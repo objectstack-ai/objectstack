@@ -423,6 +423,8 @@ export const WebSocketConfigSchema = lazySchema(() => z.object({
 }));
 
 export type WebSocketConfig = z.infer<typeof WebSocketConfigSchema>;
+/** Post-parse shape of {@link WebSocketConfig} — defaults applied, transforms run (ADR-0122). */
+export type WebSocketConfigParsed = z.infer<typeof WebSocketConfigSchema>;
 
 // ==========================================
 // Simplified Collaboration API
@@ -561,3 +563,5 @@ export const WebSocketServerConfigSchema = lazySchema(() => z.object({
 }));
 
 export type WebSocketServerConfig = z.infer<typeof WebSocketServerConfigSchema>;
+/** Post-parse shape of {@link WebSocketServerConfig} — defaults applied, transforms run (ADR-0122). */
+export type WebSocketServerConfigParsed = z.infer<typeof WebSocketServerConfigSchema>;

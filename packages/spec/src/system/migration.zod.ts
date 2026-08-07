@@ -101,7 +101,11 @@ export const ChangeSetSchema = lazySchema(() => z.object({
 }).describe('A versioned set of atomic schema migration operations'));
 
 export type ChangeSet = z.infer<typeof ChangeSetSchema>;
+/** Post-parse shape of {@link ChangeSet} — defaults applied, transforms run (ADR-0122). */
+export type ChangeSetParsed = z.infer<typeof ChangeSetSchema>;
 export type MigrationOperation = z.infer<typeof MigrationOperationSchema>;
+/** Post-parse shape of {@link MigrationOperation} — defaults applied, transforms run (ADR-0122). */
+export type MigrationOperationParsed = z.infer<typeof MigrationOperationSchema>;
 
 // --- Deployment-level data-migration flags (#3617) ---
 //

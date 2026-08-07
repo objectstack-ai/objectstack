@@ -146,4 +146,6 @@ export const EnvironmentArtifactSchema = lazySchema(() => z.object({
 }));
 
 export type EnvironmentArtifact      = z.infer<typeof EnvironmentArtifactSchema>;
+/** Post-parse shape of {@link EnvironmentArtifact} — defaults applied, transforms run (ADR-0122). */
+export type EnvironmentArtifactParsed = z.infer<typeof EnvironmentArtifactSchema>;
 export type EnvironmentArtifactInput = z.input<typeof EnvironmentArtifactSchema>;

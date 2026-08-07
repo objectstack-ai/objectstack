@@ -183,7 +183,11 @@ export const AnalyticsQuerySchema = lazySchema(() => z.object({
 export type Metric = z.infer<typeof MetricSchema>;
 export type Dimension = z.infer<typeof DimensionSchema>;
 export type CubeJoin = z.infer<typeof CubeJoinSchema>;
+/** Post-parse shape of {@link CubeJoin} — defaults applied, transforms run (ADR-0122). */
+export type CubeJoinParsed = z.infer<typeof CubeJoinSchema>;
 export type Cube = z.infer<typeof CubeSchema>;
+/** Post-parse shape of {@link Cube} — defaults applied, transforms run (ADR-0122). */
+export type CubeParsed = z.infer<typeof CubeSchema>;
 /** Authoring input for {@link Cube} — defaulted fields are optional. */
 export type CubeInput = z.input<typeof CubeSchema>;
 

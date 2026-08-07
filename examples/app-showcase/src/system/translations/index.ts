@@ -419,6 +419,17 @@ export const ShowcaseTranslationBundle = {
       showcase_field_zoo: {
         label: '字段动物园', pluralLabel: '字段动物园',
         fields: { f_lookups: { label: '查找 → 客户（多值）' } },
+        // 三个视图共用一套门控动作，差别只在「被门控的字段是否也作为列显示」——
+        // 即客户端是否展开它、投影是否本来就会带上它。见 ui/views/field-zoo.view.ts。
+        // `_views.default` —— 容器的默认列表：它声明时不带 `name`，composer 把它
+        // 注册为 `showcase_field_zoo.default`，bundle 的键就是这个裸运行时键
+        // （#5164，2026-08-06 定案）。写成 `list` 是没有任何查找能到达的拼法 ——
+        // 本条正是这么错过一次的：分支落后 main 时本地绿、合进 main 后 CI 红。
+        _views: {
+          default: { label: '字段动物园' },
+          gated_columns: { label: '被门控字段作为列' },
+          inline_bulk_defs: { label: '内联批量定义' },
+        },
         // #3405 — the inline system-object picker specimen. Translated at birth
         // because `check-i18n-coverage` ratchets this example at its current
         // untranslated count: a newly declared label that skips zh-CN pushes the
@@ -426,6 +437,10 @@ export const ShowcaseTranslationBundle = {
         // that baseline; this one is not allowed to widen it.) `负责人` matches
         // what the bundle already renders for `showcase_task.assignee`, rather
         // than introducing a second word for the same idea.
+        // 动作显隐矩阵（objectui#3492 / #3501）。同上：本示例被
+        // `check-i18n-coverage` 按当前未翻译计数上了棘轮，新声明的标签必须当场
+        // 翻译，否则计数上涨、门变红。标签本身是覆盖夹具的说明文字，中文照写同
+        // 一句技术陈述，不做意译。
         _actions: {
           showcase_action_param_gallery: {
             params: {
@@ -435,6 +450,65 @@ export const ShowcaseTranslationBundle = {
               },
             },
           },
+          showcase_zoo_relation_gate: { label: '查找 == 多值第一项', successMessage: '两个关系都解析到同一个 id。' },
+          showcase_zoo_user_gate: { label: '指派给我（user 字段）', successMessage: '你是这条标本的指派用户。' },
+          showcase_zoo_owner_gate: { label: '归我所有（owner_id）', successMessage: '这条标本归你所有。' },
+          showcase_zoo_dialect_split: { label: '仅 CEL：contains()' },
+          showcase_zoo_toolbar_gate: { label: '仅登录可见（工具栏）', successMessage: '工具栏门通过。' },
+          showcase_zoo_visible_string: { label: 'visible：字符串' },
+          showcase_zoo_visible_tagged: { label: 'visible：P`…` 标签模板' },
+          showcase_zoo_visible_envelope: { label: 'visible：{ dialect, source } 信封' },
+          showcase_zoo_disabled_gate: { label: '未评分则禁用' },
+          showcase_zoo_perm_held: { label: '需要导出能力' },
+          showcase_zoo_perm_missing: { label: '需要受限能力' },
+          showcase_zoo_perm_and: { label: '需要同时具备两项能力' },
+          showcase_zoo_perm_empty: { label: 'requiredPermissions：[]' },
+          // 字段类型谓词园 —— 每种字段类型一条 `visible`。
+          showcase_zoo_t_lookup: { label: 'lookup —— 已设置' },
+          showcase_zoo_t_lookup_multi: { label: 'lookup 多值 —— 多于 1 项' },
+          showcase_zoo_t_master_detail: { label: 'master_detail —— 已设置' },
+          showcase_zoo_t_tree: { label: 'tree —— 未设置' },
+          showcase_zoo_t_user: { label: 'user —— 未设置' },
+          showcase_zoo_t_user_identity: { label: 'user —— 是我' },
+          showcase_zoo_t_owner: { label: 'owner_id（注入列）—— 属于我' },
+          showcase_zoo_t_text: { label: 'text —— name 非空' },
+          showcase_zoo_t_textarea: { label: 'textarea —— contains' },
+          showcase_zoo_t_email: { label: 'email —— matches' },
+          showcase_zoo_t_url: { label: 'url —— contains' },
+          showcase_zoo_t_phone: { label: 'phone —— contains' },
+          showcase_zoo_t_markdown: { label: 'markdown —— contains' },
+          showcase_zoo_t_html: { label: 'html —— contains' },
+          showcase_zoo_t_code: { label: 'code —— contains' },
+          showcase_zoo_t_number: { label: 'number —— > 100' },
+          showcase_zoo_t_currency: { label: 'currency —— > 1000' },
+          showcase_zoo_t_percent: { label: 'percent —— >= 75' },
+          showcase_zoo_t_rating: { label: 'rating —— >= 4' },
+          showcase_zoo_t_slider: { label: 'slider —— > 50' },
+          showcase_zoo_t_progress: { label: 'progress —— >= 80' },
+          showcase_zoo_t_formula: { label: 'formula —— > 100' },
+          showcase_zoo_t_autonumber: { label: 'autonumber —— 等于 0001' },
+          showcase_zoo_t_date: { label: 'date —— 早于今天' },
+          showcase_zoo_t_datetime: { label: 'datetime —— 已设置' },
+          showcase_zoo_t_time: { label: 'time —— 等于 14:30' },
+          showcase_zoo_t_boolean: { label: 'boolean —— 真' },
+          showcase_zoo_t_toggle: { label: 'toggle —— 真' },
+          showcase_zoo_t_select: { label: 'select —— high' },
+          showcase_zoo_t_radio: { label: 'radio —— yes' },
+          showcase_zoo_t_multiselect: { label: 'multiselect —— 含 red' },
+          showcase_zoo_t_checkboxes: { label: 'checkboxes —— 含 email' },
+          showcase_zoo_t_tags: { label: 'tags —— 非空' },
+          showcase_zoo_t_json: { label: 'json —— 嵌套键' },
+          showcase_zoo_t_location: { label: 'location —— 纬度 > 40' },
+          showcase_zoo_t_address: { label: 'address —— 美国' },
+          showcase_zoo_t_color: { label: 'color —— 等于 #2563EB' },
+          showcase_zoo_t_composite: { label: 'composite —— width 为 10' },
+          showcase_zoo_t_repeater: { label: 'repeater —— 2 行' },
+          showcase_zoo_t_record: { label: 'record 套 record —— score 为 9' },
+          showcase_zoo_t_vector: { label: 'vector —— 4 维' },
+          showcase_zoo_t_and: { label: 'AND —— boolean && number' },
+          showcase_zoo_t_or: { label: 'OR —— select || rating' },
+          showcase_zoo_t_not: { label: 'NOT —— !boolean' },
+          showcase_zoo_t_ternary: { label: '三元 —— rating ? :' },
         },
       },
     },

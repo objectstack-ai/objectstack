@@ -59,6 +59,62 @@ export const MetadataEventType = z.enum([
 export type MetadataEventType = z.infer<typeof MetadataEventType>;
 
 /**
+ * The `{action}` half of `metadata.{type}.{action}`.
+ *
+ * Module-private: it exists to make {@link MetadataEventSubject}'s pattern
+ * spell the real suffix instead of `${string}`, which would also match a type
+ * name containing a dot and silently mis-split it. Not exported — the actions
+ * are a property of the event-name grammar, not a vocabulary anything outside
+ * this file chooses from.
+ */
+type MetadataEventAction = 'created' | 'updated' | 'deleted';
+
+/**
+ * Splits one `metadata.{type}.{action}` name into its `{type}` segment.
+ *
+ * The type parameter is what makes this work: a conditional type distributes
+ * over a union only through a NAKED type parameter, so matching the whole
+ * {@link MetadataEventType} union against the pattern inline would infer one
+ * answer for all 39 members instead of 13 answers. Module-private for the same
+ * reason {@link MetadataEventAction} is — it is derivation machinery, not a
+ * contract anyone authors against.
+ */
+type MetadataEventSubjectOf<T extends string> =
+  T extends `metadata.${infer Subject}.${MetadataEventAction}` ? Subject : never;
+
+/**
+ * Metadata Event Subject — the `{type}` half of `metadata.{type}.{action}`:
+ * `'object' | 'field' | 'view' | …`, DERIVED from {@link MetadataEventType}
+ * rather than restated, so the two can never disagree.
+ *
+ * This is the set of metadata types that HAVE a realtime event contract, and
+ * it is the same set on both sides of the wire:
+ *
+ * - **Publish** (#4602, `MetadataManager.register`/`unregister`): a metadata
+ *   type outside {@link MetadataEventType} publishes nothing — there is no
+ *   event shape that could be delivered to a `(event: MetadataEvent) => void`
+ *   callback, and emitting one every compliant consumer must reject is worse
+ *   than silence.
+ * - **Subscribe** (#4627, `@objectstack/client`'s `subscribeMetadata` and the
+ *   `@objectstack/client-react` hooks that delegate to it): the parameter is
+ *   THIS type, so subscribing to a type that will never fire —
+ *   `subscribeMetadata('translation', …)` — is a compile error rather than a
+ *   green build with a permanently silent callback.
+ *
+ * `MetadataManager.register()` accepts any `type` string and
+ * `DEFAULT_METADATA_TYPE_REGISTRY` holds more types than this
+ * (`translation`, `datasource`, `page`, `hook`, `trigger`, `validation`, …).
+ * That gap is deliberate and is NOT closed by widening this alias: which
+ * additional types deserve a realtime event is a product question, tracked as
+ * axis 2 of #4627 and answered only when a real consumer needs one (e.g.
+ * #4426 would put `translation` in play). Until then the honest statement is
+ * the narrow one — adding a member here without adding its three
+ * {@link MetadataEventType} names would re-open exactly the silent-subscription
+ * hole this alias closes, and the derivation makes that impossible to express.
+ */
+export type MetadataEventSubject = MetadataEventSubjectOf<MetadataEventType>;
+
+/**
  * Data Event Types
  *
  * Triggered when data records are created, updated, or deleted.

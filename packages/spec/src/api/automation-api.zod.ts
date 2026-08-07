@@ -66,6 +66,8 @@ export const ListFlowsRequestSchema = lazySchema(() => z.object({
     .describe('Cursor for pagination'),
 }));
 export type ListFlowsRequest = z.infer<typeof ListFlowsRequestSchema>;
+/** Post-parse shape of {@link ListFlowsRequest} — defaults applied, transforms run (ADR-0122). */
+export type ListFlowsRequestParsed = z.infer<typeof ListFlowsRequestSchema>;
 
 /**
  * Summary information for a flow in list results.
@@ -94,6 +96,8 @@ export const ListFlowsResponseSchema = lazySchema(() => BaseResponseSchema.exten
   }),
 }));
 export type ListFlowsResponse = z.infer<typeof ListFlowsResponseSchema>;
+/** Post-parse shape of {@link ListFlowsResponse} — defaults applied, transforms run (ADR-0122). */
+export type ListFlowsResponseParsed = z.infer<typeof ListFlowsResponseSchema>;
 
 // ==========================================
 // 3. Get Flow (GET /api/automation/:name)
@@ -112,6 +116,8 @@ export const GetFlowResponseSchema = lazySchema(() => BaseResponseSchema.extend(
   data: FlowSchema.describe('Full flow definition'),
 }));
 export type GetFlowResponse = z.infer<typeof GetFlowResponseSchema>;
+/** Post-parse shape of {@link GetFlowResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetFlowResponseParsed = z.infer<typeof GetFlowResponseSchema>;
 
 // ==========================================
 // 4. Create Flow (POST /api/automation)
@@ -133,6 +139,8 @@ export const CreateFlowResponseSchema = lazySchema(() => BaseResponseSchema.exte
   data: FlowSchema.describe('The created flow definition'),
 }));
 export type CreateFlowResponse = z.infer<typeof CreateFlowResponseSchema>;
+/** Post-parse shape of {@link CreateFlowResponse} — defaults applied, transforms run (ADR-0122). */
+export type CreateFlowResponseParsed = z.infer<typeof CreateFlowResponseSchema>;
 
 // ==========================================
 // 5. Update Flow (PUT /api/automation/:name)
@@ -148,6 +156,8 @@ export const UpdateFlowRequestSchema = lazySchema(() => AutomationFlowPathParams
   definition: FlowSchema.partial().describe('Partial flow definition to update'),
 }));
 export type UpdateFlowRequest = z.infer<typeof UpdateFlowRequestSchema>;
+/** Post-parse shape of {@link UpdateFlowRequest} — defaults applied, transforms run (ADR-0122). */
+export type UpdateFlowRequestParsed = z.infer<typeof UpdateFlowRequestSchema>;
 
 /**
  * Response after updating a flow.
@@ -156,6 +166,8 @@ export const UpdateFlowResponseSchema = lazySchema(() => BaseResponseSchema.exte
   data: FlowSchema.describe('The updated flow definition'),
 }));
 export type UpdateFlowResponse = z.infer<typeof UpdateFlowResponseSchema>;
+/** Post-parse shape of {@link UpdateFlowResponse} — defaults applied, transforms run (ADR-0122). */
+export type UpdateFlowResponseParsed = z.infer<typeof UpdateFlowResponseSchema>;
 
 // ==========================================
 // 6. Delete Flow (DELETE /api/automation/:name)
@@ -177,6 +189,8 @@ export const DeleteFlowResponseSchema = lazySchema(() => BaseResponseSchema.exte
   }),
 }));
 export type DeleteFlowResponse = z.infer<typeof DeleteFlowResponseSchema>;
+/** Post-parse shape of {@link DeleteFlowResponse} — defaults applied, transforms run (ADR-0122). */
+export type DeleteFlowResponseParsed = z.infer<typeof DeleteFlowResponseSchema>;
 
 // ==========================================
 // 7. Trigger Flow (POST /api/automation/:name/trigger)
@@ -214,6 +228,8 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
   }),
 }));
 export type TriggerFlowResponse = z.infer<typeof TriggerFlowResponseSchema>;
+/** Post-parse shape of {@link TriggerFlowResponse} — defaults applied, transforms run (ADR-0122). */
+export type TriggerFlowResponseParsed = z.infer<typeof TriggerFlowResponseSchema>;
 
 // ==========================================
 // 8. Toggle Flow (POST /api/automation/:name/toggle)
@@ -240,6 +256,8 @@ export const ToggleFlowResponseSchema = lazySchema(() => BaseResponseSchema.exte
   }),
 }));
 export type ToggleFlowResponse = z.infer<typeof ToggleFlowResponseSchema>;
+/** Post-parse shape of {@link ToggleFlowResponse} — defaults applied, transforms run (ADR-0122). */
+export type ToggleFlowResponseParsed = z.infer<typeof ToggleFlowResponseSchema>;
 
 // ==========================================
 // 9. List Runs (GET /api/automation/:name/runs)
@@ -259,6 +277,8 @@ export const ListRunsRequestSchema = lazySchema(() => AutomationFlowPathParamsSc
     .describe('Cursor for pagination'),
 }));
 export type ListRunsRequest = z.infer<typeof ListRunsRequestSchema>;
+/** Post-parse shape of {@link ListRunsRequest} — defaults applied, transforms run (ADR-0122). */
+export type ListRunsRequestParsed = z.infer<typeof ListRunsRequestSchema>;
 
 /**
  * Response for the list runs endpoint.
@@ -272,6 +292,8 @@ export const ListRunsResponseSchema = lazySchema(() => BaseResponseSchema.extend
   }),
 }));
 export type ListRunsResponse = z.infer<typeof ListRunsResponseSchema>;
+/** Post-parse shape of {@link ListRunsResponse} — defaults applied, transforms run (ADR-0122). */
+export type ListRunsResponseParsed = z.infer<typeof ListRunsResponseSchema>;
 
 // ==========================================
 // 10. Get Run (GET /api/automation/:name/runs/:runId)
@@ -290,6 +312,8 @@ export const GetRunResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: ExecutionLogSchema.describe('Full execution log with step details'),
 }));
 export type GetRunResponse = z.infer<typeof GetRunResponseSchema>;
+/** Post-parse shape of {@link GetRunResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetRunResponseParsed = z.infer<typeof GetRunResponseSchema>;
 
 // ==========================================
 // 11. Automation API Error Codes

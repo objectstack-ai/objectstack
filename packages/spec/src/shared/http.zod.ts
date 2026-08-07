@@ -80,6 +80,8 @@ export const HttpRequestSchema = lazySchema(() => z.object({
 }));
 
 export type HttpRequest = z.infer<typeof HttpRequestSchema>;
+/** Post-parse shape of {@link HttpRequest} — defaults applied, transforms run (ADR-0122). */
+export type HttpRequestParsed = z.infer<typeof HttpRequestSchema>;
 
 // ==========================================
 // CORS Configuration
@@ -138,6 +140,8 @@ export const CorsConfigSchema = lazySchema(() => z.object({
 }));
 
 export type CorsConfig = z.infer<typeof CorsConfigSchema>;
+/** Post-parse shape of {@link CorsConfig} — defaults applied, transforms run (ADR-0122). */
+export type CorsConfigParsed = z.infer<typeof CorsConfigSchema>;
 
 // ==========================================
 // Rate Limiting
@@ -180,6 +184,8 @@ export const RateLimitConfigSchema = lazySchema(() => z.object({
 }));
 
 export type RateLimitConfig = z.infer<typeof RateLimitConfigSchema>;
+/** Post-parse shape of {@link RateLimitConfig} — defaults applied, transforms run (ADR-0122). */
+export type RateLimitConfigParsed = z.infer<typeof RateLimitConfigSchema>;
 
 // ==========================================
 // Static File Serving

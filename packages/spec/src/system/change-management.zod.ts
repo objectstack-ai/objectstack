@@ -420,6 +420,8 @@ export const ChangeRequestSchema = lazySchema(() => z.object({
 
 // Type exports
 export type ChangeRequest = z.infer<typeof ChangeRequestSchema>;
+/** Post-parse shape of {@link ChangeRequest} — defaults applied, transforms run (ADR-0122). */
+export type ChangeRequestParsed = z.infer<typeof ChangeRequestSchema>;
 export type ChangeType = z.infer<typeof ChangeTypeSchema>;
 export type ChangeStatus = z.infer<typeof ChangeStatusSchema>;
 export type ChangePriority = z.infer<typeof ChangePrioritySchema>;

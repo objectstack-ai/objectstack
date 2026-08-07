@@ -602,6 +602,8 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
 }).superRefine(applyApiEndpointGates));
 
 export type ObjectStackDefinition = z.infer<typeof ObjectStackDefinitionSchema>;
+/** Post-parse shape of {@link ObjectStackDefinition} — defaults applied, transforms run (ADR-0122). */
+export type ObjectStackDefinitionParsed = z.infer<typeof ObjectStackDefinitionSchema>;
 
 /**
  * Extract the element type from an array type.

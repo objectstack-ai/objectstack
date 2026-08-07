@@ -132,6 +132,8 @@ export const ServerRateLimitConfigSchema = lazySchema(() => strictObject(
 }));
 
 export type ServerRateLimitConfig = z.infer<typeof ServerRateLimitConfigSchema>;
+/** Post-parse shape of {@link ServerRateLimitConfig} — defaults applied, transforms run (ADR-0122). */
+export type ServerRateLimitConfigParsed = z.infer<typeof ServerRateLimitConfigSchema>;
 
 /**
  * `server.security` — security configuration consumed by the inbound seam.
@@ -168,6 +170,8 @@ export const StackServerSecuritySchema = lazySchema(() => strictObject(
 ));
 
 export type StackServerSecurity = z.infer<typeof StackServerSecuritySchema>;
+/** Post-parse shape of {@link StackServerSecurity} — defaults applied, transforms run (ADR-0122). */
+export type StackServerSecurityParsed = z.infer<typeof StackServerSecuritySchema>;
 
 /**
  * The `server:` block of a stack definition.
@@ -229,4 +233,6 @@ export const StackServerConfigSchema = lazySchema(() => strictObject(
 ));
 
 export type StackServerConfig = z.infer<typeof StackServerConfigSchema>;
+/** Post-parse shape of {@link StackServerConfig} — defaults applied, transforms run (ADR-0122). */
+export type StackServerConfigParsed = z.infer<typeof StackServerConfigSchema>;
 export type StackServerConfigInput = z.input<typeof StackServerConfigSchema>;

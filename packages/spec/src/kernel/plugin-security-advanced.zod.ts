@@ -704,11 +704,27 @@ export type PermissionScope = z.infer<typeof PermissionScopeSchema>;
 export type PermissionAction = z.infer<typeof PermissionActionSchema>;
 export type ResourceType = z.infer<typeof ResourceTypeSchema>;
 export type PluginPermission = z.infer<typeof PluginPermissionSchema>;
+/** Post-parse shape of {@link PluginPermission} — defaults applied, transforms run (ADR-0122). */
+export type PluginPermissionParsed = z.infer<typeof PluginPermissionSchema>;
 export type PluginPermissionSet = z.infer<typeof PluginPermissionSetSchema>;
+/** Post-parse shape of {@link PluginPermissionSet} — defaults applied, transforms run (ADR-0122). */
+export type PluginPermissionSetParsed = z.infer<typeof PluginPermissionSetSchema>;
 export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>;
+/** Post-parse shape of {@link RuntimeConfig} — defaults applied, transforms run (ADR-0122). */
+export type RuntimeConfigParsed = z.infer<typeof RuntimeConfigSchema>;
 export type SandboxConfig = z.infer<typeof SandboxConfigSchema>;
+/** Post-parse shape of {@link SandboxConfig} — defaults applied, transforms run (ADR-0122). */
+export type SandboxConfigParsed = z.infer<typeof SandboxConfigSchema>;
 export type KernelSecurityVulnerability = z.infer<typeof KernelSecurityVulnerabilitySchema>;
+/** Post-parse shape of {@link KernelSecurityVulnerability} — defaults applied, transforms run (ADR-0122). */
+export type KernelSecurityVulnerabilityParsed = z.infer<typeof KernelSecurityVulnerabilitySchema>;
 export type KernelSecurityScanResult = z.infer<typeof KernelSecurityScanResultSchema>;
+/** Post-parse shape of {@link KernelSecurityScanResult} — defaults applied, transforms run (ADR-0122). */
+export type KernelSecurityScanResultParsed = z.infer<typeof KernelSecurityScanResultSchema>;
 export type KernelSecurityPolicy = z.infer<typeof KernelSecurityPolicySchema>;
+/** Post-parse shape of {@link KernelSecurityPolicy} — defaults applied, transforms run (ADR-0122). */
+export type KernelSecurityPolicyParsed = z.infer<typeof KernelSecurityPolicySchema>;
 export type PluginTrustLevel = z.infer<typeof PluginTrustLevelSchema>;
 export type PluginSecurityManifest = z.infer<typeof PluginSecurityManifestSchema>;
+/** Post-parse shape of {@link PluginSecurityManifest} — defaults applied, transforms run (ADR-0122). */
+export type PluginSecurityManifestParsed = z.infer<typeof PluginSecurityManifestSchema>;

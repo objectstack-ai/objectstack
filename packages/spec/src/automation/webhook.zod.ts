@@ -229,6 +229,8 @@ export const WebhookSchema = lazySchema(() => strictObject({
 }));
 
 export type Webhook = z.infer<typeof WebhookSchema>;
+/** Post-parse shape of {@link Webhook} — defaults applied, transforms run (ADR-0122). */
+export type WebhookParsed = z.infer<typeof WebhookSchema>;
 /** Authoring input for {@link Webhook} — defaulted fields are optional. */
 export type WebhookInput = z.input<typeof WebhookSchema>;
 

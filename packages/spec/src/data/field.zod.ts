@@ -858,6 +858,8 @@ export const FieldSchema = lazySchema(() => strictObject({
 }));
 
 export type Field = z.infer<typeof FieldSchema>;
+/** Post-parse shape of {@link Field} — defaults applied, transforms run (ADR-0122). */
+export type FieldParsed = z.infer<typeof FieldSchema>;
 /**
  * Author-facing parse INPUT for a field. Since protocol 17 (#3855) it no longer
  * carries the removed `conditionalRequired` alias — the key is tombstoned, so
@@ -867,9 +869,13 @@ export type Field = z.infer<typeof FieldSchema>;
  */
 export type FieldParseInput = z.input<typeof FieldSchema>;
 export type SelectOption = z.infer<typeof SelectOptionSchema>;
+/** Post-parse shape of {@link SelectOption} — defaults applied, transforms run (ADR-0122). */
+export type SelectOptionParsed = z.infer<typeof SelectOptionSchema>;
 export type LocationCoordinates = z.infer<typeof LocationCoordinatesSchema>;
 export type Address = z.infer<typeof AddressSchema>;
 export type CurrencyConfig = z.infer<typeof CurrencyConfigSchema>;
+/** Post-parse shape of {@link CurrencyConfig} — defaults applied, transforms run (ADR-0122). */
+export type CurrencyConfigParsed = z.infer<typeof CurrencyConfigSchema>;
 export type CurrencyConfigInput = z.input<typeof CurrencyConfigSchema>;
 export type CurrencyValue = z.infer<typeof CurrencyValueSchema>;
 

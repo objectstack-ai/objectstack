@@ -61,6 +61,8 @@ export const EventHandlerSchema = lazySchema(() => z.object({
 }));
 
 export type EventHandler = z.infer<typeof EventHandlerSchema>;
+/** Post-parse shape of {@link EventHandler} — defaults applied, transforms run (ADR-0122). */
+export type EventHandlerParsed = z.infer<typeof EventHandlerSchema>;
 
 /**
  * Event Route Schema
@@ -87,3 +89,5 @@ export const EventPersistenceSchema = lazySchema(() => z.object({
 }));
 
 export type EventPersistence = z.infer<typeof EventPersistenceSchema>;
+/** Post-parse shape of {@link EventPersistence} — defaults applied, transforms run (ADR-0122). */
+export type EventPersistenceParsed = z.infer<typeof EventPersistenceSchema>;

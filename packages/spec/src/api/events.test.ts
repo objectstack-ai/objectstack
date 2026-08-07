@@ -4,6 +4,7 @@ import {
   DataEventType,
   MetadataEventSchema,
   DataEventSchema,
+  type MetadataEventSubject,
 } from './events.zod';
 
 // Coverage added with the v17 dual-source cleanup (#4587): ./api is now the
@@ -48,6 +49,90 @@ describe('MetadataEventType', () => {
     ]) {
       expect(MetadataEventType.options).toContain(name);
     }
+  });
+});
+
+// ===========================================================================
+// MetadataEventSubject — the `{type}` half, derived rather than restated (#4627)
+// ===========================================================================
+//
+// `@objectstack/client`'s `subscribeMetadata(type)` and the `client-react`
+// hooks that delegate to it take THIS type. Its whole value is that it cannot
+// disagree with the enum above, so the pins below are split in two on purpose:
+//
+//  - the tsc-resolved ones prove the DERIVATION is faithful (nothing lost,
+//    nothing invented, and the split recomposes back to the enum exactly);
+//  - the vitest-run one binds the hand-written list of 13 names to the enum's
+//    runtime data, so a member added to `MetadataEventType` cannot leave the
+//    type pins asserting a stale vocabulary while still passing.
+//
+// This file carries no entry in `test-typecheck-debt.json`, which is what makes
+// "zero tsc errors" the baseline the type-level pins move away from. The
+// `expect()` calls only give the type assertions a home vitest will run.
+
+describe('MetadataEventSubject', () => {
+  /** The 13 metadata types that have a realtime event contract today. */
+  const COVERED = [
+    'object', 'field', 'view', 'app', 'agent', 'tool', 'flow',
+    'action', 'workflow', 'dashboard', 'report', 'role', 'permission',
+  ] as const;
+
+  type Covered = (typeof COVERED)[number];
+
+  it('is exactly the {type} segment of every member — no more, no less', () => {
+    // Two directions, because one is not exactness. The `extends Covered`
+    // direction alone would pass VACUOUSLY if the derivation ever collapsed to
+    // `never` (`never extends X` is true for any X) — the phantom this pin
+    // would otherwise be. The `Covered extends …` direction is what catches
+    // that collapse, and also catches a member silently dropped from the enum.
+    type NoStrangers = MetadataEventSubject extends Covered ? 'exact' : never;
+    type NoneMissing = Covered extends MetadataEventSubject ? 'exact' : never;
+    const both: [NoStrangers, NoneMissing] = ['exact', 'exact'];
+    expect(both).toEqual(['exact', 'exact']);
+  });
+
+  it('recomposes to MetadataEventType exactly, so the 13 x 3 grid stays full', () => {
+    // The type-level twin of the runtime "created/updated/deleted triple"
+    // assertion above, and the reason a partial extension cannot land quietly:
+    // adding only `metadata.translation.created` makes this recomposition
+    // produce `metadata.translation.updated` — a name the enum does not have —
+    // and the first line below resolves to `never`.
+    type Recomposed = `metadata.${MetadataEventSubject}.${'created' | 'updated' | 'deleted'}`;
+    type NoStrangers = Recomposed extends MetadataEventType ? 'exact' : never;
+    type NoneMissing = MetadataEventType extends Recomposed ? 'exact' : never;
+    const both: [NoStrangers, NoneMissing] = ['exact', 'exact'];
+    expect(both).toEqual(['exact', 'exact']);
+  });
+
+  it('does not admit registrable metadata types that have no event contract', () => {
+    // These are all real `DEFAULT_METADATA_TYPE_REGISTRY` types. #4602 pinned
+    // that the producer publishes NOTHING for them; this pins that a consumer
+    // cannot claim to subscribe to them either. Wrapped in tuples so the check
+    // is "this literal is not in the union", not a distributed one.
+    type Rejects<T extends string> = [T] extends [MetadataEventSubject] ? never : 'rejected';
+    const offContract: [
+      Rejects<'translation'>,
+      Rejects<'datasource'>,
+      Rejects<'page'>,
+      Rejects<'hook'>,
+      Rejects<'trigger'>,
+      Rejects<'validation'>,
+    ] = ['rejected', 'rejected', 'rejected', 'rejected', 'rejected', 'rejected'];
+    expect(offContract).toHaveLength(6);
+
+    // Widening the enum to cover them is axis 2 of #4627 — a product question
+    // about which types deserve a realtime event, deliberately left open. When
+    // one is answered (e.g. #4426 putting `translation` in play), the enum
+    // gains its three names, this list loses an entry, and both sides of the
+    // wire move together because neither side restates the vocabulary.
+  });
+
+  it('is derived from the enum, not restated beside it', () => {
+    // The runtime half of the pin: COVERED above is hand-written, so this is
+    // what stops the type-level assertions from certifying a stale list. A
+    // member added to `MetadataEventType` fails HERE first, by name.
+    const subjects = [...new Set(MetadataEventType.options.map((v) => v.split('.')[1]))];
+    expect(subjects).toEqual([...COVERED]);
   });
 });
 

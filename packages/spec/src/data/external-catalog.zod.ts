@@ -25,6 +25,8 @@ export const ExternalColumnSchema = z.object({
 });
 
 export type ExternalColumn = z.infer<typeof ExternalColumnSchema>;
+/** Post-parse shape of {@link ExternalColumn} — defaults applied, transforms run (ADR-0122). */
+export type ExternalColumnParsed = z.infer<typeof ExternalColumnSchema>;
 
 /** A single remote table/view captured in a catalog snapshot. */
 export const ExternalTableSchema = z.object({
@@ -40,6 +42,8 @@ export const ExternalTableSchema = z.object({
 });
 
 export type ExternalTable = z.infer<typeof ExternalTableSchema>;
+/** Post-parse shape of {@link ExternalTable} — defaults applied, transforms run (ADR-0122). */
+export type ExternalTableParsed = z.infer<typeof ExternalTableSchema>;
 
 /**
  * The persisted snapshot of a federated datasource's remote schema.
@@ -55,3 +59,5 @@ export const ExternalCatalogSchema = lazySchema(() => z.object({
 }));
 
 export type ExternalCatalog = z.infer<typeof ExternalCatalogSchema>;
+/** Post-parse shape of {@link ExternalCatalog} — defaults applied, transforms run (ADR-0122). */
+export type ExternalCatalogParsed = z.infer<typeof ExternalCatalogSchema>;

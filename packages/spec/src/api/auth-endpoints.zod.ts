@@ -230,9 +230,15 @@ export type AuthEndpointPath = typeof AuthEndpointPaths[keyof typeof AuthEndpoin
 export type AuthEndpointAlias = keyof typeof AuthEndpointAliases;
 export type EndpointMappingKey = keyof typeof EndpointMapping;
 export type AuthProviderInfo = z.infer<typeof AuthProviderInfoSchema>;
+/** Post-parse shape of {@link AuthProviderInfo} — defaults applied, transforms run (ADR-0122). */
+export type AuthProviderInfoParsed = z.infer<typeof AuthProviderInfoSchema>;
 export type EmailPasswordConfigPublic = z.infer<typeof EmailPasswordConfigPublicSchema>;
 export type AuthFeaturesConfig = z.infer<typeof AuthFeaturesConfigSchema>;
+/** Post-parse shape of {@link AuthFeaturesConfig} — defaults applied, transforms run (ADR-0122). */
+export type AuthFeaturesConfigParsed = z.infer<typeof AuthFeaturesConfigSchema>;
 export type GetAuthConfigResponse = z.infer<typeof GetAuthConfigResponseSchema>;
+/** Post-parse shape of {@link GetAuthConfigResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetAuthConfigResponseParsed = z.infer<typeof GetAuthConfigResponseSchema>;
 
 // ==========================================
 // Device Flow (CLI Browser-Based Login)
@@ -272,4 +278,6 @@ export const DeviceTokenResponseSchema = lazySchema(() => z.discriminatedUnion('
 ]));
 
 export type DeviceRequestResponse = z.infer<typeof DeviceRequestResponseSchema>;
+/** Post-parse shape of {@link DeviceRequestResponse} — defaults applied, transforms run (ADR-0122). */
+export type DeviceRequestResponseParsed = z.infer<typeof DeviceRequestResponseSchema>;
 export type DeviceTokenResponse = z.infer<typeof DeviceTokenResponseSchema>;

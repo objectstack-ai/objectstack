@@ -78,6 +78,8 @@ export const SqliteConfigSchema = lazySchema(() => z.object({
   .describe('SQLite connection configuration'));
 
 export type SqliteConfig = z.infer<typeof SqliteConfigSchema>;
+/** Post-parse shape of {@link SqliteConfig} — defaults applied, transforms run (ADR-0122). */
+export type SqliteConfigParsed = z.infer<typeof SqliteConfigSchema>;
 
 /** JSON-Schema projection of {@link SqliteConfigSchema}, memoized. */
 export const getSqliteConfigJsonSchema = driverConfigJsonSchema(SqliteConfigSchema);
@@ -129,6 +131,8 @@ export const SqliteWasmConfigSchema = lazySchema(() => z.object({
   .describe('SQLite (WASM) connection configuration'));
 
 export type SqliteWasmConfig = z.infer<typeof SqliteWasmConfigSchema>;
+/** Post-parse shape of {@link SqliteWasmConfig} — defaults applied, transforms run (ADR-0122). */
+export type SqliteWasmConfigParsed = z.infer<typeof SqliteWasmConfigSchema>;
 
 /** JSON-Schema projection of {@link SqliteWasmConfigSchema}, memoized. */
 export const getSqliteWasmConfigJsonSchema = driverConfigJsonSchema(SqliteWasmConfigSchema);

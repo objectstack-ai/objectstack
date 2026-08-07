@@ -108,6 +108,8 @@ export const FlowNodeRenderDescriptorSchema = lazySchema(() => strictObject({
 }).describe('Visual render descriptor for a flow node type'));
 
 export type FlowNodeRenderDescriptor = z.infer<typeof FlowNodeRenderDescriptorSchema>;
+/** Post-parse shape of {@link FlowNodeRenderDescriptor} — defaults applied, transforms run (ADR-0122). */
+export type FlowNodeRenderDescriptorParsed = z.infer<typeof FlowNodeRenderDescriptorSchema>;
 
 // ─── Canvas Node ─────────────────────────────────────────────────────
 
@@ -147,6 +149,8 @@ export const FlowCanvasNodeSchema = lazySchema(() => strictObject({
 }).describe('Canvas layout data for a flow node'));
 
 export type FlowCanvasNode = z.infer<typeof FlowCanvasNodeSchema>;
+/** Post-parse shape of {@link FlowCanvasNode} — defaults applied, transforms run (ADR-0122). */
+export type FlowCanvasNodeParsed = z.infer<typeof FlowCanvasNodeSchema>;
 
 // ─── Canvas Edge ─────────────────────────────────────────────────────
 
@@ -200,6 +204,8 @@ export const FlowCanvasEdgeSchema = lazySchema(() => strictObject({
 }).describe('Canvas layout and visual data for a flow edge'));
 
 export type FlowCanvasEdge = z.infer<typeof FlowCanvasEdgeSchema>;
+/** Post-parse shape of {@link FlowCanvasEdge} — defaults applied, transforms run (ADR-0122). */
+export type FlowCanvasEdgeParsed = z.infer<typeof FlowCanvasEdgeSchema>;
 
 // ─── Flow Canvas Layout ──────────────────────────────────────────────
 
@@ -302,6 +308,8 @@ export const FlowBuilderConfigSchema = lazySchema(() => strictObject({
 }).describe('Studio Flow Builder configuration'));
 
 export type FlowBuilderConfig = z.infer<typeof FlowBuilderConfigSchema>;
+/** Post-parse shape of {@link FlowBuilderConfig} — defaults applied, transforms run (ADR-0122). */
+export type FlowBuilderConfigParsed = z.infer<typeof FlowBuilderConfigSchema>;
 
 // ─── Built-in Node Descriptors ───────────────────────────────────────
 

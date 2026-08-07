@@ -740,5 +740,11 @@ export const DriverConfigSchema = lazySchema(() => z.object({
 export type DriverOptions = z.infer<typeof DriverOptionsSchema>;
 export type DriverCapabilities = z.infer<typeof DriverCapabilitiesSchema>;
 export type DriverInterface = z.infer<typeof DriverInterfaceSchema>;
+/** Post-parse shape of {@link DriverInterface} — defaults applied, transforms run (ADR-0122). */
+export type DriverInterfaceParsed = z.infer<typeof DriverInterfaceSchema>;
 export type DriverConfig = z.infer<typeof DriverConfigSchema>;
+/** Post-parse shape of {@link DriverConfig} — defaults applied, transforms run (ADR-0122). */
+export type DriverConfigParsed = z.infer<typeof DriverConfigSchema>;
 export type PoolConfig = z.infer<typeof PoolConfigSchema>;
+/** Post-parse shape of {@link PoolConfig} — defaults applied, transforms run (ADR-0122). */
+export type PoolConfigParsed = z.infer<typeof PoolConfigSchema>;

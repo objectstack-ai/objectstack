@@ -3,9 +3,12 @@
 //
 // check-nul-bytes -- rejects raw ASCII control bytes in every tracked TEXT file.
 //
-// Scanned set (#5157, #5460): 0x00-0x08, 0x0b, 0x0c, 0x0e-0x1f and 0x7f -- every
-// ASCII control character except the three bytes that ARE ordinary text
-// structure: tab (0x09), LF (0x0a), CR (0x0d). Equivalently
+// Scanned set (#5157, #5460): every ASCII control character except the three that
+// ARE ordinary text structure -- tab, LF, CR. The `IS_SCANNED` table below is the
+// authoritative statement of which bytes those are; this line deliberately no
+// longer transcribes the list (#5681), and the pasteable class on the next line is
+// DERIVED from that table rather than copied (see "The character class is written
+// down once" below). Equivalently
 // `[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`.
 //
 // #5157 drew that set as "C0 minus tab/LF/CR", matching the pattern #4890's own
@@ -290,11 +293,12 @@ export function scannedCharClass() {
  *     Those are HISTORICAL RECORDS of one widening each, and one of them states
  *     the pre-DEL set correctly for the change it describes. Forcing them to
  *     equal today's set would falsify the record.
- *   - The prose ENUMERATIONS of the same bytes -- this header's opening line and
- *     the `.github/workflows/lint.yml` step comment. Those are sentences, not
- *     pasteable classes; prose stays on the #5579 footing -- cite this header,
- *     do not restate it. (Which is why this list names them rather than quoting
- *     them: a ledger entry that spelled the bytes out would be one more copy.)
+ *   - The prose STATEMENTS of the same set -- this header's opening line and the
+ *     `.github/workflows/lint.yml` step comment. Those are sentences, not
+ *     pasteable classes; prose stays on the #5579 footing -- cite this header, do
+ *     not restate it -- and as of #5681 neither of them enumerates the bytes any
+ *     more. (Which is why this list names them rather than quoting them: a ledger
+ *     entry that spelled the bytes out would be one more copy.)
  *   - The non-ASCII guard `[^\x00-\x7f]` quoted in the isLikelyEmail changeset
  *     and the plugin-auth CHANGELOG: a different regex about input validation,
  *     unrelated to this set.

@@ -233,7 +233,9 @@ are therefore deleted, and `userActions` on this bucket now only NARROWS. The
 affordance side-effect is that CSV `import` resolves `true` where it resolved
 `false` under the locked default — an affordance change only; every row a CSV
 import writes is still adjudicated by the `DelegatedAdminGate` / RLS / permission
-sets.
+sets. *(This last sentence is **revised** by the #4671 addendum below: `import`
+was taken back out of the bucket default before v17 shipped, so it resolves
+`false` on both sides and the flip described here never reached a release.)*
 
 **Enforcement is unchanged, as in D5.** `system-data` joins `platform` / `config`
 as a bucket neither `ENGINE_OWNED_BUCKETS` (guard) nor `GUARDED_WRITE_BUCKETS`
@@ -250,3 +252,62 @@ covers the bucket to catch it. `ObjectSchema.create()` therefore **refuses**
 `system-data` on an object whose resolved affordances grant no create, edit or
 delete — a contradiction with no honest reading, computable from the declaration
 alone. Partial narrowing stays legal; only the all-writes-false shape is refused.
+
+---
+
+## Addendum (v17, #4671) — CSV `import` is opt-in on `system-data`
+
+This addendum **revises one line** of the #3355 addendum above: the affordance
+side-effect that let CSV `import` resolve `true` on the writable default. Nothing
+else about the rename, the enum retirement, the conversion, the enforcement
+boundary or the mis-assignment refusal changes.
+
+**Why it was reopened.** The two comments on #3355 that settled "the `system-data`
+default is `create/edit/delete/import/exportCsv: true`" carry a Claude Code
+footer — they are an earlier **agent** session's adjudication, not the
+maintainer's. The implementing agent said so itself, flagged the consequence as
+security-adjacent, and noted the adjudication may not have had the specific
+scenario in view. It did not.
+
+**The scenario.** Three of the bucket's eight charter members are the RBAC link
+tables — `sys_user_position`, `sys_user_permission_set`,
+`sys_position_permission_set` — i.e. the grant surface of the whole permission
+model. Under v16 all eight resolved `import: false` (locked `system` plus
+`userActions` blocks that only ever re-opened create/edit/delete), so the flip
+would have put a "bulk-bind permission sets from a spreadsheet" entry point in the
+admin console for the first time.
+
+**What is NOT at stake.** No authorization boundary. `import` is an affordance —
+it decides whether a UI entry point renders. Every row a CSV import writes still
+goes through `DelegatedAdminGate`, RLS and permission-set adjudication one at a
+time, and an admin who cannot grant a permission set by hand cannot grant it by
+file. D5's enforcement conclusions stand unchanged.
+
+**What is.** Leverage. Row by row, one misclick affects one person; one wrong CSV
+is a bulk grant with no natural review rhythm, on precisely the tables that
+decide who can do what.
+
+**Decision (maintainer, 2026-08-03; reconfirmed 2026-08-06).**
+`CRUD_AFFORDANCE_DEFAULTS['system-data']` grants
+`create / edit / delete / exportCsv` and **not** `import`. An object that wants
+the wizard declares `userActions: { import: true }`. `platform` is now the only
+bucket whose default grants `import`.
+
+Two axes carried it:
+
+- **Long-term soundness.** A batch entry point onto authorization data should be
+  an explicit declaration, not something eight objects inherit by being filed in
+  the right bucket. The bucket still describes its members completely — none of
+  the eight needs a `userActions` block to claw a verb back, so the v16 shape this
+  rename existed to end does not return.
+- **Making AI-written metadata hard to get wrong.** Model-authored object metadata
+  inherits bucket defaults in bulk. Minimum leverage by default means the result
+  of "forgot to think about import" lands on the safe side, and turning it on is a
+  line a reviewer can see.
+
+**Consequence for the #3355 equivalence pins.** The one deliberate
+non-equivalence is gone: the rename now moves **no** affordance on **any** verb,
+so the per-object pins in `plugin-security`, `service-messaging`,
+`plugin-approvals` and `platform-objects` assert full five-verb v16/v17 equality,
+plus that the wizard is still reachable via the opt-in — a pin of the surviving
+mechanism rather than of an absence.

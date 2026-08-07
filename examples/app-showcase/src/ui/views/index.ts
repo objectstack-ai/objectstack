@@ -5,3 +5,4 @@ export { ProjectViews } from './project.view.js';
 export { InquiryViews } from './inquiry.view.js';
 export { BusinessUnitViews } from './business-unit.view.js';
 export { ContactViews } from './contact.view.js';
+export { FieldZooViews } from './field-zoo.view.js';

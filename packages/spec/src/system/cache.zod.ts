@@ -56,6 +56,8 @@ export const CacheTierSchema = lazySchema(() => z.object({
 }).describe('Configuration for a single cache tier in the hierarchy'));
 
 export type CacheTier = z.infer<typeof CacheTierSchema>;
+/** Post-parse shape of {@link CacheTier} — defaults applied, transforms run (ADR-0122). */
+export type CacheTierParsed = z.infer<typeof CacheTierSchema>;
 export type CacheTierInput = z.input<typeof CacheTierSchema>;
 
 export const CacheInvalidationSchema = lazySchema(() => z.object({
@@ -77,6 +79,8 @@ export const CacheConfigSchema = lazySchema(() => z.object({
 }).describe('Top-level application cache configuration'));
 
 export type CacheConfig = z.infer<typeof CacheConfigSchema>;
+/** Post-parse shape of {@link CacheConfig} — defaults applied, transforms run (ADR-0122). */
+export type CacheConfigParsed = z.infer<typeof CacheConfigSchema>;
 export type CacheConfigInput = z.input<typeof CacheConfigSchema>;
 
 /**
@@ -134,6 +138,8 @@ export const CacheAvalanchePreventionSchema = lazySchema(() => z.object({
 }).describe('Cache avalanche/stampede prevention configuration'));
 
 export type CacheAvalanchePrevention = z.infer<typeof CacheAvalanchePreventionSchema>;
+/** Post-parse shape of {@link CacheAvalanchePrevention} — defaults applied, transforms run (ADR-0122). */
+export type CacheAvalanchePreventionParsed = z.infer<typeof CacheAvalanchePreventionSchema>;
 
 /**
  * Cache Warmup Strategy Schema
@@ -155,6 +161,8 @@ export const CacheWarmupSchema = lazySchema(() => z.object({
 }).describe('Cache warmup strategy'));
 
 export type CacheWarmup = z.infer<typeof CacheWarmupSchema>;
+/** Post-parse shape of {@link CacheWarmup} — defaults applied, transforms run (ADR-0122). */
+export type CacheWarmupParsed = z.infer<typeof CacheWarmupSchema>;
 
 /**
  * Distributed Cache Configuration Schema
@@ -193,4 +201,6 @@ export const DistributedCacheConfigSchema = lazySchema(() => CacheConfigSchema.e
 }).describe('Distributed cache configuration with consistency and avalanche prevention'));
 
 export type DistributedCacheConfig = z.infer<typeof DistributedCacheConfigSchema>;
+/** Post-parse shape of {@link DistributedCacheConfig} — defaults applied, transforms run (ADR-0122). */
+export type DistributedCacheConfigParsed = z.infer<typeof DistributedCacheConfigSchema>;
 export type DistributedCacheConfigInput = z.input<typeof DistributedCacheConfigSchema>;

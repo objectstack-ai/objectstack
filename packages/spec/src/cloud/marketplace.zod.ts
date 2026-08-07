@@ -119,6 +119,8 @@ export const ArtifactReferenceSchema = lazySchema(() => z.object({
 }).describe('Reference to a downloadable package artifact'));
 
 export type ArtifactReference = z.infer<typeof ArtifactReferenceSchema>;
+/** Post-parse shape of {@link ArtifactReference} — defaults applied, transforms run (ADR-0122). */
+export type ArtifactReferenceParsed = z.infer<typeof ArtifactReferenceSchema>;
 
 /**
  * Artifact Download Response Schema
@@ -523,12 +525,24 @@ export const MarketplaceInstallResponseSchema = lazySchema(() => z.object({
 
 export type PublisherVerification = z.infer<typeof PublisherVerificationSchema>;
 export type Publisher = z.infer<typeof PublisherSchema>;
+/** Post-parse shape of {@link Publisher} — defaults applied, transforms run (ADR-0122). */
+export type PublisherParsed = z.infer<typeof PublisherSchema>;
 export type MarketplaceCategory = z.infer<typeof MarketplaceCategorySchema>;
 export type ListingStatus = z.infer<typeof ListingStatusSchema>;
 export type PricingModel = z.infer<typeof PricingModelSchema>;
 export type MarketplaceListing = z.infer<typeof MarketplaceListingSchema>;
+/** Post-parse shape of {@link MarketplaceListing} — defaults applied, transforms run (ADR-0122). */
+export type MarketplaceListingParsed = z.infer<typeof MarketplaceListingSchema>;
 export type PackageSubmission = z.infer<typeof PackageSubmissionSchema>;
+/** Post-parse shape of {@link PackageSubmission} — defaults applied, transforms run (ADR-0122). */
+export type PackageSubmissionParsed = z.infer<typeof PackageSubmissionSchema>;
 export type MarketplaceSearchRequest = z.infer<typeof MarketplaceSearchRequestSchema>;
+/** Post-parse shape of {@link MarketplaceSearchRequest} — defaults applied, transforms run (ADR-0122). */
+export type MarketplaceSearchRequestParsed = z.infer<typeof MarketplaceSearchRequestSchema>;
 export type MarketplaceSearchResponse = z.infer<typeof MarketplaceSearchResponseSchema>;
+/** Post-parse shape of {@link MarketplaceSearchResponse} — defaults applied, transforms run (ADR-0122). */
+export type MarketplaceSearchResponseParsed = z.infer<typeof MarketplaceSearchResponseSchema>;
 export type MarketplaceInstallRequest = z.infer<typeof MarketplaceInstallRequestSchema>;
+/** Post-parse shape of {@link MarketplaceInstallRequest} — defaults applied, transforms run (ADR-0122). */
+export type MarketplaceInstallRequestParsed = z.infer<typeof MarketplaceInstallRequestSchema>;
 export type MarketplaceInstallResponse = z.infer<typeof MarketplaceInstallResponseSchema>;

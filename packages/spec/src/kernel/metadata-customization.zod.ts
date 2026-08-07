@@ -309,7 +309,13 @@ export const CustomizationPolicySchema = lazySchema(() => z.object({
 export type CustomizationOrigin = z.infer<typeof CustomizationOriginSchema>;
 export type FieldChange = z.infer<typeof FieldChangeSchema>;
 export type MetadataOverlay = z.infer<typeof MetadataOverlaySchema>;
+/** Post-parse shape of {@link MetadataOverlay} — defaults applied, transforms run (ADR-0122). */
+export type MetadataOverlayParsed = z.infer<typeof MetadataOverlaySchema>;
 export type MergeConflict = z.infer<typeof MergeConflictSchema>;
 export type MergeStrategyConfig = z.infer<typeof MergeStrategyConfigSchema>;
+/** Post-parse shape of {@link MergeStrategyConfig} — defaults applied, transforms run (ADR-0122). */
+export type MergeStrategyConfigParsed = z.infer<typeof MergeStrategyConfigSchema>;
 export type MergeResult = z.infer<typeof MergeResultSchema>;
 export type CustomizationPolicy = z.infer<typeof CustomizationPolicySchema>;
+/** Post-parse shape of {@link CustomizationPolicy} — defaults applied, transforms run (ADR-0122). */
+export type CustomizationPolicyParsed = z.infer<typeof CustomizationPolicySchema>;

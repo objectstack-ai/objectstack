@@ -201,8 +201,13 @@ const actionDefUnknownKeyError = strictUnknownKeyError({
  * nothing while making a shape fragment look load-bearing (#4583: *"a
  * precisely-validated dead slot is the more convincing lie"*).
  *
- * The `Class` cell it should carry is an OPEN question (#5249): the ledger's
- * enumerated vocabulary has no word for a shape that is neither a door nor dead.
+ * The `Class` cell it should carry was an open question (#5249), because the
+ * ledger's enumerated vocabulary had no word for a shape that is neither a door
+ * nor dead. **Ruled 2026-08-06: the vocabulary grew one — `covered`** (carrier
+ * absent, parse absent, vocabulary fully gated at every consumer; follow-up:
+ * none), and this schema is its only instance in the five triaged directories —
+ * a spread is what makes the base inert, and it is the only strip site in all
+ * 197 that is spread rather than `.extend()`ed or carried under a key.
  *
  * Pinned in `app-strictness-batch19.test.ts`, including the mechanism itself
  * (`.extend()` inherits posture, `...shape` does not) and a guard that fails if
@@ -631,6 +636,8 @@ export const NavigationContributionSchema = lazySchema(() => z.object({
   }),
 }).strict().describe('A navigation contribution: a package injecting nav items into an app it does not own (ADR-0029 D7)'));
 export type NavigationContribution = z.infer<typeof NavigationContributionSchema>;
+/** Post-parse shape of {@link NavigationContribution} — defaults applied, transforms run (ADR-0122). */
+export type NavigationContributionParsed = z.infer<typeof NavigationContributionSchema>;
 /**
  * The authoring shape of a contribution (#4195) — `priority` is `.default(200)`
  * and each item is a {@link NavigationItemInput}, so this is what a package
@@ -995,6 +1002,8 @@ export const AppContextSelectorSchema = lazySchema(() => z.object({
 }).strict());
 
 export type AppContextSelector = z.infer<typeof AppContextSelectorSchema>;
+/** Post-parse shape of {@link AppContextSelector} — defaults applied, transforms run (ADR-0122). */
+export type AppContextSelectorParsed = z.infer<typeof AppContextSelectorSchema>;
 
 /**
  * Schema for Applications (Apps).
@@ -1381,18 +1390,36 @@ export function defineApp(config: z.input<typeof AppSchema>): App {
 
 // Main Types
 export type App = z.infer<typeof AppSchema>;
+/** Post-parse shape of {@link App} — defaults applied, transforms run (ADR-0122). */
+export type AppParsed = z.infer<typeof AppSchema>;
 export type AppInput = z.input<typeof AppSchema>;
 export type AppBranding = z.infer<typeof AppBrandingSchema>;
 // `NavigationItem` is declared next to NavigationItemSchema — it IS that
 // schema's annotation, so it cannot be inferred back out of it (#4171).
 export type NavigationArea = z.infer<typeof NavigationAreaSchema>;
+/** Post-parse shape of {@link NavigationArea} — defaults applied, transforms run (ADR-0122). */
+export type NavigationAreaParsed = z.infer<typeof NavigationAreaSchema>;
 
 // Discriminated Item Types (Helper exports)
 export type ObjectNavItem = z.infer<typeof ObjectNavItemSchema>;
+/** Post-parse shape of {@link ObjectNavItem} — defaults applied, transforms run (ADR-0122). */
+export type ObjectNavItemParsed = z.infer<typeof ObjectNavItemSchema>;
 export type DashboardNavItem = z.infer<typeof DashboardNavItemSchema>;
+/** Post-parse shape of {@link DashboardNavItem} — defaults applied, transforms run (ADR-0122). */
+export type DashboardNavItemParsed = z.infer<typeof DashboardNavItemSchema>;
 export type PageNavItem = z.infer<typeof PageNavItemSchema>;
+/** Post-parse shape of {@link PageNavItem} — defaults applied, transforms run (ADR-0122). */
+export type PageNavItemParsed = z.infer<typeof PageNavItemSchema>;
 export type UrlNavItem = z.infer<typeof UrlNavItemSchema>;
+/** Post-parse shape of {@link UrlNavItem} — defaults applied, transforms run (ADR-0122). */
+export type UrlNavItemParsed = z.infer<typeof UrlNavItemSchema>;
 export type ReportNavItem = z.infer<typeof ReportNavItemSchema>;
+/** Post-parse shape of {@link ReportNavItem} — defaults applied, transforms run (ADR-0122). */
+export type ReportNavItemParsed = z.infer<typeof ReportNavItemSchema>;
 export type ActionNavItem = z.infer<typeof ActionNavItemSchema>;
+/** Post-parse shape of {@link ActionNavItem} — defaults applied, transforms run (ADR-0122). */
+export type ActionNavItemParsed = z.infer<typeof ActionNavItemSchema>;
 export type ComponentNavItem = z.infer<typeof ComponentNavItemSchema>;
+/** Post-parse shape of {@link ComponentNavItem} — defaults applied, transforms run (ADR-0122). */
+export type ComponentNavItemParsed = z.infer<typeof ComponentNavItemSchema>;
 export type GroupNavItem = z.infer<typeof GroupNavItemSchema> & { children: NavigationItem[] };

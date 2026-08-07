@@ -2,6 +2,13 @@
 
 import { defineAction } from '@objectstack/spec/ui';
 
+// The action-GATING matrix (`visible` / `requiredPermissions` across all four
+// action surfaces, and one predicate per field type) lives in its own file —
+// it is a coverage fixture for the gates, not another ActionType specimen.
+import { allPredicateMatrixActions } from './predicate-matrix.action.js';
+
+export * from './predicate-matrix.action.js';
+
 const task = 'showcase_task';
 const invoice = 'showcase_invoice';
 const fieldZoo = 'showcase_field_zoo';
@@ -375,4 +382,5 @@ export const allActions = [
   ActionParamGalleryAction,
   ArchiveTaskAction,
   PortfolioSnapshotAction,
+  ...allPredicateMatrixActions,
 ];
