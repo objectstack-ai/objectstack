@@ -122,14 +122,18 @@
  * flow-level, and the region is named in the **message** rather than in `where`
  * (`its data node 'touch' (update_record), in loop 'loop_rows' body,`): `where`
  * says which declaration is wrong, the message says where to find the proof. A
- * top-level hit yields the byte-identical message it always did — pinned in the
- * tests, since the wording is what every existing author already sees.
+ * top-level hit adds no region clause at all — pinned in the tests, since a
+ * top-level finding is what most authors see.
  *
  * What this fixes is not a corner. Query a set, loop it, write per item is *the*
  * shape of a scheduled data flow, so the write is almost always the nested node —
  * and because this rule gates the build, the shape it was missing built clean and
  * then could not run at all. That is precisely what promoting it to `error`
  * (#3760) was for.
+ *
+ * #5693 rewrote how that same message names the identity — one wording true of
+ * both authoring inputs instead of a branch on `flow.runAs` that no CLI command
+ * could take. See {@link RUNAS_EFFECTIVE_IDENTITY}.
  */
 
 import {
@@ -248,6 +252,49 @@ const INERT_CONDITION_NODE_TYPES = new Set([
 
 /** Node types that perform a data operation — the ones `flow.runAs` governs (#1888). */
 const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
+
+/**
+ * How {@link FLOW_RUNAS_UNSCOPED} names the identity the run would use — ONE
+ * wording, true whether the author wrote `runAs:'user'` or wrote nothing (#5693).
+ *
+ * It replaces a ternary that told the author which of the two they had done:
+ * `` `runAs:'user'` `` when `flow.runAs` was a string, `the default …` when it
+ * was absent. That distinction is real, but the rule cannot observe it, and the
+ * arm it picked depended on the SURFACE rather than on the metadata:
+ *
+ *  - **CLI (`os validate` / `os build` / `os lint`) — always the explicit arm.**
+ *    `FlowSchema.runAs` carries `.default('user')`, and the registry wires this
+ *    rule `input: 'parsed'`, so `flow.runAs` is the string `'user'` either way.
+ *    `os lint` does not parse and would have escaped that, except that
+ *    `defineStack` (and `defineFlow`) parse at *definition* time, so the config
+ *    module hands even the non-parsing command a stack with the default already
+ *    materialized. Measured on `examples/app-todo` with the `runAs` line deleted:
+ *    both commands printed the EXPLICIT arm at an author who had declared nothing.
+ *  - **Runtime publish gate (#4463) — both arms.** It judges `request.item`, the
+ *    verbatim authored body (`saveMetaItem` keeps it verbatim past the schema
+ *    check), so an omitted key really is absent there.
+ *
+ * So the same flow was told two different things by two shipped surfaces, and on
+ * the surface an author uses first it was told the one that reads as an
+ * accusation: *"you declared `runAs:'user'`"* to someone who declared nothing —
+ * inviting "the tool is confused" at the exact moment the tool is right and the
+ * fix is one line. Restoring the distinction would mean giving a `parsed`-tier
+ * rule a second, pre-parse input; #5693 chose the wording instead.
+ *
+ * The parenthetical is a statement about the VALUE, not an accusation about the
+ * author, so it stays true for someone who did write `runAs:'user'`. That is the
+ * house pattern, not a new one: `flow-draft-status-ambiguous` says `has status
+ * 'draft' (the default when none is authored)` for exactly this reason, on
+ * exactly this mechanism (`validate-flow-trigger-readiness.ts`).
+ *
+ * `'user'` is spelled out rather than interpolated from `flow.runAs` because the
+ * branch that uses this has already excluded `'system'` and the enum holds only
+ * those two — so on every surface that reaches the message (CLI: parsed; runtime
+ * gate: `safeParse`d against the overlay schema before the gate runs) the
+ * effective identity IS `'user'`. Interpolating would re-introduce a limb only
+ * an off-spec literal could reach, which is the defect this replaced.
+ */
+const RUNAS_EFFECTIVE_IDENTITY = "`runAs:'user'` (the default when none is declared)";
 
 /**
  * The first data node ANYWHERE in a flow, with the region it was found in —
@@ -1034,22 +1081,24 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
     //      build-GATING rule is its own change with its own blast radius — this
     //      is that change. The shape it was missing is the DEFAULT one for a
     //      scheduled data flow: query a set, loop it, write per item.
+    //      #5693 — the message states the EFFECTIVE identity in one wording that
+    //      is true of both authoring inputs, and does not branch on whether the
+    //      author wrote `runAs` (see {@link RUNAS_EFFECTIVE_IDENTITY}).
     const runAs = typeof flow.runAs === 'string' ? flow.runAs : 'user';
     const userLessKind = userLessTriggerKind(flow, startCfg);
     if (userLessKind && runAs !== 'system') {
       const dataNode = findDataNodeAnywhere(nodes, edges);
       if (dataNode) {
-        const declared = typeof flow.runAs === 'string' ? `\`runAs:'${runAs}'\`` : `the default \`runAs:'user'\``;
         // The region is named in the MESSAGE, not in `where`: `where` says which
         // declaration is wrong (`flow 'x' · runAs`, unchanged), the message says
         // where to look for the node that proves it. A top-level hit adds nothing
-        // here, so its wording is byte-identical to before (pinned in the tests).
+        // here, so its wording carries no region clause (pinned in the tests).
         const at = dataNode.scope ? `, in ${dataNode.scope},` : '';
         findings.push({
           where: `flow '${flowName}' · runAs`,
           message:
-            `${userLessKind}-triggered flow runs as ${declared}, but a ${userLessKind} run has no trigger ` +
-            `user — so its data node '${dataNode.node.id}' (${dataNode.node.type})${at} has no identity to scope to and ` +
+            `${userLessKind}-triggered flow runs under ${RUNAS_EFFECTIVE_IDENTITY}, but a ${userLessKind} run ` +
+            `has no trigger user — so its data node '${dataNode.node.id}' (${dataNode.node.type})${at} has no identity to scope to and ` +
             `will be REFUSED at run time.`,
           hint:
             `Declare \`runAs:'system'\` to make the elevation explicit and intended (the run reads/writes ` +

@@ -143,6 +143,72 @@ export function resolveImports(
   return { valueNames, typeNames, exampleValue: valueNames[0] ?? null, gaps };
 }
 
+// ── The committed baseline's BYTES ───────────────────────────────────────────
+//
+// The comment and the serializer live here, next to the rules they describe,
+// for one reason: the writer in `build-docs.ts` and the file on disk must be
+// able to *prove* they agree, and a constant private to a script that executes
+// on import cannot be read by a test.
+//
+// They disagreed until #5990. `--update-import-baseline` wrote raw characters
+// (plain `JSON.stringify`) while the committed file carried `\uXXXX` escapes,
+// so every run of the command rewrote all 136 entry lines to say exactly what
+// they already said. Measured on `origin/main` at the time: 305 tracked `.json`
+// files, 151 of them carrying non-ASCII, and this was the ONLY one that escaped
+// it — the sibling ratchets (`dual-source-exports`, `react-declaration-parity`,
+// `variant-docs`, `test-typecheck-debt`) and every generated artifact
+// (`api-surface/`, `authorable-surface/`, `json-schema.manifest/`,
+// `spec-changes.json`) all land raw. So the file was the outlier, not the
+// writer, and #5990 converted the file once rather than teaching the writer to
+// produce an escape nothing else in the repo produces.
+//
+// Why the churn was worth a fix rather than a habit: this is a SHRINK-ONLY
+// ratchet whose whole design intent is that a change to it is CONSPICUOUS —
+// growing it is a maintainer decision that is supposed to show up in the diff
+// (`NOT_DRIVER_MANAGED` in `scripts/regen-artifacts.mjs` keeps it out of the
+// merge driver for the same reason). 136 lines of encoding flip buries the one
+// line that carries the decision. Twice measured, not theorised: PR #5976 had
+// to re-serialize the generator's output by hand to get a 1-line diff, and
+// PR #6069 — changing nothing but a path inside the prose below — still
+// produced 137 insertions and 137 deletions.
+
+/**
+ * The `_comment` the baseline file carries, and the one place it is written.
+ *
+ * `serializeImportBaseline` is the ONLY writer, so editing this string makes
+ * the committed file stale — deliberately, and loudly: the round-trip pin in
+ * `docs-import-surface.test.ts` goes red until `--update-import-baseline` is
+ * re-run. That trade only became affordable once the encodings matched; while
+ * they did not, re-running the command cost 137 lines of noise, which is
+ * exactly why #6069 chose to leave the stale path (`api-surface.json`, a file
+ * that no longer exists) for #5990 to fix instead.
+ */
+export const IMPORT_BASELINE_COMMENT =
+  'Accepted gaps between the reference docs\' import examples and the real export surface of ' +
+  '@objectstack/spec (#4570): a documented JSON Schema whose entry point exports no matching type ' +
+  'alias ("no type export") or no matching schema const ("no schema const export"). The name is ' +
+  'omitted from the generated import line — the docs never advertise an import that cannot compile ' +
+  '— and listed here so the omission is countable instead of silent. Shrink-only ratchet: a NEW gap ' +
+  'fails check:docs (fix it by adding `export type X = z.infer<typeof XSchema>;` next to the schema ' +
+  'and regenerating api-surface/, or by retiring the schema together with its alias), and a ' +
+  'stale entry fails until its line is deleted. Growing this list is a maintainer decision that ' +
+  'shows up as this file in the diff. Regenerate with: ' +
+  'tsx scripts/build-docs.ts --update-import-baseline (after gen:schema).';
+
+/**
+ * The exact bytes `docs-import-surface.baseline.json` must carry for `entries`.
+ *
+ * Both sides of #5990 route through here — the `--update-import-baseline`
+ * writer and the test that re-serializes the committed file and demands the
+ * bytes back — so "the writer's encoding" and "the file's encoding" are no
+ * longer two facts that can drift apart. Plain `JSON.stringify` is the point,
+ * not an implementation detail: it emits raw characters, which is what the rest
+ * of the repo's JSON carries.
+ */
+export function serializeImportBaseline(entries: readonly string[]): string {
+  return JSON.stringify({ _comment: IMPORT_BASELINE_COMMENT, entries }, null, 2) + '\n';
+}
+
 export interface BaselineVerdict {
   /** Gaps not covered by the baseline — a NEW dead import example. */
   fresh: string[];

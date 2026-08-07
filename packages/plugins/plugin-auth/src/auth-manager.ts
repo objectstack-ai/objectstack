@@ -728,6 +728,70 @@ export function ipMatchesRange(ip: string, range: string): boolean {
   return ip.trim() === r;
 }
 
+/**
+ * #6039 / #2814 — the error code an SMS service reports a QUOTA refusal with.
+ *
+ * `SmsService.send()` cannot throw an HTTP-shaped error: it is a kernel service
+ * with no idea who is calling. It reports the deployment's daily cost ceiling
+ * being hit as a normal failed result whose `error` carries the service's
+ * `CODE: message` envelope — here `TOO_MANY_REQUESTS: daily SMS quota
+ * exhausted`. Turning that back into an HTTP answer is the auth endpoint's job,
+ * which is why the mapping lives here (see {@link isSmsQuotaRefusal}).
+ *
+ * **Source of truth**: `SMS_QUOTA_EXCEEDED_CODE` in
+ * `packages/services/service-sms/src/sms-daily-quota.ts` (exported alongside
+ * `SMS_QUOTA_EXCEEDED_ERROR`).
+ *
+ * **Why it is restated instead of imported**: `@objectstack/service-sms` already
+ * depends on THIS package — its day counter imports `InProcessCounterStore` /
+ * `incrementFixedWindow` from `@objectstack/plugin-auth` — so importing the
+ * constant back would close a dependency cycle. This is the same call, in the
+ * other direction, that `normalizeSmsRecipient` makes in
+ * `packages/services/service-sms/src/sms-service.ts` ("Same shape rule as
+ * plugin-auth's `normalizePhoneNumber` … kept local: the two packages must not
+ * depend on each other").
+ *
+ * Only the CODE crosses the boundary — a closed-vocabulary ADR-0112 error code,
+ * not prose. The message half of the envelope is service-owned and may be
+ * reworded without touching this file.
+ */
+const SMS_QUOTA_EXCEEDED_CODE = 'TOO_MANY_REQUESTS';
+
+/**
+ * #6039 — is this `SendSmsResult.error` the quota wall's refusal?
+ *
+ * Matched as a PREFIX of the service's `CODE: message` envelope, never as a
+ * substring: a transport failure puts the provider's raw text in `error`
+ * (`SmsService` truncates it and reports it verbatim), and one that happens to
+ * mention the code mid-sentence is still a transport failure — 500, not 429.
+ */
+function isSmsQuotaRefusal(error: string | undefined): boolean {
+  return typeof error === 'string' && error.startsWith(`${SMS_QUOTA_EXCEEDED_CODE}:`);
+}
+
+/**
+ * #6039 — the 429 an SMS quota refusal must reach the caller as.
+ *
+ * better-call (better-auth's router) maps ONLY `APIError` to a real HTTP status:
+ * `isAPIError(err) = err instanceof APIError || err?.name === 'APIError'`
+ * (better-call@1.3.7 `dist/utils.mjs:57`), consumed at `dist/router.mjs:93`,
+ * where everything else takes the `console.error` + `500 / null body` branch.
+ * A plain `Error` therefore buried `TOO_MANY_REQUESTS` in a server log while the
+ * per-number wall on the same endpoint ({@link AuthManager.assertPhoneOtpSendAllowed})
+ * answered 429 — one endpoint, two voices.
+ *
+ * The message follows the per-number wall's shape and carries NO budget detail:
+ * no ceiling, no remaining count, no reset clock. #2814's requirement is that
+ * the two walls be indistinguishable from outside — an attacker must not learn
+ * which budget they hit, and a legitimate caller needs no more than "not now".
+ * (The per-number wall names its own retry window because it can compute one;
+ * this wall states no time it cannot honestly promise.)
+ */
+async function smsQuotaExceededApiError(message: string): Promise<Error> {
+  const { APIError } = await import('better-auth/api');
+  return new APIError(SMS_QUOTA_EXCEEDED_CODE, { message });
+}
+
 export class AuthManager {
   private auth: Auth<any> | null = null;
   private config: AuthManagerOptions;
@@ -2840,6 +2904,16 @@ export class AuthManager {
       templateParams: { code },
     });
     if (result.status === 'failed') {
+      // #6039 — the deployment's daily SMS quota refused this send. Answer it
+      // the way the per-number wall on this same endpoint answers: a real
+      // `APIError`, hence 429 TOO_MANY_REQUESTS instead of a 500 with a null
+      // body. Everything else stays a plain Error — a transport outage IS a
+      // server-side failure and 500 is the honest answer for it.
+      if (isSmsQuotaRefusal(result.error)) {
+        throw await smsQuotaExceededApiError(
+          'Too many verification codes requested. Please try again later.',
+        );
+      }
       // `result.error` is transport detail (never the code) — safe to surface.
       throw new Error(`Phone OTP could not be sent: ${result.error ?? 'SMS delivery failed'}`);
     }
@@ -2870,6 +2944,18 @@ export class AuthManager {
     });
     const result = await sms.send({ to: phone, body, templateParams: { content: body } });
     if (result.status === 'failed') {
+      // #6039 — same quota wall, same outward shape as the OTP path above.
+      // (The one in-repo caller, admin import-users, catches this per row and
+      // records INVITE_SMS_FAILED rather than failing the request — so what
+      // changes there is that the row's message no longer carries the raw
+      // service envelope. The 429 matters for any caller that surfaces this
+      // rejection directly, which is what a public AuthManager method must be
+      // correct for.)
+      if (isSmsQuotaRefusal(result.error)) {
+        throw await smsQuotaExceededApiError(
+          'Too many SMS messages requested. Please try again later.',
+        );
+      }
       throw new Error(`Invitation SMS failed: ${result.error ?? 'SMS delivery failed'}`);
     }
   }

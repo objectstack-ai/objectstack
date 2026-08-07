@@ -804,6 +804,23 @@ interface SummaryDescriptor {
   filter?: Record<string, unknown>;
 }
 
+/**
+ * The value a roll-up summary takes over an **empty** child collection (#5749).
+ *
+ * `count` and `sum` are defined on the empty set — zero children is zero, not
+ * "unknown" — while `min`/`max`/`avg` are not, so those stay `null`. This is the
+ * ONE place that list is written down: {@link ObjectQL.recomputeSummaries} uses
+ * it for the post-aggregate fallback (an aggregate over no rows returns
+ * `null`/`undefined` on every driver), and the insert-time initialiser
+ * {@link ObjectQL.initializeSummaryFields} uses it to seed a brand-new parent
+ * row with the same value the first recompute would have produced. Two sites,
+ * one list — a parent that has never had a child and a parent whose last child
+ * was deleted are the SAME logical state and must read the same value.
+ */
+function summaryEmptySetValue(fn: SummaryDescriptor['fn']): number | null {
+  return fn === 'count' || fn === 'sum' ? 0 : null;
+}
+
 // `implements IObjectQLEngine` is the verification step of #4251 B3: every
 // member the `objectql` slot's contract declares is checked against this class
 // on every build, so the seven consumer-local surface declarations the contract
@@ -4156,6 +4173,15 @@ export class ObjectQL implements IObjectQLEngine {
    *  parent objects that aggregate it. Invalidated when packages register. */
   private summaryIndex: Map<string, SummaryDescriptor[]> | null = null;
 
+  /** The SAME descriptors, indexed the other way: parent object name → the
+   *  roll-up summary fields that object OWNS. Built in the same pass as
+   *  {@link summaryIndex} and invalidated with it. The child index answers
+   *  "whose summaries must I recompute after writing this row"; this one answers
+   *  "which of my own summary fields must be seeded when I create this row"
+   *  (#5749) — the question the child index structurally cannot answer, because
+   *  a parent that has never had a child appears in no child write. */
+  private summaryIndexByParent: Map<string, SummaryDescriptor[]> | null = null;
+
   /**
    * Retry options for roll-up summary recompute (framework#3147). Public so a
    * test can inject a no-op sleep for deterministic backoff; production uses
@@ -4166,12 +4192,20 @@ export class ObjectQL implements IObjectQLEngine {
   /** Invalidate the cached roll-up summary index (call when metadata changes). */
   private invalidateSummaryIndex(): void {
     this.summaryIndex = null;
+    this.summaryIndexByParent = null;
   }
 
-  /** Scan all registered objects for `summary` fields and index them by the
-   *  child object they aggregate, resolving the child→parent FK field. */
-  private buildSummaryIndex(): Map<string, SummaryDescriptor[]> {
+  /** Scan all registered objects for `summary` fields and index them BOTH ways
+   *  — by the child object they aggregate and by the parent object that owns
+   *  them — resolving the child→parent FK field. One scan, two views of the
+   *  identical descriptor objects, so the two indexes can never disagree about
+   *  which roll-ups exist. */
+  private buildSummaryIndex(): {
+    byChild: Map<string, SummaryDescriptor[]>;
+    byParent: Map<string, SummaryDescriptor[]>;
+  } {
     const index = new Map<string, SummaryDescriptor[]>();
+    const byParent = new Map<string, SummaryDescriptor[]>();
     let objects: any[] = [];
     try { objects = (this._registry as any).getAllObjects?.() ?? []; } catch { objects = []; }
     for (const parent of objects) {
@@ -4204,18 +4238,34 @@ export class ObjectQL implements IObjectQLEngine {
         const filter = so.filter && typeof so.filter === 'object' && !Array.isArray(so.filter)
           ? so.filter as Record<string, unknown>
           : undefined;
+        const descriptor: SummaryDescriptor = {
+          parentObject: parent.name, summaryField, fkField, fn, sourceField: so.field, filter,
+        };
         const list = index.get(childObject) ?? [];
-        list.push({ parentObject: parent.name, summaryField, fkField, fn, sourceField: so.field, filter });
+        list.push(descriptor);
         index.set(childObject, list);
+        // Same descriptor, parent-side view. Only descriptors that made it this
+        // far are indexed either way, so "seeded at insert" and "maintained by
+        // recompute" are the same set by construction — a roll-up whose
+        // relationship could not be resolved (the `continue` above) is left
+        // untouched on both paths rather than seeded with a 0 nothing updates.
+        const owned = byParent.get(parent.name) ?? [];
+        owned.push(descriptor);
+        byParent.set(parent.name, owned);
       }
     }
-    return index;
+    return { byChild: index, byParent };
   }
 
   /** `registry.objectRevision` the cached {@link summaryIndex} was built at. */
   private summaryIndexRevision = -1;
 
-  private getSummaryDescriptors(childObject: string): SummaryDescriptor[] {
+  /**
+   * Ensure both roll-up indexes are present and current. Split out of
+   * {@link getSummaryDescriptors} so the parent-side view (#5749) shares the
+   * exact same staleness rule instead of re-deriving one.
+   */
+  private ensureSummaryIndexes(): void {
     // Rebuild whenever the REGISTRY's object set has moved since the index was
     // built — not only when someone remembered to call
     // `invalidateSummaryIndex`. That single site (`registerApp`) is bypassed by
@@ -4228,11 +4278,67 @@ export class ObjectQL implements IObjectQLEngine {
     // "已完成任务数" shipped empty over correct metadata (cloud#970).
     const revision = (this._registry as unknown as { objectRevision?: number })?.objectRevision;
     const stale = typeof revision === 'number' && revision !== this.summaryIndexRevision;
-    if (!this.summaryIndex || stale) {
-      this.summaryIndex = this.buildSummaryIndex();
+    if (!this.summaryIndex || !this.summaryIndexByParent || stale) {
+      const built = this.buildSummaryIndex();
+      this.summaryIndex = built.byChild;
+      this.summaryIndexByParent = built.byParent;
       if (typeof revision === 'number') this.summaryIndexRevision = revision;
     }
-    return this.summaryIndex.get(childObject) ?? [];
+  }
+
+  /** Roll-up descriptors for summaries that aggregate `childObject` — i.e. the
+   *  ones a write to `childObject` must recompute. Semantics unchanged. */
+  private getSummaryDescriptors(childObject: string): SummaryDescriptor[] {
+    this.ensureSummaryIndexes();
+    return this.summaryIndex!.get(childObject) ?? [];
+  }
+
+  /** Roll-up descriptors for the summary fields `parentObject` OWNS (#5749) —
+   *  i.e. the ones a NEW row of `parentObject` must have seeded. */
+  private getOwnedSummaryDescriptors(parentObject: string): SummaryDescriptor[] {
+    this.ensureSummaryIndexes();
+    return this.summaryIndexByParent!.get(parentObject) ?? [];
+  }
+
+  /**
+   * Seed the roll-up `summary` fields a freshly-created row owns (#5749).
+   *
+   * `recomputeSummaries` only ever visits parents named by a child write, so a
+   * parent that has NEVER had a child is never visited and its summary column
+   * keeps whatever insert put there — `null`. Delete the last child and the
+   * parent DOES get visited (via `previous`) and lands on 0. Same logical state,
+   * two different values: `filter ["task_count","=",0]` silently skipped every
+   * parent that never had a child, and so did sorting, GROUP BY and any formula
+   * reading the field (null propagation).
+   *
+   * The fix is at the producer: write the empty-collection value at create time,
+   * so `count`/`sum` start at 0 and only ever move to another number.
+   * `min`/`max`/`avg` have no empty-set value and deliberately stay `null` —
+   * {@link summaryEmptySetValue} is the single list both this and the recompute
+   * fallback read.
+   *
+   * Author-supplied values are never overwritten. The `!= null` test matches
+   * {@link applyFieldDefaults} exactly (#2706): on INSERT an explicit `null` is
+   * "no value supplied", any real value — including a deliberate 0 or a seeded
+   * count — is respected. Runs before the `beforeInsert` hooks for the same
+   * reason defaults do, so a hook still has the final say.
+   *
+   * Existing rows are untouched: this is create-time only, so parents already
+   * stored with `null` stay `null` until a child write recomputes them.
+   */
+  private initializeSummaryFields(object: string, record: any): any {
+    const descriptors = this.getOwnedSummaryDescriptors(object);
+    if (descriptors.length === 0) return record;
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return record;
+    let out: Record<string, unknown> = record;
+    for (const desc of descriptors) {
+      const seed = summaryEmptySetValue(desc.fn);
+      if (seed == null) continue; // min/max/avg — undefined on an empty set
+      if (out[desc.summaryField] != null) continue; // author supplied a value
+      if (out === record) out = { ...record };
+      out[desc.summaryField] = seed;
+    }
+    return out;
   }
 
   /**
@@ -4277,7 +4383,10 @@ export class ObjectQL implements IObjectQLEngine {
               context: execCtx,
             } as any);
             let value = rows?.[0]?.value;
-            if (value == null) value = (desc.fn === 'count' || desc.fn === 'sum') ? 0 : null;
+            // An aggregate over no rows returns null/undefined on every driver.
+            // Behaviour unchanged — the empty-set list simply moved to the one
+            // place the insert-time seed reads it from too (#5749).
+            if (value == null) value = summaryEmptySetValue(desc.fn);
             await this.update(desc.parentObject, { id: parentId, [desc.summaryField]: value }, { context: execCtx } as any);
           }, this.summaryRetryOptions);
         } catch (err) {
@@ -5037,13 +5146,28 @@ export class ObjectQL implements IObjectQLEngine {
       // (#2703). The hook still has final say — it runs after and may override
       // any defaulted field. `applyFieldDefaults` returns a fresh copy and only
       // fills fields left `undefined`, so client-supplied values are untouched.
+      //
+      // [#5749] Roll-up `summary` fields this object OWNS are seeded in the same
+      // pass, right after the declared defaults: `count`/`sum` over the empty
+      // child collection is 0, and a brand-new parent HAS an empty child
+      // collection. Without it the row stored `null` and stayed there until some
+      // child write happened to name it — so "never had a child" (null) and
+      // "had one, deleted it" (0) read differently and `= 0` filters dropped
+      // rows. Same placement rules as the defaults above: caller-supplied values
+      // untouched, hooks run after and may override.
       const nowSnap = new Date();
       const isBatch = Array.isArray(opCtx.data);
       const defaultedData = isBatch
         ? (opCtx.data as any[]).map((row) =>
-            this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap),
+            this.initializeSummaryFields(
+              object,
+              this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap),
+            ),
           )
-        : this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap);
+        : this.initializeSummaryFields(
+            object,
+            this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap),
+          );
 
       // Batch inserts trigger beforeInsert/afterInsert PER ROW, each with the
       // exact single-record context shape (`input.data` = one row, `result` =

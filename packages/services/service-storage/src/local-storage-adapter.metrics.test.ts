@@ -29,31 +29,23 @@ describe('LocalStorageAdapter instrumentation', () => {
         expect(durations[0]).toBeGreaterThanOrEqual(0);
     });
 
-    it('records ok for get / head / list when the object is present', async () => {
+    it('records ok for get / head when the object is present', async () => {
         const metrics = new InMemoryMetricsRegistry();
         const storage = new LocalStorageAdapter({ rootDir, metrics });
         await storage.upload('a/b.txt', Buffer.from('x'));
         await storage.download('a/b.txt');
         await storage.exists('a/b.txt');
         await storage.getInfo('a/b.txt');
-        await storage.list('a');
 
         expect(metrics.totalCounter(SEMCONV.storageOperationsTotal, { adapter: 'local', op: 'get', result: 'ok' })).toBe(1);
         expect(metrics.totalCounter(SEMCONV.storageOperationsTotal, { adapter: 'local', op: 'head', result: 'ok' })).toBe(2);
-        expect(metrics.totalCounter(SEMCONV.storageOperationsTotal, { adapter: 'local', op: 'list', result: 'ok' })).toBe(1);
     });
 
-    it('list() does not double-count head per entry', async () => {
-        const metrics = new InMemoryMetricsRegistry();
-        const storage = new LocalStorageAdapter({ rootDir, metrics });
-        await storage.upload('p/a.txt', Buffer.from('x'));
-        await storage.upload('p/b.txt', Buffer.from('y'));
-        metrics.reset();
-        await storage.list('p');
-        // Exactly one list operation; no head operations from inner stats.
-        expect(metrics.totalCounter(SEMCONV.storageOperationsTotal, { adapter: 'local', op: 'list' })).toBe(1);
-        expect(metrics.totalCounter(SEMCONV.storageOperationsTotal, { adapter: 'local', op: 'head' })).toBe(0);
-    });
+    // The `list() does not double-count head per entry` case was deleted with the
+    // method it exercised (#5541). It pinned an internal detail of the removed
+    // implementation (inline `stat` instead of `getInfo`), so with `list` gone it
+    // could only have stayed green by asserting nothing. `op: 'list'` is no longer
+    // in the adapter's `track()` vocabulary either, so no sample can carry it.
 
     it('records errors_total{errorClass} on path-traversal rejection', async () => {
         const metrics = new InMemoryMetricsRegistry();

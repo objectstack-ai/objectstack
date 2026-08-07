@@ -328,12 +328,19 @@ describe('[#5769] RemoteTransport refuses a $-key in a node position', () => {
       expect((await compile({ $and: [{ a: 1 }, { b: 2 }] })).sql).toBe(
         `${BARE_SCAN} WHERE (("a" = ?) AND ("b" = ?))`,
       );
+      // [#5903] The `$not` operand is NULL-safe since #5146 landed on this
+      // face, so the negated predicate now carries the `IS NOT NULL` guard that
+      // makes it TOTAL. That is a change THIS suite must not read as a #5769
+      // regression: what #5769 pins is that the node gate compiles the three
+      // declared combinators rather than refusing them, and it still does.
       expect((await compile({ $not: { stage: 'won' } })).sql).toBe(
-        `${BARE_SCAN} WHERE NOT ("stage" = ?)`,
+        `${BARE_SCAN} WHERE NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))`,
       );
       expect(
         (await compile({ $and: [{ $or: [{ stage: 'won' }] }, { $not: { stage: 'lost' } }] })).sql,
-      ).toBe(`${BARE_SCAN} WHERE (((("stage" = ?))) AND (NOT ("stage" = ?)))`);
+      ).toBe(
+        `${BARE_SCAN} WHERE (((("stage" = ?))) AND (NOT ((("stage" IS NOT NULL) AND ("stage" = ?)))))`,
+      );
     });
 
     it('keeps the boolean identities of #1073 / #1076 exactly where they were', async () => {
