@@ -104,11 +104,13 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     }
   }, 30_000);
 
-  const authed = (path: string, init?: RequestInit) =>
+  const as = (user: string, path: string, init?: RequestInit) =>
     fetch(`${baseUrl}${path}`, {
       ...init,
-      headers: { 'x-test-user': TEST_USER, 'content-type': 'application/json', ...(init?.headers ?? {}) },
+      headers: { 'x-test-user': user, 'content-type': 'application/json', ...(init?.headers ?? {}) },
     });
+
+  const authed = (path: string, init?: RequestInit) => as(TEST_USER, path, init);
 
   it('resolves the notification service in discovery (declared === enforced)', async () => {
     const res = await fetch(`${baseUrl}/api/v1/discovery`);
@@ -173,4 +175,54 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(receipts.length).toBe(2);
     expect(receipts.every((r: any) => r.state === 'read')).toBe(true);
   });
+
+  it('[#6436] mark-all-read clears an inbox LARGER than the list window — no readCount/unreadCount contradiction', async () => {
+    // The issue, over the wire, on the real stack. `markAllRead` swept one page
+    // of the list (`limit: 200`, that list's hard cap), so a user with more
+    // unread than the cap pressed "mark all read" and the badge did not clear:
+    //
+    //   POST /api/v1/notifications/read/all  →  { readCount: 200 }
+    //   GET  /api/v1/notifications           →  { unreadCount: 150 }
+    //
+    // #6363 did not cause that — it removed the cover. While `unreadCount` was
+    // window-scoped the shortfall was self-consistent and invisible; once the
+    // badge became a true total the same request pair states it out loud, which
+    // is why this pin lives at the wire and not only under the service.
+    //
+    // Rows are seeded through the data engine rather than 260 `emit()` calls:
+    // this asserts the READ/SWEEP path over HTTP, and the delivery path is
+    // already covered by the test above.
+    const BULK_USER = 'usr_notif_bulk';
+    const TOTAL = 260; // > the list's hard cap of 200
+    const data = kernel.getService<IDataEngine>('data');
+    for (let i = 0; i < TOTAL; i++) {
+      await data.insert('sys_inbox_message', {
+        user_id: BULK_USER,
+        notification_id: `bulk_n${String(i).padStart(3, '0')}`,
+        topic: 'deal.won',
+        title: `Bulk ${i}`,
+        body_md: 'body',
+        severity: 'info',
+        created_at: `2026-02-01T00:00:00.${String(i).padStart(3, '0')}Z`,
+      });
+    }
+
+    const before = await (await as(BULK_USER, '/api/v1/notifications')).json();
+    expect(before.data.unreadCount).toBe(TOTAL); // the true total (#6363)
+    expect(before.data.notifications).toHaveLength(50); // the list is still one window
+
+    const readAll = await (await as(BULK_USER, '/api/v1/notifications/read/all', { method: 'POST' })).json();
+    expect(readAll.data).toMatchObject({ success: true, readCount: TOTAL }); // was 200
+
+    const after = await (await as(BULK_USER, '/api/v1/notifications')).json();
+    expect(after.data.unreadCount).toBe(0); // was 60
+    expect(after.data.notifications.every((n: any) => n.read === true)).toBe(true);
+
+    // Persisted, not computed: one `read` receipt per notification.
+    const receipts = await data.find('sys_notification_receipt', {
+      where: { user_id: BULK_USER, channel: 'inbox' },
+    });
+    expect(receipts.length).toBe(TOTAL);
+    expect(receipts.every((r: any) => r.state === 'read')).toBe(true);
+  }, 120_000);
 });

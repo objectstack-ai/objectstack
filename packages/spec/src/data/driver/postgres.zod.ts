@@ -1,5 +1,18 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+/**
+ * PostgreSQL driver configuration — the `config` slot of a `datasource` whose
+ * `driver` resolves to `postgres` (`pg` / `postgresql`).
+ *
+ * ENFORCED as of #4410: `DatasourceSchema` parses `config` against this schema,
+ * so a misspelled connection key fails at authoring time instead of leaving the
+ * datasource on the client's localhost defaults. Every key here is read by
+ * `createDefaultDatasourceDriverFactory` (→ `SqlDriver`, knex `pg`).
+ *
+ * Pool sizing is NOT here: it lives in the driver-agnostic `datasource.pool`
+ * block, which the factory now honours for every SQL driver.
+ */
+
 import { z } from 'zod';
 
 import { lazySchema } from '../../shared/lazy-schema';
@@ -13,18 +26,6 @@ import {
   SSL_DETAIL_BELONGS_ON_DATASOURCE,
 } from './common.zod';
 
-/**
- * PostgreSQL driver configuration — the `config` slot of a `datasource` whose
- * `driver` resolves to `postgres` (`pg` / `postgresql`).
- *
- * ENFORCED as of #4410: `DatasourceSchema` parses `config` against this schema,
- * so a misspelled connection key fails at authoring time instead of leaving the
- * datasource on the client's localhost defaults. Every key here is read by
- * `createDefaultDatasourceDriverFactory` (→ `SqlDriver`, knex `pg`).
- *
- * Pool sizing is NOT here: it lives in the driver-agnostic `datasource.pool`
- * block, which the factory now honours for every SQL driver.
- */
 const POSTGRES_CONFIG_KEYS = [
   'url', 'host', 'port', 'database', 'username', 'password', 'ssl',
   'schema', 'applicationName', 'statementTimeout', 'autoMigrate',

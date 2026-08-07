@@ -309,26 +309,10 @@ export class MessagingService {
         const where: Record<string, unknown> = { user_id: userId };
         if (opts.type) where.topic = opts.type;
 
-        const [rows, receipts] = await Promise.all([
+        const [rows, stateByNotif] = await Promise.all([
             data.find(INBOX_OBJECT, { where, orderBy: [{ field: 'created_at', order: 'desc' }], limit }) as Promise<Array<Record<string, unknown>>>,
-            // Read-state spine. Best-effort: if receipts are unavailable the
-            // inbox still lists (everything reads as unread) rather than erroring.
-            (data.find(RECEIPT_OBJECT, { where: { user_id: userId, channel: 'inbox' } }) as Promise<Array<Record<string, unknown>>>)
-                .catch(() => [] as Array<Record<string, unknown>>),
+            this.readReceiptStates(data, userId),
         ]);
-
-        // notification_id → most-advanced receipt state (read/clicked/dismissed
-        // wins over a plain delivered one).
-        const stateByNotif = new Map<string, string>();
-        for (const r of receipts) {
-            const nid = r?.notification_id != null ? String(r.notification_id) : '';
-            if (!nid) continue;
-            const state = String(r.state ?? 'delivered');
-            const prev = stateByNotif.get(nid);
-            if (!prev || (!READ_RECEIPT_STATES.has(prev) && READ_RECEIPT_STATES.has(state))) {
-                stateByNotif.set(nid, state);
-            }
-        }
 
         let windowUnread = 0;
         const all: InboxNotificationView[] = rows.map((m) => {
@@ -404,6 +388,37 @@ export class MessagingService {
     }
 
     /**
+     * The user's inbox read-state spine: `notification_id` → most-advanced
+     * receipt state, where `read`/`clicked`/`dismissed` wins over a plain
+     * `delivered` one (ADR-0030 keeps read-state on `sys_notification_receipt`,
+     * not on the inbox row).
+     *
+     * Best-effort by design: receipts are a DIFFERENT object which a minimal
+     * stack may not have registered at all, so an unavailable spine degrades to
+     * "nothing is known to be read" rather than failing the caller. Both
+     * callers survive that direction — `listInbox` lists everything as unread,
+     * and `markAllRead` sweeps everything (re-marking a read message is
+     * idempotent; skipping an unread one is #6436).
+     */
+    private async readReceiptStates(data: IDataEngine, userId: string): Promise<Map<string, string>> {
+        const receipts = await (data.find(RECEIPT_OBJECT, {
+            where: { user_id: userId, channel: 'inbox' },
+        }) as Promise<Array<Record<string, unknown>>>).catch(() => [] as Array<Record<string, unknown>>);
+
+        const stateByNotif = new Map<string, string>();
+        for (const r of receipts) {
+            const nid = r?.notification_id != null ? String(r.notification_id) : '';
+            if (!nid) continue;
+            const state = String(r.state ?? 'delivered');
+            const prev = stateByNotif.get(nid);
+            if (!prev || (!READ_RECEIPT_STATES.has(prev) && READ_RECEIPT_STATES.has(state))) {
+                stateByNotif.set(nid, state);
+            }
+        }
+        return stateByNotif;
+    }
+
+    /**
      * Mark specific notifications read by upserting their inbox receipts to
      * `read`. Updates the existing `delivered` receipt in place (keyed
      * `(notification_id, user_id, channel:'inbox')`); inserts one only when
@@ -428,14 +443,96 @@ export class MessagingService {
     }
 
     /**
-     * Mark every currently-unread inbox message for the user as read. Returns
-     * `{ success, readCount }` (`MarkAllNotificationsReadResponseSchema`).
+     * Mark every currently-unread inbox message for the user as read — the
+     * whole inbox, not a page of it (#6436). Returns `{ success, readCount }`
+     * (`MarkAllNotificationsReadResponseSchema`), where `readCount` is the
+     * number of DISTINCT notifications this call flipped to `read`: the
+     * unread set it found, minus any whose receipt write failed (those are
+     * logged by `markRead` and left for the next sweep, which is idempotent).
+     *
+     * It used to sweep `listInbox(userId, { read: false, limit: 200 })` — one
+     * page of the LIST, and 200 is that list's hard cap — so the route
+     * documented as "mark **every** currently-unread inbox message as read"
+     * cleared at most 200 receipts per call. Two ways that showed:
+     *
+     *   * 350 unread → `{ readCount: 200 }`, 150 still unread. Invisible while
+     *     `unreadCount` was itself window-scoped; since #6363 made the badge a
+     *     true total, one response pair states the contradiction on its own.
+     *   * Worse, and the reason a paging loop is not the fix: that window is
+     *     `created_at desc` over ALL rows, with the `read` filter applied in
+     *     memory AFTER the truncation. An inbox whose newest 200 are already
+     *     read handed the sweep an EMPTY list and marked NOTHING, however much
+     *     older unread sat behind it — and "loop until the page comes back
+     *     empty" exits on exactly that empty first page.
+     *
+     * So the sweep reads the unread SET instead of a page of the list, in a
+     * FIXED two reads whatever the inbox size: the same one-column, unwindowed
+     * projection of `sys_inbox_message` that #6363's `countUnreadTotal` already
+     * issues to answer the badge, joined against the receipt spine that
+     * `listInbox` already reads unbounded. No loop, no page count to bound, and
+     * nothing asked of the data layer that the bell's poll does not ask on
+     * every saturated page. What remains linear is the WRITE — one receipt per
+     * unread notification, which is the receipt model itself (ADR-0030), and
+     * the only thing that could collapse it is a predicate-shaped bulk write
+     * (route B), which would have to redesign `markRead`'s check-then-act
+     * upsert and its "no receipt row yet" insert face. Deliberately not done
+     * here.
+     *
+     * No cap: a numeric safety valve is route C wearing a larger number — above
+     * it, "all" would be a lie again, which is the reading the maintainer ruled
+     * against on #6363 (make the declaration true rather than document the
+     * shortfall). What bounds a pathological inbox instead is that the work is
+     * idempotent and resumable — a failed receipt write is logged, skipped, and
+     * picked up by the next sweep.
      */
     async markAllRead(userId: string): Promise<{ success: boolean; readCount: number }> {
         const data = this.ctx.getData?.();
         if (!data || !userId) return { success: true, readCount: 0 };
-        const { notifications } = await this.listInbox(userId, { read: false, limit: 200 });
-        return this.markRead(userId, notifications.map((n) => n.id));
+        return this.markRead(userId, await this.unreadNotificationIds(data, userId));
+    }
+
+    /**
+     * Every notification id in the user's inbox that has no `read`-class
+     * receipt yet — the set `markAllRead` must flip, deduplicated so a
+     * notification materialized by several inbox rows is counted (and upserted)
+     * once, since its receipt is keyed `(notification_id, user_id, channel)`.
+     *
+     * The inbox read is NOT best-effort, matching `countUnreadTotal`: it is the
+     * primary read, and a failure means we do not know what to mark — far
+     * better to surface it than to report a confident `readCount` over a set we
+     * could not see. The receipt read degrades (see `readReceiptStates`).
+     *
+     * Rows carrying no `notification_id` are skipped: read-state is keyed by
+     * the event id, and the inbox channel writes no receipt for a row without
+     * one, so there is nothing addressable to write. The previous sweep fed
+     * `markRead` the inbox ROW id for those (`listInbox` views them as
+     * `nid ?? String(m.id)`), inserting a receipt the join never reads back —
+     * it could not make the row read and still counted itself into
+     * `readCount`. They keep reporting as unread, which is the true state.
+     * Whether such a row should be readable at all is a gap in the receipt KEY,
+     * not in this sweep: filed as #6448 (dormant — the single `emit()` ingress
+     * always carries an event id, so only data written around it can be null).
+     */
+    private async unreadNotificationIds(data: IDataEngine, userId: string): Promise<string[]> {
+        const [rows, stateByNotif] = await Promise.all([
+            data.find(INBOX_OBJECT, {
+                where: { user_id: userId },
+                fields: ['notification_id'],
+            }) as Promise<Array<Record<string, unknown>>>,
+            this.readReceiptStates(data, userId),
+        ]);
+
+        const ids: string[] = [];
+        const seen = new Set<string>();
+        for (const row of rows) {
+            const nid = row?.notification_id != null ? String(row.notification_id) : '';
+            if (!nid || seen.has(nid)) continue;
+            const state = stateByNotif.get(nid);
+            if (state && READ_RECEIPT_STATES.has(state)) continue;
+            seen.add(nid);
+            ids.push(nid);
+        }
+        return ids;
     }
 
     /** Upsert a `read` receipt for one notification; returns 1 when it persisted. */
