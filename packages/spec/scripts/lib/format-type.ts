@@ -103,6 +103,53 @@ function isNeverNode(prop: any): boolean {
   );
 }
 
+/**
+ * One JSON Schema literal value — a `const`, or a single member of an `enum` —
+ * rendered as the TypeScript literal an author would have to type.
+ *
+ * Quoting is decided by `typeof`, not applied unconditionally (#5729). Both
+ * literal branches below used to wrap every value in `'…'`, which turns a
+ * NUMERIC literal union into a STRING one on the page: `FormSection.columns`
+ * (`z.union([z.enum(['1','2','3','4']), z.literal(1) … z.literal(4)])`) printed
+ * as `Enum<'1' | '2' | '3' | '4'> | '1' | '2' | '3' | '4'`, so the four
+ * `z.literal(<number>)` variants were indistinguishable from the four string
+ * ones and the cell read as "this key only takes strings" — while the schema
+ * takes both `2` and `'2'`.
+ *
+ * That is not cosmetic for the audience these pages are written for. The
+ * reference pages are the authoritative input for AI authors (ADR-0033), and a
+ * literal union is a copy-the-spelling surface: quotes copied off the page onto
+ * a number-only union are a hard parse error. #5611 hit exactly that — its
+ * `RecordDetailsProps.sections[].columns` was meant to be a numeric literal
+ * union, the generated reference said strings, and the PR retreated to
+ * `z.number().int().min(1).max(4)` to sidestep the contradiction. The
+ * generator was defining the contract backwards.
+ *
+ * The mapping is the JSON→TypeScript one, and it is per VALUE rather than per
+ * node because JSON Schema states the two independently: `enum` may mix types
+ * in one array (`z.nativeEnum({A: 1})` emits `{ type: 'number', enum: [1] }`,
+ * a numeric `enum`), so a node-level `type` test would mis-render the mixed
+ * case that a per-value test gets right for free.
+ */
+function formatLiteral(value: unknown): string {
+  // The only kind that IS quoted — and it keeps its quotes exactly as before.
+  if (typeof value === 'string') return `'${value}'`;
+  // `z.literal(null)` → `{ type: 'null', const: null }`. `null` is a keyword,
+  // and `String(null)` already spells it; the explicit branch is here so the
+  // `typeof value === 'object'` tail below cannot claim it first.
+  if (value === null) return 'null';
+  if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') {
+    return String(value);
+  }
+  // A composite `const` (object/array literal). No schema emits one today, so
+  // this is a guard rather than a rendering decision: `String({})` would print
+  // `[object Object]` and the old code printed `'[object Object]'`, either of
+  // which states a type no author can write. JSON is at least the literal's
+  // real spelling. `undefined` cannot reach the `const` branch (guarded by
+  // `!== undefined`) but can sit inside a hand-written `enum` array.
+  return JSON.stringify(value) ?? 'any';
+}
+
 export function formatType(prop: any, ctx?: TypeContext): string {
   if (!prop) return 'any';
 
@@ -145,11 +192,11 @@ export function formatType(prop: any, ctx?: TypeContext): string {
   }
 
   if (prop.enum) {
-    return `Enum<${prop.enum.map((e: any) => `'${e}'`).join(' | ')}>`;
+    return `Enum<${prop.enum.map((e: unknown) => formatLiteral(e)).join(' | ')}>`;
   }
 
   if (prop.const !== undefined) {
-    return `'${prop.const}'`;
+    return formatLiteral(prop.const);
   }
 
   if (prop.anyOf || prop.oneOf) {

@@ -108,12 +108,6 @@
       "reason": "Chosen by the operator when a tenant is provisioned, not written into any tenant's metadata — so no hand-written authoring page owes it a mention. (Was labelled generated-reference-only, though its own reason already said `operator-set`; the generated page at content/docs/references/system/tenant.mdx remains the reference.)"
     },
     {
-      "key": "type:cast|constant|javascript|lookup|map",
-      "label": "sync mapping transform",
-      "exempt": "generated-reference-only",
-      "reason": "DOCUMENTATION GAP. `mappings:` is authored on a stack (releases/v12.mdx records `defineMapping`), but no hand-written page covers the transform set — the only prose that names a mapping at all is protocol/kernel/config-resolution.mdx, on a different subject. Lower priority than the connector gap: the transforms are a closed, self-describing set. Bind a page here when one is written."
-    },
-    {
       "key": "kind:action|http|navigate",
       "label": "settings-manifest handler",
       "exempt": "not-authorable",

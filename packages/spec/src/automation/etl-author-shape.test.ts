@@ -119,7 +119,8 @@ describe('[#4963] SYNC_ARCHITECTURE.md pipeline examples compile', () => {
     // bare `...`, which is not TypeScript; one full `sapConnector` example) and
     // compiles the third. When this pin was written that example reported four
     // diagnostics, three of them keys or values the schema REJECTS (`sourceField`
-    // / `targetField` for `source` / `target`, `transform.type: 'custom'`,
+    // / `targetField` for `source` / `target`, `transform.type: 'custom'` —
+    // which #5552 then made moot by retiring `transform` outright —
     // `webhooks[].retryPolicy`); those are fixed in the document. The fourth was
     // `Connector` being `z.infer` — this issue's twin on a file whose migration
     // surface is NOT empty — and it is solved there by annotating the example

@@ -6,6 +6,8 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { celEngine, parseCelToAst } from '@objectstack/formula';
+
 import {
   findUnguardedNullableOperands,
   nullGuardMessage,
@@ -111,6 +113,98 @@ describe('findUnguardedNullableOperands — what stays legal', () => {
 
   it('reports each operand/operator pair once, not per occurrence', () => {
     expect(find('record.budget > 1 && record.budget > 2')).toHaveLength(1);
+  });
+});
+
+describe('findUnguardedNullableOperands — one answer to "what parses" (#4812)', () => {
+  // Until #4812 this module built its own bare cel-js `Environment`, with no
+  // `limits`. It therefore parsed — and adjudicated — predicates the platform
+  // rejects outright, holding the MORE permissive of two answers to "what can
+  // be parsed". Routing through `@objectstack/formula`'s `parseCelToAst` makes
+  // the two answers one.
+  //
+  // Note the direction, because #4812's issue body guessed the other one: the
+  // hole was never "formula accepts something lint cannot parse, so lint
+  // silently skips it". That is impossible by construction — `rewriteNullableTernary`
+  // parses first and returns the source unchanged on failure, so it can never
+  // make an unparseable source parseable (pinned in
+  // `packages/formula/src/parse-cel-to-ast.test.ts`). The real divergence ran
+  // the opposite way, and it was the bounds.
+
+  /**
+   * `record.budget > 100 && record.f0 + record.f1 + … + record.f299 > 0`.
+   *
+   * Two properties, and BOTH are load-bearing:
+   *  - it is over `DEFAULT_LIMITS.maxAstNodes` (256) — 300 member accesses alone
+   *    are 600 nodes — so the canonical entry will not parse it;
+   *  - `record.budget > 100` is an ordering operator over an UNGUARDED nullable
+   *    declared field, so a parse that DOES succeed yields exactly one finding.
+   *
+   * The second property is what makes the assertion below mean anything. A
+   * first draft of this fixture guarded budget (`record.budget != null && …`)
+   * and returned `[]` under both parses — passing because nothing was produced
+   * rather than because the boundary moved. Reverse-verification caught it.
+   */
+  const overBounds =
+    'record.budget > 100 && ' +
+    Array.from({ length: 300 }, (_, i) => `record.f${i}`).join(' + ') +
+    ' > 0';
+
+  it('defers an over-bounds predicate to the gate that owns that verdict', () => {
+    // The canonical entry cannot parse it — because the platform cannot either.
+    expect(parseCelToAst(overBounds)).toBeNull();
+    expect(find(overBounds)).toEqual([]);
+  });
+
+  it('would have judged that very predicate under the old limitless parse', () => {
+    // The other half of the red/green line, asserted rather than asserted-about:
+    // shrink the same shape to something within bounds and the unguarded
+    // `record.budget > 100` IS reported. So the `[]` above is the bounds
+    // boundary moving, not an empty walk over a tree with nothing in it.
+    const sameShapeWithinBounds =
+      'record.budget > 100 && ' +
+      Array.from({ length: 10 }, (_, i) => `record.f${i}`).join(' + ') +
+      ' > 0';
+    expect(parseCelToAst(sameShapeWithinBounds)).not.toBeNull();
+    expect(find(sameShapeWithinBounds).map((f) => f.operand)).toEqual(['record.budget']);
+  });
+
+  it('loses no coverage doing so — the bounds gate speaks, and loudly', () => {
+    // The silence above is only correct because `validateExpression` runs at the
+    // SAME call sites (`validate-expressions.ts` calls `check()` alongside
+    // `checkNullGuards()`) and rejects this source with a blocking error. A
+    // second, quieter finding about null guards on a predicate that can never be
+    // published would be noise; once the author fixes the bounds fault the
+    // null-guard verdict comes back.
+    const compiled = celEngine.compile(overBounds);
+    expect(compiled.ok).toBe(false);
+    if (!compiled.ok) {
+      expect(compiled.error.kind).toBe('bounds');
+      expect(compiled.error.message).toMatch(/Exceeded maxAstNodes/i);
+    }
+  });
+
+  it('still judges the same predicate once it is within bounds', () => {
+    // Same shape, small enough to parse: the verdict is unchanged, so the only
+    // thing #4812 moved is where the boundary sits — not what the rule decides.
+    const withinBounds = 'record.f0 + record.f1 > 0 && record.budget > 100';
+    expect(parseCelToAst(withinBounds)).not.toBeNull();
+    expect(find(withinBounds).map((f) => f.operand)).toEqual(['record.budget']);
+  });
+
+  it('is verdict-neutral for the #3306 rewrite, which is why nothing else moved', () => {
+    // The canonical entry hands this pass a rewritten AST (`cond ? dyn(x) : null`).
+    // That cannot change a verdict here: the rewrite fires ONLY when exactly one
+    // ternary branch is the `null` literal, and `truthGuards`/`falseGuards`
+    // already prove nothing from a `null` branch — so the guard sets are
+    // identical before and after, and `dyn(...)` is transparent to the operand
+    // walk. Pinned on both outcomes rather than argued.
+    expect(find('record.budget != null ? record.budget - 1 : null')).toEqual([]);
+    // `record.owner` is not a declared nullable field here, so the condition
+    // contributes nothing and the dyn-wrapped branch is the only thing judged.
+    expect(find('record.owner == "acme" ? record.budget - 1 : null').map((f) => f.operand)).toEqual(
+      ['record.budget'],
+    );
   });
 });
 

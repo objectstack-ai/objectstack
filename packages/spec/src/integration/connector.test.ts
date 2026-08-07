@@ -170,18 +170,22 @@ describe('ConnectorFieldMappingSchema', () => {
     expect(() => ConnectorFieldMappingSchema.parse(mapping)).not.toThrow();
   });
   
-  it('should accept field with transformation', () => {
-    const mapping = {
+  // Was `should accept field with transformation`, asserting this exact literal
+  // parsed and came back as `type: 'javascript'`. Replaced rather than
+  // re-spelled: #5552 retired the key and the whole union behind it, so there is
+  // no other member to move the fixture to. Its `value.toUpperCase()` is also
+  // the string that got the bug filed — `ExpressionInputSchema` wrapped it as
+  // `dialect: 'cel'`, where that method does not exist.
+  it('[#5552] rejects a field transformation — the key and its union are retired', () => {
+    const result = ConnectorFieldMappingSchema.safeParse({
       source: 'name',
       target: 'full_name',
-      transform: {
-        type: 'javascript' as const,
-        expression: 'value.toUpperCase()',
-      },
-    };
-    
-    const parsed = ConnectorFieldMappingSchema.parse(mapping);
-    expect(parsed.transform?.type).toBe('javascript');
+      transform: { type: 'javascript', expression: 'value.toUpperCase()' },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.path.join('.')).toBe('transform');
+    expect(result.error!.issues[0]!.message).toMatch(/removed in @objectstack\/spec 17\.0\.0/s);
   });
   
   it('should use default values', () => {
@@ -917,18 +921,17 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     const sharedEntry = await import('../shared/index');
     const integrationEntry = await import('./index');
 
-    // Four keys, `transform` a discriminated union, `source`/`target` required.
+    // Three live keys since #5552 retired `transform`: `source`/`target`
+    // required, `defaultValue` optional.
     expect(
       sharedEntry.FieldMappingSchema.parse({
         source: 'FirstName',
         target: 'first_name',
-        transform: { type: 'cast', targetType: 'string' },
         defaultValue: '',
       }),
     ).toEqual({
       source: 'FirstName',
       target: 'first_name',
-      transform: { type: 'cast', targetType: 'string' },
       defaultValue: '',
     });
 
@@ -939,36 +942,42 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     );
   });
 
-  // ── Difference 1: `transform` is the same key name with mutually
-  //    unparseable value types. The hardest evidence that these are two
-  //    concepts rather than three spellings of one.
-  it('`transform` means a discriminated union on two sides and a flat enum on the third', async () => {
+  // ── Difference 1: `transform` is the same key name meaning opposite things.
+  //    Until #5552 that read "a discriminated union on two sides and a flat
+  //    enum on the third", and the object/enum forms were mutually unparseable.
+  //    The retirement did not soften the difference, it sharpened it: on
+  //    shared/integration the key is now RETIRED — the union it named had no
+  //    executor on any of the five members — while on ./data it is the live,
+  //    enforced import pipeline. So the same word is now "gone, with a
+  //    prescription" versus "runs on every imported row", which is the loudest
+  //    the distinction has ever been, and the reason a snippet copied across
+  //    these domains can no longer half-work.
+  it('`transform` is retired on shared/integration and live on ./data', async () => {
     const dataEntry = await import('../data/index');
     const sharedEntry = await import('../shared/index');
     const integrationEntry = await import('./index');
 
     const unionForm = { type: 'cast' as const, targetType: 'string' as const };
 
-    // shared / integration: the object form parses…
-    expect(
-      sharedEntry.FieldMappingSchema.parse({ source: 'a', target: 'b', transform: unionForm })
-        .transform,
-    ).toEqual(unionForm);
-    expect(
-      integrationEntry.ConnectorFieldMappingSchema.parse({
-        source: 'a',
-        target: 'b',
-        transform: unionForm,
-      }).transform,
-    ).toEqual(unionForm);
-    // …and the enum form does NOT.
+    // shared / integration: the object form is refused BY NAME, with the #5552
+    // prescription — not stripped, and not a generic "unrecognized key".
+    for (const schema of [
+      sharedEntry.FieldMappingSchema,
+      integrationEntry.ConnectorFieldMappingSchema,
+    ]) {
+      const result = schema.safeParse({ source: 'a', target: 'b', transform: unionForm });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.some((i) => /#5552/.test(i.message))).toBe(true);
+    }
+    // The enum form does not get in either — retired is retired, whatever the
+    // value's shape.
     expect(
       sharedEntry.FieldMappingSchema.safeParse({ source: 'a', target: 'b', transform: 'join' })
         .success,
     ).toBe(false);
 
-    // data: exactly the other way round — a bare enum steering a flat `params`
-    // bag, defaulting to 'none'.
+    // data: untouched by #5552 — a bare enum steering a flat `params` bag,
+    // defaulting to 'none', and still rejecting the union form.
     expect(
       dataEntry.ImportFieldMappingSchema.parse({ source: 'a', target: 'b' }).transform,
     ).toBe('none');

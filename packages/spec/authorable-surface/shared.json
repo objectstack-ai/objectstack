@@ -20,7 +20,7 @@
     "shared/FieldMapping:defaultValue",
     "shared/FieldMapping:source",
     "shared/FieldMapping:target",
-    "shared/FieldMapping:transform",
+    "shared/FieldMapping:transform [RETIRED]",
     "shared/HttpRequest:body",
     "shared/HttpRequest:headers",
     "shared/HttpRequest:method",
