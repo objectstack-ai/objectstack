@@ -110,7 +110,7 @@ const result = WidgetEventSchema.parse(data);
 | **license** | `string` | optional | License (SPDX identifier) |
 | **tags** | `string[]` | optional | Tags for categorization |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
-| **performance** | `any` | optional | [REMOVED] `widget.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime ever read it. Delete the key. Virtual scrolling is the live top-level `virtualScroll` on list-shaped views. |
+| **performance** | `never` | optional | [REMOVED] `widget.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime ever read it. Delete the key. Virtual scrolling is the live top-level `virtualScroll` on list-shaped views. |
 
 
 ---
