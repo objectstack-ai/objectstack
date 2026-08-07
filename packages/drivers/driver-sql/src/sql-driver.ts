@@ -7,7 +7,7 @@
  * Supports PostgreSQL, MySQL, SQLite, and other SQL databases.
  */
 
-import type { DriverOptions, SchemaMode } from '@objectstack/spec/data';
+import type { DriverOptions, FilterCondition, SchemaMode } from '@objectstack/spec/data';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
@@ -3685,7 +3685,36 @@ export class SqlDriver implements IDataDriver {
   // Distinct
   // ===================================
 
-  async distinct(object: string, field: string, filters?: any, options?: DriverOptions): Promise<any[]> {
+  /**
+   * Distinct values of one field, optionally constrained.
+   *
+   * The third argument is a **bare {@link FilterCondition}** — the same value
+   * `find()` carries under `query.where`, NOT a query envelope. The body has
+   * always said so (`applyFilters(builder, filters)` is handed the argument
+   * itself, never a `.where` off it); `filters?: any` simply left that sentence
+   * out of the type, and #6320 measured what the omission costs.
+   *
+   * What the annotation actually buys, measured rather than assumed (#6320):
+   *
+   * - **A truthy SCALAR no longer compiles.** `distinct('orders', 'product',
+   *   'completed')` used to type-check and RESOLVE the *unfiltered* set —
+   *   `applyFilters` emits no predicate for a non-object, non-array `where`
+   *   (see the closing comment there). That silent widening is the family
+   *   #6320/#5234 are about, and it is what this narrowing removes.
+   * - **A query envelope still compiles, and that is not fixable here.**
+   *   `FilterCondition` is an open map (`[key: string]: any`) because a filter
+   *   key is a *field name*, so `{ object, where }` is structurally a perfectly
+   *   good filter — one that constrains columns named `object` and `where`.
+   *   No type can separate it from a legitimate filter. It is caught at
+   *   RUNTIME instead, loudly: `INVALID_FILTER` / 400 out of
+   *   {@link assertCompilableComparand}, because the envelope's `where` value
+   *   is an object and no comparand may be. `driver-memory`'s half of that
+   *   asymmetry (a bare filter there returns the unfiltered set in silence)
+   *   stays open under the #5499 freeze; this driver's half never was silent.
+   *
+   * Held by `sql-driver-distinct-filter-narrowing.test.ts`.
+   */
+  async distinct(object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
     const builder = this.getBuilder(object, options);
 
     if (filters) {
