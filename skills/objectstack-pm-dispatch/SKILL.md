@@ -414,6 +414,43 @@ Non-negotiables for this dispatch:
 Return ONLY the JSON report defined in the operating procedure.
 ```
 
+#### One semantics, N independent implementations — enumerate them in the prompt
+
+**Applicability:** the issue changes a *semantic rule* — how an operator, a
+predicate, a comparison, or an absent/empty value is interpreted — and that rule
+is implemented **more than once**, by compilers or evaluators that share no code.
+Query filters, expression languages, permission predicates and serialization
+formats all tend to grow this shape as a project adds backends.
+
+When it applies, the dispatch prompt carries an **explicit inventory of every
+implementing surface**, and requires the agent to give a verdict **for each one**
+in its PR body: **changed** / **already conformant** (with evidence) /
+**explicitly out of scope** (with a reason). A surface the PR never mentions is
+reviewed as one that was *missed*, not as one that needed no change.
+
+Why this is worth a standing clause instead of case-by-case judgment: the failure
+it prevents is not "implemented it wrong", it is **"implemented part of it and
+believed the work was finished"**. That failure is invisible at review time — the
+diff is correct and the tests are green, while the untouched surfaces keep
+answering the old way until a user hits the divergence. The cost scales with the
+count: a semantics carried by N implementations makes every ruling an N-part
+task, and the parts that get skipped are exactly the ones nobody wrote down.
+
+Two disciplines keep the inventory trustworthy:
+
+- **The inventory is maintained by PR.** Whichever change adds, retires or merges
+  an implementing surface updates the list in that same PR. An inventory going
+  stale is inevitable; an inventory with **no owner** is the defect.
+- **Re-verify before pasting.** Paths move and surfaces get added between
+  rulings, so re-derive the list from the code at dispatch time rather than
+  copying the previous prompt. An inventory that was right last month and is
+  pasted unchecked reintroduces the very miss it exists to prevent.
+
+Surfaces that are **deliberately frozen** (deprecated backends, formats kept only
+for compatibility) stay in the inventory. Their verdict is "out of scope —
+frozen", recorded rather than silently absent: a reader cannot otherwise tell a
+frozen surface from a forgotten one.
+
 #### Dispatch backends
 
 **`mode:subagent` (default).** Sub-agents inside the PM's own session. Reports
