@@ -1,6 +1,6 @@
 # ADR-0119: Multi-write atomicity is reachable through the contract, `atomic` means atomic or refuses, and migrations too big for one transaction get a journal runner
 
-**Status**: Accepted (2026-08-02) — D1/D4 implemented in [#4623](https://github.com/objectstack-ai/objectstack/pull/4623): D1 in `packages/spec/src/contracts/objectql-engine.ts` (test `packages/objectql/src/protocol-batch-atomic.test.ts`), D4 in `packages/metadata-protocol/src/protocol.ts` (test `packages/metadata-protocol/src/protocol.batch-atomic.test.ts`). D2 tracked in [#4617](https://github.com/objectstack-ai/objectstack/issues/4617); D3 tracked in [#4618](https://github.com/objectstack-ai/objectstack/issues/4618) — neither is implemented, so this record is *not* wholly "implemented".
+**Status**: Accepted (2026-08-02) · **Amended** (2026-08-06, #5351/#5696 — D1's two caveats decided; see "Amendment (2026-08-06)" at the end) — D1/D4 implemented in [#4623](https://github.com/objectstack-ai/objectstack/pull/4623): D1 in `packages/spec/src/contracts/objectql-engine.ts` (test `packages/objectql/src/protocol-batch-atomic.test.ts`), D4 in `packages/metadata-protocol/src/protocol.ts` (test `packages/metadata-protocol/src/protocol.batch-atomic.test.ts`). D2 tracked in [#4617](https://github.com/objectstack-ai/objectstack/issues/4617); D3 tracked in [#4618](https://github.com/objectstack-ai/objectstack/issues/4618) — neither is implemented, so this record is *not* wholly "implemented".
 **Renumbered**: published for one day as ADR-0118. Renumbered to 0119 because [ADR-0118 (非用户 actor 的平台契约)](./0118-non-user-actor-contract.md) merged first (10:37 vs 12:11 on 2026-08-02) and holds the number. Citations of "ADR-0118 D1/D2/D3/D4" written before 2026-08-03 mean this record.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0034](./0034-transactional-writes-and-ambient-transaction.md) (the ambient `AsyncLocalStorage` transaction D1 declares — this ADR adds no mechanism to it), [ADR-0067](./0067-commit-history-and-rollback-for-ai-authoring.md) (D2 — the join-don't-nest rule that makes an outer transaction the sole owner of commit/rollback), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove — the disposition method applied to `batch?` in D3 and to the `atomic` flag in D4), [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) (D3's replayable migration chain — the metadata-side analogue of the data-side runner D2 specifies), [ADR-0008](./0008-metadata-repository-and-change-log.md) (the JSONL change log — the journal shape D2 deliberately does *not* reuse), [ADR-0060](./0060-conformance-ledger-platform-pattern.md) (framework-owned ledger pattern — the precedent for `sys_migration_journal`), [ADR-0117](./0117-owning-business-unit-record-stamp.md) (D8 — backfill plus a fail-closed enable gate, the migration posture D2 and D4 both inherit), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently inert declarations — why D2 rejects a pluggable journal store)
@@ -186,3 +186,142 @@ the human-readable cause and causal row index. The D4 invariant is unchanged —
 a rolled-back batch reports zero successes and every row says what happened to
 it; only the encoding moved from a prefix convention a client had to regex to a
 code a client branches on.
+
+---
+
+## Amendment (2026-08-06, #5351 / #5696) — D1's two caveats are decided: the handle never crosses drivers, business writes across drivers are refused, and system ledgers are carved out
+
+D1 wrote two caveats into the contract TSDoc and said plainly that "declaring a
+caveat is not fixing it; tightening these is #4619." Both are now tightened.
+This amendment records what they became and, as importantly, the one thing that
+turned out to be **factually wrong** in the original wording.
+
+### The caveat text was wrong about what actually happened
+
+D1's TSDoc said that objects routed elsewhere by `setDatasourceMapping` "are
+written outside" the transaction. They were not. `buildDriverOptions` lifted the
+ambient handle onto **every** driver call without asking which driver was about
+to receive it, so the second driver was handed the FIRST driver's transaction
+object. On the in-memory doubles that is invisible; on knex it means
+`.transacting(trx)` sends the statement down the owner's connection, into a
+database that may not even contain the table.
+
+That is what #5351 measured on a real boot: `sys_audit_log` — routed to the
+dedicated `telemetry` datasource by ADR-0057 §3.6 — took 52 insert attempts, 50
+succeeded, and the 2 failures were exactly the 2 whose stack carried a knex
+`trxClient.query` frame, failing `no such table: sys_audit_log` against the
+primary database. Every audited write performed **inside a transaction** lost
+its compliance row, silently, with no retry: the business write succeeded, the
+API returned 200, and only the record of who did it was gone. PR #5724
+reproduced the same handle crossing on pure in-memory doubles with no lifecycle
+routing at all (`expected { __trx: 'primary' } to be undefined`), proving the
+defect belongs to the transaction seam and not to audit or to SQL.
+
+### D1-R1 — a transaction handle never reaches a driver that does not own it
+
+`TransactionScope` (#4619 / PR #5724) already records the owning driver by
+**instance identity** — names collide transiently in `registerDriver`, and
+identity is what decides which connection a statement rides.
+`buildDriverOptions` now consults it: the handle is threaded only when the
+resolved driver IS the owner. This is structural and verb-agnostic — it covers
+reads as well as writes, which had the same defect and no diagnostic of their
+own.
+
+### D1-R2 — a cross-driver BUSINESS write inside a transaction is refused
+
+`CrossDatasourceTransactionWriteError` (`ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`),
+thrown at the top of `insert`/`update`/`delete` before any hook, default or
+validation runs, so a refusal has cost the caller nothing. The message names
+both datasources and both remedies: keep one transaction on one datasource, or
+split into per-datasource units the caller reconciles.
+
+This is #5696 point 2 and it is **not** cross-driver atomicity. Two-phase commit
+is not in `IDataDriver` and is deliberately out of scope (#4619 excludes it);
+opening a companion transaction on the second driver would replace a known
+durability risk with a worse one — two stores that can contradict each other
+when the second commit fails.
+
+### D1-R3 — append-only SYSTEM LEDGERS are carved out, and may be orphaned
+
+Objects whose `lifecycle.class` is `audit`, `telemetry` or `event` — the
+append-only ledgers ADR-0057 §3.6 routes to a dedicated datasource — are
+**executed outside** the ambient transaction, on their own connection, rather
+than refused. They therefore **survive a rollback** of the business
+transaction: an audit row may describe a write that was undone.
+
+That cost is accepted deliberately, and the direction matters more than the
+count. For an append-only compliance ledger a spurious row is a **reconcilable**
+nuisance — it can be checked against the business data that is or is not there
+— while a **missing** row for a write that DID commit is an unrecoverable
+compliance hole, and the missing row is what was shipping. Refusal is also not
+available here even in principle: the write is made by an `afterInsert` audit
+hook whose `try/catch` turns any refusal back into a log line and drops the row
+exactly as before. That coupling is why #5696's refusal and this carve-out had
+to land in one batch rather than in PR order.
+
+The discriminator is the object's **declared** `lifecycle.class`, not the
+routing mechanism that moved it. An audit ledger pinned to its own datasource by
+an explicit `datasource:` binding is the same append-only ledger with the same
+reason to be carved out; judging by mechanism would make a compliance guarantee
+depend on which of three equivalent configurations an operator happened to
+write. The class tuple lives in exactly one place
+(`ObjectQL.SYSTEM_LEDGER_LIFECYCLE_CLASSES`), read by both the ADR-0057 §3.6
+routing step and this gate, because two copies would drift by one class and lose
+precisely the row this change exists to save.
+
+### D1-R4 — `opts.require` makes the degrade a caller's choice
+
+The other caveat — a driver with no `beginTransaction` runs the callback with no
+transaction and no rollback — keeps its default behaviour exactly (warn once,
+#4619). `transaction(cb, base, { require: true })` turns it into a throw
+(`TransactionUnsupportedError`, `ERR_TRANSACTION_UNSUPPORTED`) for callers whose
+only reason to open a transaction is the rollback. This generalizes D4's
+real-or-refused posture from `batchData` into the primitive itself.
+
+### D1-R5 — the callback is told whether it owns the transaction
+
+`transaction(cb, base, opts?)` passes `{ owned: boolean }` as the callback's
+second argument: `true` when this call opened the transaction, `false` when it
+JOINED an outer one (ADR-0067 D2) or ran on the degrade path where there is no
+transaction to own. D4's rollback guarantee, and any caller guarantee phrased as
+"this whole unit rolls back together", holds only for the owner; before this
+signal a joined callback had no way to know which it was.
+
+### The declared LIMIT of the same-origin gate
+
+The gate judges only handles it can attribute. `TransactionScope` exists for
+every transaction the engine opens, and an explicitly-threaded handle is matched
+back to the store entry by identity — so the dominant path (`transaction()`
+hands you `trxCtx`, you thread it as `{ context: trxCtx }`) is covered.
+
+**Not covered**, by decision rather than oversight: `ScopedContext`'s discrete
+`beginTransaction`/`commit`/`rollback` trio, which threads its handle across
+`setImmediate` boundaries where AsyncLocalStorage does not survive and therefore
+never populates `txStore`; and any handle an outside caller obtained elsewhere
+and passed in as `execCtx.transaction`. For those the engine holds an opaque
+driver object with no back-reference to its owner, so there is no honest
+comparison available. Guessing — assuming an unattributed handle belongs to the
+default driver — would refuse legitimate single-datasource work on one side and
+carve out genuinely-covered writes on the other. The pre-#5351 behaviour stands
+on that path, is pinned as such in
+`packages/objectql/src/engine-transaction-same-origin.test.ts`, and closing it
+requires handle ownership to become discoverable on `IDataDriver` — a
+driver-contract change, tracked separately.
+
+### Consumer impact
+
+Single-datasource deployments — the overwhelming majority — see no change of any
+kind: no refusal, no carve-out, and nothing logged. The gate is reachable only
+where a second datasource is registered AND an object routes to it AND a
+transaction is open.
+
+**Decided by**: the maintainer, 2026-08-06, on #5351 (plan A + this revision)
+and #5696 (P2, batched forward to the same implementation). **Implemented in**:
+`packages/spec/src/contracts/objectql-engine.ts`,
+`packages/objectql/src/engine.ts`,
+`packages/objectql/src/transaction-errors.ts`. **Pinned by**:
+`engine-transaction-same-origin.test.ts` (18 cases) and
+`engine-transaction-contract.test.ts` (15 cases). The `error`-level split
+diagnostic PR #5724 added is retired by D1-R2/R3 — there is no longer a split to
+report — and its section of `engine-transaction-observability.test.ts` moved to
+the same-origin file, re-asked against the decided verdict.

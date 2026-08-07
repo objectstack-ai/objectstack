@@ -136,9 +136,10 @@
     {
       "file": "packages/spec/src/contracts/objectql-engine.ts",
       "adrs": [
+        "ADR-0067",
         "ADR-0119"
       ],
-      "invariant": "`transaction` is DECLARED on the `objectql` slot contract — plugin space reaches ADR-0034's ambient transaction by name, not through `as unknown as` casts. Required, not optional, per this file's own rule. Its two caveats (default-driver only; the callback runs with NO transaction when the driver lacks `beginTransaction`) are part of the declared meaning, so a caller that cannot lose atomicity silently must fail closed rather than assume it held."
+      "invariant": "`transaction` is DECLARED on the `objectql` slot contract — plugin space reaches ADR-0034's ambient transaction by name, not through `as unknown as` casts. Required, not optional, per this file's own rule. Its two ADR-0119 D1 caveats are no longer plain caveats (2026-08-06 ruling on #5351/#5696): the no-`beginTransaction` degrade stays the DEFAULT but `opts.require: true` refuses it, and single-driver coverage is now enforced rather than merely stated — a cross-driver BUSINESS write inside a transaction is refused by name, an append-only SYSTEM LEDGER (`lifecycle.class` audit/telemetry/event) is carved out and executed outside it (surviving rollback: the orphan row is the decided cost for a compliance ledger), and no driver is ever handed a transaction handle it does not own. The callback's `owned` argument tells it whether it opened the transaction or JOINED an outer one (ADR-0067 D2). Do not re-describe the old 'routed elsewhere are written outside it' text: measurement disproved it — they were written on the OWNER's connection."
     },
     {
       "file": "packages/metadata-protocol/src/protocol.ts",
@@ -248,6 +249,15 @@
         "ADR-0076"
       ],
       "invariant": "The concrete instance of D11's registration-ownership rule: the `i18n` slot is MULTI-PROVIDER — I18nServicePlugin when service-i18n is installed, else the AppPlugin in-memory fallback auto-registered for stacks that declare translation bundles — so the dispatcher registers this route, not the provider. Moving `/i18n` registration into service-i18n, the obvious-looking 'the owning package should own its route' cleanup, 404s every stack served by the other provider. The extracted body also keeps the legacy matching semantics deliberately (`match: 'prefix'`, so `/i18nxx` matches too, exactly as the old `startsWith` chain did): normalizing that edge is a behaviour change for the http-conformance suite to re-pin, not a tidy-up to slip into an unrelated diff. The 501 on an unserveable slot is D12's honest-capability rule and is narrow on purpose — both real in-memory providers self-declare `degraded` with `handlerReady: true` and keep serving, so the gate closes only on an occupant that would answer with invented strings."
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "adrs": [
+        "ADR-0057",
+        "ADR-0067",
+        "ADR-0119"
+      ],
+      "invariant": "The transaction seam is same-origin by construction (#5351/#5696, 2026-08-06 ruling). `buildDriverOptions` threads the ambient handle ONLY to the driver that owns it, compared by instance identity via `TransactionScope` — handing it to another driver does not put that driver inside the transaction, it runs the statement on the wrong connection. `enforceTransactionOrigin` then decides the write: an append-only system ledger (`lifecycle.class` in `SYSTEM_LEDGER_LIFECYCLE_CLASSES`, the same tuple ADR-0057 §3.6 routing reads — never a second copy) is CARVED OUT and executed outside the transaction, surviving rollback; any other cross-driver write is REFUSED before hooks run. Never add a companion transaction on the second driver (no two-phase commit in IDataDriver) and never restore the unconditional handle lift."
     }
   ]
 }

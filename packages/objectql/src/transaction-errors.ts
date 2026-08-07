@@ -36,3 +36,50 @@ export class TransactionUnsupportedError extends Error {
     this.name = 'TransactionUnsupportedError';
   }
 }
+
+/**
+ * A BUSINESS write inside an open `transaction()` resolved to a driver that
+ * transaction does not cover (#5696 point 2, decided together with #5351 by the
+ * 2026-08-06 maintainer ruling).
+ *
+ * `transaction()` opens on ONE driver and covers only that driver's connection.
+ * Until v17 a write routed elsewhere was handed the open transaction's handle
+ * anyway, so it executed on the WRONG connection — measured on a real SQL
+ * driver as `no such table` against a database that never held the object
+ * (#5351). Reporting it (#4619 / PR #5724) made it audible; this error is the
+ * decided behaviour: refuse, by name, before anything runs, rather than
+ * partially commit in silence.
+ *
+ * Deliberately NOT what this does: open a companion transaction on the second
+ * driver. Cross-driver atomicity needs two-phase commit, which `IDataDriver`
+ * does not have, and faking it would swap one durability risk for a worse one
+ * (#4619 excludes it explicitly).
+ *
+ * Append-only SYSTEM ledgers (`lifecycle.class` of `audit` / `telemetry` /
+ * `event`) never reach this error — they are carved out and executed outside
+ * the transaction on their own connection. See `enforceTransactionOrigin` and
+ * `isSystemLedgerObject` in the engine.
+ */
+export class CrossDatasourceTransactionWriteError extends Error {
+  readonly code = 'ERR_CROSS_DATASOURCE_TRANSACTION_WRITE' as const;
+
+  constructor(
+    public readonly object: string,
+    public readonly operation: 'insert' | 'update' | 'delete',
+    public readonly datasource: string,
+    public readonly transactionDatasource: string,
+  ) {
+    super(
+      `${operation} of '${object}' inside transaction() resolves to datasource '${datasource}', but the ` +
+        `transaction is open on '${transactionDatasource}' and covers only that connection — refused. ` +
+        'Executing it anyway would either run the statement on the wrong connection (the pre-v17 defect: ' +
+        'the row lands in a database that may not even have the table) or commit it on its own, so a ' +
+        'rollback of this transaction would leave it behind while the caller is told only that the whole ' +
+        'unit failed. Fix it one of two ways: keep every object written inside one transaction() on one ' +
+        `datasource (move the object, or drop the datasourceMapping rule that routes '${object}' to ` +
+        `'${datasource}'), or split the work into per-datasource units and have the caller reconcile them ` +
+        'explicitly — cross-driver atomicity is not something this engine provides. Nothing was written.',
+    );
+    this.name = 'CrossDatasourceTransactionWriteError';
+  }
+}

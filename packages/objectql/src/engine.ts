@@ -43,7 +43,7 @@ import {
   resolveFilterTokens,
 } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
-import { TransactionUnsupportedError } from './transaction-errors.js';
+import { CrossDatasourceTransactionWriteError, TransactionUnsupportedError } from './transaction-errors.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import {
   DriverConnectError,
@@ -937,10 +937,16 @@ function eventMatchedCount(value: unknown): number | undefined {
  * What the engine knows about the transaction it opened, beyond the handle
  * itself (#4619, ADR-0119 D1 follow-up).
  *
- * Purely an OBSERVABILITY record: nothing here changes which driver a write is
- * routed to, whether a transaction is opened, or what is committed. It exists
- * so the write path can tell a caller that a write it believes is inside the
- * transaction is not — the one thing today's engine cannot say.
+ * It began as a pure OBSERVABILITY record — #4619 could say a write was outside
+ * the transaction but deliberately did not act on it, because acting changes
+ * ADR-0119 D1's declared contract and that was a decision for the maintainer,
+ * not for the PR that found the defect. Since the 2026-08-06 ruling on #5351
+ * this record is LOAD-BEARING: `enforceTransactionOrigin` refuses a
+ * cross-driver business write on it, and `transactionCoversDriverFor` uses it
+ * to keep a transaction handle from ever reaching a driver that does not own
+ * it. Routing itself is still untouched — a write goes exactly where `getDriver`
+ * sends it; what changed is whether it goes there carrying someone else's
+ * connection.
  */
 interface TransactionScope {
   /**
@@ -953,9 +959,11 @@ interface TransactionScope {
   /** The datasource name that driver is registered under — for the message. */
   readonly datasource: string;
   /**
-   * Datasources already reported for THIS transaction. AGENTS.md's
-   * "say it once, at the first degradation, not once per failed write" — a
-   * 500-row batch routed elsewhere is one split, not 500.
+   * Datasources already noted for THIS transaction. AGENTS.md's "say it once,
+   * at the first degradation, not once per failed write" — a 500-row audit
+   * batch carved out of this transaction is one note, not 500. Only the
+   * carve-out path consumes the budget; a refused business write throws, and a
+   * throw is never deduplicated.
    */
   readonly reportedOutOfScope: Set<string>;
 }
@@ -977,7 +985,8 @@ export class ObjectQL implements IObjectQLEngine {
      * that is part of the declared contract (ADR-0119 D1) — so a write routed
      * elsewhere by `setDatasourceMapping` runs OUTSIDE it and cannot be rolled
      * back with it. Carrying the owner here is what lets the write path SAY so
-     * ({@link reportWriteOutsideTransaction}); it changes no routing.
+     * ({@link enforceTransactionOrigin}) — and, since #5351, to DECIDE what
+     * happens to it: a business write is refused, a system ledger is carved out.
      *
      * Absent on the sandbox runner's explicitly-threaded handles (the
      * `beginTransaction`/`commit`/`rollback` trio does not use this store at
@@ -1779,7 +1788,17 @@ export class ObjectQL implements IObjectQLEngine {
     const tx = execCtx?.transaction !== undefined
       ? execCtx.transaction
       : this.txStore.getStore()?.transaction;
-    const hasTx = tx !== undefined;
+    // [#5351] SAME-ORIGIN GATE. A transaction handle is a property of ONE
+    // driver's connection; handing it to a different driver does not put that
+    // driver's statement inside the transaction, it executes the statement on
+    // the WRONG CONNECTION — measured on knex/SQLite as `no such table` against
+    // a database that never held the object. The write path's
+    // `enforceTransactionOrigin` has already refused a business write by the
+    // time we get here (and let a system ledger through by decision), so this
+    // is the structural half: whatever survives to here, the handle only ever
+    // reaches the driver that owns it. It covers READS too, which have no gate
+    // of their own and were riding the same wrong connection.
+    const hasTx = tx !== undefined && this.transactionCoversDriverFor(object, tx);
     const hasTenant =
       execCtx?.tenantId !== undefined &&
       !isTenancyDisabled(this._registry.getObject(object));
@@ -1825,6 +1844,45 @@ export class ObjectQL implements IObjectQLEngine {
       opts.preserveAudit = true;
     }
     return opts;
+  }
+
+  /**
+   * Does the open transaction `tx` actually cover the driver `object` resolves
+   * to? — the same-origin question, asked by instance IDENTITY (#5351).
+   *
+   * Answers `true` in two cases: the resolved driver IS the transaction's
+   * owner, or the engine cannot tell who the owner is. The second case is the
+   * DECLARED LIMIT of this gate, not an oversight, and it is exactly one
+   * shape: a handle the engine never opened and cannot attribute.
+   *
+   * `TransactionScope` (#5724) records the owner for every transaction the
+   * engine opens, and `transaction()` also threads that same handle down as
+   * `execCtx.transaction`, so the dominant explicit-threading path is covered
+   * by identity-matching the handle back to the store entry. What is NOT
+   * covered:
+   *
+   * - `ScopedContext`'s discrete `beginTransaction`/`commit`/`rollback` trio,
+   *   which threads the handle across `setImmediate` boundaries where
+   *   AsyncLocalStorage does not survive, and so never populates txStore;
+   * - any handle an outside caller obtained elsewhere and passed in as
+   *   `execCtx.transaction`.
+   *
+   * For those the engine holds an opaque driver object with no back-reference
+   * to its driver, so there is no honest comparison to make. Guessing — say,
+   * assuming an unattributed handle belongs to the default driver — would
+   * refuse legitimate single-datasource work on one side and carve out writes
+   * that were genuinely covered on the other. So the gate declines to judge and
+   * the pre-#5351 behaviour stands on that path: recorded in the ADR-0067/0119
+   * revision, and closable only by making handle ownership discoverable on
+   * `IDataDriver` (filed separately).
+   */
+  private transactionCoversDriverFor(object: string, tx: unknown): boolean {
+    const store = this.txStore.getStore();
+    // The scope describes the handle in the store. An explicitly-threaded
+    // handle is covered by it only when it IS that handle.
+    const scope = store !== undefined && tx === store.transaction ? store.scope : undefined;
+    if (!scope) return true;
+    return this.getDriver(object) === scope.driver;
   }
 
   /**
@@ -3329,6 +3387,50 @@ export class ObjectQL implements IObjectQLEngine {
   static readonly LIFECYCLE_DATASOURCE = 'telemetry';
 
   /**
+   * The lifecycle classes that make an object an APPEND-ONLY SYSTEM LEDGER —
+   * the audit trail, telemetry, and the event log (ADR-0057 §3.6).
+   *
+   * One constant, read by both places that must agree (#5351):
+   *
+   * 1. {@link getDriver} step 3 — which objects lifecycle-class separation
+   *    routes to the dedicated datasource;
+   * 2. {@link enforceTransactionOrigin} — which cross-datasource writes are
+   *    CARVED OUT of an ambient transaction instead of refused.
+   *
+   * Two hand-written copies of this tuple would drift by one class and produce
+   * the worst outcome available: an object routed away by rule 1 and refused by
+   * rule 2 loses exactly the compliance row this whole change exists to save.
+   *
+   * `transient` is deliberately absent, matching step 3: those objects stay on
+   * the primary, so they never reach the gate at all.
+   */
+  static readonly SYSTEM_LEDGER_LIFECYCLE_CLASSES: ReadonlySet<string> = new Set([
+    'audit',
+    'telemetry',
+    'event',
+  ]);
+
+  /**
+   * Is `objectName` an append-only system ledger? — the #5351 carve-out's
+   * discriminator, and deliberately a property of the object's DECLARATION
+   * (`lifecycle.class`) rather than of the deployment's routing.
+   *
+   * Why the declaration and not "was it routed by step 3": an audit ledger
+   * pinned to its own datasource by an explicit `datasource:` binding, or by a
+   * `datasourceMapping` rule, is the same append-only compliance ledger with
+   * the same reason to be carved out — the routing mechanism is an operator's
+   * choice, the class is the author's statement about what the data IS. Judging
+   * by the mechanism would make the carve-out depend on which of three
+   * equivalent configurations a deployment happened to use.
+   */
+  private isSystemLedgerObject(objectName: string): boolean {
+    const lifecycleClass = (
+      this._registry.getObject(objectName) as { lifecycle?: { class?: string } } | undefined
+    )?.lifecycle?.class;
+    return lifecycleClass !== undefined && ObjectQL.SYSTEM_LEDGER_LIFECYCLE_CLASSES.has(lifecycleClass);
+  }
+
+  /**
    * Helper to get the target driver
    *
    * Resolution priority (first match wins):
@@ -3416,7 +3518,8 @@ export class ObjectQL implements IObjectQLEngine {
     // the engine — splitting their storage would split their brain.
     const lifecycleClass = (object as { lifecycle?: { class?: string } } | undefined)?.lifecycle?.class;
     if (
-      (lifecycleClass === 'telemetry' || lifecycleClass === 'event' || lifecycleClass === 'audit') &&
+      lifecycleClass !== undefined &&
+      ObjectQL.SYSTEM_LEDGER_LIFECYCLE_CLASSES.has(lifecycleClass) &&
       this.drivers.has(ObjectQL.LIFECYCLE_DATASOURCE)
     ) {
       return this.drivers.get(ObjectQL.LIFECYCLE_DATASOURCE)!;
@@ -5161,8 +5264,10 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
     const driver = this.getDriver(object);
-    // #4619 — diagnostic only, changes nothing about where this write goes.
-    this.reportWriteOutsideTransaction(object, driver, 'insert');
+    // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
+    // carve an append-only system ledger out of the transaction. Before any
+    // hook, default or validation runs, so a refusal costs nothing.
+    this.enforceTransactionOrigin(object, driver, 'insert');
 
     const opCtx: OperationContext = {
       object,
@@ -5525,8 +5630,10 @@ export class ObjectQL implements IObjectQLEngine {
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
      const driver = this.getDriver(object);
-     // #4619 — diagnostic only, changes nothing about where this write goes.
-     this.reportWriteOutsideTransaction(object, driver, 'update');
+     // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
+     // carve an append-only system ledger out of the transaction. Before any
+     // hook, default or validation runs, so a refusal costs nothing.
+     this.enforceTransactionOrigin(object, driver, 'update');
 
      // Fold the `filter` alias into `where` FIRST (#4346): everything below —
      // token resolution, the by-id fast path, the #2982 AST seeding — reads
@@ -6178,8 +6285,10 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
     const driver = this.getDriver(object);
-    // #4619 — diagnostic only, changes nothing about where this write goes.
-    this.reportWriteOutsideTransaction(object, driver, 'delete');
+    // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
+    // carve an append-only system ledger out of the transaction. Before any
+    // hook, default or validation runs, so a refusal costs nothing.
+    this.enforceTransactionOrigin(object, driver, 'delete');
 
     // Fold the `filter` alias into `where` first — same reasoning as update()
     // above (#4346): unfolded, a `multi: true` delete with `{ filter }` had no
@@ -6671,10 +6780,18 @@ export class ObjectQL implements IObjectQLEngine {
    *   which THROWS {@link TransactionUnsupportedError} instead (#5696 point 1).
    * - On callback success the transaction is committed; on any thrown error
    *   it is rolled back and the original error is re-thrown.
-   * - The transaction covers the DEFAULT datasource only — also declared
-   *   (ADR-0119 D1). A write that `setDatasourceMapping` routes elsewhere runs
-   *   OUTSIDE it and survives the rollback; that split is reported at `error`
-   *   from the write path (#4619, {@link reportWriteOutsideTransaction}).
+   * - The transaction covers ONE driver's connection — the default one — as
+   *   ADR-0119 D1 declared and this engine still provides (no two-phase
+   *   commit). What a write routed elsewhere gets is decided by
+   *   {@link enforceTransactionOrigin} (#5351 / #5696, 2026-08-06 ruling): a
+   *   BUSINESS write is refused with
+   *   {@link CrossDatasourceTransactionWriteError}; an append-only SYSTEM
+   *   LEDGER (`lifecycle.class` audit / telemetry / event) is carved out and
+   *   executed OUTSIDE the transaction, so it survives a rollback — the orphan
+   *   row is the deliberate direction of error for a compliance ledger. Either
+   *   way the other driver never receives this transaction's handle, which is
+   *   what the pre-v17 engine did and what put statements on the wrong
+   *   connection entirely.
    * - The callback's SECOND argument says whether this call owns the
    *   transaction (#5696 point 3): `owned: true` when this call opened it,
    *   `false` when it JOINED an outer one (ADR-0067 D2) — and `false` on the
@@ -6815,51 +6932,76 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * A write inside an open `transaction()` was routed to a driver that
-   * transaction does not cover (#4619).
+   * A write inside an open `transaction()` resolved to a driver that
+   * transaction does not cover — decide what happens to it (#5351, #5696).
    *
-   * `transaction()` opens on the DEFAULT datasource only — declared behaviour
-   * (ADR-0119 D1) — so an object that `setDatasourceMapping` (or an explicit
-   * `datasource:` binding, or lifecycle-class separation) routes elsewhere is
-   * written on another connection entirely. It commits immediately, the
-   * transaction's rollback cannot reach it, and today NOTHING says so: a failed
-   * "atomic" multi-datasource write reverts one store, keeps the other, and
-   * returns a clean rejection either way.
+   * Called at the TOP of `insert`/`update`/`delete`, before hooks, validation
+   * or defaults run: a refusal here has cost the caller nothing.
    *
-   * `error`, per AGENTS.md's judgment question — after the degradation the
-   * system looks entirely normal from the outside while a write it claimed was
-   * part of an atomic unit has landed on its own. This is the durability class,
-   * not the functional one.
+   * This seam replaced `reportWriteOutsideTransaction` (#4619 / PR #5724),
+   * which reported the split at `error` and let the write proceed with the
+   * owner's handle. Reporting was the right first move — it made the defect
+   * audible without pre-empting a decision that changes ADR-0119 D1's declared
+   * contract for every multi-datasource deployment. The 2026-08-06 maintainer
+   * ruling made that decision, and it is TWO answers, not one, because the two
+   * kinds of write fail in opposite directions:
    *
-   * Diagnostic ONLY: the write still goes exactly where routing sent it.
-   * Refusing the cross-driver write would change the declared contract and
-   * belongs to #4619's spec half.
+   * - **Business writes are REFUSED** ({@link CrossDatasourceTransactionWriteError},
+   *   #5696 point 2). The caller opened a transaction and asked for one unit of
+   *   work; there is no way to give them one across two drivers (no two-phase
+   *   commit on `IDataDriver`, deliberately out of scope). Silently committing
+   *   part of it — which is what the pre-v17 engine did, on the wrong
+   *   connection at that — is the outcome a caller can neither detect nor undo.
+   *   Refusing hands them the choice: one datasource per transaction, or
+   *   per-datasource units they reconcile themselves.
+   * - **Append-only system ledgers are CARVED OUT** (#5351): audit / telemetry
+   *   / event rows execute OUTSIDE the transaction, on their own connection,
+   *   with no foreign handle. They therefore survive a rollback of the business
+   *   transaction — an "orphan row" describing a write that was undone. For an
+   *   append-only compliance ledger that is the correct direction of error:
+   *   a spurious row is reconcilable, a MISSING row for a write that did
+   *   commit is an unrecoverable compliance hole, and the missing row is what
+   *   shipped before this change. It is also what lets a plugin author write an
+   *   ordinary `afterInsert` audit hook with no knowledge that datasource
+   *   routing exists — refusing here would be swallowed by that hook's
+   *   try/catch and lose the row exactly as before.
+   *
+   * No `error` log survives on either path. The refusal IS the report, louder
+   * than any line; and the carve-out is now DECLARED behaviour that fires on
+   * every audited write of every transaction in a lifecycle-split deployment —
+   * logging it at `error`, or even `warn`, would train readers to skim the
+   * levels that carry real durability failures, which AGENTS.md names as the
+   * mirror-image mistake. It is recorded at `debug`, once per transaction per
+   * datasource, for the operator who is asking why an audit row outlived a
+   * rolled-back write; the durable answer lives in ADR-0067/ADR-0119.
    */
-  private reportWriteOutsideTransaction(
+  private enforceTransactionOrigin(
     objectName: string,
     driver: IDataDriver,
     operation: 'insert' | 'update' | 'delete',
   ): void {
     const scope = this.txStore.getStore()?.scope;
     // No engine-owned transaction in scope (or a handle threaded explicitly by
-    // the sandbox trio, which this store never sees) — nothing to be outside of.
+    // the sandbox trio, which this store never sees) — nothing to be outside
+    // of. See `transactionCoversDriverFor` for why that limit is declared.
     if (!scope) return;
     // Identity, not name: this is about riding the same connection.
     if (driver === scope.driver) return;
     const target = this.datasourceNameOf(driver);
+
+    if (!this.isSystemLedgerObject(objectName)) {
+      throw new CrossDatasourceTransactionWriteError(objectName, operation, target, scope.datasource);
+    }
+
     if (scope.reportedOutOfScope.has(target)) return;
     scope.reportedOutOfScope.add(target);
-    this.logger.error(
-      `${operation} of '${objectName}' inside transaction() is routed to datasource '${target}', but the ` +
-        `transaction was opened on the default datasource '${scope.datasource}' and covers only that one — ` +
-        'so this write is running OUTSIDE the transaction. It commits on its own the moment it executes, and ' +
-        "rolling the transaction back will NOT undo it: a failed \"atomic\" unit of work reverts " +
-        `'${scope.datasource}' while these rows stay behind in '${target}', and the caller is told only that ` +
-        'the whole thing failed. Keep every object written inside one transaction() on the default ' +
-        'datasource (move the object, or drop the datasourceMapping rule that routes it away), or split the ' +
-        'work into per-datasource units and have the caller reconcile them explicitly — cross-driver ' +
-        'atomicity is not something this engine provides. Reported once per transaction per datasource.',
-      undefined,
+    this.logger.debug(
+      `${operation} of '${objectName}' inside transaction() is routed to datasource '${target}' while the ` +
+        `transaction is open on '${scope.datasource}' — executing it OUTSIDE the transaction, on its own ` +
+        'connection (ADR-0057 §3.6 system ledger, carved out by #5351). It commits independently and will ' +
+        'SURVIVE a rollback of this transaction: an audit/telemetry/event row may describe a write that was ' +
+        'undone. That is the decided direction of error for an append-only ledger — an extra reconcilable ' +
+        'row beats a missing row for a write that did commit. Said once per transaction per datasource.',
       { object: objectName, operation, datasource: target, transactionDatasource: scope.datasource },
     );
   }
