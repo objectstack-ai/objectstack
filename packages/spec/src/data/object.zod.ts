@@ -421,6 +421,24 @@ const TENANCY_RETIRED_KEY_GUIDANCE: Record<string, string> = {
  * `strategy`/`crossTenantAccess` or a typo — is a loud, *fixable* parse error
  * instead of a silent strip (#1535), and a retired key's error carries its
  * upgrade prescription. Every other issue code defers to zod's default.
+ *
+ * ## Message order: the fix comes before the explainer (#5955 / #6416)
+ *
+ * ```text
+ * Unrecognized key(s) on `tenancy`: `k1`.       ← which key is wrong
+ *   • {per-key tombstone / "not a `tenancy` key"} ← the fix
+ * The two supported tenancy modes are: …        ← the standing explainer
+ * ```
+ *
+ * Same emission order the shared `strictUnknownKeyError` template took in
+ * #5955 — bullets first, the surface-level sentence appended to the last one.
+ * A hand-written `$ZodErrorMap` is reachable by neither that fix nor #5593's
+ * `strictObject` migration, so #6416 applies the ruling here directly. The
+ * two-modes explainer used to sit between the key statement and the bullets,
+ * which on the single-line renders several consumers use (`os validate`'s
+ * `• where: message`, CI logs) buried each key's actual prescription behind
+ * ~160 characters of standing background. Nothing is dropped: the explainer is
+ * still emitted verbatim, just last.
  */
 const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code !== 'unrecognized_keys') return undefined;
@@ -429,11 +447,11 @@ const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
     TENANCY_RETIRED_KEY_GUIDANCE[key] ?? `\`${key}\` is not a \`tenancy\` key.`,
   );
   return (
-    `Unrecognized key(s) on \`tenancy\`: ${keys.map((k) => `\`${k}\``).join(', ')}. ` +
-    'The two supported tenancy modes are: database-per-tenant = environment-level ' +
+    `Unrecognized key(s) on \`tenancy\`: ${keys.map((k) => `\`${k}\``).join(', ')}.\n` +
+    lines.map((l) => `  • ${l}`).join('\n') +
+    ' The two supported tenancy modes are: database-per-tenant = environment-level ' +
     'deployment (no object config); row-level isolation = `tenancy.enabled` + ' +
-    '`tenancy.tenantField`.\n' +
-    lines.map((l) => `  • ${l}`).join('\n')
+    '`tenancy.tenantField`.'
   );
 };
 

@@ -90,22 +90,42 @@ function looksLikeVisibilityKey(key: string): boolean {
  *   .strict()
  *   .transform(normalizeVisibleWhen)
  * ```
+ *
+ * ## Message order: the fix comes before the history (#5955 / #6416)
+ *
+ * ```text
+ * Unrecognized key(s) on this view/page schema: `k1`.   ← which key is wrong
+ * [ If this is the conditional-visibility predicate … ] ← the fix
+ * Before ADR-0089 D3a these were dropped silently …     ← why it used to be silent
+ * ```
+ *
+ * This map is a hand-written `$ZodErrorMap`, so #5955's fix to the shared
+ * `strictUnknownKeyError` template could not reach it and #5593's
+ * `strictObject` migration cannot either — #6416 applies the same ruling here.
+ * The history sentence used to sit between the key statement and the alias
+ * pointer, which is the position several consumers render on ONE line
+ * (`os validate`'s `• where: message`, CI logs, and
+ * `validateFlowTriggerReadiness`, which flattens the newlines): an author —
+ * often an AI — reads the front of that line and acts on it, so the canonical
+ * key has to be there. Nothing is dropped and nothing is conditional; the
+ * sentence is still emitted verbatim, just last.
  */
 export const strictVisibilityError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code !== 'unrecognized_keys') return undefined;
   const keys = (issue as { keys?: readonly string[] }).keys ?? [];
   const list = keys.map((k) => `\`${k}\``).join(', ');
-  const base =
-    `Unrecognized key(s) on this view/page schema: ${list}. ` +
+  const front = `Unrecognized key(s) on this view/page schema: ${list}.`;
+  const history =
     `Before ADR-0089 D3a these were dropped silently, shipping inert metadata; ` +
     `a mis-layered or stale key is now a loud parse error.`;
   if (keys.some(looksLikeVisibilityKey)) {
     return (
-      base +
+      front +
       ' If this is the conditional-visibility predicate, the canonical key is ' +
       '`visibleWhen` (ADR-0089) — `visibleOn` (view form) and `visibility` (page ' +
-      'component) are still accepted as deprecated aliases.'
+      'component) are still accepted as deprecated aliases. ' +
+      history
     );
   }
-  return base;
+  return `${front} ${history}`;
 };

@@ -141,29 +141,48 @@ const QUARANTINED_WIDGET_KEYS = new Set(['component', 'data']);
  * objectui-internal prop it points the author at the ADR-0021 dataset shape
  * (and `options` for renderer-specific extras). Mirrors `strictVisibilityError`
  * (ADR-0089 D3a); every other issue code defers to zod's default.
+ *
+ * ## Message order: the fix comes before the history (#5955 / #6416)
+ *
+ * ```text
+ * Unrecognized key(s) on this dashboard widget: `k1`.   ← which key is wrong
+ * [ one of the three prescription branches ]            ← the fix
+ * Undeclared top-level keys were dropped silently …     ← why it used to be silent
+ * ```
+ *
+ * Hand-written `$ZodErrorMap`s were out of reach of both #5955 (which moved the
+ * sentence inside the shared `strictUnknownKeyError`) and #5593 (which migrates
+ * the direct call sites to `strictObject`); #6416 applies the same ruling here.
+ * The history sentence used to sit between the key statement and the branch that
+ * fixes it, pushing every prescription — the ADR-0021 dataset migration, the
+ * objectui quarantine, the #5022 drill answer — past character ~220 of a message
+ * several consumers render on ONE line. Nothing is dropped or made conditional:
+ * the sentence is still emitted verbatim, just last.
  */
 const strictWidgetAnalyticsError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code !== 'unrecognized_keys') return undefined;
   const keys = (issue as { keys?: readonly string[] }).keys ?? [];
   const list = keys.map((k) => `\`${k}\``).join(', ');
-  const base =
-    `Unrecognized key(s) on this dashboard widget: ${list}. ` +
+  const front = `Unrecognized key(s) on this dashboard widget: ${list}.`;
+  const history =
     `Undeclared top-level keys were dropped silently before strict validation, ` +
     `shipping inert metadata; a stale or mis-layered key is now a loud parse error.`;
   if (keys.some((k) => LEGACY_WIDGET_ANALYTICS_KEYS.has(k))) {
     return (
-      base +
+      front +
       ' The pre-ADR-0021 inline analytics shape (`object` + `categoryField` + ' +
       '`valueField` + `aggregate`, pivot `rowField`/`columnField`) was removed — ' +
       'bind a `dataset` and select `dimensions` + `values` by name. Renderer-only ' +
-      'settings belong under `options`.'
+      'settings belong under `options`. ' +
+      history
     );
   }
   if (keys.some((k) => QUARANTINED_WIDGET_KEYS.has(k))) {
     return (
-      base +
+      front +
       ' `component` and inline `data` are objectui-internal renderer capabilities, ' +
-      'not part of the author-facing dashboard spec (framework#3251).'
+      'not part of the author-facing dashboard spec (framework#3251). ' +
+      history
     );
   }
   // #5022 — the drill near-key, in all three spellings an author reaches for.
@@ -175,7 +194,7 @@ const strictWidgetAnalyticsError: z.core.$ZodErrorMap = (issue) => {
   // between two real keys on two other surfaces.
   if (keys.some((k) => k === 'drillDown' || k === 'drilldown' || k === 'drill')) {
     return (
-      base +
+      front +
       ' Drill-through on a dashboard is AUTOMATIC and not configurable per widget: ' +
       'a dataset-bound widget derives the drill target and filter from the dataset row ' +
       'that was clicked, and a `table`/`pivot` widget is the one to reach for when you ' +
@@ -183,10 +202,11 @@ const strictWidgetAnalyticsError: z.core.$ZodErrorMap = (issue) => {
       'The two configurable drills live elsewhere and neither is a widget key: ' +
       '`drillDown` (camelCase, a config object) is the react-tier `<ObjectChart drillDown={…}>` ' +
       'prop — `ChartDrillDownSchema`; `drilldown` (all lowercase, a boolean) is ' +
-      '`ReportSchema.drilldown` (ADR-0021 D2, on by default).'
+      '`ReportSchema.drilldown` (ADR-0021 D2, on by default). ' +
+      history
     );
   }
-  return base;
+  return `${front} ${history}`;
 };
 
 /**

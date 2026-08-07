@@ -2954,6 +2954,76 @@ describe('ADR-0089 D3a — strict view form schemas (loud mis-layered keys)', ()
 });
 
 /**
+ * Message ORDER on `strictVisibilityError` (#6416, applying #5955's ruling).
+ *
+ * The map in `shared/visibility.ts` is a hand-written `$ZodErrorMap`: it never
+ * calls `strictUnknownKeyError`, so #5955's reorder of the shared template did
+ * not reach it, and it is not one of the 44 direct call sites #5593 migrates to
+ * `strictObject` either. It had the same defect the ruling was filed against —
+ * a ~120-char history sentence sitting BETWEEN the offending key and the
+ * canonical-key pointer that fixes it, which is past the front of the single-
+ * line renders several consumers use (`os validate`'s `• where: message`, CI
+ * logs, and `validateFlowTriggerReadiness`, which flattens the newlines).
+ *
+ * These are ORDER pins, not presence checks. The reorder deletes nothing, so
+ * every existing `toContain` in the block above stays green either way; a
+ * future edit that folds the sentence back into the middle passes all of them
+ * and fails here.
+ */
+describe('strictVisibilityError message order — fix before history (#6416)', () => {
+  const HISTORY =
+    'Before ADR-0089 D3a these were dropped silently, shipping inert metadata; ' +
+    'a mis-layered or stale key is now a loud parse error.';
+  const PRESCRIPTION = 'the canonical key is `visibleWhen` (ADR-0089)';
+
+  const messageFor = (body: Record<string, unknown>) => {
+    const res = FormFieldSchema.safeParse({ field: 'state', ...body });
+    expect(res.success).toBe(false);
+    const unknown = res.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown).toBeDefined();
+    return unknown!.message;
+  };
+
+  it('names the wrong key first, then the alias pointer, then the history', () => {
+    const m = messageFor({ visibleWhenn: 'record.a == 1' });
+    // 1. which key is wrong — and nothing before it
+    expect(m.startsWith('Unrecognized key(s) on this view/page schema: `visibleWhenn`.')).toBe(true);
+    // 2. the fix, immediately after it — this is the whole point of the reorder
+    expect(m).toContain('`visibleWhenn`. If this is the conditional-visibility predicate');
+    // 3. the history sentence, verbatim, last — moved, never dropped
+    expect(m).toContain(PRESCRIPTION);
+    expect(m.indexOf(PRESCRIPTION)).toBeLessThan(m.indexOf(HISTORY));
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+  });
+
+  it('still emits the whole alias table after the reorder — nothing was trimmed', () => {
+    // The prescription names all three spellings; a reorder that quietly lost
+    // one of them would still satisfy the order assertions above.
+    const m = messageFor({ visibleWhenn: 'record.a == 1' });
+    expect(m).toContain('`visibleOn` (view form)');
+    expect(m).toContain('`visibility` (page component) are still accepted as deprecated aliases.');
+  });
+
+  it('is unchanged in SHAPE when there is no visibility hint to offer', () => {
+    // No prescription branch — the sentence follows the key statement directly,
+    // exactly as it always did. Full-message pin, so a stray separator or a
+    // duplicated clause fails here.
+    const res = FormSectionSchema.safeParse({ label: 'S', fields: [], bogusKey: true });
+    expect(res.success).toBe(false);
+    const m = res.error!.issues.find((i) => i.code === 'unrecognized_keys')!.message;
+    expect(m).toBe(`Unrecognized key(s) on this view/page schema: \`bogusKey\`. ${HISTORY}`);
+  });
+
+  it('emits the history exactly once, whatever the key count', () => {
+    // One `unrecognized_keys` issue names every offending key, so "last" is a
+    // well-defined position: the sentence is appended to that one message once.
+    const m = messageFor({ visibleWhenn: 'record.a == 1', alsoWrong: 2, andThis: 3 });
+    expect(m.split(HISTORY)).toHaveLength(2);
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+  });
+});
+
+/**
  * ObjectUI Studio derives the View inspector's authoring JSONSchema from
  * ViewSchema via `z.toJSONSchema` (objectui#2561). FormFieldSchema is a
  * self-recursive `.strict().transform(…)` pipe reached through

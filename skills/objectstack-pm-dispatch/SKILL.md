@@ -173,8 +173,56 @@ invariant is what makes the loop resumable and the board honest.
 ### 0. Backlog sweep — classification is a standing duty, not a request
 
 The maintainer does not pre-sort the backlog. On every round (and every idle
-check-in), sweep issues carrying no `pm:*` / `needs-user-decision` label and
+check-in), sweep every issue matching **any one** of these three disjuncts, and
 classify each:
+
+1. **No `pm:*` / `needs-user-decision` label, and no classification label**
+   either — none of the labels your project reads as "already routed" (area,
+   component, owning team, lane). The plain rule.
+2. **`pm:queue` present, classification label absent** — scoped to the
+   repositories that actually use classification labels (see the caution).
+3. **A classification label present, but no queue state** (`pm:queue`,
+   `pm:dispatched`, any other `pm:*` state your setup defines, or
+   `needs-user-decision`).
+
+Disjuncts 2 and 3 take only cards whose `updated_at` is more than a minute or
+two old; disjunct 1 needs no such floor.
+
+**Why the sweep is a disjunction and not one "unlabeled" filter.** Routing and
+queue state are two independent axes, and a card carrying exactly one of them
+is invisible on **both** views at once: the queue lists by queue state, while
+claimants filter by classification — and a predicate that skips anything
+already carrying a `pm:*` label shuts the last door. Neither half is one
+filer's bad habit; both have standing producers:
+
+- A card can arrive **pre-queued by the protocol itself**. Cross-seat transfer
+  tickets (the handing-off side applies the queue label as part of the
+  transfer) and tickets filed mechanically by a steward automation both carry
+  `pm:queue` on arrival, while a single-producer discipline for classification
+  labels forbids those same producers from applying one. The card then reads as
+  dispatchable on the board and is claimable by nobody.
+- The mirror shape — classified but stateless — comes from anyone who files
+  with an area label out of habit. Writing the discipline down elsewhere does
+  not fix it: a project that had published exactly that rule hours earlier
+  still produced such a card the same day. **The predicate itself has to
+  absorb it.**
+
+⚠️ **Any disjunct keyed on a label's absence must be scoped to the
+repositories where that label exists.** Where it does not exist, its absence is
+universal, so the disjunct matches every open queue card in that repository and
+the sweep becomes its own noise source — the check is whether the label exists
+there at all, not whether some card happens to carry it. Whatever your project
+already excludes from the sweep (parked work, tracking issues, protocol posts)
+stays excluded, and disjunct 3 makes that exclusion list load-bearing: a parked
+card's normal shape is precisely "classified, no queue state".
+
+⏳ **Give the partial-labeling disjuncts an age floor keyed on `updated_at`,
+not `created_at`.** A half-labeled card has two sources: one just filed, and an
+older one that a **label write** has just put into that state — and since
+labels are applied one write at a time, the sweep's own labeling passes through
+the half-labeled shape for a few seconds. `created_at` misses the second
+source; `updated_at` covers both, at the cost of a freshly commented card
+waiting one more round.
 
 - **Auto-queue (`pm:queue`)** — a concrete defect with a named location or
   repro; a scoped tooling or gate fix; a restore-invariant finding; a test-only
