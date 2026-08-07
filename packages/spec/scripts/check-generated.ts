@@ -84,7 +84,7 @@ const GATED: ReadonlyArray<{
   {
     check: 'check:authorable-surface',
     gen: 'gen:schema',
-    artifact: 'authorable-surface/ (+ its .base.json anchor) + JSON schemas',
+    artifact: 'authorable-surface/ + authorable-defaults/ (+ its .base.json anchor) + JSON schemas',
   },
   // Reads the BUILT `dist/*.d.ts`, not the source. On a stale dist it reports
   // every export added since the last build as a "breaking removal" — a phantom
