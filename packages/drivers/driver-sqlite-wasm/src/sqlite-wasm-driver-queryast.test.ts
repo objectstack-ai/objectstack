@@ -144,9 +144,18 @@ describe('SqliteWasmDriver (QueryAST Format)', () => {
       expect(results[0].name).toBe('Mouse');
     });
 
-    it('should still support legacy aggregate format', async () => {
+    /**
+     * [#6321] The twin of `sql-driver-queryast.test.ts`'s case, replaced for the
+     * same reason: it was titled `should still support legacy aggregate format`
+     * and spelled `aggregate:` / `func:`, two keys the Query Protocol never
+     * declared. This driver inherits `SqlDriver.aggregate` verbatim, so the two
+     * `||` limbs that used to read them were deleted once and stop existing here
+     * too — a case pinning a "legacy format" that no longer exists cannot be
+     * re-spelled into truth, only replaced with the declared spelling.
+     */
+    it('aggregates through the declared `aggregations` / `function` keys', async () => {
       const results = await driver.aggregate('products', {
-        aggregate: [{ func: 'avg', field: 'price', alias: 'avg_price' }],
+        aggregations: [{ function: 'avg', field: 'price', alias: 'avg_price' }],
         groupBy: ['category'],
       });
 
