@@ -92,7 +92,7 @@ function makeStubEngine() {
             assertEngineDeleteDispatch(opts);
             return { deleted: 0 };
         },
-        async transaction<T>(cb: (ctx: any) => Promise<T>): Promise<T> { return cb(undefined); },
+        async transaction<T>(cb: (ctx: any, info: { owned: boolean }) => Promise<T>): Promise<T> { return cb(undefined, { owned: true }); },
         async syncObjectSchema() { /* no DDL in this stub */ },
         registry: {
             listItems: () => [],

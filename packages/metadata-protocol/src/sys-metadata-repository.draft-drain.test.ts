@@ -180,13 +180,13 @@ function makeFakeEngine() {
       rows.delete(found.key);
       return { deleted: 1 };
     },
-    async transaction<T>(cb: (ctx: any) => Promise<T>): Promise<T> {
+    async transaction<T>(cb: (ctx: any, info: { owned: boolean }) => Promise<T>): Promise<T> {
       const rowsSnapshot = new Map(Array.from(rows, ([k, r]) => [k, { ...r }] as const));
       const historySnapshot = historyRows.map((h) => ({ ...h }));
       const outer = pendingRollback;
       pendingRollback = rowsSnapshot;
       try {
-        return await cb({ txn: true });
+        return await cb({ txn: true }, { owned: true });
       } catch (err) {
         rows.clear();
         for (const [k, r] of rowsSnapshot) rows.set(k, r);

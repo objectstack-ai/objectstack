@@ -166,8 +166,8 @@ function makeStubEngine() {
             rows.delete(found.key);
             return { deleted: 1 };
         },
-        async transaction<T>(cb: (ctx: any) => Promise<T>): Promise<T> {
-            return cb(undefined);
+        async transaction<T>(cb: (ctx: any, info: { owned: boolean }) => Promise<T>): Promise<T> {
+            return cb(undefined, { owned: true });
         },
         registry: {
             registerItem: () => {},
