@@ -1003,9 +1003,6 @@ importers:
 
   packages/lint:
     dependencies:
-      '@marcbachmann/cel-js':
-        specifier: ^8.0.0
-        version: 8.0.0
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula

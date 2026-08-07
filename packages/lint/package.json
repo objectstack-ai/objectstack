@@ -26,7 +26,6 @@
     "check:doc-formula-expressions": "node scripts/check-doc-formula-expressions.mjs --self-test && node scripts/check-doc-formula-expressions.mjs"
   },
   "dependencies": {
-    "@marcbachmann/cel-js": "^8.0.0",
     "@objectstack/formula": "workspace:*",
     "@objectstack/sdui-parser": "workspace:*",
     "@objectstack/spec": "workspace:*",
