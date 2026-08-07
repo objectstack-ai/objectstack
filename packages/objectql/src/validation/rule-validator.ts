@@ -633,16 +633,59 @@ export function isRuntimeOwnedField(def: { type?: string } | undefined | null): 
  *    number: the same defect as #4447 (`created_at` forgeable by a normal
  *    PATCH), except the field carried no flag for this loop to notice.
  *
- * Two guards keep every legitimate write intact:
- *  - `suppliedKeys` — only keys the CALLER sent are candidates. Server stamps
- *    applied by beforeUpdate hooks or write middleware (e.g. `updated_by` /
- *    `updated_at`, plugin.ts) land in `data` but are NOT in `suppliedKeys`, so
- *    they survive. A caller that *explicitly* forges e.g. `updated_by` simply
+ * Three guards keep every legitimate write intact:
+ *  - `supplied` KEY presence — only keys the CALLER sent are candidates. Server
+ *    stamps applied by beforeUpdate hooks or write middleware (e.g. `updated_by`
+ *    / `updated_at`, plugin.ts) land in `data` but are absent from `supplied`,
+ *    so they survive. A caller that *explicitly* forges e.g. `updated_by` simply
  *    has it dropped for that request (the last-modified stamp is left unchanged
  *    — safe).
+ *  - `supplied` VALUE identity (#5591) — the key must still hold THE CALLER'S
+ *    OWN VALUE. This is the half that used to be missing, and its absence is
+ *    what made the guard above conditional on an accident. See below.
  *  - system context — the caller passes this strip only for NON-system writes;
  *    system-context writes (import, seed replay, approvals, lifecycle hooks —
  *    all `isSystem: true`) legitimately set read-only columns and skip it.
+ *
+ * ### Why `supplied` carries VALUES, not just keys (#5591)
+ *
+ * This strip runs AFTER `beforeUpdate`, so by the time it looks at a key, the
+ * value sitting there may no longer be the caller's — a hook may have written
+ * its own. The guard used to be a key SET, which cannot tell those apart, so
+ * `delete data[name]` deleted whatever was there: on a payload that merely
+ * ECHOED a read-only key back, the hook's write died with it.
+ *
+ * Measured downstream (objectstack#5591, from hotcrm#788): a REST caller reads a
+ * whole `crm_knowledge_article`, flips `status` to `published`, and PUTs the
+ * whole record back — `published_at: null` included, because that is what it
+ * read. The publish hook stamps `published_at` on the draft→published
+ * transition; the strip then deleted the hook's timestamp because the caller had
+ * echoed the key. The row committed as `status = "published"` with
+ * `published_at = null`, which every list and report ordering by `published_at`
+ * is undefined on. The same hook's `last_reviewed_at` — a read-only field the
+ * caller had NOT echoed — landed normally in the same write. Two hook-derived
+ * writes, one alive and one dead, decided by nothing but whether the caller's
+ * payload happened to carry a same-named key.
+ *
+ * So the rule is: **strip the value the CALLER SUBMITTED, never the value that
+ * happens to be there when the strip runs.** A key whose value a hook has
+ * replaced is a PLATFORM write, and platform writes to read-only columns are
+ * legitimate by construction — that is the same contract #4903 pins from the
+ * other side (a read-only key a hook ADDS lands, because it is not caller
+ * supplied). #5591 only makes the two agree.
+ *
+ * This does NOT relax #2948 / #3003 / #3015 in any direction: a caller-supplied
+ * read-only value that no hook touched is still dropped, byte for byte the same
+ * verdict as before. What changed is exclusively the case where a hook already
+ * overwrote the key — where the value being deleted was never the caller's.
+ *
+ * KNOWN LIMIT, deliberately not papered over: the snapshot is SHALLOW, so a hook
+ * that mutates a caller-supplied object or array IN PLACE
+ * (`data.some_json.x = 1`) is indistinguishable from a hook that did nothing —
+ * identity is unchanged — and the field is still stripped. No comparison can see
+ * that without deep-cloning every write payload, which this path will not pay
+ * for. The fallback is the pre-#5591 behaviour (strip), i.e. fail-safe; a hook
+ * that means to write a read-only column should ASSIGN a value to it.
  *
  * `options.preserveAudit` (#3493) relaxes the strip for an opt-in "historical"
  * import that reinstates the original timeline: a caller-supplied read-only
@@ -682,7 +725,7 @@ export function isRuntimeOwnedField(def: { type?: string } | undefined | null): 
 export function stripReadonlyFields(
   objectSchema: { name?: string; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
-  suppliedKeys: ReadonlySet<string>,
+  supplied: Readonly<Record<string, unknown>>,
   logger?: EvaluateRulesOptions['logger'],
   options?: { preserveAudit?: boolean },
 ): Record<string, unknown> | undefined | null {
@@ -697,7 +740,18 @@ export function stripReadonlyFields(
     const runtimeOwned = isRuntimeOwnedField(def);
     if (!def?.readonly && !runtimeOwned) continue;
     if (!(name in (result as Record<string, unknown>))) continue;
-    if (!suppliedKeys.has(name)) continue; // server-stamped, not caller-supplied — keep
+    // Own-property, never `in`: a field name is `^[a-z_][a-z0-9_]*$`, which
+    // admits `constructor` / `valueOf` — inherited from `Object.prototype` on
+    // any plain snapshot, so `in` would call a hook stamp caller-supplied and
+    // strip it.
+    if (!Object.prototype.hasOwnProperty.call(supplied, name)) continue; // server-stamped, not caller-supplied — keep
+    // [#5591] ...and it must still BE the caller's value. A hook that
+    // overwrote this key wrote a PLATFORM value; deleting that is what put
+    // `status = published` rows in the database with `published_at = null`.
+    // `Object.is`, not `===`, on purpose: `===` reports NaN !== NaN, which
+    // would read a caller-forged NaN as "a hook rewrote it" and KEEP the
+    // forgery — the one input where the loose operator inverts the verdict.
+    if (!Object.is((result as Record<string, unknown>)[name], supplied[name])) continue;
     if (preserveAudit && isPreservableUnderAudit(name, def)) continue; // historical import reinstates it
     if (result === data) result = { ...data };
     delete (result as Record<string, unknown>)[name];

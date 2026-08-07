@@ -181,25 +181,44 @@ export const SystemFieldName = {
    * {@link SystemFieldName.ORGANIZATION_ID} (the tenant wall): *which department
    * / legal entity does this row belong to*. A lookup to `sys_business_unit`.
    *
-   * **NOT injected by open-core** — nothing provisions this column today. The
-   * NAME is reserved here by ADR-0117 (Accepted, D1/D3 scoped) so the canonical
-   * spelling has one reference before the injection lands, and so consumers stop
-   * inventing their own (`business_unit_id`, `bu_id`, `dept_id` …) — the drift
-   * mode framework#4330 / cloud#982 already paid for with `tenant_id`/`org_id`/
-   * `space`.
+   * **INJECTED** (ADR-0117 D1, landed in #5677) — `applySystemFields` provisions
+   * the column on every ownership-eligible object, i.e. wherever
+   * {@link SystemFieldName.OWNER_ID} is injected. Withheld on `managedBy` /
+   * `sys_*` tables and under `ownership: 'org' | 'none'`, exactly like
+   * `owner_id`. The per-object derivation both the engine and author-time lint
+   * read is `resolveInjectedSystemColumns` (`@objectstack/spec/data`) — its
+   * table, not this sentence, is the authority on the per-tier answer.
    *
-   * It is on the public-form denylist as defense-in-depth: once stamped it is a
-   * kernel-owned ownership anchor, and a forged value on the anonymous surface
-   * would move the row behind another department's wall — the same forge class
-   * `owner_id`/`organization_id` are denied for. Denying it before it exists is
-   * free and fail-closed; adding it after would be a hole with a release in it.
+   * ⚠️ Injected — but the unit-owned TIER is **not authorable yet**, and the two
+   * facts must be read together. D1's table adds `ownership: 'business_unit'`
+   * (an owning unit, deliberately no owning person) and `applySystemFields`
+   * already implements that row, yet the `ownership` enum in
+   * `packages/spec/src/data/object.zod.ts` is still `'user' | 'org' | 'none'`:
+   * `ownership: 'business_unit'` is therefore still deliberately REJECTED by
+   * `ObjectSchema` (pinned in `packages/spec/src/data/object.test.ts`; the enum
+   * member is #5678). Today the column reaches objects through the DEFAULT
+   * (`ownership` omitted) and `'user'` tiers only. Do not read "INJECTED" as
+   * "the business-unit tier is available".
    *
-   * When injection lands (ADR-0117 D1 — gated on the `ownership` enum gaining
-   * its `business_unit` tier AND `applySystemFields`' `wantOwner` deny-list
-   * becoming an allow-list), this doc must flip to INJECTED and the objectql
-   * conformance test moves it from the reserved group to the injected group.
-   * Until then `ownership: 'business_unit'` is deliberately REJECTED by
-   * `ObjectSchema` — see `packages/spec/src/data/object.test.ts`.
+   * The column is also provisioned but **inert**: it is shaped after
+   * `organization_id` (`readonly`, `hidden`), not after `owner_id`, because it
+   * is a server-stamped scope anchor — and the stamping middleware (ADR-0117
+   * D2/D4) has not landed, so nothing writes a value yet. See
+   * `applySystemFields`' injection site (`packages/objectql/src/registry.ts`)
+   * for why that shape presumes nothing about the undecided D2 policy.
+   *
+   * The NAME was reserved here by ADR-0117 (Accepted, D1/D3 scoped) ahead of the
+   * injection so the canonical spelling had one reference from the start, and so
+   * consumers stopped inventing their own (`business_unit_id`, `bu_id`,
+   * `dept_id` …) — the drift mode framework#4330 / cloud#982 already paid for
+   * with `tenant_id`/`org_id`/`space`.
+   *
+   * It is on the public-form denylist as defense-in-depth: it is a kernel-owned
+   * ownership anchor, and a forged value on the anonymous surface would move the
+   * row behind another department's wall — the same forge class
+   * `owner_id`/`organization_id` are denied for. Denying it before it existed
+   * was free and fail-closed; adding it only now that open-core injects it would
+   * have been a hole with a release in it.
    *
    * @see docs/adr/0117-owning-business-unit-record-stamp.md
    */

@@ -102,6 +102,50 @@
 //     entry would vanish, so both captured diagnostics are re-emitted, named by
 //     attempt, and the error still propagates. Quiet is earned by the fallback
 //     that worked; it is never extended to the one that did not.
+//
+// WHY THE UNDECLARED COMMITS ARE NAMED, NOT ONLY COUNTED (#6174)
+// --------------------------------------------------------------
+// "Read what objectui declared" is the right criterion, and this changes none
+// of it. What it fixes is a REPORTING gap on the criterion's own shadow: a
+// commit that declared nothing is correctly kept out of the releasing list, and
+// used to leave the artifact as one digit inside `omitted: N commits carrying
+// no changeset`. Which commits those were, the record did not say.
+//
+// Measured on the real pin bump `f995a452d2ca..7dfbeb704e1e` (#6159 / PR
+// #6173), the 20 undeclared commits are 1 release commit, 3 dependabot bumps,
+// 15 docs/ci/scripts commits — and `0e50440e8`, `fix(form): bind `previous` for
+// field rules and stop resubmitting read-only fields` (objectui#3518): 26 files
+// across 5 packages and all ten locale packs, a user-visible form behaviour
+// change. Inside the number 20 it is indistinguishable from `chore(deps-dev):
+// Bump postcss from 8.5.25 to 8.5.26`. It shipped in the console build and is
+// in no CHANGELOG anywhere — not even objectui's, because there was no
+// changeset to compile. A count cannot be read; a subject can.
+//
+// Three boundaries this deliberately keeps:
+//
+//   * It does not touch the CRITERION. `noChangesetCommits` is rendered exactly
+//     as `classifyRange` produced it — unfiltered, unreordered. Nothing enters
+//     or leaves the releasing list, no count moves, and the accounting line is
+//     byte-for-byte what it was. Presentation only, the same separation
+//     `objectui-range.mjs` already keeps; the rows are spelled in that script's
+//     `--all` vocabulary (`- _(no changeset)_ …`) so the two artifacts read as
+//     one, which is what "wire up the capability that already exists" means.
+//   * It does not CLASSIFY them. `chore: release packages` and the form fix are
+//     both listed, flatly. Deciding which undeclared commit "matters" means
+//     inferring from a subject line — the exact move #4731 removed, and it
+//     would fail the same way, since the commit worth naming here carries a
+//     `fix(form)` subject no more distinctive than the `fix(ci)` beside it. The
+//     reader judges; the tool only stops hiding.
+//   * It is NOT the stderr fallback line (#6175). That one reports how the tool
+//     READ A FILE, which is not a fact about the release, so it stays on stderr
+//     beside the accounting. This one reports WHICH COMMITS entered the build
+//     with nothing declared for them — which is precisely what a release record
+//     is for. Adjacent facts, different readers, different destinations.
+//
+// The gate that would stop this at the source is objectui#3387 (a PR touching
+// `packages/*/src/**` with no changeset fails). Until it lands, this is the only
+// place the class is visible at all; after it lands, this list goes quiet on its
+// own, because there will be nothing to name.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -112,7 +156,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 
-/** Default cap on the rendered list. A cap that fires ANNOUNCES itself (#4731). */
+/**
+ * Default cap on EACH rendered list. The releasing entries (#4731) and the
+ * undeclared commits (#6174) are capped INDEPENDENTLY, so a long release can
+ * never squeeze the other list down to nothing — one budget shared between them
+ * would make the second list's length depend on the first's, which no reader
+ * could infer. A cap that fires ANNOUNCES itself, with the real total (#4731).
+ */
 export const DEFAULT_MAX_ENTRIES = 100;
 
 const LEVEL_RANK = { patch: 1, minor: 2, major: 3 };
@@ -511,7 +561,7 @@ export function classifyRange({ objectuiRoot, from, to }) {
 /**
  * Build the digest for a range.
  *
- * @returns {{ bump: string, declaredLevel: string|null, breaking: number, breakingByLevel: number, breakingByAnnotation: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, changesetsAdded: number, absentAtTo: number, totalCommits: number, downgradedMajor: boolean, body: string }}
+ * @returns {{ bump: string, declaredLevel: string|null, breaking: number, breakingByLevel: number, breakingByAnnotation: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, noChangesetCommits: Array<object>, changesetsAdded: number, absentAtTo: number, totalCommits: number, downgradedMajor: boolean, body: string }}
  */
 export function buildDigest({
   objectuiRoot,
@@ -521,12 +571,19 @@ export function buildDigest({
   max = DEFAULT_MAX_ENTRIES,
   bumpOverride = '',
 }) {
-  const { releasing, releaseNothing, noChangeset, changesetsAdded, absentAtTo, totalCommits } =
-    classifyRange({
-      objectuiRoot,
-      from,
-      to,
-    });
+  const {
+    releasing,
+    releaseNothing,
+    noChangeset,
+    noChangesetCommits,
+    changesetsAdded,
+    absentAtTo,
+    totalCommits,
+  } = classifyRange({
+    objectuiRoot,
+    from,
+    to,
+  });
 
   const declaredLevel = releasing.length
     ? releasing.reduce(
@@ -613,7 +670,58 @@ export function buildDigest({
     );
   }
 
-  const body = [accounting, '', ...lines, ...(notes.length ? ['', ...notes] : [])].join('\n');
+  // --- #6174: NAME the commits that declared nothing, don't only count them ---
+  // Rendered straight from `classifyRange`'s own `noChangesetCommits`, in its
+  // order, with no predicate of any kind: presentation, never a criterion (see
+  // the header note). Zero-suppressed, and the silence is safe because this
+  // block is never the SOLE record of the fact — whenever the count is non-zero
+  // the accounting line above already carries it, so an absent block can only
+  // mean "every commit in this range declared something", never "the section
+  // was not written" (the same reasoning that lets #6175's fallback sentence
+  // stay quiet on a range that crossed no release).
+  const undeclared = [];
+  if (noChangesetCommits.length > 0) {
+    const n = noChangesetCommits.length;
+    undeclared.push(
+      `**In this console build, declared nowhere** — objectui merged ${n} ` +
+        `commit${n === 1 ? '' : 's'} in this range with no \`.changeset/*.md\`. ` +
+        `The code is inside the pin above and ships here, but nothing upstream declared ` +
+        `${n === 1 ? 'it' : 'them'}, so ${n === 1 ? 'it appears' : 'they appear'} in no objectui ` +
+        `CHANGELOG and in no entry above. Listed by subject rather than counted, because a ` +
+        `count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); ` +
+        `the upstream gate that would prevent this is objectui#3387.`,
+      '',
+    );
+    const shownUndeclared = noChangesetCommits.slice(0, Math.max(0, max));
+    for (const c of shownUndeclared) {
+      undeclared.push(
+        `- _(no changeset)_ ${clampSummary(c.subject)} (objectui \`${c.sha.slice(0, 9)}\`)`,
+      );
+    }
+    const hiddenUndeclared = n - shownUndeclared.length;
+    if (hiddenUndeclared > 0) {
+      // Same rule as the releasing cap, and the reason it is worth repeating:
+      // this list's whole purpose is that a number hides which commits it is
+      // made of, so truncating it back into a number in silence would restore
+      // the exact defect. The marker carries the REAL TOTAL and the command
+      // that produces the rest (#4731: a degraded list and a complete one must
+      // never look alike).
+      undeclared.push(
+        `- …and ${hiddenUndeclared} more commit${hiddenUndeclared === 1 ? '' : 's'} with no ` +
+          `changeset — this list is capped at ${max}, the range has ${n} in total. ` +
+          `Run \`node scripts/objectui-range.mjs --from ${from.slice(0, 12)} ` +
+          `--to ${to.slice(0, 12)} --all\` for the complete list.`,
+      );
+    }
+  }
+
+  const body = [
+    accounting,
+    '',
+    ...lines,
+    ...(notes.length ? ['', ...notes] : []),
+    ...(undeclared.length ? ['', ...undeclared] : []),
+  ].join('\n');
 
   return {
     bump,
@@ -624,6 +732,7 @@ export function buildDigest({
     releasing,
     releaseNothing,
     noChangeset,
+    noChangesetCommits,
     changesetsAdded,
     absentAtTo,
     totalCommits,
@@ -835,8 +944,18 @@ function selfTest() {
       !digest.body.includes('cross-repo token'),
     );
     check(
-      'a `fix(ci)` commit with no changeset at all is NOT represented',
-      !digest.body.includes('budget FAIL'),
+      'a `fix(ci)` commit with no changeset at all is NOT represented as a releasing entry',
+      // #6174 repaired the PROXY, never the claim. This check has always meant
+      // "the criterion did not admit it", and tested that by looking for the
+      // subject ANYWHERE in the body — which stopped expressing it the moment
+      // the body began naming undeclared commits on purpose. It now says what it
+      // always meant, at both layers: the classified set, and the rendered
+      // releasing lines. The other half — that it IS named, under the undeclared
+      // block — is pinned in the #6174 group below.
+      !digest.releasing.some((r) => r.subject.includes('budget FAIL')) &&
+        !digest.body
+          .split('\n')
+          .some((l) => /^- \*\*(?:major|minor|patch)\*\* —/.test(l) && l.includes('budget FAIL')),
     );
     check('release-nothing changesets are counted, not dropped in silence', digest.releaseNothing === 1);
     check(
@@ -1281,6 +1400,214 @@ function selfTest() {
       "#6175 both attempts' git diagnostics are re-emitted, not swallowed",
       (bothFail.stderr.match(/fatal:/g) ?? []).length >= 2,
       bothFail.stderr,
+    );
+
+    // --- #6174: the undeclared commits are NAMED, not only counted -----------
+    // Its own repos, for the reason the two groups above have theirs: the #4731
+    // / #6099 / #6175 fixtures pin exact counts and must not shift underneath.
+    // The row count here is deliberately > 1 so "the list agrees with the count"
+    // is a real claim, and the cap can be made to fire without touching `max`
+    // anywhere else.
+    const SUBJECT_3518 =
+      'fix(form): bind `previous` for field rules and stop resubmitting read-only fields (#3518)';
+
+    const ui4 = join(tmp, 'objectui-undeclared');
+    mkdirSync(join(ui4, '.changeset'), { recursive: true });
+    const g4 = (...args) => git(ui4, args);
+    g4('init', '-q', '-b', 'main');
+    g4('config', 'user.email', 'selftest@objectstack.ai');
+    g4('config', 'user.name', 'self test');
+    g4('config', 'commit.gpgsign', 'false');
+    const commit4 = (subject, files) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(ui4, path)), { recursive: true });
+        writeFileSync(join(ui4, path), content);
+      }
+      g4('add', '-A');
+      g4('commit', '-q', '-m', subject);
+      return g4('rev-parse', 'HEAD').trim();
+    };
+
+    const base4 = commit4('chore: base', { 'README.md': 'base\n' });
+    commit4('feat(grid): row virtualization for long lists (#3600)', {
+      '.changeset/grid-row-virtualization.md':
+        '---\n"@object-ui/plugin-grid": patch\n---\n\nThe grid virtualizes long lists.\n',
+      'src/grid.ts': 'a\n',
+    });
+    // The live specimen this issue is named after: a real, user-visible change
+    // that declared nothing. Committed FIRST of the three so the newest-first
+    // order puts it LAST — which is what lets the cap below hide it.
+    const undeclared3518 = commit4(SUBJECT_3518, {
+      'packages/plugin-form/src/rules.ts': 'previous\n',
+      'packages/components/src/form.tsx': 'readonly\n',
+    });
+    const undeclaredDeps = commit4('chore(deps-dev): Bump postcss from 8.5.25 to 8.5.26 (#3519)', {
+      'package.json': '{"devDependencies":{"postcss":"8.5.26"}}\n',
+    });
+    const undeclaredDocs = commit4('docs(guide): retarget two dead examples/ links (#3509)', {
+      'docs/guide.md': 'links\n',
+    });
+    const head4 = g4('rev-parse', 'HEAD').trim();
+
+    const named = buildDigest({
+      objectuiRoot: ui4,
+      frameworkRoot: fwPlain,
+      from: base4,
+      to: head4,
+    });
+    const namedRows = named.body
+      .split('\n')
+      .filter((l) => l.startsWith('- _(no changeset)_'));
+
+    check(
+      '#6174 every commit with no changeset is NAMED by subject, carrying its sha',
+      namedRows.length === 3 &&
+        named.body.includes(
+          `- _(no changeset)_ ${SUBJECT_3518} (objectui \`${undeclared3518.slice(0, 9)}\`)`,
+        ) &&
+        named.body.includes(
+          `- _(no changeset)_ chore(deps-dev): Bump postcss from 8.5.25 to 8.5.26 (#3519) (objectui \`${undeclaredDeps.slice(0, 9)}\`)`,
+        ) &&
+        named.body.includes(
+          `- _(no changeset)_ docs(guide): retarget two dead examples/ links (#3509) (objectui \`${undeclaredDocs.slice(0, 9)}\`)`,
+        ),
+      named.body,
+    );
+    check(
+      '#6174 the rendered rows AGREE with the count — no list/number drift',
+      namedRows.length === named.noChangeset && named.noChangesetCommits.length === namedRows.length,
+      `rows=${namedRows.length} noChangeset=${named.noChangeset}`,
+    );
+    check(
+      '#6174 the block says WHAT it is — shipped in this build, declared nowhere',
+      named.body.includes(
+        '**In this console build, declared nowhere** — objectui merged 3 commits in this range with no `.changeset/*.md`.',
+      ) && named.body.includes('objectui#3387'),
+      named.body,
+    );
+    check(
+      '#6174 naming is ADDITIVE — the releasing list is unchanged and still leads',
+      named.releasing.length === 1 &&
+        named.body.includes('- **patch** — The grid virtualizes long lists.') &&
+        named.body.indexOf('- _(no changeset)_') > named.body.indexOf('- **patch** —'),
+      named.body,
+    );
+    check(
+      '#6174 the accounting line is untouched — a section was added, no count moved',
+      named.body.includes(
+        'Derived from the changesets objectui declared over the range — 1 releasing of 1 changeset added across 4 non-merge commits; omitted: 3 commits carrying no changeset (they ship no package code).',
+      ),
+      named.body,
+    );
+
+    const named2 = buildDigest({
+      objectuiRoot: ui4,
+      frameworkRoot: fwPlain,
+      from: base4,
+      to: head4,
+      max: 2,
+    });
+    const named2Rows = named2.body.split('\n').filter((l) => l.startsWith('- _(no changeset)_'));
+    check(
+      '#6174 a capped undeclared list SAYS SO, with the real total and the way to the rest',
+      named2Rows.length === 2 &&
+        named2.body.includes(
+          '- …and 1 more commit with no changeset — this list is capped at 2, the range has 3 in total.',
+        ) &&
+        named2.body.includes('--all'),
+      named2.body,
+    );
+    check(
+      '#6174 truncation CAN hide the one commit worth naming — which is why it is loud',
+      // Not a restatement of the check above: it measures the stake. The
+      // specimen is the oldest of the three, so a cap eats it first, and a
+      // SILENT cap would restore exactly the defect this issue is about — a
+      // number where objectui#3518 used to be.
+      !named2.body.includes(SUBJECT_3518) && named2.body.includes('the range has 3 in total'),
+      named2.body,
+    );
+    check(
+      '#6174 the two caps are INDEPENDENT — truncating the releasing list empties nothing else',
+      capped.body.includes('…and 2 more releasing changesets') &&
+        capped.body.includes(
+          '- _(no changeset)_ fix(ci): never render a budget FAIL for a run that measured nothing (#3198)',
+        ),
+      capped.body,
+    );
+    check(
+      '#6174 the commit the old body could only COUNT is now in the record by name',
+      digest.body.includes(
+        '- _(no changeset)_ fix(ci): never render a budget FAIL for a run that measured nothing (#3198)',
+      ),
+      digest.body,
+    );
+    check(
+      '#6174 only the no-changeset class is named — a release-nothing changeset DID declare',
+      // The count clause is the load-bearing one: it goes red both if the block
+      // disappears (1 → 0) and if release-nothing entries are swept in (1 → 2).
+      // The substring clause alone would be green for an empty reason.
+      digest.body.split('\n').filter((l) => l.startsWith('- _(no changeset)_')).length === 1 &&
+        !digest.body.includes('- _(no changeset)_ fix(ci): hand the cross-repo token'),
+      digest.body,
+    );
+    check(
+      '#6174 body names the commits, #6175 keeps the read-fallback on stderr — adjacent, not merged',
+      quietArtifact.includes('- _(no changeset)_ chore: release packages (#3403)') &&
+        !quietArtifact.includes('no longer exist at') &&
+        fellBack.stderr.includes('no longer exist at') &&
+        !fellBack.stderr.includes('_(no changeset)_'),
+      quietArtifact,
+    );
+
+    // NEGATIVE POLARITY, declared as such: this one cannot go red when the
+    // feature is deleted, because deleting it also produces no line. It pins a
+    // DIFFERENT regression — a block that fires on an empty list — so it stays,
+    // with the two positive guards that keep it from passing vacuously: the
+    // fixture must really be the zero case AND must really have produced a
+    // digest. Without them "no new line" would also be satisfied by an empty
+    // range, or by a `body` that failed to build at all.
+    const ui5 = join(tmp, 'objectui-all-declared');
+    mkdirSync(join(ui5, '.changeset'), { recursive: true });
+    const g5 = (...args) => git(ui5, args);
+    g5('init', '-q', '-b', 'main');
+    g5('config', 'user.email', 'selftest@objectstack.ai');
+    g5('config', 'user.name', 'self test');
+    g5('config', 'commit.gpgsign', 'false');
+    const commit5 = (subject, files) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(ui5, path)), { recursive: true });
+        writeFileSync(join(ui5, path), content);
+      }
+      g5('add', '-A');
+      g5('commit', '-q', '-m', subject);
+      return g5('rev-parse', 'HEAD').trim();
+    };
+    const base5 = commit5('chore: base', { 'README.md': 'base\n' });
+    commit5('feat(core): every commit in this range declares (#3700)', {
+      '.changeset/core-declares.md':
+        '---\n"@object-ui/core": minor\n---\n\nA declared change.\n',
+      'src/core.ts': 'a\n',
+    });
+    commit5('fix(fields): and so does this one (#3701)', {
+      '.changeset/fields-declares.md':
+        '---\n"@object-ui/fields": patch\n---\n\nAnother declared change.\n',
+      'src/fields.ts': 'b\n',
+    });
+    const head5 = g5('rev-parse', 'HEAD').trim();
+
+    const allDeclared = buildDigest({
+      objectuiRoot: ui5,
+      frameworkRoot: fwPlain,
+      from: base5,
+      to: head5,
+    });
+    check(
+      '#6174 a range where every commit declared gains NO new line (negative polarity)',
+      allDeclared.noChangeset === 0 &&
+        allDeclared.releasing.length === 2 &&
+        !allDeclared.body.includes('_(no changeset)_') &&
+        !allDeclared.body.includes('declared nowhere'),
+      allDeclared.body,
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });

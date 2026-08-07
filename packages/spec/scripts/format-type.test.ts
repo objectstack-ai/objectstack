@@ -31,7 +31,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { formatType, type TypeContext } from './lib/format-type';
+import { formatPropertyType, formatType, type TypeContext } from './lib/format-type';
 
 const ctx = (defs: Record<string, any> = {}): TypeContext => ({
   defs,
@@ -962,5 +962,254 @@ describe('formatType — the elision boundary (#5340)', () => {
     expect(formatType({ type: 'object', properties: { k: { enum: FIELD_TYPES } } })).toContain(
       "'vector'",
     );
+  });
+});
+
+/**
+ * `build-docs.ts` has always had a rendering for a long vocabulary — a
+ * `### Allowed Values` heading and one bullet per member — but it fired only
+ * when the WHOLE SCHEMA was `type: 'string'` + `enum`. The identical 49 members
+ * inlined onto a PROPERTY got a 561-character table cell instead, and
+ * `ApiError.code` got 6092 (#6225). `formatPropertyType` is the mirror of that
+ * branch, matched to it condition for condition.
+ *
+ * REVERSE VERIFICATION, direction predicted BEFORE running. One prediction held
+ * and one was WRONG in an informative direction — both recorded as measured:
+ *
+ *   1. Removing the limb (making `formatPropertyType` always delegate to
+ *      `formatType`) was predicted to redden only PART of this block — the
+ *      relocation cases — while the cases asserting `allowedValues === null`
+ *      stay green, because "no relocation anywhere" is exactly what they
+ *      already assert. HELD: **4 failed | 64 passed** in the file, the four
+ *      reds all relocation cases, every other block green.
+ *   2. The one that actually validates the design: putting the same budget in
+ *      `formatType`'s `enum` branch — where a naive fix would put it — was
+ *      predicted to redden five PRE-EXISTING #5340 tests, the four
+ *      `NOT elided` cases plus `does not elide when no ctx is passed at all`,
+ *      because a bare `formatType` call has nowhere to relocate members TO.
+ *      MISSED, and low: those five did redden, but so did two of the guards in
+ *      THIS block — `does NOT relocate an enum reached through an array, a
+ *      record or a union variant` and `does NOT relocate a NUMERIC enum`.
+ *      Measured **7 failed | 61 passed**, not the 5 predicted. The two extra
+ *      reds are the useful part of the result: the misplacement is caught by
+ *      this block on its own, so the contract does not depend on #5340's tests
+ *      continuing to exist. That is why the budget is read from
+ *      `formatPropertyType` and never from `formatType` — the narrow entry
+ *      point is the guarantee that a vocabulary is only ever cut where the full
+ *      list is printed underneath it.
+ */
+describe('formatPropertyType — a property that IS a vocabulary relocates it (#6225)', () => {
+  it('cuts the `Field.type` cell to a sample and hands back all 49 members', () => {
+    const { cell, allowedValues } = formatPropertyType({ type: 'string', enum: FIELD_TYPES }, ctx());
+    // The cell states what it is — a sample of a 49-term vocabulary — never a
+    // silent prefix.
+    expect(cell).toMatch(/^Enum<'text' \| .* \| … \+\d+ more>$/);
+    expect(cell.length).toBeLessThan(200);
+    // …and nothing is lost: the caller gets the WHOLE list, in schema order.
+    expect(allowedValues).toEqual(FIELD_TYPES);
+  });
+
+  it('cuts the 261-member `ApiError.code` cell — the 6092-character filed instance', () => {
+    const { cell, allowedValues } = formatPropertyType({ type: 'string', enum: ERROR_CODES }, ctx());
+    expect(cell).toContain('… +');
+    expect(cell).toContain('more>');
+    expect(cell.length).toBeLessThan(200);
+    expect(allowedValues).toHaveLength(ERROR_CODES.length);
+    expect(allowedValues).toEqual(ERROR_CODES);
+  });
+
+  it('states the hidden count exactly — shown members plus the count is the whole vocabulary', () => {
+    const { cell, allowedValues } = formatPropertyType({ type: 'string', enum: FIELD_TYPES }, ctx());
+    const hidden = Number(/… \+(\d+) more/.exec(cell)![1]);
+    const shown = cell.slice('Enum<'.length, -1).split(' | ').filter(m => !m.startsWith('…')).length;
+    expect(shown + hidden).toBe(FIELD_TYPES.length);
+    expect(allowedValues).toHaveLength(shown + hidden);
+  });
+
+  it('leaves an ordinary short vocabulary spelled out in its own cell', () => {
+    // The overwhelming majority of the corpus's 893 top-level enums. Nothing
+    // moves, and no page grows a section for two members.
+    const { cell, allowedValues } = formatPropertyType(
+      { type: 'string', enum: ['asc', 'desc'] },
+      ctx(),
+    );
+    expect(cell).toBe("Enum<'asc' | 'desc'>");
+    expect(allowedValues).toBeNull();
+  });
+
+  it('does NOT relocate an enum reached through an array, a record or a union variant', () => {
+    // Each renders an `Enum<…>` somewhere in its cell, but "the allowed values
+    // of this property" would be a false statement for all three — the members
+    // are the ELEMENT / VALUE / one-variant vocabulary. A bullet list under the
+    // table would claim something the schema does not, so they keep the full
+    // spelling #5340 left them with.
+    const array = formatPropertyType({ type: 'array', items: { type: 'string', enum: FIELD_TYPES } }, ctx());
+    expect(array.allowedValues).toBeNull();
+    expect(array.cell).toContain("'vector'");
+
+    const record = formatPropertyType(
+      { type: 'object', additionalProperties: { type: 'string', enum: FIELD_TYPES } },
+      ctx(),
+    );
+    expect(record.allowedValues).toBeNull();
+    expect(record.cell).toContain("'vector'");
+
+    // `ui/page.mdx`'s `PageComponent.type` — `z.union([z.enum([…]), z.string()])`.
+    const variant = formatPropertyType(
+      { anyOf: [{ type: 'string', enum: FIELD_TYPES }, { type: 'string' }] },
+      ctx(),
+    );
+    expect(variant.allowedValues).toBeNull();
+    expect(variant.cell).toContain("'vector'");
+  });
+
+  it('does NOT relocate a NUMERIC enum — the bullets would re-quote it (#5729)', () => {
+    // The mirrored whole-schema branch is `type === 'string' && enum` too, and
+    // the match is deliberate rather than incidental: the bullet list renders
+    // each member as `` * `x` ``, which cannot distinguish `2` from `'2'`. A
+    // numeric vocabulary keeps its cell, where `formatLiteral` still prints it
+    // bare.
+    const { cell, allowedValues } = formatPropertyType(
+      { type: 'number', enum: Array.from({ length: 60 }, (_, i) => i * 1000) },
+      ctx(),
+    );
+    expect(allowedValues).toBeNull();
+    expect(cell).toContain('59000');
+    expect(cell).not.toContain("'59000'");
+  });
+
+  // Distinct members of a FIXED width (10 characters, 12 once quoted), so the
+  // boundary arithmetic below is exact. `sized` above cannot serve here: its
+  // members grow from 10 to 19 characters once the index reaches two digits,
+  // which is invisible at the 80-character budget it was written for and moves
+  // the boundary by 9 characters at 160.
+  const fixed = (n: number) => Array.from({ length: n }, (_, i) => String(i).padStart(10, '0'));
+
+  it('prints a body AT the 160-character budget whole', () => {
+    // 10 members x 12 chars + 9 separators = 147; an 11th would be 162.
+    expect(fixed(10).map(m => `'${m}'`).join(' | ').length).toBe(147);
+    const { cell, allowedValues } = formatPropertyType({ type: 'string', enum: fixed(10) }, ctx());
+    expect(cell).not.toContain('more');
+    expect(allowedValues).toBeNull();
+  });
+
+  it('prints a body just OVER the budget whole — and adds no page section for it', () => {
+    // 162 characters. Hiding the single overflowing member saves 3 while the
+    // marker costs 12, so the guard refuses. The relocation refuses WITH it:
+    // this is the case where a whole `### Allowed Values` section would have
+    // been added to a page to shave 3 characters off one cell. Measured on the
+    // corpus, the guard refuses 7 such sections.
+    expect(fixed(11).map(m => `'${m}'`).join(' | ').length).toBe(162);
+    const { cell, allowedValues } = formatPropertyType({ type: 'string', enum: fixed(11) }, ctx());
+    expect(cell).not.toContain('more');
+    expect(allowedValues).toBeNull();
+  });
+
+  it('relocates at the first width where the marker DOES pay for itself', () => {
+    // 177 characters: 2 members hidden, 18 saved against a 12-character marker.
+    expect(fixed(12).map(m => `'${m}'`).join(' | ').length).toBe(177);
+    const { cell, allowedValues } = formatPropertyType({ type: 'string', enum: fixed(12) }, ctx());
+    expect(cell).toContain('… +2 more>');
+    expect(allowedValues).toEqual(fixed(12));
+  });
+
+  it('keeps every other property rendering byte-identical to `formatType`', () => {
+    // The wrapper is a narrow addition, not a second renderer: anything that is
+    // not an over-wide string vocabulary must come back exactly as before.
+    for (const node of [
+      { type: 'string' },
+      { type: 'array', items: { type: 'string' } },
+      INDEX_SCHEMA,
+      BULK_ACTION_PARAMS,
+      { anyOf: [{ type: 'string' }, { type: 'number' }] },
+      { not: {} },
+    ]) {
+      expect(formatPropertyType(node, ctx()).cell).toBe(formatType(node, ctx()));
+      expect(formatPropertyType(node, ctx()).allowedValues).toBeNull();
+    }
+  });
+});
+
+/**
+ * A union's width is variant COUNT times variant WIDTH, so neither enum budget
+ * can reach it — `ui/app.mdx`'s `App.navigation` printed the same
+ * `{ id; label; icon?; order?; … }` shape nine times, seven of them
+ * character-identical, for 582 characters (#6226).
+ *
+ * REVERSE VERIFICATION: raising `VARIANT_LIMIT` past every union in the corpus
+ * (i.e. putting the un-capped `variants.map(...).join(' | ')` back) was
+ * predicted to redden only the cases that assert a marker, leaving the three
+ * that assert a FULL spelling green — because no-cap produces exactly the full
+ * spelling those three demand. HELD: **4 failed | 64 passed** in the file, the
+ * four reds being precisely the marker cases, and no other block moved.
+ */
+describe('formatType — a union spells four variants and counts the rest (#6226)', () => {
+  const variant = (id: string) => ({
+    type: 'object',
+    properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string' }, order: { type: 'number' }, [id]: { type: 'string' } },
+    required: ['id', 'label'],
+  });
+
+  it('renders the `App.navigation` cell as four variants plus a count (the filed instance)', () => {
+    const rendered = formatType(
+      { type: 'array', items: { anyOf: Array.from({ length: 9 }, (_, i) => variant(`k${i}`)) } },
+      ctx(),
+    );
+    expect(rendered).toContain('… +5 more');
+    // Still an ARRAY of that union — the parenthesis #5338 added must survive
+    // the elision, or the cell states a different type than the schema.
+    expect(rendered.startsWith('(')).toBe(true);
+    expect(rendered.endsWith(')[]')).toBe(true);
+    expect(rendered.length).toBeLessThan(400);
+  });
+
+  it('states the hidden count exactly — shown variants plus the count is the arity', () => {
+    const rendered = formatType({ anyOf: Array.from({ length: 7 }, (_, i) => variant(`k${i}`)) }, ctx());
+    const hidden = Number(/… \+(\d+) more/.exec(rendered)![1]);
+    const shown = rendered.split(' | ').filter(v => !v.startsWith('…')).length;
+    expect(shown).toBe(4);
+    expect(shown + hidden).toBe(7);
+  });
+
+  it('spells a union of exactly four variants in full — the cap is not a cliff at four', () => {
+    const rendered = formatType({ anyOf: Array.from({ length: 4 }, (_, i) => variant(`k${i}`)) }, ctx());
+    expect(rendered).not.toContain('more');
+    expect(rendered.split(' | ')).toHaveLength(4);
+  });
+
+  it('leaves the corpus-dominant two-variant union exactly as it renders today', () => {
+    // 256 of the corpus's 353 unions are these, and none of them moves.
+    expect(formatType({ anyOf: [{ type: 'string' }, { type: 'number' }] }, ctx())).toBe(
+      'string | number',
+    );
+  });
+
+  it('does NOT elide five tiny variants — the marker would cost more than it saves', () => {
+    // `string | string | string | string | string` is 42 characters; capping it
+    // would print 33 + a 12-character marker footprint and come out LONGER. The
+    // pay-for-your-marker guard is shared with the enum elisions, so a count
+    // never replaces a spelling that was already shorter than the count.
+    const rendered = formatType({ anyOf: Array.from({ length: 5 }, () => ({ type: 'string' })) }, ctx());
+    expect(rendered).toBe('string | string | string | string | string');
+    expect(rendered).not.toContain('more');
+  });
+
+  it('elides the same way under `oneOf` as under `anyOf`', () => {
+    const rendered = formatType({ oneOf: Array.from({ length: 9 }, (_, i) => variant(`k${i}`)) }, ctx());
+    expect(rendered).toContain('… +5 more');
+  });
+
+  it('caps a union nested inside a shape summary too, alongside the enum elision', () => {
+    // The two elisions compose: `Page.slots`-shaped cells carry both.
+    const rendered = formatType(
+      {
+        type: 'object',
+        properties: {
+          slot: { anyOf: Array.from({ length: 6 }, (_, i) => variant(`k${i}`)) },
+        },
+      },
+      ctx(),
+    );
+    expect(rendered).toContain('… +2 more');
   });
 });

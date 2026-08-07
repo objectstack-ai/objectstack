@@ -40,7 +40,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| 'INVALID_REFERENCE' \| 'DUPLICATE_VALUE' \| 'INVALID_QUERY' \| 'INVALID_FILTER' \| 'INVALID_SORT' \| 'MAX_RECORDS_EXCEEDED' \| 'UNAUTHENTICATED' \| 'INVALID_CREDENTIALS' \| 'EXPIRED_TOKEN' \| 'INVALID_TOKEN' \| 'SESSION_EXPIRED' \| 'MFA_REQUIRED' \| 'EMAIL_NOT_VERIFIED' \| 'PERMISSION_DENIED' \| 'INSUFFICIENT_PRIVILEGES' \| 'FIELD_NOT_ACCESSIBLE' \| 'RECORD_NOT_ACCESSIBLE' \| 'LICENSE_REQUIRED' \| 'IP_RESTRICTED' \| 'TIME_RESTRICTED' \| 'RESOURCE_NOT_FOUND' \| 'OBJECT_NOT_FOUND' \| 'RECORD_NOT_FOUND' \| 'FIELD_NOT_FOUND' \| 'ENDPOINT_NOT_FOUND' \| 'RESOURCE_CONFLICT' \| 'CONCURRENT_MODIFICATION' \| 'DELETE_RESTRICTED' \| 'DUPLICATE_RECORD' \| 'LOCK_CONFLICT' \| 'METHOD_NOT_ALLOWED' \| 'PRECONDITION_REQUIRED' \| 'RATE_LIMIT_EXCEEDED' \| 'QUOTA_EXCEEDED' \| 'CONCURRENT_LIMIT_EXCEEDED' \| 'INTERNAL_ERROR' \| 'DATABASE_ERROR' \| 'TIMEOUT' \| 'SERVICE_UNAVAILABLE' \| 'NOT_IMPLEMENTED' \| 'EXTERNAL_SERVICE_ERROR' \| 'INTEGRATION_ERROR' \| 'WEBHOOK_DELIVERY_FAILED' \| 'BATCH_PARTIAL_FAILURE' \| 'BATCH_COMPLETE_FAILURE' \| 'TRANSACTION_FAILED'>` | ✅ | Machine-readable error code |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +46 more>` | ✅ | Machine-readable error code |
 | **message** | `string` | ✅ | Human-readable error message |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
 | **httpStatus** | `number` | optional | HTTP status code |
@@ -55,6 +55,62 @@ const result = EnhancedApiErrorSchema.parse(data);
 | **traceId** | `string` | optional | Distributed trace ID |
 | **documentation** | `string` | optional | URL to error documentation |
 | **helpText** | `string` | optional | Suggested actions to resolve the error |
+
+### Allowed Values: `EnhancedApiError.code`
+
+* `VALIDATION_ERROR`
+* `INVALID_FIELD`
+* `MISSING_REQUIRED_FIELD`
+* `INVALID_FORMAT`
+* `VALUE_TOO_LONG`
+* `VALUE_TOO_SHORT`
+* `VALUE_OUT_OF_RANGE`
+* `INVALID_REFERENCE`
+* `DUPLICATE_VALUE`
+* `INVALID_QUERY`
+* `INVALID_FILTER`
+* `INVALID_SORT`
+* `MAX_RECORDS_EXCEEDED`
+* `UNAUTHENTICATED`
+* `INVALID_CREDENTIALS`
+* `EXPIRED_TOKEN`
+* `INVALID_TOKEN`
+* `SESSION_EXPIRED`
+* `MFA_REQUIRED`
+* `EMAIL_NOT_VERIFIED`
+* `PERMISSION_DENIED`
+* `INSUFFICIENT_PRIVILEGES`
+* `FIELD_NOT_ACCESSIBLE`
+* `RECORD_NOT_ACCESSIBLE`
+* `LICENSE_REQUIRED`
+* `IP_RESTRICTED`
+* `TIME_RESTRICTED`
+* `RESOURCE_NOT_FOUND`
+* `OBJECT_NOT_FOUND`
+* `RECORD_NOT_FOUND`
+* `FIELD_NOT_FOUND`
+* `ENDPOINT_NOT_FOUND`
+* `RESOURCE_CONFLICT`
+* `CONCURRENT_MODIFICATION`
+* `DELETE_RESTRICTED`
+* `DUPLICATE_RECORD`
+* `LOCK_CONFLICT`
+* `METHOD_NOT_ALLOWED`
+* `PRECONDITION_REQUIRED`
+* `RATE_LIMIT_EXCEEDED`
+* `QUOTA_EXCEEDED`
+* `CONCURRENT_LIMIT_EXCEEDED`
+* `INTERNAL_ERROR`
+* `DATABASE_ERROR`
+* `TIMEOUT`
+* `SERVICE_UNAVAILABLE`
+* `NOT_IMPLEMENTED`
+* `EXTERNAL_SERVICE_ERROR`
+* `INTEGRATION_ERROR`
+* `WEBHOOK_DELIVERY_FAILED`
+* `BATCH_PARTIAL_FAILURE`
+* `BATCH_COMPLETE_FAILURE`
+* `TRANSACTION_FAILED`
 
 
 ---
@@ -96,11 +152,41 @@ const result = EnhancedApiErrorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field path (supports dot notation) |
-| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| 'invalid_boolean' \| 'invalid_number' \| 'invalid_date' \| 'invalid_time' \| 'invalid_email' \| 'invalid_url' \| 'invalid_phone' \| 'invalid_json' \| 'invalid_format' \| 'min_length' \| 'max_length' \| 'min_value' \| 'max_value' \| 'min_items' \| 'max_items' \| 'invalid_option' \| 'invalid_value' \| 'reference_not_found' \| 'reference_ambiguous' \| 'rule_violation' \| 'json_schema_violation' \| 'invalid_initial_state' \| 'invalid_transition'>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
+| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| 'invalid_boolean' \| 'invalid_number' \| 'invalid_date' \| 'invalid_time' \| 'invalid_email' \| … +18 more>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
 | **message** | `string` | ✅ | Human-readable error message, rendered in the caller’s locale |
 | **label** | `string` | optional | Field display label in the caller’s locale |
 | **value** | `any` | optional | The invalid value that was provided |
 | **constraint** | `Record<string, any>` | optional | The constraint that was violated, as discrete values (e.g. `{ maxLength: 512, actual: 3000 }`) |
+
+### Allowed Values: `FieldError.code`
+
+* `required`
+* `invalid_type`
+* `invalid_shape`
+* `unknown_field`
+* `invalid_boolean`
+* `invalid_number`
+* `invalid_date`
+* `invalid_time`
+* `invalid_email`
+* `invalid_url`
+* `invalid_phone`
+* `invalid_json`
+* `invalid_format`
+* `min_length`
+* `max_length`
+* `min_value`
+* `max_value`
+* `min_items`
+* `max_items`
+* `invalid_option`
+* `invalid_value`
+* `reference_not_found`
+* `reference_ambiguous`
+* `rule_violation`
+* `json_schema_violation`
+* `invalid_initial_state`
+* `invalid_transition`
 
 
 ---

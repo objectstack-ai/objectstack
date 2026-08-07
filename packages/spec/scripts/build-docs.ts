@@ -36,7 +36,7 @@ import {
 } from './lib/docs-import-surface';
 import { escapeMdxDescription } from './lib/escape-mdx';
 import { renderFileDescription } from './lib/file-description';
-import { anchorFor, formatType, type TypeContext } from './lib/format-type';
+import { anchorFor, formatPropertyType, formatType, type TypeContext } from './lib/format-type';
 import { createSink } from './lib/generated-output';
 import {
   blurbCoverage,
@@ -333,14 +333,22 @@ function generateMarkdown(schemaName: string, schema: any, category: string, zod
   const typeCtx: TypeContext = { defs, currentSchema: schemaName, schemaHref: schemaHrefFrom(category) };
 
   const renderProperties = (props: any, required: Set<string> = new Set()) => {
+      // Vocabularies too wide for their own table cell. Collected while the
+      // table is built and printed as `### Allowed Values` bullets right after
+      // it, so the complete list never leaves the page the cell sits on
+      // (#6225) — the same rendering a hoisted `type: 'string'` + `enum` schema
+      // has always got, now reachable from a property position too.
+      const relocated: Array<{ key: string; members: string[] }> = [];
       let t = `### Properties\n\n`;
       t += `| Property | Type | Required | Description |\n`;
       t += `| :--- | :--- | :--- | :--- |\n`;
       for (const [key, prop] of Object.entries(props) as [string, any][]) {
+          const { cell, allowedValues } = formatPropertyType(prop, typeCtx);
+          if (allowedValues) relocated.push({ key, members: allowedValues });
           // Backslashes first, then pipes — same order as `desc` below, and for
           // the same reason: escaping pipes first lets a literal backslash in
           // the input pair with the escape and free the pipe again.
-          const typeStr = formatType(prop, typeCtx)
+          const typeStr = cell
             .replace(/\\/g, '\\\\')
             .replace(/\|/g, '\\|');
           const isReq = required.has(key) ? '✅' : 'optional';
@@ -353,7 +361,16 @@ function generateMarkdown(schemaName: string, schema: any, category: string, zod
             .replace(/\|/g, '\\|');
           t += `| **${key}** | \`${typeStr}\` | ${isReq} | ${desc} |\n`;
       }
-      return t + '\n';
+      t += '\n';
+      // Qualified by schema AND property: `api/errors.mdx` carries a wide
+      // `code` on both `EnhancedApiError` and `FieldError`, so a heading naming
+      // only the property would give one page two identical anchors.
+      for (const { key, members } of relocated) {
+          t += `### Allowed Values: \`${schemaName}.${key}\`\n\n`;
+          t += members.map(m => `* \`${m}\``).join('\n');
+          t += `\n\n`;
+      }
+      return t;
   };
 
   if (mainDef.type === 'object' && mainDef.properties) {

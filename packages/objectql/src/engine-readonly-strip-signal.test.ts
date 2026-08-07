@@ -15,10 +15,13 @@
 // This suite pins the three things that decide how expensive that is to
 // diagnose:
 //
-//  1. WHY the hook path differs (`suppliedKeys` is snapshotted at engine entry,
-//     BEFORE middleware and beforeUpdate hooks run) — the asymmetry the issue
-//     reports is pinned as EXISTING behaviour so the next change to it is
-//     deliberate. Nothing here endorses it.
+//  1. WHY the hook path differs (the caller's payload is snapshotted at engine
+//     entry, BEFORE middleware and beforeUpdate hooks run, so a hook write is
+//     not a caller write). #5591 narrowed that snapshot's reading from a key
+//     SET to the keys AND VALUES: a hook that OVERWRITES a read-only key the
+//     caller also sent now survives too, where before it was deleted along
+//     with the caller's value. See the block at the bottom of this file — the
+//     case that pinned the old behaviour was replaced there, not re-spelled.
 //  2. The strip's log states the CONSEQUENCE and both REMEDIES, so the log is
 //     actionable on its own (#4632's second-class shape: caller believes
 //     persisted, database disagrees, log is the only trace).
@@ -210,7 +213,7 @@ describe('static `readonly` write strip — caller-facing signal (#4903)', () =>
     stripReadonlyFields(
       { name: 'attendance', fields: { work_duration: { type: 'number', readonly: true } } } as any,
       { work_duration: 480 },
-      new Set(['work_duration']),
+      { work_duration: 480 },
       probe,
     );
     expect(calls.map(([level]) => level)).toEqual(['warn']);
@@ -221,14 +224,22 @@ describe('static `readonly` write strip — caller-facing signal (#4903)', () =>
     expect(readonlyStripWarning('work_duration')).toContain("Field 'work_duration' is read-only");
   });
 
-  // ── 4. the hook/plugin asymmetry, PINNED as-is ──────────────────────────
+  // ── 4. hook write vs. caller supply — the two are now judged alike ──────
   //
-  // NOT an endorsement. The issue asks whether a beforeUpdate hook SHOULD be
-  // able to write a column a plugin cannot; that question is open. This pins
-  // the current answer and — more usefully — the MECHANISM, so a future change
-  // is made on purpose instead of by accident.
+  // This block used to pin the OPPOSITE of its second case, under the heading
+  // "the hook/plugin asymmetry, PINNED as-is", explicitly as a mechanism record
+  // and explicitly not as an endorsement ("a future change is made on purpose
+  // instead of by accident"). #5591 is that change, so the case is REPLACED
+  // rather than re-spelled: it asserted that a hook could not rescue a key the
+  // caller had supplied, which is exactly the limb that was removed.
+  //
+  // What survives unchanged is the principle underneath: a value a HOOK wrote
+  // is a platform write and lands; a value the CALLER submitted to a read-only
+  // column does not. #4903 pins that from the "hook adds a new key" side, and
+  // the old asymmetry was that the same hook write died instead whenever the
+  // caller's payload happened to carry the same key name.
 
-  describe('beforeUpdate backfill vs. caller supply (pinned mechanism)', () => {
+  describe('beforeUpdate write vs. caller supply', () => {
     it('a hook-written readonly field LANDS while the same field supplied by the caller is stripped', async () => {
       engine.registerHook('beforeUpdate', async (ctx: any) => {
         ctx.input.data.work_duration = 480;
@@ -239,12 +250,13 @@ describe('static `readonly` write strip — caller-facing signal (#4903)', () =>
       expect(att().work_duration).toBe(480);
     });
 
-    it('a hook cannot rescue a key the CALLER supplied — the snapshot is taken first', async () => {
-      // The mechanism, stated: `suppliedKeys` is `new Set(Object.keys(data))`
-      // captured at engine entry, BEFORE middleware and beforeUpdate hooks run.
-      // A key the hook ADDS is absent from that snapshot and survives; a key the
-      // caller sent is in it and is stripped no matter what the hook does to the
-      // value afterwards.
+    it('[#5591] a hook OVERWRITING a key the caller supplied now survives the strip', async () => {
+      // The mechanism, restated: the entry snapshot carries the caller's VALUES,
+      // and the strip deletes a read-only key only while it still holds the
+      // caller's own value. A hook that writes over it has replaced a caller
+      // write with a platform write, and platform writes to read-only columns
+      // are legitimate. Before #5591 the snapshot was a key SET, so the hook's
+      // 999 was deleted and the column kept its stored null.
       storeFor('attendance').set('att_2', { id: 'att_2', status: 'open', work_duration: null });
       engine.registerHook('beforeUpdate', async (ctx: any) => {
         if (ctx.input.data.work_duration !== undefined) ctx.input.data.work_duration = 999;
@@ -252,20 +264,29 @@ describe('static `readonly` write strip — caller-facing signal (#4903)', () =>
 
       await engine.update('attendance', { id: 'att_2', status: 'closed', work_duration: 480 });
       expect(storeFor('attendance').get('att_2')).toMatchObject({ status: 'closed' });
-      expect(storeFor('attendance').get('att_2').work_duration).toBeNull();
+      // The HOOK's value — never the caller's 480.
+      expect(storeFor('attendance').get('att_2').work_duration).toBe(999);
+    });
+
+    it('[#5591] with NO hook on the key, the caller-supplied value is still stripped', async () => {
+      // The #2948 verdict, unchanged: this is the case the strip exists for,
+      // and it must not have moved a millimetre.
+      storeFor('attendance').set('att_3', { id: 'att_3', status: 'open', work_duration: null });
+      await engine.update('attendance', { id: 'att_3', status: 'closed', work_duration: 480 });
+      expect(storeFor('attendance').get('att_3').work_duration).toBeNull();
     });
 
     it('the engine-stamped audit column is the same exemption, not a special case', () => {
       // `updated_by` survives a user write for exactly one reason: the audit
-      // hook writes it, so it is not in `suppliedKeys`. Supplied explicitly, it
-      // is dropped like any other readonly field.
+      // hook writes it, so it is not in the caller's snapshot. Supplied
+      // explicitly, it is dropped like any other readonly field.
       const schema = {
         name: 'attendance',
         fields: { updated_by: { type: 'text', readonly: true, system: true } },
       } as any;
-      const stamped = stripReadonlyFields(schema, { updated_by: 'hook-stamp' }, new Set());
+      const stamped = stripReadonlyFields(schema, { updated_by: 'hook-stamp' }, {});
       expect(stamped).toEqual({ updated_by: 'hook-stamp' });
-      const forged = stripReadonlyFields(schema, { updated_by: 'attacker' }, new Set(['updated_by']));
+      const forged = stripReadonlyFields(schema, { updated_by: 'attacker' }, { updated_by: 'attacker' });
       expect(forged).toEqual({});
     });
   });

@@ -1410,10 +1410,22 @@ const FormFieldBaseSchema = lazySchema(() => z.object({
   /**
    * Conditional-visibility predicate (CEL) — the field is shown only when TRUE
    * (ADR-0089, canonical `*When` name). Binding root depends on the surface:
-   * runtime record forms bind `record` + `current_user`; metadata-editing forms
+   * runtime record forms bind `record` (plus `previous`, the saved record, and
+   * `parent` for master-detail line items); metadata-editing forms
    * (`*.form.ts`) bind the row under edit as `data`.
+   *
+   * ⚠️ **No `current_user` here** (#6146). Field-level rules are evaluated by
+   * `evalFieldPredicate` / `resolveFieldRuleState` (`@object-ui/core`), which
+   * binds `record` + `previous` + an `extra` scope and nothing else — the
+   * autocomplete pins the same set (objectui#1582). A predicate referencing
+   * `current_user` is an UNBOUND identifier: the evaluation faults and falls
+   * back, and visibility's fallback is `true`, so the field a `current_user`
+   * test was meant to hide stays **permanently visible**. `current_user` IS
+   * bound for **per-option** `visibleWhen` (a different evaluator —
+   * `resolveCascadingOptions` against the host's predicate scope, ADR-0068 /
+   * objectui#2284); that is the only `*When` surface where it resolves.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). e.g. P`record.priority == 'urgent'`"),
+  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at field level — it is unbound here and the predicate would fault open (per-option `visibleWhen` is the surface that binds it). e.g. P`record.priority == 'urgent'`"),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
@@ -1504,10 +1516,12 @@ export const FormSectionSchema = lazySchema(() => z.object({
   /**
    * Conditional-visibility predicate (CEL) — the whole section is shown only
    * when TRUE (ADR-0089, canonical `*When` name). Same per-layer binding root as
-   * {@link FormFieldSchema.visibleWhen}: `record`+`current_user` in runtime
-   * forms, `data` in metadata-editing forms.
+   * {@link FormFieldSchema.visibleWhen}: `record` (+ `previous`, `parent`) in
+   * runtime forms, `data` in metadata-editing forms — and, as there, **no
+   * `current_user`**: it is unbound at this level, so such a predicate faults
+   * and falls back to visible (#6146).
    */
-  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms).'),
+  visibleWhen: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. No `current_user` at section level — it is unbound here and the predicate would fault open.'),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
   columns: z.union([

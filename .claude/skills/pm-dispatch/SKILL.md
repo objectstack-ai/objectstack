@@ -576,7 +576,8 @@ file the fix touches, you have not triaged it yet, and it is not labelable.
 
 | 标签 | 包家族 |
 |:--|:--|
-| `domain:engine-core` | `packages/objectql`、`packages/metadata*`、`packages/platform-objects`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(`__search` 伴生列由 SchemaRegistry 声明、engine 把它 OR 进 `$search`,落点在编译/查询核心而非任何 driver;全局写钩子同 #4775 锚定) |
+| `domain:engine-core` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`(`__search` 伴生列由 SchemaRegistry 声明、engine 把它 OR 进 `$search`,落点在编译/查询核心而非任何 driver;全局写钩子同 #4775 锚定) |
+| `domain:metadata` | `packages/metadata*`(metadata service / registry / directory:加载、注册、持久化、缓存、目录)、`packages/platform-objects`(内置平台对象定义)—— 见下「`engine-core` 再拆 `metadata`」 |
 | `domain:drivers` | `packages/drivers/driver-*`(`driver-memory` / `driver-mongodb` / `driver-sql` / `driver-sqlite-wasm`) |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`(flow 触发器)、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow` |
 | `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
@@ -596,7 +597,7 @@ updated **by PR** — the taxonomy evolves deliberately, never per-claim.
 
 - `packages/apps/*` 今天只是 app manifest + plugin 壳,内容仍从
   `@objectstack/platform-objects/apps` 再导出,落点可能在 platform-objects
-  (`engine-core`)、这三个包本身、或控制台渲染面(`repo:objectui`)—— 按主要
+  (`metadata`)、这三个包本身、或控制台渲染面(`repo:objectui`)—— 按主要
   落地站点在分诊时判定。
 - `packages/console` 是 `../objectui` 构建产物的落盘位:仓内只跟踪
   `package.json` / `README` / `CHANGELOG`,`dist/` 由 `scripts/build-console.sh`
@@ -650,6 +651,26 @@ objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
   一次性重标;拆分时已在飞的打包卡(sweep/工头)由原认领者跟完,不迁移。
 - **运行模式**:surface 席 sweep-first —— 一认领、一 PR、多单 `Fixes`,逐单
   清单复审、零 rider,把认领/PR/CI/验收的固定开销摊薄到 1/N(试点 #6243)。
+
+**`engine-core` 再拆 `metadata`(维护者 2026-08-07 拍板,座位贴 #6367)。**
+首拆后的 engine-core 仍是全仓最大、增长最快的车道:编译/查询核心与元数据
+机制(service / registry / directory + 内置平台对象)的落地节律不同 —— 前者
+深、串行、常挂 ★,后者以机制修缮与观测型 finding 为主,天然可并行。二次
+切分仍按包边界(anchoring rule 无例外,与 spec 拆分不同):**`engine-core` =
+编译/查询核心**(objectql / core / formula / plugin-pinyin-search),
+**`metadata` = 元数据机制与内置对象**(`packages/metadata*`、
+`packages/platform-objects`)。配套纪律:
+
+- **红线**:改变元数据**格式/接受面**的卡照旧归 `domain:spec`(协议席,判据
+  「合法集合变没变」,#6245/#6235 先例);`/meta` HTTP 路由本体在
+  `packages/rest`,归 `domain:cli` —— `metadata` 席只吃 engine 侧机制。跨半边
+  的卡按主要落点判,拿不准 FLAG 回分诊。
+- **迁移**:存量带 `domain:engine-core` 的 open issue 由**分诊座位**按落点
+  逐条改标(只读分类审计留证,逐卡迁移评论);已在飞(`pm:dispatched`)的
+  **改标不改辖** —— 标签随分类走,收尾与复核仍归原认领会话(先例 #6298
+  说明段)。
+- **座位贴新立**:#6367,范围段照抄上表;母席 #6019 范围随表收缩,由其在任
+  PM 自行更新正文(单写手规则),分诊座位只留知会评论。
 
 **Label discipline —— 单一生产者。** `domain:*` 只由**分诊座位**在 backlog
 sweep(round loop step 0)产出,全仓唯一(rule 4)。**打标签 ≠ 认领**:分诊座位
@@ -818,6 +839,24 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
   范围 —— 已排队父单的 sub-issue 会自动成为派发候选(step 1),把仅有依赖
   关系的发现挂进去等于让未分诊的东西静默入池;那种情况独立立单 +
   `Blocked-by:`(cloud#1045/#1046 之于 cloud#1050 即此形)。
+- **sweep 打包晋级**(试点 #6243 / PR #6288 一轮跑顺后定稿,维护者
+  2026-08-07 批准):晋级一批**同类**发现时,可以打包成**一张 sweep 卡**
+  代替逐张入队 —— 一次认领、一个 PR、N 条 `Fixes`、逐项清单评审,把每单的
+  认领/PR/CI/验收固定开销摊薄到 1/N。这是「顺手修」的制度化替身:省同一笔
+  固定开销,但评审完整性不打折。打包判据与纪律,五条都是试点实测过的:
+  1. **同类才打包**:全部命中同一判据(试点即「description 面在说谎或漂移」,
+     全部校验不变量卡);不同性质的卡打包=一张 PR 里混多个评审面,禁止;
+  2. **逐项清单是 PR 正文的必备件**:每项一行 落点 | before | after,评审
+     按行核,不按 diff 顺序读;
+  3. **N 项之外零改动**,且 PR 自证(`git diff --stat` 文件数与清单一一
+     对应)—— 这是 sweep 与 rider 的分界线;
+  4. **范围外发现照旧单开**(PD #10 不因打包而豁免;#6287 之于 #6288 即
+     此形);
+  5. **卡片本身是认领对象**:sweep 卡入队、被认领,成员单保持 `pm:queue`
+     标签但**不再是可派发候选**(选择期按 sweep 卡的成员清单排除,防双派;
+     PR 合并时 N 条 `Fixes` 齐关)。
+  适用面注记:`domain:spec-surface` 车道的默认运行模式即 sweep-first
+  (见「`spec` 一分为二」);其它车道按发现批次的同类度自行判断。
 
 #### 发版板(`target:<major>` —— 发版视角的常设轴,维护者 2026-08-06 拍板)
 
@@ -1357,15 +1396,31 @@ to `mode:subagent`).
    处停摆,而 PM 只能靠 poke 唤醒。条款原文形:⛔ 不为提问/中期汇报结束回合;
    开放选择按裁决与三轴自裁记入终报 open_questions;合法回合终点只有
    (a) 推送完成 + 终报 JSON 作为最后一条消息,或 (b) 硬阻塞详报。
-3. **交付通道写明降级路径。** 云会话通常没有 GitHub API 工具(连接器不随
-   create_session/trigger 传递),派发词写明:开 PR / 发评论失败 ⛔ 不视为
-   阻塞 —— 推送 outcome branch + 终报作最后一条会话消息,**PM 代开 draft
-   PR、代转录报告**到 issue(权限面不因此放大)。
+3. **交付通道:自开 PR + 订阅唤醒是正道,降级通道只属于 trigger 流。**
+   初版条款以为云会话一律没有 GitHub API 工具 —— 对 `create_session` 卡是
+   **过度保守的误判**(2026-08-07 下午三例实测推翻:#5599 会话自发 issue
+   评论、#5775 会话自立两张 issue、#6243 会话自开 PR #6288),没有工具的只是
+   **trigger 拉起**的会话(与第 1 课的 403 同源)。据此分流:
+   - **create_session 卡(常态)**:派发词要求 dev **自开 draft PR**
+     (`Fixes #<n>`,正文含验证记录)并把终报以 **issue 评论**
+     (`<!-- os-dev-report -->`)交付;PM 在派发后立即对该 PR(或预期分支的
+     PR)挂 `subscribe_pr_activity` —— dev 的完成动作即 webhook,通知延迟从
+     「≤巡检间隔」降到秒级。**例外仍归 PM 代办**:会话未 attach 的姊妹仓
+     (源仓之外)依旧够不着 —— 跨仓跟进卡由 PM 代立(#5775 的 objectui
+     跟进卡即此形)。
+   - **trigger 拉起的会话(定时/重复型)**:维持降级通道 —— 推送 outcome
+     branch + 终报走报告 ref(空提交信息)或最后一条会话消息,PM 代开
+     draft PR、代转录(权限面不因此放大)。附一条实测:报告 ref 用完后
+     PM 侧 `push --delete` 会被 git 代理 403(推送授权不含删 ref),清理
+     要走有权限的通道或留给维护者。
 
-**监控与转向**:`get_session` 读实时状态(status / model / token 用量;
-IDLE + 分支未推送 = 停摆待 poke);投递消息用**绑定会话的 poke 触发器**
-(`create_trigger` 带 `persistent_session_id` + `fire_trigger` + 用后即
-`delete_trigger`)。收报:巡检主动读会话终报与分支推送,⛔ 不等推送通知。
+**监控与转向**:事件面交给 PR 订阅(上条),`get_session` 读实时状态
+(status / model / `post_turn_summary`;IDLE + 分支未推送 = 停摆待 poke);
+投递消息用**绑定会话的 poke 触发器**(`create_trigger` 带
+`persistent_session_id` + `fire_trigger` + 用后即 `delete_trigger`)。巡检
+从主通知通道退为**兜底心跳**:webhook 不保证送达(CI success/新推送/踢队
+可能缺席),定时器仍要挂,但频率可放宽,且每轮先核订阅已覆盖哪些面、只补
+盲区(会话停摆、未开 PR 的分支、姊妹仓动静)。
 
 #### 座位 Routine 化(PM 侧的运行形态,#5472 第 5 点)
 

@@ -380,7 +380,7 @@ fields: [
 | `colSpan` | `1-4` | Legacy absolute column span — prefer `span` |
 | `widget` | `string` | Custom widget/component name |
 | `dependsOn` | `string` | Parent field for cascading |
-| `visibleWhen` | `string` | Visibility predicate (CEL); runtime forms bind `record` + `current_user` (was `visibleOn`, ADR-0089) |
+| `visibleWhen` | `string` | Visibility predicate (CEL); runtime forms bind `record` (+ `previous`, `parent`) — **not** `current_user`, which is unbound at field level and would fault the predicate open (was `visibleOn`, ADR-0089) |
 
 ## Complete Example
 

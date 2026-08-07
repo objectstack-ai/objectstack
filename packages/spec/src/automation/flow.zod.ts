@@ -766,7 +766,7 @@ export const FlowSchema = lazySchema(() => z.object({
     fallbackNodeId: retiredKey(
       '`flow.errorHandling.fallbackNodeId` was removed in @objectstack/spec 17.0.0 (#3896 ' +
       'audit close-out) — the engine routes unrecoverable node errors via per-node fault ' +
-      "edges (an edge with condition 'fault'), and never read this key: a fallback " +
+      "edges (an edge with type: 'fault'), and never read this key: a fallback " +
       'configured here silently did not exist. Delete the key and draw a fault edge from ' +
       'the failing node to the handler node instead.',
     ),
