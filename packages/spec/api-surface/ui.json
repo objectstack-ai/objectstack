@@ -338,6 +338,7 @@
     "VIEW_CONSOLE_ROW_DECORATIONS (const)",
     "VIEW_FILTER_OPERATORS (const)",
     "VIEW_FILTER_OPERATOR_ALIASES (const)",
+    "VIEW_WRITE_PATH_IDENTITY_KEYS (const)",
     "View (type)",
     "ViewData (type)",
     "ViewDataParsed (type)",

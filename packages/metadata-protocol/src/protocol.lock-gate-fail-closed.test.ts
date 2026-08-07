@@ -185,8 +185,17 @@ function protocolFor(h: Harness) {
     return new ObjectStackProtocolImplementation(h.engine, undefined, 'env_1');
 }
 
+// [#5599] The body carries a real view key (`type` / `columns`), not identity
+// alone. It used to be `{ name, label }`, which the `view` schema accepted only
+// because its union had a member that stripped unknown keys and required none —
+// the hole #5599 closed. Nothing here needs a contentless body: this file's
+// subject is WHICH writes the lock gate admits, not what a view looks like.
 const save = (p: ObjectStackProtocolImplementation) =>
-    p.saveMetaItem({ type: 'view', name: 'v1', item: { name: 'v1', label: 'Edited' } } as any);
+    p.saveMetaItem({
+        type: 'view',
+        name: 'v1',
+        item: { name: 'v1', label: 'Edited', type: 'grid', columns: ['name'] },
+    } as any);
 
 const remove = (p: ObjectStackProtocolImplementation) =>
     p.deleteMetaItem({ type: 'view', name: 'v1' } as any);

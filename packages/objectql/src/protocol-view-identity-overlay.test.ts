@@ -231,4 +231,62 @@ describe('view overlay identity (#2555)', () => {
         expect(persisted.name).toBe('adhoc.view');
         expect('viewKind' in persisted).toBe(false);
     });
+
+    // ── #5599 — the write path's spec gate was bypassable by ANY body ────────
+    //
+    // #3095 (above) closed the case where a view's nested `config` was stripped
+    // to `{}`. #5599 is the case one level further out: the union's fourth
+    // member both `.strip()`s and requires nothing, so `{ nope: 1 }` MATCHED it,
+    // the gate reported success, and — because `saveMetaItem` persists the
+    // ORIGINAL body, not the parse output — `{"nope":1,"name":"garbage_view"}`
+    // landed in `sys_metadata` as an ACTIVE view. `view` was the one common
+    // overlay type whose declared spec validation (ADR-0005 §Validation) could
+    // be bypassed outright: Prime Directive #10's "declared ≠ enforced", at the
+    // union's member-selection layer rather than inside any member.
+    //
+    // Measured on `origin/main` before the fix, this exact call returned
+    // `{ success: true, state: 'active', seq: 1 }`.
+    it('#5599 write path REJECTS a body that is not a view at all (was: success + stored active)', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await expect(
+            protocol.saveMetaItem({ type: 'view', name: 'garbage_view', item: { nope: 1 } }),
+        ).rejects.toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+        // The half that made this a data bug rather than a validation nit:
+        // nothing may reach the store.
+        expect(Array.from(rows.values()).some((r) => r.type === 'view')).toBe(false);
+    });
+
+    it('#5599 write path REJECTS an empty body, and stores nothing', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await expect(
+            protocol.saveMetaItem({ type: 'view', name: 'empty_view', item: {} }),
+        ).rejects.toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+        expect(Array.from(rows.values()).some((r) => r.type === 'view')).toBe(false);
+    });
+
+    it('#5599 the 422 carries the prescription, not a rootless "Invalid input"', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const failure = await protocol
+            .saveMetaItem({ type: 'view', name: 'garbage_view', item: { nope: 1 } })
+            .then(() => null, (e: unknown) => e);
+        expect(failure).toBeTruthy();
+        expect(JSON.stringify(failure)).toContain('no recognized `view` key');
+    });
+
+    it('#5599 …while the personalization PUT this file exists for still saves', async () => {
+        // The regression this precondition must never cause: a 422 on a body the
+        // platform itself writes. `personalization` is the captured console PUT.
+        const { engine, rows } = makeStubEngine({ 'showcase_task.default': flattened });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const result = await protocol.saveMetaItem({
+            type: 'view',
+            name: 'showcase_task.default',
+            item: { ...personalization },
+        });
+        expect(result.success).toBe(true);
+        expect(Array.from(rows.values()).some((r) => r.type === 'view')).toBe(true);
+    });
 });
