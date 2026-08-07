@@ -16,6 +16,19 @@ import {
   type EmittedDef,
 } from './lib/def-key-collisions';
 import { RENAMED_DEFS, carryAuthorableKey, checkRenameTable } from './lib/renamed-defs';
+import {
+  AUTHORABLE_SURFACE_DESCRIPTION,
+  AUTHORABLE_SURFACE_DIR_NAME,
+  SCHEMA_MANIFEST_DESCRIPTION,
+  SCHEMA_MANIFEST_DIR_NAME,
+  aggregateCategoryShards,
+  authorableSurfaceShardTexts,
+  readShardedKeysAtRev,
+  schemaManifestShardTexts,
+  serializeShard,
+  writeShards,
+  type GitRun,
+} from './lib/sharded-artifacts';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
 import {
   MIGRATIONS_BY_MAJOR,
@@ -50,16 +63,22 @@ const Protocol: Record<string, Record<string, unknown>> = {
   Kernel, QA, Security, Shared, Studio, System, UI,
 };
 
-const OUT_DIR = path.resolve(__dirname, '../json-schema');
+/** The package root — every generated artifact below is resolved from here. */
+const PKG_DIR = path.resolve(__dirname, '..');
+
+const OUT_DIR = path.resolve(PKG_DIR, 'json-schema');
 // Ratchet manifest: the committed record of every schema key this script has
 // ever emitted. json-schema/ itself is a gitignored build artifact, so this
-// file is the durable "last time" — see the disappearance check below (#2978).
-const MANIFEST_PATH = path.resolve(__dirname, '../json-schema.manifest.json');
+// directory is the durable "last time" — see the disappearance check below
+// (#2978). Sharded by category since #5837: the ratchet reads the WHOLE
+// directory as one set, so its semantics are byte-for-byte the old ones and only
+// the merge surface changed. See scripts/lib/sharded-artifacts.ts.
+const MANIFEST_DIR = path.resolve(__dirname, `../${SCHEMA_MANIFEST_DIR_NAME}`);
 // Three modes, one code path:
 //
 //   (default)       `gen:schema` — regenerate json-schema/ and, when they are
 //                   behind, the two committed PROJECTIONS of this source:
-//                   json-schema.manifest.json and authorable-surface.json.
+//                   json-schema.manifest/ and authorable-surface/.
 //   `--check`       `check:authorable-surface` — verify both snapshots without
 //                   rewriting either, so CI fails on an uncommitted ADDITION too
 //                   (the write and check paths share the same code — same
@@ -77,7 +96,7 @@ const CHECK = process.argv.includes('--check');
 // step (#5358).
 //
 // Why the anchor is different in kind from this script's other two artifacts.
-// `json-schema.manifest.json` and `authorable-surface.json` are projections of
+// `json-schema.manifest/` and `authorable-surface/` are projections of
 // the source being built: regenerating them is always right, and their diff is
 // the change under review. The anchor is not a projection of anything local — it
 // is a snapshot of an UPSTREAM commit, the baseline the #4650 deletion gate
@@ -445,36 +464,36 @@ if (defKeyCollisions.length > 0) {
 // run means a code change unpublished a schema — fail loudly instead of
 // letting gen:docs quietly delete its reference docs (#2978). Deliberate
 // removals must delete the key from the manifest in the same PR.
-interface SchemaManifest {
-  description?: string;
-  schemas: string[];
-}
-
 /**
- * The manifest's own description — the procedure a reader who opens the file to
+ * The manifest's description — the procedure a reader who opens a shard to
  * delete a line follows. Until #4725 it ended "remove a key ONLY for a
  * deliberate retirement", which was the entire requirement and was checked by
- * nothing; it now names the gate and the table that answer for a removal.
+ * nothing; it now names the gate and the table that answer for a removal. It
+ * lives in scripts/lib/sharded-artifacts.ts with the writer that stamps it into
+ * every shard (#5837).
  */
-const MANIFEST_DESCRIPTION =
-  'Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts. ' +
-  'Auto-appended when new schemas are added (commit the change). A listed schema that a ' +
-  'build no longer emits fails gen:schema. DELETING a key is gated too (#4725): the removal ' +
-  'is measured against this file at the merge base with origin/main — which the commit under ' +
-  'test cannot rewrite — and every def that leaves the published set must be declared in ' +
-  'RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts), or in RENAMED_DEFS ' +
-  '(scripts/lib/renamed-defs.ts) when it is a rename rather than a removal. See #2978, #4725.';
+const MANIFEST_DESCRIPTION = SCHEMA_MANIFEST_DESCRIPTION;
 
-let manifest: SchemaManifest | null = null;
+/**
+ * Every def key recorded across `json-schema.manifest/`, or null when the whole
+ * directory is absent (first run — bootstrap below).
+ *
+ * The read is of the DIRECTORY, never of "the shards this build would write":
+ * a shard nobody regenerates still answers for its keys, so a hand-deleted
+ * shard file is exactly as visible to the disappearance ratchet as the
+ * hand-deleted lines it replaced.
+ */
+let manifestSchemas: string[] | null = null;
+let manifestTexts: Map<string, string> | null = null;
 try {
-  manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8')) as SchemaManifest;
-} catch (error) {
-  // A missing manifest just means first run (bootstrap below); anything else
-  // (unreadable, invalid JSON) must fail rather than silently drop the ratchet.
-  if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-    console.error(`\n❌ Failed to read ${MANIFEST_PATH}: ${error}`);
-    process.exit(1);
+  const read = aggregateCategoryShards(MANIFEST_DIR, 'schemas');
+  if (read) {
+    manifestSchemas = read.entries;
+    manifestTexts = new Map(read.shards.map((s) => [s.name, s.raw]));
   }
+} catch (error) {
+  console.error(`\n❌ Failed to read ${SCHEMA_MANIFEST_DIR_NAME}/: ${error instanceof Error ? error.message : error}`);
+  process.exit(1);
 }
 
 const generatedKeys = new Set(generatedSchemas.keys());
@@ -490,7 +509,7 @@ if (renameProblems.length > 0) {
   process.exit(1);
 }
 
-const missing = (manifest?.schemas ?? []).filter(
+const missing = (manifestSchemas ?? []).filter(
   // A def listed as renamed is not missing — it is published under the new
   // name, which `checkRenameTable` just proved this build emits. The manifest
   // rewrite below drops the old key, so the entry self-clears on regeneration.
@@ -502,11 +521,11 @@ if (missing.length > 0) {
     console.error(`     - json-schema/${key}.json`);
   }
   console.error(
-    `\n   A schema listed in json-schema.manifest.json was not emitted. This usually means a\n` +
+    `\n   A schema listed in ${SCHEMA_MANIFEST_DIR_NAME}/ was not emitted. This usually means a\n` +
     `   Zod change made it unrepresentable (e.g. an added .transform in "output" AND "input"\n` +
     `   io modes) or an export was renamed/removed. Fix the schema, or — if the removal is\n` +
-    `   deliberate — delete the key(s) from packages/spec/json-schema.manifest.json in the\n` +
-    `   same PR AND declare each one in RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts),\n` +
+    `   deliberate — delete the key(s) from packages/spec/${SCHEMA_MANIFEST_DIR_NAME}/<category>.json\n` +
+    `   in the same PR AND declare each one in RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts),\n` +
     `   which the manifest deletion gate below requires (#4725). Deleting the line alone\n` +
     `   used to be the whole procedure, and nothing checked it. Silently unpublishing a\n` +
     `   schema deletes its reference docs on the next gen:docs run (see #2978).`,
@@ -514,21 +533,32 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-const added = [...generatedKeys].filter((key) => !(manifest?.schemas ?? []).includes(key));
+const manifestRecorded = new Set(manifestSchemas ?? []);
+const added = [...generatedKeys].filter((key) => !manifestRecorded.has(key));
 // A renamed-away source key must be dropped from the manifest even in the (rare)
 // case where the new name adds nothing — e.g. a rename onto a def that already
 // existed. Without this the stale key would sit in the manifest forever, kept
 // alive only by its RENAMED_DEFS entry.
-const renamedAway = (manifest?.schemas ?? []).filter((key) => key in RENAMED_DEFS);
-// The file's own description states the procedure for deleting a key, and #4725
-// changed that procedure from "do it deliberately" to "declare it in
-// RETIRED_DEFS_BY_MAJOR". A generated file that documents a superseded procedure
-// is read by whoever opens it to delete a line — precisely the reader the gate
-// exists for — so the text is part of the artifact and drifting from it is
-// staleness like any other. Reported separately below: "0 schema(s) not
-// recorded" would be a confusing way to say the prose moved.
-const descriptionStale = !!manifest && manifest.description !== MANIFEST_DESCRIPTION;
-const manifestChanged = !manifest || added.length > 0 || renamedAway.length > 0 || descriptionStale;
+const renamedAway = (manifestSchemas ?? []).filter((key) => key in RENAMED_DEFS);
+// The canonical shard bytes this build would write. Comparing BYTES rather than
+// key sets is what keeps the shards' own description part of the artifact —
+// #4725 changed the deletion procedure from "do it deliberately" to "declare it
+// in RETIRED_DEFS_BY_MAJOR", and a generated file that documents a superseded
+// procedure is read by exactly the person the gate exists for. Sharding made the
+// comparison stricter for free: hand-formatting inside a shard is now caught the
+// same way #4662 catches it in the authorable surface.
+const canonicalManifestTexts = schemaManifestShardTexts([...generatedKeys].sort());
+const staleManifestShards = [...canonicalManifestTexts]
+  .filter(([name, text]) => manifestTexts?.get(name) !== text)
+  .map(([name]) => name);
+const orphanManifestShards = [...(manifestTexts?.keys() ?? [])]
+  .filter((name) => !canonicalManifestTexts.has(name));
+const manifestChanged =
+  manifestTexts === null ||
+  added.length > 0 ||
+  renamedAway.length > 0 ||
+  staleManifestShards.length > 0 ||
+  orphanManifestShards.length > 0;
 if (manifestChanged && CHECK) {
   // Removals already exited above; reaching here in check mode means the manifest
   // is behind on ADDITIONS (or still lists a def that RENAMED_DEFS moved away).
@@ -539,18 +569,24 @@ if (manifestChanged && CHECK) {
   // generated artifact of eight that can never go red in CI — "stale ⇒ rewrite it
   // for you" instead of "stale ⇒ run the generator" (#4711). Same split as the
   // authorable-surface ratchet below.
-  const onlyDescription = manifest && added.length === 0 && renamedAway.length === 0;
+  const onlyBytes = manifestTexts && added.length === 0 && renamedAway.length === 0;
   console.error(
-    !manifest
-      ? `\n❌ json-schema.manifest.json is missing (${generatedKeys.size} schema(s) unrecorded).`
-      : onlyDescription
-        ? `\n❌ json-schema.manifest.json carries a stale description (the key set is current).`
-        : `\n❌ json-schema.manifest.json is out of date (${added.length} schema(s) not recorded` +
+    !manifestTexts
+      ? `\n❌ ${SCHEMA_MANIFEST_DIR_NAME}/ is missing (${generatedKeys.size} schema(s) unrecorded).`
+      : onlyBytes
+        ? `\n❌ ${SCHEMA_MANIFEST_DIR_NAME}/ does not match its generated form (the key set is current).`
+        : `\n❌ ${SCHEMA_MANIFEST_DIR_NAME}/ is out of date (${added.length} schema(s) not recorded` +
             `${renamedAway.length > 0 ? `, ${renamedAway.length} renamed-away key(s) still listed` : ''}).`,
   );
   for (const key of added.slice(0, 20)) console.error(`     + json-schema/${key}.json`);
   if (added.length > 20) console.error(`     … and ${added.length - 20} more`);
   for (const key of renamedAway) console.error(`     - json-schema/${key}.json  (renamed away)`);
+  for (const name of staleManifestShards) {
+    console.error(`     ~ ${SCHEMA_MANIFEST_DIR_NAME}/${name}.json  (stale)`);
+  }
+  for (const name of orphanManifestShards) {
+    console.error(`     - ${SCHEMA_MANIFEST_DIR_NAME}/${name}.json  (no schema in this category)`);
+  }
   console.error(
     `\n   Run \`pnpm --filter @objectstack/spec gen:schema\` and commit the result. A schema\n` +
     `   absent from the manifest is one this ratchet can never report as disappeared later,\n` +
@@ -559,17 +595,17 @@ if (manifestChanged && CHECK) {
   process.exit(1);
 }
 if (manifestChanged && !CHECK) {
-  const updated: SchemaManifest = {
-    description: MANIFEST_DESCRIPTION,
-    schemas: [...generatedKeys].sort(),
-  };
-  fs.writeFileSync(MANIFEST_PATH, JSON.stringify(updated, null, 2) + '\n');
-  const what = !manifest
-    ? `created (${generatedKeys.size} schemas)`
+  const { written, removed } = writeShards(MANIFEST_DIR, canonicalManifestTexts);
+  const what = !manifestTexts
+    ? `created (${generatedKeys.size} schemas in ${canonicalManifestTexts.size} shard(s))`
     : added.length > 0 || renamedAway.length > 0
-      ? `updated (+${added.length} schema(s))`
-      : 'description refreshed (key set unchanged)';
-  console.log(`\n📒 json-schema.manifest.json ${what} — commit it.`);
+      ? `updated (+${added.length} schema(s) across ${written.length} shard(s))`
+      : `rewritten (${written.length} shard(s); key set unchanged)`;
+  console.log(
+    `\n📒 ${SCHEMA_MANIFEST_DIR_NAME}/ ${what} — commit it.` +
+      (written.length > 0 ? `\n     touched: ${written.map((n) => `${n}.json`).join(', ')}` : '') +
+      (removed.length > 0 ? `\n     removed: ${removed.map((n) => `${n}.json`).join(', ')}` : ''),
+  );
 }
 
 // ─── Authorable-surface ratchet (#3855 follow-up) ────────────────────
@@ -578,12 +614,12 @@ if (manifestChanged && !CHECK) {
 // inside them — and for a metadata-driven platform those keys ARE the
 // third-party API: what an author (very often an AI, ADR-0033) may write.
 //
-// Both existing witnesses look elsewhere. `api-surface.json` records exported
+// Both existing witnesses look elsewhere. `api-surface/` records exported
 // `name (kind)`, and `api-surface-signatures.json` hashes each `defineX`
 // factory's type as TypeScript PRINTS it — a reference (`z.input<typeof
 // ActionSchema>`), never structurally expanded, so member-level narrowing does
 // not reach the hash. `spec-changes.json` inherits the same blind spot: its
-// added/removed arrays are a diff of `api-surface.json`. So #3883 removed three
+// added/removed arrays are a diff of `api-surface/`. So #3883 removed three
 // authorable keys with all three witnesses green, and #3733 did the same by
 // ACCIDENT — `dataQuality` / `cached` outlived their keys and were silently
 // stripped. ADR-0059 §5 deferred this gate "until a narrowing actually slips
@@ -598,21 +634,36 @@ if (manifestChanged && !CHECK) {
 //              state that must never be reached silently, because none of these
 //              schemas is `.strict()`: Zod STRIPS an unknown key, so the setting
 //              vanishes and the metadata still parses clean.
-const AUTHORABLE_SURFACE_PATH = path.resolve(__dirname, '../authorable-surface.json');
+const AUTHORABLE_SURFACE_DIR = path.resolve(__dirname, `../${AUTHORABLE_SURFACE_DIR_NAME}`);
 // The in-tree anchor the deletion gate falls back to when this build environment
 // cannot reach GitHub (#5235). See resolveSurfaceBase() below for the full story.
+//
+// It stays ONE file while its subject is sharded (#5837), and that is a
+// deliberate asymmetry rather than an oversight. The three sharded artifacts are
+// rewritten by every spec PR, which is what made them the merge-queue's
+// serialization point; this one is written by nothing but a human typing
+// `--update-base` (#5358), so it is not on the churn path and sharding it would
+// buy no conflict relief. What it WOULD cost is the authenticity criterion:
+// `baseRev` is one commit for the whole surface, and a per-shard copy of it
+// invites a tree where different shards mirror different revs — a state no
+// upstream commit ever had. So the anchor keeps its single `baseRev` + aggregate
+// `keys`, and the comparison it feeds reads the baseline commit's shards and
+// aggregates them. The criterion is unchanged in both halves: `baseRev` is an
+// origin/main ancestor, and its keys ARE that commit's surface.
 const AUTHORABLE_SURFACE_BASE_PATH = path.resolve(__dirname, '../authorable-surface.base.json');
-const SURFACE_FILE_NAME = path.basename(AUTHORABLE_SURFACE_PATH);
+/** How the messages below name the sharded surface — a directory, not a file. */
+const SURFACE_FILE_NAME = `${AUTHORABLE_SURFACE_DIR_NAME}/`;
 const SURFACE_BASE_FILE_NAME = path.basename(AUTHORABLE_SURFACE_BASE_PATH);
 // `REANCHOR_COMMAND` — the ONE command that writes this file — is declared near
 // the top of this script, next to the `--update-base` flag it names: the merge
 // refusal there quotes it, and that refusal runs before anything here (#5370).
 const RETIRED_MARK = ' [RETIRED]';
 
-interface AuthorableSurface { description: string; keys: string[] }
+/** The aggregated authorable surface — every shard's keys, as one sorted set. */
+interface AuthorableSurface { keys: string[] }
 
 /**
- * The committed mirror of `authorable-surface.json` as it stood at an UPSTREAM
+ * The committed mirror of the authorable surface as it stood at an UPSTREAM
  * commit (`baseRev`) — the deletion gate's anchor in a build that cannot reach
  * GitHub (#5235).
  */
@@ -658,11 +709,21 @@ const currentEntries = [...currentKeys.entries()]
   .map(([k, retired]) => (retired ? k + RETIRED_MARK : k))
   .sort();
 
-let surfaceRaw: string | null = null;
+// The committed surface, aggregated across every shard PRESENT ON DISK — never
+// across "the shards this build would write". That distinction is the whole
+// reason sharding is semantics-preserving: a deleted shard file drops its keys
+// into checks (a)/(c) exactly as deleted lines did (#5837).
+let surfaceTexts: Map<string, string> | null = null;
 let surfaceDoc: AuthorableSurface | null = null;
-if (fs.existsSync(AUTHORABLE_SURFACE_PATH)) {
-  surfaceRaw = fs.readFileSync(AUTHORABLE_SURFACE_PATH, 'utf-8');
-  surfaceDoc = JSON.parse(surfaceRaw) as AuthorableSurface;
+try {
+  const read = aggregateCategoryShards(AUTHORABLE_SURFACE_DIR, 'keys');
+  if (read) {
+    surfaceTexts = new Map(read.shards.map((s) => [s.name, s.raw]));
+    surfaceDoc = { keys: read.entries };
+  }
+} catch (error) {
+  console.error(`\n❌ Failed to read ${SURFACE_FILE_NAME}: ${error instanceof Error ? error.message : error}`);
+  process.exit(1);
 }
 
 if (surfaceDoc) {
@@ -802,7 +863,7 @@ if (surfaceDoc) {
 
 // ─── (c) A deleted baseline line must prove itself (#4650) ─────────────
 //
-// Checks (a0)/(a)/(b) read authorable-surface.json from THIS commit — a file
+// Checks (a0)/(a)/(b) read authorable-surface/ from THIS commit — files
 // the same commit can freely edit. Deleting a baseline line therefore deleted
 // the very evidence check (a) runs on: #4638 and #4643 both removed authorable
 // keys with zero registered conversions and a green gate, and #4662 later
@@ -826,7 +887,7 @@ if (surfaceDoc) {
 //      license to change the schema (plugin manifests, connector configs and
 //      other non-metadata authoring go through their own gates);
 //   3. the whole def is no longer emitted — whole-schema removals are
-//      adjudicated by the json-schema.manifest.json ratchet (#2978), not by
+//      adjudicated by the json-schema.manifest/ ratchet (#2978), not by
 //      this per-key ratchet. Until #4725 that deferral was to nothing: the
 //      ratchet's `missing` set was computed from the same-commit manifest, so
 //      deleting the line deleted the evidence, exactly as hand-editing this
@@ -1047,7 +1108,7 @@ function computeSurfaceReachability(): SurfaceReachability {
  */
 const SURFACE_BASE_DESCRIPTION =
   'In-tree anchor for the authorable-surface deletion gate (#4650, #5235): a verbatim copy of the ' +
-  'keys in authorable-surface.json as they stood at `baseRev`, a commit on origin/main. A build that ' +
+  'keys in authorable-surface/ as they stood at `baseRev`, a commit on origin/main. A build that ' +
   'CAN reach origin/main anchors on the merge base instead, and re-verifies this file against ' +
   '`baseRev` — so a PR that edits it to hide a deletion goes red wherever the network exists. A build ' +
   'that CANNOT reach GitHub (image-build stages, air-gapped, fork, historical-tag reproduction) ' +
@@ -1057,7 +1118,43 @@ const SURFACE_BASE_DESCRIPTION =
 /** Canonical bytes of the in-tree anchor — the one form the generator writes. */
 function serializeSurfaceBase(baseRev: string, keys: string[]): string {
   const doc: AuthorableSurfaceBase = { description: SURFACE_BASE_DESCRIPTION, baseRev, keys };
-  return JSON.stringify(doc, null, 2) + '\n';
+  return serializeShard(doc);
+}
+
+/**
+ * The authorable surface at an upstream revision, from whichever layout that
+ * revision carried (#5837).
+ *
+ * Every caller below is a gate reading a baseline out of GIT — an already-merged
+ * commit, immutable by construction. Revisions from before the sharding
+ * migration hold the single `authorable-surface.json`; they always will, and no
+ * producer exists that could be fixed instead. The tree's OWN surface is read by
+ * `aggregateCategoryShards`, which knows the sharded layout and nothing else, so
+ * this is not a tolerant read of anything a PR can write.
+ *
+ * `context` names the gate in the failure so a baseline problem does not read as
+ * a problem with the commit under test.
+ */
+function readSurfaceKeysAtRev(
+  git: GitRun,
+  rev: string,
+  dirName: string,
+  field: 'keys' | 'schemas',
+  context: string,
+): { entries: string[] } | null {
+  const read = readShardedKeysAtRev(git, rev, dirName, field);
+  if (read === null) return null;
+  if ('error' in read) {
+    console.error(`\n❌ ${context}: ${read.error}`);
+    process.exit(1);
+  }
+  if (read.layout === 'legacy') {
+    console.log(
+      `ℹ️  ${context}: ${rev.slice(0, 12)} predates the ${dirName}/ split, so its baseline was read\n` +
+        `   from the retired single file. Same keys, same verdict (#5837).`,
+    );
+  }
+  return { entries: read.entries };
 }
 
 /**
@@ -1066,7 +1163,7 @@ function serializeSurfaceBase(baseRev: string, keys: string[]): string {
  * Malformed or non-canonical bytes are fatal in BOTH modes, deliberately: this
  * file exists to be the baseline a commit cannot rewrite, so a hand-edit here is
  * the #4650 attack itself, not a formatting slip to repair silently (#4662 made
- * the same call for authorable-surface.json). Regenerating it needs origin/main,
+ * the same call for the authorable surface). Regenerating it needs origin/main,
  * which is exactly the environment where that hand-edit is also detectable.
  */
 function readCommittedSurfaceBase(): { raw: string; doc: AuthorableSurfaceBase } | null {
@@ -1103,8 +1200,6 @@ function readCommittedSurfaceBase(): { raw: string; doc: AuthorableSurfaceBase }
   return { raw, doc };
 }
 
-type GitRun = (...args: string[]) => { status: number | null; stdout: string; stderr: string };
-
 /**
  * Git, run in the package directory — the one runner every check below shares
  * (`resolveSurfaceBase()` used to hold a private copy of it; the anchor's
@@ -1114,7 +1209,7 @@ const gitInPackage: GitRun = (...args: string[]) =>
   // A network-less environment that BLACKHOLES rather than refuses (proxied
   // air gaps do) would otherwise hang the whole build in the self-heal fetch.
   spawnSync('git', args, {
-    cwd: path.dirname(AUTHORABLE_SURFACE_PATH),
+    cwd: PKG_DIR,
     encoding: 'utf-8' as const,
     timeout: 60_000,
   });
@@ -1129,7 +1224,8 @@ const gitInPackage: GitRun = (...args: string[]) =>
  *   1. `baseRev` is an ancestor of origin/main — a PR cannot point it at one of
  *      its own commits, because its own commits are not upstream. Decidable only
  *      where history is walkable, so a shallow checkout says so and skips it;
- *   2. the recorded keys ARE that commit's `authorable-surface.json` keys. This
+ *   2. the recorded keys ARE that commit's authorable-surface keys, aggregated
+ *      across its shards. This
  *      one holds everywhere the object can be read, shallow included.
  *
  * Together those make hand-editing the anchor pointless: the only way to shed a
@@ -1194,22 +1290,21 @@ function verifyCommittedSurfaceBase(
     );
     process.exit(1);
   }
-  const show = git('show', `${rev}:./${SURFACE_FILE_NAME}`);
-  if (show.status !== 0) {
+  const upstream = readSurfaceKeysAtRev(
+    git,
+    rev,
+    AUTHORABLE_SURFACE_DIR_NAME,
+    'keys',
+    `${SURFACE_BASE_FILE_NAME} anchor verification (#5235)`,
+  );
+  if (!upstream) {
     console.error(
       `\n❌ ${SURFACE_BASE_FILE_NAME} names baseRev ${short}, which has no ${SURFACE_FILE_NAME}\n` +
-        `   to mirror (#5235):\n${show.stderr}\n${fix}`,
+        `   to mirror (#5235).\n${fix}`,
     );
     process.exit(1);
   }
-  let upstreamKeys: string[];
-  try {
-    upstreamKeys = (JSON.parse(show.stdout) as AuthorableSurface).keys ?? [];
-  } catch (error) {
-    console.error(`\n❌ ${SURFACE_FILE_NAME} at ${short} is not valid JSON (#5235): ${error}`);
-    process.exit(1);
-  }
-  compareAnchorKeys(upstreamKeys, committed, short, fix);
+  compareAnchorKeys(upstream.entries, committed, short, fix);
 }
 
 /** The anchor's keys must BE the upstream baseline it names — in both directions. */
@@ -1336,7 +1431,7 @@ function assertAnchorMovesForward(git: GitRun, committedRev: string, resolvedRev
 let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
 
 /**
- * The committed authorable-surface.json this PR started from: its content at
+ * The committed authorable surface this PR started from: its content at
  * the merge base of HEAD and origin/main. Returns null (with a note) only
  * when no baseline existed there at all; failure to ANCHOR the base is fatal —
  * a deletion check that silently skips is the #4650 bypass with extra steps.
@@ -1381,27 +1476,21 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
     if (mergeBase.status !== 0) {
       console.log(`   (shallow history — using origin/main tip ${tip.slice(0, 12)} as the baseline anchor)`);
     }
-    const show = git('show', `${rev}:./${SURFACE_FILE_NAME}`);
-    if (show.status !== 0) {
-      if (/does not exist in|exists on disk, but not in/.test(show.stderr)) {
-        console.log(
-          `ℹ️  authorable-surface deletion check: no ${SURFACE_FILE_NAME} at base ${rev.slice(0, 12)} — nothing to compare.`,
-        );
-        return null;
-      }
-      console.error(
-        `\n❌ Failed to read ${SURFACE_FILE_NAME} at base ${rev.slice(0, 12)} (#4650):\n${show.stderr}`,
+    const baseline = readSurfaceKeysAtRev(
+      git,
+      rev,
+      AUTHORABLE_SURFACE_DIR_NAME,
+      'keys',
+      `authorable-surface deletion check (#4650)`,
+    );
+    if (!baseline) {
+      console.log(
+        `ℹ️  authorable-surface deletion check: no ${SURFACE_FILE_NAME} at base ${rev.slice(0, 12)} — nothing to compare.`,
       );
-      process.exit(1);
+      return null;
     }
-    let doc: AuthorableSurface;
-    try {
-      doc = JSON.parse(show.stdout) as AuthorableSurface;
-    } catch (error) {
-      console.error(`\n❌ ${SURFACE_FILE_NAME} at base ${rev.slice(0, 12)} is not valid JSON (#4650): ${error}`);
-      process.exit(1);
-    }
-    gitResolvedAnchor = { rev, keys: doc.keys ?? [] };
+    const doc: AuthorableSurface = { keys: baseline.entries };
+    gitResolvedAnchor = { rev, keys: doc.keys };
     // The environment that CAN police the in-tree anchor is the one that must.
     if (committed) verifyCommittedSurfaceBase(git, tip, gitResolvedAnchor, committed.doc);
     return { rev, doc };
@@ -1415,7 +1504,7 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
     );
     return {
       rev: committed.doc.baseRev,
-      doc: { description: committed.doc.description, keys: committed.doc.keys },
+      doc: { keys: committed.doc.keys },
     };
   }
 
@@ -1438,7 +1527,7 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
 // #4650 closed the hand-edit shortcut one level down, for authorable KEYS. It
 // left the whole-def case to the #2978 manifest ratchet, and route 3 of check
 // (c) still says so in as many words: "whole-schema removals are adjudicated by
-// json-schema.manifest.json". They were not. That ratchet's `missing` set is
+// json-schema.manifest". They were not. That ratchet's `missing` set is
 // `manifest − emitted` with the manifest read from THIS commit — the same
 // same-commit-evidence defect #4650 exists for — so a PR that deleted the
 // export, the manifest line and the baseline lines together produced an empty
@@ -1452,7 +1541,7 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
 // and `check:api-surface` all exiting 0.
 //
 // So the removal is re-anchored the way #4650 re-anchored key deletions: against
-// json-schema.manifest.json at the merge base with origin/main, which the commit
+// json-schema.manifest/ at the merge base with origin/main, which the commit
 // under test cannot rewrite. The proof demanded there is a DECLARATION —
 // RETIRED_DEFS_BY_MAJOR — and deliberately not reachability, which #4650 uses
 // per key. Reachability is keyed by `zodByDefKey`, populated only for defs this
@@ -1461,8 +1550,8 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
 // the removals this gate is for. That is not a bug to fix by widening the BFS:
 // the def is gone from the source, so there is no schema left to walk.
 
-/** The manifest file, by name — what every message here points the reader at. */
-const MANIFEST_FILE_NAME = path.basename(MANIFEST_PATH);
+/** The manifest, by name — what every message here points the reader at. */
+const MANIFEST_FILE_NAME = `${SCHEMA_MANIFEST_DIR_NAME}/`;
 
 /**
  * Every def the ADR-0087 registries declare as unpublished, by exact
@@ -1537,24 +1626,20 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
   }
 
   const short = baseRev.slice(0, 12);
-  const show = git('show', `${baseRev}:./${MANIFEST_FILE_NAME}`);
-  if (show.status !== 0) {
-    if (/does not exist in|exists on disk, but not in/.test(show.stderr)) {
-      console.log(
-        `ℹ️  ${MANIFEST_FILE_NAME} removal check: no ${MANIFEST_FILE_NAME} at base ${short} — nothing to compare.`,
-      );
-      return;
-    }
-    console.error(`\n❌ Failed to read ${MANIFEST_FILE_NAME} at base ${short} (#4725):\n${show.stderr}`);
-    process.exit(1);
+  const baseline = readSurfaceKeysAtRev(
+    git,
+    baseRev,
+    SCHEMA_MANIFEST_DIR_NAME,
+    'schemas',
+    `${MANIFEST_FILE_NAME} removal check (#4725)`,
+  );
+  if (!baseline) {
+    console.log(
+      `ℹ️  ${MANIFEST_FILE_NAME} removal check: no ${MANIFEST_FILE_NAME} at base ${short} — nothing to compare.`,
+    );
+    return;
   }
-  let baseSchemas: string[];
-  try {
-    baseSchemas = (JSON.parse(show.stdout) as SchemaManifest).schemas ?? [];
-  } catch (error) {
-    console.error(`\n❌ ${MANIFEST_FILE_NAME} at base ${short} is not valid JSON (#4725): ${error}`);
-    process.exit(1);
-  }
+  const baseSchemas = baseline.entries;
 
   // Measured against what this build EMITS, never against the manifest file in
   // the tree: the file is what the PR can rewrite, and rewriting it is the
@@ -1675,7 +1760,7 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
       for (const [defKey, keyCount] of goneDefs) {
         allowed.push(
           `${defKey}:* (${keyCount} line(s)) — def no longer emitted by this build; whole-schema\n` +
-            `       removals are adjudicated by json-schema.manifest.json (#2978) — since #4725 by the\n` +
+            `       removals are adjudicated by json-schema.manifest/ (#2978) — since #4725 by the\n` +
             `       manifest deletion gate that ran above, which required a declared removal for it\n` +
             `       (until then this deferral pointed at a ratchet that said nothing).`,
         );
@@ -1688,7 +1773,7 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
         console.error(`\n❌ ${violations.length} authorable baseline line(s) were deleted without proof (#4650):`);
         for (const line of violations) console.error(`     - ${line}`);
         console.error(
-          `\n   authorable-surface.json is generated evidence, not an editable list: deleting a\n` +
+          `\n   authorable-surface/ is generated evidence, not an editable list: deleting a\n` +
             `   line deletes exactly what check (a) above needs to see — #4638 and #4643 both\n` +
             `   removed authorable keys that way with a green gate. Deletions are therefore\n` +
             `   compared against the baseline at merge base ${baseRev} with origin/main,\n` +
@@ -1796,22 +1881,21 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
   }
 }
 
-// The whole FILE is compared against its canonical serialization, not just the
-// key array. #4662 caught a hand-normalized description dash the keys-only
-// comparison could never see — proof the file's content was not this script's
-// output. Any non-generated byte is a hand-edit (or a stale writer), and
+// Every shard is compared against its canonical serialization BYTE FOR BYTE, not
+// just on its key array. #4662 caught a hand-normalized description dash the
+// keys-only comparison could never see — proof the file's content was not this
+// script's output. Any non-generated byte is a hand-edit (or a stale writer), and
 // hand-edits are exactly how deletions hid from check (a) (#4650, comment 2).
-const canonicalSurface: AuthorableSurface = {
-  description:
-    'Ratchet of every AUTHORABLE key in the spec — what a metadata author may write, which ' +
-    'for this platform IS the third-party API. Auto-updated on additions (commit the change). ' +
-    'A key that disappears without a tombstone fails gen:schema, because these schemas are ' +
-    'not .strict() and Zod would silently strip it. "[RETIRED]" marks a tombstoned key that ' +
-    'still rejects with an upgrade prescription. See #3855, ADR-0059 §5.',
-  keys: currentEntries,
-};
-const canonicalSurfaceText = JSON.stringify(canonicalSurface, null, 2) + '\n';
-const surfaceChanged = surfaceRaw !== canonicalSurfaceText;
+// Sharding does not soften this: the comparison is now per shard, and a shard
+// nobody regenerates is reported as stale rather than skipped.
+const canonicalSurfaceTexts = authorableSurfaceShardTexts(currentEntries);
+const staleSurfaceShards = [...canonicalSurfaceTexts]
+  .filter(([name, text]) => surfaceTexts?.get(name) !== text)
+  .map(([name]) => name);
+const orphanSurfaceShards = [...(surfaceTexts?.keys() ?? [])]
+  .filter((name) => !canonicalSurfaceTexts.has(name));
+const surfaceChanged =
+  surfaceTexts === null || staleSurfaceShards.length > 0 || orphanSurfaceShards.length > 0;
 if (surfaceChanged && CHECK) {
   // Removals already exited above; reaching here in check mode means the snapshot
   // is behind on ADDITIONS, or differs without any key change at all — a hand-edit.
@@ -1819,7 +1903,7 @@ if (surfaceChanged && CHECK) {
   const addedKeys = currentEntries.filter((k) => !before.has(k));
   if (addedKeys.length > 0) {
     console.error(
-      `\n❌ authorable-surface.json is out of date (${addedKeys.length} key(s) not recorded).`,
+      `\n❌ ${SURFACE_FILE_NAME} is out of date (${addedKeys.length} key(s) not recorded).`,
     );
     for (const k of addedKeys.slice(0, 20)) console.error(`     + ${k}`);
     if (addedKeys.length > 20) console.error(`     … and ${addedKeys.length - 20} more`);
@@ -1830,12 +1914,18 @@ if (surfaceChanged && CHECK) {
     );
   } else {
     console.error(
-      `\n❌ authorable-surface.json does not match its generated form (key set unchanged).`,
+      `\n❌ ${SURFACE_FILE_NAME} does not match its generated form (key set unchanged).`,
     );
+    for (const name of staleSurfaceShards) {
+      console.error(`     ~ ${AUTHORABLE_SURFACE_DIR_NAME}/${name}.json  (stale)`);
+    }
+    for (const name of orphanSurfaceShards) {
+      console.error(`     - ${AUTHORABLE_SURFACE_DIR_NAME}/${name}.json  (no key in this category)`);
+    }
     console.error(
-      `\n   The recorded keys are current, but the file's bytes are not what gen:schema\n` +
+      `\n   The recorded keys are current, but the bytes are not what gen:schema\n` +
       `   writes — a hand-edit or stale formatting (#4662 found a manually normalized\n` +
-      `   description dash exactly this way; see #4650). This file is generated evidence:\n` +
+      `   description dash exactly this way; see #4650). These files are generated evidence:\n` +
       `   every difference must come from the generator.\n\n` +
       `   Run \`pnpm --filter @objectstack/spec gen:schema\` and commit the result.`,
     );
@@ -1843,9 +1933,14 @@ if (surfaceChanged && CHECK) {
   process.exit(1);
 }
 if (surfaceChanged && !CHECK) {
-  fs.writeFileSync(AUTHORABLE_SURFACE_PATH, canonicalSurfaceText);
+  const { written, removed } = writeShards(AUTHORABLE_SURFACE_DIR, canonicalSurfaceTexts);
   console.log(
-    `\n🔑 authorable-surface.json ${surfaceDoc ? 'updated' : 'created'} (${currentEntries.length} keys) — commit it.`,
+    `\n🔑 ${SURFACE_FILE_NAME} ${surfaceTexts ? 'updated' : 'created'} (${currentEntries.length} keys) — commit it.` +
+      // The locality claim, printed: a PR that touched one category names one
+      // shard here, which is the same fact as "two such PRs do not conflict in
+      // the merge queue" (#5837).
+      (written.length > 0 ? `\n     touched: ${written.map((n) => `${n}.json`).join(', ')}` : '') +
+      (removed.length > 0 ? `\n     removed: ${removed.map((n) => `${n}.json`).join(', ')}` : ''),
   );
 }
 
