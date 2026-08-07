@@ -22,6 +22,10 @@ import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyD
 // runs, so `FilterArray` has exactly one lowering in the product.
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
 import { assertListComparandShapes } from './filter-comparand-shape.js';
+// Seek pagination for the walks that must read EVERY row — the autonumber seed
+// scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
+// the cursor merge is the part that is easy to get subtly wrong.
+import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
@@ -285,6 +289,15 @@ const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where
 const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
 ]);
+
+/**
+ * Rows per page for the autonumber seeding scan (#6249). This is a PAGE size,
+ * not a cap: the walk pages until the scope is exhausted. The number is the one
+ * the old single-shot `limit: 5000` used, kept so the per-read cost against a
+ * driver is unchanged — what changed is that reaching it no longer ends the
+ * scan and truncates the max.
+ */
+const AUTONUMBER_SEED_PAGE_SIZE = 5000;
 
 /** Tombstoned option keys: rejected with the spec's own removal notice. */
 const ENGINE_RETIRED_OPTION_MESSAGES: Record<string, string> = {
@@ -2126,6 +2139,41 @@ export class ObjectQL implements IObjectQLEngine {
    * same scope count, and the counter is the digit-run immediately after the
    * prefix; with an empty prefix (legacy fixed-prefix formats) the last digit
    * run of the whole value is used, preserving the original behaviour.
+   *
+   * # Why this walks every row in the scope (#6249)
+   *
+   * The seed used to be one `find` with `limit: 5000`, no `orderBy` and no
+   * filter: the max of an ARBITRARY 5000-row window (on SQL, typically the
+   * oldest 5000 rows), which for any object past that size — or any scope
+   * whose rows sit outside the window because other scopes filled it — seeds
+   * BELOW the real MAX. The counter then issues numbers from an already-taken
+   * band, and on a `unique` record-number field that is a duplicate business
+   * identifier: a value written wrong, which no retry and no restart repairs
+   * (the same class of harm as the read-outage half fixed in #5979/#6114).
+   *
+   * The scan is therefore complete rather than windowed, in the shape the
+   * SQL driver's own seeding already uses (`scanMaxNumericTail` pushes
+   * `like 'prefix%'` down with NO limit). Two deliberate choices:
+   *
+   *   - **The numeric max is computed here, never delegated to an ORDER BY or
+   *     an aggregate `max`.** Both of those rank the stored value as TEXT, and
+   *     lexicographic order equals numeric order only when every value in the
+   *     scope is zero-padded to one fixed width — which the format language
+   *     does not guarantee (`{0}` pads to nothing, and any width OVERFLOWS
+   *     once the counter passes it, putting `CASE-99999` above `CASE-100000`).
+   *     The empty-prefix legacy path, which reads the LAST digit run of the
+   *     whole value, has no lexicographic reading at all. Parsing every value
+   *     keeps one code path correct for every format instead of a fast path
+   *     guarded by assumptions a format author can silently break.
+   *   - **Seek pagination, not `offset`** — `keysetWalk`'s own rationale
+   *     (#4363): an offset walk cannot promise it visited every row, and a
+   *     row it skips is exactly a number this seed must not miss.
+   *
+   * `prefix` is pushed down as `$startsWith` so a date/`{field}` scope reads
+   * its own rows instead of paging through every other scope's. The JS-side
+   * `startsWith` re-check below is kept as the authority: a driver whose
+   * matching is LOOSER (a case-insensitive `LIKE`) must not be able to inflate
+   * the max with another scope's rows.
    */
   private async seedAutonumber(
     object: string,
@@ -2139,31 +2187,54 @@ export class ObjectQL implements IObjectQLEngine {
       // worked only because an unprojected row still carries `field`), and the
       // catch below would have swallowed the guard's rejection into "seed
       // from 0", i.e. duplicate autonumbers.
-      const rows = await this.find(object, {
-        fields: ['id', field],
-        limit: 5000,
-        context: execCtx,
-      } as any);
+      const walk = keysetWalk<Record<string, unknown>>(
+        (q: KeysetPageQuery) => this.find(object, {
+          ...q,
+          fields: ['id', field],
+          context: execCtx,
+        } as any),
+        {
+          where: prefix ? { [field]: { $startsWith: prefix } } : undefined,
+          pageSize: AUTONUMBER_SEED_PAGE_SIZE,
+        },
+      );
       let max = 0;
-      for (const r of rows || []) {
-        const v = r?.[field];
-        if (v == null) continue;
-        const s = String(v);
-        if (prefix && !s.startsWith(prefix)) continue;
-        const tail = prefix ? s.slice(prefix.length) : s;
-        // With a prefix the counter is the digit run right after it; without one
-        // (legacy fixed-prefix formats) it is the LAST digit run. Both use the
-        // linear /\d+/g — a backtracking lookahead here is a polynomial-ReDoS
-        // sink on stored values full of zeros (CodeQL js/polynomial-redos).
-        let digits: string | undefined;
-        if (prefix) {
-          const head = tail.match(/^\d+/);
-          digits = head ? head[0] : undefined;
-        } else {
-          const runs = tail.match(/\d+/g);
-          digits = runs ? runs[runs.length - 1] : undefined;
+      for await (const page of walk.pages()) {
+        for (const r of page) {
+          const v = r?.[field];
+          if (v == null) continue;
+          const s = String(v);
+          if (prefix && !s.startsWith(prefix)) continue;
+          const tail = prefix ? s.slice(prefix.length) : s;
+          // With a prefix the counter is the digit run right after it; without one
+          // (legacy fixed-prefix formats) it is the LAST digit run. Both use the
+          // linear /\d+/g — a backtracking lookahead here is a polynomial-ReDoS
+          // sink on stored values full of zeros (CodeQL js/polynomial-redos).
+          let digits: string | undefined;
+          if (prefix) {
+            const head = tail.match(/^\d+/);
+            digits = head ? head[0] : undefined;
+          } else {
+            const runs = tail.match(/\d+/g);
+            digits = runs ? runs[runs.length - 1] : undefined;
+          }
+          if (digits) max = Math.max(max, parseInt(digits, 10) || 0);
         }
-        if (digits) max = Math.max(max, parseInt(digits, 10) || 0);
+      }
+      // The walk is unbounded (no `max`), so truncation here means the scan
+      // could not COMPLETE: a row carried no `id` to seek past, or the reader
+      // never applied the seek predicate. Either way rows were left unread, and
+      // the max over what was read is a floor, not the max. Answering with it
+      // is the "seed below the real MAX" defect this method was fixed for, so
+      // it fails loudly instead — the same disposition #6114 gave the read
+      // outage: allocate nothing, write nothing.
+      if (walk.truncated) {
+        throw new Error(
+          `Cannot seed the autonumber counter for "${object}.${field}": the seeding scan ` +
+            `could not visit every stored row (it stopped after ${walk.scanned} rows without ` +
+            `reaching the end). Seeding from a partial scan would issue record numbers that ` +
+            `collide with existing ones, so no number was allocated.`,
+        );
       }
       return max;
     } catch (error) {
