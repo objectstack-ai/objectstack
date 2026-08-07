@@ -78,8 +78,9 @@ export const jaJP: TranslationData = {
         notes: { label: 'メモ' },
         category_color: { label: 'カテゴリ色' },
       },
+      // `default` — the container's DEFAULT list; see the zh-CN bundle (#5164).
       _views: {
-        list: { label: 'すべてのタスク' },
+        default: { label: 'すべてのタスク' },
         overdue: { label: '期限切れのタスク' },
         due_today: { label: '本日期限' },
       },

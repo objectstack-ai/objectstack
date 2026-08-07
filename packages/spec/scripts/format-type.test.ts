@@ -515,3 +515,137 @@ describe('formatType — tombstones leave the inline summary to the live keys (#
     expect(formatType({ ...allDead, additionalProperties: {} }, ctx())).toBe('Record<string, any>');
   });
 });
+
+/**
+ * The real `FormSection.columns` node, as `gen:schema` emits it — probed
+ * against the converter, not guessed:
+ * `z.toJSONSchema(z.object({ columns: z.union([z.enum(['1','2','3','4']),
+ * z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).default(1) }),
+ * { target: 'draft-2020-12' })` yields this in BOTH the `output` and the
+ * `io: 'input'` direction `build-schemas.ts` falls back to.
+ */
+const FORM_SECTION_COLUMNS = {
+  default: 1,
+  anyOf: [
+    { type: 'string', enum: ['1', '2', '3', '4'] },
+    { type: 'number', const: 1 },
+    { type: 'number', const: 2 },
+    { type: 'number', const: 3 },
+    { type: 'number', const: 4 },
+  ],
+};
+
+/**
+ * Pin for NON-STRING literals — #5729.
+ *
+ * The `enum` and `const` branches quoted every value unconditionally
+ * (`.map(e => `'${e}'`)` / `return `'${prop.const}'``), so a numeric literal
+ * union was written down as a string one. `FormSection.columns` is the specimen
+ * the issue was filed from: `content/docs/references/ui/view.mdx:184` printed
+ * `Enum<'1' | '2' | '3' | '4'> | '1' | '2' | '3' | '4'`, where the second half
+ * is the four `z.literal(<number>)` variants — rendered identically to the four
+ * string ones, so the cell claimed the key takes strings only while the schema
+ * takes both `2` and `'2'`.
+ *
+ * Why it is worth a pin rather than a one-line sweep: these pages are the
+ * authoritative input for AI authors (ADR-0033) and a literal union is a
+ * copy-the-spelling surface — the quotes get copied. #5611 was the live cost:
+ * its `RecordDetailsProps.sections[].columns` was meant to be a numeric literal
+ * union, the generated reference said strings, and the PR gave up the shape for
+ * `z.number().int().min(1).max(4)`. The generator was defining the contract
+ * backwards, which is the class this block exists to keep closed.
+ *
+ * MEASURED (reverse verification): restoring the unconditional quoting in BOTH
+ * branches — `.map((e: any) => `'${e}'`)` and `return `'${prop.const}'`` — gives
+ * **5 failed | 30 passed**. The five reds are exactly the five cases below that
+ * assert a non-string literal, reporting `expected ''2'' to be '2'`,
+ * `expected ''true'' to be 'true'`, `expected 'Enum<'1' | '2'>' to be
+ * 'Enum<1 | 2>'`, `expected ''1' | '2'' to be '1 | 2'`, and the `columns` cell
+ * back to its issue-report spelling. The direction is the ordinary one (restore
+ * the defect → the new pins go red) because these assert a POSITIVE rendering
+ * the fix produces, not the absence of a finding.
+ *
+ * The three `STRING literals are UNTOUCHED` cases stay green under both
+ * versions, and are split into their own `it`s for that reason: an assertion
+ * that only ever runs in the shadow of a red sibling proves nothing. They are
+ * the over-reach guard — a fix that simply *deleted* the quotes, rather than
+ * choosing per `typeof`, turns those three red instead and would be caught
+ * here. Their staying green is also why the bug survived this long: the
+ * renderer was correct on the only literal kind anyone thought to look at.
+ *
+ * (An earlier draft of this comment predicted "4 red, 2 green" and was wrong on
+ * both counts — the string assertions were then sharing an `it` with the
+ * numeric ones, so they could not stay green independently. The numbers above
+ * are the re-measured ones after that split.)
+ */
+describe('formatType — literal quoting follows `typeof`, not habit (#5729)', () => {
+  it('renders a numeric literal bare', () => {
+    // `z.literal(2)` — the issue's headline case.
+    expect(formatType({ type: 'number', const: 2 }, ctx())).toBe('2');
+    expect(formatType({ type: 'integer', const: 0 }, ctx())).toBe('0');
+    expect(formatType({ type: 'number', const: -1.5 }, ctx())).toBe('-1.5');
+  });
+
+  it('renders boolean and null literals as the keywords they are', () => {
+    expect(formatType({ type: 'boolean', const: true }, ctx())).toBe('true');
+    expect(formatType({ type: 'boolean', const: false }, ctx())).toBe('false');
+    // `const: null` reaches the branch (`null !== undefined`) and used to print
+    // `'null'` — a four-character string type, not the null literal.
+    expect(formatType({ type: 'null', const: null }, ctx())).toBe('null');
+  });
+
+  it('quotes per VALUE inside an `enum`, so a numeric enum stays numeric', () => {
+    // `z.nativeEnum({ A: 1, B: 2 })` emits a NUMERIC enum — same branch.
+    expect(formatType({ type: 'number', enum: [1, 2] }, ctx())).toBe('Enum<1 | 2>');
+    // JSON Schema states member types per value, so a mixed `enum` must render
+    // mixed. A node-level `type` test would get this one wrong.
+    expect(formatType({ enum: ['a', 1, true, null] }, ctx())).toBe("Enum<'a' | 1 | true | null>");
+  });
+
+  it('renders a union of numeric literals as bare numbers (the #5611 shape)', () => {
+    expect(
+      formatType({ anyOf: [{ type: 'number', const: 1 }, { type: 'number', const: 2 }] }, ctx()),
+    ).toBe('1 | 2');
+    // …and the array form still parenthesizes: `1 | 2[]` would claim "the
+    // number 1, or an array of 2s". The depth scan is unchanged by this fix,
+    // but it now scans a cell with no quotes in it.
+    expect(
+      formatType(
+        { type: 'array', items: { anyOf: [{ type: 'number', const: 1 }, { type: 'number', const: 2 }] } },
+        ctx(),
+      ),
+    ).toBe('(1 | 2)[]');
+  });
+
+  it('renders the `FormSection.columns` cell end-to-end as view.mdx must show it', () => {
+    // Was: `Enum<'1' | '2' | '3' | '4'> | '1' | '2' | '3' | '4'` — the two
+    // halves indistinguishable. Now the string half keeps its quotes and the
+    // numeric half loses them, which is the ONLY difference the page needed.
+    expect(formatType(FORM_SECTION_COLUMNS, ctx())).toBe("Enum<'1' | '2' | '3' | '4'> | 1 | 2 | 3 | 4");
+  });
+
+  // ---- STRING literals are UNTOUCHED. Green before and after; see the block
+  // comment above for why they are separate `it`s rather than extra lines in
+  // the cases above.
+
+  it('keeps a string `const` quoted — the distinction the fix exists to make', () => {
+    // Same *spelling* as `z.literal(2)` in the schema source, different type.
+    // The quotes are the only thing telling the two apart on the page.
+    expect(formatType({ type: 'string', const: '2' }, ctx())).toBe("'2'");
+    expect(formatType({ type: 'string', const: 'global' }, ctx())).toBe("'global'");
+  });
+
+  it('keeps a string `enum` quoted', () => {
+    expect(formatType({ type: 'string', enum: ['a', 'b'] }, ctx())).toBe("Enum<'a' | 'b'>");
+  });
+
+  it('leaves the string `const`s already on the pages exactly as they render today', () => {
+    // `ObjectSchema.indexes[].unique` — `z.union([z.boolean(),
+    // z.literal('global'), z.literal('organization')])`. Its two string
+    // literals are the regression risk of this change, so they are asserted
+    // through the same real node the tombstone block uses.
+    expect(formatType(INDEX_SCHEMA, ctx())).toBe(
+      "{ name?: string; fields: string[]; unique?: boolean | 'global' | 'organization' }[]",
+    );
+  });
+});

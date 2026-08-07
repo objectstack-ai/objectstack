@@ -52,6 +52,15 @@ import {
   type DatasourceUnavailableKind,
 } from './driver-connect-errors.js';
 import { resolveAllowDriverConnectFailure } from '@objectstack/types';
+// [#5979] The ONE shared "which read failure is benign?" predicate (#4825
+// family). Imported from the leaf `/errors` subpath — which exists precisely
+// so a cross-package consumer gets the 40-line predicate without the manager,
+// the loaders or the YAML/filesystem machinery behind `@objectstack/metadata`'s
+// root entry. Asking the shared predicate rather than hand-rolling a
+// `code === '42P01'` test here is load-bearing, not stylistic: a second
+// vocabulary of "benign driver error" is the exact debt that module exists to
+// retire, and `check:durability-log-level` exempts only this declared name.
+import { isMissingTableError } from '@objectstack/metadata/errors';
 
 /**
  * Per-row outcome of {@link ObjectQL.insertMany} (framework#3172). One entry
@@ -2099,8 +2108,20 @@ export class ObjectQL implements IObjectQLEngine {
         if (digits) max = Math.max(max, parseInt(digits, 10) || 0);
       }
       return max;
-    } catch {
-      return 0;
+    } catch (error) {
+      // [#5979] Discriminate by error TYPE. Seeding from 0 is the truth for
+      // exactly ONE failure reason — the table has not been provisioned, so
+      // there are genuinely no rows and number 1 collides with nothing.
+      if (isMissingTableError(error)) return 0;
+      // Every other failure (connection drop, timeout, permission denial,
+      // query error) means the rows may well exist and simply were not seen.
+      // Answering 0 there restarts the sequence at 1 against a table already
+      // holding N rows and issues autonumbers that COLLIDE with existing ones
+      // — a value written wrong, which no retry and no restart repairs. So the
+      // read failure propagates and the caller allocates nothing: the write
+      // fails loudly instead of succeeding with a forged business identifier.
+      // This is the hazard the #4371 comment above the read already named.
+      throw error;
     }
   }
 
@@ -3931,10 +3952,20 @@ export class ObjectQL implements IObjectQLEngine {
    * order — the certificate is already in the ledger and the contradicting
    * value lands afterwards, which is reachable whenever the deployment is
    * still lenient at that moment (`OS_ALLOW_LAX_MEDIA_VALUES` /
-   * `OS_ALLOW_LAX_VALUE_SHAPES`, or a seed that finishes in the background
-   * after its budget). Without this the ledger would keep asserting a fact the
-   * store contradicts, and the NEXT boot would enforce it against exactly the
-   * data this one wrote.
+   * `OS_ALLOW_LAX_VALUE_SHAPES`) or whenever a writer runs after the
+   * attestation point at all — the `os dev` hot-reload seeder and a runtime
+   * marketplace install both seed on a store this boot created. Without this
+   * the ledger would keep asserting a fact the store contradicts, and the NEXT
+   * boot would enforce it against exactly the data this one wrote.
+   *
+   * The boot's own inline seed used to head that list, via the background
+   * continuation of a run that overran `OS_INLINE_SEED_BUDGET_MS` — the
+   * attestation's `kernel:ready` backstop fired mid-seed and the tail landed
+   * against the certificate it had just issued. #4795 closed that ordering at
+   * the source: the attestation now defers while the `seed-settlement` contract
+   * reports a source outstanding, so the inline seed can no longer contradict
+   * a certificate this boot issued. This stays the safety net rather than the
+   * first line of defence for it.
    *
    * Deliberately narrow:
    *

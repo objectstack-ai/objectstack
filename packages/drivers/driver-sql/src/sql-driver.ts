@@ -887,6 +887,117 @@ function nonBooleanNullComparandError(field: string, value: unknown, path: strin
   );
 }
 
+/**
+ * [#6050] `undefined` in a COMPARAND position.
+ *
+ * Ruled REFUSED on 2026-08-07 (ruling B on #6050), the same disposition #5347-A
+ * gave a non-boolean `$null`, and for a sharper version of the same reason:
+ * there is no reading of `undefined` here that is not a guess, and the two
+ * candidate readings are each other's opposite.
+ *
+ * `undefined` cannot survive a JSON round trip, so it only ever arrives from
+ * IN-PROCESS code — which is exactly what makes it dangerous rather than
+ * academic. `{ owner_id: ctx.user?.id }` with a missing id is the shape that
+ * produced this issue: measured on `origin/main` (`cba7454df`, four rows, `d`
+ * valued on 1-2 and NULL on 3-4), the SAME `TursoDriver` answered it two ways,
+ * chosen by the `url` it was constructed with:
+ *
+ * | filter | LOCAL (this compiler) | REMOTE (`RemoteTransport`) |
+ * |---|---|---|
+ * | `{ d: undefined }`             | bare knex `Undefined binding(s)` | `['3','4']` |
+ * | `{ d: { $eq: undefined } }`    | bare knex `Undefined binding(s)` | `['3','4']` |
+ * | `{ $not: { d: undefined } }`   | bare knex `Undefined binding(s)` | `['1','2']` |
+ * | `{ d: { $ne: undefined } }`    | `['1','2']`                      | `['1','2']` |
+ * | `{ $not: { d: { $ne: undefined } } }` | `[]`                      | `['3','4']` |
+ * | `{ d: { $in: [undefined] } }`  | bare knex `Undefined binding(s)` | `[]` |
+ * | `{ d: { $gt: undefined } }`    | bare knex `Undefined binding(s)` | `[]` |
+ *
+ * Two defects in one gate:
+ *
+ * 1. The thrown rows carried NO ADR-0112 envelope — knex's `Undefined
+ *    binding(s) detected when compiling SELECT` has neither `code` nor
+ *    `status`, so `mapDataError` served an opaque 500 for what is a caller
+ *    mistake in a filter (#1116 / #4436 catalogued this exact shape for other
+ *    inputs; this one was missing from the list).
+ * 2. The `$not: { $ne: undefined }` row is this driver contradicting ITSELF:
+ *    the `$ne` emitter reads `coerced == null` (LOOSE — so `undefined` compiled
+ *    `IS NOT NULL`, a TOTAL predicate), while {@link operatorIsNullTotal} and
+ *    {@link nullValueSatisfiesOperator} read `value === null` (STRICT — so they
+ *    judged the same leaf non-total AND satisfied by a NULL row). The guard
+ *    then wrapped a total predicate in `d IS NULL OR d IS NOT NULL`, a
+ *    tautology, whose negation is FALSE — the `[]` above. That is the #5298
+ *    invariant broken at its own definition: a polarity table pins the spelling
+ *    of ITS OWN emitter.
+ *
+ * Refusing the comparand kills both at once and does it BEFORE either can act:
+ * knex never sees an undefined binding, and guard-vs-emitter disagreement about
+ * `undefined` becomes unreachable rather than merely repaired.
+ *
+ * ⛔ What deliberately does NOT move: `null`. `{ f: null }`, `{ $eq: null }`,
+ * `{ $ne: null }` and `$null` keep their exact behaviour — `null` IS a declared
+ * comparand and IS the null predicate. The refusal is about the JS value that
+ * the language cannot distinguish from an ABSENT key: `{ f: undefined }` and
+ * `{}` are the same object to every reader, and they mean opposite things (a
+ * predicate vs no constraint at all).
+ */
+function undefinedComparandError(field: string, path: string): Error {
+  return unsupportedFilterError(
+    `Comparand at ${path} is undefined. @objectstack/spec FieldOperatorsSchema declares no ` +
+      `undefined comparand, and in JavaScript { "${field}": undefined } cannot be told apart from ` +
+      `omitting the key — yet the two mean OPPOSITE things (a predicate versus no constraint at ` +
+      `all), so there is no reading of it that is not a guess. Write null if you meant the null ` +
+      `predicate ({ "${field}": null } or { "${field}": { "$null": true } }), or omit the key when ` +
+      `the value is genuinely absent (e.g. \`if (id !== undefined) where.${field} = id\`). It is ` +
+      `refused rather than compiled because the backends disagreed: driver-sql handed it to knex ` +
+      `and got a bare "Undefined binding(s)" Error carrying no code, while Turso's remote transport ` +
+      `compiled it to IS NULL — so \`{ owner_id: ctx.user?.id }\` with a missing id silently ` +
+      `matched every env-wide row instead of failing (#6050).`,
+  );
+}
+
+/**
+ * [#6050] Refuse every `undefined` sitting in a comparand position of ONE field
+ * constraint.
+ *
+ * The positions are enumerated rather than swept, because "comparand" is a
+ * position and not a type:
+ *
+ * - the DIRECT comparand — `{ d: undefined }`, the implicit `=`;
+ * - an OPERATOR's comparand — `{ d: { $eq: undefined } }`, `$ne`, `$gt`, the
+ *   LIKE family, and every other single-value operator;
+ * - a MEMBER of a list operator's array — `{ d: { $in: [undefined] } }`,
+ *   `$nin`, `$between`. The array itself IS `$in`'s legitimate comparand; each
+ *   element is a comparand in its own right, which is the same split
+ *   {@link assertCompilableComparand} makes for `$field`.
+ *
+ * Two positions are deliberately NOT swept:
+ *
+ * - `$null` / `$exists`. Their comparand is a declared BOOLEAN — a flag, not a
+ *   value to compare against — and `undefined` there is already refused by
+ *   {@link nonBooleanNullComparandError} / {@link nonBooleanExistsComparandError}
+ *   with a message that names the declared domain. Re-answering it here would
+ *   swap a better message for a worse one and give one condition two wordings,
+ *   which is what #5240 ruled against.
+ * - a bare ARRAY in DIRECT comparand position (`{ d: [1, undefined] }`). An
+ *   array is not a comparand outside a list operator, and
+ *   {@link assertCompilableComparand} already refuses it as a whole for that
+ *   reason; inspecting its members here would relabel a shape that is refused
+ *   either way.
+ */
+function assertDefinedComparands(field: string, spec: unknown, path: string): void {
+  if (spec === undefined) throw undefinedComparandError(field, path);
+  if (!isFilterNode(spec)) return;
+  for (const [op, opValue] of Object.entries(spec)) {
+    if (op === '$null' || op === '$exists') continue;
+    const opPath = `${path}.${op}`;
+    if (opValue === undefined) throw undefinedComparandError(field, opPath);
+    if (!Array.isArray(opValue)) continue;
+    opValue.forEach((member, index) => {
+      if (member === undefined) throw undefinedComparandError(field, `${opPath}[${index}]`);
+    });
+  }
+}
+
 /** [#5134] `$and`/`$or` take a list; anything else is refused, never coerced. */
 function assertFilterNodeList(value: unknown, key: string, path: string): asserts value is unknown[] {
   if (Array.isArray(value)) return;
@@ -990,6 +1101,22 @@ function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdi
   // before compiles byte-identically now.
   if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, here);
 
+  // [#6050] `undefined` in a comparand position, refused on THIS walk for the
+  // two reasons the walk exists — it is exhaustive and it runs FIRST.
+  //
+  // "First" is the whole design here, not a preference. Both defects #6050
+  // measured live downstream of this line: the emitter hands an undefined bind
+  // to knex (a bare `Undefined binding(s)` Error, outside ADR-0112), and the
+  // `$not` branch's {@link nullSafeNegationOperand} rewrite consults
+  // {@link operatorIsNullTotal} / {@link nullValueSatisfiesOperator}, whose
+  // `=== null` spelling disagrees with the `$ne` emitter's `== null` about
+  // exactly this value. `applyFilterCondition` runs the whole reduction before
+  // it reaches either, so a refusal raised here makes BOTH unreachable rather
+  // than repaired — and the polarity tables never have to answer a question
+  // nobody ruled on. See {@link undefinedComparandError} for the measured
+  // local/remote matrix and why `null` is untouched.
+  assertDefinedComparands(key, value, here);
+
   // [#5347] `$null`'s comparand is a boolean by declaration. Checked on this
   // walk rather than in the emitter's `$null` arm for the same
   // evaluation-order reason, and checked on the RAW value so the message names
@@ -1054,6 +1181,15 @@ type NullGuard = 'none' | 'requireValue' | 'allowNull';
 function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
   switch (op) {
     // `$eq: null` IS the null predicate; any other comparand is a value test.
+    //
+    // [#6050] These two arms are STRICT (`=== null`) while the `$ne` emitter
+    // used to be LOOSE (`== null`) — the #5298 invariant broken at its own
+    // definition, since a polarity table pins the spelling of its own emitter.
+    // The repair is the gate, not a third spelling: `reduceFilterKey` refuses
+    // an `undefined` comparand before this table is consulted, so `null` and
+    // real values are the only comparands left and the emitter now reads
+    // `=== null` too. Both spellings are exhaustive over the surviving domain,
+    // and they are the SAME spelling — which is what the invariant asks for.
     case '$eq': return value === null;
     case '$ne': return value !== null;
     // [#5347] `$null` is now TOTAL over its declared domain: `reduceFilterKey`
@@ -1110,6 +1246,10 @@ function operatorIsNullTotal(op: string, value: unknown): boolean {
       return true;
     // A null comparand makes these null PREDICATES too (see the `$eq`/`$ne`
     // arms of the emitter below), not comparisons.
+    //
+    // [#6050] Same note as {@link nullValueSatisfiesOperator}'s `$eq`/`$ne`
+    // arms: this `=== null` and the emitter's test now read the same value set,
+    // because `undefined` is refused before either runs.
     case '$eq':
     case '$ne':
       return value === null;
@@ -6326,6 +6466,16 @@ export class SqlDriver implements IDataDriver {
         // with #5041's generic "cannot be bound as a SQL parameter", which
         // describes a comparand and not a constraint with no operator at all.
         if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, `filter.${key}`);
+        // #6050 — the same position as the `undefined` gate on the reduction
+        // walk, reached the same way `{ field: {} }` above reaches its own: this
+        // loop runs when NO key of the filter carries an operator, so the walk
+        // never sees the node. `{ d: undefined }` IS that shape — `typeof
+        // undefined` is not `'object'`, so it cannot make `hasMongoOperators`
+        // true — and it is the single most likely spelling of the defect
+        // (`{ owner_id: ctx.user?.id }`). ONE function answers both call sites
+        // so the two positions cannot drift into two verdicts, which is the
+        // #5240 lesson this driver already paid for once.
+        assertDefinedComparands(key, value, `filter.${key}`);
         // #5041 — the plain `{ field: value }` map compiles to an implicit `=`,
         // so it is a comparison emitter too and gets the same gate.
         assertCompilableComparand(column, '=', value);
@@ -6623,7 +6773,22 @@ export class SqlDriver implements IDataDriver {
               // UNCHANGED by #5298: `IS NOT NULL` is already total, and both
               // sides of the ruling agree a row with no value does NOT have
               // "any value". Only the value COMPARISON below becomes NULL-safe.
-              if (coerced == null) (builder as any)[logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull'](field);
+              //
+              // [#6050] The test was `coerced == null` — LOOSE, so it also
+              // caught `undefined`, while the two polarity tables that must
+              // pin THIS emitter's spelling (`operatorIsNullTotal`,
+              // `nullValueSatisfiesOperator`) read `=== null`. That split was
+              // defect B: `{ $not: { d: { $ne: undefined } } }` compiled a
+              // guarded tautology and answered `[]` where remote answered
+              // `['3','4']`. Now that `undefined` is refused upstream the two
+              // spellings cover the same domain, and the strict one is written
+              // for the reason #5347 gave when it tightened the `$null` arm:
+              // a lenient test keeps compiling if the gate is ever moved, and
+              // silently resumes answering for a value nobody ruled on. Note
+              // `coerceFilterValue` is total (every arm returns its input on a
+              // shape it cannot canonicalise), so it cannot manufacture an
+              // `undefined` the gate never saw.
+              if (coerced === null) (builder as any)[logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull'](field);
               else this.applyNullSafeNegative(builder, method, field, (qb) => qb.orWhere(field, '<>', coerced));
               break;
             case '$gt':

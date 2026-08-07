@@ -200,6 +200,47 @@ const PARITY_CASES: Array<{ name: string; filter: unknown; expected: string[]; w
 /** Every non-boolean `$exists` comparand both transports must REFUSE. */
 const NON_BOOLEAN_EXISTS: unknown[] = ['yes', 1, 0, null, undefined, {}, 'false', []];
 
+/**
+ * [#6050] Every COMPARAND position an `undefined` can occupy, which both
+ * transports must refuse with the same code and the same sentence.
+ *
+ * #6047 deliberately left this column of the matrix uncovered — it was writing
+ * the NULL-safe polarity table and `undefined` turned out to be a DIFFERENT
+ * defect underneath it, filed as #6050 rather than settled as a rider. This is
+ * that column, measured on `origin/main` at `cba7454df` before the fix:
+ *
+ * | filter | LOCAL | REMOTE |
+ * |---|---|---|
+ * | `{ d: undefined }`                    | knex `Undefined binding(s)` | `['3','4']` |
+ * | `{ d: { $eq: undefined } }`           | knex `Undefined binding(s)` | `['3','4']` |
+ * | `{ $not: { d: undefined } }`          | knex `Undefined binding(s)` | `['1','2']` |
+ * | `{ d: { $ne: undefined } }`           | `['1','2']`                 | `['1','2']` |
+ * | `{ $not: { d: { $ne: undefined } } }` | `[]`                        | `['3','4']` |
+ * | `{ d: { $in: [undefined] } }`         | knex `Undefined binding(s)` | `[]` |
+ * | `{ d: { $gt: undefined } }`           | knex `Undefined binding(s)` | `[]` |
+ *
+ * Note the two rows that were never a CRASH-vs-answer split: `$ne: undefined`
+ * agreed by coincidence, and `$not: { $ne: undefined }` disagreed while BOTH
+ * sides answered — this driver's own guard contradicting its own emitter
+ * (`=== null` versus `== null`), which is the #5298 invariant broken at its
+ * definition. Ruled REFUSED on 2026-08-07, per #5347-A.
+ */
+const UNDEFINED_COMPARANDS: Array<[label: string, where: unknown]> = [
+  ['a direct comparand', { d: undefined }],
+  ['$eq', { d: { $eq: undefined } }],
+  ['$ne', { d: { $ne: undefined } }],
+  ['$gt', { d: { $gt: undefined } }],
+  ['$contains', { d: { $contains: undefined } }],
+  ['$notContains', { d: { $notContains: undefined } }],
+  ['an $in member', { d: { $in: [undefined] } }],
+  ['an $in member beside a good one', { d: { $in: ['v1', undefined] } }],
+  ['a $nin member', { d: { $nin: [undefined] } }],
+  ['inside $and', { $and: [{ d: undefined }] }],
+  ['inside $or, beside a satisfiable disjunct', { $or: [{ a: 'x' }, { d: undefined }] }],
+  ['inside $not', { $not: { d: undefined } }],
+  ['inside $not, one operator down', { $not: { d: { $ne: undefined } } }],
+];
+
 describe('[#5903] TursoDriver LOCAL and REMOTE answer the NULL family identically', () => {
   let local: TursoDriver;
   let remote: TursoDriver;
@@ -295,5 +336,62 @@ describe('[#5903] TursoDriver LOCAL and REMOTE answer the NULL family identicall
       expect(ids(await driver.find('conformance', { object: 'conformance', where: { d: { $exists: true } } } as QueryAST))).toEqual(['1', '2']);
       expect(ids(await driver.find('conformance', { object: 'conformance', where: { d: { $exists: false } } } as QueryAST))).toEqual(['3', '4']);
     }
+  });
+
+  // ── [#6050] The `undefined` column of the matrix ───────────────────────────
+
+  describe('[#6050] both transports refuse an undefined comparand, identically', () => {
+    for (const [label, where] of UNDEFINED_COMPARANDS) {
+      it(`refuses ${label} on both faces, with one code and one sentence`, async () => {
+        const errors: Record<string, Error & { code?: string; status?: number }> = {};
+        for (const [faceLabel, driver] of [['local', local], ['remote', remote]] as const) {
+          const err = (await driver
+            .find('conformance', { object: 'conformance', where } as unknown as QueryAST)
+            .catch((e) => e)) as Error & { code?: string; status?: number };
+          expect(err, faceLabel).toBeInstanceOf(Error);
+          // The ENVELOPE is half the fix (#1116 / #4436): LOCAL used to throw
+          // knex's bare `Undefined binding(s)` with neither code nor status, so
+          // an assertion that only checked "it threw" would have passed on the
+          // driver this issue was filed against.
+          expect(err.code, faceLabel).toBe('INVALID_FILTER');
+          expect(err.status, faceLabel).toBe(400);
+          errors[faceLabel] = err;
+        }
+        // #5240 — one condition, one wording. The two compilers are independent
+        // implementations, so the sentence is what holds them together; only
+        // the transport prefix and the `on '<object>'` qualifier may differ.
+        const requirement =
+          '@objectstack/spec FieldOperatorsSchema declares no undefined comparand';
+        expect(errors.local.message).toContain(requirement);
+        expect(errors.remote.message).toContain(requirement);
+        expect(errors.local.message).toContain('Write null if you meant the null predicate');
+        expect(errors.remote.message).toContain('Write null if you meant the null predicate');
+      });
+    }
+
+    /**
+     * ⛔ The control this whole block needs: refusing `undefined` must not have
+     * cost `null` a single answer, on either face. Every row below is one of
+     * `PARITY_CASES`' own null spellings, re-asserted here so a regression
+     * caused by the #6050 gate is attributed to the gate.
+     */
+    it('null comparands still answer identically, and correctly, on both faces', async () => {
+      const NULL_CASES: Array<[unknown, string[]]> = [
+        [{ d: null }, ['3', '4']],
+        [{ d: { $eq: null } }, ['3', '4']],
+        [{ d: { $ne: null } }, ['1', '2']],
+        [{ d: { $null: true } }, ['3', '4']],
+        [{ d: { $null: false } }, ['1', '2']],
+        [{ $not: { d: null } }, ['1', '2']],
+        [{ $not: { d: { $ne: null } } }, ['3', '4']],
+        [{ d: { $in: ['v1', null] } }, ['1']],
+      ];
+      for (const [where, expected] of NULL_CASES) {
+        const localIds = ids(await local.find('conformance', { object: 'conformance', where } as QueryAST));
+        const remoteIds = ids(await remote.find('conformance', { object: 'conformance', where } as QueryAST));
+        expect(remoteIds, `divergence on ${JSON.stringify(where)}`).toEqual(localIds);
+        expect(localIds, `wrong answer on ${JSON.stringify(where)}`).toEqual(expected);
+      }
+    });
   });
 });

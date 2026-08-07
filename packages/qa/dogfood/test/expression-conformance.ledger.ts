@@ -80,15 +80,20 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   },
   {
     id: 'cel-formula',
-    summary: 'computed / formula field + mapping expressions',
+    summary: 'computed / formula field expressions',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement: '@objectstack/formula celEngine (interpret)',
     // kernel/feature.zod.ts:expression was covered here until the orphaned
     // FeatureFlagSchema module was removed (zero runtime consumers once its
     // capabilities-descriptor home went, #3605).
+    // shared/mapping.zod.ts:expression went the same way at #5552: it was the
+    // `javascript` member of FieldMappingTransform, and the whole five-member
+    // union was retired under ADR-0049 (no runtime executed any of them). The
+    // surface it named no longer exists in source, so the cover is deleted
+    // rather than re-pointed — and the summary drops "+ mapping expressions"
+    // with it, since nothing on that side is left to interpret.
     covers: [
       'data/field.zod.ts:expression',
-      'shared/mapping.zod.ts:expression',
     ],
   },
   {

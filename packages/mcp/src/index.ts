@@ -24,10 +24,20 @@ export type {
   McpActionParamSummary,
   RegisterActionToolsOptions,
 } from './mcp-http-tools.js';
+// The portable `SKILL.md` distributable (ADR-0036 Amendment C) — NOT the
+// `skill` metadata type; that one is projected onto MCP prompts just below.
 export {
   renderSkillMarkdown,
   OBJECTSTACK_SKILL_NAME,
   OBJECTSTACK_SKILL_DESCRIPTION,
-} from './skill.js';
-export type { RenderSkillOptions } from './skill.js';
+} from './skill-md.js';
+export type { RenderSkillOptions } from './skill-md.js';
+// The `skill` metadata type (`SkillSchema`) → MCP `prompts` primitive (#3905).
+export {
+  projectSkillPrompt,
+  listSkillPrompts,
+  registerSkillPrompts,
+  skillPromptResult,
+} from './skill-prompts.js';
+export type { McpSkillBridge, SkillPrompt } from './skill-prompts.js';
 export { CONNECT_AGENT_PAGE, CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';

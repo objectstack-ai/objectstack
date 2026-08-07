@@ -152,6 +152,54 @@ to typed per-action tools) is the planned next step, consistent with ADR-0097's
 [#3167](https://github.com/objectstack-ai/objectstack/issues/3167).
 </Callout>
 
+## Prompts: your skills, served to the client
+
+Tools are not the only primitive. Every **skill** you author (`*.skill.ts`,
+`defineSkill`) that carries `instructions` is served as an MCP **prompt** — so
+a connected client can list your app's playbooks by name and pull one into the
+conversation:
+
+```typescript
+export const CaseTriageSkill = defineSkill({
+  name: 'case_triage',
+  label: 'Case Triage',
+  description: 'How this team triages an inbound support case',
+  instructions: `Read the case, classify severity from the account tier and the
+symptom, then propose the next action. Never close a case the customer has not
+confirmed.`,
+  tools: ['query_records', 'action_resolve_case'],
+});
+```
+
+```jsonc
+// prompts/list
+{ "prompts": [ { "name": "case_triage", "title": "Case Triage",
+                 "description": "How this team triages an inbound support case" } ] }
+// prompts/get { "name": "case_triage" } → the instructions text, as a message
+```
+
+In Claude Code that surfaces as `/mcp__my-app__case_triage`; other clients show
+prompts in their own picker. Nothing to enable — the surface appears as soon as
+the app has a skill with instructions, and `prompts/list` simply returns an
+empty list until then.
+
+**Only the instructions half projects.** A skill's `tools` / `surface` /
+`triggerConditions` are read by the **in-product agent runtime** (the `ask` /
+`build` agents, cloud / Enterprise), which is the thing that composes a tool set
+and decides when a skill activates. MCP has neither step: the model lives in
+*your* client, driving one flat tool list, and your AI-exposed actions are
+already reachable there as `list_actions` / `run_action`. So on the open
+framework a skill contributes its judgment (as a prompt), not its wiring — and
+the same skill file keeps its full meaning when the app runs on the cloud
+runtime. See [AI Agents](/docs/ai/agents#you-extend-the-platform-with-skills-not-agents).
+
+<Callout type="warn">
+**Two different "skills" again.** These are **agent skills** — `defineSkill`
+metadata inside your app. The `SKILL.md` file at `GET /api/v1/mcp/skill`
+(below) is the *authoring* skill that teaches an external coding agent how to
+drive this MCP server. Same word, different layer.
+</Callout>
+
 ## The security model
 
 - **Every call runs as the caller.** The MCP bridge resolves the same
@@ -200,6 +248,7 @@ skill and a guided `/objectstack:connect` command.
 
 ## Related
 
+- [Prompts from your skills](#prompts-your-skills-served-to-the-client) — the other MCP primitive this server serves
 - [Actions as Tools](/docs/ai/actions-as-tools) — the `run_action` bridge and its governance
 - [Actions](/docs/ui/actions) — defining the actions you expose
 - [Your app as an MCP server](/docs/api#your-app-as-an-mcp-server) — the API-level view
