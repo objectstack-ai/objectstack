@@ -11,6 +11,34 @@ export const CLI_ALIAS = 'os';
 
 // ─── Machine-readable output ────────────────────────────────────────
 
+/**
+ * The only two exit codes this CLI has: `0` success, `1` failure.
+ *
+ * Deliberately a narrow union rather than `number`, and that narrowness is the
+ * whole point. The value it types sits in the SECOND POSITIONAL slot of
+ * {@link emitJson} / {@link emitText} — immediately after a payload — where
+ * `number` accepted whatever numeric the caller happened to be holding.
+ * `os migrate recorded-by --json` and `os migrate resume --json` were holding
+ * `timer.elapsed()`, a DURATION in milliseconds, and passed it there (#4873).
+ *
+ * The result was invisible in every way an author checks: correct JSON on
+ * stdout, `✅ Graceful shutdown complete`, empty stderr — and
+ * `process.exitCode = 531`, which the shell reports as `531 & 0xFF` = 19. A
+ * different non-zero code on every run, because the code WAS the run's
+ * duration, so every caller that judges success by exit status (CI steps,
+ * `set -e`, Makefiles, container entrypoints) saw a random failure from a
+ * command that had just succeeded — the one audience `--json` exists for.
+ *
+ * Every other `--json` site in this CLI reports its duration INSIDE the
+ * payload (`{ ...report, duration: timer.elapsed() }` — `os lint`,
+ * `os migrate meta`, `os migrate summary-nulls`, `os meta resync`), which is
+ * what those two meant to do as well. With this union a duration in the exit
+ * slot is a compile error, so the mistake cannot be made silently again.
+ *
+ * Widening it is a deliberate act: a third code needs a meaning first.
+ */
+export type CliExitCode = 0 | 1;
+
 export interface EmitJsonOptions {
   /**
    * Emit on a single line instead of 2-space-indented.
@@ -60,7 +88,7 @@ export interface EmitJsonOptions {
  */
 export async function emitJson(
   payload: unknown,
-  exitCode = 0,
+  exitCode: CliExitCode = 0,
   opts: EmitJsonOptions = {},
 ): Promise<void> {
   const text = opts.compact ? JSON.stringify(payload) : JSON.stringify(payload, null, 2);
@@ -100,7 +128,7 @@ export function isExitSignal(error: unknown): boolean {
  * why this cannot be fixed at the exit, or globally via blocking stdout,
  * applies here too.
  */
-export async function emitText(text: string, exitCode = 0): Promise<void> {
+export async function emitText(text: string, exitCode: CliExitCode = 0): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     process.stdout.write(text + '\n', (err) => (err ? reject(err) : resolve()));
   });

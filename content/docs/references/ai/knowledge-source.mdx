@@ -88,7 +88,7 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | **adapterConfig** | `Record<string, any>` | optional |  |
 | **source** | `{ kind: 'object'; object: string; contentFields: string[]; metadataFields?: string[]; … } \| { kind: 'file'; prefix: string; mimeTypes?: string[] } \| { kind: 'http'; urls: string[]; userAgent?: string }` | ✅ |  |
 | **embedding** | `{ provider: Enum<'openai' \| 'cohere' \| 'azure_openai' \| 'huggingface' \| 'local' \| 'custom'>; model: string; dimensions: integer; endpoint?: string; … }` | optional |  |
-| **vectorStore** | `{ provider: Enum<'pgvector' \| 'chroma' \| 'qdrant' \| 'pinecone' \| 'weaviate' \| 'milvus' \| 'redis' \| 'opensearch' \| 'elasticsearch' \| 'custom'>; collection: string; endpoint?: string; secretRef?: string; … }` | optional |  |
+| **vectorStore** | `{ provider: Enum<'pgvector' \| 'chroma' \| 'qdrant' \| 'pinecone' \| 'weaviate' \| 'milvus' \| 'redis' \| … +3 more>; collection: string; endpoint?: string; secretRef?: string; … }` | optional |  |
 | **refresh** | `{ onRecordChange?: boolean; cron?: string }` | optional |  |
 | **aiExposed** | `boolean` | optional |  |
 

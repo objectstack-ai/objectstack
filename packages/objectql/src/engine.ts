@@ -21,6 +21,7 @@ import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyD
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import { assertListComparandShapes } from './filter-comparand-shape.js';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
@@ -451,7 +452,16 @@ function lowerWhereFilterArray<T extends object | undefined>(
 ): T {
   if (!bag) return bag;
   const where = (bag as Record<string, unknown>).where;
-  if (!Array.isArray(where)) return bag;
+  if (!Array.isArray(where)) {
+    // [#5869] Door 1 lands HERE, not below: the protocol face runs its own
+    // `isFilterAST` → `parseFilterAST` and hands the engine an already-lowered
+    // `FilterCondition` object, so a gate on the array branch alone would miss
+    // every query that arrived over the wire. The comparand check is the same
+    // one either way — it reads the lowered condition, which is what both doors
+    // produce.
+    assertListComparandShapes(object, operation, where);
+    return bag;
+  }
 
   const lowered: Record<string, unknown> = { ...bag };
 
@@ -488,6 +498,11 @@ function lowerWhereFilterArray<T extends object | undefined>(
       `unfiltered (#5158).`,
     );
   }
+  // [#5869] Door 2's half of the same check. `isFilterAST` vouched for the
+  // OPERATOR and `parseFilterAST` lowered it, but neither looks at the
+  // comparand — `['status', 'not_in', 'done']` lowers to `{status: {$nin:
+  // 'done'}}` and a scalar `$nin` is what reached the driver as a 500.
+  assertListComparandShapes(object, operation, condition);
   lowered.where = condition;
   return lowered as T;
 }

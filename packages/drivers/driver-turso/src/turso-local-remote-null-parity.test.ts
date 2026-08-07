@@ -53,7 +53,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { FILTER_LOGIC_ROWS } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
-import type { QueryAST } from '@objectstack/spec/data';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 
 /**
  * The SHARED conformance fixture, not a private one. `d` is valued on rows 1-2
@@ -276,18 +276,18 @@ describe('[#5903] TursoDriver LOCAL and REMOTE answer the NULL family identicall
    * would turn every case below green for the wrong reason.
    */
   it('both transports hold the same four rows, with `d` really NULL on 3 and 4', async () => {
-    expect(ids(await local.find('conformance', { object: 'conformance' }))).toEqual(['1', '2', '3', '4']);
-    expect(ids(await remote.find('conformance', { object: 'conformance' }))).toEqual(['1', '2', '3', '4']);
+    expect(ids(await local.find('conformance', {}))).toEqual(['1', '2', '3', '4']);
+    expect(ids(await remote.find('conformance', {}))).toEqual(['1', '2', '3', '4']);
     for (const driver of [local, remote]) {
-      expect(ids(await driver.find('conformance', { object: 'conformance', where: { d: { $null: true } } } as QueryAST))).toEqual(['3', '4']);
-      expect(ids(await driver.find('conformance', { object: 'conformance', where: { d: { $null: false } } } as QueryAST))).toEqual(['1', '2']);
+      expect(ids(await driver.find('conformance', { where: { d: { $null: true } } } as DriverQuery))).toEqual(['3', '4']);
+      expect(ids(await driver.find('conformance', { where: { d: { $null: false } } } as DriverQuery))).toEqual(['1', '2']);
     }
   });
 
   for (const c of PARITY_CASES) {
     it(c.name, async () => {
-      const localIds = ids(await local.find('conformance', { object: 'conformance', where: c.filter } as QueryAST));
-      const remoteIds = ids(await remote.find('conformance', { object: 'conformance', where: c.filter } as QueryAST));
+      const localIds = ids(await local.find('conformance', { where: c.filter } as DriverQuery));
+      const remoteIds = ids(await remote.find('conformance', { where: c.filter } as DriverQuery));
       // Agreement first — this is the assertion #5903 is about.
       expect(remoteIds, `local/remote divergence. ${c.why}`).toEqual(localIds);
       // …and agreement on the RIGHT answer, so a shared regression cannot pass
@@ -301,10 +301,10 @@ describe('[#5903] TursoDriver LOCAL and REMOTE answer the NULL family identicall
     // wearing a total instead of a row set — and remote builds its COUNT
     // statement separately from its SELECT.
     for (const c of PARITY_CASES) {
-      expect(await local.count('conformance', { object: 'conformance', where: c.filter } as QueryAST), `local ${c.name}`).toBe(
+      expect(await local.count('conformance', { where: c.filter } as DriverQuery), `local ${c.name}`).toBe(
         c.expected.length,
       );
-      expect(await remote.count('conformance', { object: 'conformance', where: c.filter } as QueryAST), `remote ${c.name}`).toBe(
+      expect(await remote.count('conformance', { where: c.filter } as DriverQuery), `remote ${c.name}`).toBe(
         c.expected.length,
       );
     }
@@ -319,7 +319,7 @@ describe('[#5903] TursoDriver LOCAL and REMOTE answer the NULL family identicall
       const where = { d: { $exists: value } };
       for (const [label, driver] of [['local', local], ['remote', remote]] as const) {
         const err = (await driver
-          .find('conformance', { where } as unknown as QueryAST)
+          .find('conformance', { where } as unknown as DriverQuery)
           .catch((e) => e)) as Error & { code?: string; status?: number };
         expect(err, `${label} ${JSON.stringify(value) ?? 'undefined'}`).toBeInstanceOf(Error);
         expect(err.code, label).toBe('INVALID_FILTER');
@@ -333,8 +333,8 @@ describe('[#5903] TursoDriver LOCAL and REMOTE answer the NULL family identicall
 
   it('both transports still COMPILE the two booleans `$exists` declares', async () => {
     for (const driver of [local, remote]) {
-      expect(ids(await driver.find('conformance', { object: 'conformance', where: { d: { $exists: true } } } as QueryAST))).toEqual(['1', '2']);
-      expect(ids(await driver.find('conformance', { object: 'conformance', where: { d: { $exists: false } } } as QueryAST))).toEqual(['3', '4']);
+      expect(ids(await driver.find('conformance', { where: { d: { $exists: true } } } as DriverQuery))).toEqual(['1', '2']);
+      expect(ids(await driver.find('conformance', { where: { d: { $exists: false } } } as DriverQuery))).toEqual(['3', '4']);
     }
   });
 
@@ -346,7 +346,7 @@ describe('[#5903] TursoDriver LOCAL and REMOTE answer the NULL family identicall
         const errors: Record<string, Error & { code?: string; status?: number }> = {};
         for (const [faceLabel, driver] of [['local', local], ['remote', remote]] as const) {
           const err = (await driver
-            .find('conformance', { object: 'conformance', where } as unknown as QueryAST)
+            .find('conformance', { where } as unknown as DriverQuery)
             .catch((e) => e)) as Error & { code?: string; status?: number };
           expect(err, faceLabel).toBeInstanceOf(Error);
           // The ENVELOPE is half the fix (#1116 / #4436): LOCAL used to throw
@@ -387,8 +387,8 @@ describe('[#5903] TursoDriver LOCAL and REMOTE answer the NULL family identicall
         [{ d: { $in: ['v1', null] } }, ['1']],
       ];
       for (const [where, expected] of NULL_CASES) {
-        const localIds = ids(await local.find('conformance', { object: 'conformance', where } as QueryAST));
-        const remoteIds = ids(await remote.find('conformance', { object: 'conformance', where } as QueryAST));
+        const localIds = ids(await local.find('conformance', { where } as DriverQuery));
+        const remoteIds = ids(await remote.find('conformance', { where } as DriverQuery));
         expect(remoteIds, `divergence on ${JSON.stringify(where)}`).toEqual(localIds);
         expect(localIds, `wrong answer on ${JSON.stringify(where)}`).toEqual(expected);
       }

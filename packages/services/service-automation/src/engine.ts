@@ -3036,9 +3036,37 @@ export class AutomationEngine implements IAutomationService {
                 run = await this.loadSuspendedRunStrict(runId);
             } catch (err) {
                 const message = (err as Error).message;
+                // #5912 — the LOG record's cause goes to `meta`, never into the
+                // message. `message` is the datasource DRIVER's own failure text
+                // and we do not control how many lines it has;
+                // `ObjectLogger.write()` adds one `<ts> <LEVEL>` head per call, so
+                // a newline in it turns this ONE record into several physical
+                // lines of which only the first is greppable — the family of
+                // #5048 / #5575 / #5636 / #5661 / #5737, and cloud#971's shape.
+                //
+                // Third argument, per the `Logger` contract
+                // (`packages/spec/src/contracts/logger.ts`)
+                // `error(message, error?, meta?)`. NOT the second: that is the
+                // `Error` slot and a raw error there ships its whole stack on
+                // every record (#5575). `runId` stays in the message — it is the
+                // caller's own handle, the same call the family's other seams
+                // make for their ids, not the foreign text this fix is about.
+                //
+                // Level stays `error`: the run is on disk and the resume did not
+                // land, which is #4632's durability degradation exactly.
                 this.logger.error(
-                    `[automation] durable suspended-run store unreachable while resuming '${runId}': ${message}`,
+                    `[automation] durable suspended-run store unreachable while resuming '${runId}' — the suspension was ` +
+                        `NOT consumed, so the run stays parked and this resume can be retried verbatim once the store is ` +
+                        `reachable; the caller was told the same via the STORE_UNAVAILABLE result. The store's own failure ` +
+                        `is in this record's meta.`,
+                    undefined,
+                    describeThrownForLog(err),
                 );
+                // The RESULT envelope keeps the cause spliced in, verbatim and
+                // deliberately (#5636 made the same call for `degradedReason`):
+                // this is a structured return value a caller reads as a whole —
+                // over REST it is a JSON string field, never split on newlines —
+                // and PR #5911 already made wait-node put it into `meta` intact.
                 return {
                     success: false,
                     code: 'STORE_UNAVAILABLE',

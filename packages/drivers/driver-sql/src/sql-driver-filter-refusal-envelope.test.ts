@@ -70,7 +70,7 @@ describe('[#4436] SqlDriver filter refusals carry INVALID_FILTER and leak no dri
   });
 
   const find = (where: unknown) =>
-    driver.find('deal', { object: 'deal', fields: ['id'], where: where as FilterCondition });
+    driver.find('deal', { fields: ['id'], where: where as FilterCondition });
 
   // The issue's own repro, at the layer that produces the envelope.
   it('the $-object unsupported-operator branch — the exact shape #4436 reported', async () => {

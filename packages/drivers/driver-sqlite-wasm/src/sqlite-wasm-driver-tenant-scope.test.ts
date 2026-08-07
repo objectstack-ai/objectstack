@@ -45,22 +45,22 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
 
   describe('find', () => {
     it('returns only the caller tenant rows when tenantId is set', async () => {
-      const rowsA = await driver.find('account', { object: 'account' }, { tenantId: 'org_a' });
-      const rowsB = await driver.find('account', { object: 'account' }, { tenantId: 'org_b' });
+      const rowsA = await driver.find('account', {}, { tenantId: 'org_a' });
+      const rowsB = await driver.find('account', {}, { tenantId: 'org_b' });
       expect(rowsA.map(r => r.id).sort()).toEqual(['a1', 'a2']);
       expect(rowsB.map(r => r.id).sort()).toEqual(['b1', 'b2']);
     });
 
     it('is unscoped when no tenantId (admin path)', async () => {
-      const all = await driver.find('account', { object: 'account' });
+      const all = await driver.find('account', {});
       expect(all).toHaveLength(4);
     });
   });
 
   describe('findOne by id', () => {
     it('cannot read across tenants', async () => {
-      const own = await driver.findOne('account', { object: 'account', where: { id: 'a1' } }, { tenantId: 'org_a' });
-      const cross = await driver.findOne('account', { object: 'account', where: { id: 'a1' } }, { tenantId: 'org_b' });
+      const own = await driver.findOne('account', { where: { id: 'a1' } }, { tenantId: 'org_a' });
+      const cross = await driver.findOne('account', { where: { id: 'a1' } }, { tenantId: 'org_b' });
       expect(own?.id).toBe('a1');
       expect(cross).toBeNull();
     });
@@ -70,13 +70,13 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
     it('refuses to update a row owned by another tenant', async () => {
       // org_b tries to update org_a's a1 → no-op
       await driver.update('account', 'a1', { tier: 'compromised' }, { tenantId: 'org_b' });
-      const a1 = await driver.findOne('account', { object: 'account', where: { id: 'a1' } });
+      const a1 = await driver.findOne('account', { where: { id: 'a1' } });
       expect(a1.tier).toBe('gold');
     });
 
     it('updates own rows fine', async () => {
       await driver.update('account', 'a1', { tier: 'platinum' }, { tenantId: 'org_a' });
-      const a1 = await driver.findOne('account', { object: 'account', where: { id: 'a1' } });
+      const a1 = await driver.findOne('account', { where: { id: 'a1' } });
       expect(a1.tier).toBe('platinum');
     });
   });
@@ -84,15 +84,15 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
   describe('delete', () => {
     it('refuses to delete a row owned by another tenant', async () => {
       await driver.delete('account', 'a1', { tenantId: 'org_b' });
-      const a1 = await driver.findOne('account', { object: 'account', where: { id: 'a1' } });
+      const a1 = await driver.findOne('account', { where: { id: 'a1' } });
       expect(a1).not.toBeNull();
     });
   });
 
   describe('count / aggregate', () => {
     it('count is scoped', async () => {
-      const a = await driver.count!('account', { object: 'account' }, { tenantId: 'org_a' });
-      const b = await driver.count!('account', { object: 'account' }, { tenantId: 'org_b' });
+      const a = await driver.count!('account', {}, { tenantId: 'org_a' });
+      const b = await driver.count!('account', {}, { tenantId: 'org_b' });
       expect(a).toBe(2);
       expect(b).toBe(2);
     });
@@ -109,7 +109,7 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
 
       const visibleToB = await driver.findOne(
         'account',
-        { object: 'account', where: { id: 'a3' } },
+        { where: { id: 'a3' } },
         { tenantId: 'org_b' },
       );
       expect(visibleToB).toBeNull();
@@ -130,11 +130,11 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
     it('updateMany only touches caller tenant rows', async () => {
       await driver.updateMany!(
         'account',
-        { object: 'account', where: { tier: 'gold' } },
+        { where: { tier: 'gold' } },
         { tier: 'gold-upgraded' },
         { tenantId: 'org_a' },
       );
-      const all = await driver.find('account', { object: 'account' });
+      const all = await driver.find('account', {});
       const byId = Object.fromEntries(all.map(r => [r.id, r.tier]));
       expect(byId.a1).toBe('gold-upgraded');
       expect(byId.b1).toBe('gold'); // untouched
@@ -143,10 +143,10 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
     it('deleteMany only deletes caller tenant rows', async () => {
       await driver.deleteMany!(
         'account',
-        { object: 'account', where: { tier: 'gold' } },
+        { where: { tier: 'gold' } },
         { tenantId: 'org_a' },
       );
-      const remaining = await driver.find('account', { object: 'account' });
+      const remaining = await driver.find('account', {});
       const ids = remaining.map(r => r.id).sort();
       expect(ids).toEqual(['a2', 'b1', 'b2']);
     });
@@ -162,7 +162,7 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
         ],
         { tenantId: 'org_a' },
       );
-      const rows = await driver.find('account', { object: 'account', where: { id: { $in: ['bc1', 'bc2'] } } });
+      const rows = await driver.find('account', { where: { id: { $in: ['bc1', 'bc2'] } } });
       expect(rows.every(r => r.organization_id === 'org_a')).toBe(true);
     });
   });
@@ -179,7 +179,7 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
         },
       ]);
       await driver.create('global_flag', { id: 'g1', name: 'G1' });
-      const rows = await driver.find('global_flag', { object: 'global_flag' }, { tenantId: 'org_a' });
+      const rows = await driver.find('global_flag', {}, { tenantId: 'org_a' });
       expect(rows).toHaveLength(1);
     });
   });
@@ -201,7 +201,7 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
       ]);
       await driver.create('workspace_item', { id: 'w1', name: 'W1' }, { tenantId: 'ws_a' });
       await driver.create('workspace_item', { id: 'w2', name: 'W2' }, { tenantId: 'ws_b' });
-      const rowsA = await driver.find('workspace_item', { object: 'workspace_item' }, { tenantId: 'ws_a' });
+      const rowsA = await driver.find('workspace_item', {}, { tenantId: 'ws_a' });
       expect(rowsA.map(r => r.id)).toEqual(['w1']);
       expect(rowsA[0].workspace_id).toBe('ws_a');
     });
@@ -241,13 +241,13 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
     });
 
     it('read is unscoped even when the caller passes tenantId (admin with active org sees all)', async () => {
-      const adminRead = await driver.find('sys_license', { object: 'sys_license' }, { tenantId: 'org_admin_active' });
+      const adminRead = await driver.find('sys_license', {}, { tenantId: 'org_admin_active' });
       expect(adminRead.map(r => r.id).sort()).toEqual(['lic_global', 'lic_org_b']);
     });
 
     it('matches the unscoped (anonymous) read — no auth-dependent divergence', async () => {
-      const scoped = await driver.find('sys_license', { object: 'sys_license' }, { tenantId: 'org_admin_active' });
-      const unscoped = await driver.find('sys_license', { object: 'sys_license' });
+      const scoped = await driver.find('sys_license', {}, { tenantId: 'org_admin_active' });
+      const unscoped = await driver.find('sys_license', {});
       expect(scoped.map(r => r.id).sort()).toEqual(unscoped.map(r => r.id).sort());
     });
 
@@ -266,7 +266,7 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
         fields: platformGlobal[0].fields,
       });
       expect((driver as any).tenantFieldByTable['sys_license']).toBeNull();
-      const adminRead = await driver.find('sys_license', { object: 'sys_license' }, { tenantId: 'org_admin_active' });
+      const adminRead = await driver.find('sys_license', {}, { tenantId: 'org_admin_active' });
       expect(adminRead.map(r => r.id).sort()).toEqual(['lic_global', 'lic_org_b']);
     });
 

@@ -8,6 +8,10 @@ import { z } from 'zod';
 import * as API from '../src/api';
 import * as Data from '../src/data';
 import { assertRefsResolve, assertNoDegradedSchemas } from './lib/openapi-self-consistency';
+// The name this generator writes is DECLARED next to `build-schemas.ts`'s clean
+// step, which shares this directory and must not sweep it away (#5371). Imported
+// rather than spelled again so a rename here moves the declaration with it.
+import { OPENAPI_ARTIFACT_NAME } from './lib/json-schema-out-dir';
 
 const OUT_DIR = path.resolve(__dirname, '../json-schema');
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
@@ -175,7 +179,7 @@ if (!fs.existsSync(OUT_DIR)) {
   fs.mkdirSync(OUT_DIR, { recursive: true });
 }
 
-const outPath = path.join(OUT_DIR, 'openapi.json');
+const outPath = path.join(OUT_DIR, OPENAPI_ARTIFACT_NAME);
 fs.writeFileSync(outPath, JSON.stringify(openapi, null, 2));
 console.log(`✅ Generated OpenAPI spec: ${outPath}`);
 console.log(`   Version: ${SPEC_VERSION}`);

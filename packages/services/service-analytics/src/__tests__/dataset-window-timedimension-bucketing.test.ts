@@ -48,6 +48,21 @@
  * was outside the merge key: with several month-split rows per owner the
  * comparison value landed on whichever row the index happened to hold last and
  * the others read a confident `0`. Both numbers are asserted below.
+ *
+ * ## …and bucketing alike was only HALF of it (#6007)
+ *
+ * Identical bucketing makes the two grids the same SHAPE; it does not make them
+ * the same KEYS. For a bucketed anchor the comparison pass groups the shifted
+ * window, so its rows key to `2025-01` where the primary grid keys to `2026-01`
+ * — nothing merges, every comparison row is appended, and the grid doubles into
+ * half-real/half-zero rows plus buckets from outside the caller's own window.
+ * The bucketed-anchor case below asserted exactly that grid as "long-standing
+ * behaviour, unchanged by #5688", pointing at #6007; #6007 ruled it a defect and
+ * flipped it to the paired 2×2. The whole-file pairing is unchanged: the
+ * window-only anchor is still asserted NOT to align (it is not a column on
+ * either pass, so there is nothing to realign), and the alignment itself —
+ * every granularity, both `compareTo` kinds, and every case it declines — lives
+ * in `dataset-compare-bucket-alignment.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -389,7 +404,7 @@ describe('#5688 — compareTo buckets both passes alike, whichever verdict it re
     expect(names(result.fields)).toEqual(['owner', 'opp_count', 'opp_count__compare']);
   });
 
-  it('bucketed anchor: BOTH passes bucket by month — the #4870 fix, unregressed', async () => {
+  it('bucketed anchor: BOTH passes bucket by month, and the comparison lands on the SAME row (#6007)', async () => {
     const { service, calls } = svc();
     const result = await service.queryDataset(
       dataset,
@@ -411,16 +426,35 @@ describe('#5688 — compareTo buckets both passes alike, whichever verdict it re
     expect(descriptor(result.fields, 'close_date')).toEqual({
       name: 'close_date', type: 'time', label: 'Close Date',
     });
-    // Long-standing behaviour, unchanged by #5688 and asserted so the pair is
-    // read as a whole: the shifted grid keys by its OWN buckets, so a comparison
-    // bucket with no current-window twin arrives as its own row (the append
-    // `fillEmptyGroups` is documented to expect).
+    // **This assertion was deliberately flipped by #6007**, and it is the whole
+    // point of the pair. Bucketing the two passes ALIKE (#4870, above) was only
+    // half the requirement: the comparison pass still grouped the SHIFTED
+    // window, so its rows keyed to `2025-01` / `2025-02` while the merge keys on
+    // `selection.dimensions` — nothing matched, every comparison row was
+    // APPENDED, and this is what the grid used to be:
+    //
+    // ```
+    // [{ close_date: '2025-01', opp_count: 0, opp_count__compare: 2 },
+    //  { close_date: '2025-02', opp_count: 0, opp_count__compare: 2 },
+    //  { close_date: '2026-01', opp_count: 2, opp_count__compare: 0 },
+    //  { close_date: '2026-02', opp_count: 1, opp_count__compare: 0 }]
+    // ```
+    //
+    // Four rows for a two-bucket window, a confident `0` on every one of them
+    // (each pass reported only its own half, and `fillEmptyGroups` filled the
+    // other), and two rows keyed OUTSIDE the window the caller filtered to. The
+    // ruling on #6007 restates each comparison bucket key in current-period
+    // terms — `2025-01` → `2026-01` — so a "this year vs last year" trend is
+    // what it reads as: 2 rows × 2 columns, one row per bucket of the requested
+    // window, both numbers real.
     expect(result.rows).toEqual([
-      { close_date: '2025-01', opp_count: 0, opp_count__compare: 2 },
-      { close_date: '2025-02', opp_count: 0, opp_count__compare: 2 },
-      { close_date: '2026-01', opp_count: 2, opp_count__compare: 0 },
-      { close_date: '2026-02', opp_count: 1, opp_count__compare: 0 },
+      { close_date: '2026-01', opp_count: 2, opp_count__compare: 2 },
+      { close_date: '2026-02', opp_count: 1, opp_count__compare: 2 },
     ]);
+    // Said as an invariant rather than only as a row list, because it is the
+    // invariant a future change is most likely to break silently: no row keys to
+    // a bucket outside the filtered window.
+    expect(result.rows.every((r) => String(r.close_date).startsWith('2026-'))).toBe(true);
   });
 
   it('window-only anchor with NO grid dimensions: one row, both totals comparable', async () => {

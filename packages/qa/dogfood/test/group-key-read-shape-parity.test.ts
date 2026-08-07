@@ -94,7 +94,7 @@ describe.each(DRIVERS)('group-key read-shape parity: $name', ({ make }) => {
     await driver.create(TABLE, { id: 'c', qty: 7, won: false, stage: 'lost', amount: 4 }, opts);
     // What `engine.aggregate` feeds the in-memory fallback, and the canonical
     // presentation both aggregate paths are measured against.
-    rows = await driver.find(TABLE, { object: TABLE });
+    rows = await driver.find(TABLE, {});
   });
 
   afterEach(async () => {

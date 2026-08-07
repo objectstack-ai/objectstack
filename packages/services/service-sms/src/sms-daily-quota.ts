@@ -156,13 +156,32 @@ export interface NormalizedDailyQuota {
 /**
  * Clamp an authored `sms.daily_quota` into the value actually enforced.
  *
- * **This lives on the CONSUMER side on purpose (#5932).** `SettingsService`
- * declares `min`/`max` on a manifest specifier but `validatePatch` does not
- * enforce them today, so a `min: 0` declaration is inert: negative, fractional
- * and outright non-numeric values all reach a reader intact. Anything that
- * depends on the manifest having filtered them is declared-but-unenforced
- * (ADR-0049), so the clamp is here, where the value becomes behaviour, and is
- * pinned by tests.
+ * **This lives on the CONSUMER side on purpose (#5932).** It was written while
+ * `min` was inert — `SettingsService.validatePatch` declared five value
+ * constraints and read only `pattern`, so a `min: 0` filtered nothing and
+ * negative, fractional and outright non-numeric values all reached a reader
+ * intact. #5932 has since closed the producer half: the declared window is
+ * enforced on the save path and on the `OS_*` env path, so `daily_quota: -1`
+ * is now refused at `PUT /api/settings/sms` with a `min_value` FieldError.
+ *
+ * The clamp stays, and not out of sentiment — three of its inputs are still
+ * genuinely reachable, so removing it would re-open a live hole rather than
+ * delete a dead one:
+ *
+ * - **Non-numeric values** (`true`, `'unlimited'`, `{ n: 5 }`). The window
+ *   check deliberately does not judge a value's SHAPE — that is `invalid_type`,
+ *   a different constraint with a different owner — so these still arrive.
+ * - **Fractional counts.** `100.5` is inside `min: 0` and always was; flooring
+ *   is this reader's rule, not the manifest's.
+ * - **Historical rows.** The save-path check runs under the TOUCH gate, so a
+ *   value stored before the gate existed survives until someone re-writes that
+ *   key — deliberately, so a workspace carrying drift is not locked out of its
+ *   own settings page.
+ *
+ * What changed is the failure mode this defends against, not whether it is
+ * needed: a bad value is now refused where it is authored (loudly, at the
+ * producer, per ADR-0049), and this clamp is what keeps a value that predates
+ * or sidesteps that gate from becoming behaviour.
  *
  * The rules, and why each is the safe direction for a paid channel:
  *

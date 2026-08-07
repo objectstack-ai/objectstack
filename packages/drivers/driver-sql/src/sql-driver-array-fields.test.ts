@@ -63,7 +63,7 @@ describe('SqlDriver array/object field persistence', () => {
       },
       { bypassTenantAudit: true },
     );
-    const row = await driver.findOne('zoo', { object: 'zoo', where: { id: 'z1' } }, { bypassTenantAudit: true });
+    const row = await driver.findOne('zoo', { where: { id: 'z1' } }, { bypassTenantAudit: true });
     expect(row.tags).toEqual(['x', 'y']);
     expect(row.ms).toEqual(['red', 'green']);
     expect(row.cbs).toEqual(['email', 'push']);
@@ -76,13 +76,13 @@ describe('SqlDriver array/object field persistence', () => {
   it('updates an array field to a new array', async () => {
     await driver.create('zoo', { id: 'z2', name: 'B', tags: ['a'] }, { bypassTenantAudit: true });
     await driver.update('zoo', 'z2', { tags: ['a', 'b', 'c'] }, { bypassTenantAudit: true });
-    const row = await driver.findOne('zoo', { object: 'zoo', where: { id: 'z2' } }, { bypassTenantAudit: true });
+    const row = await driver.findOne('zoo', { where: { id: 'z2' } }, { bypassTenantAudit: true });
     expect(row.tags).toEqual(['a', 'b', 'c']);
   });
 
   it('does not crash on an empty array', async () => {
     await driver.create('zoo', { id: 'z3', name: 'C', ms: [] }, { bypassTenantAudit: true });
-    const row = await driver.findOne('zoo', { object: 'zoo', where: { id: 'z3' } }, { bypassTenantAudit: true });
+    const row = await driver.findOne('zoo', { where: { id: 'z3' } }, { bypassTenantAudit: true });
     expect(row.ms).toEqual([]);
   });
 });

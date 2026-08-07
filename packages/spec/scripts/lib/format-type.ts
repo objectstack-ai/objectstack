@@ -31,6 +31,18 @@ export interface TypeContext {
    */
   expanding?: Set<string>;
   /**
+   * Recursion state, like `expanding`: set while rendering anything BELOW an
+   * inline object summary's `{ … }`, and never cleared on the way down.
+   *
+   * It is what separates a vocabulary's OWN row — where the full member list is
+   * the point of the cell — from a second copy of that list smuggled into a
+   * summary, which is the only position `INLINE_ENUM_WIDTH_LIMIT` elides.
+   * A caller that passes no `ctx` at all gets no elision, the same way it gets
+   * no `$ref` links: this file already degrades that way, and every real caller
+   * (`build-docs.ts`) passes one.
+   */
+  inShapeSummary?: boolean;
+  /**
    * Resolve a schema name to its page href, or `null` when the schema isn't one
    * the generator produces a page for — the type is then rendered without a
    * link rather than emitting a 404.
@@ -46,6 +58,45 @@ export const anchorFor = (schemaName: string) => `#${schemaName.toLowerCase()}`;
 
 /** How many declared keys an inline object shows before eliding the rest. */
 const INLINE_KEY_LIMIT = 4;
+
+/**
+ * Character budget for one `Enum<…>` BODY rendered INSIDE an inline shape
+ * summary. Over it, members are dropped until the body fits and the count of
+ * what was dropped is printed in their place (#5340).
+ *
+ * `INLINE_KEY_LIMIT` above caps how many KEYS a summary shows; nothing capped
+ * how wide a single key's TYPE could be, so one long enum blew the cell past
+ * anything a table can render. The issue was filed on `BulkActionDef.params`
+ * (~900 characters); measuring the whole corpus found that instance is not even
+ * close to the worst — `content/docs/references/api/*.mdx` inline the
+ * 261-member error-code vocabulary into their `error` shapes, at **6242
+ * characters in one cell**, on 80 rows across 13 pages.
+ *
+ * WHY 80, measured rather than chosen. Across the 216 generated pages there are
+ * 8541 type cells carrying 1768 `Enum<…>` occurrences, 805 of them in a shape
+ * summary. Their body widths are strongly bimodal, and the population density
+ * per character collapses right here:
+ *
+ *   body width  | (48,56] | (56,64] | (64,80] | (80,100] | (100,200] | >200
+ *   occurrences |      57 |      51 |      57 |       31 |        51 |  109
+ *   per char    |    7.1  |     6.4 |     3.6 |      1.6 |       0.5 |   —
+ *
+ * Below 80 sit the ordinary short vocabularies a reader wants spelled out
+ * (`'asc' | 'desc'`, the 4-member widget modes); above it sit listings. 80
+ * selects 189 of the 805, of which 160 survive the pay-for-your-marker guard in
+ * `formatEnum` and 645 are printed exactly as before. Measured on the emitted
+ * pages: cells over 200 characters 246 → 145 (-41%), over 900 characters
+ * 76 → 4, p99 cell width 643 → 247 (-62%) — while p95 stays at 145, i.e. the
+ * ordinary cells do not move, which is the point.
+ *
+ * Tightening further buys almost nothing and costs real information: budget 24
+ * elides 635 of 805 (79%) to save only 4% more characters than budget 80 does,
+ * because ~all of the width lives in the ~91 giant listings either budget
+ * catches. A fixed MEMBER cap was measured too and is strictly worse at every
+ * setting — a cap of 4 elides `Enum<'a' | 'b' | 'c' | 'd' | 'e'>` (31
+ * characters, perfectly readable) while still leaving 134 cells over 200.
+ */
+const INLINE_ENUM_WIDTH_LIMIT = 80;
 
 /**
  * Does this rendered type carry a top-level `&` or `|`, i.e. would suffixing
@@ -150,6 +201,69 @@ function formatLiteral(value: unknown): string {
   return JSON.stringify(value) ?? 'any';
 }
 
+/**
+ * An `enum` node's members, joined — and, inside a shape summary only, cut to
+ * `INLINE_ENUM_WIDTH_LIMIT` with an explicit count of what was cut.
+ *
+ * The elided spelling is `Enum<'text' | 'textarea' | … +42 more>`-shaped:
+ * `…` is the same "there is more" token the key elision above already uses, and
+ * `+42 more` is the part that makes this SAFE to do at all. A silent prefix
+ * would leave the page looking complete while it wasn't — the reader has no way
+ * to tell a 7-member vocabulary from the first 7 of 49 — and a docs page that
+ * lies by omission is worse than a wide one. With the count, the cell states
+ * exactly what it is: a sample of a 49-term vocabulary.
+ *
+ * Where the rest stays readable, in order of what a reader hits first:
+ *   1. The vocabulary's OWN row is never elided — `ctx.inShapeSummary` is only
+ *      set below a summary's `{ … }`. For 457 of the 805 in-shape occurrences
+ *      the identical list is printed in full elsewhere on the SAME page (the
+ *      named schema's own `type` row, or its `### Allowed Values` bullets):
+ *      `BulkActionDef.params` is one — `BulkActionParam.type` two sections down
+ *      carries all 49 — and so is every `api/*.mdx` `error` shape, whose codes
+ *      are spelled out on `ErrorResponse.code`.
+ *   2. For the remaining 348 the elided cell is the only place on that page, so
+ *      the count is doing the work by itself, and the JSON Schema under
+ *      `json-schema/` remains the authority it always was.
+ * The marker cannot be an anchor to (1): Zod inlines enums, so the node reaching
+ * this function is a bare `{ type: 'string', enum: [...] }` with no `$ref` and
+ * no name to link — inventing one would be guessing at which page-local heading
+ * happens to carry the same members.
+ */
+function formatEnum(values: unknown[], inShapeSummary: boolean): string {
+  const members = values.map((v: unknown) => formatLiteral(v));
+  const full = members.join(' | ');
+  if (!inShapeSummary || full.length <= INLINE_ENUM_WIDTH_LIMIT) return `Enum<${full}>`;
+
+  // Fill greedily, never below one member: a sample of zero states nothing, and
+  // the member widths are the schema's, not ours to bound.
+  const shown: string[] = [];
+  let width = 0;
+  for (const member of members) {
+    const cost = shown.length === 0 ? member.length : member.length + ' | '.length;
+    if (shown.length > 0 && width + cost > INLINE_ENUM_WIDTH_LIMIT) break;
+    shown.push(member);
+    width += cost;
+  }
+
+  const hidden = members.length - shown.length;
+  // One member wider than the whole budget: it was forced in, nothing is
+  // hidden, and `+0 more` would be a marker pointing at nothing.
+  if (hidden === 0) return `Enum<${full}>`;
+
+  const marker = `… +${hidden} more`;
+  const elided = [...shown, marker].join(' | ');
+  // THE MARKER MUST EARN ITS OWN FOOTPRINT. A body only a member or two over
+  // the budget gives back less than the marker costs to print, so eliding it
+  // trades a real spelling for a count and a rewritten page, and buys nothing.
+  // Measured on the corpus: without this guard 29 of 189 elisions save fewer
+  // characters than the marker occupies (14 of them hide a single member and
+  // save 2-3 characters). With it, every elision that survives saves at least
+  // its own cost, and the limit stops being a cliff at exactly 81 characters.
+  const markerFootprint = marker.length + ' | '.length;
+  const worthIt = full.length - elided.length >= markerFootprint;
+  return `Enum<${worthIt ? elided : full}>`;
+}
+
 export function formatType(prop: any, ctx?: TypeContext): string {
   if (!prop) return 'any';
 
@@ -192,7 +306,7 @@ export function formatType(prop: any, ctx?: TypeContext): string {
   }
 
   if (prop.enum) {
-    return `Enum<${prop.enum.map((e: unknown) => formatLiteral(e)).join(' | ')}>`;
+    return formatEnum(prop.enum, ctx?.inShapeSummary === true);
   }
 
   if (prop.const !== undefined) {
@@ -237,9 +351,14 @@ export function formatType(prop: any, ctx?: TypeContext): string {
         const child = prop.properties[k];
         const optional = (prop.required || []).includes(k) ? '' : '?';
         // Depth-limited: nested objects stay opaque so a table cell can't explode.
+        // Everything below this point is a SUMMARY of the child, not the
+        // child's own row, so a long enum reached from here is elided (#5340).
+        // The flag is set once, here, and inherited by every branch underneath
+        // — arrays of objects recurse (only a direct object child is forced
+        // opaque above), so `errors?: { code: Enum<…> }[]` is reached this way.
         const childType = child?.type === 'object' && child.properties
           ? 'object'
-          : formatType(child, ctx);
+          : formatType(child, ctx && { ...ctx, inShapeSummary: true });
         return `${k}${optional}: ${childType}`;
       });
       // `…` elides further LIVE declared keys; `& Record<…>` states that
