@@ -600,3 +600,154 @@ describe('[#5840] the narrowness is the design — three things it deliberately 
         expect([caught.status, caught.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
     });
 });
+
+// ---------------------------------------------------------------------------
+// [#5980] The SAME rule on the ADR-0067 commit timeline — `listCommits`
+// ---------------------------------------------------------------------------
+// A fourth read in this same file, and the one whose invented emptiness points
+// at a WRITE. `listCommits` reads `sys_metadata_commit` and its `catch` answered
+// `[]` for every failure, with no log and no error-type discrimination — its own
+// JSDoc said so ("Returns [] if the commit store is unavailable"), which is how
+// a defect gets read as a design decision by everyone who arrives after it.
+//
+// Why it lives in this file rather than beside the commit tests: it is the same
+// DEFECT and the same prescription (`rethrowUnlessMetadataStoreUnprovisioned`)
+// as the #5532 / #5707 / #5840 reads above, so `expectStoreUnavailable` holds
+// the envelope identical across all four seams and a future edit that re-widens
+// one catch and not the others is a diff in one file.
+//
+// What the emptiness costs, and why this seam is worse than a 404. The timeline
+// is `revertCommit`'s SELECTION surface:
+//
+//   GET /packages/:id/commits  → `{ commits: [] }` — "nothing to roll back",
+//                                 rendered as an empty history in the Studio at
+//                                 the exact moment an operator is trying to roll
+//                                 something back;
+//   rollbackToPackageCommit    → filters that same `[]`, reverts nothing, and
+//                                 returns `success: true` — an operation that
+//                                 reports having done the job it never started.
+//
+// The second is the sharp one and it is asserted below: every other read in this
+// file mis-answers a QUESTION, this one mis-reports a WRITE as complete.
+//
+// Reverse verification, direction predicted BEFORE running: ordinary red, on
+// the outage half only. Restoring `} catch { return []; }` turns the 4 outage
+// cases below red (they resolve instead of throwing) and leaves the 3
+// benign/healthy cases green — that separation is what shows the change is the
+// outage split and not a blanket "listCommits now throws". The baseline entry
+// `packages/metadata-protocol/src/protocol.ts::listCommits` is removed in the
+// same PR, and its gate is shrink-only, so a lap with the limb restored and the
+// entry already removed must ALSO fail `check-durability-degradation-log-level`
+// — the ledger and the code are pinned to each other in both directions.
+
+/** One `sys_metadata_commit` row, in the driver's snake_case wire shape. */
+function commitRow(id: string, createdAt: string, operation = 'apply') {
+    return {
+        id,
+        package_id: 'pkg_crm',
+        operation,
+        message: `commit ${id}`,
+        actor: 'alice',
+        item_count: 1,
+        items: JSON.stringify([{ type: 'object', name: 'acct', existedBefore: true, prevVersion: 3 }]),
+        created_at: createdAt,
+    };
+}
+
+describe('[#5980] an unreadable commit store is a 503, not "this package has no history"', () => {
+    it('the timeline read stops inventing an empty history it never verified', async () => {
+        const err = connectionRefused();
+        const p = new ObjectStackProtocolImplementation(engineThatCannotBeRead(() => err));
+
+        const caught = await rejection(() => p.listCommits({ packageId: 'pkg_crm' }));
+        expectStoreUnavailable(caught, err);
+    });
+
+    it('a timeout is an outage too — the discrimination is by TYPE, not by phrasing', async () => {
+        // The guard's conservative direction: an error it does not recognise is
+        // NOT benign. A driver phrasing nobody enumerated must cost one
+        // retryable 503, never a silent "no history".
+        const err = Object.assign(new Error('Query read timeout after 30000ms'), { code: 'ETIMEDOUT' });
+        const p = new ObjectStackProtocolImplementation(engineThatCannotBeRead(() => err));
+
+        const caught = await rejection(() => p.listCommits({ packageId: 'pkg_crm' }));
+        expectStoreUnavailable(caught, err);
+    });
+
+    it('a permission failure is an outage, not an empty package', async () => {
+        const err = Object.assign(new Error('permission denied for table sys_metadata_commit'), {
+            code: '42501',
+        });
+        const p = new ObjectStackProtocolImplementation(engineThatCannotBeRead(() => err));
+
+        const caught = await rejection(() => p.listCommits({ packageId: 'pkg_crm' }));
+        expectStoreUnavailable(caught, err);
+    });
+
+    it('rollbackToPackageCommit stops reporting `success: true` for a rollback it never performed', async () => {
+        // The consequence that points at a write. The target commit is found
+        // (that read is a separate `findOne` and it succeeds), then the TIMELINE
+        // read fails — and the filter over `[]` selected nothing to revert, so
+        // the method reported a clean success for having done nothing. An
+        // operator reads that as "the rollback went through".
+        const err = connectionRefused();
+        const engine = engineWithRows([]);
+        engine.findOne = vi.fn(async () => commitRow('cmt_target', '2026-08-01T00:00:00.000Z'));
+        engine.find = vi.fn(async () => { throw err; });
+
+        const p = new ObjectStackProtocolImplementation(engine);
+        const caught = await rejection(
+            () => p.rollbackToPackageCommit({ commitId: 'cmt_target' }),
+        );
+        expectStoreUnavailable(caught, err);
+        // The regression this replaces, verbatim: never a success envelope.
+        expect(caught.success).toBeUndefined();
+        expect(caught.revertedCommits).toBeUndefined();
+    });
+});
+
+describe('[#5980] the benign case and the healthy timeline are untouched', () => {
+    it('an unprovisioned sys_metadata_commit still reads as an empty history', async () => {
+        // First boot, before migrations: there genuinely are no commits, so `[]`
+        // IS the truth and the packages screen must render rather than 503.
+        const p = new ObjectStackProtocolImplementation(engineThatCannotBeRead(missingTable));
+
+        await expect(p.listCommits({ packageId: 'pkg_crm' })).resolves.toEqual([]);
+    });
+
+    it('a healthy store with no commits for this package is still `[]`', async () => {
+        const p = new ObjectStackProtocolImplementation(engineWithRows([]));
+
+        await expect(p.listCommits({ packageId: 'pkg_crm' })).resolves.toEqual([]);
+    });
+
+    it('a healthy store still maps the rows and still orders them newest-first', async () => {
+        // The regression half: the mapping and the sort are the behaviour every
+        // consumer depends on, and neither is touched by the catch change. Rows
+        // are handed over oldest-first on purpose — the sort, not the driver, is
+        // what makes the timeline newest-first.
+        const p = new ObjectStackProtocolImplementation(
+            engineWithRows([
+                commitRow('cmt_old', '2026-08-01T00:00:00.000Z'),
+                commitRow('cmt_new', '2026-08-03T00:00:00.000Z'),
+                commitRow('cmt_mid', '2026-08-02T00:00:00.000Z', 'revert'),
+            ]),
+        );
+
+        const commits = await p.listCommits({ packageId: 'pkg_crm' });
+        expect(commits.map((c) => c.id)).toEqual(['cmt_new', 'cmt_mid', 'cmt_old']);
+        expect(commits[1]!.operation).toBe('revert');
+        expect(commits[0]).toMatchObject({
+            id: 'cmt_new',
+            operation: 'apply',
+            message: 'commit cmt_new',
+            actor: 'alice',
+            itemCount: 1,
+            createdAt: '2026-08-03T00:00:00.000Z',
+        });
+        // `items` arrives as a JSON string from the driver and is parsed here.
+        expect(commits[0]!.items).toEqual([
+            { type: 'object', name: 'acct', existedBefore: true, prevVersion: 3 },
+        ]);
+    });
+});

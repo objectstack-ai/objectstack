@@ -1,7 +1,18 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * skill — the generic, portable ObjectStack Agent Skill.
+ * skill-md — the generic, portable ObjectStack Agent Skill (`SKILL.md`).
+ *
+ * ⚠️ TWO UNRELATED THINGS SHARE THE WORD "SKILL". This module is the
+ * **`SKILL.md` distributable** — a markdown file an external coding agent
+ * (Claude Code, Codex, Gemini CLI) installs to learn how to drive an
+ * ObjectStack environment over MCP. It is NOT the `skill` **metadata type**
+ * (`SkillSchema`, `packages/spec/src/ai/skill.zod.ts`) that an app author
+ * writes as `*.skill.ts`; that one is projected onto the MCP `prompts`
+ * primitive by {@link file://./skill-prompts.ts | skill-prompts.ts}. The file
+ * was called `skill.ts` until #3905, where the collision was fixed by naming
+ * each module after the artifact it owns — a `skill` grep in this package used
+ * to find this file first and the metadata type never (#3905).
  *
  * Per ADR-0036 (Amendment C): the cross-agent distributable is ONE generic
  * Skill, not per-app artifacts and not hand-maintained vendor config snippets.

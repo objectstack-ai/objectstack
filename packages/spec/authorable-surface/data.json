@@ -334,7 +334,7 @@
     "data/ExternalFieldMapping:readonly",
     "data/ExternalFieldMapping:source",
     "data/ExternalFieldMapping:target",
-    "data/ExternalFieldMapping:transform",
+    "data/ExternalFieldMapping:transform [RETIRED]",
     "data/ExternalFieldMapping:type",
     "data/ExternalLookup:caching",
     "data/ExternalLookup:dataSource",

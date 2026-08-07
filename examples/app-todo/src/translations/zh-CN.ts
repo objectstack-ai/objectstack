@@ -82,8 +82,13 @@ export const zhCN: TranslationData = {
         notes: { label: '备注' },
         category_color: { label: '分类颜色' },
       },
+      // `default` — the container's DEFAULT list. `defineView({ list })`
+      // declares it without a `name`, so the composer registers it as
+      // `todo_task.default` and the bundle key is that bare runtime key
+      // (#5164, ruled 2026-08-06). It read `list` until then — a spelling
+      // no lookup could reach.
       _views: {
-        list: { label: '全部任务' },
+        default: { label: '全部任务' },
         overdue: { label: '逾期任务' },
         due_today: { label: '今日到期' },
       },
