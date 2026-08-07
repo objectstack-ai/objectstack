@@ -659,6 +659,7 @@ where the data lives.
 |---------|-------------|
 | `os migrate files-to-references` | Convert legacy file-field values to `sys_file` references, verify the ownership ledger, and record the deployment's migration flag |
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
+| `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 
 ```bash
@@ -754,6 +755,43 @@ migration that produces the evidence.
 Same writing rules as its sibling: a dry run writes **nothing**, `--apply` is
 the only writing mode, a later failing run clears the verified state, and a
 running server reads the flag once — **restart it** after a successful apply.
+
+#### `os migrate summary-nulls`
+
+A roll-up `summary` field of function `count` or `sum` is **0** over an empty
+child collection — zero children is zero, not "unknown" — and since #5749 a
+parent row is created holding that value. Rows created *before* that are the
+exception: nothing seeded them, and the recompute that maintains a roll-up runs
+only when one of the parent's **children** is written, so a parent that has
+never had a child keeps its `NULL` indefinitely. `filter ["task_count", "=", 0]`
+then silently omits it, and so do sorting, `GROUP BY` and any formula reading
+the column (null propagation).
+
+```bash
+os migrate summary-nulls                    # Dry run: full report, writes nothing
+os migrate summary-nulls --apply            # Recompute and write (prompts)
+os migrate summary-nulls --apply --yes --json   # CI / scripts
+os migrate summary-nulls --object project       # Restrict to one object (repeatable)
+```
+
+**Each affected row is recomputed, not set to 0.** A pre-upgrade parent that
+*does* have children is `NULL` too, and its correct value is the aggregate over
+them — writing 0 there would replace a missing value with a wrong one, and the
+next child write would change it back. The report separates the two: `N NULL
+row(s), M with real child data`.
+
+`min` / `max` / `avg` are **never touched**. They are undefined on an empty set,
+so a `null` there is the correct reading of "no child rows"; the report lists
+them as deliberately skipped.
+
+Idempotent — every write turns a `NULL` into a number, so a second run finds
+nothing and writes nothing. Re-running until the report says zero *is* the
+verification, which is why this command records no flag: it repairs values and
+changes no behaviour, so there is no posture for a flag to attest.
+
+A deployment whose database was seeded fresh on this version has nothing to do
+here: its parents were created with the value already in place, and the run
+reports zero.
 
 #### A database created by this version needs no migration
 

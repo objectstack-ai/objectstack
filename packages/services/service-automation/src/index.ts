@@ -74,7 +74,11 @@ export type { AutomationServicePluginOptions } from './plugin.js';
 // outright (#3760). Exported for hosts building custom data nodes: call
 // `resolveRunDataContext` and let the error propagate, so a custom node inherits
 // the same posture as the built-ins instead of re-opening the fail-open.
-export { resolveRunDataContext, UnscopedRunDataAccessError } from './runtime-identity.js';
+export {
+    resolveRunDataContext,
+    stampSystemInsertOwner,
+    UnscopedRunDataAccessError,
+} from './runtime-identity.js';
 export type { RunDataContext, RunIdentityContext, RunProvenanceContext } from './runtime-identity.js';
 
 // Built-in node executors (ADR-0018). These are seeded by AutomationServicePlugin

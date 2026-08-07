@@ -81,17 +81,24 @@ describe('flow.runAs identity enforcement at the data layer (#1888)', () => {
     engine.registerFlow('sys', allOpsFlow('sys', 'system'));
 
     // Triggered by a normal user — `runAs:'system'` must still elevate.
-    const res = await engine.execute('sys', { userId: 'u1' });
+    const res = await engine.execute('sys', { userId: 'u1', tenantId: 'org1' });
     expect(res.success).toBe(true);
 
     expect(calls.map((c) => c.op).sort()).toEqual(['delete', 'find', 'findOne', 'insert', 'update']);
     for (const c of calls) {
       expect(c.ctx, `${c.op} got no context`).toBeTruthy();
       expect(c.ctx.isSystem, `${c.op} not elevated`).toBe(true);
-      // An elevated run is NOT attributed to the triggering user…
-      expect(c.ctx.userId).toBeUndefined();
-      // …but it IS attributed to the flow, so audit rows never read
-      // "Unknown user" (ADR-0014 D2, #4366).
+      // #5494 — elevation is not anonymity: the triggering user and org are
+      // CARRIED THROUGH (attribution: created_by/updated_by stamps, audit
+      // actor, downstream record-change identity; the org drives the driver's
+      // organization_id fill on born rows), while `isSystem` alone decides
+      // authorization. Dropping them here is what inserted rows with all
+      // three platform columns NULL — untouchable even by the triggering
+      // member, and outside the org partition.
+      expect(c.ctx.userId, `${c.op} lost the acting user (#5494)`).toBe('u1');
+      expect(c.ctx.tenantId, `${c.op} lost the trigger org (#5494)`).toBe('org1');
+      // …and it stays attributed to the flow as well, so audit rows name
+      // WHICH automation wrote them (ADR-0014 D2, #4366; ADR-0118 D5).
       expect(c.ctx.actor, `${c.op} lost the service-principal label`).toBe('svc:flow:sys');
     }
   });
@@ -174,19 +181,22 @@ describe('flow.runAs identity enforcement at the data layer (#1888)', () => {
       edges: [{ id: 'e1', source: 'start', target: 'mk' }, { id: 'e2', source: 'mk', target: 'end' }],
     } as any);
 
-    // Trigger as a restricted user. If the engine ignored runAs, the insert would
-    // carry that user's identity (or none) instead of the elevated principal.
+    // Trigger as a restricted user. If the engine ignored runAs, the insert
+    // would run under that user's AUTHORIZATION (isSystem false) instead of the
+    // elevated principal. Since #5494 the user still rides the context — as
+    // attribution, which grants nothing under the isSystem short-circuit — so
+    // the regression tell is the `isSystem` flag, never the userId's absence.
     await engine.execute('reg', { userId: 'restricted' });
     const insert = calls.find((c) => c.op === 'insert');
     expect(insert?.ctx?.isSystem, 'runAs:system did not elevate the data op (#1888 regressed)').toBe(true);
-    expect(insert?.ctx?.userId).not.toBe('restricted');
+    expect(insert?.ctx?.userId, 'the acting user must ride the elevated context (#5494)').toBe('restricted');
   });
 });
 
 describe('resolveRunDataContext (#1888 unit)', () => {
-  it("maps runAs:'system' to an elevated context attributed to the flow (#4366)", () => {
+  it("maps runAs:'system' to an elevated context attributed to the flow AND the acting user (#4366, #5494)", () => {
     expect(resolveRunDataContext({ runAs: 'system', userId: 'u1', flowName: 'mirror_status' })).toEqual({
-      isSystem: true, actor: 'svc:flow:mirror_status', positions: [], permissions: [],
+      isSystem: true, actor: 'svc:flow:mirror_status', userId: 'u1', positions: [], permissions: [],
     });
   });
 

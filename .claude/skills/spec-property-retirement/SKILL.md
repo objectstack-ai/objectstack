@@ -310,6 +310,20 @@ Work top to bottom; each line has a gate behind it.
       as `CHANGELOG.md` in the npm package and is what an upgrading agent greps
       after the tombstone error. `.changeset/tool-inert-keys-removed.md` is the
       model — its "The retirement kit:" section is the template to copy.
+- [ ] **The source audits `check:generated` explicitly does NOT run — run them
+      as one group, never à la carte.** Its output names them; the trap is
+      running five and skipping the sixth. `check:variant-docs` is the one that
+      bites retirements: deleting a discriminated union orphans its
+      variant/doc-ledger entry, and the gate reds only in CI if you skipped it
+      locally (#5552 / PR #6078: the `type:cast|constant|javascript|lookup|map`
+      entry outlived its union by one review round).
+- [ ] **`packages/qa/dogfood` is in the default consumption radius of a
+      retirement** — not just the packages that import the schema. It holds the
+      ADR-0058 D7 expression-surface conformance ledger
+      (`test/expression-conformance.test.ts`), so removing any schema member
+      that carries an expression surface strands a `covers` entry
+      ("STALE covers — surface no longer in source", same PR, second miss).
+      Run its targeted suite before pushing, whatever your import graph says.
 
 **A correction (§1) must propagate to every one of these lines too.** When
 `form.data` flipped back to `live`, the ledger, the conversion and the tests were

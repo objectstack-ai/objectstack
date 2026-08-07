@@ -32,7 +32,12 @@ import * as React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { ObjectStackClient } from '@objectstack/client';
-import type { BulkDataEvent, DataEvent, MetadataEvent } from '@objectstack/spec/api';
+import type {
+  BulkDataEvent,
+  DataEvent,
+  MetadataEvent,
+  MetadataEventSubject,
+} from '@objectstack/spec/api';
 import { ObjectStackProvider } from './context';
 import {
   useAutoRefresh,
@@ -209,7 +214,14 @@ describe('#4682 dependency arrays drive re-subscription', () => {
       ({ type, options }) => useMetadataSubscription(type, options),
       {
         wrapper: wrapperFor(client),
-        initialProps: { type: 'object', options: { packageId: 'crm' } },
+        // Annotated, not widened: `renderHook` infers the prop type from this
+        // literal, and a bare `'object'` widens to `string` — which the hook
+        // no longer accepts (#4627). `rerender({ type: 'view' })` below is
+        // exactly why the annotation must be the union rather than the literal.
+        initialProps: {
+          type: 'object' as MetadataEventSubject,
+          options: { packageId: 'crm' },
+        },
       }
     );
 
