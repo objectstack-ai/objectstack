@@ -43,6 +43,10 @@ function makeKernel(opts: { withMcp?: boolean; recordedContexts?: any[] } = {}) 
   const metadata = {
     listObjects: async () => [{ name: 'task', fields: { title: {} } }],
     getObject: async (n: string) => (n === 'task' ? { name: 'task', fields: {} } : null),
+    list: async (type: string) =>
+      type === 'skill'
+        ? [{ name: 'case_triage', label: 'Case Triage', instructions: 'Triage first.' }]
+        : [],
   };
   // The fake MCP service exercises the bridge so we can assert principal binding.
   const mcpService: any = {
@@ -157,6 +161,22 @@ describe('HttpDispatcher.handleMcp', () => {
       expect(res.response.body.ok).toBe(true);
       expect(mcpService.lastOpts.parsedBody).toEqual(body);
       expect(typeof mcpService.lastOpts.bridge.query).toBe('function');
+    });
+
+    // [#3905] The MCP runtime projects `skill` metadata onto the `prompts`
+    // primitive, and it reads that metadata through the SAME per-request bridge
+    // as the object tools — never through server-held state, so a multi-tenant
+    // host cannot serve one environment's skills to another. Without this seam
+    // the prompt surface has no producer in the open distribution and the
+    // capability is never declared at all.
+    it('hands the MCP runtime a skill reader bound to the request environment (#3905)', async () => {
+      const { kernel, mcpService } = makeKernel({ withMcp: true });
+      const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
+      await d.handleMcp({ jsonrpc: '2.0', id: 1, method: 'prompts/list' }, makeContext());
+      expect(typeof mcpService.lastOpts.bridge.listSkills).toBe('function');
+      expect(await mcpService.lastOpts.bridge.listSkills()).toEqual([
+        { name: 'case_triage', label: 'Case Triage', instructions: 'Triage first.' },
+      ]);
     });
 
     it('binds the bridge to the request ExecutionContext (RLS/permissions)', async () => {

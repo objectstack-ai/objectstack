@@ -1023,7 +1023,29 @@ const step17: MigrationStep = {
     + 'incremental sync — design cost for a capability nothing has asked for. Both are lossless '
     + 'deletes: no DDL changes, because no DDL ever depended on them. Drift detection is '
     + 'untouched — the `partial` flag it consumes is parsed back out of the database\'s OWN '
-    + '`CREATE INDEX` DDL and never came from this key.',
+    + '`CREATE INDEX` DDL and never came from this key.\n\n'
+    + 'It also retires the field-mapping `transform` key and the whole five-member '
+    + '`FieldMappingTransform` union behind it (#5552): `constant` / `cast` / `lookup` / '
+    + '`javascript` / `map`, declared on `shared/FieldMapping` and inherited by '
+    + '`integration/ConnectorFieldMapping` and `data/ExternalFieldMapping`. Nothing ever '
+    + 'executed one. `fieldMappings` is spelled only inside `packages/spec` itself — the '
+    + 'connector packages, the automation engine, REST and objectui never read it, and no '
+    + 'code anywhere switches on `transform.type` — so all five members were '
+    + 'declared-but-unenforced together, not just the one that got the bug filed. That one '
+    + 'is the sharpest evidence though: `javascript`\'s `.describe()` recommended the '
+    + 'dialect `js`, which `ExpressionDialect` retired at #3278 (ADR-0058 addendum), so the '
+    + 'envelope the documentation taught was rejected by the enum; the only spelling that '
+    + 'parsed was the bare string, which `ExpressionInputSchema` wraps as `cel`; and the CEL '
+    + 'that resulted could not evaluate the `value.toUpperCase()` the same line offered as '
+    + 'its example. Three surfaces disagreeing about a capability with no implementation '
+    + 'under any of them. Fixing the sentence alone was rejected (maintainer, 2026-08-06) as '
+    + 'gilding a member that cannot run. The key is tombstoned rather than deleted because '
+    + 'the schema and both extenders are plain `z.object`s and `ConnectorSchema.parse` is a '
+    + 'live receiver, so a bare deletion would strip silently. What is NOT affected, despite '
+    + 'the shared word: the import mapping\'s `mapping.fieldMapping[].transform`, a flat '
+    + 'string enum applied row by row by the REST import path and live in the liveness '
+    + 'ledger — including its own `javascript` value, which that path rejects with a 400 '
+    + 'rather than pretending to run.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1069,6 +1091,7 @@ const step17: MigrationStep = {
     'theme-inert-token-scales-removed',
     'page-header-subtitle-alias',
     'object-index-type-partial-removed',
+    'field-mapping-transform-removed',
   ],
   semantic: [
     {
@@ -2101,8 +2124,17 @@ export const MIGRATION_MAJORS: readonly number[] = Object.keys(MIGRATIONS_BY_MAJ
  * @see scripts/build-schemas.ts — checks (b)/(b2), the only consumers
  */
 export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {
-  // Empty by design at protocol 17: see "Not a backfill of history" above. The
-  // first entry arrives with the first retirement tombstoned after #4659.
+  // The first entries since #4659 built this table (#5552). ONE tombstone
+  // produces THREE keys: `transform` is declared on `shared/FieldMapping` and
+  // `integration/ConnectorFieldMapping` / `data/ExternalFieldMapping` are
+  // `.extend()`s of it, so the retired property is copied into all three walked
+  // shapes and `authorable-surface.json` marks each `[RETIRED]` separately.
+  // Registered per key, as the gate reads them — nothing radiates from the base.
+  17: [
+    'data/ExternalFieldMapping:transform',
+    'integration/ConnectorFieldMapping:transform',
+    'shared/FieldMapping:transform',
+  ],
 };
 
 /**
@@ -2178,6 +2210,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
  * @see scripts/build-schemas.ts — the manifest deletion gate, the only consumer
  */
 export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {
-  // Empty by design at protocol 17: see "Not a backfill of history" above. The
-  // first entry arrives with the first whole-schema removal after #4725.
+  // The first entry since #4725 built this table (#5552). The `transform` key's
+  // value schema had no other consumer, so it goes with the key rather than
+  // surviving as an exported union nothing references — an exported schema with
+  // no consumer reads as a capability to whoever finds it (#3950).
+  17: ['shared/FieldMappingTransform'],
 };
