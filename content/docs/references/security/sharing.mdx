@@ -37,6 +37,13 @@ const result = CriteriaSharingRuleSchema.parse(data);
 | **active** | `boolean` | optional |  |
 | **accessLevel** | `Enum<'read' \| 'edit'>` | optional |  |
 | **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit'>; value: string }` | ✅ | The recipient of the shared access |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **type** | `'criteria'` | ✅ |  |
 | **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
 
@@ -91,6 +98,13 @@ const result = CriteriaSharingRuleSchema.parse(data);
 | **active** | `boolean` | optional |  |
 | **accessLevel** | `Enum<'read' \| 'edit'>` | optional |  |
 | **sharedWith** | `{ type: Enum<'user' \| 'team' \| 'position' \| 'unit_and_subordinates' \| 'business_unit'>; value: string }` | ✅ | The recipient of the shared access |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 | **type** | `'criteria'` | ✅ |  |
 | **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Predicate (CEL). e.g. P`record.department == "Sales"` |
 
