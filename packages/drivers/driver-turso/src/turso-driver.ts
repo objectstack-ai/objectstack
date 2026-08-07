@@ -545,7 +545,17 @@ export class TursoDriver extends SqlDriver {
     return super.count(object, query, options);
   }
 
-  override async aggregate(object: string, query: any, options?: any): Promise<any> {
+  /**
+   * [#6212] `query` is a {@link DriverQuery}, matching the narrowed
+   * `SqlDriver.aggregate` this forwards to — the two faces of one driver may not
+   * declare one argument two ways.
+   *
+   * `options` is deliberately left `any`: it is a SECOND axis, shared verbatim
+   * with the four overrides above it, and narrowing one of five mid-file would
+   * read as a decision about the others. #6210 left the same `options?: any` on
+   * `count` for the same reason.
+   */
+  override async aggregate(object: string, query: DriverQuery, options?: any): Promise<any> {
     if (this.isRemote) return this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query));
     return super.aggregate(object, query, options);
   }

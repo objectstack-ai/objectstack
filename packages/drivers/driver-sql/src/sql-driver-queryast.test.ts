@@ -154,9 +154,24 @@ describe('SqlDriver (QueryAST Format)', () => {
       expect(results[0].name).toBe('Mouse');
     });
 
-    it('should still support legacy aggregate format', async () => {
+    /**
+     * [#6321] Was `should still support legacy aggregate format`, spelling
+     * `aggregate:` / `func:` — two keys the Query Protocol has never declared,
+     * kept alive by two `||` limbs in `SqlDriver.aggregate` whose only writers
+     * were this fixture and its three siblings. That is #4984's family: the
+     * fixture spells the alias, the lenient limb stays green forever, and nothing
+     * ever measures that deleting it costs nobody anything.
+     *
+     * The limbs are gone, so this case is REPLACED, not re-spelled: what it
+     * pinned no longer exists, and a case whose title advertises a "legacy
+     * format" the driver no longer has is worse than no case. What survives is
+     * the same query in the DECLARED spelling — which is what this file, about
+     * the standard QueryAST keys, is for. The refusal of the old spelling is
+     * pinned in `sql-driver-aggregate-undeclared-keys.test.ts`.
+     */
+    it('aggregates through the declared `aggregations` / `function` keys', async () => {
       const results = await driver.aggregate('products', {
-        aggregate: [{ func: 'avg', field: 'price', alias: 'avg_price' }],
+        aggregations: [{ function: 'avg', field: 'price', alias: 'avg_price' }],
         groupBy: ['category'],
       });
 

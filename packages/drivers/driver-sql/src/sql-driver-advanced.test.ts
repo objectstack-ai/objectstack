@@ -42,7 +42,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
     it('should sum values', async () => {
       const result = await driver.aggregate('orders', {
         where: { status: 'completed' },
-        aggregate: [{ func: 'sum', field: 'amount', alias: 'total_amount' }],
+        aggregations: [{ function: 'sum', field: 'amount', alias: 'total_amount' }],
       });
 
       expect(result).toHaveLength(1);
@@ -51,7 +51,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
 
     it('should count records', async () => {
       const result = await driver.aggregate('orders', {
-        aggregate: [{ func: 'count', field: '*', alias: 'total_orders' }],
+        aggregations: [{ function: 'count', field: '*', alias: 'total_orders' }],
       });
 
       expect(result).toHaveLength(1);
@@ -61,7 +61,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
     it('should calculate average', async () => {
       const result = await driver.aggregate('orders', {
         where: { status: 'completed' },
-        aggregate: [{ func: 'avg', field: 'amount', alias: 'avg_amount' }],
+        aggregations: [{ function: 'avg', field: 'amount', alias: 'avg_amount' }],
       });
 
       expect(result).toHaveLength(1);
@@ -70,9 +70,9 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
 
     it('should find min and max values', async () => {
       const result = await driver.aggregate('orders', {
-        aggregate: [
-          { func: 'min', field: 'amount', alias: 'min_amount' },
-          { func: 'max', field: 'amount', alias: 'max_amount' },
+        aggregations: [
+          { function: 'min', field: 'amount', alias: 'min_amount' },
+          { function: 'max', field: 'amount', alias: 'max_amount' },
         ],
       });
 
@@ -84,9 +84,9 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
     it('should group by with aggregates', async () => {
       const result = await driver.aggregate('orders', {
         groupBy: ['customer'],
-        aggregate: [
-          { func: 'sum', field: 'amount', alias: 'total_spent' },
-          { func: 'count', field: '*', alias: 'order_count' },
+        aggregations: [
+          { function: 'sum', field: 'amount', alias: 'total_spent' },
+          { function: 'count', field: '*', alias: 'order_count' },
         ],
       });
 
@@ -104,7 +104,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
     it('should handle multiple group by fields', async () => {
       const result = await driver.aggregate('orders', {
         groupBy: ['customer', 'status'],
-        aggregate: [{ func: 'sum', field: 'quantity', alias: 'total_qty' }],
+        aggregations: [{ function: 'sum', field: 'quantity', alias: 'total_qty' }],
       });
 
       expect(result.length).toBeGreaterThan(0);
@@ -118,7 +118,7 @@ describe('SqlDriver Advanced Operations (SQLite)', () => {
       const result = await driver.aggregate('orders', {
         where: { status: { $ne: 'cancelled' } },
         groupBy: ['product'],
-        aggregate: [{ func: 'sum', field: 'quantity', alias: 'total_quantity' }],
+        aggregations: [{ function: 'sum', field: 'quantity', alias: 'total_quantity' }],
       });
 
       const laptop = result.find((r: any) => r.product === 'Laptop');
