@@ -12,6 +12,10 @@ import { retiredKey } from '../shared/retired-key';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { HookBodySchema } from './hook-body.zod';
+// Type-only, and it must stay that way: `contracts/` already imports `data/`
+// (`contracts/data-engine.ts`), so a VALUE import here would close a runtime
+// cycle. `import type` is erased, leaving the edge in the type graph only.
+import type { IScopedContext } from '../contracts/scoped-context';
 
 /*
  * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
@@ -580,13 +584,54 @@ export const HookContextSchema = lazySchema(() => z.object({
    * Cross-Object API
    * Provides a scoped data access interface for performing CRUD operations
    * on other objects within hooks. Bound to the current execution context
-   * (userId, tenantId, transaction).
+   * (userId, organizationId, transaction).
    *
-   * Usage in hooks:
-   *   const users = ctx.api.object('user');
-   *   const admin = await users.findOne({ where: { role: 'admin' } });
+   * Usage in hooks — this example COMPILES, and is pinned as a compile probe
+   * by `contracts/scoped-context.test.ts` so that it keeps doing so:
+   *
+   *   const owner = await ctx.api?.object('user').findOne({
+   *     where: { id: ctx.input.owner_id },
+   *   });
+   *
+   * TYPED as {@link IScopedContext} since #5945 (maintainer ruling C), where it
+   * was `z.unknown()` — which made `HookContext['api']` infer as `unknown`, so
+   * the two lines this JSDoc used to show were themselves a `TS18046: 'ctx.api'
+   * is of type 'unknown'`. Every document teaches `(ctx: HookContext)` plus
+   * `ctx.api.object(…)`; none of it type-checked, and the one doc block already
+   * under `check:skill-examples` compiled only by casting to a private
+   * hand-rolled `CrossObjectApi`. The declared face is deliberately the minimum
+   * the corpus is measured to CALL — see the evidence bar in
+   * `contracts/scoped-context.ts` for what is excluded and how to grow it.
+   *
+   * The RUNTIME schema stays `z.unknown()` and the narrowing is a static cast,
+   * the same idiom (and for the same reason) as `ObjectCapabilities.apiMethods`
+   * in `object.zod.ts`: keep the TS type the authors' one, keep the parse the
+   * permissive one. Two things force it here.
+   *
+   *  1. This key carries a LIVE engine object — ObjectQL's `ScopedContext`, a
+   *     class instance with methods — not authored data. Validating it would
+   *     mean checking a class against a JSON shape on every parse, on a schema
+   *     that is deliberately the non-authored runtime context (see the header).
+   *  2. `z.custom<IScopedContext>()` was the obvious spelling and is WRONG
+   *     here: `custom` is unrepresentable in JSON Schema, so `gen:schema`
+   *     stopped emitting `json-schema/data/HookContext.json` altogether —
+   *     "1 previously published schema disappeared", which unpublishes the
+   *     generated `references/data/hook.mdx` page on the next `gen:docs`
+   *     (#2978). Measured, not guessed: the spec build failed on it. `unknown`
+   *     keeps the schema representable, so the JSON Schema, the manifest and
+   *     the reference page are all byte-identical to before.
+   *
+   * The change is therefore type-only: same accepted values, same JSON Schema
+   * (`{}`), same generated row — only the `.describe()` text moves, which is
+   * that page's only channel for saying what the value is.
+   *
+   * Stays OPTIONAL, though `buildHookApi` sets it at all five dispatch sites:
+   * making it required would start REJECTING the partial contexts that
+   * `HookContextSchema.parse` accepts today (a context built without a live
+   * engine). Read it as `ctx.api?.object(…)`, or bind it once and narrow.
    */
-  api: z.unknown().optional().describe('Cross-object data access (ScopedContext)'),
+  api: (z.unknown().optional() as unknown as z.ZodOptional<z.ZodType<IScopedContext, IScopedContext>>)
+    .describe('Cross-object data access (IScopedContext — `object(name)` + `transaction(cb)`)'),
 
   /**
    * Current User Info
