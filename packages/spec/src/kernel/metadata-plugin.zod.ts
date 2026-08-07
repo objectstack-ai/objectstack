@@ -302,6 +302,8 @@ export const MetadataTypeRegistryEntrySchema = lazySchema(() =>
 );
 
 export type MetadataTypeRegistryEntry = z.infer<typeof MetadataTypeRegistryEntrySchema>;
+/** Post-parse shape of {@link MetadataTypeRegistryEntry} — defaults applied, transforms run (ADR-0122). */
+export type MetadataTypeRegistryEntryParsed = z.infer<typeof MetadataTypeRegistryEntrySchema>;
 
 // ==========================================
 // Metadata Query Protocol

@@ -398,6 +398,8 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
 }));
 
 export type EnhancedApiError = z.infer<typeof EnhancedApiErrorSchema>;
+/** Post-parse shape of {@link EnhancedApiError} — defaults applied, transforms run (ADR-0122). */
+export type EnhancedApiErrorParsed = z.infer<typeof EnhancedApiErrorSchema>;
 
 // ==========================================
 // Error Response Schema
@@ -430,3 +432,5 @@ export const ErrorResponseSchema = lazySchema(() => z.object({
 }));
 
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
+/** Post-parse shape of {@link ErrorResponse} — defaults applied, transforms run (ADR-0122). */
+export type ErrorResponseParsed = z.infer<typeof ErrorResponseSchema>;

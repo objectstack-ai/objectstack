@@ -89,6 +89,8 @@ export const PreviewModeConfigSchema = lazySchema(() => z.object({
 }));
 
 export type PreviewModeConfig = z.infer<typeof PreviewModeConfigSchema>;
+/** Post-parse shape of {@link PreviewModeConfig} — defaults applied, transforms run (ADR-0122). */
+export type PreviewModeConfigParsed = z.infer<typeof PreviewModeConfigSchema>;
 
 /**
  * Kernel Context Schema
@@ -133,6 +135,8 @@ export const KernelContextSchema = lazySchema(() => z.object({
 }));
 
 export type KernelContext = z.infer<typeof KernelContextSchema>;
+/** Post-parse shape of {@link KernelContext} — defaults applied, transforms run (ADR-0122). */
+export type KernelContextParsed = z.infer<typeof KernelContextSchema>;
 
 // ==========================================================================
 // Tenant Runtime Context
@@ -164,3 +168,5 @@ export const TenantRuntimeContextSchema = lazySchema(() => KernelContextSchema.e
 }).describe('Tenant-aware kernel runtime context'));
 
 export type TenantRuntimeContext = z.infer<typeof TenantRuntimeContextSchema>;
+/** Post-parse shape of {@link TenantRuntimeContext} — defaults applied, transforms run (ADR-0122). */
+export type TenantRuntimeContextParsed = z.infer<typeof TenantRuntimeContextSchema>;

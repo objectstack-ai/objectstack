@@ -27,6 +27,8 @@ export const TopicConfigSchema = lazySchema(() => z.object({
 }).describe('Configuration for a message queue topic'));
 
 export type TopicConfig = z.infer<typeof TopicConfigSchema>;
+/** Post-parse shape of {@link TopicConfig} — defaults applied, transforms run (ADR-0122). */
+export type TopicConfigParsed = z.infer<typeof TopicConfigSchema>;
 
 export const ConsumerConfigSchema = lazySchema(() => z.object({
   groupId: z.string().describe('Consumer group identifier'),
@@ -36,6 +38,8 @@ export const ConsumerConfigSchema = lazySchema(() => z.object({
 }).describe('Consumer group configuration for topic consumption'));
 
 export type ConsumerConfig = z.infer<typeof ConsumerConfigSchema>;
+/** Post-parse shape of {@link ConsumerConfig} — defaults applied, transforms run (ADR-0122). */
+export type ConsumerConfigParsed = z.infer<typeof ConsumerConfigSchema>;
 
 export const DeadLetterQueueSchema = lazySchema(() => z.object({
   enabled: z.boolean().default(false).describe('Enable dead letter queue for failed messages'),
@@ -44,6 +48,8 @@ export const DeadLetterQueueSchema = lazySchema(() => z.object({
 }).describe('Dead letter queue configuration for unprocessable messages'));
 
 export type DeadLetterQueue = z.infer<typeof DeadLetterQueueSchema>;
+/** Post-parse shape of {@link DeadLetterQueue} — defaults applied, transforms run (ADR-0122). */
+export type DeadLetterQueueParsed = z.infer<typeof DeadLetterQueueSchema>;
 
 export const MessageQueueConfigSchema = lazySchema(() => z.object({
   provider: MessageQueueProviderSchema.describe('Message queue backend provider'),
@@ -59,3 +65,5 @@ export const MessageQueueConfigSchema = lazySchema(() => z.object({
 }).describe('Top-level message queue configuration'));
 
 export type MessageQueueConfig = z.infer<typeof MessageQueueConfigSchema>;
+/** Post-parse shape of {@link MessageQueueConfig} — defaults applied, transforms run (ADR-0122). */
+export type MessageQueueConfigParsed = z.infer<typeof MessageQueueConfigSchema>;

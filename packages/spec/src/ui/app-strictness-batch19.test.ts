@@ -4,7 +4,12 @@
  * #4001 批 19 — `ui/app.zod.ts`'s last strip site, measured.
  *
  * The file has ONE site left: `BaseNavItemSchema`. The ledger carried it as
- * `verify` — held pending a check, not scheduled work — with this instruction:
+ * `verify` — held pending a check, not scheduled work — and, once this check
+ * came back, held it there a second time while the VOCABULARY question it
+ * raised went to the maintainer (#5249). That ruling landed on 2026-08-06 and
+ * added a ninth verdict, `covered`, which the row now carries; the measurement
+ * below is what `covered` means, and is unchanged by the renaming. The original
+ * instruction was:
  *
  *   > `BaseNavItemSchema` — the base the strict discriminated-union members
  *   > extend. Closing a base that is `.extend()`ed is the #4001 trap that bit
@@ -37,7 +42,9 @@
  * than an omission — the third place it is recorded, beside the schema comment
  * and the `ui/` ledger row. If a future member is ever written as
  * `BaseNavItemSchema.extend({...})` WITHOUT its own `.strict()`, the last test
- * here is the one that should start failing.
+ * here is the one that should start failing — and that is also the one change
+ * that would take the row back out of `covered`, since `covered` rests on the
+ * spread (posture not inherited) plus every consumer's own `.strict()`.
  */
 
 import { describe, it, expect } from 'vitest';

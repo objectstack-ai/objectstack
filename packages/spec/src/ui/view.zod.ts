@@ -417,6 +417,8 @@ export const ViewFilterRuleSchema = lazySchema(() => strictObject({
 }).describe('View filter rule'));
 
 export type ViewFilterRule = z.infer<typeof ViewFilterRuleSchema>;
+/** Post-parse shape of {@link ViewFilterRule} — defaults applied, transforms run (ADR-0122). */
+export type ViewFilterRuleParsed = z.infer<typeof ViewFilterRuleSchema>;
 
 /**
  * Column Summary Function Schema
@@ -2627,23 +2629,43 @@ export function defineForm(
 }
 
 export type View = z.infer<typeof ViewSchema>;
+/** Post-parse shape of {@link View} — defaults applied, transforms run (ADR-0122). */
+export type ViewParsed = z.infer<typeof ViewSchema>;
 export type ViewItem = z.infer<typeof ViewItemSchema>;
 /** A ViewItem record as it travels the WIRE — the authoring shape plus Studio's round-trip keys (#5074). */
 export type ViewItemWire = z.infer<typeof ViewItemWireSchema>;
 /** Any persisted `view` metadata body: container | ViewItem record | flattened overlay (#3095). */
 export type ViewMetadata = z.infer<typeof ViewMetadataSchema>;
+/** Post-parse shape of {@link ViewMetadata} — defaults applied, transforms run (ADR-0122). */
+export type ViewMetadataParsed = z.infer<typeof ViewMetadataSchema>;
 export type ViewScope = z.infer<typeof ViewScopeSchema>;
 export type ViewKind = z.infer<typeof ViewKindSchema>;
 export type ListView = z.infer<typeof ListViewSchema>;
+/** Post-parse shape of {@link ListView} — defaults applied, transforms run (ADR-0122). */
+export type ListViewParsed = z.infer<typeof ListViewSchema>;
 export type FormView = z.infer<typeof FormViewSchema>;
+/** Post-parse shape of {@link FormView} — defaults applied, transforms run (ADR-0122). */
+export type FormViewParsed = z.infer<typeof FormViewSchema>;
 export type FormSection = z.infer<typeof FormSectionSchema>;
+/** Post-parse shape of {@link FormSection} — defaults applied, transforms run (ADR-0122). */
+export type FormSectionParsed = z.infer<typeof FormSectionSchema>;
 export type ListColumn = z.infer<typeof ListColumnSchema>;
+/** Post-parse shape of {@link ListColumn} — defaults applied, transforms run (ADR-0122). */
+export type ListColumnParsed = z.infer<typeof ListColumnSchema>;
 // `FormField` is declared next to FormFieldSchema — it IS that schema's
 // annotation, so it cannot be inferred back out of it (#4171).
 export type SelectionConfig = z.infer<typeof SelectionConfigSchema>;
+/** Post-parse shape of {@link SelectionConfig} — defaults applied, transforms run (ADR-0122). */
+export type SelectionConfigParsed = z.infer<typeof SelectionConfigSchema>;
 export type NavigationConfig = z.infer<typeof NavigationConfigSchema>;
+/** Post-parse shape of {@link NavigationConfig} — defaults applied, transforms run (ADR-0122). */
+export type NavigationConfigParsed = z.infer<typeof NavigationConfigSchema>;
 export type PaginationConfig = z.infer<typeof PaginationConfigSchema>;
+/** Post-parse shape of {@link PaginationConfig} — defaults applied, transforms run (ADR-0122). */
+export type PaginationConfigParsed = z.infer<typeof PaginationConfigSchema>;
 export type ViewData = z.infer<typeof ViewDataSchema>;
+/** Post-parse shape of {@link ViewData} — defaults applied, transforms run (ADR-0122). */
+export type ViewDataParsed = z.infer<typeof ViewDataSchema>;
 // `HttpRequest` is NOT inferred here — it is re-exported from its single
 // declaration in `shared/http.zod.ts` next to the schema re-export at the top of
 // this file (#4688). Re-adding `= z.infer<typeof HttpRequestSchema>` below would
@@ -2661,17 +2683,39 @@ export type ViewData = z.infer<typeof ViewDataSchema>;
 export type ColumnSummary = z.infer<typeof ColumnSummarySchema>;
 export type ColumnSummaryConfig = z.infer<typeof ColumnSummaryConfigSchema>;
 export type ColumnPrefix = z.infer<typeof ColumnPrefixSchema>;
+/** Post-parse shape of {@link ColumnPrefix} — defaults applied, transforms run (ADR-0122). */
+export type ColumnPrefixParsed = z.infer<typeof ColumnPrefixSchema>;
 export type RowHeight = z.infer<typeof RowHeightSchema>;
 export type GroupingConfig = z.infer<typeof GroupingConfigSchema>;
+/** Post-parse shape of {@link GroupingConfig} — defaults applied, transforms run (ADR-0122). */
+export type GroupingConfigParsed = z.infer<typeof GroupingConfigSchema>;
 export type GalleryConfig = z.infer<typeof GalleryConfigSchema>;
+/** Post-parse shape of {@link GalleryConfig} — defaults applied, transforms run (ADR-0122). */
+export type GalleryConfigParsed = z.infer<typeof GalleryConfigSchema>;
 export type TimelineConfig = z.infer<typeof TimelineConfigSchema>;
+/** Post-parse shape of {@link TimelineConfig} — defaults applied, transforms run (ADR-0122). */
+export type TimelineConfigParsed = z.infer<typeof TimelineConfigSchema>;
 export type ListChartConfig = z.infer<typeof ListChartConfigSchema>;
+/** Post-parse shape of {@link ListChartConfig} — defaults applied, transforms run (ADR-0122). */
+export type ListChartConfigParsed = z.infer<typeof ListChartConfigSchema>;
 export type ViewSharing = z.infer<typeof ViewSharingSchema>;
+/** Post-parse shape of {@link ViewSharing} — defaults applied, transforms run (ADR-0122). */
+export type ViewSharingParsed = z.infer<typeof ViewSharingSchema>;
 export type RowColorConfig = z.infer<typeof RowColorConfigSchema>;
 export type VisualizationType = z.infer<typeof VisualizationTypeSchema>;
 export type UserActionsConfig = z.infer<typeof UserActionsConfigSchema>;
+/** Post-parse shape of {@link UserActionsConfig} — defaults applied, transforms run (ADR-0122). */
+export type UserActionsConfigParsed = z.infer<typeof UserActionsConfigSchema>;
 export type AppearanceConfig = z.infer<typeof AppearanceConfigSchema>;
+/** Post-parse shape of {@link AppearanceConfig} — defaults applied, transforms run (ADR-0122). */
+export type AppearanceConfigParsed = z.infer<typeof AppearanceConfigSchema>;
 export type ViewTab = z.infer<typeof ViewTabSchema>;
+/** Post-parse shape of {@link ViewTab} — defaults applied, transforms run (ADR-0122). */
+export type ViewTabParsed = z.infer<typeof ViewTabSchema>;
 export type UserFilterField = z.infer<typeof UserFilterFieldSchema>;
 export type UserFilters = z.infer<typeof UserFiltersSchema>;
+/** Post-parse shape of {@link UserFilters} — defaults applied, transforms run (ADR-0122). */
+export type UserFiltersParsed = z.infer<typeof UserFiltersSchema>;
 export type AddRecordConfig = z.infer<typeof AddRecordConfigSchema>;
+/** Post-parse shape of {@link AddRecordConfig} — defaults applied, transforms run (ADR-0122). */
+export type AddRecordConfigParsed = z.infer<typeof AddRecordConfigSchema>;

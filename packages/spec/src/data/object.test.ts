@@ -1808,9 +1808,51 @@ describe('managedBy: retiring the overloaded `system` bucket (#3355)', () => {
     expect(msg).not.toMatch(/removed in @objectstack\/spec 17/s);
   });
 
-  it('`system-data` defaults to full CRUD — the bucket says the data is yours', () => {
+  it('`system-data` defaults to writable CRUD — the bucket says the data is yours', () => {
     expect(resolveCrudAffordances({ managedBy: 'system-data' } as never)).toEqual({
-      create: true, import: true, edit: true, delete: true, exportCsv: true,
+      create: true, import: false, edit: true, delete: true, exportCsv: true,
+    });
+  });
+
+  /**
+   * #4671 — CSV import is the ONE verb the writable default does not hand out.
+   *
+   * The bucket's charter members are the three RBAC link tables
+   * (`sys_user_position`, `sys_user_permission_set`,
+   * `sys_position_permission_set`), i.e. the grant surface of the whole
+   * permission model. Authorization is untouched — the DelegatedAdminGate, RLS
+   * and permission sets adjudicate every row a CSV import would write, and an
+   * admin who cannot grant a permission set by hand cannot grant it by file
+   * either. What moves is LEVERAGE: row-by-row, one misclick is one person; one
+   * wrong CSV is one bulk grant with no natural review rhythm. So the wizard is
+   * a per-object declaration rather than something eight objects inherit by
+   * being filed in the right bucket — and the default result of "nobody thought
+   * about import" is the safe one, which is the shape that matters most for
+   * model-authored object metadata.
+   */
+  describe('`system-data` makes CSV import opt-IN (#4671)', () => {
+    it('does not grant import by bucket default', () => {
+      expect(resolveCrudAffordances({ managedBy: 'system-data' } as never).import).toBe(false);
+    });
+
+    it('grants it when the object declares `userActions: { import: true }`, and moves nothing else', () => {
+      expect(resolveCrudAffordances({
+        managedBy: 'system-data',
+        userActions: { import: true },
+      } as never)).toEqual({
+        create: true, import: true, edit: true, delete: true, exportCsv: true,
+      });
+    });
+
+    it('leaves `platform` — the one bucket that still grants import by default — alone', () => {
+      expect(resolveCrudAffordances({} as never).import).toBe(true);
+      expect(resolveCrudAffordances({ managedBy: 'platform' } as never).import).toBe(true);
+    });
+
+    it('is now the same answer every non-`platform` bucket gives', () => {
+      for (const bucket of ['config', 'system-data', 'engine-owned', 'append-only', 'better-auth'] as const) {
+        expect(resolveCrudAffordances({ managedBy: bucket } as never).import, bucket).toBe(false);
+      }
     });
   });
 

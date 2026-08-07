@@ -258,6 +258,20 @@
         "ADR-0119"
       ],
       "invariant": "The transaction seam is same-origin by construction (#5351/#5696, 2026-08-06 ruling). `buildDriverOptions` threads the ambient handle ONLY to the driver that owns it, compared by instance identity via `TransactionScope` — handing it to another driver does not put that driver inside the transaction, it runs the statement on the wrong connection. `enforceTransactionOrigin` then decides the write: an append-only system ledger (`lifecycle.class` in `SYSTEM_LEDGER_LIFECYCLE_CLASSES`, the same tuple ADR-0057 §3.6 routing reads — never a second copy) is CARVED OUT and executed outside the transaction, surviving rollback; any other cross-driver write is REFUSED before hooks run. Never add a companion transaction on the second driver (no two-phase commit in IDataDriver) and never restore the unconditional handle lift."
+    },
+    {
+"file": "packages/spec/src/type-alias-convention.pin.test.ts",
+      "adrs": [
+        "ADR-0122"
+      ],
+      "invariant": "ADR-0122 D6: this file is the EXEMPTION REGISTRY for the type-alias convention, and its assertions are the only thing making the exemption honest. Each line says `z.input` and `z.infer` of one schema are the same type, which is why that schema's bare alias is allowed to have no `XParsed` (D3 — a permanent synonym is a name an author can only pick wrongly). Isomorphism is not declared by anyone; it is a fact about the schema tree, and it ROTS the day a nested field gains a `.default()` / `.transform()` / `.catch()` / `.pipe()`. Deleting a red line to make the build pass re-opens exactly the hole phase 1 closed: the alias silently joins the shape-diff set and the phase-2 flip of the bare name breaks its consumers with no migration target. The fix for a red line is always the same and is never deletion alone — declare `XParsed` next to the bare alias, THEN delete the pin. `scripts/check-spec-parsed-alias.mjs` reads this file as its registry, so a pin removed without its alias turns that gate red too."
+    },
+    {
+      "file": "scripts/check-spec-parsed-alias.mjs",
+      "adrs": [
+        "ADR-0122"
+      ],
+      "invariant": "ADR-0122 D7: every bare `z.infer` alias in `packages/spec/src/**/*.zod.ts` must either be paired with its `XParsed` or be pinned isomorphic in the pin file. The exemption list deliberately does NOT live in this script — it lives in the pin file where tsc proves each entry, because an exemption a comment merely asserts is the declared-but-unenforced shape this repo keeps paying to fix. Moving the list in here to 'simplify' the gate would make it a phantom check. The gate also belongs HERE rather than in `packages/lint`: that package's contract is an in-memory metadata graph with 'no I/O, no runtime, no filesystem', and a rule reading our own TypeScript source cannot live there."
     }
   ]
 }

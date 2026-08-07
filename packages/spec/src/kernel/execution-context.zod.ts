@@ -377,6 +377,8 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
 }));
 
 export type ExecutionContext = z.infer<typeof ExecutionContextSchema>;
+/** Post-parse shape of {@link ExecutionContext} — defaults applied, transforms run (ADR-0122). */
+export type ExecutionContextParsed = z.infer<typeof ExecutionContextSchema>;
 
 /**
  * The CALLER-SUPPLIED form of {@link ExecutionContext} — any subset of the

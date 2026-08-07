@@ -242,6 +242,8 @@ export const MappingSchema = lazySchema(() => strictObject({
 }));
 
 export type Mapping = z.infer<typeof MappingSchema>;
+/** Post-parse shape of {@link Mapping} — defaults applied, transforms run (ADR-0122). */
+export type MappingParsed = z.infer<typeof MappingSchema>;
 /** Authoring input for {@link Mapping} — defaulted fields are optional. */
 export type MappingInput = z.input<typeof MappingSchema>;
 
@@ -254,3 +256,5 @@ export function defineMapping(config: z.input<typeof MappingSchema>): Mapping {
   return MappingSchema.parse(config);
 }
 export type ImportFieldMapping = z.infer<typeof ImportFieldMappingSchema>;
+/** Post-parse shape of {@link ImportFieldMapping} — defaults applied, transforms run (ADR-0122). */
+export type ImportFieldMappingParsed = z.infer<typeof ImportFieldMappingSchema>;

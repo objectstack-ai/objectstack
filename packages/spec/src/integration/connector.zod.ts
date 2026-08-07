@@ -148,6 +148,8 @@ export const ConnectorFieldMappingSchema = lazySchema(() => BaseFieldMappingSche
 }));
 
 export type ConnectorFieldMapping = z.infer<typeof ConnectorFieldMappingSchema>;
+/** Post-parse shape of {@link ConnectorFieldMapping} — defaults applied, transforms run (ADR-0122). */
+export type ConnectorFieldMappingParsed = z.infer<typeof ConnectorFieldMappingSchema>;
 
 // ============================================================================
 // Data Synchronization Configuration
@@ -250,6 +252,8 @@ export const DataSyncConfigSchema = lazySchema(() => z.object({
 }));
 
 export type DataSyncConfig = z.infer<typeof DataSyncConfigSchema>;
+/** Post-parse shape of {@link DataSyncConfig} — defaults applied, transforms run (ADR-0122). */
+export type DataSyncConfigParsed = z.infer<typeof DataSyncConfigSchema>;
 
 // ============================================================================
 // Webhook Configuration
@@ -307,6 +311,8 @@ export const WebhookConfigSchema = lazySchema(() => WebhookSchema.extend({
 }));
 
 export type WebhookConfig = z.infer<typeof WebhookConfigSchema>;
+/** Post-parse shape of {@link WebhookConfig} — defaults applied, transforms run (ADR-0122). */
+export type WebhookConfigParsed = z.infer<typeof WebhookConfigSchema>;
 
 // ============================================================================
 // Retry Configuration
@@ -405,6 +411,8 @@ export const RetryConfigSchema = lazySchema(() => z.object({
 }));
 
 export type RetryConfig = z.infer<typeof RetryConfigSchema>;
+/** Post-parse shape of {@link RetryConfig} — defaults applied, transforms run (ADR-0122). */
+export type RetryConfigParsed = z.infer<typeof RetryConfigSchema>;
 
 // ============================================================================
 // Error Mapping Configuration
@@ -463,6 +471,8 @@ export const ErrorMappingConfigSchema = lazySchema(() => z.object({
 }).describe('Error mapping configuration'));
 
 export type ErrorMappingConfig = z.infer<typeof ErrorMappingConfigSchema>;
+/** Post-parse shape of {@link ErrorMappingConfig} — defaults applied, transforms run (ADR-0122). */
+export type ErrorMappingConfigParsed = z.infer<typeof ErrorMappingConfigSchema>;
 
 // ============================================================================
 // Health Check & Circuit Breaker Configuration
@@ -485,6 +495,8 @@ export const HealthCheckConfigSchema = lazySchema(() => z.object({
 }).describe('Health check configuration'));
 
 export type HealthCheckConfig = z.infer<typeof HealthCheckConfigSchema>;
+/** Post-parse shape of {@link HealthCheckConfig} — defaults applied, transforms run (ADR-0122). */
+export type HealthCheckConfigParsed = z.infer<typeof HealthCheckConfigSchema>;
 
 /**
  * Circuit Breaker Configuration
@@ -501,6 +513,8 @@ export const CircuitBreakerConfigSchema = lazySchema(() => z.object({
 }).describe('Circuit breaker configuration'));
 
 export type CircuitBreakerConfig = z.infer<typeof CircuitBreakerConfigSchema>;
+/** Post-parse shape of {@link CircuitBreakerConfig} — defaults applied, transforms run (ADR-0122). */
+export type CircuitBreakerConfigParsed = z.infer<typeof CircuitBreakerConfigSchema>;
 
 /**
  * Connector Health Configuration
@@ -513,6 +527,8 @@ export const ConnectorHealthSchema = lazySchema(() => z.object({
 }).describe('Connector health configuration'));
 
 export type ConnectorHealth = z.infer<typeof ConnectorHealthSchema>;
+/** Post-parse shape of {@link ConnectorHealth} — defaults applied, transforms run (ADR-0122). */
+export type ConnectorHealthParsed = z.infer<typeof ConnectorHealthSchema>;
 
 // ============================================================================
 // Base Connector Schema
@@ -740,6 +756,8 @@ export const ConnectorSchema = lazySchema(() => z.object({
 }));
 
 export type Connector = z.infer<typeof ConnectorSchema>;
+/** Post-parse shape of {@link Connector} — defaults applied, transforms run (ADR-0122). */
+export type ConnectorParsed = z.infer<typeof ConnectorSchema>;
 /** Authoring input for {@link Connector} — defaulted fields are optional. */
 export type ConnectorInput = z.input<typeof ConnectorSchema>;
 
@@ -815,6 +833,8 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
 );
 
 export type DeclarativeConnectorEntry = z.infer<typeof DeclarativeConnectorEntrySchema>;
+/** Post-parse shape of {@link DeclarativeConnectorEntry} — defaults applied, transforms run (ADR-0122). */
+export type DeclarativeConnectorEntryParsed = z.infer<typeof DeclarativeConnectorEntrySchema>;
 
 // Re-export the declarative-instance auth surface (ADR-0097) so consumers reach
 // it through `@objectstack/spec/integration` alongside the connector schema.

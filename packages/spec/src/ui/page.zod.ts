@@ -545,6 +545,8 @@ export const PageSchema = lazySchema(() => strictObject({
 // (all removed — unrendered roadmap / "required-but-unauthorable" Studio traps).
 
 export type Page = z.infer<typeof PageSchema>;
+/** Post-parse shape of {@link Page} — defaults applied, transforms run (ADR-0122). */
+export type PageParsed = z.infer<typeof PageSchema>;
 /** Authoring input for {@link Page} — defaulted fields are optional. */
 export type PageInput = z.input<typeof PageSchema>;
 
@@ -558,7 +560,15 @@ export function definePage(config: z.input<typeof PageSchema>): Page {
 }
 export type PageType = z.infer<typeof PageTypeSchema>;
 export type PageComponent = z.infer<typeof PageComponentSchema>;
+/** Post-parse shape of {@link PageComponent} — defaults applied, transforms run (ADR-0122). */
+export type PageComponentParsed = z.infer<typeof PageComponentSchema>;
 export type PageRegion = z.infer<typeof PageRegionSchema>;
+/** Post-parse shape of {@link PageRegion} — defaults applied, transforms run (ADR-0122). */
+export type PageRegionParsed = z.infer<typeof PageRegionSchema>;
 export type PageVariable = z.infer<typeof PageVariableSchema>;
+/** Post-parse shape of {@link PageVariable} — defaults applied, transforms run (ADR-0122). */
+export type PageVariableParsed = z.infer<typeof PageVariableSchema>;
 export type ElementDataSource = z.infer<typeof ElementDataSourceSchema>;
 export type InterfacePageConfig = z.infer<typeof InterfacePageConfigSchema>;
+/** Post-parse shape of {@link InterfacePageConfig} — defaults applied, transforms run (ADR-0122). */
+export type InterfacePageConfigParsed = z.infer<typeof InterfacePageConfigSchema>;

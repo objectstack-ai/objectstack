@@ -141,6 +141,8 @@ export const MetadataRecordSchema = lazySchema(() => z.object({
 }));
 
 export type MetadataRecord = z.infer<typeof MetadataRecordSchema>;
+/** Post-parse shape of {@link MetadataRecord} — defaults applied, transforms run (ADR-0122). */
+export type MetadataRecordParsed = z.infer<typeof MetadataRecordSchema>;
 export type MetadataScope = z.infer<typeof MetadataScopeSchema>;
 
 /**
@@ -358,6 +360,8 @@ export type MetadataLoaderContract = z.input<typeof MetadataLoaderContractSchema
 export type MetadataLoadOptions = z.infer<typeof MetadataLoadOptionsSchema>;
 export type MetadataLoadResult = z.infer<typeof MetadataLoadResultSchema>;
 export type MetadataSaveOptions = z.infer<typeof MetadataSaveOptionsSchema>;
+/** Post-parse shape of {@link MetadataSaveOptions} — defaults applied, transforms run (ADR-0122). */
+export type MetadataSaveOptionsParsed = z.infer<typeof MetadataSaveOptionsSchema>;
 export type MetadataSaveResult = z.infer<typeof MetadataSaveResultSchema>;
 export type MetadataWatchEvent = z.infer<typeof MetadataWatchEventSchema>;
 export type MetadataCollectionInfo = z.infer<typeof MetadataCollectionInfoSchema>;
@@ -472,6 +476,8 @@ export const MetadataHistoryQueryOptionsSchema = lazySchema(() => z.object({
 }));
 
 export type MetadataHistoryQueryOptions = z.infer<typeof MetadataHistoryQueryOptionsSchema>;
+/** Post-parse shape of {@link MetadataHistoryQueryOptions} — defaults applied, transforms run (ADR-0122). */
+export type MetadataHistoryQueryOptionsParsed = z.infer<typeof MetadataHistoryQueryOptionsSchema>;
 
 /**
  * Metadata History Query Result
@@ -544,3 +550,5 @@ export const MetadataHistoryRetentionPolicySchema = lazySchema(() => z.object({
 }));
 
 export type MetadataHistoryRetentionPolicy = z.infer<typeof MetadataHistoryRetentionPolicySchema>;
+/** Post-parse shape of {@link MetadataHistoryRetentionPolicy} — defaults applied, transforms run (ADR-0122). */
+export type MetadataHistoryRetentionPolicyParsed = z.infer<typeof MetadataHistoryRetentionPolicySchema>;

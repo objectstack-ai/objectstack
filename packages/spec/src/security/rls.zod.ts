@@ -570,6 +570,8 @@ export const RLSEvaluationResultSchema = lazySchema(() => z.object({
  * Type exports
  */
 export type RowLevelSecurityPolicy = z.infer<typeof RowLevelSecurityPolicySchema>;
+/** Post-parse shape of {@link RowLevelSecurityPolicy} — defaults applied, transforms run (ADR-0122). */
+export type RowLevelSecurityPolicyParsed = z.infer<typeof RowLevelSecurityPolicySchema>;
 export type RLSUserContext = z.infer<typeof RLSUserContextSchema>;
 export type RLSEvaluationResult = z.infer<typeof RLSEvaluationResultSchema>;
 

@@ -58,12 +58,64 @@ describe('Class cell grammar', () => {
   });
 
   it('maps `verify` to authorable, because that is what the ledger has always counted', () => {
-    // `ui/app.zod.ts`'s single site: held pending the finding-16 `.extend()`
-    // check, and counted in the published `view` 6 + `app` 1 = 7 all the same.
-    // A readiness flag, not a class.
+    // A readiness flag, not a class — counted in the published `view` 6 +
+    // `app` 1 = 7 from the start. #5249 moved its one instance to `covered` and
+    // deliberately left this mapping alone: the word still means "held pending a
+    // check" and the next site that needs holding must count the same way.
     const parsed = parseClassCell('verify');
     expect(parsed).not.toBeNull();
     expect(bucketize(parsed!, 1)).toEqual({ buckets: { ...zero(), authorable: 1 } });
+  });
+});
+
+describe('`covered` — the ninth verdict (#5249)', () => {
+  it('parses, and lands in a bucket of its own', () => {
+    const parsed = parseClassCell('covered');
+    expect(parsed).toMatchObject({ verdict: 'covered', provisional: false, breakdown: null });
+    expect(bucketize(parsed!, 1)).toEqual({ buckets: { ...zero(), covered: 1 } });
+  });
+
+  it('does NOT merge into `no door`, which is the whole reason it exists', () => {
+    // Both are carrier-absent + parse-absent, so an arithmetic merge would look
+    // harmless. It is not: the subtotal is a worklist readout and the two rows
+    // prescribe OPPOSITE work — `no door` sends the next agent to ADR-0049
+    // retirement, `covered` sends them nowhere because every consumer already
+    // gates the keys. Retiring `ui/app.zod.ts`'s `BaseNavItemSchema` on a
+    // `no door` reading would delete nine live nav branches' shared keys.
+    const covered = bucketize(parseClassCell('covered')!, 3);
+    const noDoor = bucketize(parseClassCell('no door')!, 3);
+    expect(covered).not.toEqual(noDoor);
+    expect('buckets' in covered && covered.buckets['no door']).toBe(0);
+    expect('buckets' in noDoor && noDoor.buckets.covered).toBe(0);
+  });
+
+  it('is a single class, so a split may be declared in terms of it', () => {
+    // The ledger's `ui/i18n.zod.ts` row is `split · 5 no door`; a file that ever
+    // mixes a covered fragment with live sites must be able to say so, and
+    // `bucketize` rejects breakdown parts that name no single class.
+    const parsed = parseClassCell('split · 2 covered, 1 authorable')!;
+    expect(bucketize(parsed, 3)).toEqual({ buckets: { ...zero(), covered: 2, authorable: 1 } });
+  });
+
+  it('is reported under a label that names the measurement, not just the word', () => {
+    // The counts artifact is read by people who never open this file, so the
+    // bucket label has to carry the three-part test (`no carrier, no parse,
+    // guarded at every consumer`) rather than a bare `covered`.
+    const { rendered } = loadLedger(REPO, SRC);
+    expect(rendered).toContain('covered — no carrier, no parse, guarded at every consumer');
+  });
+
+  it('has exactly one instance in the tree, and it is `ui/app.zod.ts`', () => {
+    // The re-review #5249's ruling required, pinned rather than narrated: the
+    // verdict was created for one measured site, and a second row appearing
+    // without a measurement is the drift this asserts against. `covered`
+    // requires the keys to reach consumers by `...X.shape` SPREAD — `.extend()`
+    // INHERITS posture, which makes the base a real door (`FormFieldBaseSchema`,
+    // `BaseQuerySchema`) rather than an inert fragment.
+    const { parsed, model } = loadLedger(REPO, SRC);
+    const rows = parsed.strip.filter((r) => parseClassCell(r.classCell)?.verdict === 'covered');
+    expect(rows.map((r) => `${r.dir}/${r.file}`)).toEqual(['ui/app.zod.ts']);
+    expect(model.global.buckets.covered).toBe(1);
   });
 });
 
@@ -161,11 +213,15 @@ describe('the ledger documents the grammar the parser enforces', () => {
   it('names every verdict the parser accepts, and no others', () => {
     // Two copies of a vocabulary drift, and the direction they drift in is the
     // one where an author writes what the doc says and the gate rejects it.
+    //
+    // The alternation is built FROM `VERDICTS` rather than transcribed. It used
+    // to be a third hand-written copy of the list, which meant adding a verdict
+    // (#5249's `covered`) failed here for the one reason this test is not about:
+    // a word missing from the regex is reported as a word missing from the doc.
     const md = fs.readFileSync(path.join(REPO, LEDGER_PATH), 'utf-8');
     const block = md.split('## Classification rule')[0];
-    const documented = new Set(
-      [...block.matchAll(/`(authorable|verify|mixed|split|wire|open|no door|no gate)`/g)].map((m) => m[1]),
-    );
+    const alternation = VERDICTS.map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    const documented = new Set([...block.matchAll(new RegExp(`\`(${alternation})\``, 'g'))].map((m) => m[1]));
     expect([...documented].sort()).toEqual([...VERDICTS].sort());
   });
 
@@ -177,5 +233,13 @@ describe('the ledger documents the grammar the parser enforces', () => {
 });
 
 function zero(): Record<string, number> {
-  return { authorable: 0, unresolved: 0, 'wire/open': 0, 'no door': 0, 'no gate': 0, unclassified: 0 };
+  return {
+    authorable: 0,
+    unresolved: 0,
+    'wire/open': 0,
+    'no door': 0,
+    'no gate': 0,
+    covered: 0,
+    unclassified: 0,
+  };
 }

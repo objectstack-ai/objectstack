@@ -202,6 +202,8 @@ export const MetricDefinitionSchema = lazySchema(() => z.object({
 }).describe('Metric definition'));
 
 export type MetricDefinition = z.infer<typeof MetricDefinitionSchema>;
+/** Post-parse shape of {@link MetricDefinition} — defaults applied, transforms run (ADR-0122). */
+export type MetricDefinitionParsed = z.infer<typeof MetricDefinitionSchema>;
 
 /**
  * Metric Data Point Schema
@@ -355,6 +357,8 @@ export const MetricAggregationConfigSchema = lazySchema(() => z.object({
 }).describe('Metric aggregation configuration'));
 
 export type MetricAggregationConfig = z.infer<typeof MetricAggregationConfigSchema>;
+/** Post-parse shape of {@link MetricAggregationConfig} — defaults applied, transforms run (ADR-0122). */
+export type MetricAggregationConfigParsed = z.infer<typeof MetricAggregationConfigSchema>;
 
 /**
  * Service Level Indicator (SLI) Schema
@@ -428,6 +432,8 @@ export const ServiceLevelIndicatorSchema = lazySchema(() => z.object({
 }).describe('Service Level Indicator'));
 
 export type ServiceLevelIndicator = z.infer<typeof ServiceLevelIndicatorSchema>;
+/** Post-parse shape of {@link ServiceLevelIndicator} — defaults applied, transforms run (ADR-0122). */
+export type ServiceLevelIndicatorParsed = z.infer<typeof ServiceLevelIndicatorSchema>;
 
 /**
  * Service Level Objective (SLO) Schema
@@ -540,6 +546,8 @@ export const ServiceLevelObjectiveSchema = lazySchema(() => z.object({
 }).describe('Service Level Objective'));
 
 export type ServiceLevelObjective = z.infer<typeof ServiceLevelObjectiveSchema>;
+/** Post-parse shape of {@link ServiceLevelObjective} — defaults applied, transforms run (ADR-0122). */
+export type ServiceLevelObjectiveParsed = z.infer<typeof ServiceLevelObjectiveSchema>;
 
 /**
  * Metric Export Configuration
@@ -598,6 +606,8 @@ export const MetricExportConfigSchema = lazySchema(() => z.object({
 }).describe('Metric export configuration'));
 
 export type MetricExportConfig = z.infer<typeof MetricExportConfigSchema>;
+/** Post-parse shape of {@link MetricExportConfig} — defaults applied, transforms run (ADR-0122). */
+export type MetricExportConfigParsed = z.infer<typeof MetricExportConfigSchema>;
 
 /**
  * Metrics Configuration Schema
@@ -698,3 +708,5 @@ export const MetricsConfigSchema = lazySchema(() => z.object({
 }).describe('Metrics configuration'));
 
 export type MetricsConfig = z.infer<typeof MetricsConfigSchema>;
+/** Post-parse shape of {@link MetricsConfig} — defaults applied, transforms run (ADR-0122). */
+export type MetricsConfigParsed = z.infer<typeof MetricsConfigSchema>;

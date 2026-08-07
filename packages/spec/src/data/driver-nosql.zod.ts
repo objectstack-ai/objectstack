@@ -93,6 +93,8 @@ export const ShardingConfigSchema = lazySchema(() => z.object({
 }));
 
 export type ShardingConfig = z.infer<typeof ShardingConfigSchema>;
+/** Post-parse shape of {@link ShardingConfig} — defaults applied, transforms run (ADR-0122). */
+export type ShardingConfigParsed = z.infer<typeof ShardingConfigSchema>;
 
 /**
  * NoSQL Replication Configuration
@@ -111,6 +113,8 @@ export const ReplicationConfigSchema = lazySchema(() => z.object({
 }));
 
 export type ReplicationConfig = z.infer<typeof ReplicationConfigSchema>;
+/** Post-parse shape of {@link ReplicationConfig} — defaults applied, transforms run (ADR-0122). */
+export type ReplicationConfigParsed = z.infer<typeof ReplicationConfigSchema>;
 
 /**
  * Document Schema Validation
@@ -124,6 +128,8 @@ export const DocumentSchemaValidationSchema = lazySchema(() => z.object({
 }));
 
 export type DocumentSchemaValidation = z.infer<typeof DocumentSchemaValidationSchema>;
+/** Post-parse shape of {@link DocumentSchemaValidation} — defaults applied, transforms run (ADR-0122). */
+export type DocumentSchemaValidationParsed = z.infer<typeof DocumentSchemaValidationSchema>;
 
 /**
  * NoSQL Data Type Mapping Schema
@@ -275,6 +281,8 @@ export const NoSQLDriverConfigSchema = lazySchema(() => DriverConfigSchema.exten
 }));
 
 export type NoSQLDriverConfig = z.infer<typeof NoSQLDriverConfigSchema>;
+/** Post-parse shape of {@link NoSQLDriverConfig} — defaults applied, transforms run (ADR-0122). */
+export type NoSQLDriverConfigParsed = z.infer<typeof NoSQLDriverConfigSchema>;
 
 /**
  * NoSQL Query Options
@@ -416,6 +424,8 @@ export const NoSQLIndexSchema = lazySchema(() => z.object({
 }));
 
 export type NoSQLIndex = z.infer<typeof NoSQLIndexSchema>;
+/** Post-parse shape of {@link NoSQLIndex} — defaults applied, transforms run (ADR-0122). */
+export type NoSQLIndexParsed = z.infer<typeof NoSQLIndexSchema>;
 
 /**
  * NoSQL Transaction Options

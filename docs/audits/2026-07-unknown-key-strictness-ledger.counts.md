@@ -29,11 +29,12 @@ Remaining strip sites by class:
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 43 |
+| authorable — the ruling's forced scope | 42 |
 | unresolved — needs a per-schema verdict | 33 |
 | wire / open — out of forced scope | 107 |
 | no door — no carrier, ADR-0049 territory | 14 |
 | no gate — carrier live, no parse | 0 |
+| covered — no carrier, no parse, guarded at every consumer | 1 |
 
 ## Posture, per triaged directory
 
@@ -171,11 +172,12 @@ over it is here.
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 34 |
+| authorable — the ruling's forced scope | 33 |
 | unresolved — needs a per-schema verdict | 0 |
 | wire / open — out of forced scope | 3 |
 | no door — no carrier, ADR-0049 territory | 14 |
 | no gate — carrier live, no parse | 0 |
+| covered — no carrier, no parse, guarded at every consumer | 1 |
 
 ### `data/` — open
 
@@ -208,6 +210,7 @@ over it is here.
 | wire / open — out of forced scope | 65 |
 | no door — no carrier, ADR-0049 territory | 0 |
 | no gate — carrier live, no parse | 0 |
+| covered — no carrier, no parse, guarded at every consumer | 0 |
 
 ### `automation/` — open
 
@@ -229,6 +232,7 @@ over it is here.
 | wire / open — out of forced scope | 26 |
 | no door — no carrier, ADR-0049 territory | 0 |
 | no gate — carrier live, no parse | 0 |
+| covered — no carrier, no parse, guarded at every consumer | 0 |
 
 ### `security/` — open
 
@@ -247,6 +251,7 @@ over it is here.
 | wire / open — out of forced scope | 13 |
 | no door — no carrier, ADR-0049 territory | 0 |
 | no gate — carrier live, no parse | 0 |
+| covered — no carrier, no parse, guarded at every consumer | 0 |
 
 ### `studio/` — open
 

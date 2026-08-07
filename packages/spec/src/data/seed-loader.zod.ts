@@ -62,6 +62,8 @@ export const ReferenceResolutionSchema = lazySchema(() => z.object({
 }).describe('Describes how a field reference is resolved during seed loading'));
 
 export type ReferenceResolution = z.infer<typeof ReferenceResolutionSchema>;
+/** Post-parse shape of {@link ReferenceResolution} — defaults applied, transforms run (ADR-0122). */
+export type ReferenceResolutionParsed = z.infer<typeof ReferenceResolutionSchema>;
 
 // ==========================================================================
 // 2. Object Dependency Node
@@ -89,6 +91,8 @@ export const ObjectDependencyNodeSchema = lazySchema(() => z.object({
 }).describe('Object node in the seed data dependency graph'));
 
 export type ObjectDependencyNode = z.infer<typeof ObjectDependencyNodeSchema>;
+/** Post-parse shape of {@link ObjectDependencyNode} — defaults applied, transforms run (ADR-0122). */
+export type ObjectDependencyNodeParsed = z.infer<typeof ObjectDependencyNodeSchema>;
 
 // ==========================================================================
 // 3. Object Dependency Graph
@@ -120,6 +124,8 @@ export const ObjectDependencyGraphSchema = lazySchema(() => z.object({
 }).describe('Complete object dependency graph for seed data loading'));
 
 export type ObjectDependencyGraph = z.infer<typeof ObjectDependencyGraphSchema>;
+/** Post-parse shape of {@link ObjectDependencyGraph} — defaults applied, transforms run (ADR-0122). */
+export type ObjectDependencyGraphParsed = z.infer<typeof ObjectDependencyGraphSchema>;
 
 // ==========================================================================
 // 4. Reference Resolution Error
@@ -296,6 +302,8 @@ export const SeedLoaderConfigSchema = lazySchema(() => z.object({
 }).describe('Seed data loader configuration'));
 
 export type SeedLoaderConfig = z.infer<typeof SeedLoaderConfigSchema>;
+/** Post-parse shape of {@link SeedLoaderConfig} — defaults applied, transforms run (ADR-0122). */
+export type SeedLoaderConfigParsed = z.infer<typeof SeedLoaderConfigSchema>;
 
 /** Input type — all fields with defaults are optional */
 export type SeedLoaderConfigInput = z.input<typeof SeedLoaderConfigSchema>;
@@ -385,6 +393,8 @@ export const SeedLoadResultSchema = lazySchema(() => z.object({
 }).describe('Result of loading a single dataset'));
 
 export type SeedLoadResult = z.infer<typeof SeedLoadResultSchema>;
+/** Post-parse shape of {@link SeedLoadResult} — defaults applied, transforms run (ADR-0122). */
+export type SeedLoadResultParsed = z.infer<typeof SeedLoadResultSchema>;
 
 // ==========================================================================
 // 7. Seed Loader Result
@@ -464,6 +474,8 @@ export const SeedLoaderResultSchema = lazySchema(() => z.object({
 }).describe('Complete seed loader result'));
 
 export type SeedLoaderResult = z.infer<typeof SeedLoaderResultSchema>;
+/** Post-parse shape of {@link SeedLoaderResult} — defaults applied, transforms run (ADR-0122). */
+export type SeedLoaderResultParsed = z.infer<typeof SeedLoaderResultSchema>;
 
 // ==========================================================================
 // 8. Seed Loader Request
@@ -482,6 +494,8 @@ export const SeedLoaderRequestSchema = lazySchema(() => z.object({
 }).describe('Seed loader request with datasets and configuration'));
 
 export type SeedLoaderRequest = z.infer<typeof SeedLoaderRequestSchema>;
+/** Post-parse shape of {@link SeedLoaderRequest} — defaults applied, transforms run (ADR-0122). */
+export type SeedLoaderRequestParsed = z.infer<typeof SeedLoaderRequestSchema>;
 
 /** Input type — config defaults are optional */
 export type SeedLoaderRequestInput = z.input<typeof SeedLoaderRequestSchema>;

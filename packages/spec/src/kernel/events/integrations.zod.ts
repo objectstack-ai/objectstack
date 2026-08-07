@@ -82,6 +82,8 @@ export const EventWebhookConfigSchema = lazySchema(() => z.object({
 }));
 
 export type EventWebhookConfig = z.infer<typeof EventWebhookConfigSchema>;
+/** Post-parse shape of {@link EventWebhookConfig} — defaults applied, transforms run (ADR-0122). */
+export type EventWebhookConfigParsed = z.infer<typeof EventWebhookConfigSchema>;
 
 // ==========================================
 // Message Queue Integration
@@ -148,6 +150,8 @@ export const EventMessageQueueConfigSchema = lazySchema(() => z.object({
 }));
 
 export type EventMessageQueueConfig = z.infer<typeof EventMessageQueueConfigSchema>;
+/** Post-parse shape of {@link EventMessageQueueConfig} — defaults applied, transforms run (ADR-0122). */
+export type EventMessageQueueConfigParsed = z.infer<typeof EventMessageQueueConfigSchema>;
 
 // ==========================================
 // Real-time Notifications
@@ -213,3 +217,5 @@ export const RealTimeNotificationConfigSchema = lazySchema(() => z.object({
 }));
 
 export type RealTimeNotificationConfig = z.infer<typeof RealTimeNotificationConfigSchema>;
+/** Post-parse shape of {@link RealTimeNotificationConfig} — defaults applied, transforms run (ADR-0122). */
+export type RealTimeNotificationConfigParsed = z.infer<typeof RealTimeNotificationConfigSchema>;
