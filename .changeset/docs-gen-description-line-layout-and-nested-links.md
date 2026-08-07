@@ -28,6 +28,15 @@ link resolution are now scoped to prose: fenced and indented code blocks are
 copied verbatim, and within prose a tokenizer keeps inline code spans out of
 reach.
 
+One construct is deliberately NOT reproduced as authored: an indented (4-space)
+code block is re-emitted as a fenced one. MDX dropped CommonMark's indented code
+blocks so that indentation could lay out JSX, so such a block reaches the MDX
+compiler as ordinary prose — and unescaped braces in prose are an expression.
+`data/date-macros` and `data/context-tokens` write their placeholder examples
+that way and are almost entirely braces; left indented they fail to compile
+("Could not parse expression with acorn"), and escaped instead they show `\{` in
+what is meant to be code. The target dialect has one spelling for a code block.
+
 Measured over the 185 rendered descriptions: paragraphs with unpaired backticks
 8 → 0 (`automation/flow-function`, `security/explain`, `shared/expression`,
 `system/settings-client`), and backslash-brace residue inside code 296 → 0 across

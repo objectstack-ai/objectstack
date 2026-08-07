@@ -91,6 +91,13 @@
  * tokenizer keeps inline code spans and already-formed links out of reach.
  * Widening the rewriter's lookaround instead would not have worked — lookaround
  * cannot express "not nested inside a link".
+ *
+ * The one place the output is NOT the source's own layout is an indented
+ * (4-space) code block, which is re-emitted as a fenced one. MDX dropped
+ * CommonMark's indented code blocks so that indentation could lay out JSX, so
+ * keeping them would hand `{ $gte: '{last_quarter_start}' }` to MDX as an
+ * expression and fail the docs build — the target dialect has one spelling for
+ * a code block and this is it.
  */
 
 /**
@@ -208,18 +215,25 @@ function stripDocGutter(block: string): string[] {
   });
 }
 
+/** What a line is, which decides which transforms may touch it. */
+type LineKind = 'prose' | 'fenced' | 'indented';
+
 /**
- * For each line: is it code (a fenced block, or an indented one) rather than
- * prose? Code is copied to the page verbatim — no link resolution, no brace
- * escaping — because every one of those transforms would be printing its own
- * syntax into text the reader is meant to read literally.
+ * Classify every line as prose, fenced code, or an indented (4-space) code
+ * block. Code of either kind is content the reader is meant to read literally,
+ * so link resolution and brace escaping would be printing their own syntax into
+ * it.
  *
- * Indented blocks matter as much as fenced ones here: two sources write their
- * placeholder examples as 4-space blocks (`data/date-macros`,
- * `data/context-tokens`), and both are almost entirely braces.
+ * Indented blocks have to be recognised separately rather than folded in with
+ * fenced ones, because MDX does not have them: it dropped CommonMark's indented
+ * code blocks precisely so indentation could be used to lay out JSX. Two sources
+ * write their placeholder examples that way (`data/date-macros`,
+ * `data/context-tokens`) and both are almost entirely braces, so leaving them
+ * indented would hand `{ $gte: '{last_quarter_start}' }` to MDX as an expression
+ * and fail the docs build. They are re-emitted as fenced blocks instead.
  */
-function codeLineMask(lines: readonly string[]): boolean[] {
-  const mask = lines.map(() => false);
+function classifyLines(lines: readonly string[]): LineKind[] {
+  const kind: LineKind[] = lines.map(() => 'prose');
   let fence: string | null = null;
   let indented = false;
   let prevBlank = true; // the start of the block is a block boundary
@@ -228,23 +242,33 @@ function codeLineMask(lines: readonly string[]): boolean[] {
     const blank = line.trim() === '';
 
     if (fence !== null) {
-      mask[i] = true;
+      kind[i] = 'fenced';
       if (line.trimStart().startsWith(fence)) fence = null;
       prevBlank = false;
       continue;
     }
     if (indented) {
       if (blank) { prevBlank = true; continue; } // a blank line does not close it
-      if (/^ {4,}\S/.test(line)) { mask[i] = true; prevBlank = false; continue; }
+      if (/^ {4,}\S/.test(line)) { kind[i] = 'indented'; prevBlank = false; continue; }
       indented = false; // dedented — this line is prose again
     }
     const opener = /^\s*(`{3,}|~{3,})/.exec(line);
-    if (opener) { mask[i] = true; fence = opener[1]; prevBlank = false; continue; }
-    if (prevBlank && /^ {4,}\S/.test(line)) { mask[i] = true; indented = true; prevBlank = false; continue; }
+    if (opener) { kind[i] = 'fenced'; fence = opener[1]; prevBlank = false; continue; }
+    if (prevBlank && /^ {4,}\S/.test(line)) { kind[i] = 'indented'; indented = true; prevBlank = false; continue; }
 
     prevBlank = blank;
   }
-  return mask;
+
+  // A blank line BETWEEN two indented lines belongs to the block; one after the
+  // last belongs to the prose that follows.
+  for (let i = 0; i < kind.length; i++) {
+    if (kind[i] !== 'indented') continue;
+    let j = i + 1;
+    while (j < kind.length && lines[j].trim() === '') j++;
+    if (j < kind.length && kind[j] === 'indented') for (let k = i + 1; k < j; k++) kind[k] = 'indented';
+    i = j - 1;
+  }
+  return kind;
 }
 
 /**
@@ -257,10 +281,10 @@ function codeLineMask(lines: readonly string[]): boolean[] {
  * paragraph they would read as a single run-on sentence.
  */
 function withTagBlocksSeparated(lines: readonly string[]): string[] {
-  const code = codeLineMask(lines);
+  const kind = classifyLines(lines);
   const out: string[] = [];
   lines.forEach((line, i) => {
-    if (!code[i] && /^@\w+/.test(line) && out.length > 0 && out[out.length - 1].trim() !== '') out.push('');
+    if (kind[i] === 'prose' && /^@\w+/.test(line) && out.length > 0 && out[out.length - 1].trim() !== '') out.push('');
     out.push(line);
   });
   return out;
@@ -375,16 +399,26 @@ export function renderFileDescription(source: string, ctx: FileDescriptionContex
   if (block === null) return '';
 
   const lines = withTagBlocksSeparated(stripDocGutter(block));
-  const code = codeLineMask(lines);
+  const kind = classifyLines(lines);
 
   // Prose is rendered a RUN of lines at a time, never line by line: a sentence,
   // an inline code span and a `{@link}` tag may each wrap across source lines,
   // and a transform applied per line cuts them in half (#5553).
   const out: string[] = [];
   for (let i = 0; i < lines.length;) {
-    if (code[i]) { out.push(lines[i]); i++; continue; }
+    if (kind[i] === 'fenced') { out.push(lines[i]); i++; continue; }
+
+    if (kind[i] === 'indented') {
+      const start = i;
+      while (i < lines.length && kind[i] === 'indented') i++;
+      // Re-emitted as a fence: MDX has no indented code blocks, so left as it
+      // was authored this would be parsed as prose containing JSX expressions.
+      out.push('```', ...lines.slice(start, i).map(line => line.replace(/^ {4}/, '')), '```');
+      continue;
+    }
+
     const start = i;
-    while (i < lines.length && !code[i]) i++;
+    while (i < lines.length && kind[i] === 'prose') i++;
     out.push(renderProse(lines.slice(start, i).join('\n'), ctx));
   }
   return out.join('\n').trim();

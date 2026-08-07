@@ -306,9 +306,16 @@ describe('renderFileDescription — #5553: line layout is content, not decoratio
     );
   });
 
-  it('leaves an indented (4-space) code block alone', () => {
+  it('re-emits an indented (4-space) code block as a fenced one', () => {
     // `data/date-macros.zod.ts` and `data/context-tokens.zod.ts` write their
     // placeholder examples this way, and they are almost entirely braces.
+    //
+    // The fence is not cosmetic. MDX dropped CommonMark's indented code blocks
+    // so indentation could lay out JSX, so an indented block reaches MDX as
+    // ordinary prose — and unescaped braces in prose are an expression. Left
+    // indented, both pages fail to compile with "Could not parse expression
+    // with acorn"; escaped instead, the reader gets `\{` in what is meant to be
+    // code, which is the very defect #5553 is about.
     const source = [
       '/**',
       ' * They use a placeholder grammar:',
@@ -325,7 +332,9 @@ describe('renderFileDescription — #5553: line layout is content, not decoratio
       [
         'They use a placeholder grammar:',
         '',
-        "    { published_at: { $gte: '{last_quarter_start}' } }",
+        '```',
+        "{ published_at: { $gte: '{last_quarter_start}' } }",
+        '```',
         '',
         'Expanded on both sides.',
       ].join('\n'),
@@ -596,6 +605,36 @@ describe('corpus — every rendered description is well-formed markdown', () => 
           ? [line]
           : line.match(/`[^`]*`/g) ?? [];
         if (code.some(c => /\\[{}]/.test(c))) offenders.push(`${rel}: ${line.trim().slice(0, 60)}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('never leaves a brace where MDX would parse it as an expression', () => {
+    // The other half of "escape only in prose": every `{` that is NOT inside a
+    // code span or a fenced block has to arrive escaped, or the docs build dies
+    // with "Could not parse expression with acorn". This is the assertion that
+    // catches an indented code block left indented — MDX has no such construct,
+    // so its braces reach the compiler as prose.
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      const bare = withoutFences(out)
+        .replace(/`[^`]*`/g, '') // inline code spans are literal in MDX
+        .replace(/\\[{}]/g, ''); // already escaped
+      if (/[{}]/.test(bare)) offenders.push(`${rel}: ${bare.match(/.{0,40}[{}].{0,20}/)?.[0].trim()}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('never emits an indented code block — MDX has no such construct', () => {
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      let fenced = false;
+      let prevBlank = true;
+      for (const line of out.split('\n')) {
+        if (/^\s*(?:`{3,}|~{3,})/.test(line)) { fenced = !fenced; prevBlank = false; continue; }
+        if (!fenced && prevBlank && /^ {4,}\S/.test(line)) offenders.push(`${rel}: ${line.slice(0, 60)}`);
+        prevBlank = line.trim() === '';
       }
     }
     expect(offenders).toEqual([]);
