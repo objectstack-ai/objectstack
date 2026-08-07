@@ -41,6 +41,18 @@
  * code and all ten fail with `code` / `status` `undefined`, while the block above
  * stays green.
  *
+ * ## [#6125] An eleventh site, and why it is registered HERE
+ *
+ * The `undefined` comparand refusal (row ⑥) was added on 2026-08-07 by #6125's
+ * ruling. It is in this table for the invariant at the bottom of the file rather
+ * than for its own sake: what #5352 cost was a module where SOME refusals
+ * carried the envelope, which is indistinguishable from none of them at the HTTP
+ * boundary. So the rule this table encodes is that the inventory grows whenever
+ * the module gains a refusing site — a new `throw` that is not listed here is
+ * the defect returning. Row ⑥'s own behaviour (four comparand positions, and the
+ * `null` control group that must NOT move) is pinned in
+ * `read-scope-undefined-comparand.test.ts`; only its ENVELOPE is asserted here.
+ *
  * The end-to-end consequence — that the REST face answers
  * `500 ANALYTICS_QUERY_FAILED` with the policy content WITHHELD from the body and
  * intact in `logError` — is `packages/rest`'s
@@ -69,7 +81,7 @@ function refusalFor(filter: unknown, alias = 'crm_opportunity'): Refusal | undef
 /**
  * Every refusing site in `read-scope-sql.ts`, in source order.
  *
- * ELEVEN rows over TEN throw sites: `quoteIdent` is one site reached with two
+ * TWELVE rows over ELEVEN throw sites: `quoteIdent` is one site reached with two
  * `kind` values, and both are listed on purpose. That alias-vs-field split was
  * option C on #5367's decision card — the one place where the two triggers are
  * genuinely different (a bad alias is OUR generator, a bad field is the admin's
@@ -129,42 +141,49 @@ const REFUSALS: Array<{
     sensitive: '$nor',
   },
   {
-    name: '⑥ bare array value',
+    name: '⑥ undefined in a comparand position',
+    site: 'compileField: undefined comparand',
+    filter: { owner_id: undefined },
+    message: /comparand at "owner_id" is undefined — refusing to build read scope \(fail-closed\)/,
+    sensitive: 'owner_id',
+  },
+  {
+    name: '⑦ bare array value',
     site: 'compileField: bare array value',
     filter: { region_code: ['emea', 'apac'] },
     message: /bare array value for "region_code" — use \{ \$in: \[\.\.\.\] \} \(fail-closed\)/,
     sensitive: 'region_code',
   },
   {
-    name: '⑦ nested / relation value',
+    name: '⑧ nested / relation value',
     site: 'compileField: nested/relation value',
     filter: { owner: { manager_id: 'u1' } },
     message: /"owner" has a nested\/relation value which is not supported in a read scope \(fail-closed\)/,
     sensitive: 'owner',
   },
   {
-    name: '⑧ $in without an array',
+    name: '⑨ $in without an array',
     site: 'compileOperator: $in needs an array',
     filter: { region_code: { $in: 'emea' } },
     message: /\$in for "region_code" needs an array \(fail-closed\)/,
     sensitive: 'region_code',
   },
   {
-    name: '⑨ $nin without an array',
+    name: '⑩ $nin without an array',
     site: 'compileOperator: $nin needs an array',
     filter: { region_code: { $nin: 'emea' } },
     message: /\$nin for "region_code" needs an array \(fail-closed\)/,
     sensitive: 'region_code',
   },
   {
-    name: '⑩ $between without [min, max]',
+    name: '⑪ $between without [min,max]',
     site: 'compileOperator: $between needs [min,max]',
     filter: { credit_limit: { $between: [10] } },
     message: /\$between for "credit_limit" needs \[min,max\] \(fail-closed\)/,
     sensitive: 'credit_limit',
   },
   {
-    name: '⑪ unsupported operator',
+    name: '⑫ unsupported operator',
     site: 'compileOperator: unsupported operator',
     filter: { owner_email: { $regex: 'admin@' } },
     message: /unsupported operator "\$regex" on "owner_email" \(fail-closed\)/,
@@ -255,10 +274,12 @@ describe('[#5367] every read-scope refusal carries the ADR-0112 envelope (READ_S
     // #5352's lesson, stated as a guard: seven of `filter-normalizer.ts`'s nine
     // sites carrying an envelope was indistinguishable from none of them at the
     // HTTP boundary, because the commonest input hit one of the two bare ones.
-    // Eleven inputs over the module's ten throw sites (see the table's note on
-    // `quoteIdent`), and every one of them enveloped.
-    expect(REFUSALS).toHaveLength(11);
-    expect(new Set(REFUSALS.map((c) => c.site)).size).toBe(10);
+    // Twelve inputs over the module's ELEVEN throw sites (see the table's note
+    // on `quoteIdent`), and every one of them enveloped. [#6125] added the
+    // eleventh site; these two numbers are the ratchet that makes a future
+    // unenveloped `throw` fail HERE instead of at an HTTP boundary.
+    expect(REFUSALS).toHaveLength(12);
+    expect(new Set(REFUSALS.map((c) => c.site)).size).toBe(11);
     for (const c of REFUSALS) {
       expect(refusalFor(c.filter, c.alias)?.code, `${c.site} is still bare`).toBe('READ_SCOPE_COMPILE_FAILED');
     }
