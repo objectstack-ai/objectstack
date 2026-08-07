@@ -27,6 +27,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { SCHEMA_MANIFEST_DIR_NAME } from './lib/sharded-artifacts';
 
 import {
   findDefKeyCollisions,
@@ -212,8 +213,15 @@ describe('build-schemas.ts refuses a second write of one def key (#5832)', () =>
       // this package really does carry must stay green, or the guard is unusable.
       expect(output).toContain('1 JSON Schema def key(s) are claimed');
       // It stops BEFORE the ratchets, which would otherwise adjudicate a build
-      // whose output already depends on export iteration order.
-      expect(output).not.toContain('json-schema.manifest.json');
+      // whose output already depends on export iteration order. The name here
+      // must track the ratchet's real spelling — `json-schema.manifest/` since
+      // #5837 — or this assertion passes vacuously about a string nothing
+      // prints, which is a phantom check dressed as a pin.
+      expect(output).not.toContain(SCHEMA_MANIFEST_DIR_NAME);
+      // …and the collision detection itself is unmoved by the split: it keys on
+      // the STRIPPED SCHEMA NAME (`shared/HttpMethod`), which is what selects a
+      // def key, never on the shard file that key would later land in.
+      expect(output).toContain('shared/HttpMethod');
     },
   );
 });

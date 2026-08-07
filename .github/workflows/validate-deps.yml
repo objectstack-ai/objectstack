@@ -72,9 +72,17 @@ jobs:
       # another (the 15.1.0 quickstart shipped exactly that: plugin-auth
       # declared better-auth ^1.6.23 while CI ran the 1.7.0-rc.1 override,
       # and every fresh project 500'd on auth).
+      #
+      # The same run also prints two informational censuses (#6046): overrides
+      # nothing in the dependency tree consumes, and selectors whose upper
+      # bound excludes their own target (#4961 / #5032). Both are REPORTS and
+      # never fail the job — an unconsumed override is a legitimate posture
+      # (#5835 ruling A). `--self-test` proves the check in both directions,
+      # so run the `check:override-consistency` chain rather than the bare
+      # script: a self-test nothing invokes is a phantom check.
       - name: Verify overrides are reflected in published manifests
-        run: node scripts/check-override-consistency.mjs
-          
+        run: pnpm check:override-consistency
+
       # Fail the workflow if known vulnerabilities are found — enforces
       # security compliance before merging.
       #

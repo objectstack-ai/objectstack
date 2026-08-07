@@ -32,7 +32,7 @@ const result = ApiEndpointSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Unique endpoint ID |
-| **path** | `string` | ✅ | URL Path (e.g. /api/v1/customers) |
+| **path** | `string` | ✅ | URL Path — must be inside this stack's endpoint carve-out: `/api/v1/apps/<manifest.namespace>/<subpath>` with a non-empty subpath (ADR-0121 D1), e.g. `/api/v1/apps/crm/leads` for a stack whose `manifest.namespace` is `crm`. Only the subpath is yours to name; the namespace segment is derived from `manifest.namespace` (ADR-0121 D2), never authored here. A path outside the carve-out is rejected at publish and would match NOTHING at runtime. |
 | **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP Method |
 | **summary** | `string` | optional |  |
 | **description** | `string` | optional |  |

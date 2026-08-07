@@ -8,6 +8,7 @@ import type {
   SendSmsResult,
   SmsTransportSendResult,
 } from '@objectstack/spec/contracts';
+import { SMS_QUOTA_EXCEEDED_ERROR, type SmsDailyQuota } from './sms-daily-quota.js';
 
 /**
  * Normalize + validate a recipient phone number. Accepts E.164 and common
@@ -74,6 +75,14 @@ export interface SmsServiceOptions {
     info: (msg: string, meta?: any) => void;
     warn: (msg: string, meta?: any) => void;
   };
+  /**
+   * The deployment-wide daily send ceiling (#2814). Charged once per admitted
+   * send, HERE rather than at the auth endpoints, so OTP, invitations and the
+   * messaging `sms` channel are all counted against the one budget — see
+   * `sms-daily-quota.ts`. Omitted ⇒ no total-cost gate (the pre-#2814
+   * behaviour).
+   */
+  dailyQuota?: SmsDailyQuota;
 }
 
 /**
@@ -119,6 +128,30 @@ export class SmsService implements ISmsService {
     };
 
     const id = `sms-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+    // #2814 — the deployment's daily cost ceiling, charged after the input is
+    // known to be a real send (a malformed recipient never spent anything, so
+    // it must not spend a unit either) and before the transport, which is the
+    // only ordering that actually caps spend. Refusal is reported as a failed
+    // send carrying the SAME `TOO_MANY_REQUESTS` code the per-number guard
+    // raises, with no remaining-quota detail — outside, the two walls are
+    // indistinguishable on purpose.
+    //
+    // Measured caveat (#6039): on the auth OTP path that code does NOT reach
+    // the HTTP caller today. `AuthManager.deliverPhoneOtp` rethrows a plain
+    // `Error`, and better-call answers 500 for anything that is not an
+    // `APIError` — so the endpoint returns 500 while the per-number guard on
+    // the same endpoint returns 429. Closing that needs a change inside
+    // plugin-auth, which is why it is filed rather than papered over here.
+    if (this.options.dailyQuota) {
+      const decision = await this.options.dailyQuota.checkAndRecord();
+      if (!decision.ok) {
+        this.options.logger?.warn?.(
+          `[SmsService] send to ${maskPhoneNumber(to)} refused: daily quota exhausted`,
+        );
+        return { id, status: 'failed', error: SMS_QUOTA_EXCEEDED_ERROR };
+      }
+    }
     const maxAttempts = (this.options.retries ?? 0) + 1;
     let lastError: unknown;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {

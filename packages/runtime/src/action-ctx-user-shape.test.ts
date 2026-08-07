@@ -294,7 +294,7 @@ describe('#5372 — the SHAPE: one key set across every producer', () => {
         // the id/name aliases the dispatch surfaces already published.
         expect(keys(rest)).toEqual([
             'displayName', 'email', 'id', 'isPlatformAdmin', 'name', 'organizationId',
-            'permissions', 'positions', 'roles', 'systemPermissions', 'userId',
+            'permissions', 'positions', 'systemPermissions', 'userId',
         ]);
     });
 
@@ -312,7 +312,6 @@ describe('#5372 — the SHAPE: one key set across every producer', () => {
             displayName: 'Dev Admin',
             email: 'admin@objectos.ai',
             positions: ['platform_admin'],
-            roles: ['platform_admin'],
             // Derived by `createEvalUser`, never stored — ADR-0068 D2.
             isPlatformAdmin: true,
             permissions: ['admin_full_access'],
@@ -321,10 +320,23 @@ describe('#5372 — the SHAPE: one key set across every producer', () => {
         });
     });
 
-    it('the ADR-0090 position aliases stay in lockstep (`roles` is `positions`)', async () => {
+    it('publishes positions under ONE spelling — the `roles` alias is gone (#6011)', async () => {
+        // REPLACED, not deleted. This pin used to assert the two spellings
+        // stayed "in lockstep"; the maintainer's 2026-08-06 ruling closed the
+        // alias outright (direction 2, immediate retirement — not a
+        // deprecation window), so a lockstep assertion would now pin the
+        // removed limb. Deleting it outright would have been worse: the
+        // substance it guarded (positions reaches the body verbatim) would
+        // have gone unguarded on this surface. So it asserts BOTH halves —
+        // what the surviving key carries, and that the retired one is absent.
         const { actionCtx } = await dispatchRest(makeEc({ positions: ['sales_rep'] }), makeQl(DEV_ADMIN));
 
+        // Substance: the canonical key carries the caller's positions verbatim.
         expect(actionCtx.user.positions).toEqual(['sales_rep']);
-        expect(actionCtx.user.roles).toEqual(actionCtx.user.positions);
+        // Direction: the retired spelling is ABSENT — not present-and-empty,
+        // which is what a half-done removal (dropped value, surviving key)
+        // would leave behind and what `toBeUndefined()` alone cannot tell apart.
+        expect('roles' in actionCtx.user).toBe(false);
+        expect(Object.keys(actionCtx.user)).not.toContain('roles');
     });
 });

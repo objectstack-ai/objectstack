@@ -6,7 +6,7 @@ import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
 import type { IHttpServer, IHttpRequest, ShareLinkExecutionContext } from '@objectstack/spec/contracts';
 import { SysRecordShare, SysSharingRule, SysShareLink } from './objects/index.js';
 import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
-import { SharingService, type SharingEngine } from './sharing-service.js';
+import { SharingService, type SharingEngine, type SharingTenancyProbe } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
@@ -447,6 +447,16 @@ export class SharingServicePlugin implements Plugin {
         // closed — a degraded security stack never widens sharing authority.
         securityService: () => {
           try { return ctx.getService<any>('security'); }
+          catch { return null; }
+        },
+        // [ADR-0105 D1 / #5859] Late-bound tenancy posture — read exactly the
+        // way SecurityPlugin reads it for the Layer 0 wall, so the two layers
+        // can never disagree about whether an organization wall is in force.
+        // Absent (no plugin-auth) → the org gate assumes WALLED and refuses to
+        // widen a hierarchy scope that carries no organization; an unresolvable
+        // posture is not evidence of `single`.
+        tenancy: () => {
+          try { return ctx.getService<SharingTenancyProbe>('tenancy'); }
           catch { return null; }
         },
       });

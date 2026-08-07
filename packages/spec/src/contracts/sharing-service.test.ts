@@ -257,3 +257,62 @@ describe('[#5858] HierarchyScopeContext tenancy authority', () => {
     expect(resolver.get('resolveOwnerIds')).toContain('never widen');
   });
 });
+
+/**
+ * [#5817] The MODULE HEADER must route each write verb to its own gate.
+ *
+ * The header's "Per-record gating" item predates ADR-0111 D3 and still said
+ * `canEdit()` answered `update` / `delete` — the exact semantics D3 rejects,
+ * contradicting the `canDelete()` doc 140 lines below it (delete is ownership
+ * or `modifyAllRecords` ONLY; an `edit` share widens which ROWS a principal
+ * reaches, never which VERBS). The header is the first thing a cross-package
+ * caller reads, so following it meant treating an `edit` share as delete
+ * authorization, or not knowing `canDelete` exists.
+ *
+ * A prose pin like #5125's, for the same reason: nothing type-checks a doc
+ * comment, and the drift is only visible against the method docs a reader may
+ * never scroll to. This pins the FILE-level comment rather than a member's, so
+ * it reads the leading comment ranges instead of an interface member.
+ */
+describe('[#5817] ISharingService module header — one gate per write verb', () => {
+  it('routes `update` to canEdit() and `delete` to canDelete(), not both to canEdit()', async () => {
+    const ts = (await import('typescript')).default;
+    const { readFileSync } = await import('node:fs');
+    const { dirname, resolve } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+
+    const file = resolve(dirname(fileURLToPath(import.meta.url)), 'sharing-service.ts');
+    const text = readFileSync(file, 'utf8');
+
+    // The module header is one of the comments preceding the first statement;
+    // it identifies itself by the module path it documents (the copyright line
+    // and the first type's own doc are the other two).
+    const header = (ts.getLeadingCommentRanges(text, 0) ?? [])
+      .map((range) => text.slice(range.pos, range.end))
+      .find((comment) => comment.includes('@objectstack/spec/contracts/sharing-service'));
+    expect(header, 'the module header must still open this file').toBeDefined();
+    // Anti-vacuity 1: this really is the header with its numbered concerns, so
+    // a rewrite cannot empty the assertions below by moving the text elsewhere.
+    expect(header).toContain('Per-record gating');
+
+    // THE pin: the header names the gate ADR-0111 D3 split `delete` out to.
+    // Restoring the pre-D3 sentence turns this red.
+    expect(header).toContain('canDelete()');
+
+    // ...and does not hand `delete` back to `canEdit()`. Both indices resolve
+    // in order, so the slice is never empty (a vacuous pass).
+    const editAt = header!.indexOf('canEdit()');
+    const deleteAt = header!.indexOf('canDelete()');
+    expect(editAt, 'canEdit() must still be named in the header').toBeGreaterThan(-1);
+    expect(deleteAt, 'canDelete() must be named AFTER canEdit()').toBeGreaterThan(editAt);
+    expect(
+      header!.slice(editAt, deleteAt),
+      "canEdit()'s clause must not claim the `delete` verb (ADR-0111 D3)",
+    ).not.toMatch(/\bdelete\b/);
+
+    // Anti-vacuity 2: the negative above DISCRIMINATES — the lower-case verb is
+    // still in the header, now attributed to `canDelete()`, so the assertion
+    // cannot pass by `delete` having disappeared from the file altogether.
+    expect(header).toMatch(/\bdelete\b/);
+  });
+});

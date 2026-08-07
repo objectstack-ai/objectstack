@@ -708,9 +708,21 @@ export class ObjectQLPlugin implements Plugin {
         // Re-fetch the canonical definition from the metadata service.
         // The metadata service goes through its loader chain (FS, DB,
         // attached repository), so this picks up edits from any source.
-        const fresh = typeof metadataService.get === 'function'
-          ? await metadataService.get('object', name)
-          : undefined;
+        //
+        // [#5840, ADR-0110 D3] Through `getDiagnosed` when the service offers
+        // it: the loader chain named above is exactly what can be DOWN, and
+        // `get()` reported an unreachable metadata database as the same
+        // `undefined` a deleted object produces. The `else` branch below then
+        // said, in the log, that the service "has no fresh body" — an
+        // assertion about what is declared, made from a read that never
+        // happened. A service that predates `getDiagnosed` reports nothing
+        // degraded, which is precisely what it could express before.
+        const read = typeof metadataService.getDiagnosed === 'function'
+          ? await metadataService.getDiagnosed('object', name)
+          : typeof metadataService.get === 'function'
+            ? { data: await metadataService.get('object', name), degraded: false, errors: [] }
+            : { data: undefined, degraded: false, errors: [] };
+        const fresh = read?.data;
         if (fresh && typeof fresh === 'object') {
           // Re-register with the original contributor metadata. We use
           // 'metadata-service' as packageId to match how the initial
@@ -727,7 +739,31 @@ export class ObjectQLPlugin implements Plugin {
             name,
             packageId,
           });
+        } else if (read?.degraded) {
+          // #5840 — `warn`, not `error`, and the choice is made with the
+          // AGENTS.md "Degradation log levels" question rather than by
+          // analogy to `restoreMetadataFromDb`'s `error` below. Ask it
+          // honestly: does something this code CLAIMS IS PERSISTED fail to
+          // land, while the system looks normal? No — the write already
+          // landed in the metadata store; what failed is a re-READ, and the
+          // registry keeps serving the definition it already holds. That is a
+          // functional degradation (this kernel's copy is behind), not a
+          // durability one. Escalating it would be the mirror-image failure
+          // that rule warns about, and it would fire once per event during an
+          // outage rather than once per boot.
+          //
+          // What it still owes the reader is the consequence and the fix,
+          // which the `debug` line it replaces gave neither of.
+          ctx.logger.warn(
+            '[ObjectQLPlugin] object metadata changed but the metadata service could not be read — ' +
+              'the registry keeps the PREVIOUS definition for this object and nothing retries: reads serve the stale ' +
+              'schema until a later event for it succeeds or the process restarts. ' +
+              'Fix: check the loaders behind the metadata service (datasource connection, credentials, table).',
+            { name, errors: read.errors },
+          );
         } else {
+          // A read that HAPPENED and found nothing — the object really is gone
+          // from every loader (deleted between the event and this re-read).
           ctx.logger.debug('[ObjectQLPlugin] object event received but metadata service has no fresh body', { name });
         }
       } catch (e: any) {

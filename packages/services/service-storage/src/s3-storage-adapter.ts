@@ -72,7 +72,7 @@ export class S3StorageAdapter implements IStorageService {
    * Records ok/error counters, a duration histogram, and an error counter
    * keyed by error class on failure. Never swallows the underlying error.
    */
-  private async track<T>(op: 'put' | 'get' | 'delete' | 'head' | 'list', fn: () => Promise<T>): Promise<T> {
+  private async track<T>(op: 'put' | 'get' | 'delete' | 'head', fn: () => Promise<T>): Promise<T> {
     const started = Date.now();
     const baseLabels = { adapter: 's3', op } as const;
     try {
@@ -211,19 +211,19 @@ export class S3StorageAdapter implements IStorageService {
     });
   }
 
-  async list(prefix: string): Promise<StorageFileInfo[]> {
-    return this.track('list', async () => {
-      const client = await this.getClient();
-      const s3 = await this.s3Mod();
-      const cmd = new s3.ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix });
-      const res = await client.send(cmd);
-      return (res.Contents ?? []).map((item: any) => ({
-        key: item.Key,
-        size: item.Size ?? 0,
-        lastModified: item.LastModified ?? new Date(),
-      }));
-    });
-  }
+  // `list(prefix)` is gone (#5541), following its removal from IStorageService
+  // (#5540, ADR-0049 enforce-or-remove; analysis #5266). This implementation
+  // issued one `ListObjectsV2` and read neither `IsTruncated` nor
+  // `ContinuationToken`, so past 1000 objects it returned the first page with
+  // nothing to distinguish it from a complete answer — while the local adapter
+  // answered the same call one level deep. Nothing in the repo called either.
+  // Enumerate the records you wrote (`sys_file` / file references, paginated
+  // through ObjectQL) instead of the bucket; if a first-party caller ever needs
+  // real bucket enumeration it returns cursor-shaped —
+  // `list(prefix, { cursor, limit })` — with adapter-conformance cases proving
+  // both backends agree before it ships. Absence is pinned in
+  // `storage-adapter-list-retirement.test.ts`: an excess method on a class is
+  // not a type error, so tsc cannot hold this line.
 
   // ---------------------------------------------------------------------------
   // Presigned URLs
