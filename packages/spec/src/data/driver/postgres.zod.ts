@@ -144,6 +144,8 @@ export const PostgresConfigSchema = lazySchema(() => z.object({
   }));
 
 export type PostgresConfig = z.infer<typeof PostgresConfigSchema>;
+/** Post-parse shape of {@link PostgresConfig} — defaults applied, transforms run (ADR-0122). */
+export type PostgresConfigParsed = z.infer<typeof PostgresConfigSchema>;
 
 /** JSON-Schema projection of {@link PostgresConfigSchema}, memoized. */
 export const getPostgresConfigJsonSchema = driverConfigJsonSchema(PostgresConfigSchema);

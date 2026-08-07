@@ -229,6 +229,8 @@ export const MultipartUploadConfigSchema = lazySchema(() => z.object({
 }));
 
 export type MultipartUploadConfig = z.infer<typeof MultipartUploadConfigSchema>;
+/** Post-parse shape of {@link MultipartUploadConfig} — defaults applied, transforms run (ADR-0122). */
+export type MultipartUploadConfigParsed = z.infer<typeof MultipartUploadConfigSchema>;
 
 /**
  * Access Control Configuration
@@ -265,6 +267,8 @@ export const AccessControlConfigSchema = lazySchema(() => z.object({
 }));
 
 export type AccessControlConfig = z.infer<typeof AccessControlConfigSchema>;
+/** Post-parse shape of {@link AccessControlConfig} — defaults applied, transforms run (ADR-0122). */
+export type AccessControlConfigParsed = z.infer<typeof AccessControlConfigSchema>;
 
 /**
  * Lifecycle Policy Rule
@@ -310,6 +314,8 @@ export const LifecyclePolicyRuleSchema = lazySchema(() => z.object({
 }));
 
 export type LifecyclePolicyRule = z.infer<typeof LifecyclePolicyRuleSchema>;
+/** Post-parse shape of {@link LifecyclePolicyRule} — defaults applied, transforms run (ADR-0122). */
+export type LifecyclePolicyRuleParsed = z.infer<typeof LifecyclePolicyRuleSchema>;
 
 /**
  * Lifecycle Policy Configuration
@@ -343,6 +349,8 @@ export const LifecyclePolicyConfigSchema = lazySchema(() => z.object({
 }));
 
 export type LifecyclePolicyConfig = z.infer<typeof LifecyclePolicyConfigSchema>;
+/** Post-parse shape of {@link LifecyclePolicyConfig} — defaults applied, transforms run (ADR-0122). */
+export type LifecyclePolicyConfigParsed = z.infer<typeof LifecyclePolicyConfigSchema>;
 
 /**
  * Bucket Configuration Schema
@@ -394,6 +402,8 @@ export const BucketConfigSchema = lazySchema(() => z.object({
 }));
 
 export type BucketConfig = z.infer<typeof BucketConfigSchema>;
+/** Post-parse shape of {@link BucketConfig} — defaults applied, transforms run (ADR-0122). */
+export type BucketConfigParsed = z.infer<typeof BucketConfigSchema>;
 
 /**
  * Storage Connection Configuration
@@ -438,6 +448,8 @@ export const StorageConnectionSchema = lazySchema(() => z.object({
 }));
 
 export type StorageConnection = z.infer<typeof StorageConnectionSchema>;
+/** Post-parse shape of {@link StorageConnection} — defaults applied, transforms run (ADR-0122). */
+export type StorageConnectionParsed = z.infer<typeof StorageConnectionSchema>;
 
 /**
  * Object Storage Configuration
@@ -503,6 +515,8 @@ export const ObjectStorageConfigSchema = lazySchema(() => z.object({
 }));
 
 export type ObjectStorageConfig = z.infer<typeof ObjectStorageConfigSchema>;
+/** Post-parse shape of {@link ObjectStorageConfig} — defaults applied, transforms run (ADR-0122). */
+export type ObjectStorageConfigParsed = z.infer<typeof ObjectStorageConfigSchema>;
 
 // ============================================================================
 // Helper Examples

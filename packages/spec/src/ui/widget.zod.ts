@@ -184,6 +184,8 @@ export const WidgetEventSchema = lazySchema(() => z.object({
 }));
 
 export type WidgetEvent = z.infer<typeof WidgetEventSchema>;
+/** Post-parse shape of {@link WidgetEvent} — defaults applied, transforms run (ADR-0122). */
+export type WidgetEventParsed = z.infer<typeof WidgetEventSchema>;
 
 /**
  * Widget Property Definition Schema
@@ -256,6 +258,8 @@ export const WidgetPropertySchema = lazySchema(() => z.object({
 }));
 
 export type WidgetProperty = z.infer<typeof WidgetPropertySchema>;
+/** Post-parse shape of {@link WidgetProperty} — defaults applied, transforms run (ADR-0122). */
+export type WidgetPropertyParsed = z.infer<typeof WidgetPropertySchema>;
 
 /**
  * Widget Manifest Schema
@@ -304,6 +308,8 @@ export const WidgetSourceSchema = lazySchema(() => z.discriminatedUnion('type', 
 ]));
 
 export type WidgetSource = z.infer<typeof WidgetSourceSchema>;
+/** Post-parse shape of {@link WidgetSource} — defaults applied, transforms run (ADR-0122). */
+export type WidgetSourceParsed = z.infer<typeof WidgetSourceSchema>;
 
 export const WidgetManifestSchema = lazySchema(() => z.object({
   /**
@@ -417,6 +423,8 @@ export const WidgetManifestSchema = lazySchema(() => z.object({
 }));
 
 export type WidgetManifest = z.infer<typeof WidgetManifestSchema>;
+/** Post-parse shape of {@link WidgetManifest} — defaults applied, transforms run (ADR-0122). */
+export type WidgetManifestParsed = z.infer<typeof WidgetManifestSchema>;
 
 /**
  * Field Widget Props Schema
@@ -505,3 +513,5 @@ export const FieldWidgetPropsSchema = lazySchema(() => z.object({
  * TypeScript type for Field Widget Props
  */
 export type FieldWidgetProps = z.infer<typeof FieldWidgetPropsSchema>;
+/** Post-parse shape of {@link FieldWidgetProps} — defaults applied, transforms run (ADR-0122). */
+export type FieldWidgetPropsParsed = z.infer<typeof FieldWidgetPropsSchema>;

@@ -105,6 +105,8 @@ export const MetadataViewerContributionSchema = lazySchema(() => strictObject({
 }));
 
 export type MetadataViewerContribution = z.infer<typeof MetadataViewerContributionSchema>;
+/** Post-parse shape of {@link MetadataViewerContribution} — defaults applied, transforms run (ADR-0122). */
+export type MetadataViewerContributionParsed = z.infer<typeof MetadataViewerContributionSchema>;
 
 // ─── Sidebar Group Contribution ──────────────────────────────────────
 
@@ -133,6 +135,8 @@ export const SidebarGroupContributionSchema = lazySchema(() => strictObject({
 }));
 
 export type SidebarGroupContribution = z.infer<typeof SidebarGroupContributionSchema>;
+/** Post-parse shape of {@link SidebarGroupContribution} — defaults applied, transforms run (ADR-0122). */
+export type SidebarGroupContributionParsed = z.infer<typeof SidebarGroupContributionSchema>;
 
 // ─── Action Contribution ─────────────────────────────────────────────
 
@@ -180,6 +184,8 @@ export const ActionContributionSchema = lazySchema(() => strictObject({
 }));
 
 export type ActionContribution = z.infer<typeof ActionContributionSchema>;
+/** Post-parse shape of {@link ActionContribution} — defaults applied, transforms run (ADR-0122). */
+export type ActionContributionParsed = z.infer<typeof ActionContributionSchema>;
 
 // ─── Metadata Icon Contribution ──────────────────────────────────────
 
@@ -229,6 +235,8 @@ export const PanelContributionSchema = lazySchema(() => strictObject({
 }));
 
 export type PanelContribution = z.infer<typeof PanelContributionSchema>;
+/** Post-parse shape of {@link PanelContribution} — defaults applied, transforms run (ADR-0122). */
+export type PanelContributionParsed = z.infer<typeof PanelContributionSchema>;
 
 // ─── Command Contribution ────────────────────────────────────────────
 
@@ -285,6 +293,8 @@ export const StudioPluginContributionsSchema = lazySchema(() => strictObject({
 }));
 
 export type StudioPluginContributions = z.infer<typeof StudioPluginContributionsSchema>;
+/** Post-parse shape of {@link StudioPluginContributions} — defaults applied, transforms run (ADR-0122). */
+export type StudioPluginContributionsParsed = z.infer<typeof StudioPluginContributionsSchema>;
 
 // ─── Activation Events — REMOVED (#4657, ADR-0049) ───────────────────
 //
@@ -394,6 +404,8 @@ export const StudioPluginManifestSchema = lazySchema(() => strictObject({
 }));
 
 export type StudioPluginManifest = z.infer<typeof StudioPluginManifestSchema>;
+/** Post-parse shape of {@link StudioPluginManifest} — defaults applied, transforms run (ADR-0122). */
+export type StudioPluginManifestParsed = z.infer<typeof StudioPluginManifestSchema>;
 
 // ─── Helper: defineStudioPlugin ──────────────────────────────────────
 

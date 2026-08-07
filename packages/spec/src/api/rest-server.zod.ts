@@ -161,6 +161,8 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
 }));
 
 export type RestApiConfig = z.infer<typeof RestApiConfigSchema>;
+/** Post-parse shape of {@link RestApiConfig} — defaults applied, transforms run (ADR-0122). */
+export type RestApiConfigParsed = z.infer<typeof RestApiConfigSchema>;
 export type RestApiConfigInput = z.input<typeof RestApiConfigSchema>;
 
 // ==========================================
@@ -252,6 +254,8 @@ export const CrudEndpointsConfigSchema = lazySchema(() => z.object({
 }));
 
 export type CrudEndpointsConfig = z.infer<typeof CrudEndpointsConfigSchema>;
+/** Post-parse shape of {@link CrudEndpointsConfig} — defaults applied, transforms run (ADR-0122). */
+export type CrudEndpointsConfigParsed = z.infer<typeof CrudEndpointsConfigSchema>;
 export type CrudEndpointsConfigInput = z.input<typeof CrudEndpointsConfigSchema>;
 
 // ==========================================
@@ -301,6 +305,8 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
 }));
 
 export type MetadataEndpointsConfig = z.infer<typeof MetadataEndpointsConfigSchema>;
+/** Post-parse shape of {@link MetadataEndpointsConfig} — defaults applied, transforms run (ADR-0122). */
+export type MetadataEndpointsConfigParsed = z.infer<typeof MetadataEndpointsConfigSchema>;
 export type MetadataEndpointsConfigInput = z.input<typeof MetadataEndpointsConfigSchema>;
 
 // ==========================================
@@ -351,6 +357,8 @@ export const BatchEndpointsConfigSchema = lazySchema(() => z.object({
 }));
 
 export type BatchEndpointsConfig = z.infer<typeof BatchEndpointsConfigSchema>;
+/** Post-parse shape of {@link BatchEndpointsConfig} — defaults applied, transforms run (ADR-0122). */
+export type BatchEndpointsConfigParsed = z.infer<typeof BatchEndpointsConfigSchema>;
 export type BatchEndpointsConfigInput = z.input<typeof BatchEndpointsConfigSchema>;
 
 // ==========================================
@@ -392,6 +400,8 @@ export const RouteGenerationConfigSchema = lazySchema(() => z.object({
 }));
 
 export type RouteGenerationConfig = z.infer<typeof RouteGenerationConfigSchema>;
+/** Post-parse shape of {@link RouteGenerationConfig} — defaults applied, transforms run (ADR-0122). */
+export type RouteGenerationConfigParsed = z.infer<typeof RouteGenerationConfigSchema>;
 export type RouteGenerationConfigInput = z.input<typeof RouteGenerationConfigSchema>;
 
 // ==========================================
@@ -496,6 +506,8 @@ export const RestServerConfigSchema = lazySchema(() => z.object({
 }));
 
 export type RestServerConfig = z.infer<typeof RestServerConfigSchema>;
+/** Post-parse shape of {@link RestServerConfig} — defaults applied, transforms run (ADR-0122). */
+export type RestServerConfigParsed = z.infer<typeof RestServerConfigSchema>;
 export type RestServerConfigInput = z.input<typeof RestServerConfigSchema>;
 
 // ==========================================

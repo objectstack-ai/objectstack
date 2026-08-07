@@ -41,6 +41,11 @@ import {
   resolveFilterTokens,
 } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
+import {
+  aggregateSummaryValue,
+  summaryEmptySetValue,
+  type SummaryDescriptor,
+} from './summary-aggregate.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import {
   DriverConnectError,
@@ -796,39 +801,12 @@ function resolveMetadataItemName(key: string, item: any): string | undefined {
  * - CoreServiceName.data (CRUD)
  * - CoreServiceName.metadata (Schema Registry)
  */
-/** A roll-up `summary` field on a parent object that aggregates a child. */
-interface SummaryDescriptor {
-  parentObject: string;
-  summaryField: string;
-  /** FK field on the child pointing back to the parent. */
-  fkField: string;
-  fn: 'count' | 'sum' | 'min' | 'max' | 'avg';
-  /** Child field aggregated (unused for count). */
-  sourceField: string;
-  /**
-   * Optional predicate (a query `where` FilterCondition) restricting which child
-   * rows are aggregated. ANDed with the parent-FK match when the aggregate runs.
-   * Undefined ⇒ aggregate every child of the parent.
-   */
-  filter?: Record<string, unknown>;
-}
-
-/**
- * The value a roll-up summary takes over an **empty** child collection (#5749).
- *
- * `count` and `sum` are defined on the empty set — zero children is zero, not
- * "unknown" — while `min`/`max`/`avg` are not, so those stay `null`. This is the
- * ONE place that list is written down: {@link ObjectQL.recomputeSummaries} uses
- * it for the post-aggregate fallback (an aggregate over no rows returns
- * `null`/`undefined` on every driver), and the insert-time initialiser
- * {@link ObjectQL.initializeSummaryFields} uses it to seed a brand-new parent
- * row with the same value the first recompute would have produced. Two sites,
- * one list — a parent that has never had a child and a parent whose last child
- * was deleted are the SAME logical state and must read the same value.
- */
-function summaryEmptySetValue(fn: SummaryDescriptor['fn']): number | null {
-  return fn === 'count' || fn === 'sum' ? 0 : null;
-}
+// [#6063] `SummaryDescriptor`, `summaryEmptySetValue` and the single-descriptor
+// aggregate moved to `./summary-aggregate.js` — unchanged, and still the one
+// place each is written down. The move exists so the one-off backfill of
+// pre-#6013 `NULL` rows computes its value through the SAME code this engine
+// does, instead of a second implementation that agrees only until one of them
+// is edited.
 
 // `implements IObjectQLEngine` is the verification step of #4251 B3: every
 // member the `objectql` slot's contract declares is checked against this class
@@ -4270,7 +4248,7 @@ export class ObjectQL implements IObjectQLEngine {
           ? so.filter as Record<string, unknown>
           : undefined;
         const descriptor: SummaryDescriptor = {
-          parentObject: parent.name, summaryField, fkField, fn, sourceField: so.field, filter,
+          parentObject: parent.name, summaryField, childObject, fkField, fn, sourceField: so.field, filter,
         };
         const list = index.get(childObject) ?? [];
         list.push(descriptor);
@@ -4325,8 +4303,14 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /** Roll-up descriptors for the summary fields `parentObject` OWNS (#5749) —
-   *  i.e. the ones a NEW row of `parentObject` must have seeded. */
-  private getOwnedSummaryDescriptors(parentObject: string): SummaryDescriptor[] {
+   *  i.e. the ones a NEW row of `parentObject` must have seeded.
+   *
+   *  Public since #6063: the one-off backfill of pre-#6013 `NULL` rows
+   *  (`os migrate summary-nulls`) iterates parents, and reading the engine's
+   *  OWN index is what makes it see exactly the roll-ups the engine maintains —
+   *  same FK resolution, same filter, same staleness rule. Re-deriving them
+   *  would be a second index that disagrees the first time either moves. */
+  getOwnedSummaryDescriptors(parentObject: string): SummaryDescriptor[] {
     this.ensureSummaryIndexes();
     return this.summaryIndexByParent!.get(parentObject) ?? [];
   }
@@ -4400,24 +4384,12 @@ export class ObjectQL implements IObjectQLEngine {
           // aggregate/update) with backoff — a network blip here used to leave
           // the parent summary silently stale (framework#3147).
           await withTransientRetry(async () => {
-            // AND the parent-FK match with the optional per-summary filter so
-            // only matching child rows are aggregated (e.g. received receipts).
-            const fkMatch = { [desc.fkField]: parentId };
-            const where = desc.filter ? { $and: [fkMatch, desc.filter] } : fkMatch;
-            const rows = await this.aggregate(childObject, {
-              where,
-              aggregations: [{
-                function: desc.fn,
-                ...(desc.fn === 'count' ? {} : { field: desc.sourceField }),
-                alias: 'value',
-              }],
-              context: execCtx,
-            } as any);
-            let value = rows?.[0]?.value;
-            // An aggregate over no rows returns null/undefined on every driver.
-            // Behaviour unchanged — the empty-set list simply moved to the one
-            // place the insert-time seed reads it from too (#5749).
-            if (value == null) value = summaryEmptySetValue(desc.fn);
+            // The aggregate — parent-FK match ANDed with the optional
+            // per-summary filter, empty-set fallback included — is
+            // `aggregateSummaryValue` (#6063). Behaviour unchanged; it simply
+            // lives where the insert-time seed and the one-off NULL backfill
+            // can read the identical computation instead of copying it.
+            const value = await aggregateSummaryValue(this, desc, parentId, execCtx);
             await this.update(desc.parentObject, { id: parentId, [desc.summaryField]: value }, { context: execCtx } as any);
           }, this.summaryRetryOptions);
         } catch (err) {

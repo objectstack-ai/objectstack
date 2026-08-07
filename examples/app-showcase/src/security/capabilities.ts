@@ -56,4 +56,27 @@ export const ExportDataCapability = defineCapability({
   packageId: 'com.example.showcase',
 });
 
-export const allCapabilities = [ExportDataCapability];
+/**
+ * A capability that is DEFINED and granted to NOBODY — the falsifiable half of
+ * the ADR-0066 three-way separation, and the one a demo usually leaves out.
+ *
+ * Its whole job is to be required and never held: `showcase_zoo_perm_missing`
+ * (and the AND-gate specimen next to it, see ui/actions/predicate-matrix.action.ts)
+ * lists it in `requiredPermissions`, so those buttons must be absent for every
+ * caller on every one of the four action surfaces. Without a capability nobody
+ * holds there is nothing to notice when a surface stops applying the gate —
+ * which is exactly how the selection bar shipped ignoring `requiredPermissions`
+ * outright (objectui#3492) while three other surfaces honoured it.
+ *
+ * Deliberately absent from every permission set. If a future set grants it, the
+ * two specimens stop testing anything.
+ */
+export const RestrictedOpsCapability = defineCapability({
+  name: 'showcase.restricted_ops',
+  label: 'Restricted Showcase Operations',
+  description: 'Reserved for the capability-gate specimens — intentionally granted to no permission set.',
+  scope: 'org',
+  packageId: 'com.example.showcase',
+});
+
+export const allCapabilities = [ExportDataCapability, RestrictedOpsCapability];

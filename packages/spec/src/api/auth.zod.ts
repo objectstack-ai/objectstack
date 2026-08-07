@@ -92,12 +92,20 @@ export const UserProfileResponseSchema = lazySchema(() => BaseResponseSchema.ext
 
 export type AuthProvider = z.infer<typeof AuthProvider>;
 export type SessionUser = z.infer<typeof SessionUserSchema>;
+/** Post-parse shape of {@link SessionUser} — defaults applied, transforms run (ADR-0122). */
+export type SessionUserParsed = z.infer<typeof SessionUserSchema>;
 export type SessionUserInput = z.input<typeof SessionUserSchema>;
 export type Session = z.infer<typeof SessionSchema>;
 export type LoginType = z.infer<typeof LoginType>;
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
+/** Post-parse shape of {@link LoginRequest} — defaults applied, transforms run (ADR-0122). */
+export type LoginRequestParsed = z.infer<typeof LoginRequestSchema>;
 export type LoginRequestInput = z.input<typeof LoginRequestSchema>;
 export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
 export type RefreshTokenRequest = z.infer<typeof RefreshTokenRequestSchema>;
 export type SessionResponse = z.infer<typeof SessionResponseSchema>;
+/** Post-parse shape of {@link SessionResponse} — defaults applied, transforms run (ADR-0122). */
+export type SessionResponseParsed = z.infer<typeof SessionResponseSchema>;
 export type UserProfileResponse = z.infer<typeof UserProfileResponseSchema>;
+/** Post-parse shape of {@link UserProfileResponse} — defaults applied, transforms run (ADR-0122). */
+export type UserProfileResponseParsed = z.infer<typeof UserProfileResponseSchema>;

@@ -313,8 +313,20 @@ export type CapabilityConformanceLevel = z.infer<typeof CapabilityConformanceLev
 export type ProtocolVersion = z.infer<typeof ProtocolVersionSchema>;
 export type ProtocolReference = z.infer<typeof ProtocolReferenceSchema>;
 export type ProtocolFeature = z.infer<typeof ProtocolFeatureSchema>;
+/** Post-parse shape of {@link ProtocolFeature} — defaults applied, transforms run (ADR-0122). */
+export type ProtocolFeatureParsed = z.infer<typeof ProtocolFeatureSchema>;
 export type PluginCapability = z.infer<typeof PluginCapabilitySchema>;
+/** Post-parse shape of {@link PluginCapability} — defaults applied, transforms run (ADR-0122). */
+export type PluginCapabilityParsed = z.infer<typeof PluginCapabilitySchema>;
 export type PluginInterface = z.infer<typeof PluginInterfaceSchema>;
+/** Post-parse shape of {@link PluginInterface} — defaults applied, transforms run (ADR-0122). */
+export type PluginInterfaceParsed = z.infer<typeof PluginInterfaceSchema>;
 export type PluginDependency = z.infer<typeof PluginDependencySchema>;
+/** Post-parse shape of {@link PluginDependency} — defaults applied, transforms run (ADR-0122). */
+export type PluginDependencyParsed = z.infer<typeof PluginDependencySchema>;
 export type ExtensionPoint = z.infer<typeof ExtensionPointSchema>;
+/** Post-parse shape of {@link ExtensionPoint} — defaults applied, transforms run (ADR-0122). */
+export type ExtensionPointParsed = z.infer<typeof ExtensionPointSchema>;
 export type PluginCapabilityManifest = z.infer<typeof PluginCapabilityManifestSchema>;
+/** Post-parse shape of {@link PluginCapabilityManifest} — defaults applied, transforms run (ADR-0122). */
+export type PluginCapabilityManifestParsed = z.infer<typeof PluginCapabilityManifestSchema>;

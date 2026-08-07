@@ -111,4 +111,8 @@ export const AnalyticsSqlResponseSchema = lazySchema(() => BaseResponseSchema.ex
 export type AnalyticsEndpoint = z.infer<typeof AnalyticsEndpoint>;
 export type AnalyticsQueryRequest = z.infer<typeof AnalyticsQueryRequestSchema>;
 export type AnalyticsMetadataResponse = z.infer<typeof AnalyticsMetadataResponseSchema>;
+/** Post-parse shape of {@link AnalyticsMetadataResponse} — defaults applied, transforms run (ADR-0122). */
+export type AnalyticsMetadataResponseParsed = z.infer<typeof AnalyticsMetadataResponseSchema>;
 export type AnalyticsSqlResponse = z.infer<typeof AnalyticsSqlResponseSchema>;
+/** Post-parse shape of {@link AnalyticsSqlResponse} — defaults applied, transforms run (ADR-0122). */
+export type AnalyticsSqlResponseParsed = z.infer<typeof AnalyticsSqlResponseSchema>;

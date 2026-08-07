@@ -81,7 +81,11 @@ export const LicenseSchema = lazySchema(() => z.object({
 }));
 
 export type Feature = z.infer<typeof FeatureSchema>;
+/** Post-parse shape of {@link Feature} — defaults applied, transforms run (ADR-0122). */
+export type FeatureParsed = z.infer<typeof FeatureSchema>;
 export type FeatureInput = z.input<typeof FeatureSchema>;
 export type Plan = z.infer<typeof PlanSchema>;
+/** Post-parse shape of {@link Plan} — defaults applied, transforms run (ADR-0122). */
+export type PlanParsed = z.infer<typeof PlanSchema>;
 export type PlanInput = z.input<typeof PlanSchema>;
 export type License = z.infer<typeof LicenseSchema>;

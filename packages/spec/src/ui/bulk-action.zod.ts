@@ -276,3 +276,5 @@ export const BulkActionDefSchema = lazySchema(() => z.object({
     }
   }));
 export type BulkActionDef = z.infer<typeof BulkActionDefSchema>;
+/** Post-parse shape of {@link BulkActionDef} — defaults applied, transforms run (ADR-0122). */
+export type BulkActionDefParsed = z.infer<typeof BulkActionDefSchema>;

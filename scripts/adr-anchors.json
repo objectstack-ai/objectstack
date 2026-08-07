@@ -248,6 +248,20 @@
         "ADR-0076"
       ],
       "invariant": "The concrete instance of D11's registration-ownership rule: the `i18n` slot is MULTI-PROVIDER — I18nServicePlugin when service-i18n is installed, else the AppPlugin in-memory fallback auto-registered for stacks that declare translation bundles — so the dispatcher registers this route, not the provider. Moving `/i18n` registration into service-i18n, the obvious-looking 'the owning package should own its route' cleanup, 404s every stack served by the other provider. The extracted body also keeps the legacy matching semantics deliberately (`match: 'prefix'`, so `/i18nxx` matches too, exactly as the old `startsWith` chain did): normalizing that edge is a behaviour change for the http-conformance suite to re-pin, not a tidy-up to slip into an unrelated diff. The 501 on an unserveable slot is D12's honest-capability rule and is narrow on purpose — both real in-memory providers self-declare `degraded` with `handlerReady: true` and keep serving, so the gate closes only on an occupant that would answer with invented strings."
+    },
+    {
+      "file": "packages/spec/src/type-alias-convention.pin.test.ts",
+      "adrs": [
+        "ADR-0122"
+      ],
+      "invariant": "ADR-0122 D6: this file is the EXEMPTION REGISTRY for the type-alias convention, and its assertions are the only thing making the exemption honest. Each line says `z.input` and `z.infer` of one schema are the same type, which is why that schema's bare alias is allowed to have no `XParsed` (D3 — a permanent synonym is a name an author can only pick wrongly). Isomorphism is not declared by anyone; it is a fact about the schema tree, and it ROTS the day a nested field gains a `.default()` / `.transform()` / `.catch()` / `.pipe()`. Deleting a red line to make the build pass re-opens exactly the hole phase 1 closed: the alias silently joins the shape-diff set and the phase-2 flip of the bare name breaks its consumers with no migration target. The fix for a red line is always the same and is never deletion alone — declare `XParsed` next to the bare alias, THEN delete the pin. `scripts/check-spec-parsed-alias.mjs` reads this file as its registry, so a pin removed without its alias turns that gate red too."
+    },
+    {
+      "file": "scripts/check-spec-parsed-alias.mjs",
+      "adrs": [
+        "ADR-0122"
+      ],
+      "invariant": "ADR-0122 D7: every bare `z.infer` alias in `packages/spec/src/**/*.zod.ts` must either be paired with its `XParsed` or be pinned isomorphic in the pin file. The exemption list deliberately does NOT live in this script — it lives in the pin file where tsc proves each entry, because an exemption a comment merely asserts is the declared-but-unenforced shape this repo keeps paying to fix. Moving the list in here to 'simplify' the gate would make it a phantom check. The gate also belongs HERE rather than in `packages/lint`: that package's contract is an in-memory metadata graph with 'no I/O, no runtime, no filesystem', and a rule reading our own TypeScript source cannot live there."
     }
   ]
 }

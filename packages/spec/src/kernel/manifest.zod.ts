@@ -561,5 +561,7 @@ export const ManifestSchema = z.object({
  * Use this type for type-safe manifest handling in TypeScript code.
  */
 export type ObjectStackManifest = z.infer<typeof ManifestSchema>;
+/** Post-parse shape of {@link ObjectStackManifest} — defaults applied, transforms run (ADR-0122). */
+export type ObjectStackManifestParsed = z.infer<typeof ManifestSchema>;
 export type ObjectStackManifestInput = z.input<typeof ManifestSchema>;
 

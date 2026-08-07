@@ -81,6 +81,7 @@
     "ObjectStack (type)",
     "ObjectStackDefinition (type)",
     "ObjectStackDefinitionInput (type)",
+    "ObjectStackDefinitionParsed (type)",
     "ObjectStackDefinitionSchema (const)",
     "ObjectStackSchema (const)",
     "P (const)",

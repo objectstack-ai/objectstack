@@ -233,6 +233,8 @@ export const SkillSchema = lazySchema(() => strictObject({
 }));
 
 export type Skill = z.infer<typeof SkillSchema>;
+/** Post-parse shape of {@link Skill} — defaults applied, transforms run (ADR-0122). */
+export type SkillParsed = z.infer<typeof SkillSchema>;
 
 // ==========================================
 // Factory

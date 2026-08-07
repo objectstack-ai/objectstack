@@ -100,6 +100,8 @@ export const RouteDefinitionSchema = lazySchema(() => z.object({
 }));
 
 export type RouteDefinition = z.infer<typeof RouteDefinitionSchema>;
+/** Post-parse shape of {@link RouteDefinition} — defaults applied, transforms run (ADR-0122). */
+export type RouteDefinitionParsed = z.infer<typeof RouteDefinitionSchema>;
 
 /**
  * Router Configuration Schema
@@ -156,3 +158,5 @@ export const RouterConfigSchema = lazySchema(() => z.object({
 }));
 
 export type RouterConfig = z.infer<typeof RouterConfigSchema>;
+/** Post-parse shape of {@link RouterConfig} — defaults applied, transforms run (ADR-0122). */
+export type RouterConfigParsed = z.infer<typeof RouterConfigSchema>;

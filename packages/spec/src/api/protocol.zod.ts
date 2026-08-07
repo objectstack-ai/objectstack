@@ -1304,8 +1304,12 @@ export type DeleteMetaItemRequest = z.infer<typeof DeleteMetaItemRequestSchema>;
 export type DeleteMetaItemResponse = z.infer<typeof DeleteMetaItemResponseSchema>;
 export type GetMetaItemCachedRequest = z.infer<typeof GetMetaItemCachedRequestSchema>;
 export type GetMetaItemCachedResponse = z.infer<typeof GetMetaItemCachedResponseSchema>;
+/** Post-parse shape of {@link GetMetaItemCachedResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetMetaItemCachedResponseParsed = z.infer<typeof GetMetaItemCachedResponseSchema>;
 export type GetUiViewRequest = z.infer<typeof GetUiViewRequestSchema>;
 export type GetUiViewResponse = z.infer<typeof GetUiViewResponseSchema>;
+/** Post-parse shape of {@link GetUiViewResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetUiViewResponseParsed = z.infer<typeof GetUiViewResponseSchema>;
 
 type AnalyticsQueryRequest = z.infer<typeof AnalyticsQueryRequestSchema>;
 type AnalyticsResultResponse = z.infer<typeof AnalyticsResultResponseSchema>;
@@ -1315,6 +1319,8 @@ type GetAnalyticsMetaResponse = z.infer<typeof AnalyticsMetadataResponseSchema>;
 export type AutomationTriggerRequest = z.infer<typeof AutomationTriggerRequestSchema>;
 export type AutomationTriggerResponse = z.infer<typeof AutomationTriggerResponseSchema>;
 export type AutomationActionsResponse = z.infer<typeof AutomationActionsResponseSchema>;
+/** Post-parse shape of {@link AutomationActionsResponse} — defaults applied, transforms run (ADR-0122). */
+export type AutomationActionsResponseParsed = z.infer<typeof AutomationActionsResponseSchema>;
 
 export type FindDataRequest = z.input<typeof FindDataRequestSchema>;
 export type FindDataResponse = z.infer<typeof FindDataResponseSchema>;
@@ -1329,22 +1335,36 @@ export type DeleteDataResponse = z.infer<typeof DeleteDataResponseSchema>;
 
 export type BatchDataRequest = z.input<typeof BatchDataRequestSchema>;
 export type BatchDataResponse = z.infer<typeof BatchDataResponseSchema>;
+/** Post-parse shape of {@link BatchDataResponse} — defaults applied, transforms run (ADR-0122). */
+export type BatchDataResponseParsed = z.infer<typeof BatchDataResponseSchema>;
 export type CreateManyDataRequest = z.input<typeof CreateManyDataRequestSchema>;
 export type CreateManyDataResponse = z.infer<typeof CreateManyDataResponseSchema>;
 export type UpdateManyDataRequest = z.input<typeof UpdateManyDataRequestSchema>;
 export type UpdateManyDataResponse = z.infer<typeof UpdateManyDataResponseSchema>;
+/** Post-parse shape of {@link UpdateManyDataResponse} — defaults applied, transforms run (ADR-0122). */
+export type UpdateManyDataResponseParsed = z.infer<typeof UpdateManyDataResponseSchema>;
 export type DeleteManyDataRequest = z.input<typeof DeleteManyDataRequestSchema>;
 export type DeleteManyDataResponse = z.infer<typeof DeleteManyDataResponseSchema>;
+/** Post-parse shape of {@link DeleteManyDataResponse} — defaults applied, transforms run (ADR-0122). */
+export type DeleteManyDataResponseParsed = z.infer<typeof DeleteManyDataResponseSchema>;
 
 // View Management Types
 export type ListViewsRequest = z.input<typeof ListViewsRequestSchema>;
 export type ListViewsResponse = z.infer<typeof ListViewsResponseSchema>;
+/** Post-parse shape of {@link ListViewsResponse} — defaults applied, transforms run (ADR-0122). */
+export type ListViewsResponseParsed = z.infer<typeof ListViewsResponseSchema>;
 export type GetViewRequest = z.input<typeof GetViewRequestSchema>;
 export type GetViewResponse = z.infer<typeof GetViewResponseSchema>;
+/** Post-parse shape of {@link GetViewResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetViewResponseParsed = z.infer<typeof GetViewResponseSchema>;
 export type CreateViewRequest = z.input<typeof CreateViewRequestSchema>;
 export type CreateViewResponse = z.infer<typeof CreateViewResponseSchema>;
+/** Post-parse shape of {@link CreateViewResponse} — defaults applied, transforms run (ADR-0122). */
+export type CreateViewResponseParsed = z.infer<typeof CreateViewResponseSchema>;
 export type UpdateViewRequest = z.input<typeof UpdateViewRequestSchema>;
 export type UpdateViewResponse = z.infer<typeof UpdateViewResponseSchema>;
+/** Post-parse shape of {@link UpdateViewResponse} — defaults applied, transforms run (ADR-0122). */
+export type UpdateViewResponseParsed = z.infer<typeof UpdateViewResponseSchema>;
 export type DeleteViewRequest = z.input<typeof DeleteViewRequestSchema>;
 export type DeleteViewResponse = z.infer<typeof DeleteViewResponseSchema>;
 
@@ -1353,6 +1373,8 @@ export type CheckPermissionRequest = z.input<typeof CheckPermissionRequestSchema
 export type CheckPermissionResponse = z.infer<typeof CheckPermissionResponseSchema>;
 export type GetObjectPermissionsRequest = z.input<typeof GetObjectPermissionsRequestSchema>;
 export type GetObjectPermissionsResponse = z.infer<typeof GetObjectPermissionsResponseSchema>;
+/** Post-parse shape of {@link GetObjectPermissionsResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetObjectPermissionsResponseParsed = z.infer<typeof GetObjectPermissionsResponseSchema>;
 export type GetEffectivePermissionsRequest = z.input<typeof GetEffectivePermissionsRequestSchema>;
 export type GetEffectivePermissionsResponse = z.infer<typeof GetEffectivePermissionsResponseSchema>;
 
@@ -1379,15 +1401,25 @@ export type RegisterDeviceResponse = z.infer<typeof RegisterDeviceResponseSchema
 export type UnregisterDeviceRequest = z.input<typeof UnregisterDeviceRequestSchema>;
 export type UnregisterDeviceResponse = z.infer<typeof UnregisterDeviceResponseSchema>;
 export type NotificationPreferences = z.infer<typeof NotificationPreferencesSchema>;
+/** Post-parse shape of {@link NotificationPreferences} — defaults applied, transforms run (ADR-0122). */
+export type NotificationPreferencesParsed = z.infer<typeof NotificationPreferencesSchema>;
 export type NotificationPreferencesInput = z.input<typeof NotificationPreferencesSchema>;
 export type GetNotificationPreferencesRequest = z.input<typeof GetNotificationPreferencesRequestSchema>;
 export type GetNotificationPreferencesResponse = z.infer<typeof GetNotificationPreferencesResponseSchema>;
+/** Post-parse shape of {@link GetNotificationPreferencesResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetNotificationPreferencesResponseParsed = z.infer<typeof GetNotificationPreferencesResponseSchema>;
 export type UpdateNotificationPreferencesRequest = z.input<typeof UpdateNotificationPreferencesRequestSchema>;
 export type UpdateNotificationPreferencesResponse = z.infer<typeof UpdateNotificationPreferencesResponseSchema>;
+/** Post-parse shape of {@link UpdateNotificationPreferencesResponse} — defaults applied, transforms run (ADR-0122). */
+export type UpdateNotificationPreferencesResponseParsed = z.infer<typeof UpdateNotificationPreferencesResponseSchema>;
 export type Notification = z.infer<typeof NotificationSchema>;
+/** Post-parse shape of {@link Notification} — defaults applied, transforms run (ADR-0122). */
+export type NotificationParsed = z.infer<typeof NotificationSchema>;
 export type NotificationInput = z.input<typeof NotificationSchema>;
 export type ListNotificationsRequest = z.input<typeof ListNotificationsRequestSchema>;
 export type ListNotificationsResponse = z.infer<typeof ListNotificationsResponseSchema>;
+/** Post-parse shape of {@link ListNotificationsResponse} — defaults applied, transforms run (ADR-0122). */
+export type ListNotificationsResponseParsed = z.infer<typeof ListNotificationsResponseSchema>;
 export type MarkNotificationsReadRequest = z.input<typeof MarkNotificationsReadRequestSchema>;
 export type MarkNotificationsReadResponse = z.infer<typeof MarkNotificationsReadResponseSchema>;
 export type MarkAllNotificationsReadRequest = z.input<typeof MarkAllNotificationsReadRequestSchema>;
@@ -1419,6 +1451,8 @@ export type RejectAiPendingActionResponse = z.infer<typeof RejectAiPendingAction
 // i18n Types
 export type GetLocalesRequest = z.input<typeof GetLocalesRequestSchema>;
 export type GetLocalesResponse = z.infer<typeof GetLocalesResponseSchema>;
+/** Post-parse shape of {@link GetLocalesResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetLocalesResponseParsed = z.infer<typeof GetLocalesResponseSchema>;
 export type GetTranslationsRequest = z.input<typeof GetTranslationsRequestSchema>;
 export type GetTranslationsResponse = z.infer<typeof GetTranslationsResponseSchema>;
 export type GetFieldLabelsRequest = z.input<typeof GetFieldLabelsRequestSchema>;

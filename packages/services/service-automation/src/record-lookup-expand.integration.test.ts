@@ -109,7 +109,10 @@ describe('record-change lookup expansion (#3475)', () => {
 
     const read = crud.find((c) => c.op === 'findOne' && c.obj === 'lead');
     expect(read!.ctx?.isSystem).toBe(true);
-    expect(read!.ctx?.userId).toBeUndefined();
+    // #5494 — the acting user rides the elevated context as attribution; what
+    // makes this read ELEVATED is `isSystem` (the middleware short-circuits
+    // before any gate reads `userId`), not the absence of a user.
+    expect(read!.ctx?.userId).toBe('u1');
 
     await kernel.shutdown();
   });

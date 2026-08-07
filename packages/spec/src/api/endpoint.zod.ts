@@ -128,4 +128,6 @@ export const ApiEndpoint = Object.assign(ApiEndpointSchema, {
 });
 
 export type ApiEndpoint = z.infer<typeof ApiEndpointSchema>;
+/** Post-parse shape of {@link ApiEndpoint} — defaults applied, transforms run (ADR-0122). */
+export type ApiEndpointParsed = z.infer<typeof ApiEndpointSchema>;
 export type ApiEndpointInput = z.input<typeof ApiEndpointSchema>;

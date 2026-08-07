@@ -45,7 +45,11 @@ export const ScheduleSchema = lazySchema(() => z.discriminatedUnion('type', [
 ]));
 
 export type Schedule = z.infer<typeof ScheduleSchema>;
+/** Post-parse shape of {@link Schedule} — defaults applied, transforms run (ADR-0122). */
+export type ScheduleParsed = z.infer<typeof ScheduleSchema>;
 export type CronSchedule = z.infer<typeof CronScheduleSchema>;
+/** Post-parse shape of {@link CronSchedule} — defaults applied, transforms run (ADR-0122). */
+export type CronScheduleParsed = z.infer<typeof CronScheduleSchema>;
 export type IntervalSchedule = z.infer<typeof IntervalScheduleSchema>;
 export type OnceSchedule = z.infer<typeof OnceScheduleSchema>;
 // NOTE [#4538]: the legacy `export type JobSchedule = Schedule` alias was
@@ -148,6 +152,8 @@ export const JobSchema = lazySchema(() => strictObject({
 }));
 
 export type Job = z.infer<typeof JobSchema>;
+/** Post-parse shape of {@link Job} — defaults applied, transforms run (ADR-0122). */
+export type JobParsed = z.infer<typeof JobSchema>;
 /** Authoring input for {@link Job} — defaulted fields are optional. */
 export type JobInput = z.input<typeof JobSchema>;
 

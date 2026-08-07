@@ -13,6 +13,8 @@ import {
   DataEventSchema,
   BulkDataEventSchema,
   type MetadataEvent,
+  type MetadataEventSubject,
+  type MetadataEventType,
   type DataEvent,
   type BulkDataEvent,
 } from '@objectstack/spec/api';
@@ -53,25 +55,44 @@ export class RealtimeAPI {
   }
 
   /**
-   * Subscribe to metadata events
-   * Returns an unsubscribe function
+   * Subscribe to metadata events for one metadata type.
+   * Returns an unsubscribe function.
+   *
+   * `type` is {@link MetadataEventSubject} — the `{type}` half of the
+   * `metadata.{type}.{action}` vocabulary, derived from `MetadataEventType` —
+   * not a free string (#4627). The producer publishes nothing for a metadata
+   * type outside that enum (#4602 pinned that as declared = enforced), so a
+   * `string` parameter let a caller write `subscribeMetadata('translation', …)`,
+   * compile green, and wait forever on a callback the contract guarantees will
+   * never fire. Now the compiler says so at the call site.
+   *
+   * The narrowing does NOT decide which types deserve realtime events — that is
+   * axis 2 of #4627 and stays open. It only stops the consumer from claiming a
+   * coverage the producer never promised.
    */
   subscribeMetadata(
-    type: string,
+    type: MetadataEventSubject,
     callback: (event: MetadataEvent) => void,
     options?: { packageId?: string }
   ): () => void {
     const subscriptionId = `metadata-${type}-${Date.now()}`;
 
+    // Annotated `MetadataEventType[]`, not left to widen to `string[]`: with a
+    // narrowed `type` these three templates are provably members of the enum,
+    // and saying so makes tsc re-check the composition. A typo here
+    // (`metadata.${type}.create`) used to be a silent no-match subscription —
+    // the same defect class one level down from the one the parameter fixes.
+    const eventTypes: MetadataEventType[] = [
+      `metadata.${type}.created`,
+      `metadata.${type}.updated`,
+      `metadata.${type}.deleted`,
+    ];
+
     this.subscriptions.set(subscriptionId, {
       filter: {
         type,
         packageId: options?.packageId,
-        eventTypes: [
-          `metadata.${type}.created`,
-          `metadata.${type}.updated`,
-          `metadata.${type}.deleted`
-        ]
+        eventTypes
       },
       handler: (event) => {
         if (!event.type.startsWith('metadata.')) return;

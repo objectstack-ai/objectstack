@@ -140,3 +140,5 @@ export const SharingConfigSchema = lazySchema(() => strictObject({
 
 // Type Exports
 export type SharingConfig = z.infer<typeof SharingConfigSchema>;
+/** Post-parse shape of {@link SharingConfig} — defaults applied, transforms run (ADR-0122). */
+export type SharingConfigParsed = z.infer<typeof SharingConfigSchema>;

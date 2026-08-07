@@ -469,6 +469,8 @@ export const ThemeSchema = lazySchema(() => strictObject(
 ));
 
 export type Theme = z.infer<typeof ThemeSchema>;
+/** Post-parse shape of {@link Theme} — defaults applied, transforms run (ADR-0122). */
+export type ThemeParsed = z.infer<typeof ThemeSchema>;
 /** Authoring input for {@link Theme} — defaulted fields are optional. */
 export type ThemeInput = z.input<typeof ThemeSchema>;
 

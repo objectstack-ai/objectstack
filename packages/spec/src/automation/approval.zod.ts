@@ -618,6 +618,8 @@ export const ApprovalEscalationSchema = lazySchema(() => z.object({
   notifySubmitter: z.boolean().default(true).describe('Notify the original submitter on escalation'),
 }, { error: approvalEscalationUnknownKeyError }).strict());
 export type ApprovalEscalation = z.infer<typeof ApprovalEscalationSchema>;
+/** Post-parse shape of {@link ApprovalEscalation} — defaults applied, transforms run (ADR-0122). */
+export type ApprovalEscalationParsed = z.infer<typeof ApprovalEscalationSchema>;
 
 /**
  * Config for an **Approval node** (`type: 'approval'`) on a flow — the ADR-0019
@@ -780,6 +782,8 @@ export const ApprovalNodeConfigSchema = lazySchema(() => z.object({
     .describe('Max send-backs for revision before auto-reject (0 = send-back disabled)'),
 }, { error: approvalNodeConfigUnknownKeyError }).strict());
 export type ApprovalNodeConfig = z.infer<typeof ApprovalNodeConfigSchema>;
+/** Post-parse shape of {@link ApprovalNodeConfig} — defaults applied, transforms run (ADR-0122). */
+export type ApprovalNodeConfigParsed = z.infer<typeof ApprovalNodeConfigSchema>;
 
 /**
  * JSON Schema for {@link ApprovalNodeConfigSchema}, memoized.

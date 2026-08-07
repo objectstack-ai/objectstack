@@ -187,6 +187,8 @@ export const OpenApiSpecSchema = lazySchema(() => z.object({
 }));
 
 export type OpenApiSpec = z.infer<typeof OpenApiSpecSchema>;
+/** Post-parse shape of {@link OpenApiSpec} — defaults applied, transforms run (ADR-0122). */
+export type OpenApiSpecParsed = z.infer<typeof OpenApiSpecSchema>;
 
 // ==========================================
 // API Testing Playground
@@ -277,6 +279,8 @@ export const ApiTestingUiConfigSchema = lazySchema(() => z.object({
 }));
 
 export type ApiTestingUiConfig = z.infer<typeof ApiTestingUiConfigSchema>;
+/** Post-parse shape of {@link ApiTestingUiConfig} — defaults applied, transforms run (ADR-0122). */
+export type ApiTestingUiConfigParsed = z.infer<typeof ApiTestingUiConfigSchema>;
 
 /**
  * API Test Request Schema
@@ -336,6 +340,8 @@ export const ApiTestRequestSchema = lazySchema(() => z.object({
 }));
 
 export type ApiTestRequest = z.infer<typeof ApiTestRequestSchema>;
+/** Post-parse shape of {@link ApiTestRequest} — defaults applied, transforms run (ADR-0122). */
+export type ApiTestRequestParsed = z.infer<typeof ApiTestRequestSchema>;
 
 /**
  * API Test Collection Schema
@@ -378,6 +384,8 @@ export const ApiTestCollectionSchema = lazySchema(() => z.object({
 }));
 
 export type ApiTestCollection = z.infer<typeof ApiTestCollectionSchema>;
+/** Post-parse shape of {@link ApiTestCollection} — defaults applied, transforms run (ADR-0122). */
+export type ApiTestCollectionParsed = z.infer<typeof ApiTestCollectionSchema>;
 
 // ==========================================
 // API Documentation Configuration
@@ -410,6 +418,8 @@ export const ApiChangelogEntrySchema = lazySchema(() => z.object({
 }));
 
 export type ApiChangelogEntry = z.infer<typeof ApiChangelogEntrySchema>;
+/** Post-parse shape of {@link ApiChangelogEntry} — defaults applied, transforms run (ADR-0122). */
+export type ApiChangelogEntryParsed = z.infer<typeof ApiChangelogEntrySchema>;
 
 /**
  * Code Generation Template Schema
@@ -534,6 +544,8 @@ export const ApiDocumentationConfigSchema = lazySchema(() => z.object({
 }));
 
 export type ApiDocumentationConfig = z.infer<typeof ApiDocumentationConfigSchema>;
+/** Post-parse shape of {@link ApiDocumentationConfig} — defaults applied, transforms run (ADR-0122). */
+export type ApiDocumentationConfigParsed = z.infer<typeof ApiDocumentationConfigSchema>;
 
 // ==========================================
 // API Documentation Generation
@@ -566,6 +578,8 @@ export const GeneratedApiDocumentationSchema = lazySchema(() => z.object({
 }));
 
 export type GeneratedApiDocumentation = z.infer<typeof GeneratedApiDocumentationSchema>;
+/** Post-parse shape of {@link GeneratedApiDocumentation} — defaults applied, transforms run (ADR-0122). */
+export type GeneratedApiDocumentationParsed = z.infer<typeof GeneratedApiDocumentationSchema>;
 
 // ==========================================
 // Helper Functions

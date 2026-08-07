@@ -111,6 +111,8 @@ export const EnvironmentPackageInstallationSchema = lazySchema(() => z.object({
 }).describe('Package installation record in an environment (sys_package_installation)'));
 
 export type EnvironmentPackageInstallation = z.infer<typeof EnvironmentPackageInstallationSchema>;
+/** Post-parse shape of {@link EnvironmentPackageInstallation} — defaults applied, transforms run (ADR-0122). */
+export type EnvironmentPackageInstallationParsed = z.infer<typeof EnvironmentPackageInstallationSchema>;
 
 // ---------------------------------------------------------------------------
 // Install / Upgrade / Rollback requests
@@ -142,6 +144,8 @@ export const InstallPackageToEnvironmentRequestSchema = lazySchema(() => z.objec
   ));
 
 export type InstallPackageToEnvironmentRequest = z.infer<typeof InstallPackageToEnvironmentRequestSchema>;
+/** Post-parse shape of {@link InstallPackageToEnvironmentRequest} — defaults applied, transforms run (ADR-0122). */
+export type InstallPackageToEnvironmentRequestParsed = z.infer<typeof InstallPackageToEnvironmentRequestSchema>;
 
 /**
  * Request body for upgrading a package installation.
@@ -157,6 +161,8 @@ export const UpgradeEnvironmentPackageRequestSchema = lazySchema(() => z.object(
 }).describe('Upgrade a package installation to a newer version'));
 
 export type UpgradeEnvironmentPackageRequest = z.infer<typeof UpgradeEnvironmentPackageRequestSchema>;
+/** Post-parse shape of {@link UpgradeEnvironmentPackageRequest} — defaults applied, transforms run (ADR-0122). */
+export type UpgradeEnvironmentPackageRequestParsed = z.infer<typeof UpgradeEnvironmentPackageRequestSchema>;
 
 /**
  * Request body for rolling back a package installation.
@@ -183,3 +189,5 @@ export const ListEnvironmentPackagesResponseSchema = lazySchema(() => z.object({
 }).describe('List of packages installed in an environment'));
 
 export type ListEnvironmentPackagesResponse = z.infer<typeof ListEnvironmentPackagesResponseSchema>;
+/** Post-parse shape of {@link ListEnvironmentPackagesResponse} — defaults applied, transforms run (ADR-0122). */
+export type ListEnvironmentPackagesResponseParsed = z.infer<typeof ListEnvironmentPackagesResponseSchema>;
