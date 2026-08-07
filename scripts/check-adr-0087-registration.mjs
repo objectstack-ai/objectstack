@@ -102,10 +102,10 @@
 //                            two cannot be confused because base decides.
 //   no-migration-prescription
 //                         -- REFUSED when the changeset's own body carries a
-//                            FROM -> TO migration prescription. A changeset that
-//                            ships instructions for rewriting a consumer's code
-//                            cannot also claim no consumer has to rewrite
-//                            anything: that is a self-contradiction, checked
+//                            migration prescription. A changeset that ships
+//                            instructions for rewriting a consumer's code cannot
+//                            also claim no consumer has to rewrite anything: that
+//                            is a self-contradiction, checked
 //                            statement-against-statement, not a retirement
 //                            detector.
 //
@@ -115,6 +115,13 @@
 // mechanically-verified category. Measured on the same 400 commits: 11 of the 32
 // breaking changesets carry such a prescription, and it covers 4 of the 5 that did
 // register -- a genuine forcing function, not a blanket demand.
+//
+// #6419 repaired the detector behind it. It had been matching the literal
+// PLACEHOLDER words `FROM`/`TO` -- so `迁移:FROM → TO` (the template) was caught
+// while `迁移:`aggregate:` → `aggregations:`` (a real prescription) was not, and
+// the better the prescription the more invisible it was. It now also reads
+// framing-anchored rewrites in both languages. The full argument, the measured
+// numbers and the deliberate residual blind spot are at hasMigrationPrescription.
 //
 // ## Absence is never a pass (#4690)
 //
@@ -224,23 +231,177 @@ export function breakingDeclaration(parsed) {
   return { breaking: signals.length > 0, signals };
 }
 
+// ---------------------------------------------------------------------------
+// Migration-prescription detection
+//
+// ## What went wrong the first time (#6419)
+//
+// The original detector had an English branch and a Chinese branch, and BOTH
+// required the literal uppercase words `FROM` and `TO`:
+//
+//     迁移:FROM → TO                          (the TEMPLATE PLACEHOLDER)  -> caught
+//     迁移:`aggregate:` → `aggregations:`     (a REAL prescription)       -> MISSED
+//
+// So it detected the SHAPE OF ONE HISTORICAL CHANGESET (#6048's) rather than the
+// presence of a prescription, and the failure was worst exactly where it mattered
+// most: a prescription is only useful when it names real identifiers, so the
+// better an author wrote one, the more invisible it became. That is a gate not
+// checking what it claims to check, so it is repaired rather than documented.
+//
+// ## What replaced it
+//
+// Two branches, unioned. The first is the OLD pattern, kept verbatim, so the new
+// detector is a strict SUPERSET of the old one: nothing that used to be refused
+// can now slip through, and the `no-migration-prescription` exemption can only
+// have got harder to claim, never easier.
+//
+//   1. THE LABEL CONVENTION -- `FROM`/`TO` used as a section label, table header
+//      or code comment. Measured: this is a genuine house convention, not one
+//      changeset's quirk (`## FROM → TO` x16, `FROM → TO:` x15, `**FROM → TO**`
+//      x11, `Migration (FROM → TO):` x4 in the current stock).
+//
+//   2. A FRAMING-ANCHORED REWRITE -- a REWRITE (`X → Y` where both sides are
+//      code-ish: a backticked span, or a dotted/slashed identifier path) that
+//      appears either ON a line carrying migration framing, or ANYWHERE UNDER a
+//      heading that carries it. This is the branch that catches
+//      `**迁移**:`aggregate:` → `aggregations:`` and every other honestly-written
+//      prescription in either language.
+//
+// ## What it moved (measured on the stock, both versions run over it)
+//
+// 1342 changesets, 235 of them declared-breaking (the only population this gate
+// judges). Old detector: 113 hits, 87 of them breaking. New detector: 122 hits,
+// 92 breaking. NINE newly flagged, ZERO no longer flagged -- the superset property
+// is a measurement, not a claim. Seven of the nine are prescriptions the old
+// pattern missed (`r.deleted` → `r.success`; `改名 HttpMethodSchema →
+// HttpMethodSubsetSchema`; `rename `group` → `team``; a `OLD.x` → `previous.x`
+// migration table; ...). Two are false positives, both on changesets that declare
+// NO breaking change and are therefore never judged -- an error-message template
+// diagram (`[ Did you mean `k1` → `canonical`? ]`) and a docs-only changeset
+// describing a theme engine's internal token mapping. Verdict impact of the false
+// positives on the current tree: zero.
+//
+// ## Why anchored on framing rather than on the arrow alone (measured)
+//
+// An arrow is not a prescription. The current stock carries 933 distinct
+// arrow-bearing lines across 480 changesets, and the great majority are ordinary
+// prose: pipelines (`analytics→engine`), version steps (`16→17`), request/response
+// traces (`→ 200 {...}`), dependency directions (`runtime → objectql`). Requiring
+// code-ish operands on both sides removes the numeric and single-word cases but
+// still leaves behavioural mappings that nobody has to rewrite anything for
+// (`.yml` → `'yaml'` inside a format detector, `test` → `development` inside a
+// NODE_ENV normalizer). Framing is what separates "here is what you must rewrite"
+// from "here is what the code does".
+//
+// ## The residual blind spot, stated rather than hidden (measured)
+//
+// Framing-anchored means an UNFRAMED rename table is still missed. Measured over
+// the same stock: 128 changesets carry a code-to-code rewrite that this detector
+// does not flag, 21 of them declared-breaking -- typically the
+// `unknown-key-strictness-*` and `adr-0112-*` batches, whose bodies list
+// `old` → `new` pairs under a plain heading with no migration word anywhere near
+// them. Anyone widening this later should start there, with these numbers to
+// beat.
+//
+// Two wider rules were measured and REJECTED as noisier than they are useful:
+// firing on any line carrying >=2 rewrites takes the declared-breaking hit count
+// 92 -> 102 but adds 35 changesets to hand-check, of which a clear minority are
+// prescriptions; firing on ANY code-to-code arrow takes it to 250 hits / 113
+// breaking and is plainly a different check (it flags behaviour tables and worked
+// examples). An honestly-scoped detector beats a noisy one here because a FALSE
+// POSITIVE has no honest escape: the author is refused an exemption they are
+// entitled to and the closed vocabulary offers them nothing else -- which is the
+// #6419 shape itself, one category over.
+//
+// Consequence to keep in mind when reading a green run: this branch answers
+// "did the author FRAME a rewrite as a migration", not "is a rewrite required".
+// It is a contradiction check on one exemption, never a trigger and never a
+// retirement detector.
+// ---------------------------------------------------------------------------
+
+/** The three arrow spellings this repo's changesets use. */
+const ARROW = '(?:→|->|—>)';
+
 /**
- * Does the changeset carry a FROM -> TO migration prescription?
+ * One side of a rewrite: a backticked code span, or a dotted/slashed identifier
+ * path. A BARE word is deliberately not an operand -- `runtime → objectql` is a
+ * dependency direction, not a rename -- and neither is a bare number, which is
+ * what keeps `16 → 17` and `60 → 3` out.
+ */
+const OPERAND = '(?:`[^`\\n]+`|[A-Za-z_$][A-Za-z0-9_$]*(?:[./][A-Za-z0-9_$]+)+)';
+
+/** `X → Y`, both sides code-ish. Stateless (no `g`): it is used inside a loop. */
+export const REWRITE_RE = new RegExp(`${OPERAND}\\s*${ARROW}\\s*${OPERAND}`);
+
+/**
+ * Migration framing, in the spellings THIS repo's changesets actually use.
  *
- * Case-SENSITIVE and anchored on this repo's house spellings only. An earlier,
- * case-insensitive draft matched ordinary prose ("from the old value to the new")
- * and fired on 14 of 32 breaking changesets instead of 11; the uppercase
- * convention is what authors actually use for a prescription, so the pattern reads
- * that and nothing else.
+ * Derived from the stock, not invented: the Chinese side comes from `## 迁移`,
+ * `**迁移**:`, `**迁移面**:`, `## 破坏性变更 · 迁移`, `## 作者需要知道的迁移`,
+ * `## 升级说明`, `## 升级影响`, `应改写为`, `改名`; the English side from
+ * `## Migration`, `## Migrating`, `**Migration.**`, `Migration (FROM → TO):`.
  *
- * This is a CONTRADICTION check on one exemption, never a trigger and never a
- * retirement detector: a changeset that ships instructions for rewriting a
- * consumer's code cannot simultaneously claim no consumer must rewrite anything.
+ * The English alternatives are WORD-ANCHORED on purpose. Without `\b` the token
+ * matches inside identifiers -- `sys_migration_journal`, `renameConfigKey`,
+ * `migrations/registry.ts`, `onUpgrade` -- and those appear in ordinary prose
+ * next to arrows. Measured: word-anchoring removed one false positive
+ * (`conversion-shadowed-alias-by-value.md`, whose only "framing" was the
+ * identifier `renameConfigKey`) and removed no true positive.
+ */
+export const MIGRATION_FRAMING_RE =
+  /迁移|改写|改名|升级|\bmigrat(?:e|es|ed|ing|ion|ions)\b|\brename[sd]?\b|\brewrit(?:e|es|ten|ing)\b|\bupgrade[sd]?\b/i;
+
+/** The `FROM`/`TO` label convention -- branch 1, unchanged from #6148. */
+const FROM_TO_LABEL_RE =
+  /(?:^|[^A-Za-z])FROM(?:\s|\*|`|\)|:)[^\n]{0,60}?(?:→|->|—>)[^\n]{0,60}?TO(?![A-Za-z])|^\s*\|?\s*\**FROM\**\s*(?:\(|\|)|^\s*\/\/\s*FROM\b|迁移[^\n]{0,12}FROM\s*(?:→|->)\s*TO/m;
+
+/**
+ * The prescription this changeset carries, with the LINE that evidences it, or
+ * `null`.
+ *
+ * The evidence is returned rather than a bare boolean because the refusal message
+ * is read by an author who believes their changeset has no prescription. "Your
+ * body carries one" is unarguable-with; "your body carries one, here it is" is
+ * checkable, and it is the only way an author can tell a real contradiction from
+ * a detector they should be arguing about (#6419 exists because nobody could see
+ * what the old pattern was actually reading).
+ *
+ * See the block comment above for what each branch reads, what was measured, and
+ * which shapes are deliberately out of reach.
  *
  * @param {string} body
+ * @returns {{ branch: 'from-to-label' | 'framed-line' | 'framed-section', line: string } | null}
+ */
+export function findMigrationPrescription(body) {
+  const label = FROM_TO_LABEL_RE.exec(body);
+  if (label) {
+    const at = body.slice(0, label.index).split(/\r?\n/).length - 1;
+    return { branch: 'from-to-label', line: (body.split(/\r?\n/)[at] ?? label[0]).trim() };
+  }
+
+  // A heading carrying migration framing opens a framed region that runs to the
+  // next heading. Without it, the most natural way to write a prescription --
+  // `## 迁移` followed by a list of `old` → `new` lines -- would be invisible,
+  // which is the #6419 defect in a second spelling.
+  let framedSection = false;
+  for (const line of body.split(/\r?\n/)) {
+    if (/^\s{0,3}#{1,6}\s/.test(line)) framedSection = MIGRATION_FRAMING_RE.test(line);
+    if (!REWRITE_RE.test(line)) continue;
+    if (MIGRATION_FRAMING_RE.test(line)) return { branch: 'framed-line', line: line.trim() };
+    if (framedSection) return { branch: 'framed-section', line: line.trim() };
+  }
+  return null;
+}
+
+/**
+ * Does the changeset carry a migration prescription -- instructions for
+ * rewriting a consumer's code?
+ *
+ * @param {string} body
+ * @returns {boolean}
  */
 export function hasMigrationPrescription(body) {
-  return /(?:^|[^A-Za-z])FROM(?:\s|\*|`|\)|:)[^\n]{0,60}?(?:→|->|—>)[^\n]{0,60}?TO(?![A-Za-z])|^\s*\|?\s*\**FROM\**\s*(?:\(|\|)|^\s*\/\/\s*FROM\b|迁移[^\n]{0,12}FROM\s*(?:→|->)\s*TO/m.test(body);
+  return findMigrationPrescription(body) !== null;
 }
 
 /**
@@ -742,10 +903,13 @@ export function scan({ cwd, base, head = 'HEAD' }) {
     }
 
     // no-migration-prescription
-    if (hasMigrationPrescription(parsed.body)) {
+    const prescription = findMigrationPrescription(parsed.body);
+    if (prescription) {
       push(
         '`not-required (no-migration-prescription)` contradicts the changeset\'s own body, which carries\n' +
-        '      a FROM -> TO migration prescription.\n' +
+        '      a migration prescription.\n' +
+        `      Evidence (${prescription.branch}):\n` +
+        `        ${prescription.line.slice(0, 160)}\n` +
         '      A changeset that ships instructions for rewriting a consumer\'s code cannot also claim\n' +
         '      that no consumer has to rewrite anything. This is the shape #6048 had: its changeset\n' +
         '      carried a worked `迁移:FROM → TO` block and the ledger got no entry.\n' +
@@ -931,7 +1095,7 @@ function selfTest() {
       ),
     },
     pkgs: { '@objectstack/runtime': { dir: 'packages/runtime', private: false }, '@objectstack/spec': { dir: 'packages/spec', private: false } },
-  })), [/contradicts the changeset's own body/, /FROM -> TO/, /#6048/]);
+  })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/, /#6048/]);
 
   // ---- G2: THE RECONCILIATION STEP -- register it and the same input passes --
   green('G2 same input, registered by this diff', run(mk({
@@ -1015,6 +1179,58 @@ function selfTest() {
     },
   })), [/markers -- exactly one disposition is expected/]);
 
+  // ---- R10: THE #6419 SHAPE -- a REAL prescription, written in Chinese with -
+  // real identifiers, claiming the catch-all exemption.
+  //
+  // This is the case the gate was blind to on the day it landed: the body ships a
+  // worked rewrite (`aggregate:` -> `aggregations:`) and simultaneously claims no
+  // consumer has to rewrite anything, and the old detector passed it because the
+  // author had written real identifiers instead of the placeholder words FROM/TO.
+  // Reverse-verified: restore the old pattern and this case reports "expected RED,
+  // got green" -- it is green for the empty reason, which is exactly the defect.
+  red('R10 the #6419 shape (a real Chinese prescription under the catch-all)', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body:
+          '**BREAKING**: 驱动 `aggregate()` 的两个宽容分支删除\n\n' +
+          '**迁移**:`aggregate:` → `aggregations:`,`func:` → `function:`。\n\n' +
+          '<!-- adr-0087: not-required (no-migration-prescription) these keys were never a declared surface anywhere -->\n',
+      }),
+    },
+  })), [/contradicts the changeset's own body/, /Evidence \(framed-line\)/, /aggregations/]);
+
+  // ---- R11: the same, framed by a HEADING instead of an inline label ---------
+  // `## 迁移` + a list of rewrites is the other natural spelling; a line-only rule
+  // would read the list as unframed prose and pass it.
+  red('R11 a prescription under a migration HEADING', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body:
+          '**BREAKING**: two config keys renamed\n\n' +
+          '## 迁移\n\n- `node.config.filters` → `node.config.filter`\n\n' +
+          '<!-- adr-0087: not-required (no-migration-prescription) nothing downstream reads either spelling today -->\n',
+      }),
+    },
+  })), [/contradicts the changeset's own body/, /Evidence \(framed-section\)/]);
+
+  // ---- G7: ordinary prose arrows under the catch-all stay GREEN --------------
+  // The false-positive floor. Every arrow here is real corpus prose: a pipeline, a
+  // version step, a dependency direction, a request trace. None is a prescription,
+  // and refusing them would leave an entitled author with no honest disposition --
+  // the #6419 shape pointed the other way.
+  green('G7 prose arrows are not prescriptions', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body:
+          '**BREAKING** an internal error string changed\n\n' +
+          'The analytics→engine bridge forwards the context; 16 → 17 is already a\n' +
+          'substantial migration, and the dependency direction (runtime → objectql)\n' +
+          'permits no other home. A bad request now answers → 400 instead of 500.\n\n' +
+          '<!-- adr-0087: not-required (no-migration-prescription) an internal error string changed; no key, symbol or stored value moves -->\n',
+      }),
+    },
+  })));
+
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
   {
     const r = mk({ files: {} });
@@ -1077,11 +1293,34 @@ function selfTest() {
   }
 
   // ---- Unit pins on the two pattern-shaped judgements ----------------------
+  //
+  // P1-P3 are the LABEL branch, unchanged since #6148 -- the template placeholder
+  // must keep matching, or the #6048 shape stops being caught. P4-P5 are the
+  // original false-positive floor. P9-P17 are #6419: the branch that reads real
+  // prescriptions, and the prose shapes it must still refuse.
   assert(hasMigrationPrescription('### 迁移:FROM → TO\n'), 'P1: the Chinese prescription heading must match');
   assert(hasMigrationPrescription('**FROM → TO**\n'), 'P2: the inline FROM -> TO heading must match');
   assert(hasMigrationPrescription('| FROM (legacy) | TO (primitives) |\n'), 'P3: a FROM/TO table header must match');
   assert(!hasMigrationPrescription('moved from the old value to the new one\n'), 'P4: ordinary lowercase prose must NOT match');
   assert(!hasMigrationPrescription('this is from A to B in prose\n'), 'P5: lowercase "from ... to" must NOT match');
+
+  // #6419 -- REAL prescriptions, which the placeholder-only pattern all missed.
+  assert(hasMigrationPrescription('**迁移**:`aggregate:` → `aggregations:`\n'), 'P9: a real Chinese prescription with backticked identifiers must match');
+  assert(hasMigrationPrescription('一行修复:把 `ctx.user.roles` 改写成 `ctx.user.positions`(`req.user.roles` → `req.user.positions`)\n'), 'P10: a 改写 prescription must match');
+  assert(hasMigrationPrescription('**Migration.** `r.deleted` → `r.success`. That is the whole migration.\n'), 'P11: an English inline Migration prescription must match');
+  assert(hasMigrationPrescription('## 迁移\n\n- `node.config.filters` → `node.config.filter`\n'), 'P12: a rewrite under a migration HEADING must match');
+  assert(hasMigrationPrescription('## Migration\n\n- `sharedWith.type` → `sharedWith.recipientType`\n'), 'P13: the same, in English');
+  // and the prose it must still refuse -- every one of these is real corpus text.
+  assert(!hasMigrationPrescription('ceremony — 16→17 is already a substantial, tested migration — to postpone\n'), 'P14: a version step next to the word migration must NOT match');
+  assert(!hasMigrationPrescription('dependency direction (runtime → objectql) permits no other home.\n'), 'P15: a dependency direction must NOT match');
+  assert(!hasMigrationPrescription('No `sys_migration_journal` registered → the scan is skipped in silence.\n'), 'P16: the framing word inside an identifier must NOT anchor');
+  assert(!hasMigrationPrescription('`renameConfigKey`, so `object` → `objectName`, `filters` → `filter`\n'), 'P17: `renameConfigKey` is an identifier, not framing');
+  // the evidence line is what makes a refusal checkable rather than assertive
+  assert(findMigrationPrescription('**迁移**:`a.b` → `a.c`\n')?.branch === 'framed-line', 'P18: an inline framed rewrite reports the framed-line branch');
+  assert(findMigrationPrescription('## 迁移\n\n`a.b` → `a.c`\n')?.branch === 'framed-section', 'P19: a heading-framed rewrite reports the framed-section branch');
+  assert(findMigrationPrescription('### 迁移:FROM → TO\n')?.branch === 'from-to-label', 'P20: the placeholder label reports the label branch');
+  assert(findMigrationPrescription('nothing here\n') === null, 'P21: a body with no prescription reports null, not a shrug');
+
   assert(breakingDeclaration(parseChangeset(CS({ body: 'feat(spec)!: x\n' }))).breaking, 'P6: a conventional-commit bang is a declaration');
   assert(!breakingDeclaration(parseChangeset(CS({ bumps: [['a', 'patch']], body: 'plain\n' }))).breaking, 'P7: a plain patch is not');
   assert(extractIds("  id: 'object-titleFormat-to-nameField',\n").length === 1, 'P8: an id with a capital letter must be extracted');
