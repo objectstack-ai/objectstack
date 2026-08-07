@@ -146,7 +146,7 @@ export function createEvalUser(input: {
   email?: string | null;
   positions?: readonly string[] | null;
   organizationId?: string | null;
-}): EvalUser {
+}): EvalUserParsed {
   const positions = Array.from(
     new Set((input.positions ?? []).map((r) => String(r).trim()).filter(Boolean))
   );

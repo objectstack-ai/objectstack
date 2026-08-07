@@ -358,13 +358,18 @@ export class DelegatedAdminGate {
     }
 
     const held = await this.resolveHeldScopes(sets);
+    // The declared defaults are applied HERE because nothing parses these: the
+    // scope arrives as raw JSON off the row (`parseMaybeJson`), so since ADR-0122
+    // its type says what that actually is — every flag optional. The report
+    // promises booleans, so it states `AdminScopeSchema`'s own defaults rather
+    // than passing `undefined` through a field typed `boolean`.
     const scopes = held.map((h) => ({
       setName: h.setName,
       businessUnit: h.scope.businessUnit,
-      includeSubtree: h.scope.includeSubtree,
-      manageAssignments: h.scope.manageAssignments,
-      manageBindings: h.scope.manageBindings,
-      authorEnvironmentSets: h.scope.authorEnvironmentSets,
+      includeSubtree: h.scope.includeSubtree ?? true,
+      manageAssignments: h.scope.manageAssignments ?? false,
+      manageBindings: h.scope.manageBindings ?? false,
+      authorEnvironmentSets: h.scope.authorEnvironmentSets ?? false,
       assignablePermissionSets: [...h.scope.assignablePermissionSets],
       businessUnitIds: [...h.subtree],
     }));

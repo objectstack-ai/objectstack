@@ -183,7 +183,11 @@ describe('build-schemas.ts refuses a second write of one def key (#5832)', () =>
 
       const httpZod = path.join(dir, 'src', 'shared', 'http.zod.ts');
       const original = fs.readFileSync(httpZod, 'utf-8');
-      const anchor = 'export type HttpMethodSubset = z.infer<typeof HttpMethodSubsetSchema>;';
+      // Reads `z.input` since ADR-0122 phase 2 (#6083) flipped every bare alias.
+      // The anchor is only an insertion point, and it is asserted to exist on the
+      // next line — so a future re-spelling fails loudly here instead of mutating
+      // nothing and reporting the guard green over an unmodified fixture.
+      const anchor = 'export type HttpMethodSubset = z.input<typeof HttpMethodSubsetSchema>;';
       expect(original, 'anchor line must exist — the mutation is pointless otherwise')
         .toContain(anchor);
       const mutated = original.replace(

@@ -3,7 +3,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { QueryAST, HookContext, ServiceObject } from '@objectstack/spec/data';
 import {
-  EngineQueryOptions,
+  EngineQueryOptionsParsed,
   DataEngineInsertOptions,
   EngineUpdateOptions,
   EngineDeleteOptions,
@@ -27,7 +27,7 @@ import {
   VALUE_SHAPES_MIGRATION_ID,
   isDataMigrationFlagVerified,
 } from '@objectstack/spec/system';
-import { ExecutionContext, ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
+import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import {
   IDataDriver,
@@ -4955,7 +4955,7 @@ export class ObjectQL implements IObjectQLEngine {
     );
   }
 
-  async find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
+  async find(object: string, query?: EngineQueryOptionsParsed, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     // Normalize the alias spellings (`filter`→`where`, `top`→`limit`) by the
     // spec's slot table — the driver AST only understands the canonical keys,
@@ -4974,9 +4974,12 @@ export class ObjectQL implements IObjectQLEngine {
     // stray `query.object` overwrite it, splitting the AST's object from the
     // table actually queried (#4371 option-2 survey) — every middleware and
     // hook reading `ast.object` would have been lied to.
-    const ast: QueryAST = { ...query, object };
-    // Remove context from the AST — it's not a driver concern
-    delete (ast as any).context;
+    // `context` is dropped HERE rather than `delete`d from the built AST: since
+    // ADR-0122 the caller-supplied `context` is the AUTHOR state (every key
+    // optional) while `QueryAST` carries the parsed one, so spreading it in and
+    // removing it a line later would type the AST with a context it never holds.
+    const { context: _findContext, ...findQuery } = query ?? {};
+    const ast: QueryAST = { ...findQuery, object };
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
     // names and inject their dependencies, so the driver returns the raw
@@ -5102,7 +5105,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Fires the same `beforeFind`/`afterFind` hooks as `find` (#3195).
    */
-  async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any> {
+  async findOne(objectName: string, query?: EngineQueryOptionsParsed, options?: EngineReadOptions): Promise<any> {
     objectName = this.resolveObjectName(objectName);
     // Same alias fold as find() (#4346). Without it, `findOne({ filter })`
     // matched the first row of the WHOLE table rather than the predicate.
@@ -5117,9 +5120,10 @@ export class ObjectQL implements IObjectQLEngine {
     const driver = this.getDriver(objectName);
     // `object` after the spread for the same reason as find(); `limit: 1`
     // last — findOne is single-row by contract.
-    const ast: QueryAST = { ...query, object: objectName, limit: 1 };
-    // Remove context from the AST — it's not a driver concern
-    delete (ast as any).context;
+    // Same reason as find(): the caller's `context` is the author state and the
+    // AST carries the parsed one, so it leaves before the AST is typed.
+    const { context: _findOneContext, ...findOneQuery } = query ?? {};
+    const ast: QueryAST = { ...findOneQuery, object: objectName, limit: 1 };
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
