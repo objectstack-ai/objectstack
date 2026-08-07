@@ -38,12 +38,18 @@
  *
  * ## The source of truth, and why it is this one
  *
- * `RouteManager.getAll()` — the very table the router matches requests
+ * `RestServer.getRoutes()` — the very tables the router matches requests
  * against, read at REQUEST time. That is what makes phantom rows structurally
- * impossible rather than merely unlikely: a route absent from the table is
+ * impossible rather than merely unlikely: a route absent from the tables is
  * absent from the document, and vice versa. It is also what makes the prefix
- * correct for free, since the paths in that table are the wire paths the
- * server registered under its configured base.
+ * correct for free, since the paths there are the wire paths the server
+ * registered under its configured base.
+ *
+ * Since #5822 that answer covers both ways this package mounts a route:
+ * `RouteManager`'s own table, and the routes the bypassing registrars reported
+ * after mounting them (`direct-mount.ts`). The second half kept the same
+ * standard rather than relaxing it — a registrar reports the array it iterated
+ * to mount, so the document still describes only what a boot actually mounted.
  *
  * The four batch routes are the standing demonstration: they register only
  * when the protocol implements `batchData` / `createManyData` / … , so on a
@@ -52,26 +58,32 @@
  *
  * ## COVERAGE — what is in the section and what is not (#5588 ⑤)
  *
- * IN: every route this `RestServer` mounted through its own `RouteManager`
- * under the base being served — all families in `rest-route-ledger.ts` whose
- * `source` is `route-manager` (discovery, openapi, metadata, ui, crud,
- * data-actions, search, email, forms, sharing, reports, approvals, analytics,
- * security, batch) — regardless of ledger `disposition`. Disposition records
- * whether the SDK expresses a route, which is a different question from
- * whether the HTTP surface exists; `server-only` and `public` routes are
- * served and therefore documented. On a default boot that is 78 routes,
- * against the 10 operations the old section described.
+ * IN: every route this `RestServer` knows is mounted under the base being
+ * served — regardless of ledger `disposition`. Disposition records whether the
+ * SDK expresses a route, which is a different question from whether the HTTP
+ * surface exists; `server-only` and `public` routes are served and therefore
+ * documented. Two ways in, both real:
+ *
+ *  - Everything registered through its own `RouteManager` — all families in
+ *    `rest-route-ledger.ts` whose `source` is `route-manager` (discovery,
+ *    openapi, metadata, ui, crud, data-actions, search, email, forms, sharing,
+ *    reports, approvals, analytics, security, batch). On a default boot that is
+ *    78 routes, against the 10 operations the old section described.
+ *  - Since #5822, the `direct-mount` registrars' routes (`package-routes.ts`,
+ *    `external-datasource-routes.ts`, 9 ledger rows, 8 of them SDK
+ *    capabilities) — but ONLY the ones this boot actually mounted. They
+ *    register straight on `IHttpServer`, bypassing `RouteManager`, and the
+ *    package registrar is service-gated (`packageService`) by
+ *    `rest-api-plugin.ts`; each registrar now returns the array it iterated to
+ *    mount and the composition step records it on this server, so the fact
+ *    comes from the actual call rather than from a second, hand-kept table. A
+ *    deployment with no `package` service documents no `packages.*` route,
+ *    which is the same standard the rest of this document is held to — see
+ *    `direct-mount.ts`, and `direct-mount-introspection.test.ts` for both
+ *    directions pinned.
  *
  * OUT, deliberately and namedly:
  *
- *  - The two `direct-mount` registrars (`package-routes.ts`,
- *    `external-datasource-routes.ts`, 9 ledger rows). They register straight
- *    on `IHttpServer`, bypassing `RouteManager`, and each is service-gated
- *    (`packageService` / the external-datasource service) by
- *    `rest-api-plugin.ts`. This server therefore holds NO fact about whether
- *    they are mounted for this boot — and inventing one is precisely the
- *    defect being repaired. Making them enumerable is a change to those
- *    registrars, not to this document.
  *  - Everything mounted by other packages: the runtime dispatcher's root
  *    routes (including the `/.well-known/objectstack` the old section
  *    misfiled under `/api`), `service-storage`, `service-i18n`. Not rest's

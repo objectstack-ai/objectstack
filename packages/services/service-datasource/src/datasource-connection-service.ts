@@ -43,6 +43,7 @@ import {
   assertDatasourcePoolSupported,
   unsupportedPoolIssue,
 } from './datasource-pool-support.js';
+import { connectFailureRemedy } from './connect-failure-remedy.js';
 import type { Logger } from './logger.js';
 
 /** A datasource definition this service can connect (code- or runtime-origin). */
@@ -563,7 +564,7 @@ export class DatasourceConnectionService {
       try {
         secret = await resolver(credentialsRef);
       } catch (err) {
-        return this.handleFailure(record, 'failed-credentials', `resolving credential '${credentialsRef}' threw: ${errMsg(err)}`, opts.context, opts.objects, opts.mappedObjects);
+        return this.handleFailure(record, 'failed-credentials', `resolving credential '${credentialsRef}' threw: ${errMsg(err)}`, opts.context, opts.objects, opts.mappedObjects, err);
       }
       if (secret == null || secret === '') {
         return this.handleFailure(
@@ -615,7 +616,11 @@ export class DatasourceConnectionService {
       this.logger?.info?.(`datasource '${name}': connected (driver=${record.driver}, schemaMode=${record.schemaMode ?? 'managed'})`);
       return { name, status: 'connected', ...(handle.ownership ? { ownership: handle.ownership } : {}) };
     } catch (err) {
-      return this.handleFailure(record, 'failed-degraded', errMsg(err), opts.context, opts.objects, opts.mappedObjects);
+      // `err` itself is handed on, not just its message: the driver package's
+      // build output being absent is reported as `err.code ===
+      // 'ERR_MODULE_NOT_FOUND'`, and that structured signal is gone the moment
+      // the error is stringified (#5794).
+      return this.handleFailure(record, 'failed-degraded', errMsg(err), opts.context, opts.objects, opts.mappedObjects, err);
     }
   }
 
@@ -708,6 +713,12 @@ export class DatasourceConnectionService {
    *
    * Either way the datasource is left unconnected with a clear message — never
    * a silent skip.
+   *
+   * The fail-fast throw's closing sentence is chosen by CAUSE (#5794): a driver
+   * package that could not be loaded at all gets `pnpm install && pnpm build`
+   * and nothing else, because for that cause both halves of the generic advice
+   * are actively harmful — see `connect-failure-remedy.ts`. Everything above
+   * that sentence, and every other cause's text, is unchanged.
    */
   private handleFailure(
     record: ConnectableDatasource,
@@ -716,6 +727,15 @@ export class DatasourceConnectionService {
     context?: DatasourceConnectContext,
     boundObjects: readonly string[] = [],
     mappedObjects: readonly string[] = [],
+    /**
+     * The value that was actually thrown, when this failure came from one.
+     * Carried alongside `reason` rather than folded into it because the signal
+     * that identifies an unbuilt workspace is STRUCTURED (`err.code`), and
+     * stringifying the error to a message drops it. Absent for the failures
+     * this service diagnoses itself (an unsupported driver id, an unresolvable
+     * credential) — those are never module-resolution failures.
+     */
+    cause?: unknown,
   ): ConnectResult {
     const isExternal = record.schemaMode && record.schemaMode !== 'managed';
     const msg = `datasource '${record.name}': connect failed — ${reason}`;
@@ -752,10 +772,7 @@ export class DatasourceConnectionService {
 
     const why = causes.join('; ');
     if (!resolveAllowDriverConnectFailure()) {
-      throw new Error(
-        `${msg}. (${why} ⇒ fail-fast per ADR-0062 D5). Fix the datasource configuration, or set ` +
-        `OS_ALLOW_DRIVER_CONNECT_FAILURE=1 to boot anyway and serve errors until it is reachable.`,
-      );
+      throw new Error(`${msg}. (${why} ⇒ fail-fast per ADR-0062 D5). ${connectFailureRemedy(cause)}`);
     }
     const banner =
       `⚠️ DEGRADED BOOT: ${msg} (${why}), but OS_ALLOW_DRIVER_CONNECT_FAILURE is set — starting ` +

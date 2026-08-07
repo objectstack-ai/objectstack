@@ -212,4 +212,68 @@ describe('BulkActionDefSchema (#4457)', () => {
         .toBeDefined();
     });
   });
+
+  describe('— `requiredPermissions` is declarable on every def form (ADR-0066 D4, #6257)', () => {
+    // The renderer filtered on this key from objectui#3492 on, while the schema
+    // rejected every attempt to write it — `enforced ≠ declarable`. The forms
+    // below are the ones that USED to have no legal spelling: a data-plane def
+    // dispatches no action, so there is nothing to inherit a gate from.
+    it('accepts the gate on an inline `delete` def — the form with nowhere to inherit from', () => {
+      const def = ok({ name: 'purge_projects', operation: 'delete', requiredPermissions: ['showcase.restricted_ops'] });
+      expect(def.requiredPermissions).toEqual(['showcase.restricted_ops']);
+    });
+
+    it('accepts the gate on a declarative `update` + `patch` def', () => {
+      const def = ok({
+        name: 'archive_projects',
+        operation: 'update',
+        patch: { status: 'archived' },
+        requiredPermissions: ['plan.push_down'],
+      });
+      expect(def.requiredPermissions).toEqual(['plan.push_down']);
+    });
+
+    it('accepts the gate on an aggregate custom def alongside the inherited route', () => {
+      // Legal but usually redundant — an aggregate def already inherits the
+      // named action's declaration. Authored here, the authored key wins the
+      // renderer's merge, so it must parse rather than force the inherit path.
+      const def = ok({
+        name: 'recalc_selection',
+        operation: 'custom',
+        execution: 'aggregate',
+        requiredPermissions: ['showcase.export_data'],
+      });
+      expect(def.requiredPermissions).toEqual(['showcase.export_data']);
+    });
+
+    it('accepts several capabilities — the renderer ANDs them', () => {
+      const def = ok({
+        name: 'purge_projects',
+        operation: 'delete',
+        requiredPermissions: ['showcase.export_data', 'showcase.restricted_ops'],
+      });
+      expect(def.requiredPermissions).toHaveLength(2);
+    });
+
+    it('accepts `requiredPermissions: []` — the explicit always-pass declaration', () => {
+      expect(ok({ name: 'purge_projects', operation: 'delete', requiredPermissions: [] }).requiredPermissions)
+        .toEqual([]);
+    });
+
+    it('stays optional — a def without it parses exactly as before', () => {
+      expect(ok({ name: 'purge_projects', operation: 'delete' }).requiredPermissions).toBeUndefined();
+    });
+
+    it('rejects a bare-string declaration — the gate is a list, never a scalar', () => {
+      expect(reject({ name: 'purge_projects', operation: 'delete', requiredPermissions: 'showcase.restricted_ops' })
+        .join('\n')).toContain('requiredPermissions');
+    });
+
+    it('renames the `ActionSchema` near-misses onto the canonical key', () => {
+      expect(reject({ name: 'purge_projects', operation: 'delete', permissions: ['x'] }).join('\n'))
+        .toContain('`permissions` → `requiredPermissions`');
+      expect(reject({ name: 'purge_projects', operation: 'delete', requiredCapabilities: ['x'] }).join('\n'))
+        .toContain('`requiredCapabilities` → `requiredPermissions`');
+    });
+  });
 });

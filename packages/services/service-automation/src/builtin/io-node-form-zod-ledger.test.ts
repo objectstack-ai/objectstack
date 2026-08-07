@@ -110,8 +110,13 @@ describe('IO-node form ↔ Zod reconciliation (#4045)', () => {
       // and nothing else (connector-nodes.ts). The spec side of that contract
       // is FlowNodeSchema.connectorConfig — unwrap the optional wrapper
       // structurally to stay off a direct `zod` dependency.
-      const prop = (FlowNodeSchema as unknown as { shape: Record<string, unknown> })
-        .shape.connectorConfig as { unwrap?: () => { shape?: Record<string, unknown> } };
+      //
+      // `FlowNodeSchema` is a ZodPipe since #4415 (it parses its own ADR-0031
+      // regions), so the declared keys live on the pipe's INPUT side — the
+      // authorable half, which is what this reconciliation is about, and the
+      // same side the spec's own generators read (`pipeAuthorableSide`).
+      const node = FlowNodeSchema as unknown as { def: { in: { shape: Record<string, unknown> } } };
+      const prop = node.def.in.shape.connectorConfig as { unwrap?: () => { shape?: Record<string, unknown> } };
       expect(prop, 'FlowNodeSchema should declare connectorConfig').toBeDefined();
       expect(prop.unwrap, 'connectorConfig should be an optional-wrapped object').toBeTypeOf('function');
       const shape = prop.unwrap!().shape;

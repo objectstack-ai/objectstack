@@ -63,6 +63,13 @@
 // nothing and the receipt no longer claims it does. Neither the direction nor
 // the 5/7 split changes — only the noun in the resolved value.)
 //
+// (#5927 — and now the SECOND line, for the same reason on the reset path.
+// These fail-closed cases pass no `registryItems`, so `v1` is artifact-backed
+// on neither side; re-run today the delete resolves
+// `"Deleted view 'v1' — it no longer exists. …"`. Same treatment: the
+// measurement stands as taken, and the 5/7 split is untouched — what these
+// assertions read is the REJECTION, never the resolved sentence.)
+//
 // Predicted 4 (the four in the first describe); the fifth is the last case of
 // the artifact describe, which is itself a fail-closed assertion and only lives
 // there for narrative reasons. Recorded as measured rather than rounded to the
@@ -185,8 +192,17 @@ function protocolFor(h: Harness) {
     return new ObjectStackProtocolImplementation(h.engine, undefined, 'env_1');
 }
 
+// [#5599] The body carries a real view key (`type` / `columns`), not identity
+// alone. It used to be `{ name, label }`, which the `view` schema accepted only
+// because its union had a member that stripped unknown keys and required none —
+// the hole #5599 closed. Nothing here needs a contentless body: this file's
+// subject is WHICH writes the lock gate admits, not what a view looks like.
 const save = (p: ObjectStackProtocolImplementation) =>
-    p.saveMetaItem({ type: 'view', name: 'v1', item: { name: 'v1', label: 'Edited' } } as any);
+    p.saveMetaItem({
+        type: 'view',
+        name: 'v1',
+        item: { name: 'v1', label: 'Edited', type: 'grid', columns: ['name'] },
+    } as any);
 
 const remove = (p: ObjectStackProtocolImplementation) =>
     p.deleteMetaItem({ type: 'view', name: 'v1' } as any);

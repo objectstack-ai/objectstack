@@ -419,7 +419,7 @@ describe('HookContextSchema', () => {
       const context = HookContextSchema.parse({
         object: 'account',
         event: 'beforeInsert',
-        input: { doc: { name: 'Test Account' } },
+        input: { data: { name: 'Test Account' } },
         ql: {},
       });
 
@@ -460,7 +460,7 @@ describe('HookContextSchema', () => {
         object: 'account',
         event: 'beforeInsert',
         input: {
-          doc: {
+          data: {
             name: 'New Account',
             industry: 'Technology',
           },
@@ -471,7 +471,7 @@ describe('HookContextSchema', () => {
 
       // `input` is `z.record(z.string(), z.unknown())` by contract — the payload
       // shape varies per event — so a parsed read is narrowed at the read site.
-      expect((context.input.doc as { name: string }).name).toBe('New Account');
+      expect((context.input.data as { name: string }).name).toBe('New Account');
     });
 
     it('should accept update input', () => {
@@ -480,14 +480,14 @@ describe('HookContextSchema', () => {
         event: 'beforeUpdate',
         input: {
           id: '123',
-          doc: { status: 'active' },
+          data: { status: 'active' },
           options: {},
         },
         ql: {},
       });
 
       expect(context.input.id).toBe('123');
-      expect((context.input.doc as { status: string }).status).toBe('active');
+      expect((context.input.data as { status: string }).status).toBe('active');
     });
 
     it('should accept delete input', () => {
@@ -667,7 +667,7 @@ describe('HookContextSchema', () => {
         object: 'account',
         event: 'beforeInsert',
         input: {
-          doc: {
+          data: {
             name: 'New Account',
             industry: 'Technology',
             status: 'active',
@@ -701,7 +701,7 @@ describe('HookContextSchema', () => {
         event: 'afterUpdate',
         input: {
           id: '123',
-          doc: { status: 'active' },
+          data: { status: 'active' },
           options: {},
         },
         result: {
@@ -745,7 +745,7 @@ describe('Integration Tests', () => {
       object: 'account',
       event: 'beforeInsert',
       input: {
-        doc: { name: 'Test Account' },
+        data: { name: 'Test Account' },
       },
       session: {
         userId: 'user_123',
@@ -758,7 +758,7 @@ describe('Integration Tests', () => {
       object: 'account',
       event: 'afterInsert',
       input: {
-        doc: { name: 'Test Account' },
+        data: { name: 'Test Account' },
       },
       result: {
         id: '123',
@@ -1140,5 +1140,124 @@ describe('session.positions / session.preserveAudit declaration (#5605)', () => 
 
     const preserveAuditDoc = sessionShape.preserveAudit.description ?? '';
     expect(preserveAuditDoc).toMatch(/not an authorization input/i);
+  });
+});
+
+/**
+ * `HookContext.api` is typed as {@link IScopedContext} (#5945, maintainer
+ * ruling C of 2026-08-07).
+ *
+ * The THIRD entry in this file's drift family, and the one whose two ends both
+ * pointed the same way: `session.roles` was declared-never-produced (removed),
+ * `session.positions` / `.preserveAudit` were produced-never-declared
+ * (declared), and `api` was produced, DOCUMENTED, and typed `unknown` — so the
+ * documentation's primary data channel could not be called from the annotation
+ * the documentation itself teaches:
+ *
+ *     error TS18046: 'ctx.api' is of type 'unknown'.    // ctx.api.object('x')
+ *
+ * measured on `origin/main` and reproduced by reverting this change (the exact
+ * diagnostics, chained and unchained, are tabulated in
+ * `contracts/scoped-context.test.ts`, which owns the COMPILE half of the pin).
+ * What lives here is the half that belongs to the schema: the change is
+ * type-only, and the runtime must be able to prove it.
+ *
+ * REVERSE VERIFICATION, direction predicted then measured: restoring
+ * `z.unknown()` leaves every assertion in THIS block green — `z.custom()` with
+ * no validator and `z.unknown()` accept exactly the same values, which is the
+ * point of choosing it. The block is a REGRESSION guard, not evidence that the
+ * type landed; the pins for that are in `scoped-context.test.ts`. Said out loud
+ * because a green companion test read as a pin is how #5605's third assertion
+ * nearly got over-credited.
+ */
+describe('HookContext.api typing (#5945)', () => {
+  /** Shaped like ObjectQL's `ScopedContext` — a live object, not authored data. */
+  const liveApi = {
+    object: (_name: string) => ({
+      find: async () => [],
+      findOne: async () => null,
+      count: async () => 0,
+      insert: async (data: unknown) => data,
+      update: async (data: unknown) => data,
+      updateById: async (id: string | number, data: object) => ({ id, ...data }),
+    }),
+    transaction: async (cb: (tx: unknown, info: { owned: boolean }) => unknown) => cb(liveApi, { owned: true }),
+    sudo: () => liveApi,
+  };
+
+  it('still accepts a live engine object, and hands back the SAME instance', () => {
+    // `z.custom()` with no validator neither rejects nor clones. Identity is
+    // the load-bearing assertion: a copied `api` would be a repository whose
+    // closures point at the wrong execution context, which no shape check
+    // could see.
+    const context = HookContextSchema.parse({
+      object: 'account',
+      event: 'beforeInsert',
+      input: {},
+      api: liveApi,
+      ql: {},
+    });
+
+    expect(context.api).toBe(liveApi);
+  });
+
+  it('stays OPTIONAL — a context built without an engine still parses', () => {
+    // Every `buildHookApi` dispatch site sets it, but making it required would
+    // start rejecting the partial contexts this schema accepts today (and that
+    // this file's own older tests build). Declaring the type must not change
+    // what parses.
+    const context = HookContextSchema.parse({
+      object: 'account',
+      event: 'beforeInsert',
+      input: {},
+      ql: {},
+    });
+
+    expect(context.api).toBeUndefined();
+  });
+
+  it('accepts the values `z.unknown()` accepted — the change is type-only', () => {
+    for (const api of [undefined, null, 42, 'nope', {}, liveApi]) {
+      expect(() => HookContextSchema.parse({
+        object: 'account', event: 'beforeInsert', input: {}, api, ql: {},
+      })).not.toThrow();
+    }
+  });
+
+  it('type-checks the code the docs teach — `(ctx: HookContext)` calling ctx.api', () => {
+    // The TSC channel, and the reason this block is in a file `tsconfig.test.json`
+    // compiles (#5286). Every line below was TS18046 or TS2339-on-`{}` before
+    // the declaration. Explicit annotations, so a widened or renamed
+    // declaration fails here rather than being absorbed by inference.
+    const crossObjectRead = async (ctx: HookContext) => {
+      const owner: unknown = await ctx.api?.object('user').findOne({
+        where: { id: ctx.input.owner_id },
+      });
+      const open: number | undefined = await ctx.api?.object('task').count({
+        where: { done: false },
+      });
+      await ctx.api?.object('audit_log').insert({ object_type: ctx.object });
+      return { owner, open };
+    };
+
+    // ...and the transaction shape the docs teach: objects are reached through
+    // the CALLBACK's context, which must itself be an IScopedContext.
+    const transactional = async (ctx: HookContext) => ctx.api?.transaction(async (tx) => {
+      await tx.object('task').insert({ title: 'kickoff' });
+      return tx.object('project').update({ id: 'p1', task_count: 1 });
+    });
+
+    expect(typeof crossObjectRead).toBe('function');
+    expect(typeof transactional).toBe('function');
+  });
+
+  it('names the contract in the `.describe()`, so the generated reference does too', () => {
+    // `api`'s JSON Schema is `{}` either way, so the generated reference row
+    // renders its TYPE as `any` in both states — the description is the only
+    // channel that page has for saying what the value actually is.
+    const doc = HookContextSchema.shape.api.description ?? '';
+    expect(doc).toContain('IScopedContext');
+    expect(doc).toContain('object(name)');
+    expect(doc).toContain('transaction(cb)');
   });
 });

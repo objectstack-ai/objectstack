@@ -30,6 +30,10 @@ import {
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
+// Imported from spec directly rather than through `@objectstack/core`'s
+// re-export block: that block is labelled backward-compatibility, and this
+// contract is new (#5945).
+import type { IScopedContext, IScopedObjectRepository } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
@@ -7320,7 +7324,21 @@ export class ObjectQL implements IObjectQLEngine {
  * and convenience aliases (create, updateById, deleteById) matching
  * the @objectql/core ObjectRepository API.
  */
-export class ObjectRepository {
+/**
+ * A repository bound to one object and one execution context — what
+ * `ScopedContext.object(name)` returns, and what a hook reaches as
+ * `ctx.api.object(name)`.
+ *
+ * `implements IScopedObjectRepository` (#5945): the six members that contract
+ * declares are the ones the documentation corpus is measured to CALL, and the
+ * `implements` clause is what keeps the two from drifting — before it, the
+ * only descriptions of this face were the private slices each consumer
+ * hand-rolled (`type CrossObjectApi = …`), which nothing checked. The class
+ * stays WIDER than the contract on purpose (`create`, `delete`, `deleteById`,
+ * `aggregate`, `execute`); `implements` allows that, and those members join the
+ * contract when a call site turns up to justify them.
+ */
+export class ObjectRepository implements IScopedObjectRepository {
   constructor(
     private objectName: string,
     private context: ExecutionContextInput,
@@ -7413,12 +7431,18 @@ export class ObjectRepository {
 
 /**
  * Scoped execution context with object() accessor.
- * 
+ *
  * Provides identity (userId, tenantId/spaceId, roles),
  * repository access via object(), privilege escalation via sudo(),
  * and transactional execution via transaction().
+ *
+ * `implements IScopedContext` (#5945) — this class IS `HookContext.api`, built
+ * per dispatch by {@link ObjectQL.buildHookApi}. The contract declares the two
+ * members hooks reach (`object`, `transaction`); `sudo()`, the discrete
+ * begin/commit/rollback trio and the identity getters stay off it, so this
+ * class is deliberately wider than what it implements.
  */
-export class ScopedContext {
+export class ScopedContext implements IScopedContext {
   constructor(
     private executionContext: ExecutionContextInput,
     private engine: IDataEngine

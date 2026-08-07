@@ -591,21 +591,28 @@ function uncompilableAggregateFunctionError(func: string): Error {
  * [#5907] Which refusal a name this transport cannot compile deserves — the
  * twin of `driver-sql`'s `refuseAggregateFunction`.
  *
- * `func` is the name the CALLER wrote, before this transport's `toLowerCase()`.
- * Measured on `origin/main` @ `80f7dc6a3`, the two faces do not normalise alike:
+ * `func` is the name the CALLER wrote — which, since #6203, is also the name
+ * this transport looked up. Judging the caller's own spelling against the
+ * case-sensitive enum is what keeps a miscased name from splitting the envelope:
+ * on a lowercased name this transport would call `COUNT_DISTINCT` a capability
+ * gap (501) while the local driver, reading the name raw, called it undeclared
+ * (400) — one query, two wire identities.
+ *
+ * [#6203] The other half of that fork — the LOOKUP being case-insensitive here
+ * and case-sensitive on the local driver — is now closed too, in this direction:
+ * the `toLowerCase()` in {@link RemoteTransport.aggregate} is gone. Measured on
+ * `origin/main` @ `d367f03d6`, before that removal:
  *
  * ```
- * COUNT           REMOTE -> RESOLVED  ("SELECT count(...)")   LOCAL -> threw
- * COUNT_DISTINCT  REMOTE -> threw "…: count_distinct"         LOCAL -> threw "…: COUNT_DISTINCT"
+ * COUNT   REMOTE -> RESOLVED "SELECT count(\"stage\") …"   LOCAL -> THREW INVALID_QUERY/400
+ * Count   REMOTE -> RESOLVED "SELECT count(\"stage\") …"   LOCAL -> THREW INVALID_QUERY/400
  * ```
  *
- * Judging the CALLER's spelling against the case-sensitive enum is what keeps
- * that pre-existing fork from spreading into the envelope: on the lowercased
- * name this transport would call `COUNT_DISTINCT` a capability gap (501) while
- * the local driver, reading the name raw, called it undeclared (400) — one
- * query, two wire identities, which is the fork this issue exists to close.
- * The normalisation difference itself — `COUNT` compiles here and is refused by
- * the local driver — is untouched by this change and filed as #6203.
+ * `AggregationFunction` is a CASE-SENSITIVE `z.enum` and `COUNT` is a spelling
+ * the Query Protocol never declared, so what this transport used to accept was a
+ * dialect of its own — a lenient consumer, which PD#12 rejects. Both faces now
+ * read only the declared lowercase spelling, and `COUNT` lands on class 1 above
+ * on both.
  */
 function refuseAggregateFunction(func: string): never {
   throw DECLARED_AGGREGATE_FUNCTIONS.includes(func)
@@ -831,13 +838,20 @@ export class RemoteTransport {
 
     const aggregations = query?.aggregations || query?.aggregate || [];
     for (const agg of aggregations) {
-      // [#5907] `funcWritten` is the caller's spelling — what the refusal quotes
-      // back and what the declared-vocabulary check is judged against; `funcRaw`
-      // is this transport's own normalised lookup key, unchanged.
-      const funcWritten = String(agg.function || agg.func || '');
-      const funcRaw = funcWritten.toLowerCase();
-      const sqlFunc = REMOTE_AGGREGATE_FUNCTIONS.get(funcRaw);
-      if (sqlFunc === undefined) refuseAggregateFunction(funcWritten);
+      // [#5907] The caller's spelling is what the refusal quotes back and what
+      // the declared-vocabulary check is judged against.
+      //
+      // [#6203] It is now also the LOOKUP KEY. This read used to be
+      // `funcWritten.toLowerCase()`, which made `COUNT` compile here while the
+      // local driver — same `TursoDriver`, different `url` — refused it: one
+      // query, two answers, decided by a connection string. `AggregationFunction`
+      // is a case-sensitive `z.enum`, so the lowercased read was accepting a
+      // spelling the Query Protocol never declared; deleting it converges both
+      // faces on the declared spelling rather than fossilising the dialect into
+      // a second contract (PD#12). See {@link refuseAggregateFunction}.
+      const func = String(agg.function || agg.func || '');
+      const sqlFunc = REMOTE_AGGREGATE_FUNCTIONS.get(func);
+      if (sqlFunc === undefined) refuseAggregateFunction(func);
       const field = agg.field || '*';
       let fieldSql: string;
       if (field === '*') {
@@ -846,11 +860,14 @@ export class RemoteTransport {
         this.assertSafeIdentifier(field);
         fieldSql = `"${field}"`;
       }
-      // The default alias keeps spelling itself with the normalised NAME
-      // (`count_stage`), unchanged; the emitted SQL uses the lowering table's
-      // value so that table is what decides the statement, not a membership
-      // check beside it. Identical text for all five entries today.
-      const alias = agg.alias || `${funcRaw}_${field === '*' ? 'all' : field}`;
+      // The default alias spells itself with the function NAME (`count_stage`)
+      // while the emitted SQL uses the lowering table's VALUE, so that table is
+      // what decides the statement, not a membership check beside it. Identical
+      // text for all five entries today. Unchanged by #6203: only a name already
+      // in the table reaches this line, and every key there is lowercase, so the
+      // alias this produces is byte-identical to the pre-#6203 one for every
+      // input that still compiles.
+      const alias = agg.alias || `${func}_${field === '*' ? 'all' : field}`;
       this.assertSafeIdentifier(alias);
       selectParts.push(`${sqlFunc}(${fieldSql}) AS "${alias}"`);
     }

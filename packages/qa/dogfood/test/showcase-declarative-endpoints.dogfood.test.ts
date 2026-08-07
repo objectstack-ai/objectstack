@@ -103,7 +103,27 @@ beforeAll(async () => {
   process.chdir(SHOWCASE_DIR);
   tempDir = mkdtempSync(join(tmpdir(), 'os-e8-endpoints-'));
   const artifactPath = join(tempDir, 'objectstack.json');
-  writeFileSync(artifactPath, JSON.stringify(showcaseStack));
+  // `functions` is dropped DELIBERATELY, and saying so is the point (#4976).
+  //
+  // This line stands in for `objectstack build`, but it is only half of it: the
+  // real build runs `lowerCallables` first, replacing every callable with a
+  // string ref and carrying the functions themselves in a sibling ESM module.
+  // A plain `JSON.stringify` has no such step — it simply omits function-valued
+  // keys — so this artifact never carried the showcase's functions at all. It
+  // merely LOOKED like it did, because a bare entry (`sweepProjectHealth: fn`)
+  // vanishes key and all and leaves `functions: {}` behind, which parses.
+  //
+  // That silence broke the moment the showcase spelled its writer the honest,
+  // declared way: `{ handler: fn, effect: 'writes' }` keeps the object and drops
+  // only `handler`, leaving `{ effect: 'writes' }` — an entry declaring an
+  // effect for a function it does not carry, which `FlowFunctionEntrySchema`
+  // refuses in all four of its members, exactly as it should.
+  //
+  // Nothing is lost by omitting the key: the functions this boot actually runs
+  // come from the LIVE stack handed to `bootStack` below, not from this file,
+  // whose job is to give `MetadataPlugin` the `apis:` block to ingest.
+  const { functions: _functionsLiveOnly, ...artifact } = showcaseStack as Record<string, unknown>;
+  writeFileSync(artifactPath, JSON.stringify(artifact));
 
   stack = await bootStack(showcaseStack, {
     // The `flow`-typed endpoint delegates to `IAutomationService.execute`;
