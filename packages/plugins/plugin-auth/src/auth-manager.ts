@@ -22,7 +22,11 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
-import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
+import {
+  invitationRoleCapFailure,
+  isPlainMemberInvitation,
+  isOrgAdminGrade,
+} from './invitation-role-cap.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import type { TenancyService } from './tenancy-service.js';
@@ -3587,11 +3591,17 @@ export class AuthManager {
    * True when `userId` is a platform admin (a `sys_user_permission_set` row
    * pointing at `admin_full_access` with `organization_id = null`) OR an
    * owner/admin member of `activeOrgId` (any org membership with role
-   * owner/admin when no active org is set). Mirrors the role-derivation in
-   * `customSession`; reads through `withSystemReadContext` so the lookups are
-   * not themselves RLS-scoped to the acting (possibly non-privileged) user.
-   * Fails CLOSED (returns false) on any lookup error — this backs a security
-   * gate, so an unverifiable actor must never pass.
+   * owner/admin when no active org is set). Reads through
+   * `withSystemReadContext` so the lookups are not themselves RLS-scoped to the
+   * acting (possibly non-privileged) user. Fails CLOSED (returns false) on any
+   * lookup error — this backs a security gate, so an unverifiable actor must
+   * never pass.
+   *
+   * [#5942] The membership half asks {@link isOrgAdminGrade} — the single grade
+   * ladder in `invitation-role-cap.ts`, shared with the break-glass ban guard —
+   * so "which membership is an administrator" has exactly one answer inside
+   * plugin-auth. The platform-admin half above is unchanged and still has its
+   * own derivations elsewhere (`resolve-authz-context.ts` is authoritative).
    */
   private async isOrgOrPlatformAdmin(
     userId: string,
@@ -3623,13 +3633,14 @@ export class AuthManager {
       if (activeOrgId) where.organization_id = activeOrgId;
       const members = await sys.find('sys_member', { where, limit: 10 });
       for (const m of (Array.isArray(members) ? members : [])) {
-        const raw = typeof m?.role === 'string' ? m.role : '';
-        if (
-          raw
-            .split(',')
-            .map((s: string) => s.trim())
-            .some((r: string) => r === 'owner' || r === 'admin')
-        ) {
+        // [#5942] The ONE grade ladder answers "does this membership administer
+        // the org" — never a hand-copied `role === 'owner' || role === 'admin'`.
+        // The copy that used to live here was case-SENSITIVE and string-only, so
+        // a `sys_member.role` of `Owner` / `ADMIN` / `['owner']` was refused
+        // here while `last-admin-ban-guard.ts` — same question, same ladder —
+        // counted that row AS an administrator. Two spellings of one security
+        // question cannot disagree if there is only one spelling.
+        if (isOrgAdminGrade(m?.role)) {
           return true;
         }
       }

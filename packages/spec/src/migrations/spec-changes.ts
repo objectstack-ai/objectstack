@@ -3,7 +3,7 @@
 /**
  * The machine-readable-first change manifest, `spec-changes.json` (ADR-0087 D4).
  *
- * The Release workflow diffs the current `api-surface.json` against the
+ * The Release workflow diffs the current api-surface snapshot against the
  * previously published one (reusing the ADR-0059 §3 gate artifact instead of
  * discarding it), then joins the conversion table (D2) and the migration set
  * (D3) into a single `{ from, to, added, converted, migrated, removed }` record.

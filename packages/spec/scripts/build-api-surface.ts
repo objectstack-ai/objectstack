@@ -10,12 +10,21 @@
  * with the spec in the same commit. See ADR-0059.
  *
  * Two committed artifacts, both checked in CI:
- *   - api-surface.json            — every exported `name (kind)` per public entry
- *                                    point (breadth: did an export disappear?).
+ *   - api-surface/<entry>.json    — every exported `name (kind)` for ONE public
+ *                                    entry point (breadth: did an export
+ *                                    disappear?). One file per entry point since
+ *                                    #5837, so two PRs that touch different entry
+ *                                    points do not collide in the merge queue —
+ *                                    which is where `merge=os-regen` cannot help,
+ *                                    because the queue rebuilds server-side with
+ *                                    no custom merge driver. The root entry `.`
+ *                                    lands in `root.json`.
  *   - api-surface-signatures.json — a stable hash of each `defineX` factory's
  *                                    resolved signature. Scoped to the factories to
  *                                    stay low-noise; full per-export signatures
  *                                    would churn on every internal type tweak.
+ *                                    Deliberately NOT sharded: 1.3KB, one line
+ *                                    per factory, never a conflict surface.
  *
  * SCOPE — read before trusting these as a narrowing gate. Both artifacts describe
  * the TYPESCRIPT surface. The hash is of `checker.typeToString()`, which prints a
@@ -23,7 +32,7 @@
  * adding or removing a key inside a schema does not move it: #3883 narrowed
  * `defineAction`'s input by three keys and this snapshot did not change. The
  * authorable KEY surface — which for a metadata-driven platform is the real
- * third-party API — is ratcheted separately by `authorable-surface.json`
+ * third-party API — is ratcheted separately by `authorable-surface/`
  * (scripts/build-schemas.ts, #3855). Value-level narrowing (an enum losing a
  * member) is still ungated, per ADR-0059 §5's evidence gate.
  *
@@ -39,9 +48,15 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  API_SURFACE_DIR_NAME,
+  aggregateApiSurfaceShards,
+  apiSurfaceShardTexts,
+  writeShards,
+} from './lib/sharded-artifacts';
 
 const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
-const SURFACE_SNAPSHOT = resolve(PKG_DIR, 'api-surface.json');
+const SURFACE_DIR = resolve(PKG_DIR, API_SURFACE_DIR_NAME);
 const SIG_SNAPSHOT = resolve(PKG_DIR, 'api-surface-signatures.json');
 const CHECK = process.argv.includes('--check');
 
@@ -118,14 +133,21 @@ function buildSignatures(): Record<string, string> {
 
 const surface = buildSurface();
 const signatures = buildSignatures();
-const surfaceStr = JSON.stringify(surface, null, 2) + '\n';
+const surfaceTexts = apiSurfaceShardTexts(surface);
 const sigStr = JSON.stringify(signatures, null, 2) + '\n';
 
 if (!CHECK) {
-  writeFileSync(SURFACE_SNAPSHOT, surfaceStr);
+  const { written, removed } = writeShards(SURFACE_DIR, surfaceTexts);
   writeFileSync(SIG_SNAPSHOT, sigStr);
   const total = Object.values(surface).reduce((n, a) => n + a.length, 0);
-  console.log(`Wrote api-surface.json (${Object.keys(surface).length} entries, ${total} exports) and api-surface-signatures.json (${Object.keys(signatures).length} factories).`);
+  console.log(
+    `Wrote ${API_SURFACE_DIR_NAME}/ (${Object.keys(surface).length} entries, ${total} exports) ` +
+      `and api-surface-signatures.json (${Object.keys(signatures).length} factories).`,
+  );
+  // The locality claim, printed: a PR that changed one entry point's exports
+  // rewrites one shard, so two such PRs cannot conflict (#5837).
+  if (written.length > 0) console.log(`  touched: ${written.map((n) => `${n}.json`).join(', ')}`);
+  if (removed.length > 0) console.log(`  removed: ${removed.map((n) => `${n}.json`).join(', ')}`);
   process.exit(0);
 }
 
@@ -141,9 +163,21 @@ function read(path: string, hint: string): string {
 let breaking = 0;
 let additions = 0;
 
-// Breadth check.
-const prevSurface: Record<string, string[]> = JSON.parse(read(SURFACE_SNAPSHOT, 'breadth'));
-if (JSON.stringify(prevSurface, null, 2) + '\n' !== surfaceStr) {
+// Breadth check. Reads the whole shard DIRECTORY, never "the shards this run
+// would write" — a deleted shard drops its entry point's exports and must read
+// as a removal, exactly as deleting those lines from the single file did.
+const prevRead = aggregateApiSurfaceShards(SURFACE_DIR);
+if (!prevRead) {
+  console.error(
+    `No snapshot at ${SURFACE_DIR}. Run \`pnpm --filter @objectstack/spec gen:api-surface\` and commit it (breadth).`,
+  );
+  process.exit(1);
+}
+const prevSurface = prevRead.surface;
+const prevTexts = new Map(prevRead.shards.map((s) => [s.name, s.raw]));
+const staleShards = [...surfaceTexts].filter(([name, text]) => prevTexts.get(name) !== text).map(([n]) => n);
+const orphanShards = [...prevTexts.keys()].filter((name) => !surfaceTexts.has(name));
+if (staleShards.length > 0 || orphanShards.length > 0) {
   for (const sub of new Set([...Object.keys(prevSurface), ...Object.keys(surface)])) {
     const before = new Set(prevSurface[sub] ?? []);
     const after = new Set(surface[sub] ?? []);
@@ -153,6 +187,16 @@ if (JSON.stringify(prevSurface, null, 2) + '\n' !== surfaceStr) {
     console.error(`\n  ${sub}`);
     for (const g of gone) { console.error(`    - ${g}`); breaking++; }
     for (const f of fresh) { console.error(`    + ${f}`); additions++; }
+  }
+  // Bytes can drift with no name moving at all — a hand-edited description, a
+  // re-indent. That is still a stale artifact and still has to go red, or the
+  // shard stops being generated evidence.
+  if (breaking === 0 && additions === 0) {
+    console.error(`\n  ${API_SURFACE_DIR_NAME}/ does not match its generated form (export names unchanged):`);
+    for (const name of staleShards) console.error(`    ~ ${name}.json`);
+    for (const name of orphanShards) console.error(`    - ${name}.json  (no such entry point)`);
+    console.error('\nRun `pnpm --filter @objectstack/spec gen:api-surface` and commit the updated shards.');
+    process.exit(1);
   }
 }
 

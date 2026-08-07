@@ -251,11 +251,27 @@ Even inside your own worktree, operate defensively:
 11. **Generated artifacts don't text-merge — a driver defers them and
    `pre-commit` collects the debt.** §10's "never trust git's textual merge of a
    generated file" is now mechanical (#4675). `.gitattributes` routes the
-   generator-owned artifacts (`spec-changes.json`, `authorable-surface.json`,
-   `api-surface*.json`, `json-schema.manifest.json`,
+   generator-owned artifacts (`spec-changes.json`, `authorable-surface/**`,
+   `authorable-surface.base.json`, `api-surface/**`,
+   `api-surface-signatures.json`, `json-schema.manifest/**`,
    `docs/protocol-upgrade-guide.md`, `content/docs/references/**`) to
    `merge=os-regen`, so a merge that used to stop on conflicts across all of
    them now stops only on the hand-written files that actually need you.
+
+   **The driver is a LOCAL facility, and #5837 is where that bound showed.** The
+   GitHub merge queue rebuilds each PR server-side, where no custom merge driver
+   runs — so two PRs that both touched `authorable-surface.json` (a 310KB sorted
+   array every spec PR rewrites) were a plain textual conflict there and the
+   second was evicted, capping the spec lane at one PR at a time. The three
+   hottest artifacts are therefore **sharded**: `authorable-surface/<category>.json`,
+   `json-schema.manifest/<category>.json`, `api-surface/<entry>.json`. PRs
+   touching different categories now touch disjoint files, and the driver keeps
+   the residue (two PRs in the same category). Every gate reads the whole
+   directory as one set, so the ratchet semantics are unchanged — see
+   `packages/spec/scripts/lib/sharded-artifacts.ts`. Deliberately still single
+   files: `spec-changes.json` (keyed by version), `api-surface-signatures.json`
+   (1.3KB) and `authorable-surface.base.json` (written only by an explicit
+   `--update-base`, so never on the churn path).
 
    The driver does **not** regenerate. Git runs merge drivers *while* it merges,
    in index order, so the worktree still holds pre-merge sources — a generator
@@ -382,7 +398,7 @@ regenerate up front:
 | The react-blocks contract | `check:react-blocks` | `gen:react-blocks` |
 
 A `.describe()` string counts — it is not "just a comment", it lands in
-`content/docs/references/`. Adding one export counts — it lands in `api-surface.json`.
+`content/docs/references/`. Adding one export counts — it lands in `api-surface/`.
 Both were learned the hard way in #4040: two separate red builds, neither a logic error.
 
 Don't match by hand — one command runs **every** gate and reports **all** stale
@@ -401,7 +417,7 @@ regenerate those.
 
 **No `check:` script regenerates anything — that is the point of the split, not an
 oversight.** `check:docs` used to begin with `pnpm gen:schema`, which rewrites two
-*tracked* files (`json-schema.manifest.json`, `authorable-surface.json`) whenever they
+*tracked* files (`json-schema.manifest/`, `authorable-surface/`) whenever they
 are behind: running the gate edited your working tree and reported nothing, so a
 `check:generated` run on a stale manifest printed a red `check:authorable-surface`
 over a file the gate two lines below had already quietly fixed (#4711, #4723). The
@@ -434,7 +450,7 @@ inline when that gate is the one failing.)
 pure checks with no generator — a failure there is a real finding to fix, not an artifact
 to regenerate. `check:generated` names them as deliberately not run, so its "all up to
 date" never reads as "everything passed". The last one asks the third question about the
-export surface (#4446): `api-surface.json` shows a name on two entries but not whether
+export surface (#4446): `api-surface/` shows a name on two entries but not whether
 that is one declaration re-exported (fine) or two declarations sharing a name — the #4411
 trap, judged by symbol identity against the built dist, with the accepted cases in the
 shrink-only `dual-source-exports.baseline.json` (hand-edited under review, never
@@ -468,7 +484,7 @@ re-adding a skip.
 
 `check:exported-any` is the one of those that also reads the built `dist/*.d.ts`, so the
 stale-`dist` caveat above applies to it too. It asks the other half of the
-`api-surface.json` question: that snapshot records an export *exists*, never what it
+`api-surface/` question: that snapshot records an export *exists*, never what it
 *resolves to*, which is how five exported symbols sat at `any` for a whole major with
 every gate green (#4171). A recursive Zod schema needs an annotation to break its
 circular inference, and `z.ZodType<any>` compiles, validates correctly, and silently
@@ -746,7 +762,7 @@ it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    working tree.
 3. **Add a changeset for feature work.** When the change is a feature or functional improvement, run `pnpm changeset` (or add a `.changeset/*.md` entry) describing it before committing. Pure bug fixes do **not** require a changeset.
    **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix — this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the tombstone error. Removing an authorable spec key also requires a tombstone so the rejection itself carries the prescription — `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) on a non-strict schema, or an entry in the relevant `UNKNOWN_KEY_GUIDANCE` / `*_RETIRED_KEY_GUIDANCE` map (see `object.zod.ts`, `ai/tool.zod.ts`) when the schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes imply **opposite** liveness-ledger dispositions.
-4. **Added or removed a `packages/spec` export? Run `pnpm --filter @objectstack/spec gen:api-surface` and commit the result.** The `TypeScript Type Check` job diffs spec's built export surface against `api-surface.json`; a new export makes the snapshot stale and turns the job red. It reads the **built `dist` declarations**, so `OS_SKIP_DTS=1` — the flag you reach for to make local builds fast — skips exactly the artifact the gate inspects, and the check passes locally while failing in CI. Same shape for the other generated-artifact gates in that job (`check:docs`, `check:skill-refs`, `check:react-blocks`), which read `src/` and so do reproduce locally.
+4. **Added or removed a `packages/spec` export? Run `pnpm --filter @objectstack/spec gen:api-surface` and commit the result.** The `TypeScript Type Check` job diffs spec's built export surface against `api-surface/` (one shard per entry point since #5837); a new export makes the snapshot stale and turns the job red. It reads the **built `dist` declarations**, so `OS_SKIP_DTS=1` — the flag you reach for to make local builds fast — skips exactly the artifact the gate inspects, and the check passes locally while failing in CI. Same shape for the other generated-artifact gates in that job (`check:docs`, `check:skill-refs`, `check:react-blocks`), which read `src/` and so do reproduce locally.
 5. Update `CHANGELOG.md` / `ROADMAP.md` if user-facing or architectural.
 6. **Delete temporary artifacts** — screenshots, traces, scratch logs, `.playwright-mcp/`, throwaway `tmp*.ts`, ad-hoc scripts. Repo must look identical to before, minus intended changes.
 

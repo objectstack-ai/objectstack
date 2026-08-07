@@ -213,6 +213,7 @@ export const jaJP: TranslationData = {
         provider: { title: 'プロバイダー', description: 'このワークスペースが送信 SMS をどう送るかを選択します。' },
         aliyun: { title: 'Aliyun SMS' },
         twilio: { title: 'Twilio' },
+        limits: { title: '送信上限', description: 'この配備の送信 SMS 量を制限します。SMS は有料チャネルで、1 通ごとに実費が発生します。' },
       },
       keys: {
         provider: {
@@ -233,6 +234,10 @@ export const jaJP: TranslationData = {
           help: 'E.164 形式の送信者。例:+15005550006。これか Messaging Service SID のいずれかが必要です。',
         },
         twilio_messaging_service_sid: { label: 'Messaging Service SID' },
+        daily_quota: {
+          label: '1 日の送信上限',
+          help: 'この配備が UTC の 1 日あたりに送信できる SMS の上限数（OTP サインイン・招待・通知を含む）。0 は無制限。上限を超える送信は 00:00 UTC まで拒否されます。',
+        },
       },
       actions: { test: { label: 'テスト SMS を送信' } },
     },
