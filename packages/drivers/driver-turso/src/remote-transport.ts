@@ -19,6 +19,7 @@ import { FILTER_OPERATORS, LOGICAL_OPERATORS } from '@objectstack/spec/data';
 // transport's "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` admits, nor from the local driver's twin.
 import { AggregationFunction } from '@objectstack/spec/data';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { nanoid } from 'nanoid';
 
 /**
@@ -621,6 +622,40 @@ function refuseAggregateFunction(func: string): never {
 }
 
 /**
+ * [#6212] A `groupBy` entry asks for a date BUCKET — the twin of `driver-sql`'s
+ * `refuseDateBucketedGroupBy`, first sentence for first sentence, and the same
+ * NOT_IMPLEMENTED/501 class for the same reason: `DateGranularity` declares the
+ * name, this backend cannot emit it, so it is a capability gap rather than a
+ * mistake in the query (#5907, ADR-0112).
+ *
+ * This transport buckets NOTHING natively, which is exactly what `TursoDriver`
+ * publishes for it — `supports.queryDateGranularity` is `{}` in remote mode (see
+ * the comment there), so the engine buckets every granularity in memory and
+ * never pushes a bucketed item down here. The refusal therefore only fires for a
+ * caller that went around the capability bit and reached this transport
+ * directly, which is the caller this message is written for.
+ *
+ * Before #6212 there was no refusal at all: `groupBy` was read as `string[]`,
+ * a structured item was interpolated as `"[object Object]"` and died in
+ * {@link RemoteTransport.assertSafeIdentifier} — a SQL-injection message for a
+ * capability question.
+ */
+function refuseDateBucketedGroupBy(granularity: string): never {
+  const err = new Error(
+    `Date bucketing by '${granularity}' is not supported by this backend. ` +
+    `Bucketed here: none (Turso remote transport). ` +
+    `The query is spelled correctly and @objectstack/spec DateGranularity declares it — this is ` +
+    `a capability gap in the backend, not a mistake in the query, which is why it answers ` +
+    `NOT_IMPLEMENTED/501 rather than a 400. A driver publishes the granularities it buckets ` +
+    `natively as \`supports.queryDateGranularity\`; the engine reads that record and buckets ` +
+    `in memory for every granularity absent from it, which is always correct (#6212).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
+/**
  * How a filtered column must be READ so it is in the same storage form the
  * comparand was coerced into — the column half of the driver's temporal seam
  * (`SqlDriver.temporalFilterColumnSql`), injected by TursoDriver.
@@ -824,19 +859,55 @@ export class RemoteTransport {
   // yielding, so it never streamed anything either; its only caller was
   // `TursoDriver.findStream`, which went at the same time.
 
-  async aggregate(object: string, query: any): Promise<Record<string, unknown>[]> {
+  /**
+   * [#6212] `query` is a {@link DriverQuery}, not `any` — the same narrowing
+   * `SqlDriver.aggregate` and `TursoDriver.aggregate` took, because all three are
+   * one door and a caller may not be told three different things about it.
+   */
+  async aggregate(object: string, query: DriverQuery): Promise<Record<string, unknown>[]> {
     await this.ensureConnected();
     this.assertSafeIdentifier(object);
 
     const selectParts: string[] = [];
-    const groupBy: string[] = Array.isArray(query?.groupBy) ? query.groupBy : [];
+
+    // [#6212] `groupBy` is `GroupByNode[]` — a UNION of a bare field name and a
+    // structured `{ field, dateGranularity?, alias? }` entry — so reading it as
+    // `string[]` was a type assumption held up by a CAPABILITY BIT rather than by
+    // the type, and only for half of the union:
+    //
+    // - a DATE-BUCKETED item genuinely cannot reach here through the engine,
+    //   because remote mode publishes `queryDateGranularity: {}` and the engine
+    //   falls back to in-memory bucketing (`TursoDriver.supports`). A caller that
+    //   goes around that bit now gets {@link refuseDateBucketedGroupBy} instead
+    //   of `"[object Object]"` rejected as an unsafe identifier.
+    // - a PLAIN structured item (`{ field: 'region' }`, no granularity) is NOT
+    //   guarded by that bit at all: objectql's aggregate dispatch treats it as
+    //   supported by every driver ("plain {field} object is fine") and pushes it
+    //   down. It arrived here, stringified, and died — while the LOCAL face of
+    //   this same driver compiles it as a plain `GROUP BY "region"`. That is the
+    //   #6203 shape again: one query, two answers, decided by a connection
+    //   string. Reading `.field` converges them.
+    //
+    // `alias` is deliberately not read: `SqlDriver.aggregate` does not read it
+    // either, so honouring it here would be the divergence rather than the fix.
+    // That the SQL faces ignore a key the in-memory path honours
+    // (`in-memory-aggregation.ts` projects `g.alias ?? g.field`) is filed
+    // separately — it is not created here.
+    const groupBy: string[] = (Array.isArray(query?.groupBy) ? query.groupBy : []).map((g) => {
+      if (typeof g === 'string') return g;
+      if (g?.dateGranularity) refuseDateBucketedGroupBy(g.dateGranularity);
+      return g?.field;
+    });
 
     for (const field of groupBy) {
       this.assertSafeIdentifier(field);
       selectParts.push(`"${field}"`);
     }
 
-    const aggregations = query?.aggregations || query?.aggregate || [];
+    // [#6321] Was `query?.aggregations || query?.aggregate` — see the twin note
+    // on `SqlDriver.aggregate`. `aggregate` is not a key the Query Protocol ever
+    // declared; its only writers were the two driver packages' own fixtures.
+    const aggregations = query?.aggregations || [];
     for (const agg of aggregations) {
       // [#5907] The caller's spelling is what the refusal quotes back and what
       // the declared-vocabulary check is judged against.
@@ -849,7 +920,15 @@ export class RemoteTransport {
       // spelling the Query Protocol never declared; deleting it converges both
       // faces on the declared spelling rather than fossilising the dialect into
       // a second contract (PD#12). See {@link refuseAggregateFunction}.
-      const func = String(agg.function || agg.func || '');
+      //
+      // [#6321] The `|| agg.func` limb is gone — an undeclared spelling this
+      // consumer tolerated — and so is the `|| ''` behind it, which only ever
+      // fired when NEITHER key was written. Coalescing to `''` there made this
+      // face quote `""` back at a caller while the local face quoted
+      // `"undefined"` for the same off-contract input: one condition, two
+      // wordings (#5240). `String()` stays so the quoted spelling is a string
+      // whatever a JS caller put there.
+      const func = String(agg.function);
       const sqlFunc = REMOTE_AGGREGATE_FUNCTIONS.get(func);
       if (sqlFunc === undefined) refuseAggregateFunction(func);
       const field = agg.field || '*';

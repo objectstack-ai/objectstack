@@ -625,6 +625,46 @@ function refuseAggregateFunction(func: string): never {
 }
 
 /**
+ * [#6212] A `groupBy` entry asks for a date BUCKET this face cannot emit.
+ *
+ * `GroupByNodeSchema` declares `{ field, dateGranularity }` and `DateGranularity`
+ * declares all five names, so a granularity this dialect has no expression for is
+ * a CAPABILITY GAP in the backend, not a mistake in the query — the same 501
+ * class {@link uncompilableAggregateFunctionError} answers for a
+ * declared-but-uncompiled aggregate function, and for the same reason (#5907,
+ * ADR-0112). It used to be a bare `throw new Error(...)`: `code`/`status` both
+ * `undefined`, so `mapDataError` served an opaque 500 for a named condition.
+ *
+ * WHICH granularities a backend buckets natively is PUBLISHED, per driver, as
+ * `supports.queryDateGranularity`, and the engine reads that record and falls
+ * back to in-memory bucketing for anything absent from it (objectql `engine.ts`,
+ * aggregate dispatch). Reaching this throw therefore means a caller went around
+ * that bit, so the message names the bit rather than the SQL.
+ *
+ * Written once per FACE — `RemoteTransport` carries the twin, first sentence for
+ * first sentence — because `TursoDriver` picks its face from `url` and one
+ * condition may not have two wire identities (#5240 / #5907). The two faces
+ * refuse different populations (this one refuses what its DIALECT cannot bucket,
+ * the remote transport refuses every granularity because it buckets none), but
+ * both refuse exactly `supports.queryDateGranularity[g] !== true`, which is one
+ * condition stated per face.
+ */
+function refuseDateBucketedGroupBy(granularity: string, bucketedHere: string[], face: string): never {
+  const err = new Error(
+    `Date bucketing by '${granularity}' is not supported by this backend. ` +
+    `Bucketed here: ${bucketedHere.length > 0 ? bucketedHere.join(', ') : 'none'} (${face}). ` +
+    `The query is spelled correctly and @objectstack/spec DateGranularity declares it — this is ` +
+    `a capability gap in the backend, not a mistake in the query, which is why it answers ` +
+    `NOT_IMPLEMENTED/501 rather than a 400. A driver publishes the granularities it buckets ` +
+    `natively as \`supports.queryDateGranularity\`; the engine reads that record and buckets ` +
+    `in memory for every granularity absent from it, which is always correct (#6212).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
+/**
  * [#5158] A `FilterArray` reached the driver unlowered.
  *
  * `where` is a `FilterCondition` — `QueryASTSchema.where: FilterConditionSchema`
@@ -3588,7 +3628,16 @@ export class SqlDriver implements IDataDriver {
   // Aggregation
   // ===================================
 
-  async aggregate(object: string, query: any, options?: DriverOptions): Promise<any> {
+  /**
+   * [#6212] `query` is a {@link DriverQuery}, not `any`.
+   *
+   * `any` here was not "the object name goes unchecked", it was every check off
+   * on the members this body READS: `where`'s filter dialect, `groupBy`'s node
+   * union, `aggregations`' node shape. #5181 narrowed the six methods
+   * `IDataDriver` declares and #6075 followed through on five drivers;
+   * `aggregate` is not on that contract, so neither reached it.
+   */
+  async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 
@@ -3616,7 +3665,12 @@ export class SqlDriver implements IDataDriver {
       // ({ field: 'closed_at', dateGranularity: 'quarter' }). For structured
       // items we emit a dialect-specific bucket expression aliased as the
       // field name so the resulting row keys match in-memory bucketDateValue.
-      for (const g of query.groupBy as Array<string | { field: string; dateGranularity?: string }>) {
+      // [#6212] The element type is `GroupByNode` — the spec's own union — so
+      // the local `Array<string | { field, dateGranularity? }>` restatement is
+      // gone. It had drifted from the declaration it was restating: `alias` was
+      // missing from it and `dateGranularity` was widened to `string`, which is
+      // what forced the `as any` on the `buildDateBucketExpr` call below.
+      for (const g of query.groupBy) {
         if (typeof g === 'string') {
           builder.groupBy(g);
           builder.select(g);
@@ -3624,11 +3678,15 @@ export class SqlDriver implements IDataDriver {
           if (kind) presentedOutput.set(g, kind);
         } else if (g && typeof g === 'object' && g.field) {
           if (g.dateGranularity) {
-            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity as any, table);
+            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity, table);
             if (!bucket) {
-              throw new Error(
-                `SqlDriver: dateGranularity '${g.dateGranularity}' not supported on dialect ` +
-                  `'${(this.config as any).client}'. Engine must fall back to in-memory bucketing.`,
+              // [#6212] Was a bare `throw new Error(...)`; see
+              // {@link refuseDateBucketedGroupBy} for why it now carries the
+              // ADR-0112 envelope and what the remote face answers.
+              refuseDateBucketedGroupBy(
+                g.dateGranularity,
+                Object.entries(this.dateGranularityCapabilities).filter(([, on]) => on).map(([k]) => k),
+                `dialect '${(this.config as any).client}'`,
               );
             }
             builder.groupByRaw(bucket.sql, bucket.bindings);
@@ -3643,10 +3701,20 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    const aggregates = query.aggregations || query.aggregate;
+    // [#6321] Was `query.aggregations || query.aggregate` / `agg.function ||
+    // agg.func`. Neither `aggregate` nor `func` is declared anywhere in the
+    // Query Protocol — `QueryASTSchema` declares `aggregations` and
+    // `AggregationNodeSchema` declares `function` — so those two limbs were a
+    // private dialect this consumer tolerated, which is what PD#12 rejects. The
+    // only writers were this package's own fixtures and driver-sqlite-wasm's
+    // (#4984's family: a fixture spelling the alias keeps the lenient limb green
+    // forever, and nothing ever measures that deleting it costs nothing). Both
+    // fixture sets now spell the declared keys, the non-test writer count was
+    // zero when measured, and ADR-0049 says an unenforced tolerance goes.
+    const aggregates = query.aggregations;
     if (aggregates) {
       for (const agg of aggregates) {
-        const funcName = agg.function || agg.func;
+        const funcName = agg.function;
         const rawFunc = this.mapAggregateFunc(funcName);
         // Spec: `field` is optional for COUNT (means COUNT(*)).
         const fieldExpr = agg.field ?? '*';

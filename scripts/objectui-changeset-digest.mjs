@@ -1226,10 +1226,25 @@ function selfTest() {
     for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs']) {
       writeFileSync(join(fwRun, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
     }
-    execFileSync('bash', [join(fwRun, 'scripts', 'bump-objectui.sh'), '--no-commit', head], {
-      encoding: 'utf8',
-      env: { ...process.env, OBJECTUI_ROOT: ui },
-    });
+    const bumpStdout = execFileSync(
+      'bash',
+      [join(fwRun, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, OBJECTUI_ROOT: ui },
+      },
+    );
+    // #5960: the pin bump is the ONLY trigger of ADR-0082 D4's declaration-parity
+    // ratchet — no workflow produces `sdui.manifest.json`, by ruling — so the
+    // procedure's second half lives in this script's output. Prose alone is
+    // deletable in silence; pinning it here is what makes "the procedure gained a
+    // line" a fact a gate can lose. Asserted on the `--no-commit` path on purpose:
+    // that path moved the pin too, and it is the one that returns early.
+    check(
+      '#5960 a bump prints the `pnpm sdui:manifest` step (the ratchet has no other trigger)',
+      bumpStdout.includes('pnpm sdui:manifest') && bumpStdout.includes('NEXT STEP'),
+      bumpStdout,
+    );
     const written = join(fwRun, '.changeset', `console-${head.slice(0, 12)}.md`);
     const body = existsSync(written) ? readFileSync(written, 'utf8') : '';
     check('bump-objectui.sh writes the digest-derived changeset', body.length > 0);
