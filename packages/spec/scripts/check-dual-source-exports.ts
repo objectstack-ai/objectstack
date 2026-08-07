@@ -4,7 +4,7 @@
  * check-dual-source-exports.ts — no two entry points of @objectstack/spec may
  * export the same name for DIFFERENT declarations.
  *
- * `api-surface.json` records every `name (kind)` per entry point, so a name
+ * `api-surface/` records every `name (kind)` per entry point, so a name
  * appearing on two entries is VISIBLE there — but nothing distinguishes the two
  * ways that can happen, and only one of them is fine:
  *

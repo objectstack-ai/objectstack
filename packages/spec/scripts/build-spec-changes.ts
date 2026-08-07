@@ -15,14 +15,22 @@
  *   pnpm --filter @objectstack/spec gen:spec-changes     # regenerate + write
  *   pnpm --filter @objectstack/spec check:spec-changes   # CI: fail on drift
  *
- * Release-time surface join: `--previous-surface <api-surface.json>` diffs the
- * current committed `api-surface.json` against a previously *published* one
- * (both ship in the npm artifact from protocol 15 on) and fills the
- * `added[]`/`removed[]` arrays of the aggregate record, attributed to the
- * current major. The Release workflow runs this against the last published
- * spec tarball and attaches the result to the GitHub Release; the committed
- * copy keeps `added`/`removed` empty (registry-derived content only) so it
- * stays deterministic.
+ * Release-time surface join: `--previous-surface <path>` diffs the current
+ * committed export surface against a previously *published* one (both ship in
+ * the npm artifact from protocol 15 on) and fills the `added[]`/`removed[]`
+ * arrays of the aggregate record, attributed to the current major. The Release
+ * workflow runs this against the last published spec tarball and attaches the
+ * result to the GitHub Release; the committed copy keeps `added`/`removed`
+ * empty (registry-derived content only) so it stays deterministic.
+ *
+ * `<path>` is whichever shape that published tarball carried: the `api-surface/`
+ * directory from #5837 on, or the single `api-surface.json` before it. Reading
+ * both is not consumer leniency — a published tarball is immutable, so there is
+ * no producer to fix. This repo's OWN surface is always the directory.
+ *
+ * `spec-changes.json` itself stays a single file, deliberately (#5837): it is
+ * keyed by version, so two PRs append under different majors and it has never
+ * been a conflict surface worth splitting.
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -37,17 +45,18 @@ import {
   type SpecSurfaceAdd,
   type SpecSurfaceRemove,
 } from '../src/migrations/spec-changes';
+import { API_SURFACE_DIR_NAME, readApiSurfaceFrom } from './lib/sharded-artifacts';
 
 const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const SNAPSHOT = resolve(PKG_DIR, 'spec-changes.json');
-const SURFACE = resolve(PKG_DIR, 'api-surface.json');
+const SURFACE = resolve(PKG_DIR, API_SURFACE_DIR_NAME);
 const CHECK = process.argv.includes('--check');
 const prevSurfaceIdx = process.argv.indexOf('--previous-surface');
 const PREV_SURFACE = prevSurfaceIdx >= 0 ? process.argv[prevSurfaceIdx + 1] : undefined;
 
-/** Flatten an api-surface.json ({ entry: ["name (kind)", …] }) into one set. */
+/** Flatten an export surface ({ entry: ["name (kind)", …] }) into one set. */
 function flattenSurface(path: string): Set<string> {
-  const doc = JSON.parse(readFileSync(path, 'utf8')) as Record<string, string[]>;
+  const doc = readApiSurfaceFrom(path);
   const out = new Set<string>();
   for (const [entry, names] of Object.entries(doc)) {
     for (const name of names) out.add(`${entry}: ${name}`);
