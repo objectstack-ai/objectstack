@@ -184,8 +184,13 @@ export const ShowcaseTranslationBundle = {
           start_date: { label: '开始日期' },
           end_date: { label: '结束日期' },
         },
+        // `default` — the container's DEFAULT list. `defineView({ list })`
+        // declares it without a `name`, and the composer therefore registers it
+        // as `<object>.default`; `_views` keys are that bare runtime key
+        // (#5164, ruled 2026-08-06). It read `list` until then, which no
+        // lookup could ever reach.
         _views: {
-          list: { label: '全部项目' },
+          default: { label: '全部项目' },
           by_status: { label: '按状态' },
           budget_chart: { label: '按客户预算' },
         },
@@ -223,7 +228,8 @@ export const ShowcaseTranslationBundle = {
           sync_error: { label: '同步错误' },
         },
         _views: {
-          list: { label: '全部任务' },
+          // The default list — keyed `default`, see showcase_project above.
+          default: { label: '全部任务' },
           in_progress: { label: '进行中' },
           urgent: { label: '紧急' },
           done: { label: '已完成' },
@@ -307,13 +313,16 @@ export const ShowcaseTranslationBundle = {
         // array, so nothing (runtime or gate) could reach these two surfaces.
         // Registering the container is what makes them translatable at all.
         //
-        // `_views.list` — the container's DEFAULT list, which the resolver ids
-        // as `list` (`primary.name || 'list'`). Its source label is the bare
-        // plural "Contacts", so the object's own `pluralLabel` above is the
-        // right word; the `全部…` spelling the task/project lists use belongs to
+        // `_views.default` — the container's DEFAULT list. It is declared
+        // without a `name`, so the composer registers it as
+        // `showcase_contact.default` and the bundle key is that bare runtime
+        // key (#5164, ruled 2026-08-06); it read `list` until then, a spelling
+        // no lookup could reach. Its source label is the bare plural
+        // "Contacts", so the object's own `pluralLabel` above is the right
+        // word; the `全部…` spelling the task/project lists use belongs to
         // labels that actually say "All …".
         _views: {
-          list: { label: '联系人' },
+          default: { label: '联系人' },
         },
         // `_sections` — the four groups of the default edit form in
         // `ui/views/contact.view.ts`. Each declares a stable `name`, which is
@@ -381,15 +390,16 @@ export const ShowcaseTranslationBundle = {
       // their object/field debt is inside the ratchet's baseline. Translating
       // the VIEW labels the coverage fix newly surfaces is what keeps the gate
       // from widening; the rest is left exactly as it was.
+      // (`default` = the container's DEFAULT list — see showcase_project.)
       showcase_inquiry: {
         _views: {
-          list: { label: '客户询问' },
+          default: { label: '客户询问' },
           triage: { label: '询问分流' },
         },
       },
       showcase_business_unit: {
         _views: {
-          list: { label: '全部单元' },
+          default: { label: '全部单元' },
           org_chart: { label: '组织架构图' },
         },
       },

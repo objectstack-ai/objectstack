@@ -181,10 +181,18 @@ claims abilities it does not have.
 A `defineTool` record is an **optional refinement layer**, not a required step
 — reach for one only when the AI-facing surface must differ from the Action
 itself (a different LLM-facing description, fewer exposed parameters).
-Both `surface:'ask'` and `surface:'build'` skills run only where the in-UI AI
-runtime exists — **ObjectOS**. On the open framework
-there is no in-product agent to attach them to; author capability
-as Actions / Flows and reach it through `@objectstack/mcp` instead.
+
+### A skill has two halves, and they run in different places
+
+| Half | Keys | Where it runs |
+|---|---|---|
+| **Judgment** | `instructions` | **Everywhere.** On the open framework `@objectstack/mcp` serves it as an MCP **prompt** — any connected client can `prompts/list` it by name and `prompts/get` the text ([Connect an MCP client](/docs/ai/connect-mcp#prompts-your-skills-served-to-the-client)). On **ObjectOS** it is injected into the active agent's system prompt. |
+| **Wiring** | `tools`, `surface`, `triggerConditions` | **ObjectOS only.** Composing an agent's tool set and deciding when a skill activates are properties of an in-product agent loop. Over MCP the model lives in the client and drives one flat tool list, and your AI-exposed Actions already reach it as `action_<name>` via `list_actions` / `run_action`. |
+
+Both halves are still **validated everywhere** — a skill naming a tool that
+does not exist is an authoring error in either distribution. So a skill written
+against the open framework keeps its full meaning when the app runs on
+ObjectOS; nothing is authored twice.
 
 ## The shape of an agent
 

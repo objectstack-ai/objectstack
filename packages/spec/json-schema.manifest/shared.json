@@ -12,7 +12,6 @@
     "shared/ExpressionInput",
     "shared/ExpressionMeta",
     "shared/FieldMapping",
-    "shared/FieldMappingTransform",
     "shared/FieldName",
     "shared/FlowName",
     "shared/HttpMethod",

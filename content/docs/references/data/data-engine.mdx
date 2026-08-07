@@ -230,7 +230,7 @@ Query options for IDataEngine.find() operations
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **filter** | `Record<string, any> \| any` | optional | Data Engine query filter conditions |
 | **select** | `string[]` | optional |  |
-| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, '1' \| '-1'> \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
+| **sort** | `Record<string, Enum<'asc' \| 'desc'>> \| Record<string, 1 \| -1> \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order definition |
 | **limit** | `integer` | optional |  |
 | **skip** | `integer` | optional |  |
 | **top** | `integer` | optional |  |
@@ -382,7 +382,7 @@ Type: `Record<string, Enum<'asc' | 'desc'>>`
 
 #### Option 2
 
-Type: `Record<string, '1' | '-1'>`
+Type: `Record<string, 1 | -1>`
 
 ---
 

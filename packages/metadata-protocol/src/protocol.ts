@@ -9851,8 +9851,33 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * List the commit timeline for a package, newest-first (ADR-0067). Returns
-     * [] if the commit store is unavailable.
+     * List the commit timeline for a package, newest-first (ADR-0067).
+     *
+     * `[]` means ONE thing: this package genuinely has no commits — a first
+     * boot before `sys_metadata_commit` is provisioned, or a package nobody has
+     * applied yet. It does NOT mean "the commit store could not be read".
+     *
+     * [#5980] It used to mean both. The `catch` answered `[]` for every failure
+     * and this JSDoc said so outright ("Returns [] if the commit store is
+     * unavailable"), which is ADR-0110 D3 broken on the ADR-0067 timeline: a
+     * miss and an outage are different facts with opposite meanings, and the
+     * timeline is `revertCommit`'s selection surface. An unreachable store
+     * rendered as "this package has no history", so the Studio offers nothing
+     * to roll back at the exact moment an operator is trying to roll something
+     * back — and {@link rollbackToPackageCommit}, which filters this list,
+     * reported `success: true` for having reverted nothing. Not one line was
+     * logged anywhere on the path.
+     *
+     * Classification is by error TYPE through
+     * {@link rethrowUnlessMetadataStoreUnprovisioned} — the same guard the
+     * `sys_metadata` overlay reads in this file already ask (#5532 / #5707) and
+     * the same `isMissingTableError` predicate `DatabaseLoader` (#5108) and
+     * `SysMetadataRepository` (#4867) ask, so a driver quirk is taught to the
+     * platform once rather than re-spelled per seam.
+     *
+     * @throws {@link metadataStoreUnavailableError} — a 503 carrying the driver
+     *         error as `cause`, for every failure that is not an unprovisioned
+     *         table.
      */
     async listCommits(request: {
         packageId: string;
@@ -9891,7 +9916,10 @@ export class ObjectStackProtocolImplementation implements
             // insertion order, then sort by the ISO timestamp.
             mapped.sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
             return mapped;
-        } catch {
+        } catch (error) {
+            // [#5980] Benign (the table has not been provisioned) falls through;
+            // everything else is a read that did not happen and leaves as a 503.
+            this.rethrowUnlessMetadataStoreUnprovisioned(error);
             return [];
         }
     }

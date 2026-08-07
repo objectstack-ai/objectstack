@@ -36,15 +36,6 @@
   ],
   "entries": [
     {
-      "file": "packages/metadata-protocol/src/protocol.ts",
-      "fn": "listCommits",
-      "verdict": "unfixed-degradation",
-      "invents": "return [] (catch has no log and no error-type discrimination)",
-      "why": "`listCommits` reads `sys_metadata_commit` through `engine.find` and answers `[]` for every failure — its own JSDoc says so ('Returns [] if the commit store is unavailable'). An unreachable commit store is then rendered as 'this package has no history', which is the ADR-0067 timeline reading as empty rather than as unavailable: the exact ADR-0110 D3 miss/outage confusion #5108 fixed one layer down in `DatabaseLoader` and #5532 fixed for `getMetaItems` in this same file.",
-      "closes": "Ask `isMissingTableError` (already imported in this file) and rethrow everything else, exactly as `rethrowUnlessMetadataStoreUnprovisioned` a few thousand lines up already does for the overlay reads. Tracked separately — a gate PR does not edit the packages it scans.",
-      "tracked_by": "#5980"
-    },
-    {
       "file": "packages/objectql/src/engine.ts",
       "fn": "referenceExists",
       "verdict": "reviewed-legitimate",

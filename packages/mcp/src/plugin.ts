@@ -225,7 +225,10 @@ export class MCPServerPlugin implements Plugin {
 
     if (metadataService) {
       this.runtime.bridgeResources(metadataService, getRecord);
-      this.runtime.bridgePrompts(metadataService);
+      // Awaited: the prompt bridge reads `skill` metadata to project each
+      // skill's instructions onto an MCP prompt (#3905), so the surface must be
+      // complete before the transport attaches below.
+      await this.runtime.bridgePrompts(metadataService);
     }
 
     if (shouldStart) {

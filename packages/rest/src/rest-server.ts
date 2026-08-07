@@ -4,7 +4,12 @@ import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
 } from '@objectstack/core';
-import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import {
+    isMcpServerEnabled,
+    looksLikeInternalErrorLeak,
+    declaresServerFault,
+    INTERNAL_ERROR_MESSAGE,
+} from '@objectstack/types';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { RouteManager } from './route-manager.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
@@ -6979,10 +6984,21 @@ export class RestServer {
                     // a bare `Error` still goes through the heuristic, so a
                     // self-authored fault ("no strategy can handle query …")
                     // stays readable.
+                    //
+                    // [#5811] That rule is no longer written here. The sibling
+                    // face — `/analytics/query`, exiting through
+                    // `dispatcher-plugin.errorResponseBase` — had the identical
+                    // leak (measured: 11/11 read-scope messages echoed verbatim),
+                    // so the criterion was promoted to `declaresServerFault` in
+                    // `@objectstack/types`, beside the heuristic it complements,
+                    // and both boundaries read it. #5808 deliberately left it
+                    // in-line while there was one consumer; this is the second.
+                    // The verdict here is unchanged in every case — the predicate
+                    // is the same `status >= 500` + non-empty `code` test, reading
+                    // the same two fields ① derives `envelopeStatus`/`envelopeCode`
+                    // from.
                     logError('[REST] Analytics dataset query error:', error);
-                    const declaredServerFault =
-                        envelopeStatus !== undefined && envelopeStatus >= 500 && envelopeCode !== undefined;
-                    const outward = declaredServerFault || looksLikeInternalErrorLeak(msg)
+                    const outward = declaresServerFault(error) || looksLikeInternalErrorLeak(msg)
                         ? INTERNAL_ERROR_MESSAGE
                         : msg.slice(0, 500);
                     res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: outward });

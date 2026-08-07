@@ -34,6 +34,7 @@ import {
   type CategorySurface,
 } from './lib/docs-import-surface';
 import { escapeMdxDescription } from './lib/escape-mdx';
+import { renderFileDescription } from './lib/file-description';
 import { anchorFor, formatType, type TypeContext } from './lib/format-type';
 import { createSink } from './lib/generated-output';
 import {
@@ -282,33 +283,12 @@ function sourcePathToDocsRoute(target: string): string | null {
   return `/docs/references/${category}/${zodFile}`;
 }
 
-// Extract file-level JSDoc description from source
-function getFileDescription(content: string): string {
-  const match = content.match(/\/\*\*([\s\S]*?)\*\//);
-  if (match) {
-    return match[1]
-      .split('\n')
-      .map(line => line.replace(/^\s*\*\s?/, '').trim())
-      .filter(line => line)
-      // A bare `@see <path>` tag renders as noise — turn it into prose.
-      .map(line => line.replace(/^@see\s+/, 'See also: '))
-      .join('\n\n')
-      .replace(/\{@link\s+([^|]+?)\s*\|\s*([^}]+?)\s*\}/g, (_m, target: string, text: string) =>
-        `[${text.trim()}](${sourcePathToDocsRoute(target.trim()) ?? target.trim()})`)
-      .replace(/\{@link\s+([^}]+?)\s*\}/g, (_m, target: string) => {
-        const route = sourcePathToDocsRoute(target.trim());
-        return route ? `[${target.trim()}](${route})` : `\`${target.trim()}\``;
-      })
-      // Same for a bare source path left in prose by `See also:` above.
-      .replace(/(?<!\()\b((?:\.\.\/)?[\w-]+\/[\w.-]+\.zod\.ts)\b(?!\))/g, (m0, p: string) => {
-        const route = sourcePathToDocsRoute(p);
-        return route ? `[${p}](${route})` : `\`${p}\``;
-      })
-      .replace(/file:\/\//g, '') // Remove file:// protocol
-      .replace(/\{/g, '\\{').replace(/\}/g, '\\}') // Escape { } for MDX
-  }
-  return '';
-}
+// The module description a page opens with — WHICH doc block, and how it
+// renders, both live in `lib/file-description.ts` (#5059). It used to be the
+// first doc block anywhere in the file, which is a rule about ordering rather
+// than about descriptions: six public pages opened with an internal comment
+// because a helper happened to sit at the top of the file, and `check:docs`
+// could not see it (the artifact reproduced the wrong block faithfully).
 
 function generateMarkdown(schemaName: string, schema: any, category: string, zodFile: string) {
   const defs = schema.definitions || schema.$defs || {};
@@ -409,7 +389,7 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
   const sourcePath = sourceRel ? path.join(REPO_ROOT, sourceRel) : undefined;
   let fileDesc = '';
   if (sourcePath && fs.existsSync(sourcePath)) {
-      fileDesc = getFileDescription(fs.readFileSync(sourcePath, 'utf-8'));
+      fileDesc = renderFileDescription(fs.readFileSync(sourcePath, 'utf-8'), { sourcePathToDocsRoute });
   }
 
   let md = `---\n`;
