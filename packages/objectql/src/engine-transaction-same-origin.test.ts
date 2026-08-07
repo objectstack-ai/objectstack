@@ -55,13 +55,33 @@ function recordingLogger() {
   };
 }
 
+/**
+ * The error a call rejected with, typed as `E`.
+ *
+ * `promise.catch((e) => e as E)` types the result as `E | <resolved type>`, so
+ * every property read on it is a type error. This narrows to the rejection and
+ * fails loudly if the call did NOT reject — which a bare `.catch()` would
+ * silently let through as a passing test.
+ */
+async function rejection<E>(p: Promise<unknown>): Promise<E> {
+  try {
+    await p;
+  } catch (e) {
+    return e as E;
+  }
+  throw new Error('expected the call to reject, but it resolved');
+}
+
 function meta(r: Recorded): Record<string, unknown> {
   return (r.args.find((a) => a !== undefined && typeof a === 'object' && !(a instanceof Error)) ??
     {}) as Record<string, unknown>;
 }
 
+/** One write the driver double saw — the shape its `writes` array carries. */
+type RecordedWrite = { object: string; op: 'create' | 'update' | 'delete'; transaction: unknown };
+
 function makeDriver(name: string) {
-  const writes: Array<{ object: string; op: 'create' | 'update' | 'delete'; transaction: unknown }> = [];
+  const writes: RecordedWrite[] = [];
   const reads: Array<{ object: string; transaction: unknown }> = [];
   const rows = new Map<string, Record<string, unknown>>();
   let nextId = 0;
@@ -139,24 +159,24 @@ async function splitEngine() {
   await engine.init();
   // `ledger` is an ordinary BUSINESS object that a mapping rule routes away.
   engine.setDatasourceMapping([{ objectPattern: 'ledger', datasource: 'ledger_db' }]);
-  engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
-  engine.registry.registerObject({ name: 'ledger', fields: { name: { type: 'text' } } } as any);
+  engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, '__test__');
+  engine.registry.registerObject({ name: 'ledger', fields: { name: { type: 'text' } } } as any, '__test__');
   // The three append-only system ledgers, routed by lifecycle class alone.
   engine.registry.registerObject({
     name: 'sys_audit_log',
     lifecycle: { class: 'audit', retention: { maxAge: '90d' } },
     fields: { action: { type: 'text' } },
-  } as any);
+  } as any, '__test__');
   engine.registry.registerObject({
     name: 'sys_activity',
     lifecycle: { class: 'telemetry', retention: { maxAge: '14d' } },
     fields: { action: { type: 'text' } },
-  } as any);
+  } as any, '__test__');
   engine.registry.registerObject({
     name: 'sys_bus_event',
     lifecycle: { class: 'event', ttl: { field: 'created_at', expireAfter: '6h' } },
     fields: { action: { type: 'text' } },
-  } as any);
+  } as any, '__test__');
   const carveOutNotes = () =>
     rec.at('debug').filter((r) => r.message.includes('executing it OUTSIDE the transaction'));
   return { rec, engine, primary, telemetry, ledgerDb, carveOutNotes };
@@ -199,8 +219,8 @@ describe('an audit-shaped write inside a cross-origin transaction LANDS, outside
       await engine.insert('sys_bus_event', { action: 'c' });
     });
 
-    expect(telemetry.writes.map((w) => w.object)).toEqual(['sys_audit_log', 'sys_activity', 'sys_bus_event']);
-    expect(telemetry.writes.every((w) => w.transaction === undefined)).toBe(true);
+    expect(telemetry.writes.map((w: RecordedWrite) => w.object)).toEqual(['sys_audit_log', 'sys_activity', 'sys_bus_event']);
+    expect(telemetry.writes.every((w: RecordedWrite) => w.transaction === undefined)).toBe(true);
   });
 
   it('SURVIVES the rollback of the business transaction — the orphan row, pinned', async () => {
@@ -272,7 +292,7 @@ describe('an audit-shaped write inside a cross-origin transaction LANDS, outside
       await engine.delete('sys_audit_log', { where: { id: seeded.id } } as any);
     });
 
-    const inTxn = telemetry.writes.slice(1);
+    const inTxn = telemetry.writes.slice(1) as RecordedWrite[];
     expect(inTxn.map((w) => w.op)).toEqual(['update', 'delete']);
     expect(inTxn.every((w) => w.transaction === undefined)).toBe(true);
   });
@@ -286,9 +306,9 @@ describe('a BUSINESS write across drivers inside a transaction is refused (#5696
   it('throws CrossDatasourceTransactionWriteError naming both datasources and the fix', async () => {
     const { engine } = await splitEngine();
 
-    const err = await engine
-      .transaction(async () => { await engine.insert('ledger', { name: 'NOT covered' }); })
-      .catch((e: unknown) => e as CrossDatasourceTransactionWriteError);
+    const err = await rejection<CrossDatasourceTransactionWriteError>(
+      engine.transaction(async () => { await engine.insert('ledger', { name: 'NOT covered' }); }),
+    );
 
     expect(err).toBeInstanceOf(CrossDatasourceTransactionWriteError);
     expect(err.code).toBe('ERR_CROSS_DATASOURCE_TRANSACTION_WRITE');
@@ -369,7 +389,7 @@ describe('a BUSINESS write across drivers inside a transaction is refused (#5696
     await engine.update('ledger', { id: seeded.id, name: 'renamed' });
     await engine.delete('ledger', { where: { id: seeded.id } } as any);
 
-    expect(ledgerDb.writes.map((w) => w.op)).toEqual(['create', 'update', 'delete']);
+    expect(ledgerDb.writes.map((w: RecordedWrite) => w.op)).toEqual(['create', 'update', 'delete']);
   });
 
   it('stays quiet after the transaction closes — the scope does not leak', async () => {
@@ -420,7 +440,7 @@ describe('a same-origin (single datasource) transaction is untouched (#5351 regr
     const primary = makeDriver('primary');
     engine.registerDriver(primary, true);
     await engine.init();
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, '__test__');
     // Audit-classed, but with NO telemetry datasource registered it resolves to
     // the default driver like everything else — ADR-0057 §3.6 is opt-in by the
     // datasource's existence. The carve-out must not fire on it.
@@ -428,7 +448,7 @@ describe('a same-origin (single datasource) transaction is untouched (#5351 regr
       name: 'sys_audit_log',
       lifecycle: { class: 'audit', retention: { maxAge: '90d' } },
       fields: { action: { type: 'text' } },
-    } as any);
+    } as any, '__test__');
     return { rec, engine, primary };
   }
 
@@ -441,7 +461,7 @@ describe('a same-origin (single datasource) transaction is untouched (#5351 regr
     });
 
     expect(primary.writes).toHaveLength(2);
-    expect(primary.writes.every((w) => JSON.stringify(w.transaction) === JSON.stringify({ __trx: 'primary' }))).toBe(true);
+    expect(primary.writes.every((w: RecordedWrite) => JSON.stringify(w.transaction) === JSON.stringify({ __trx: 'primary' }))).toBe(true);
     // No carve-out, no refusal, and nothing said: the gate is invisible to the
     // deployments that make up the overwhelming majority.
     expect(rec.at('error')).toHaveLength(0);
