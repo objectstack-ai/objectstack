@@ -343,6 +343,27 @@ each selected issue, before dispatching, execute in order:
    name exists, you lost — touch nothing of theirs, reply that you are yielding,
    and pick another issue. **First comment wins.**
 
+**Read the claim comment back — GitHub's body sanitizer deletes short `<…>`
+spans in place, and backticks do not protect them.** The shape above is built
+out of placeholders, and the branch name inside it is the key that both the race
+check and the stale-claim reclaim below read. Measured on this loop, writing
+then reading the stored body back: `<!-- dev-report -->` came back as *nothing at
+all*, `expected <n> to be 19` came back as `expected  to be 19`, `git log --
+<path>` came back as `git log -- `. All three were inside code spans. This is
+**not** the truncation shape that step 0's *Repair first* handles: the rest of
+the body survives intact, so there is no truncation point to find, the rendered
+page looks correct, and the API returned success. The first of those spans cost
+the most — it was a report-collection marker, so the instruction to sweep for it
+had been deleted from the very text that carried it.
+
+- Write literal angle brackets as HTML entities (`&lt;` / `&gt;`), or put a
+  space after the `<`. A code span is not protection.
+- After writing any body whose content is load-bearing — a claim comment, a
+  cloud-mode dispatch prompt carrying a report marker, a handover note —
+  **read it back and confirm each such span is still present**. The write side
+  needs this read-back for the same reason the read side needs two readings:
+  "the API returned 200" is not "the stored content is correct".
+
 Developer agents push their branch early — a remote branch is the hardest
 evidence of work in flight, and it closes the gap between "claimed" and "a PR
 exists".
@@ -424,6 +445,50 @@ has reported, or a dispatch has been silent for over ~2 h (count it as
 `blocked` and move on).
 
 **Never treat the absence of a report as success.**
+
+**Write every check-in as criteria, never as a conclusion — scheduled text
+arrives in a future you cannot see.** A check-in armed now is read by a session
+that has lost your context, against a world that has moved on. Measured three
+times in one day on this loop: a scheduled message **still delivered after its
+timer had been cancelled**, carrying text two rounds out of date. One of them
+read "no branch and no report ⇒ judge the agent unreliable and dispatch a fresh
+one"; by delivery time that agent had opened a PR which was already reviewed and
+accepted, so executing the text verbatim would have pushed a duplicate agent
+into a live, finished worktree — the exact collision the claim protocol exists to
+prevent, arriving through the automation instead of through a racing PM. Two
+rules make stale text harmless:
+
+- **Open every check-in with "idempotent — re-read the state before acting"**,
+  and include no imperative that can be executed without that re-read. Once a
+  timer fires nothing on the platform side re-checks its premise for you;
+  putting the re-read into the text is the only mechanism that can expire an
+  obsolete instruction.
+- **State criteria ("if X then Y"), never conclusions ("now do Y").** A
+  criterion re-derives itself on arrival; a conclusion has already discarded the
+  reading it came from. "⇒ re-dispatch", "⇒ judge it unreliable" are the shape to
+  avoid — correct when written, not necessarily correct when delivered. This
+  holds for timers you believe you cancelled too: cancellation is not a guarantee
+  of non-delivery.
+
+**A silence threshold is a collection boundary, not a verdict of death.** The
+~2 h above means "stop waiting this round"; it does not mean the agent is gone,
+and the two must not be swapped, because their costs differ by an order of
+magnitude — waiting one more round costs a round, while concluding death costs a
+**duplicate dispatch into a worktree that may still be live**. Before concluding
+that a dispatched agent is dead, require one of: a direct status query answered
+in a way that shows it is dead, the host reporting the session stopped, or
+**silence past a completion-time baseline you have actually measured**.
+
+Measure that baseline for your own project — dispatch to first pushed branch or
+PR, over a handful of comparable cards — and treat it as local. Two same-day
+samples from this repo's loop show why no single number can be inherited: four
+text-only documentation cards landed at 93 / 96 / ~95 / ~110 min, while four
+mixed cards from the same day spanned ~64 min to ~2 h 50 min (the two long ones
+waiting on CI). Nine cards, one day, one toolchain, a spread from about an hour
+to nearly three. **Silence inside the baseline is not evidence**, and a check-in
+threshold having passed twice is evidence only that time passed. This is the
+same failure as inferring an abort from symptoms: until you know the baseline,
+"working normally, slowly" and "dead" produce identical readings.
 
 ### 7. Review each report
 
