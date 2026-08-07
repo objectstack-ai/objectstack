@@ -8,6 +8,10 @@
 //   node scripts/check-empty-changeset.mjs --self-test  # verify the checker itself
 //   node scripts/check-empty-changeset.mjs --list       # audit the whole .changeset dir
 //
+// `--base` names the BRANCH POINT to judge against, not the first commit of the
+// diff: the scan always starts at `merge-base(<base>, <head>)`. See "Where the
+// diff starts" below -- getting this wrong is #6129, and it is worth reading.
+//
 // ## The rule (#5471)
 //
 // An empty-frontmatter changeset -- a `.changeset/*.md` whose frontmatter block
@@ -73,11 +77,40 @@
 // nothing. Row 3 is what keeps the stock exempt even when a PR edits an existing
 // empty file's prose, which is a legitimate thing to do and releases nothing new.
 //
+// ## Where the diff starts (#6129)
+//
+// "What the PR introduces" is a claim about ONE SIDE of a fork, so the scan
+// starts at `merge-base(base, head)` and never at `base` itself. Two things go
+// wrong when it starts at `base`, and they were measured in temp repos rather
+// than reasoned about:
+//
+//   - Fed a FROZEN commit (CI used to hand this script
+//     `github.event.pull_request.base.sha`, pinned when the PR was opened),
+//     every changeset main gained while the PR sat open reads as `A` -- added by
+//     this PR. A merged PR's empty changeset then goes red against an author who
+//     never touched the file. Note the merge base does NOT rescue that spelling:
+//     a frozen base.sha is already an ANCESTOR of head, so it IS its own merge
+//     base. The caller has to stop pinning; that is the workflow's half of #6129.
+//   - Fed a moving BRANCH (`origin/main`, this script's own default), a two-dot
+//     diff misreads DELETIONS on the base branch as additions on this one. The
+//     live trigger is queued: `changeset pre exit` deletes every consumed
+//     changeset from main, and the next `pnpm check:empty-changeset` on any
+//     branch that has not rebased then reports all ~182 stock empties as brand
+//     new. Measured on a temp repo: 2 fixtures deleted on main -> 2 violations
+//     two-dot, 0 from the merge base.
+//
+// One rule covers both, and it is idempotent: `merge-base(X, head)` is `X` again
+// whenever `X` is already the branch point, so a caller that hands over an
+// exact merge base loses nothing by this.
+//
 // ## Missing input is a failure, never a pass (#4690)
 //
-// An unresolvable base ref exits 1 rather than 0. A gate that cannot read its
-// input has verified nothing, and exiting 0 there is the #4690 anti-pattern --
-// a check that skips silently and reads as "no violations" in every checks list.
+// An unresolvable base ref exits 1 rather than 0. So does a base with no merge
+// base against head at all (unrelated histories) -- it is the same fact one step
+// later, and falling back to the raw base there would quietly restore the bug
+// above. A gate that cannot read its input has verified nothing, and exiting 0
+// there is the #4690 anti-pattern -- a check that skips silently and reads as
+// "no violations" in every checks list.
 //
 // Zero third-party dependencies, so it can run in a minimal CI environment.
 
@@ -152,16 +185,48 @@ function resolveCommit(ref, cwd) {
   }
 }
 
+/**
+ * The commit the diff actually starts at: the merge base of `base` and `head`.
+ * `null` when the two have no common ancestor -- the caller fails on that rather
+ * than falling back to `base`, see "Where the diff starts" (#6129).
+ *
+ * @param {string} base
+ * @param {string} head
+ * @param {string} cwd
+ * @returns {string|null}
+ */
+export function mergeBase(base, head, cwd) {
+  try {
+    return git(['merge-base', base, head], cwd).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 // ── The scan ─────────────────────────────────────────────────────────────────
 
 /**
  * Judge the changesets this diff introduces.
  *
+ * `base` is the branch point to judge against; the diff itself starts at
+ * `merge-base(base, head)`, which is what makes the verdict a function of THIS
+ * side of the fork alone (#6129). Resolving it HERE rather than in the caller is
+ * deliberate: this is the function the self-test drives, and a correction that
+ * lived in the CLI could be dropped from it without a single fixture noticing.
+ *
  * @param {{ cwd: string, base: string, head?: string }} opts
- * @returns {{ violations: {file: string, kind: string}[], exempt: string[], ok: string[] }}
+ * @returns {{ violations: {file: string, kind: string}[], exempt: string[], ok: string[], base: string }}
+ * @throws when `base` and `head` have no merge base (#4690: not a pass)
  */
 export function scan({ cwd, base, head = 'HEAD' }) {
-  const out = git(['diff', '--name-status', '--diff-filter=AM', base, head, '--', '.changeset/*.md'], cwd);
+  const from = mergeBase(base, head, cwd);
+  if (!from) {
+    throw new Error(
+      `no merge base between '${base}' and '${head}' -- the diff has no trustworthy starting point. ` +
+        'Refusing to fall back to the raw base, which is the #6129 defect.',
+    );
+  }
+  const out = git(['diff', '--name-status', '--diff-filter=AM', from, head, '--', '.changeset/*.md'], cwd);
 
   const violations = [];
   const exempt = [];
@@ -186,12 +251,12 @@ export function scan({ cwd, base, head = 'HEAD' }) {
 
     // Modified. Exempt only if it was ALREADY an empty declaration at base --
     // i.e. this PR did not create the empty declaration, it inherited it.
-    const baseText = showOrNull(base, file, cwd);
+    const baseText = showOrNull(from, file, cwd);
     if (baseText !== null && isEmptyDeclaration(baseText)) exempt.push(file);
     else violations.push({ file, kind: 'emptied' });
   }
 
-  return { violations, exempt, ok };
+  return { violations, exempt, ok, base: from };
 }
 
 // ── Reporting ────────────────────────────────────────────────────────────────
@@ -312,6 +377,60 @@ function selfTest() {
     return { dir, base };
   };
 
+  /**
+   * The CI shape, built for real (#6129): a base branch that KEEPS MOVING after
+   * the PR forks off it, and the `refs/pull/N/merge` commit GitHub builds from
+   * the two -- the very thing `actions/checkout` puts at HEAD on a
+   * `pull_request` event when no `ref:` is given.
+   *
+   * Faking this with two linear commits would test an imitation of the code path
+   * that ships: the whole defect lives in the difference between a merge commit's
+   * two parents, so the fixture has to have two parents.
+   *
+   * @param {{ baseFiles?: Record<string,string>, prFiles?: Record<string,string|null>,
+   *           driftFiles?: Record<string,string|null> }} opts
+   * @returns {{ dir: string, pinned: string, mainTip: string }}
+   *   `pinned` is what the event payload freezes as `base.sha` at PR-open time.
+   */
+  const makeMergeRefRepo = ({ baseFiles = {}, prFiles = {}, driftFiles = {} }) => {
+    const dir = mkdtempSync(join(tmpdir(), 'check-empty-changeset-mergeref-'));
+    repos.push(dir);
+    const apply = (files) => {
+      for (const [rel, contents] of Object.entries(files)) {
+        const full = join(dir, rel);
+        if (contents === null) rmSync(full);
+        else {
+          mkdirSync(dirname(full), { recursive: true });
+          writeFileSync(full, contents);
+        }
+      }
+      git(['add', '-A'], dir);
+    };
+    git(['init', '-q', '-b', 'main'], dir);
+    git(['config', 'user.email', 'selftest@example.invalid'], dir);
+    git(['config', 'user.name', 'self test'], dir);
+    git(['config', 'commit.gpgsign', 'false'], dir);
+    apply(baseFiles);
+    git(['commit', '-q', '-m', 'base', '--allow-empty', '--no-gpg-sign'], dir);
+    const pinned = git(['rev-parse', 'HEAD'], dir).trim(); // the frozen base.sha
+
+    git(['checkout', '-q', '-b', 'pr'], dir);
+    apply(prFiles);
+    git(['commit', '-q', '-m', 'pr: this PR own side', '--allow-empty', '--no-gpg-sign'], dir);
+
+    git(['checkout', '-q', 'main'], dir);
+    apply(driftFiles);
+    git(['commit', '-q', '-m', "main: somebody else's PR merged", '--allow-empty', '--no-gpg-sign'], dir);
+    const mainTip = git(['rev-parse', 'HEAD'], dir).trim();
+
+    // GitHub builds the merge ref exactly this way: base branch tip, merge the
+    // PR head with --no-ff. Then detach, because CI stands ON the merge commit.
+    git(['checkout', '-q', '-b', 'merge-ref', 'main'], dir);
+    git(['merge', '-q', '--no-ff', '--no-gpg-sign', '-m', 'Merge pr into main', 'pr'], dir);
+    git(['checkout', '-q', '--detach', 'HEAD'], dir);
+    return { dir, pinned, mainTip };
+  };
+
   try {
     // ── RED 1: a PR that ADDS an empty-frontmatter changeset ─────────────────
     // The #5799 shape verbatim: a skills/** change declaring nothing, via a new
@@ -411,6 +530,189 @@ function selfTest() {
       assert(r.violations.length === 0, 'GREEN 5: .changeset/README.md must never be judged as a changeset');
     }
 
+    // ── #6129: main drift must not move the verdict, in EITHER direction ─────
+    //
+    // The gate's contract is "same diff, same verdict" -- what a PR introduces
+    // cannot depend on what OTHER PRs merged while it sat open. Two fixtures,
+    // deliberately identical except for which side of the fork the offending
+    // changeset is on, because a drift assertion on its own is satisfied by a
+    // gate that has simply stopped looking.
+    {
+      const OFFENDER = '.changeset/an-empty-one.md';
+
+      // DRIFT, must NOT fire: the empty changeset arrives on MAIN, from someone
+      // else's merged PR. This PR touched nothing but source. Judged from the
+      // base BRANCH the file is on both sides of the diff and invisible, which
+      // is the point.
+      const drift = makeMergeRefRepo({
+        baseFiles: { '.changeset/README.md': '# Changesets\n', 'src/app.ts': 'export const v = 1;\n' },
+        prFiles: { 'src/app.ts': 'export const v = 2;\n' },
+        driftFiles: { [OFFENDER]: EMPTY },
+      });
+      const drifted = scan({ cwd: drift.dir, base: 'main' });
+      assert(
+        drifted.violations.length === 0,
+        "#6129 DRIFT: an empty changeset that MAIN gained after this PR forked must not be reported against this PR",
+      );
+
+      // The same repo judged from the FROZEN base.sha -- what CI used to pass.
+      // Asserted rather than merely described: this is the whole defect, and the
+      // fixture is here to stop anyone re-pinning the base "because it is the
+      // obvious commit to diff against". Note it stays wrong even now that the
+      // scan takes a merge base, because a frozen ancestor IS its own merge base.
+      const frozen = scan({ cwd: drift.dir, base: drift.pinned });
+      assert(
+        frozen.violations.length === 1 && frozen.violations[0]?.file === OFFENDER,
+        "#6129 DRIFT: judged from the frozen base.sha the same repo blames this PR for main's file -- the defect, pinned",
+      );
+      assert(
+        frozen.base === drift.pinned,
+        '#6129 DRIFT: a frozen ancestor is its own merge base, so no merge base can rescue that spelling -- the CALLER must stop pinning',
+      );
+
+      // MUST fire: byte-identical drift on main, but this time the PR itself is
+      // the one adding the empty changeset. A fix that made the drift case green
+      // by looking at less would take this one green too.
+      const own = makeMergeRefRepo({
+        baseFiles: { '.changeset/README.md': '# Changesets\n', 'src/app.ts': 'export const v = 1;\n' },
+        prFiles: { [OFFENDER]: EMPTY },
+        driftFiles: { '.changeset/somebody-elses.md': DECLARING },
+      });
+      const owned = scan({ cwd: own.dir, base: 'main' });
+      assert(
+        owned.violations.length === 1 && owned.violations[0]?.file === OFFENDER,
+        '#6129 OWN SIDE: an empty changeset this PR really adds must still go red, drift or no drift',
+      );
+      assert(
+        owned.ok.length === 0,
+        "#6129 OWN SIDE: main's own changeset must not be counted as introduced by this PR either",
+      );
+
+      // Same diff, same verdict -- stated as one assertion rather than left to be
+      // inferred from the two above. `mainTip` advancing is exactly what turned
+      // PR #6117 from red at 02:22Z into green at 02:39Z.
+      assert(
+        scan({ cwd: drift.dir, base: 'main' }).violations.length ===
+          scan({ cwd: drift.dir, base: drift.mainTip }).violations.length,
+        '#6129: the verdict must not depend on how far the base branch has run ahead',
+      );
+    }
+
+    // ── #6129, the other half: a base branch that DELETES ────────────────────
+    // Not the CI shape -- an ordinary branch and the default `--base origin/main`
+    // of `pnpm check:empty-changeset`. `changeset pre exit` deletes every consumed
+    // changeset from main, and a two-dot diff then reads each one still sitting on
+    // an un-rebased branch as newly added AND empty. This is the fixture that goes
+    // red if the merge base is taken back out of scan() itself.
+    {
+      const dir = mkdtempSync(join(tmpdir(), 'check-empty-changeset-deleted-'));
+      repos.push(dir);
+      const write = (rel, contents) => {
+        mkdirSync(dirname(join(dir, rel)), { recursive: true });
+        writeFileSync(join(dir, rel), contents);
+      };
+      git(['init', '-q', '-b', 'main'], dir);
+      git(['config', 'user.email', 'selftest@example.invalid'], dir);
+      git(['config', 'user.name', 'self test'], dir);
+      git(['config', 'commit.gpgsign', 'false'], dir);
+      write('.changeset/stock-empty-a.md', EMPTY);
+      write('.changeset/stock-empty-b.md', EMPTY);
+      write('src/app.ts', 'export const v = 1;\n');
+      git(['add', '-A'], dir);
+      git(['commit', '-q', '-m', 'base', '--no-gpg-sign'], dir);
+      const fork = git(['rev-parse', 'HEAD'], dir).trim();
+
+      git(['checkout', '-q', '-b', 'feature'], dir);
+      write('src/app.ts', 'export const v = 2;\n');
+      git(['add', '-A'], dir);
+      git(['commit', '-q', '-m', 'feature: source only', '--no-gpg-sign'], dir);
+
+      git(['checkout', '-q', 'main'], dir);
+      rmSync(join(dir, '.changeset/stock-empty-a.md'));
+      rmSync(join(dir, '.changeset/stock-empty-b.md'));
+      git(['add', '-A'], dir);
+      git(['commit', '-q', '-m', 'main: changeset pre exit, consumed changesets deleted', '--no-gpg-sign'], dir);
+      git(['checkout', '-q', 'feature'], dir);
+
+      const r = scan({ cwd: dir, base: 'main' });
+      assert(
+        r.violations.length === 0,
+        '#6129 DELETED-ON-MAIN: stock empty changesets deleted on main must not read as added by a branch that merely still carries them',
+      );
+      assert(
+        r.base === fork,
+        '#6129 DELETED-ON-MAIN: the scan must start at the fork point, not at the moved branch tip',
+      );
+    }
+
+    // ── #4690, one step later: no merge base at all is a failure ─────────────
+    // Falling back to the raw base here would restore exactly the bug above, so
+    // the scan throws and the CLI turns that into exit 1.
+    {
+      const { dir } = makeRepo({}, { 'a.txt': 'x\n' });
+      const other = mkdtempSync(join(tmpdir(), 'check-empty-changeset-unrelated-'));
+      repos.push(other);
+      git(['init', '-q', '-b', 'main'], other);
+      git(['config', 'user.email', 'selftest@example.invalid'], other);
+      git(['config', 'user.name', 'self test'], other);
+      git(['config', 'commit.gpgsign', 'false'], other);
+      git(['commit', '-q', '-m', 'unrelated', '--allow-empty', '--no-gpg-sign'], other);
+      const unrelated = git(['rev-parse', 'HEAD'], other).trim();
+      git(['fetch', '-q', other, 'main'], dir);
+      let threw = false;
+      try {
+        scan({ cwd: dir, base: unrelated });
+      } catch {
+        threw = true;
+      }
+      assert(threw, '#4690: unrelated histories have no merge base, and that is a failure rather than a silent pass');
+    }
+
+    // ── The consumer: this gate's own CI step (#6129) ────────────────────────
+    //
+    // A self-test that only ever drives scan() cannot see the half of #6129 that
+    // lives in YAML -- and that half is where the false GREEN was. The count that
+    // let PR #6117 through is a shell line in pr-automation.yml, so the fixture
+    // for it has to read that file. Without this block the workflow could be
+    // reverted to the frozen `base.sha` tomorrow with every assertion above still
+    // green, which is precisely the "returns in a different shape" #6129 rules out.
+    {
+      const workflow = join(REPO_ROOT, '.github/workflows/pr-automation.yml');
+      const present = existsSync(workflow);
+      assert(present, 'consumer: .github/workflows/pr-automation.yml must exist -- it is the step this gate runs in');
+      const yaml = present ? readFileSync(workflow, 'utf8') : '';
+
+      assert(
+        /git merge-base "refs\/remotes\/origin\/\$BASE_REF" HEAD/.test(yaml),
+        'consumer: the Check Changeset job must derive its diff base from `git merge-base origin/<base ref> HEAD`',
+      );
+      assert(
+        /--diff-filter=A "\$MERGE_BASE" HEAD -- '\.changeset\/\*\.md'/.test(yaml),
+        'consumer: the changeset COUNT must diff from $MERGE_BASE (never the frozen base.sha) -- that count going green on main drift is #6129',
+      );
+      // Every `--base` handed to this script, not just the one that exists today:
+      // a second call site added later with a pinned sha is the same bug again.
+      const bases = [...yaml.matchAll(/check-empty-changeset\.mjs --base (\S+)/g)].map((m) => m[1]);
+      assert(bases.length === 1, 'consumer: exactly one `check-empty-changeset.mjs --base` call site is expected in the workflow');
+      assert(
+        bases.every((b) => b === '"$MERGE_BASE"'),
+        'consumer: every `check-empty-changeset.mjs --base` in the workflow must be handed $MERGE_BASE',
+      );
+      // The endpoint rule itself, independent of the spellings above: no diff in
+      // this workflow may start at the payload's frozen base.sha. Comment lines
+      // are excluded because the rule is about what RUNS -- and because the
+      // workflow's own note on why `git diff base.sha...HEAD` is not a fix would
+      // otherwise be the first thing this catches (it was).
+      const pinnedDiffs = yaml
+        .split('\n')
+        .filter((line) => !/^\s*#/.test(line))
+        .filter((line) => /\bgit diff\b/.test(line) && /BASE_SHA|base\.sha/.test(line));
+      assert(
+        pinnedDiffs.length === 0,
+        `consumer: no \`git diff\` in the workflow may use the frozen base.sha as an endpoint (found ${pinnedDiffs.length})`,
+      );
+    }
+
     // ── Parser unit rows ─────────────────────────────────────────────────────
     assert(isEmptyDeclaration('---\n---\n\nbody\n'), 'parser: the canonical empty shape is empty');
     assert(isEmptyDeclaration('\n---\n\n---\n\nbody\n'), 'parser: blank lines around/inside the fence stay empty');
@@ -459,6 +761,7 @@ if (argv.includes('--self-test')) {
   const requested = readFlag('--base');
 
   let base = null;
+  let baseLabel = requested;
   if (requested) {
     base = resolveCommit(requested, REPO_ROOT);
     if (!base) {
@@ -469,7 +772,10 @@ if (argv.includes('--self-test')) {
   } else {
     for (const candidate of ['origin/main', 'main']) {
       base = resolveCommit(candidate, REPO_ROOT);
-      if (base) break;
+      if (base) {
+        baseLabel = candidate;
+        break;
+      }
     }
     if (!base) {
       console.error('⛔ check-empty-changeset: no base to diff against (tried origin/main, main).');
@@ -478,7 +784,20 @@ if (argv.includes('--self-test')) {
     }
   }
 
-  const { violations, exempt, ok } = scan({ cwd: REPO_ROOT, base, head });
+  let result;
+  try {
+    result = scan({ cwd: REPO_ROOT, base, head });
+  } catch (error) {
+    console.error(`⛔ check-empty-changeset: ${error instanceof Error ? error.message : String(error)}`);
+    console.error('   Missing input is a failure, never a pass (#4690).');
+    process.exit(1);
+  }
+  const { violations, exempt, ok, base: from } = result;
+  // The starting commit is printed on both verdicts, and it is not decoration:
+  // #6129 hid for as long as it did because nothing in any log said where the
+  // diff began, so a gate reading the wrong side of a fork looked exactly like a
+  // gate reading the right one.
+  console.log(`Diffing ${head} from ${from.slice(0, 9)} (merge base with ${baseLabel}).`);
   if (violations.length) {
     report(violations);
     process.exit(1);
