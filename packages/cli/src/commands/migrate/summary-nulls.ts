@@ -18,6 +18,12 @@ import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+// Type-only, so the heavy engine package is still loaded lazily below: this is
+// the surface the migration actually needs, which is wider than the `objectql`
+// slot contract by exactly one member (`getOwnedSummaryDescriptors`). Naming it
+// here keeps the call site checked instead of erasing the lookup to `any`
+// (#4168/#4251).
+import type { SummaryBackfillEngine } from '@objectstack/objectql';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -172,7 +178,7 @@ export default class MigrateSummaryNulls extends Command {
     }
 
     try {
-      const engine: any = stack.kernel.getService('objectql');
+      const engine: SummaryBackfillEngine = stack.kernel.getService('objectql');
       if (typeof engine?.getOwnedSummaryDescriptors !== 'function') {
         throw new Error('No ObjectQL engine on this stack — cannot read the roll-up index.');
       }
