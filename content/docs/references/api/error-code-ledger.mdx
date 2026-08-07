@@ -5,6 +5,51 @@ description: Error Code Ledger protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
+Error-Code Ledger (ADR-0112 D3).
+
+The top-level `error.code` vocabulary is two-tier:
+
+1. **Standard catalog** — `StandardErrorCode` (`errors.zod.ts`): a small,
+   closed set with platform-wide HTTP semantics. It does NOT grow when a
+   service invents a code.
+2. **Registered extension codes** — THIS ledger: every service-specific code
+   a route may put in `error.code`, registered under its owning package.
+
+`ErrorCode` (exported below) is the union, and is what `ApiErrorSchema.code`
+validates against. An unregistered code fails schema parse — which fails the
+envelope conformance suites — which fails CI. That friction is the point
+(ADR-0112: "no silent fourth state" for error codes, per ADR-0049/0078).
+
+## Registering a new code
+
+Add it to your package's entry (create the entry if your package has none),
+SCREAMING_SNAKE (`^[A-Z][A-Z0-9_]*$` — lint-enforced by
+`error-code-ledger.test.ts`), with a trailing `//` comment when the name
+alone doesn't carry the meaning. Prefer a domain prefix for anything not
+self-evidently global (`ATTACHMENT_*`, `REPORT_*`, `SETTINGS_*`). If the
+condition is generic (not found / permission / validation / rate limit),
+use the standard catalog instead of registering a synonym.
+
+A code emitted by several packages is listed once per emitting package —
+the union dedupes; the per-package rows are provenance, not identity.
+
+## Retiring a code
+
+A row whose last EMITTER is deleted comes out with it. The admission rules
+below check casing, duplication and shadowing — never whether anyone still
+throws the code — so a registered-but-unemittable row stays green forever
+while promising a client a code no response can carry. That is ADR-0112's
+"no silent fourth state" read backwards, and it is not hypothetical:
+`OVERLAY_PERSISTENCE_FAILED` outlived its only producer by one PR (#5264
+deleted `saveMetaItem`'s legacy raw-engine branch; #5783 unregistered the
+code). Before deleting a row, check that no producer remains repo-wide AND
+that no consumer — including `objectui` and `cloud` — reads the literal;
+tests that merely CONSTRUCT the code are not producers, and a test pinned to
+a producerless code is pinning nothing (#4984's phantom-check family).
+
+Field-level codes (`FieldErrorSchema.code`, the `fields[]` array) are a
+SEPARATE vocabulary and do not belong here — see #3977 (ADR-0112 D6).
+
 <Callout type="info">
 **Source:** `packages/spec/src/api/error-code-ledger.zod.ts`
 </Callout>

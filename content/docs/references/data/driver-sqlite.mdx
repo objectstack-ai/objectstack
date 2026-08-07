@@ -5,6 +5,21 @@ description: Driver Sqlite protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
+SQLite driver configuration — the `config` slot of a `datasource` whose
+`driver` resolves to `sqlite` (native `better-sqlite3`, with the dev-only
+step-down to wasm then in-memory, #2229) or to `sqlite-wasm` (pure-JS).
+
+The one key that matters is `filename`, and it is exactly the key the silent
+strip used to hide: an author who wrote `path:` got no error, the connection
+fell back to `:memory:`, and their data vanished on restart with every signal
+saying the datasource was configured.
+
+`file` and `database` once also worked, purely because the factory read them
+as undeclared `??` fallbacks. That tolerance has graduated into the declared
+ADR-0087 conversion `datasource-config-driver-key-aliases` (#4456): stored
+rows are rewritten to `filename` at load, the factory reads one spelling,
+and authoring rejects both with the rename hint below.
+
 <Callout type="info">
 **Source:** `packages/spec/src/data/driver/sqlite.zod.ts`
 </Callout>

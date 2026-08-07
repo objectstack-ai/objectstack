@@ -616,6 +616,37 @@ describe('corpus — no reference source donates a symbol comment to its page', 
     expect(openingOf('api/websocket.zod.ts')).toBe('WebSocket Event Protocol');
     expect(openingOf('ui/sharing.zod.ts')).toBe('@module ui/sharing');
   });
+
+  /**
+   * #6145 — the other side of #5059's ledger. Six more modules had written a
+   * real module introduction and then glued it to their first declaration, so
+   * the strict rule (correctly) read it as that symbol's TSDoc and their pages
+   * went on opening with nothing. The prose was never the problem; its
+   * attachment was. Each block was promoted VERBATIM to a true module header,
+   * and this pins the result per file.
+   *
+   * Deliberately an assertion about the six SOURCES, not about the emitted
+   * `.mdx`: `check:docs` compares the artifact to the source, so it stays green
+   * while a re-glued header quietly empties the page — which is exactly how the
+   * original six survived two rounds on `main`.
+   */
+  it('opens each of the six #6145 modules with its own module header', () => {
+    const openingOf = (rel: string) =>
+      opening(findModuleDocBlock(fs.readFileSync(path.join(SRC_DIR, rel), 'utf-8')));
+
+    expect(openingOf('data/driver/postgres.zod.ts'))
+      .toBe('PostgreSQL driver configuration — the `config` slot of a `datasource` whose');
+    expect(openingOf('data/driver/mysql.zod.ts'))
+      .toBe('MySQL / MariaDB driver configuration — the `config` slot of a `datasource`');
+    expect(openingOf('data/driver/sqlite.zod.ts'))
+      .toBe('SQLite driver configuration — the `config` slot of a `datasource` whose');
+    expect(openingOf('cloud/template-manifest.zod.ts'))
+      .toBe('`objectstack.manifest.json` — on-disk descriptor for a template / package');
+    expect(openingOf('system/doc.zod.ts'))
+      .toBe('Package Documentation Metadata Protocol (ADR-0046)');
+    expect(openingOf('api/error-code-ledger.zod.ts'))
+      .toBe('Error-Code Ledger (ADR-0112 D3).');
+  });
 });
 
 /**
