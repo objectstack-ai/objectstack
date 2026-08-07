@@ -9,6 +9,10 @@
 
 import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
+// The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
+// "the protocol has no such function" refusal cannot drift from what
+// `AggregationNodeSchema.function` actually admits.
+import { AggregationFunction } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 // `defaultValue` runtime tokens (#4560). The DDL below asks the SPEC — not a
 // list of its own — which `defaultValue`s are instructions rather than literals,
@@ -483,6 +487,137 @@ function unsupportedFilterError(message: string): Error {
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
   return err;
+}
+
+/**
+ * [#5907] The aggregate functions this driver LOWERS into SQL, and the SQL
+ * function each becomes.
+ *
+ * The refusals below read their "compiled here" list off THIS table instead of
+ * repeating it. A hand-written copy agrees with the compiler on the day it is
+ * typed and never again — the note already sitting over `driver-memory`'s
+ * `SUPPORTED_FIELD_OPERATORS` (#5345), applied to the aggregate vocabulary.
+ *
+ * A `Map` rather than a plain object on purpose: a caller-supplied name is
+ * looked up here, and `{}['constructor']` answers with a function.
+ */
+const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, string> = new Map([
+  ['count', 'count'],
+  ['sum', 'sum'],
+  ['avg', 'avg'],
+  ['min', 'min'],
+  ['max', 'max'],
+]);
+
+/**
+ * [#5907] The aggregate vocabulary the Query Protocol DECLARES, read from the
+ * spec rather than restated — `AggregationNodeSchema.function` is this enum, so
+ * "declared" has exactly one definition and this driver cannot drift from it.
+ */
+const DECLARED_AGGREGATE_FUNCTIONS: readonly string[] = AggregationFunction.options;
+
+/**
+ * [#5907] Class 1 — a function name the Query Protocol does not declare.
+ *
+ * The caller wrote something no backend can run (`median`), so this is a
+ * request-shaped mistake: `INVALID_QUERY` / 400, the catalogued
+ * `StandardErrorCode` for "malformed query syntax" and a member of
+ * `@objectstack/rest`'s `isExpectedQueryRejection` list, so a client mistake
+ * stops being logged as an unhandled server fault.
+ *
+ * `INVALID_QUERY` is not a new spelling for this condition — it is the one the
+ * PROTOCOL DOOR already gives it. `metadata-protocol`'s `invalidQueryError`
+ * refuses "a function outside the spec enum" on the aggregations axis with
+ * exactly `400 INVALID_QUERY` (#4254), so a caller who reaches this driver
+ * in-process gets the same wire identity as one who came through REST: one
+ * condition, one code, however the caller arrived — the argument
+ * {@link unsupportedFilterError} makes for `INVALID_FILTER`.
+ *
+ * The FIRST SENTENCE is shared verbatim with the twin in `driver-turso`'s
+ * `remote-transport.ts` (#5240 — one condition, one wording): a caller must not
+ * be able to tell which transport answered from the words it used. The parity is
+ * pinned by a test that compares the two RUNTIME messages, not two copies of a
+ * literal (`remote-transport-aggregate-function-refusal.test.ts`).
+ *
+ * Judged against the declared enum CASE-SENSITIVELY, which is what the enum is:
+ * `COUNT_DISTINCT` is not `count_distinct`, and answering "declared but not
+ * implemented" for it would be false. It also keeps the two faces in step —
+ * this driver reads the name raw while the remote transport lowercases it
+ * before its own lookup, so classifying on each face's post-normalisation name
+ * would hand `COUNT_DISTINCT` a 400 here and a 501 there for one query.
+ */
+function undeclaredAggregateFunctionError(func: string): Error {
+  const err = new Error(
+    `Aggregate function "${func}" is not a declared aggregate function. ` +
+    `Declared functions: ${DECLARED_AGGREGATE_FUNCTIONS.join(', ')} ` +
+    `(@objectstack/spec AggregationFunction). Fix the "function" key of the aggregations[] ` +
+    `entry — the Query Protocol has no such function, so this is a query no backend can run, ` +
+    `not a gap in this one (#5907).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  return err;
+}
+
+/**
+ * [#5907] Class 2 — a DECLARED function this backend cannot compile.
+ *
+ * Distinct from {@link undeclaredAggregateFunctionError} on purpose, and this is
+ * the half that must not be collapsed into it: `count_distinct`, `array_agg` and
+ * `string_agg` are declared by `AggregationFunction` and implemented by other
+ * backends (`driver-mongodb` compiles all three, `driver-memory`'s analytics
+ * face compiles `count_distinct`), so telling a dashboard author their
+ * `count_distinct` is a typo would be false — the same line #5345 drew in
+ * `driver-memory`'s `filter-refusal.ts` between `unknownFieldOperatorError` and
+ * `uncompilableFieldOperatorError`.
+ *
+ * `NOT_IMPLEMENTED` / 501 is the answer, from the ADR-0112 STANDARD catalog
+ * ("Feature not yet implemented"), whose own `HttpStatusErrorCodeMap` pairs it
+ * with 501 — so code and status are each other's mirror by construction rather
+ * than by this function's choice. It is the spelling the repo already uses for
+ * every "not supported by this protocol/runtime" answer, and the ledger's rule
+ * for a generic condition is the standard catalog over a registered synonym.
+ * The registered alternatives were measured and rejected: `UNSUPPORTED` is a
+ * 400 in both places that emit it (a share link that does not expose messages),
+ * `UNSUPPORTED_QUERY_PARAM` is a 400 on the client-mistake list, and
+ * `UNSUPPORTED_TRANSFORM` belongs to `@objectstack/rest`'s import mapper.
+ *
+ * Measured consequence, recorded so it is not rediscovered as a bug: on the
+ * `/data` routes `mapDataError`'s generic status passthrough is 4xx-ONLY, so
+ * this declared 501 does not survive to the wire — it falls to
+ * `UNCLASSIFIED_FAULT`'s `500 INTERNAL_ERROR`. That is a gap in the REST
+ * boundary — #5582, which this is the first live producer for — not a reason
+ * for the driver to misdescribe the fault as the caller's. The driver's job is
+ * to state the condition truthfully at the throw site (ADR-0112), which is also
+ * what reaches every in-process caller and the operator log.
+ */
+function uncompilableAggregateFunctionError(func: string): Error {
+  const err = new Error(
+    `Aggregate function "${func}" is declared but not implemented by this backend. ` +
+    `Compiled here: ${[...SQL_AGGREGATE_FUNCTIONS.keys()].join(', ')}. The name is spelled ` +
+    `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
+    `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
+    `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
+    `itself should stand is #6188 (ADR-0049 enforce-or-remove) (#5907).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  return err;
+}
+
+/**
+ * [#5907] Which refusal a name that this face cannot compile deserves.
+ *
+ * The classification is written ONCE per face and shared by both faces'
+ * throw sites, so "is this the caller's mistake or ours?" cannot be answered two
+ * ways for one query. `func` is the name the CALLER wrote — not a normalised
+ * form — because that is what the enum is judged against and what the message
+ * has to quote back.
+ */
+function refuseAggregateFunction(func: string): never {
+  throw DECLARED_AGGREGATE_FUNCTIONS.includes(func)
+    ? uncompilableAggregateFunctionError(func)
+    : undeclaredAggregateFunctionError(func);
 }
 
 /**
@@ -7055,21 +7190,21 @@ export class SqlDriver implements IDataDriver {
     return out;
   }
 
+  /**
+   * The SQL function a declared aggregation lowers to, or a refusal that says
+   * which KIND of "no" this is (#5907).
+   *
+   * The `switch` this replaced answered both conditions with one bare `Error`
+   * carrying no `code` and no `status`, so `mapDataError` fell to its default
+   * branch and a caller's `median` typo arrived as an opaque 500 — the #1116 /
+   * #1117 gap, at the aggregate door. The lowering table is now the single
+   * source of what this face compiles, and {@link refuseAggregateFunction}
+   * decides between the two refusals.
+   */
   protected mapAggregateFunc(func: string): string {
-    switch (func) {
-      case 'count':
-        return 'count';
-      case 'sum':
-        return 'sum';
-      case 'avg':
-        return 'avg';
-      case 'min':
-        return 'min';
-      case 'max':
-        return 'max';
-      default:
-        throw new Error(`Unsupported aggregate function: ${func}`);
-    }
+    const sql = SQL_AGGREGATE_FUNCTIONS.get(func);
+    if (sql !== undefined) return sql;
+    refuseAggregateFunction(func);
   }
 
   // ── Window function builder ─────────────────────────────────────────────────
