@@ -147,7 +147,8 @@ Note template for a tombstone entry (verbatim house style, e.g.
 - 把「整 def 删除」的零变化**判成正常** → 放过一个**根本没真正删掉**的 def。
 
 所以验收顺序是:**先确定路线,再决定该期待什么读数**,不要反过来用读数去猜路线。
-整 def 删除还有一条自证信号:`json-schema.manifest.json` 的 ratchet(#2978)会先开火,
+整 def 删除还有一条自证信号:`json-schema.manifest/`(#5837 起按 category 分片)的
+ratchet(#2978)会先开火,
 要求你**有意删除**对应的 manifest key;删完重跑,per-key ratchet 会自行判定为 #4650
 路径 3(`def no longer emitted by this build`)。这串输出本身就是路线的证据,留在 PR 里。
 
@@ -190,7 +191,7 @@ follows. Write both.
       reference untouched when nothing matched.
 - [ ] **A `RETIRED_KEYS_BY_MAJOR` entry** in
       `packages/spec/src/migrations/registry.ts` — the literal
-      `'<defKey>:<name>'` as `authorable-surface.json` spells it, minus the
+      `'<defKey>:<name>'` as `authorable-surface/<category>.json` spells it, minus the
       `[RETIRED]` mark, under this major. This is the string gate (b) reads, by
       exact set membership; nothing is inferred and nothing radiates from a
       neighbouring key. The gate's failure prints the line to paste. ⚠ Do **not**
@@ -257,7 +258,7 @@ Work top to bottom; each line has a gate behind it.
       consumer goes with it (`PerformanceConfigSchema`, `AIKnowledgeSchema`,
       `ToolCategorySchema`). An exported schema with no consumer is read as a
       capability by whoever finds it (#3950 precedent). This — and *only* this —
-      moves `api-surface.json`: that snapshot prints type *references*, not
+      moves `api-surface/`: that snapshot prints type *references*, not
       expanded shapes, so it is blind to key-level narrowing (#3883 removed three
       keys from `defineAction`'s input and the snapshot did not change). Its gate
       also lives in a different workflow (`TypeScript Type Check`, not
@@ -268,9 +269,12 @@ Work top to bottom; each line has a gate behind it.
       once; regenerate the counts with the python snippet in the README rather
       than hand-editing).
 - [ ] **Generated baselines** — `pnpm --filter @objectstack/spec gen:schema`
-      moves `authorable-surface.json` (tombstone → a new `… [RETIRED]` line;
-      strict removal → the line **vanishes**, which is gate (a)'s trip wire, so
-      delete it in the same PR deliberately) and `json-schema.manifest.json`.
+      moves `authorable-surface/<category>.json` (tombstone → a new
+      `… [RETIRED]` line; strict removal → the line **vanishes**, which is gate
+      (a)'s trip wire, so delete it in the same PR deliberately) and
+      `json-schema.manifest/<category>.json`. Both are sharded by category since
+      #5837 — the gates read the whole directory as one set, so the retirement
+      procedure is unchanged; only which file the line lives in moved.
       Then `gen:spec-changes`, `gen:upgrade-guide`, `gen:api-surface`,
       `gen:docs`. See AGENTS.md for the you-changed-X → regenerate-Y table.
 - [ ] **Forms** — prune the `{ field: '<key>' }` input from

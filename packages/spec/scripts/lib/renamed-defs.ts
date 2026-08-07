@@ -8,8 +8,8 @@
  * `build-schemas.ts` runs two ratchets, and both measure in units of the def
  * key (`<category>/<SchemaName>`):
  *
- *   - `json-schema.manifest.json` — every schema ever published;
- *   - `authorable-surface.json`   — every `<def>:<prop>` an author may write.
+ *   - `json-schema.manifest/`  — every schema ever published;
+ *   - `authorable-surface/`     — every `<def>:<prop>` an author may write.
  *
  * Renaming an exported schema const renames its def, and to both ratchets that
  * is indistinguishable from a **deletion**: the manifest sees a published
@@ -20,7 +20,7 @@
  *
  * The three remedies the ratchets suggest are all wrong for a rename:
  *
- *   1. hand-edit `authorable-surface.json` — forbidden (#4650): the snapshot is
+ *   1. hand-edit `authorable-surface/` — forbidden (#4650): the snapshot is
  *      generated, and editing it is exactly how a real deletion would hide;
  *   2. `retiredKey()` + an ADR-0087 D2 conversion — semantically false. Nothing
  *      is retired, so the tombstone has no live def to hang on and the

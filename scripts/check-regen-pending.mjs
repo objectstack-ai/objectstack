@@ -74,8 +74,8 @@ export function distIsStale(specDir = SPEC_DIR) {
  * rendered from — and the tree is gitignored, so nothing in a checkout carries
  * it. Until #4723 the question could not arise: `check:docs` ran `gen:schema` as
  * its first step, so the tree was regenerated on every run. That is also what
- * made `check:docs` a "check" that WROTE two tracked files (json-schema.manifest.json
- * and authorable-surface.json, whenever they were behind), which is the defect
+ * made `check:docs` a "check" that WROTE two tracked artifacts (json-schema.manifest/
+ * and authorable-surface/, whenever they were behind), which is the defect
  * #4711 removed from `--check` and #4723 removed from this composition. With the
  * generation gone, the freshness it silently guaranteed has to be ASSERTED, or
  * `check:docs` reports a verdict about a tree that predates the edit under test —
