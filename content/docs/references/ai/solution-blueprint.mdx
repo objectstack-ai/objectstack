@@ -5,28 +5,6 @@ description: Solution Blueprint protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Solution Blueprint Schema (ADR-0033 §4 — plan-first authoring)
-
-The structured-output target an AI agent emits for a *high-level* goal
-
-("build me a project-management system") instead of transcribing a field
-
-list. It is a **simplified proposal shape** — deliberately lighter than the
-
-full `ObjectSchema` / `ViewSchema` / `DashboardSchema`.
-
-The `apply_blueprint` tool expands each entry into a proper metadata body
-
-and stages it as a draft (so the per-type Zod schema still validates the
-
-real artifact at write time).
-
-The blueprint is **never persisted on its own**: the agent presents it for
-
-conversational confirmation/edit (cheap), and only on human approval does it
-
-batch-draft. This is the safety valve for low-specificity input.
-
 <Callout type="info">
 **Source:** `packages/spec/src/ai/solution-blueprint.zod.ts`
 </Callout>

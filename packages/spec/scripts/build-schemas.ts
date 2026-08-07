@@ -16,6 +16,10 @@ import {
   type EmittedDef,
 } from './lib/def-key-collisions';
 import { RENAMED_DEFS, carryAuthorableKey, checkRenameTable } from './lib/renamed-defs';
+// The Zod-graph walkers the authorable-surface reachability BFS runs on. Extracted
+// at #5317 so the pipe-direction rule (#4488) is assertable without running the
+// whole generator — see scripts/zod-graph.test.ts.
+import { zodChildSchemas, zodShapeOf } from './lib/zod-graph';
 import {
   AUTHORABLE_SURFACE_DESCRIPTION,
   AUTHORABLE_SURFACE_DIR_NAME,
@@ -930,89 +934,6 @@ function registeredClauseMajors(): Map<string, number> {
   return out;
 }
 
-function zodDefOf(schema: z.ZodType): Record<string, unknown> | null {
-  const def = (schema as unknown as { _zod?: { def?: unknown } })._zod?.def;
-  return def && typeof def === 'object' ? (def as Record<string, unknown>) : null;
-}
-
-/**
- * Every Zod schema instance a node's def references directly: shape values,
- * union options, pipe in/out, record key/value, array element, wrapper inner
- * types — found by walking the def's plain objects/arrays generically instead
- * of enumerating node kinds (which would silently miss the next kind Zod
- * adds). Two edges a generic def walk cannot see are added explicitly:
- * `z.lazy` hides its target behind `getter()`, and check-clones (`.refine()`,
- * `.describe()`, …) point back at the schema they cloned via `_zod.parent` —
- * the clone is what a parent schema embeds (`ViewSchema.refine(…)` inside
- * ViewMetadataSchema), while the BASELINE def is the original.
- */
-function zodChildSchemas(schema: z.ZodType): z.ZodType[] {
-  const out: z.ZodType[] = [];
-  const def = zodDefOf(schema);
-  if (!def) return out;
-  const seen = new Set<unknown>();
-  const walk = (v: unknown): void => {
-    if (v == null) return;
-    if (v instanceof z.ZodType) {
-      out.push(v);
-      return;
-    }
-    if (typeof v !== 'object') return;
-    if (seen.has(v)) return;
-    seen.add(v);
-    if (Array.isArray(v)) {
-      for (const x of v) walk(x);
-      return;
-    }
-    if (v instanceof Map) {
-      for (const x of v.values()) walk(x);
-      return;
-    }
-    const proto = Object.getPrototypeOf(v);
-    if (proto === Object.prototype || proto === null) {
-      for (const x of Object.values(v)) walk(x);
-    }
-  };
-  walk(def);
-  if (def.type === 'lazy' && typeof def.getter === 'function') {
-    try {
-      const inner = (def.getter as () => unknown)();
-      if (inner instanceof z.ZodType) out.push(inner);
-    } catch {
-      // An unresolvable lazy getter has no graph to traverse; the schema it
-      // would have produced cannot be parsed against either.
-    }
-  }
-  const parent = (schema as unknown as { _zod?: { parent?: unknown } })._zod?.parent;
-  if (parent instanceof z.ZodType) out.push(parent);
-  return out;
-}
-
-/** Unwrap pipes/wrappers/lazies down to a plain object def's shape, if any. */
-function zodShapeOf(schema: z.ZodType, depth = 0): Record<string, unknown> | null {
-  if (depth > 12) return null;
-  const def = zodDefOf(schema);
-  if (!def) return null;
-  if (def.type === 'object') {
-    const shape = def.shape;
-    return shape && typeof shape === 'object' ? (shape as Record<string, unknown>) : null;
-  }
-  if (def.type === 'pipe' && def.in instanceof z.ZodType) return zodShapeOf(def.in, depth + 1);
-  if (def.type === 'lazy' && typeof def.getter === 'function') {
-    try {
-      const inner = (def.getter as () => unknown)();
-      if (inner instanceof z.ZodType) return zodShapeOf(inner, depth + 1);
-    } catch {
-      return null;
-    }
-  }
-  const wrappers = new Set(['optional', 'nullable', 'default', 'catch', 'readonly', 'nonoptional']);
-  if (typeof def.type === 'string' && wrappers.has(def.type) && def.innerType instanceof z.ZodType) {
-    return zodShapeOf(def.innerType, depth + 1);
-  }
-  return null;
-}
-
 interface SurfaceReachability {
   /** The metadata-type roots the BFS started from. */
   rootTypes: string[];
@@ -1083,6 +1004,17 @@ function computeSurfaceReachability(): SurfaceReachability {
         // Emitted with authorable keys but no derivable object shape: nothing
         // to bridge on, so fail closed — demand the tombstone route rather
         // than silently widening the exception.
+        //
+        // #5317 narrowed WHO lands here rather than changing what happens once
+        // you do. Until then `zodShapeOf` read a `z.preprocess` node's IN side —
+        // the transform — so every preprocess node arrived shapeless and got
+        // this answer by accident rather than by measurement. One def actually
+        // did: `ui/InlineAction` (a `z.preprocess` with an object OUT) read
+        // 'root-graph' here, while its sole holder `ui/ElementButtonProps` — and
+        // its eight `ui/Element*Props` siblings — already read null. With the
+        // direction corrected it resolves its real 12-key shape, finds no bridge,
+        // and answers null like the rest of that family. Fail-closed is still the
+        // rule; it is just no longer the walker's default report.
         return 'root-graph';
       }
       for (const [name, prop] of Object.entries(shape)) {
@@ -1970,3 +1902,4 @@ writeFileWithRetry(bundledPath, JSON.stringify(bundledSchema, null, 2));
 console.log(`\n✅ Generated bundled schema: objectstack.json (${Object.keys(defs).length} definitions)`);
 
 console.log(`\n✅ Successfully generated ${count} schemas.`);
+

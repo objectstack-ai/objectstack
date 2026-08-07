@@ -1,21 +1,20 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ExpressionInputSchema } from './expression.zod';
+import { retiredKey } from './retired-key';
 
 /**
  * Base Field Mapping Protocol
- * 
- * Shared by: ETL, Connector, External Lookup
+ *
+ * Shared by: Connector, External Lookup
  *
  * This module provides the canonical field mapping schema used across
- * ObjectStack for data transformation and synchronization.
+ * ObjectStack for data synchronization.
  *
  * **Use Cases:**
- * - ETL pipelines (data/mapping.zod.ts)
  * - Integration connectors (integration/connector.zod.ts)
  * - External lookups (data/external-lookup.zod.ts)
- * 
+ *
  * @example Basic field mapping
  * ```typescript
  * const mapping: FieldMapping = {
@@ -23,77 +22,49 @@ import { ExpressionInputSchema } from './expression.zod';
  *   target: 'user_id',
  * };
  * ```
- * 
- * @example With transformation
+ *
+ * @example With a fallback for missing source values
  * ```typescript
  * const mapping: FieldMapping = {
  *   source: 'user_name',
  *   target: 'name',
- *   transform: { type: 'cast', targetType: 'string' },
  *   defaultValue: 'Unknown'
  * };
  * ```
+ *
+ * ## What is NOT here any more: `transform` (#5552, protocol 17)
+ *
+ * This schema used to carry a `transform` key typed by a five-member
+ * discriminated union — `constant` / `cast` / `lookup` / `javascript` / `map`.
+ * No runtime ever executed one of the five, so the whole union was retired
+ * under ADR-0049 enforce-or-remove; the tombstone below carries the
+ * prescription, and the measurement behind it is written up on the
+ * `field-mapping-transform-removed` conversion in `src/conversions/registry.ts`.
+ *
+ * **Where transforms actually run:** `data/mapping.zod.ts`'s
+ * `ImportFieldMappingSchema.transform` — a flat string enum steering a `params`
+ * bag, applied row by row by the REST import path and recorded live, key by
+ * key, in `packages/spec/liveness/mapping.json`. Same word, opposite
+ * disposition: that one runs, and rejects its own `javascript` value with a 400
+ * rather than pretending to.
  */
 
-/**
- * Field Mapping Transform Schema
- *
- * Defines the transformation to apply to a field value during mapping.
- * Implementations can extend this for domain-specific transforms.
- *
- * Renamed from `TransformTypeSchema` (#4539): its inferred type exported as
- * `TransformType`, colliding with the data domain's import-mapping enum of
- * the same name under a DIFFERENT shape (config-object union vs string enum)
- * — the #4411 dual-source trap. Neither old name had importers outside this
- * module in framework/cloud/objectui, so the rename is a clean break.
- */
 import { lazySchema } from './lazy-schema';
-export const FieldMappingTransformSchema = lazySchema(() => z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('constant'),
-    value: z.unknown().describe('Constant value to use'),
-  }).describe('Set a constant value'),
-  
-  z.object({
-    type: z.literal('cast'),
-    targetType: z.enum(['string', 'number', 'boolean', 'date']).describe('Target data type'),
-  }).describe('Cast to a specific data type'),
-  
-  z.object({
-    type: z.literal('lookup'),
-    table: z.string().describe('Lookup table name'),
-    keyField: z.string().describe('Field to match on'),
-    valueField: z.string().describe('Field to retrieve'),
-  }).describe('Lookup value from another table'),
-  
-  z.object({
-    type: z.literal('javascript'),
-    expression: ExpressionInputSchema.describe('JS expression (dialect="js" recommended). e.g. value.toUpperCase()'),
-  }).describe('Custom JavaScript transformation'),
-  
-  z.object({
-    type: z.literal('map'),
-    mappings: z.record(z.string(), z.unknown()).describe('Value mappings (e.g., {"Active": "active"})'),
-  }).describe('Map values using a dictionary'),
-]));
-
-export type FieldMappingTransform = z.infer<typeof FieldMappingTransformSchema>;
 
 /**
  * Field Mapping Schema
- * 
+ *
  * Base schema for mapping fields between source and target systems.
- * 
+ *
  * **NAMING CONVENTION:**
  * - source: Field name in the source system
  * - target: Field name in the target system (should be snake_case for ObjectStack)
- * 
+ *
  * @example
  * ```typescript
  * {
  *   source: 'FirstName',
  *   target: 'first_name',
- *   transform: { type: 'cast', targetType: 'string' },
  *   defaultValue: ''
  * }
  * ```
@@ -103,17 +74,31 @@ export const FieldMappingSchema = lazySchema(() => z.object({
    * Source field name
    */
   source: z.string().describe('Source field name'),
-  
+
   /**
    * Target field name (should be snake_case for ObjectStack)
    */
   target: z.string().describe('Target field name'),
-  
+
   /**
-   * Transformation to apply
+   * REMOVED at protocol 17 (#5552, ADR-0049). See the module TSDoc above for
+   * the measurement. Tombstoned rather than deleted because this schema and
+   * both of its extenders are plain `z.object`s: a plain delete would strip the
+   * key silently, replacing one silent no-op with another.
    */
-  transform: FieldMappingTransformSchema.optional().describe('Transformation to apply'),
-  
+  transform: retiredKey(
+    '`FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and '
+    + '`externalLookup.fieldMappings[].transform` — was removed in @objectstack/spec 17.0.0 '
+    + '(#5552, ADR-0049), and the whole `FieldMappingTransform` union went with it '
+    + '(`constant` / `cast` / `lookup` / `javascript` / `map`) — no runtime ever executed '
+    + 'any of the five, and the `javascript` member advertised `dialect: "js"`, a dialect '
+    + 'retired in #3278. Delete the key. The transform pipeline that IS enforced is the '
+    + "import mapping's: `mapping.fieldMapping[].transform` (a string enum — "
+    + '`none`/`constant`/`map`/`split`/`join`/`lookup` — with its settings in `params`), '
+    + 'applied by the REST import path, which rejects `javascript` with a 400 rather than '
+    + 'pretending to run it. Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
+
   /**
    * Default value if source is null/undefined
    */

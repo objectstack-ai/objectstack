@@ -275,14 +275,15 @@ const sapConnector: ConnectorInput = {
       source: 'order_value',
       target: 'order_total',
       dataType: 'number',
-      // `transform.type` is a discriminated union with exactly five members:
-      // `constant` / `cast` / `lookup` / `javascript` / `map`. The bare string
-      // below is `ExpressionInput` shorthand — the schema wraps it into an
-      // `{ dialect, source }` envelope on parse.
-      transform: {
-        type: 'javascript',
-        expression: 'value / 100' // Convert cents to dollars
-      },
+      // (`transform` sat here until #5552 retired it, together with the whole
+      // five-member `FieldMappingTransform` union — `constant` / `cast` /
+      // `lookup` / `javascript` / `map`. None of the five ever had an executor:
+      // an L3 connector mapping moves a value from `source` to `target`, and
+      // nothing anywhere read the transform. The `javascript` member is what
+      // made the gap visible — it recommended the retired `js` dialect
+      // (#3278), so the only spelling that parsed was a bare string, which
+      // means CEL. Value conversion belongs on a surface that runs it: the L2
+      // import mapping's own `transform`, or an ETL transformation step.)
       syncMode: 'bidirectional'
     }
   ],

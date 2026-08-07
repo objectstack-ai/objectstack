@@ -45,7 +45,15 @@ export { createSystemEnvironmentPlugin, SYSTEM_ENVIRONMENT_ID } from './system-e
 export type { SystemEnvironmentPluginConfig } from './system-environment-plugin.js';
 
 // Export HTTP Server Components
-export { HttpServer } from './http-server.js';
+// NOTE: the `HttpServer` delegating wrapper (`./http-server.ts`) is RETIRED
+// (#5122, #4939 precedent). It declared `implements IHttpServer` but forwarded
+// only the REQUIRED members, so every optional one — `getPort`, `getRawApp`
+// and above all `setFallbackHandler`, the single seam declarative `apis:`
+// endpoints enter through since #5111 — read as absent to the `typeof x ===
+// 'function'` probe the contract tells consumers to use. Do not reintroduce a
+// same-shaped wrapper: a host composes the framework by registering an
+// `IHttpServer` ADAPTER INSTANCE as `http.server`, which is what every real
+// host already does. Absence is held by `http-server-retirement.test.ts`.
 export { HttpDispatcher } from './http-dispatcher.js';
 export type { HttpProtocolContext, HttpDispatcherResult } from './http-dispatcher.js';
 // ADR-0006 generic kernel-resolution seam (retained framework contract; the
