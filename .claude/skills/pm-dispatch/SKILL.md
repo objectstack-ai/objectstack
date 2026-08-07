@@ -581,7 +581,8 @@ file the fix touches, you have not triaged it yet, and it is not labelable.
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`(flow 触发器)、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow` |
 | `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
 | `domain:devx` | `packages/lint`、`packages/sdui-parser`(仅 lint 消费)、`skills/**`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类) |
-| `domain:spec` | `packages/spec` 及其生成物(现 spec 车道不变) |
+| `domain:spec` | `packages/spec` 的**语义面**:schema 形状、`contracts/**`、退役的行为半边、strictness 台账 —— 判据是**接受面变化**,见下「`spec` 一分为二」 |
+| `domain:spec-surface` | `packages/spec` 的**文本面**:describe/JSDoc/墓碑迁移散文/错误 guidance 与 alias 表 —— 校验不变量卡,changeset 恒 patch,见下「`spec` 一分为二」 |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client`、`packages/client-react`(REST 线协议 SDK)、`packages/cloud-connection`、`packages/create-objectstack`、`packages/adapters/*`、`packages/plugins/plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`(`setup` / `studio` / `account`)、`packages/console`、`examples/*` —— 见下,**这一行是显式点名,不是遗漏** |
 
@@ -619,6 +620,36 @@ objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
 - **座位贴同批新立**:`domain:engine` 那一个座位一分为二,各自的范围段
   照抄上表(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族的投入
   冻结指令锚在 `drivers` 那一行,`formula` / `driver-sql` 不受影响)。
+
+**`spec` 一分为二(维护者 2026-08-07 批准,座位贴 #6298)。** 旧 `domain:spec`
+同时覆盖「改接受面」与「改契约自述文本」两类节律完全不同的活:前者量小、
+风险高、要吃版本窗口裁决;后者量大、机械、天然适合 sweep 打包 —— 混在一席,
+文本债持续积压(truth-sweep 审计开采一天可灌 5-10 张)。切分纪律:
+
+- **判据是接受面,不是包、不是 diff 大小。** 这是 anchoring rule 在
+  `packages/spec` 内的**显式例外**:一包两席,按「合法元数据集合变没变」分派 ——
+  改动前能过校验的输入,改动后逐字节仍然同判 ⇒ `spec-surface`;否则 `spec`。
+  该判据与包归属同样机械(分诊读 diff 落点:语义行 vs 纯文本行)。反向红线:
+  **任何改变接受/拒绝行为的卡,不论多小,归 `domain:spec`**(#6245 size S,
+  但把零校验放行改成 422 ⇒ 协议卡;#6235 只开一个 `visibleWhen` 键 ⇒ 协议卡)。
+- **与 `domain:spec-tooling`(#5163 程序卡,座位贴 #6018)的分界**:surface 改
+  「契约自己说的话」(`packages/spec` 源内文本行),tooling 改「围着契约转的
+  机器」(门禁/生成器/lint 与 docs 手写页;其席位范围 ⛔ 不碰
+  `packages/spec/src/**/*.zod.ts`,与 surface 天然无交集)。同一缺陷两半分治的
+  先例:#6146(文档教了一个求值面从未绑定的根 —— surface)与 #6290(lint 一边
+  宣告该根合法一边拒收、还附错误修法 —— tooling 面)。
+- **产物随源走**:describe/JSDoc 改动会重生成 `content/docs/references/**` 与
+  manifest 的 description 字段 —— 产物变更归触发它的**源 PR**(`check:generated`
+  重生成提交,⛔ 手改);同一生成树在飞重生成 >1 张时按 #4675 四步序串行
+  (#6224 扣压处置即此形,记录在 #6018)。
+- **卡点自报**(座位职责,不等积压被感觉到):① 水位 —— 本车道 `pm:queue`
+  连续 3 天 >15 张或平均滞留 >48h ⇒ 提频/加 batch/按本条款继续拆;② 同一
+  references 树在飞重生成 PR >2 ⇒ 打包成一列发,不加席位;③ 分诊脉冲 ——
+  单次审计灌入 20+ ⇒ 一次性 sweep 专项吃掉,不改常设结构。
+- **迁移**:存量带 `domain:spec` 的文本面 open issue 由**分诊座位**按上述判据
+  一次性重标;拆分时已在飞的打包卡(sweep/工头)由原认领者跟完,不迁移。
+- **运行模式**:surface 席 sweep-first —— 一认领、一 PR、多单 `Fixes`,逐单
+  清单复审、零 rider,把认领/PR/CI/验收的固定开销摊薄到 1/N(试点 #6243)。
 
 **Label discipline —— 单一生产者。** `domain:*` 只由**分诊座位**在 backlog
 sweep(round loop step 0)产出,全仓唯一(rule 4)。**打标签 ≠ 认领**:分诊座位
