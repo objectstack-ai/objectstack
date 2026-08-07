@@ -223,6 +223,153 @@ describe('connector_action (baseline node)', () => {
     });
 });
 
+// ─── Declared upstream effect (#4395) ────────────────────────────────
+
+/**
+ * The three answers a `connector_action` step can give, each driven through the
+ * REAL executor: register a connector whose action declares (or omits) `effect`,
+ * run a one-node flow, and read #4354's run summary — the actual consumer of
+ * these metrics, and what the broken-sweep alert
+ * (`selected > 0 AND acted = 0 AND unmeasured = 0`) queries.
+ *
+ * A one-node flow makes the summary fully discriminating:
+ *   declared write, dispatched  → acted 1, unmeasured 0
+ *   declared read               → acted 0, unmeasured 0
+ *   undeclared                  → acted 0, unmeasured 1
+ */
+describe('connector_action declared effect (#4395)', () => {
+    /** A connector whose single `run` action declares `effect` (or omits it). */
+    function connectorDeclaring(effect?: 'read' | 'write'): Connector {
+        return {
+            name: 'crm',
+            label: 'CRM',
+            type: 'saas',
+            authentication: { type: 'none' },
+            actions: [{ key: 'run', label: 'Run', ...(effect ? { effect } : {}) }],
+        } as Connector;
+    }
+
+    /** One-node flow dispatching `crm.run`. */
+    function registerCallerFlow(engine: AutomationEngine): void {
+        engine.registerFlow('caller', {
+            name: 'caller',
+            label: 'Caller',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'call',
+                    type: 'connector_action',
+                    label: 'Call',
+                    connectorConfig: { connectorId: 'crm', actionId: 'run', input: {} },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'call' },
+                { id: 'e2', source: 'call', target: 'end' },
+            ],
+        });
+    }
+
+    async function runWith(
+        effect: 'read' | 'write' | undefined,
+        handler: () => Promise<Record<string, unknown>>,
+    ) {
+        const engine = new AutomationEngine(createTestLogger());
+        registerConnectorNodes(engine, createCtx());
+        engine.registerConnector(connectorDeclaring(effect), { run: handler });
+        registerCallerFlow(engine);
+        return engine.execute('caller');
+    }
+
+    const ok = async () => ({ id: 'ext_1' });
+    const boom = async () => { throw new Error('upstream refused'); };
+
+    it('declared write + successful dispatch → acted: 1 (the sweep can prove it worked)', async () => {
+        const result = await runWith('write', ok);
+        expect(result.success).toBe(true);
+        expect(result.summary).toMatchObject({ acted: 1, unmeasured: 0 });
+    });
+
+    it('declared read → acted: 0, and a REAL zero (unmeasured stays 0)', async () => {
+        const result = await runWith('read', ok);
+        expect(result.success).toBe(true);
+        // The distinction that matters: `acted: 0` here is a measurement, not a
+        // shrug — so a flow whose only action is a lookup is correctly eligible
+        // for the broken-sweep alert instead of hiding behind `unmeasured`.
+        expect(result.summary).toMatchObject({ acted: 0, unmeasured: 0 });
+    });
+
+    it('undeclared → unchanged pre-#4395 behaviour: unmeasured, never acted: 0', async () => {
+        const result = await runWith(undefined, ok);
+        expect(result.success).toBe(true);
+        expect(result.summary).toMatchObject({ acted: 0, unmeasured: 1 });
+    });
+
+    it('declared write whose dispatch FAILED is uncountable, not zero', async () => {
+        // The handler threw, but the upstream may already have been reached —
+        // same call the `http` node makes for a rejected mutating request.
+        const result = await runWith('write', boom);
+        expect(result.success).toBe(false);
+        expect(result.summary).toMatchObject({ acted: 0, unmeasured: 1 });
+    });
+
+    it('declared read that failed still reports acted: 0 — it could not have mutated', async () => {
+        const result = await runWith('read', boom);
+        expect(result.success).toBe(false);
+        expect(result.summary).toMatchObject({ acted: 0, unmeasured: 0 });
+    });
+
+    it('resolves the declaration per ACTION, not per connector', async () => {
+        const engine = new AutomationEngine(createTestLogger());
+        registerConnectorNodes(engine, createCtx());
+        engine.registerConnector(
+            {
+                name: 'crm',
+                label: 'CRM',
+                type: 'saas',
+                authentication: { type: 'none' },
+                actions: [
+                    { key: 'push', label: 'Push', effect: 'write' },
+                    { key: 'lookup', label: 'Lookup', effect: 'read' },
+                    { key: 'legacy', label: 'Legacy' },
+                ],
+            } as Connector,
+            { push: ok, lookup: ok, legacy: ok },
+        );
+        expect(engine.resolveConnectorActionEffect('crm', 'push')).toBe('write');
+        expect(engine.resolveConnectorActionEffect('crm', 'lookup')).toBe('read');
+        expect(engine.resolveConnectorActionEffect('crm', 'legacy')).toBeUndefined();
+        // Unknown connector / unknown action are the same undeclared answer,
+        // never a throw: the executor already refuses those with its own error.
+        expect(engine.resolveConnectorActionEffect('crm', 'ghost')).toBeUndefined();
+        expect(engine.resolveConnectorActionEffect('ghost', 'push')).toBeUndefined();
+    });
+
+    it('serves the declaration to the designer through GET /connectors', async () => {
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerConnector(
+            {
+                name: 'crm',
+                label: 'CRM',
+                type: 'saas',
+                authentication: { type: 'none' },
+                actions: [
+                    { key: 'push', label: 'Push', effect: 'write' },
+                    { key: 'legacy', label: 'Legacy' },
+                ],
+            } as Connector,
+            { push: ok, legacy: ok },
+        );
+        const [descriptor] = engine.getConnectorDescriptors();
+        expect(descriptor.actions.map((a) => [a.key, a.effect])).toEqual([
+            ['push', 'write'],
+            ['legacy', undefined],
+        ]);
+    });
+});
+
 // ─── Engine connector registry ───────────────────────────────────────
 
 describe('AutomationEngine connector registry', () => {

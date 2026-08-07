@@ -731,7 +731,7 @@ describe('uncountable effects (#4354 follow-up)', () => {
         expect(calls).toEqual(['GET', 'POST', 'PUT']);
     });
 
-    it('a connector_action is unmeasured — its descriptor declares no read/write', async () => {
+    it('a connector_action that declares no effect is unmeasured (#4395: still the default)', async () => {
         const logger = makeLogger();
         const engine = new AutomationEngine(logger);
         registerConnectorNodes(engine, { logger, getService: () => undefined } as never);
@@ -753,6 +753,40 @@ describe('uncountable effects (#4354 follow-up)', () => {
         expect(res.success).toBe(true);
         // NOT acted:1 — the platform cannot know whether `push` wrote anything.
         expect(res.summary).toMatchObject({ acted: 0, unmeasured: 1 });
+    });
+
+    it('a connector_action that DECLARES its effect is counted (#4395)', async () => {
+        // The same flow as above, with the one difference #4395 introduces:
+        // the action says what it does upstream, so the run stops reporting
+        // "cannot count" and reports the count. This is the whole point — a
+        // connector-driven sweep can now both prove it worked (`acted`) and be
+        // flagged when it stops (`acted: 0` with `unmeasured: 0` matches the
+        // broken-sweep query, which a blanket `unmeasuredEffect` never could).
+        for (const [effect, expected] of [
+            ['write', { acted: 1, unmeasured: 0 }],
+            ['read', { acted: 0, unmeasured: 0 }],
+        ] as const) {
+            const logger = makeLogger();
+            const engine = new AutomationEngine(logger);
+            registerConnectorNodes(engine, { logger, getService: () => undefined } as never);
+            engine.registerConnector(
+                { name: 'crm', label: 'CRM', type: 'saas', actions: [{ key: 'push', label: 'Push', effect }] } as never,
+                { push: async () => ({ id: 'ext_1' }) },
+            );
+            engine.registerFlow('f', {
+                name: 'f', label: 'f', type: 'autolaunched',
+                nodes: [
+                    { id: 'start', type: 'start', label: 'S' },
+                    { id: 'push', type: 'connector_action', label: 'P', config: { connectorId: 'crm', actionId: 'push', input: {} } },
+                    { id: 'end', type: 'end', label: 'E' },
+                ],
+                edges: [{ id: 'e1', source: 'start', target: 'push' }, { id: 'e2', source: 'push', target: 'end' }],
+            } as never);
+
+            const res = await engine.execute('f', {} as AutomationContext);
+            expect(res.success, `effect ${effect}`).toBe(true);
+            expect(res.summary, `effect ${effect}`).toMatchObject(expected);
+        }
     });
 
     it('propagates through a subflow roll-up, so the parent knows its acted is incomplete', async () => {

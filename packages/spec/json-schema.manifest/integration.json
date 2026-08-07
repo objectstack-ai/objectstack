@@ -5,6 +5,7 @@
     "integration/CircuitBreakerConfig",
     "integration/Connector",
     "integration/ConnectorAction",
+    "integration/ConnectorActionEffect",
     "integration/ConnectorConflictResolution",
     "integration/ConnectorErrorCategory",
     "integration/ConnectorFieldMapping",

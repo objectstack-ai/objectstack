@@ -86,25 +86,49 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
                 logger: ctx.logger,
             };
 
+            // #4354 / #4395 — what this step reports depends on what the
+            // connector DECLARED the action does upstream, because nothing on
+            // this side can observe it.
+            //
+            // Undeclared was the only answer #4354 could give: `acted: 0` would
+            // understate a Salesforce create, `acted: 1` would overstate a
+            // lookup and make the broken-sweep alert never fire (the original
+            // bug back again), so it reported the honest third answer — this
+            // run's `acted` is incomplete. That answer is correct but blind:
+            // a connector-driven flow contributed NO signal, neither confirming
+            // work nor being flagged for doing none.
+            //
+            // #4395 lets the action declare `effect`, and this is where the
+            // declaration is spent. Resolved BEFORE dispatch so both the
+            // success and the failure path read one value.
+            const effect = engine.resolveConnectorActionEffect(cfg.connectorId, cfg.actionId);
+
             try {
                 const output = await handler((cfg.input ?? {}) as Record<string, unknown>, handlerCtx);
-                // #4354 — the action reached an external system and the platform
-                // cannot say what it did there: `ConnectorActionDescriptor`
-                // declares `key` / `label` / `description` / `inputSchema` /
-                // `outputSchema` and NOTHING about whether the action reads or
-                // writes. `acted: 0` would understate a Salesforce create;
-                // `acted: 1` would overstate a lookup and make the broken-sweep
-                // alert never fire — the original bug back again. Report the
-                // honest third answer: this run's `acted` is incomplete.
-                // #4395 proposes declaring the effect kind on the descriptor,
-                // which would turn this into a real count.
-                return { success: true, output, metrics: { unmeasuredEffect: true } };
+                return {
+                    success: true,
+                    output,
+                    // A declared `write` the upstream ACCEPTED is one effect; a
+                    // declared `read` never mutates, so its zero is real rather
+                    // than a guess. Undeclared stays uncountable — same as the
+                    // `http` node's method-derived split (a GET reports 0, an
+                    // accepted mutation reports 1).
+                    metrics: effect === 'write'
+                        ? { acted: 1 }
+                        : effect === 'read'
+                            ? { acted: 0 }
+                            : { unmeasuredEffect: true },
+                };
             } catch (err) {
                 return {
                     success: false,
                     error: `connector_action(${cfg.connectorId}.${cfg.actionId}) failed: ${(err as Error).message}`,
-                    // A handler that threw may still have reached the upstream.
-                    metrics: { unmeasuredEffect: true },
+                    // A handler that threw may still have reached the upstream —
+                    // so a declared WRITE falls back to uncountable here rather
+                    // than to `acted: 0`, exactly as a rejected mutating `http`
+                    // call does. A declared READ is the one case a failure still
+                    // answers: it could not have mutated anything either way.
+                    metrics: effect === 'read' ? { acted: 0 } : { unmeasuredEffect: true },
                 };
             }
         },

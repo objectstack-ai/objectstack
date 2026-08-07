@@ -134,8 +134,8 @@ a dead end of the same class in #4738.)
 ## TypeScript Usage
 
 ```typescript
-import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorConflictResolutionSchema, ConnectorErrorCategorySchema, ConnectorFieldMappingSchema, ConnectorHealthSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, ErrorMappingConfigSchema, ErrorMappingRuleSchema, HealthCheckConfigSchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
-import type { CircuitBreakerConfig, Connector, ConnectorConflictResolution, ConnectorErrorCategory, ConnectorFieldMapping, ConnectorHealth, ConnectorInstanceAuth, ConnectorRetryStrategy, ConnectorStatus, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
+import { CircuitBreakerConfigSchema, ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorConflictResolutionSchema, ConnectorErrorCategorySchema, ConnectorFieldMappingSchema, ConnectorHealthSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorRetryStrategySchema, ConnectorStatusSchema, ConnectorTriggerSchema, ConnectorTypeSchema, DataSyncConfigSchema, DeclarativeConnectorEntrySchema, ErrorMappingConfigSchema, ErrorMappingRuleSchema, HealthCheckConfigSchema, RetryConfigSchema, SyncStrategySchema, WebhookConfigSchema, WebhookEventSchema, WebhookSignatureAlgorithmSchema } from '@objectstack/spec/integration';
+import type { CircuitBreakerConfig, Connector, ConnectorActionEffect, ConnectorConflictResolution, ConnectorErrorCategory, ConnectorFieldMapping, ConnectorHealth, ConnectorInstanceAuth, ConnectorRetryStrategy, ConnectorStatus, ConnectorType, DataSyncConfig, DeclarativeConnectorEntry, ErrorMappingConfig, ErrorMappingRule, HealthCheckConfig, RetryConfig, SyncStrategy, WebhookConfig, WebhookEvent, WebhookSignatureAlgorithm } from '@objectstack/spec/integration';
 
 // Validate data
 const result = CircuitBreakerConfigSchema.parse(data);
@@ -205,6 +205,19 @@ Circuit breaker configuration
 | **description** | `string` | optional |  |
 | **inputSchema** | `Record<string, any>` | optional | Input parameters schema (JSON Schema) |
 | **outputSchema** | `Record<string, any>` | optional | Output schema (JSON Schema) |
+| **effect** | `Enum<'read' \| 'write'>` | optional | What the action does upstream: 'read' never mutates (reports acted:0); 'write' does (a successful dispatch reports acted:1). Omit when the effect is not knowable — the step is then reported as unmeasured, not as zero |
+
+
+---
+
+## ConnectorActionEffect
+
+What the action does upstream: 'read' never mutates (reports acted:0); 'write' does (a successful dispatch reports acted:1). Omit when the effect is not knowable — the step is then reported as unmeasured, not as zero
+
+### Allowed Values
+
+* `read`
+* `write`
 
 
 ---
