@@ -54,7 +54,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | **retryAfter** | `number` | optional | Seconds to wait before retrying |
 | **details** | `any` | optional | Additional error context |
 | **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| 'invalid_boolean' \| 'invalid_number' \| 'invalid_date' \| 'invalid_time' \| 'invalid_email' \| 'invalid_url' \| 'invalid_phone' \| 'invalid_json' \| 'invalid_format' \| 'min_length' \| 'max_length' \| 'min_value' \| 'max_value' \| 'min_items' \| 'max_items' \| 'invalid_option' \| 'invalid_value' \| 'reference_not_found' \| 'reference_ambiguous' \| 'rule_violation' \| 'json_schema_violation' \| 'invalid_initial_state' \| 'invalid_transition'>; message: string; label?: string; … }[]` | optional | One entry per offending value |
-| **fieldErrors** | `any` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4, #3977) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
+| **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4, #3977) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
 | **timestamp** | `string` | optional | When the error occurred |
 | **requestId** | `string` | optional | Request ID for tracking |
 | **traceId** | `string` | optional | Distributed trace ID |

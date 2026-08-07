@@ -6,7 +6,7 @@ import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
 import type { IHttpServer, IHttpRequest, ShareLinkExecutionContext } from '@objectstack/spec/contracts';
 import { SysRecordShare, SysSharingRule, SysShareLink } from './objects/index.js';
 import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
-import { SharingService, type SharingEngine } from './sharing-service.js';
+import { SharingService, type SharingEngine, type SharingTenancyProbe } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
@@ -456,7 +456,7 @@ export class SharingServicePlugin implements Plugin {
         // widen a hierarchy scope that carries no organization; an unresolvable
         // posture is not evidence of `single`.
         tenancy: () => {
-          try { return ctx.getService<any>('tenancy'); }
+          try { return ctx.getService<SharingTenancyProbe>('tenancy'); }
           catch { return null; }
         },
       });
