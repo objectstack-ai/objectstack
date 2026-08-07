@@ -116,7 +116,7 @@ export async function aggregateSummaryValue(
       alias: 'value',
     }],
     context: execCtx,
-  } as any);
+  });
   const value = rows?.[0]?.value;
   return value == null ? summaryEmptySetValue(desc.fn) : value;
 }
