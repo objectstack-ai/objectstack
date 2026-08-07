@@ -1085,6 +1085,86 @@ The Console side follows: `@object-ui/types` drops its
 pointed at the same retired cluster (objectui#2860). Import what you still need
 from `@objectstack/spec` directly.
 
+### Field widgets receive their metadata on one key, `field` (objectui#3233)
+
+`FieldWidgetComponentProps` no longer declares `schema`. The prop was a second
+carrier for what `field` already means: `SchemaRenderer` passed the authored
+node as `schema`, the form renderer's `renderFieldComponent` passed
+`schema={props.field || props.schema || props}` *alongside* `field`, and about
+thirty widgets settled the disagreement themselves with `field || schema` — one
+concept, two spellings, a de-facto second contract.
+
+**Reading the metadata** — drop the fallback:
+
+```diff
+-const config = field || (props as any).schema;
++const config = field;
+```
+
+**Registering a widget** that can be rendered from a schema node — anything
+`SchemaRenderer` dispatches, not just forms — wrap it once so it still receives
+`field`:
+
+```diff
++import { withFieldCarrier } from '@object-ui/fields';
++
+-ComponentRegistry.register('color', ColorField, { namespace: 'field' });
++ComponentRegistry.register('color', withFieldCarrier(ColorField), { namespace: 'field' });
+```
+
+`withFieldCarrier` forwards the node **by reference** — nothing is copied,
+narrowed or renamed — and consumes `schema` so it cannot reach the DOM through a
+widget's `...props` spread. The SDUI node → `field` translation now happens
+exactly once, in that adapter, and every built-in field widget is registered
+through it.
+
+**Who is affected:** anyone who wrote a field widget. In TypeScript, reading
+`props.schema` is now a compile error rather than a silent `any`; a third-party
+widget that keeps reading it and is **not** re-registered through the adapter
+reads `undefined` in 17 and renders its empty or default state without
+complaining. That is the deliberate cost of a major boundary — one contract
+beats N dialects, and picking the wrong spelling should fail at compile time
+rather than work under one host and not another.
+
+**Host metadata is untouched.** No authored SDUI JSON changes — this is a change
+to how widgets are *written*, not to what apps declare. `schema` also remains the
+universal SDUI prop every registered component receives from `SchemaRenderer`
+(`element:*`, `page:*`, grids, reports); only the *field-widget* contract retired
+it.
+
+### Flow node geometry is the spec's `FlowNode.position` (objectui#3172)
+
+The flow designer writes node coordinates as `position: { x, y }` — the key
+`@objectstack/spec` has modelled all along — instead of its own `ui: { x, y }`.
+Dragging, adding-at-a-point and insert-on-edge each wrote the local spelling;
+all three now write `position`, and the canvas migrates on write: a stored
+flow's legacy `ui` is lifted onto `position` and the key removed in the first
+patch the canvas emits, geometry-related or not.
+
+**This is a behaviour fix, not a rename.** `FlowNodeSchema` has been `.strict()`
+since #4001, so `ui` is an `unrecognized_keys` error: client validation flagged
+the draft on every keystroke and the server rejected the save with a 422. In
+other words, dragging a node made the flow unsavable — the convergence is what
+makes the designer's most basic gesture round-trip again.
+
+**Who is affected:** anything reading `node.ui` off a flow draft. After the
+author's first edit the key is gone and the coordinates live under
+`node.position`:
+
+```diff
+-const { x, y } = node.ui;
++const { x, y } = node.position;
+```
+
+**Reading a stored flow stays backwards-compatible.** `manualPosition()` prefers
+`position` and falls back to a legacy `ui`, so a flow saved before this change
+still opens with its nodes exactly where the author left them. The fallback is a
+migration path, not a second contract: nothing writes `ui`, and the canvas
+strips it at its input boundary, so no patch can re-emit it. Nothing in this
+repo or the engine ever read the key — it was designer-local, and the schema
+rejected it — so the migration reaches only code written against the designer's
+own drafts.
+
 ### Smaller breaking changes
 
 - **MongoDB driver declares itself single-tenant** and refuses to boot in a
@@ -1966,12 +2046,16 @@ rc.1, and administrators should know what changed:
   the generated upgrade guide and the `spec_changes` MCP tool actually
   report the 16 → 17 chain (they still said 16.0.0).
 
-### New in Console — bundled objectui advanced `4a4829d0ef39 → 785b8a5d432c`
+### New in Console — bundled objectui advanced `4a4829d0ef39 → f995a452d2ca`
 
 143 objectui commits across five pin moves, released as **objectui 17.1.0**.
 (The pin changesets enumerate 79 of them; one range under-enumerated its own
 window and is recorded by `console-bebaebd39ace-backfill` — the fixes it
 covers are folded into the list below rather than left to the changelog.)
+Two later pin moves carried the bundle on to `f995a452d2ca` — 129 further
+commits, enumerated in `console-f5bc4c78be76` and `console-f995a452d2ca`. The
+two author-facing breaking migrations in that range are documented under
+*Breaking changes & migration* above.
 
 - **The lockstep half of ADR-0110 — release-critical.** The rc.0 pin predates
   the client fix, so the Console it built still posted `action.target` to
@@ -2058,11 +2142,11 @@ covers are folded into the list below rather than left to the changelog.)
 These changes are on `main` after the `rc.1` cut and **roll into 17.0.0-rc.2**.
 At the time of writing the window has left 209 changesets pending — 46
 `major`-class, 74 `minor`, 55 `patch`, and 34 that release nothing (CI, tooling
-and docs). The Console pin is **unchanged** at `785b8a5d432c`, so the objectui
-delta rc.2 bundles is the one already documented in the section above; there is
-no new Console delta this round. (If `scripts/bump-objectui.sh` advances the pin
-before the cut, that range needs its own section — objectui `main` has moved
-past `785b8a5d432c`.)
+and docs). The Console pin was `785b8a5d432c` when this window was written and
+has since advanced to `f995a452d2ca` in two moves; that delta is carried by the
+range on *New in Console* above and enumerated in the two pin changesets. Its
+two author-facing breaking migrations are documented with the other breaking
+changes above.
 
 Two campaigns dominate the window, and both are *finishing* rather than
 starting: the #4535 dual-source convergence and #4001's close of the authorable

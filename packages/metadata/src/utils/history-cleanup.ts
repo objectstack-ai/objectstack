@@ -126,7 +126,6 @@ export class HistoryCleanupManager {
           if (organizationId) baseWhere.organization_id = organizationId;
 
           const metaItems = await driver.find(historyTableName, {
-            object: historyTableName,
             where: baseWhere,
             fields: ['type', 'name'],
           });
@@ -148,7 +147,6 @@ export class HistoryCleanupManager {
             try {
               // Fetch only the IDs of records beyond the retention limit (oldest first)
               const historyRecords = await driver.find(historyTableName, {
-                object: historyTableName,
                 where: filter,
                 orderBy: [{ field: 'version', order: 'desc' as const }],
                 fields: ['id'],
@@ -192,7 +190,7 @@ export class HistoryCleanupManager {
     }
 
     // Fallback: fetch IDs then delete
-    const records = await driver.find(table, { object: table, where: filter, fields: ['id'] });
+    const records = await driver.find(table, { where: filter, fields: ['id'] });
     const ids = records.map((r: Record<string, unknown>) => r.id as string).filter(Boolean);
     return this.bulkDeleteByIds(driver, table, ids);
   }
@@ -270,7 +268,6 @@ export class HistoryCleanupManager {
         }
 
         recordsByAge = await driver.count(historyTableName, {
-          object: historyTableName,
           where: filter,
         });
       }
@@ -278,7 +275,6 @@ export class HistoryCleanupManager {
       // Count records that would be deleted by version limit
       if (this.policy.maxVersions) {
         const metaItems = await driver.find(historyTableName, {
-          object: historyTableName,
           where: baseWhere,
           fields: ['type', 'name'],
         });
@@ -297,7 +293,6 @@ export class HistoryCleanupManager {
           const filter: Record<string, unknown> = { type, name, ...baseWhere };
 
           const count = await driver.count(historyTableName, {
-            object: historyTableName,
             where: filter,
           });
 

@@ -987,17 +987,19 @@ export class AuthPlugin implements Plugin {
           getSecondaryStorage: () =>
             this.effectiveSecondaryStorage as SecondaryStorageLike | undefined,
         });
-        // [cloud ADR-0024 D5.2] Break-glass — the SAME `sys_user` write
+        // [cloud ADR-0024 D5.2] Break-glass — the same identity write
         // chokepoints, guarding a different question: not "may this caller
         // write identity tables" (above, and system writes bypass it by
         // design) but "may this WRITE happen at all". A `banned = true` (#5892)
-        // or a row DELETE (#5941) that would leave the environment with no
-        // administrator able to sign in is refused for EVERY context,
-        // `isSystem` included — because the paths that actually lock an org out
-        // are the system ones (better-auth's admin ban and remove-user, driven
-        // by a SCIM `active: false` / `DELETE /Users/{id}`). Registered at
-        // priority 20 so the ADR-0092 checks above (10) still answer first for
-        // user-context callers. See last-admin-guard.ts.
+        // or a row DELETE (#5941) on `sys_user`, and — since #5978 — any write
+        // to `sys_member` / `sys_user_permission_set` that revokes the last
+        // administrator's STANDING while leaving their user row untouched, is
+        // refused for EVERY context, `isSystem` included: the paths that
+        // actually lock an org out are the system ones (better-auth's admin
+        // ban, remove-user and updateMemberRole, driven by a SCIM
+        // `active: false` / `DELETE /Users/{id}` / group remap). All six hooks
+        // register at priority 20 so the ADR-0092 checks above (10) still
+        // answer first for user-context callers. See last-admin-guard.ts.
         registerLastAdminGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.last-admin-guard',
           logger: ctx.logger,
