@@ -160,15 +160,27 @@
 //               The maintainer's ruling was to land the invariant with a
 //               DOCUMENTED margin on the packages that proved hottest rather
 //               than run a sixth lap: `@objectstack/objectql`,
-//               `@objectstack/lint` and `@objectstack/rest` are recorded at
-//               their measurement PLUS TEN, and each says so in its own note,
-//               naming the measured number and the sha. This is the ledger's
-//               ONLY slack and it is deliberately loud: nothing else here may
-//               sit above its measurement, and a margin is not a place to hide
-//               a real increase. Because shrinkage is informational, each of
-//               the three prints its own `ℹ ... can be lowered` line on every
-//               run -- that line IS the tightening worklist, and closing it is
-//               a follow-up PR, not a thing to leave running for months.
+//               `@objectstack/lint`, `@objectstack/rest` and
+//               `@objectstack/service-storage` are recorded at their
+//               measurement PLUS TEN, and each says so in its own note, naming
+//               the measured number and the sha. This is the ledger's ONLY
+//               slack and it is deliberately loud: nothing else here may sit
+//               above its measurement, and a margin is not a place to hide a
+//               real increase. Because shrinkage is informational, each of the
+//               four prints its own `ℹ ... can be lowered` line on every run --
+//               that line IS the tightening worklist, and closing it is a
+//               follow-up PR, not a thing to leave running for months.
+//
+//               The margins were not a precaution; two of the four were paid
+//               out inside a single hour of the landing flight. objectql moved
+//               339 -> 345 (#5749 / PR #6013 extending summary-rollup.test.ts)
+//               and service-storage 42 -> 41 -> 42 (the two halves of the
+//               `IStorageService.list(prefix)` retirement, #5540 / PR #5983 then
+//               #5541 / PR #6061, landing hours apart). Recorded exactly, both
+//               would have been red on a base nobody could have measured in
+//               advance. Note the second shape especially: a retirement split
+//               across two PRs moves a count DOWN and then back UP, so an exact
+//               number recorded between the halves is stale before it is pushed.
 //
 // The root is the one asymmetry: its `typecheck` script is the workspace
 // aggregator, so its OWN top-level TypeScript is covered by a `typecheck:root`
@@ -319,13 +331,19 @@ const DEBT = {
     note: 'code-tier 12 (TS2345 x7: manifest action handlers called without `namespace`/`actionId`; TS2322) + 1 noise. Was ledgered at 44 with "no code-tier finding" -- wrong in both directions: 31 of those 44 were unresolved imports (see the NodeNext note at the top of this ledger), and the resolution they were blocking is what made the 12 real ones visible.',
   },
   '@objectstack/service-storage': {
-    errors: 41,
-    note: 'code-tier 8 (TS2339 x4, TS2347 x4); config-tier 19 (TS2835); noise 14 (TS7006 x12, TS6196, '
-      + 'TS6133). Re-measured 41 at e8db1a230, DOWN from 42 -- the -1 follows #5540 / PR #5983 retiring '
-      + '`IStorageService.list(prefix)`. Lowered rather than left standing: an entry kept above its own '
-      + 'measurement is undocumented slack, and this ledger carries slack in exactly one place -- the '
-      + 'three bootstrap margins that say so in their own note. 11 of the 41 are in '
-      + 'storage-route-ledger.conformance.test.ts and 7 in storage-service-plugin.test.ts.',
+    errors: 52,
+    note: 'code-tier 8 (TS2339 x4, TS2347 x4); config-tier 21 (TS2835); noise 13 (TS7006 x11, TS6196, '
+      + 'TS6133). This entry is the fourth bootstrap margin, and it earned the label the hard way inside '
+      + 'one flight: 42 -> 41 at e8db1a230 (the spec half of the `IStorageService.list(prefix)` '
+      + 'retirement, #5540 / PR #5983, removed one error, and it was lowered rather than left standing) '
+      + '-> 42 again at 77c7c884b an hour later, when the adapter half (#5541 / PR #6061) deleted the '
+      + 'old list tests (-1 TS7006) and added storage-adapter-list-retirement.test.ts (+2 TS2835). A '
+      + 'two-PR retirement moves a count twice, and an exact number recorded between the halves is stale '
+      + 'before it is pushed -- so this one takes the same documented margin as the three proven-hot '
+      + 'packages instead of a sixth calibration lap. 11 of the 42 are in '
+      + 'storage-route-ledger.conformance.test.ts and 7 in storage-service-plugin.test.ts. RECORDED 52 '
+      + 'is a bootstrap margin (+10 over 42 measured at 77c7c884b) -- tighten via the ℹ hint immediately '
+      + 'after landing (#5278 option A).',
   },
   '@objectstack/spec-monorepo': {
     errors: 80,
@@ -387,7 +405,7 @@ const TEST_DEBT = {
   },
   '@objectstack/objectql': {
     tests: 130,
-    errors: 349,
+    errors: 355,
     note: 'TS2339 x115, TS2554 x93 (wrong arity), TS7006 x47, TS2345 x19, TS2322 x12, TS2749 x11. '
       + 'Re-measured 333 at 5ab08428, up from 219 -- the largest absolute growth in either ledger. The '
       + 'shape held (TS2339/TS2554/TS7006 still lead) but every number roughly tripled, and the file count '
@@ -402,9 +420,12 @@ const TEST_DEBT = {
       + 'number: the queue builds the PR as merged onto the CURRENT queue head, so a count frozen minutes '
       + 'earlier is already stale, and #5278\'s own PR was kicked on this entry three times before it '
       + 'landed. Re-measured at e8db1a230 (this PR merged with main after a day of drift): still 339, '
-      + 'and the histogram above is unchanged code for code -- the churn in this window missed the one '
-      + 'package that had absorbed the most of it. RECORDED 349 is a bootstrap margin (+10 over 339 '
-      + 'measured at e8db1a230) -- tighten via the ℹ hint immediately after landing (#5278 option A).',
+      + 'the histogram unchanged code for code. Then 345 at 77c7c884b ONE HOUR LATER: +6 TS2554 in '
+      + 'src/summary-rollup.test.ts, which #5749 / PR #6013 extended while this PR was in flight. That '
+      + '+6 is what the bootstrap margin is FOR -- recorded at 349 it was absorbed silently, and an '
+      + 'exactly-calibrated 339 would have been the sixth red in the same race. RECORDED 355 is a '
+      + 'bootstrap margin (+10 over 345 measured at 77c7c884b) -- tighten via the ℹ hint immediately '
+      + 'after landing (#5278 option A).',
   },
   '@objectstack/runtime': {
     tests: 102,
@@ -435,7 +456,8 @@ const TEST_DEBT = {
       + 'the one that proved the gate works: #5278\'s own PR went red in CI on it, because a `pull_request` '
       + 'run builds the branch MERGED INTO main and three rest-touching PRs had landed since the sweep. A '
       + 'ledger number is always a number about a moment. RECORDED 163 is a bootstrap margin (+10 over 153 '
-      + 'measured at e8db1a230) -- tighten via the ℹ hint immediately after landing (#5278 option A).',
+      + 'measured at e8db1a230 and re-confirmed at 153 an hour later at 77c7c884b) -- tighten via the ℹ '
+      + 'hint immediately after landing (#5278 option A).',
   },
   '@objectstack/plugin-auth': {
     tests: 38,
@@ -467,7 +489,8 @@ const TEST_DEBT = {
       + '(#5762 / PR #5952, #5378 / PR #5904) and the pre-merge per-file counts were not retained, so the '
       + 'delta is recorded rather than attributed. 10 of the 32 sit in '
       + 'src/validate-visibility-predicates.test.ts. RECORDED 42 is a bootstrap margin (+10 over 32 '
-      + 'measured at e8db1a230) -- tighten via the ℹ hint immediately after landing (#5278 option A).',
+      + 'measured at e8db1a230 and re-confirmed at 32 an hour later at 77c7c884b) -- tighten via the ℹ '
+      + 'hint immediately after landing (#5278 option A).',
   },
   '@objectstack/plugin-security': { tests: 35, errors: 21, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 across 35 test files rather than 34 -- the file count moved, the error count did not.' },
   '@objectstack/formula': { tests: 16, errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
