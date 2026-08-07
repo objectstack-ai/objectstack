@@ -33,7 +33,7 @@ const result = AggregationPipelineSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **collection** | `string` | ✅ | Collection/table name |
 | **stages** | `{ operator: string; options: Record<string, any> }[]` | ✅ | Aggregation pipeline stages |
-| **options** | `{ consistency?: Enum<'all' \| 'quorum' \| 'one' \| 'local_quorum' \| 'each_quorum' \| 'eventual'>; readFromSecondary?: boolean; projection?: Record<string, '0' \| '1'>; timeout?: integer; … }` | optional | Query options |
+| **options** | `{ consistency?: Enum<'all' \| 'quorum' \| 'one' \| 'local_quorum' \| 'each_quorum' \| 'eventual'>; readFromSecondary?: boolean; projection?: Record<string, 0 \| 1>; timeout?: integer; … }` | optional | Query options |
 
 
 ---
@@ -203,7 +203,7 @@ const result = AggregationPipelineSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **consistency** | `Enum<'all' \| 'quorum' \| 'one' \| 'local_quorum' \| 'each_quorum' \| 'eventual'>` | optional | Consistency level override |
 | **readFromSecondary** | `boolean` | optional | Allow reading from secondary replicas |
-| **projection** | `Record<string, '0' \| '1'>` | optional | Field projection |
+| **projection** | `Record<string, 0 \| 1>` | optional | Field projection |
 | **timeout** | `integer` | optional | Query timeout (ms) |
 | **useCursor** | `boolean` | optional | Use cursor instead of loading all results |
 | **batchSize** | `integer` | optional | Cursor batch size |

@@ -4129,6 +4129,144 @@ const connectorRateLimitConfigRemoved: MetadataConversion = {
 };
 
 /**
+ * `fieldMappings[].transform` — five declared transforms, zero engines (#5552,
+ * ADR-0049).
+ *
+ * `shared/FieldMappingSchema.transform` was typed by a five-member
+ * discriminated union (`FieldMappingTransformSchema`: `constant` / `cast` /
+ * `lookup` / `javascript` / `map`), inherited by both schemas that extend it —
+ * `integration/ConnectorFieldMapping` and `data/ExternalFieldMapping`. The
+ * whole union goes; the key is tombstoned on the base, which retires all three
+ * authorable spellings in one edit.
+ *
+ * What was measured, and against what (2026-08-06, `origin/main` @ efedd28):
+ *
+ * - **Declarative**: `transform: { type: … }` in a field-mapping position is
+ *   authored NOWHERE outside `packages/spec`'s own tests — not in `examples/`,
+ *   not in `skills/`, not in objectui. The showcase's one mapping
+ *   (`examples/app-showcase/src/data/mappings/index.ts`) writes `transform:
+ *   'map'` — a bare STRING, which is the *other* schema (see below).
+ * - **Parse**: reachable. `AutomationEngine.registerConnector` /
+ *   `registerDegradedConnector` run `ConnectorSchema.parse`, which walks
+ *   `fieldMappings[]`. So the tombstone's prescription has a live receiver,
+ *   which is why this is a `retiredKey()` and not a bare deletion.
+ * - **Execution**: none. `fieldMappings` is spelled only inside
+ *   `packages/spec` — the four connector packages, the automation engine, REST
+ *   and objectui never read it, and nothing anywhere switches on
+ *   `transform.type`. Falsification control for the scan: the member-specific
+ *   words are findable in the tree (`targetType` 70 hits, `keyField` 66,
+ *   `valueField` 260) — the scanner works, the consumers are absent.
+ * - **cloud**: NOT verified. This session has no read access to
+ *   `objectstack-ai/cloud`, and GitHub code search does not index it (a control
+ *   query scoped to that repo returns zero with `incomplete_results`). Recorded
+ *   as unverified rather than claimed clean — the #5540 disposition.
+ *
+ * The `javascript` member is the one that got the defect filed (#5552): its
+ * `.describe()` recommended `dialect="js"` while `ExpressionDialect` retired
+ * `js` in #3278 (ADR-0058 addendum), so the envelope the doc taught was
+ * rejected by the enum, the only spelling that parsed was the bare string —
+ * which `ExpressionInputSchema` wraps as `dialect: 'cel'` — and the example it
+ * offered (`value.toUpperCase()`) is not valid CEL. The maintainer ruling
+ * (2026-08-06) rejected fixing the sentence alone as "gilding a member that
+ * cannot run" and ordered enforce-or-remove on the measurement; the
+ * measurement came back dead for all five.
+ *
+ * NOT touched, and the reason the word `transform` survives elsewhere:
+ * `data/mapping.zod.ts`'s `ImportFieldMappingSchema.transform` is a different
+ * declaration under the same name — a flat string enum steering `params`,
+ * applied row by row by `packages/rest/src/import-mapping.ts:115-167` and
+ * recorded live in `packages/spec/liveness/mapping.json`. It is also the
+ * counter-example that makes this retirement's shape clear: its own
+ * `javascript` value is rejected with a 400 because no server sandbox exists —
+ * implement-or-reject-loudly, rather than a member that parses and evaporates.
+ *
+ * Scope of the rewrite: `connectors[].fieldMappings[]` is the only stored
+ * source that can carry the key. `ExternalLookupSchema` is not referenced by
+ * any stack collection or metadata type, so there is no external-lookup
+ * document for the walker to visit; its authorable key is retired by the same
+ * tombstone and needs no transform.
+ *
+ * `retiredFromLoadPath`: the key claims a transformation that never ran, the
+ * `connector-rate-limit-config-removed` shape exactly. Absorbing it silently at
+ * load would let an author keep believing their values were being cast, mapped
+ * or looked up. The entry exists so stored rows replay clean
+ * (`applyConversionsToStoredItem`) and `os migrate meta --from 16` rewrites
+ * author sources; live parses hit the tombstone.
+ */
+const fieldMappingTransformRemoved: MetadataConversion = {
+  id: 'field-mapping-transform-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'connector.fieldMappings[].transform / externalLookup.fieldMappings[].transform',
+  summary:
+    "field-mapping key 'transform' removed (#5552 — the whole five-member "
+    + 'FieldMappingTransform union went with it: no runtime ever executed constant/cast/'
+    + 'lookup/javascript/map, and the javascript member advertised dialect="js", retired '
+    + "in #3278. The enforced transform pipeline is the import mapping's string-enum "
+    + '`mapping.fieldMapping[].transform`, which is unaffected)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'connectors', (c, path) => {
+      const mappings = c.fieldMappings;
+      if (!Array.isArray(mappings)) return c;
+      let changed = false;
+      const next = mappings.map((m, i) => {
+        if (!m || typeof m !== 'object' || Array.isArray(m)) return m;
+        const stripped = stripKeys(
+          m as Record<string, unknown>,
+          ['transform'],
+          emit,
+          `${path}.fieldMappings[${i}]`,
+        );
+        if (stripped !== m) changed = true;
+        return stripped;
+      });
+      return changed ? { ...c, fieldMappings: next } : c;
+    });
+  },
+  fixture: {
+    before: {
+      connectors: [
+        {
+          name: 'sap_erp',
+          label: 'SAP ERP',
+          type: 'saas',
+          fieldMappings: [
+            // The member #5552 was filed about: `dialect: 'js'` was never
+            // parseable, so the only authored form is the bare string — which
+            // silently meant CEL.
+            { source: 'order_value', target: 'order_total', transform: { type: 'javascript', expression: 'value / 100' } },
+            // A second member, to show the notice is per mapping entry and not
+            // per union member.
+            { source: 'Status', target: 'status', transform: { type: 'map', mappings: { Active: 'active' } } },
+            // A mapping that never authored the key keeps its identity — the
+            // copy-on-write contract `stripKeys` / `mapCollection` are built on.
+            { source: 'E-mail', target: 'email', defaultValue: '' },
+          ],
+        },
+        // A connector with no field mappings at all is untouched.
+        { name: 'crm_sync', label: 'CRM Sync', type: 'saas' },
+      ],
+    },
+    after: {
+      connectors: [
+        {
+          name: 'sap_erp',
+          label: 'SAP ERP',
+          type: 'saas',
+          fieldMappings: [
+            { source: 'order_value', target: 'order_total' },
+            { source: 'Status', target: 'status' },
+            { source: 'E-mail', target: 'email', defaultValue: '' },
+          ],
+        },
+        { name: 'crm_sync', label: 'CRM Sync', type: 'saas' },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
  * The nine theme token groups that were EMITTED and read by nobody (#5021,
  * ADR-0049).
  *
@@ -4430,6 +4568,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     objectEnableTrashMruRemoved,
     hookBodyCryptoHashRemoved,
     connectorRateLimitConfigRemoved,
+    fieldMappingTransformRemoved,
     themeInertTokenScalesRemoved,
     pageHeaderSubtitleAlias,
     objectIndexTypePartialRemoved,

@@ -28,8 +28,6 @@
     "F (const)",
     "FieldMapping (type)",
     "FieldMappingSchema (const)",
-    "FieldMappingTransform (type)",
-    "FieldMappingTransformSchema (const)",
     "FieldName (type)",
     "FieldNameSchema (const)",
     "FlowName (type)",

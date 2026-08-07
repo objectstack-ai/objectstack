@@ -7,15 +7,13 @@ description: Mapping protocol schemas
 
 Base Field Mapping Protocol
 
-Shared by: ETL, Connector, External Lookup
+Shared by: Connector, External Lookup
 
 This module provides the canonical field mapping schema used across
 
-ObjectStack for data transformation and synchronization.
+ObjectStack for data synchronization.
 
 **Use Cases:**
-
-- ETL pipelines (data/mapping.zod.ts)
 
 - Integration connectors (integration/connector.zod.ts)
 
@@ -35,7 +33,7 @@ target: 'user_id',
 
 ```
 
-@example With transformation
+@example With a fallback for missing source values
 
 ```typescript
 
@@ -45,13 +43,37 @@ source: 'user_name',
 
 target: 'name',
 
-transform: \{ type: 'cast', targetType: 'string' \},
-
 defaultValue: 'Unknown'
 
 \};
 
 ```
+
+## What is NOT here any more: `transform` (#5552, protocol 17)
+
+This schema used to carry a `transform` key typed by a five-member
+
+discriminated union — `constant` / `cast` / `lookup` / `javascript` / `map`.
+
+No runtime ever executed one of the five, so the whole union was retired
+
+under ADR-0049 enforce-or-remove; the tombstone below carries the
+
+prescription, and the measurement behind it is written up on the
+
+`field-mapping-transform-removed` conversion in `src/conversions/registry.ts`.
+
+**Where transforms actually run:** `[data/mapping.zod.ts](/docs/references/data/mapping)`'s
+
+`ImportFieldMappingSchema.transform` — a flat string enum steering a `params`
+
+bag, applied row by row by the REST import path and recorded live, key by
+
+key, in `packages/spec/liveness/mapping.json`. Same word, opposite
+
+disposition: that one runs, and rejects its own `javascript` value with a 400
+
+rather than pretending to.
 
 <Callout type="info">
 **Source:** `packages/spec/src/shared/mapping.zod.ts`
@@ -60,8 +82,8 @@ defaultValue: 'Unknown'
 ## TypeScript Usage
 
 ```typescript
-import { FieldMappingSchema, FieldMappingTransformSchema } from '@objectstack/spec/shared';
-import type { FieldMapping, FieldMappingTransform } from '@objectstack/spec/shared';
+import { FieldMappingSchema } from '@objectstack/spec/shared';
+import type { FieldMapping } from '@objectstack/spec/shared';
 
 // Validate data
 const result = FieldMappingSchema.parse(data);
@@ -77,94 +99,8 @@ const result = FieldMappingSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **source** | `string` | ✅ | Source field name |
 | **target** | `string` | ✅ | Target field name |
-| **transform** | `{ type: 'constant'; value: any } \| { type: 'cast'; targetType: Enum<'string' \| 'number' \| 'boolean' \| 'date'> } \| { type: 'lookup'; table: string; keyField: string; valueField: string } \| { type: 'javascript'; expression: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } } \| { type: 'map'; mappings: Record<string, any> }` | optional | Transformation to apply |
+| **transform** | `never` | optional | [REMOVED] `FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and `externalLookup.fieldMappings[].transform` — was removed in @objectstack/spec 17.0.0 (#5552, ADR-0049), and the whole `FieldMappingTransform` union went with it (`constant` / `cast` / `lookup` / `javascript` / `map`) — no runtime ever executed any of the five, and the `javascript` member advertised `dialect: "js"`, a dialect retired in #3278. Delete the key. The transform pipeline that IS enforced is the import mapping's: `mapping.fieldMapping[].transform` (a string enum — `none`/`constant`/`map`/`split`/`join`/`lookup` — with its settings in `params`), applied by the REST import path, which rejects `javascript` with a 400 rather than pretending to run it. Run `os migrate meta --from 16` to rewrite it automatically. |
 | **defaultValue** | `any` | optional | Default if source is null/undefined |
-
-
----
-
-## FieldMappingTransform
-
-### Union Options
-
-This schema accepts one of the following structures:
-
-#### Option 1
-
-Set a constant value
-
-**Type:** `constant`
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `'constant'` | ✅ |  |
-| **value** | `any` | ✅ | Constant value to use |
-
----
-
-#### Option 2
-
-Cast to a specific data type
-
-**Type:** `cast`
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `'cast'` | ✅ |  |
-| **targetType** | `Enum<'string' \| 'number' \| 'boolean' \| 'date'>` | ✅ | Target data type |
-
----
-
-#### Option 3
-
-Lookup value from another table
-
-**Type:** `lookup`
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `'lookup'` | ✅ |  |
-| **table** | `string` | ✅ | Lookup table name |
-| **keyField** | `string` | ✅ | Field to match on |
-| **valueField** | `string` | ✅ | Field to retrieve |
-
----
-
-#### Option 4
-
-Custom JavaScript transformation
-
-**Type:** `javascript`
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `'javascript'` | ✅ |  |
-| **expression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | JS expression (dialect="js" recommended). e.g. value.toUpperCase() |
-
----
-
-#### Option 5
-
-Map values using a dictionary
-
-**Type:** `map`
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **type** | `'map'` | ✅ |  |
-| **mappings** | `Record<string, any>` | ✅ | Value mappings (e.g., `{"Active": "active"}`) |
-
----
 
 
 ---
