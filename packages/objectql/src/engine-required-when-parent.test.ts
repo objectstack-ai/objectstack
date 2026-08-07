@@ -121,7 +121,7 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
         // (`invoice.object.ts` L153) — worked all along, must keep working.
         paid_on: { type: 'date', requiredWhen: "record.status == 'paid'" },
       },
-    } as any);
+    } as any, 'test-package');
     engine.registry.registerObject({
       name: 'showcase_invoice_line',
       fields: {
@@ -134,7 +134,7 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
         note: { type: 'text', requiredWhen: 'record.quantity >= 100' },
         quantity: { type: 'number' },
       },
-    } as any);
+    } as any, 'test-package');
 
     storeFor('showcase_invoice').set('INV-SENT', { id: 'INV-SENT', invoice_number: 'INV-SENT', status: 'sent' });
     storeFor('showcase_invoice').set('INV-DRAFT', { id: 'INV-DRAFT', invoice_number: 'INV-DRAFT', status: 'draft' });
@@ -284,7 +284,7 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
         message: 'object-level rules do not get a parent binding',
         condition: "parent.status == 'sent'",
       }],
-    } as any);
+    } as any, 'test-package');
     // The header resolves fine (the field predicate below would evaluate), yet
     // the object-level rule still faults on `parent` and still fails CLOSED.
     await expect(
@@ -322,7 +322,7 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
         note: { type: 'text', requiredWhen: 'record.quantity >= 100' },
         quantity: { type: 'number' },
       },
-    } as any);
+    } as any, 'test-package');
     reads.length = 0;
     await engine.insert('plain_line', { invoice: 'INV-SENT', quantity: 1 });
     expect(reads.filter((r) => r === 'showcase_invoice')).toHaveLength(0);
