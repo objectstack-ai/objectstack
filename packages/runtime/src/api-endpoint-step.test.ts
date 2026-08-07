@@ -20,7 +20,7 @@
 import { describe, it, expect } from 'vitest';
 import { ApiEndpointSchema, type ApiEndpoint } from '@objectstack/spec/api';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
-import type { CounterStore } from '@objectstack/plugin-auth';
+import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 
 import {
     APP_ENDPOINT_SEGMENT,

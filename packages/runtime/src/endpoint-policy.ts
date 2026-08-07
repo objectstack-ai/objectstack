@@ -64,7 +64,7 @@ import {
     ANONYMOUS_DENY_STATUS,
     shouldDenyAnonymous,
 } from '@objectstack/core';
-import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth';
+import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 import type { ApiEndpoint } from '@objectstack/spec/api';
 
 import { apiErrorResponse, type ApiErrorEnvelope } from './error-envelope.js';

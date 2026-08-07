@@ -8,7 +8,7 @@ import {
   secondsUntilNextUtcMidnight,
   utcDayStamp,
 } from './sms-daily-quota.js';
-import type { CounterStore } from '@objectstack/plugin-auth';
+import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 
 /** A memory counter store with the same tolerance the cache adapters have. */
 function memoryStore(): CounterStore & { entries: Map<string, unknown> } {

@@ -301,14 +301,62 @@ jobs:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
 
+      # ── This shard's positive attestation (#6082) ─────────────────────────
+      # The credential test-gate counts: "shard N of 3 ran, and every step of it
+      # passed". These two steps are LAST and carry NO `if:` — that is what
+      # makes the statement true, because an unguarded step runs only when every
+      # preceding step of the job succeeded, and nothing after them can fail the
+      # job while the credential already counts as a pass.
+      # check:shard-attestation enforces both properties statically, so a step
+      # appended below here, or an `if:` added to either, is a red lint job
+      # rather than a silently weakened credential.
+      - name: Attest this shard ran and passed
+        run: |
+          node scripts/check-shard-attestation.mjs --emit \
+            --job test --shard ${{ matrix.shard }} --total 3 \
+            --out "$RUNNER_TEMP/shard-attestation"
+
+      - name: Publish this shard's attestation
+        uses: actions/upload-artifact@v7
+        with:
+          name: shard-attest-test-${{ matrix.shard }}-of-3
+          path: ${{ runner.temp }}/shard-attestation/
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
   test-gate:
     # Stable required-check name for the sharded Test Core matrix — the exact
     # contract dogfood-gate documents below (#3622): branch protection requires
     # the bare "Test Core" context, and once the job is a matrix that context
     # can never appear again, deadlocking every PR. Keeping the contract HERE
-    # means a future shard-count change cannot deadlock the repo. See
-    # dogfood-gate for why `cancelled` passes and why this must not be
-    # `if: !cancelled()` on the job.
+    # means a future shard-count change cannot deadlock the repo. `name:` and
+    # `if: always()` are therefore both load-bearing: this must not become
+    # `if: !cancelled()` (see dogfood-gate), and it must not be renamed.
+    #
+    # ── It COUNTS credentials; it does not read one aggregate word (#6082) ──
+    #
+    # This gate used to decide from `needs.test.result` alone, passing on
+    # `success|skipped|cancelled` and failing on everything else. One datum
+    # cannot carry three shards' verdicts, and two measured defects followed:
+    #
+    #   - run 31120902911: the queue discarded shards under runner starvation
+    #     (runner_id 0, no `steps`, zero tests executed), the aggregate read the
+    #     undocumented `abandoned`, the `*)` fallthrough painted red, and #6010
+    #     was evicted 31 seconds later. Whitelisting `abandoned` was REJECTED
+    #     (maintainer, 2026-08-07): that run was NOT moot — the queue was still
+    #     consuming its verdicts — so passing it would publish `Test Core:
+    #     success` over zero test runs, exactly what #4928 blocks.
+    #   - run 31114735713: shard `Test Core (3/3)` concluded `failure` while
+    #     this gate's read of the same matrix was `abandoned`. A lifecycle value
+    #     in the aggregate SWALLOWS whatever the siblings concluded — so the
+    #     bug was never really about one missing word.
+    #
+    # So the verdict is now: every shard the matrix DECLARES must publish an
+    # "I ran and passed" artifact, and the gate must count all of them. A shard
+    # that was never scheduled publishes nothing and cannot be counted; a shard
+    # that failed publishes nothing either. `cancelled` (#3668) and
+    # filter-`skipped` (#4928) keep their existing meanings — see the script.
     name: Test Core
     needs: [test, filter]
     if: always()
@@ -317,36 +365,37 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Same-run artifact download needs no permission beyond the `contents:
+      # read` above (`actions: read` is for cross-run/cross-repo only), so this
+      # gate's permission block is unchanged. continue-on-error: a legitimate
+      # filter-skipped run has zero artifacts to match, and an artifact-service
+      # fault must reach the verdict as "credentials missing" — fail-closed,
+      # with the step's own outcome printed — instead of an opaque red.
+      - name: Download test shard attestations
+        id: attestations
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: shard-attest-test-*
+          path: ${{ runner.temp }}/shard-attestations
+          merge-multiple: true
+
       - name: Verify test shard results
+        env:
+          OS_ATTEST_DIR: ${{ runner.temp }}/shard-attestations
+          OS_TEST_RESULT: ${{ needs.test.result }}
+          OS_FILTER_RESULT: ${{ needs.filter.result }}
+          OS_DOWNLOAD_OUTCOME: ${{ steps.attestations.outcome }}
         run: |
-          result="${{ needs.test.result }}"
-          filter_result="${{ needs.filter.result }}"
-          echo "test matrix aggregate result: $result (filter job: $filter_result)"
-          # `skipped` passes this gate, but only when `filter` is the thing that
-          # decided it. `skipped` alone cannot tell "the path filter said no
-          # core paths changed" apart from "the path filter itself exploded and
-          # took every downstream job with it" — #4928, where the second case
-          # published a green Test Core over zero test runs. The `if:` on the
-          # `test` job above now makes a filter failure RUN the suite rather
-          # than skip it, so this branch should be unreachable; it is kept as
-          # the standing assertion of that invariant, because the failure mode
-          # it guards is silent and the `if:` is one careless edit from coming
-          # back. `filter` is in `needs` for exactly this read.
-          #
-          # `cancelled` on either side stays a pass, for #3668's reason spelled
-          # out in dogfood-gate below: cancellation is a run-lifecycle state
-          # (cancel-in-progress supersession), not a verdict, and failing here
-          # would paint a false red on the superseded SHA.
-          if [ "$result" = "skipped" ] \
-             && [ "$filter_result" != "success" ] \
-             && [ "$filter_result" != "cancelled" ]; then
-            echo "::error::Test Core shards were skipped while the filter job did not succeed (filter result: $filter_result). Refusing to report a pass over zero test runs — see #4928."
-            exit 1
-          fi
-          case "$result" in
-            success|skipped|cancelled) echo "Test Core gate satisfied ($result)." ;;
-            *) echo "::error::Test Core shards did not pass (aggregate result: $result)"; exit 1 ;;
-          esac
+          node scripts/check-shard-attestation.mjs --verify \
+            --gate 'Test Core' \
+            --dir "$OS_ATTEST_DIR" \
+            --filter-result "$OS_FILTER_RESULT" \
+            --download-outcome "$OS_DOWNLOAD_OUTCOME" \
+            --leg "test/3:$OS_TEST_RESULT"
 
 
   # ── Temporal conformance against live, non-UTC servers (ADR-0053 D-A3) ─────
@@ -683,6 +732,23 @@ jobs:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
 
+      # This shard's positive attestation (#6082) — see the identical pair at
+      # the end of the test job for why these are LAST and carry no `if:`.
+      - name: Attest this shard ran and passed
+        run: |
+          node scripts/check-shard-attestation.mjs --emit \
+            --job dogfood --shard ${{ matrix.shard }} --total 3 \
+            --out "$RUNNER_TEMP/shard-attestation"
+
+      - name: Publish this shard's attestation
+        uses: actions/upload-artifact@v7
+        with:
+          name: shard-attest-dogfood-${{ matrix.shard }}-of-3
+          path: ${{ runner.temp }}/shard-attestation/
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
   # Replaces the former auto-verify dogfood tests: runs the published
   # `objectstack verify` engine over each example app through the CLI —
   # auto-derived CRUD round-trip fidelity + the cross-owner RLS invariant.
@@ -769,6 +835,25 @@ jobs:
             echo "::endgroup::"
           done
 
+      # This leg's positive attestation (#6082). Not a matrix, so its declared
+      # roster is the single 1-of-1 credential — but dogfood-gate counts it
+      # exactly like a shard, which is what keeps the one required context
+      # covering everything it covered before the split.
+      - name: Attest this leg ran and passed
+        run: |
+          node scripts/check-shard-attestation.mjs --emit \
+            --job dogfood-verify --shard 1 --total 1 \
+            --out "$RUNNER_TEMP/shard-attestation"
+
+      - name: Publish this leg's attestation
+        uses: actions/upload-artifact@v7
+        with:
+          name: shard-attest-dogfood-verify-1-of-1
+          path: ${{ runner.temp }}/shard-attestation/
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
   dogfood-gate:
     # Stable required-check name for a SHARDED job (#3622 follow-up).
     #
@@ -784,10 +869,35 @@ jobs:
     # so the one required context still covers everything it covered before
     # the split.
     #
-    # `if: always()` + result inspection so a legitimately skipped matrix (the
-    # `filter` job says no core paths changed) still satisfies the gate —
+    # `if: always()` + attestation counting so a legitimately skipped matrix
+    # (the `filter` job says no core paths changed) still satisfies the gate —
     # LEGITIMATELY being the operative word since #4928: `filter` must have
     # concluded success (or the run been cancelled) for a skip to count.
+    # Deliberately NOT `if: !cancelled()` on the job instead: a skipped gate
+    # publishes no required-check context on the SHA, which is the #3622
+    # merge-deadlock all over again.
+    #
+    # ── It COUNTS credentials; it does not read one aggregate word (#6082) ──
+    #
+    # Same rework as test-gate above, for the same two measured defects (runs
+    # 31120902911 and 31114735713): one `needs.<matrix>.result` cannot carry
+    # three shards' verdicts, so any run-lifecycle value in it — the
+    # undocumented `abandoned` that runner starvation produces, in both of
+    # those runs — either paints a false red or, once whitelisted, swallows a
+    # sibling's real `failure`. Each of the FOUR legs this context covers
+    # (3 dogfood shards + the CLI pass) now publishes its own "I ran and
+    # passed" artifact, and this gate passes only when it counts all four.
+    #
+    # `cancelled` still passes without counting, for #3668's reason: it is a
+    # run-lifecycle state, not a shard verdict — with cancel-in-progress on,
+    # every superseded push cancels the in-flight dogfood matrix (the longest
+    # job, so almost always the one still running), and failing here would
+    # paint a false red on the old SHA. Verified experimentally there (run
+    # 30271824408, a fail-fast matrix with one real failure + one cancelled
+    # sibling): a real shard failure DOMINATES the aggregate — it reads
+    # "failure", never "cancelled" — so passing `cancelled` masks no
+    # regression. That dominance is what does NOT hold for `abandoned`, which
+    # is why `abandoned` gets counting rather than a place in a word list.
     name: Dogfood Regression Gate
     needs: [dogfood, dogfood-verify, filter]
     if: always()
@@ -796,50 +906,37 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # One pattern covers both legs: `shard-attest-dogfood-*` matches the three
+      # `…-dogfood-<n>-of-3` shard credentials and `…-dogfood-verify-1-of-1`
+      # alike. See test-gate for why continue-on-error and why no new
+      # permission is needed.
+      - name: Download dogfood attestations
+        id: attestations
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: shard-attest-dogfood-*
+          path: ${{ runner.temp }}/shard-attestations
+          merge-multiple: true
+
       - name: Verify dogfood shard results
+        env:
+          OS_ATTEST_DIR: ${{ runner.temp }}/shard-attestations
+          OS_DOGFOOD_RESULT: ${{ needs.dogfood.result }}
+          OS_VERIFY_RESULT: ${{ needs['dogfood-verify'].result }}
+          OS_FILTER_RESULT: ${{ needs.filter.result }}
+          OS_DOWNLOAD_OUTCOME: ${{ steps.attestations.outcome }}
         run: |
-          result="${{ needs.dogfood.result }}"
-          echo "dogfood matrix aggregate result: $result"
-          # cancelled is a run-lifecycle state, not a shard verdict (#3668):
-          # with cancel-in-progress on, every superseded push cancelled the
-          # in-flight dogfood matrix — the longest job, so almost always the
-          # one still running — and the old `*)` fallthrough painted a false
-          # red on the old SHA. Verified experimentally (run 30271824408, a
-          # fail-fast matrix with one real failure + one cancelled sibling):
-          # a real shard failure DOMINATES the aggregate — it reads "failure",
-          # never "cancelled" — so "cancelled" here can only mean the whole
-          # run was stopped from outside (supersession, or a manual cancel —
-          # accepted trade-off), and passing it masks no regression.
-          # Deliberately NOT `if: !cancelled()` on the job instead: a skipped
-          # gate publishes no required-check context on the SHA, which is the
-          # #3622 merge-deadlock all over again.
-          verify_result="${{ needs['dogfood-verify'].result }}"
-          echo "dogfood-verify result: $verify_result"
-          # `skipped` is only a legitimate pass when the `filter` job is what
-          # decided it — the same #4928 hole test-gate documents above. A leg
-          # that is skipped while `filter` FAILED means the regression suite
-          # never ran and nothing anywhere is red. The `if:` conditions on
-          # dogfood / dogfood-verify make that unreachable today; this is the
-          # standing assertion that keeps it so. `cancelled` on `filter` still
-          # passes, same lifecycle reasoning as the paragraph above.
-          filter_result="${{ needs.filter.result }}"
-          echo "filter job result: $filter_result"
-          fail=0
-          for r in "dogfood:$result" "dogfood-verify:$verify_result"; do
-            case "${r#*:}" in
-              skipped)
-                if [ "$filter_result" != "success" ] && [ "$filter_result" != "cancelled" ]; then
-                  echo "::error::Gate leg ${r%%:*} was skipped while the filter job did not succeed (filter result: $filter_result). Refusing to report a pass over zero runs — see #4928."
-                  fail=1
-                else
-                  echo "Gate leg ${r%%:*} satisfied (skipped by filter)."
-                fi
-                ;;
-              success|cancelled) echo "Gate leg ${r%%:*} satisfied (${r#*:})." ;;
-              *) echo "::error::Gate leg ${r%%:*} did not pass (result: ${r#*:})"; fail=1 ;;
-            esac
-          done
-          exit "$fail"
+          node scripts/check-shard-attestation.mjs --verify \
+            --gate 'Dogfood Regression Gate' \
+            --dir "$OS_ATTEST_DIR" \
+            --filter-result "$OS_FILTER_RESULT" \
+            --download-outcome "$OS_DOWNLOAD_OUTCOME" \
+            --leg "dogfood/3:$OS_DOGFOOD_RESULT" \
+            --leg "dogfood-verify/1:$OS_VERIFY_RESULT"
 
   build-core:
     name: Build Core

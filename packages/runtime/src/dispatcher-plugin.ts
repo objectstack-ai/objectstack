@@ -4,7 +4,7 @@ import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, declaresServerFault, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService } from '@objectstack/spec/contracts';
-import type { CounterStore } from '@objectstack/plugin-auth';
+import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 import { HttpDispatcher, HttpDispatcherResult, type HttpProtocolContext } from './http-dispatcher.js';
 import { isServiceServeable } from './service-serveable.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
