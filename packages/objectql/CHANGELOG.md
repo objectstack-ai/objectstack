@@ -1,5 +1,163 @@
 # @objectstack/objectql
 
+## 17.0.0-rc.5
+
+### Minor Changes
+
+- 1363084: feat(spec,objectql): `engine.transaction` 契约收紧第一批 —— `opts.require` fail-closed 与 `owned` 信号 (#5696)
+
+  `IObjectQLEngine.transaction` 的声明面(`packages/spec/src/contracts/objectql-engine.ts`,
+  ADR-0119 D1)此前把「默认驱动之外的对象写在事务外」与「驱动没有 `beginTransaction`
+  时静默降级」写成**声明语义**的一部分。#4619 把这两条降级变得可观测(PR #5724),本次
+  把其中两条收紧为调用方可选的契约,并同步修订 TSDoc 的事实性偏差。
+
+  **新增(可选,默认行为完全不变):**
+
+  - `transaction(cb, base, { require: true })` —— 驱动没有 `beginTransaction` 时
+    **抛 `TransactionUnsupportedError`(`code: 'ERR_TRANSACTION_UNSUPPORTED'`)**,
+    而不是静默降级成「无事务、无回滚」。在回调运行**之前**拒绝,所以调用方收到错误时
+    一行都还没写。这是把 `batchData` 的 atomic 门(ADR-0119 D4)泛化成通用能力:
+    只为「开事务的唯一理由就是回滚」的调用方而设,不传 `require` 的行为一字未变
+    (仍然降级 + warn-once)。
+  - 回调的**第二个参数** `{ owned: boolean }` —— `true` 表示本次调用开启了事务并拥有
+    提交/回滚,`false` 表示它 **join** 了外层已开的 ambient 事务(ADR-0067 D2),
+    或者处在降级路径上(那里根本没有事务可拥有)。join 语义本身正确且保留;缺的是
+    调用方**无从分辨**,而「整体一起回滚」这类担保只在 owned 时成立。单参数回调不受影响。
+
+  两点在 `ctx.api.transaction`(`ScopedContext.transaction`,沙箱 hook/action 体)上
+  同样生效 —— 同一个原语的第二份实现不该变成第二种方言。
+
+  **契约文本修订:** transaction 的 TSDoc 原先写「路由到别处的对象在事务**外**写入」,
+  实测不符 —— 引擎无条件把 ambient 事务句柄穿给了目标驱动,语句在**错误的连接**上执行
+  (#5351 在真 SQL driver 上实测为 `no such table`)。TSDoc 已按实测改写,并声明了随后
+  落地的两条语义:业务写跨驱动**响亮拒绝**、系统账本(`lifecycle.class` 为
+  `audit`/`telemetry`/`event`)**移出事务执行**。
+
+  **类型面:** `@objectstack/core` 的 `EngineWithTransaction` 从「手抄签名」改为
+  `transaction: IObjectQLEngine['transaction']`,窄接口可以窄,但不能与真签名漂移。
+  新导出 `EngineTransactionOptions` / `EngineTransactionInfo`(spec `contracts` 命名空间,
+  经 `@objectstack/core` 转出)。
+
+  升级须知:无破坏性变更。既有调用点全部保持原行为;要 fail-closed 的调用方显式传
+  `{ require: true }`。
+
+- 148d451: fix(objectql)!: 事务句柄不再跨数据源穿透 —— 业务写响亮拒绝、系统账本移出事务落盘 (#5351, #5696)
+
+  **这是行为变化,升级前请读完。** 只影响**注册了第二个数据源**的部署;单数据源部署
+  (绝大多数)**行为一字未变**,不拒绝、不 carve-out、不打日志。
+
+  ## 修的是什么
+
+  `buildDriverOptions` 此前把 ambient 事务句柄**无条件**塞进每一次 driver 调用,不问
+  即将收到它的是哪个 driver。于是被路由到别处的对象(`setDatasourceMapping`、显式
+  `datasource:` 绑定,或 ADR-0057 §3.6 的 lifecycle 分流)拿到的是**默认库那条连接的
+  事务对象**,knex 的 `.transacting(trx)` 把语句发到了错误的库。
+
+  实测后果(#5351,一次真实 boot):`sys_audit_log` 被 §3.6 路由到 `telemetry` 数据源,
+  insert 尝试 52 次、成功 50 次、失败 2 次,失败的两次堆栈**全部**带 knex 的
+  `trxClient.query` 帧,报 `no such table: sys_audit_log`。也就是说 —— **凡是在事务中执行
+  的被审计写入,合规审计行全部静默丢失**:业务写成功、接口 200、数据在盘上,只有「谁做的」
+  那一行没了,且无人重试。契约 TSDoc 原先写这类写入「在事务外执行」,比实际情况乐观。
+
+  ## 三条新行为
+
+  1. **句柄不再跨驱动**。事务句柄只交给开启它的那个 driver(按**实例身份**比对)。读操作
+     同样覆盖 —— 它们此前也在错误的连接上跑,而且连诊断都没有。
+  2. **业务写跨驱动 → 拒绝**。抛 `CrossDatasourceTransactionWriteError`
+     (`code: 'ERR_CROSS_DATASOURCE_TRANSACTION_WRITE'`),在任何 hook / 默认值 / 校验之前,
+     **一行都没写**。⛔ 这不是跨库原子性:`IDataDriver` 没有两阶段提交,本次刻意不做
+     (#4619 原文已排除)。
+     **升级须知**:此前这类写入会静默部分提交(而且是在错的连接上)。现在它会失败。两条修法,
+     错误消息里都写了 —— 要么让一个 `transaction()` 里写的对象都留在同一个数据源(移动对象,
+     或删掉把它路由走的 `datasourceMapping` 规则),要么把工作拆成按数据源的独立单元,由调用方
+     自己对账。
+  3. **系统账本移出事务执行(carve-out)**。`lifecycle.class` 为 `audit` / `telemetry` /
+     `event` 的只追加账本**不拒绝**,而是在自己的连接上、事务之外执行 —— 所以审计行**真正
+     落盘**,插件作者写普通 `afterInsert` 钩子零负担。
+     ⚠️ **孤儿行语义**:这些行会**在业务事务回滚后留下** —— 一条审计行可能描述一次被撤销的
+     写入。这是维护者 2026-08-06 明确接受的代价:对只追加的合规账本,「多记一条可对账的行」
+     优于「已提交的写入却少一行」,而后者正是此前在发的版本。判别式是对象**声明**的
+     `lifecycle.class`(不是它被哪种机制路由走的),ADR-0067 / ADR-0119 的 2026-08-06 修订
+     记录了全部理由与边界。
+
+  ## 同时移除
+
+  PR #5724 为跨数据源写入加的那条 `error` 级日志随之退休 —— 已经没有「静默穿错连接」可报了。
+  carve-out 路径改为 `debug` 级、每事务每数据源一次:它现在是**声明过的正常行为**,在分流部署
+  里每一次被审计的事务写入都会发生,挂在 `error`/`warn` 上只会训练读者跳过真正的持久性告警。
+
+  ## 已知边界(明确不覆盖,非疏漏)
+
+  引擎无法归属的事务句柄不参与同源校验:`ScopedContext` 的离散
+  `beginTransaction`/`commit`/`rollback` 三件套(跨 `setImmediate` 显式穿句柄,不走 txStore),
+  以及外部调用方自带的 `execCtx.transaction`。这类句柄是不透明的 driver 对象,没有回指其属主的
+  引用,猜测(比如假定它属于默认驱动)会在一边误拒合法的单库工作、在另一边误放真正被覆盖的写入。
+  这条路径保持 #5351 之前的行为,已作为决定钉进测试,收口需要 `IDataDriver` 暴露句柄属主
+  (另单跟踪)。
+
+### Patch Changes
+
+- ee3bde1: feat(objectql,cli): `os migrate summary-nulls` backfills roll-up count/sum columns left NULL by pre-seed inserts (#6063)
+
+  #5749 / PR #6013 fixed the **producer**: a parent row created from that release
+  on has its `count` / `sum` roll-up columns seeded to the empty-set value at
+  insert, so `filter ["task_count", "=", 0]`, sorting, `GROUP BY` and formulas
+  over the column stop silently dropping parents that never had a child.
+
+  Being a create-time fix, it reaches **new rows only**. A database upgraded **in
+  place** still holds parents stored before the upgrade, and the recompute that
+  would otherwise correct them runs only when one of their **children** is
+  written — so those rows keep their `NULL` indefinitely and keep disappearing
+  from the same queries. A freshly seeded deployment is correct; an upgraded one
+  is not. This release ships the other half: a one-off, explicit data migration.
+
+  ```bash
+  os migrate summary-nulls                    # dry run: full report, writes nothing
+  os migrate summary-nulls --apply            # recompute and write (prompts)
+  os migrate summary-nulls --apply --yes --json   # CI / scripts
+  os migrate summary-nulls --object project   # restrict to one object (repeatable)
+  ```
+
+  **Every NULL row is recomputed, never blanket-set to 0.** A pre-upgrade parent
+  that _does_ have children is `NULL` too — nothing ever recomputed it — and its
+  correct value is the real aggregate. `UPDATE ... SET col = 0 WHERE col IS NULL`
+  would replace a visibly-missing value with a confidently-wrong one, which the
+  next child write would then silently change back. The run computes each value
+  through the same code path the engine's own child-write recompute uses
+  (`aggregateSummaryValue`), over the descriptors the engine itself maintains, so
+  a backfilled column and a recomputed one can never mean different things.
+
+  **`min` / `max` / `avg` are never touched.** They are undefined on an empty set
+  — which is why the insert-time seed leaves them `null` — so a stored `null`
+  there is the correct reading of "no child rows", not a defect. The report names
+  them as deliberately skipped rather than omitting them silently.
+
+  Other properties: dry run by default and a dry run writes nothing at all;
+  idempotent, so re-running is safe and a clean report is the operator's own
+  verification; driver-agnostic (it reads values and tests them in JS rather than
+  pushing a null predicate down, since null-predicate compilation is precisely
+  where drivers diverge); one row's failure is recorded and the run carries on.
+  It records no deployment flag — unlike its `os migrate` siblings, nothing is
+  gated on it having run.
+
+  Never running it is safe in the sense that nothing breaks _further_: the
+  affected rows simply stay missing from `= 0` filters until a child of theirs is
+  written.
+
+- Updated dependencies [e8f8f6c]
+- Updated dependencies [7f713b6]
+- Updated dependencies [c960170]
+- Updated dependencies [def5919]
+- Updated dependencies [ce0cfe9]
+- Updated dependencies [1363084]
+  - @objectstack/spec@17.0.0-rc.5
+  - @objectstack/core@17.0.0-rc.5
+  - @objectstack/formula@17.0.0-rc.5
+  - @objectstack/metadata@17.0.0-rc.5
+  - @objectstack/metadata-core@17.0.0-rc.5
+  - @objectstack/metadata-protocol@17.0.0-rc.5
+  - @objectstack/types@17.0.0-rc.5
+
 ## 17.0.0-rc.4
 
 ### Minor Changes

@@ -1,5 +1,34 @@
 # @objectstack/verify
 
+## 17.0.0-rc.5
+
+### Patch Changes
+
+- Updated dependencies [e8f8f6c]
+- Updated dependencies [bdc8e70]
+- Updated dependencies [7f713b6]
+- Updated dependencies [c960170]
+- Updated dependencies [def5919]
+- Updated dependencies [ee3bde1]
+- Updated dependencies [ce0cfe9]
+- Updated dependencies [1363084]
+- Updated dependencies [148d451]
+  - @objectstack/spec@17.0.0-rc.5
+  - @objectstack/service-automation@17.0.0-rc.5
+  - @objectstack/objectql@17.0.0-rc.5
+  - @objectstack/core@17.0.0-rc.5
+  - @objectstack/platform-objects@17.0.0-rc.5
+  - @objectstack/plugin-auth@17.0.0-rc.5
+  - @objectstack/plugin-hono-server@17.0.0-rc.5
+  - @objectstack/plugin-security@17.0.0-rc.5
+  - @objectstack/plugin-sharing@17.0.0-rc.5
+  - @objectstack/rest@17.0.0-rc.5
+  - @objectstack/runtime@17.0.0-rc.5
+  - @objectstack/service-analytics@17.0.0-rc.5
+  - @objectstack/service-datasource@17.0.0-rc.5
+  - @objectstack/service-settings@17.0.0-rc.5
+  - @objectstack/types@17.0.0-rc.5
+
 ## 17.0.0-rc.4
 
 ### Minor Changes

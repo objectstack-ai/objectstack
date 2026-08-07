@@ -1,5 +1,19 @@
 # @objectstack/lint
 
+## 17.0.0-rc.5
+
+### Patch Changes
+
+- Updated dependencies [e8f8f6c]
+- Updated dependencies [7f713b6]
+- Updated dependencies [c960170]
+- Updated dependencies [def5919]
+- Updated dependencies [ce0cfe9]
+- Updated dependencies [1363084]
+  - @objectstack/spec@17.0.0-rc.5
+  - @objectstack/formula@17.0.0-rc.5
+  - @objectstack/sdui-parser@17.0.0-rc.5
+
 ## 17.0.0-rc.4
 
 ### Minor Changes

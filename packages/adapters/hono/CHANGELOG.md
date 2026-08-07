@@ -1,5 +1,13 @@
 # @objectstack/hono
 
+## 17.0.0-rc.5
+
+### Patch Changes
+
+- @objectstack/plugin-hono-server@17.0.0-rc.5
+- @objectstack/runtime@17.0.0-rc.5
+- @objectstack/types@17.0.0-rc.5
+
 ## 17.0.0-rc.4
 
 ### Patch Changes

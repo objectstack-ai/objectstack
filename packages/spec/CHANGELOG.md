@@ -1,5 +1,289 @@
 # @objectstack/spec
 
+## 17.0.0-rc.5
+
+### Major Changes
+
+- ce0cfe9: feat(spec)!: `system-data` 的桶默认不再包含 CSV `import`,改为按对象显式 opt-in (#4671)
+
+  **FROM → TO:`managedBy: 'system-data'` 的默认 affordance 从
+  `create/import/edit/delete/exportCsv: true` 收窄为
+  `create/edit/delete/exportCsv: true`,`import: false`。** 需要 CSV 导入向导的对象
+  显式写一行:
+
+  ```ts
+  export const SysHolidayCalendar = ObjectSchema.create({
+    name: "sys_holiday_calendar",
+    managedBy: "system-data",
+    userActions: { import: true }, // 明确要这个入口
+  });
+  ```
+
+  `platform` 现在是唯一默认授予 `import` 的桶。其余五个桶(`config`、`system-data`、
+  `engine-owned`、`append-only`、`better-auth`)一致地把它留给对象自己声明。
+
+  ## 具体消失的是哪几个 UI 入口
+
+  仓内 8 个 `system-data` 对象都不再从桶默认继承导入向导,其中要紧的是三张 RBAC 关联表 ——
+  它们是整个权限模型的**授予面**:
+
+  | 对象                          | v17-rc.3 之前的管理台入口     | 本次之后                |
+  | :---------------------------- | :---------------------------- | :---------------------- |
+  | `sys_user_position`           | 「CSV 批量绑定用户 ↔ 岗位」   | 不再出现(需显式 opt-in) |
+  | `sys_user_permission_set`     | 「CSV 批量绑定用户 ↔ 权限集」 | 不再出现(需显式 opt-in) |
+  | `sys_position_permission_set` | 「CSV 批量绑定岗位 ↔ 权限集」 | 不再出现(需显式 opt-in) |
+
+  另外 5 个成员(`sys_user_preference`、`sys_approval_delegation`、
+  `sys_notification_template`、`sys_notification_subscription`、
+  `sys_notification_preference`)同样从「有导入入口」回到「无导入入口」。
+
+  **要恢复其中任意一个,在该对象上加 `userActions: { import: true }` 即可** —— 只动
+  `import` 这一个动词,create/edit/delete/exportCsv 仍走桶默认,不需要像 v16 那样把整块
+  `userActions` 抄回来。
+
+  ## 为什么
+
+  授权边界一点没动。`import` 是 **affordance**,只决定 UI 入口是否渲染;CSV 导入写下的每一行
+  仍然逐条经过 `DelegatedAdminGate`、RLS 与权限集裁决 —— 一个无权手工授予某权限集的 admin,
+  通过 CSV 同样授不出去(ADR-0103 D5 关于 enforcement 的结论完全不变)。
+
+  变的是**杠杆**:逐行点选时一次误操作影响一个人;一份错误 CSV 就是一次批量授权,且没有天然的
+  复核节奏 —— 而这三张表恰好决定「谁能做什么」。所以批量授予入口应当是一次显式声明,而不是
+  「被归进了正确的桶」就自动继承的东西。对成批继承桶默认的 AI 生成对象元数据尤其如此:
+  「没想过 import」的默认结果落在安全侧,打开它则是 reviewer 能看见的一行。
+
+  原先「默认含 import」出自 #3355 上更早的 agent 会话(评论带 Claude Code 脚注),不是维护者
+  拍板;当时的实现 agent 自己标注了这条 security-adjacent 并指出裁决可能未考虑批量绑定权限集
+  这一具体场景。维护者 2026-08-03 正式裁决收窄,2026-08-06 最终确认。记录见 ADR-0103 的
+  #4671 addendum。
+
+  ## 升级影响
+
+  **从 v16 升上来的用户:零影响。** v16 的 `managedBy: 'system'` 默认 LOCKED,8 个成员各自用
+  `userActions: { create, edit, delete }` 重开写入,没有一个重开 `import` —— 所以 CSV 导入在
+  v16 就解析为 `false`,改名后仍是 `false`。#3355 的 4 个包逐对象 before/after 等价 pin 因此
+  从「四动词等价 + 一条 import 差异」变成**五动词全等价**,并新增一条 opt-in 可达性 pin。
+
+  **已在 v17 rc.1–rc.3 上依赖 `system-data` 默认导入入口的用户:** 加
+  `userActions: { import: true }`。
+
+### Minor Changes
+
+- e8f8f6c: feat(integration): 连接器动作可以声明它在上游做了什么，`connector_action` 因此能被计数 (#4395)
+
+  #4354 给每次流程运行加上了 `selected` / `acted` 汇总，断扫告警是
+  `selected > 0 AND acted = 0 AND unmeasured = 0`。`connector_action` 当时只能给出三个
+  答案里最诚实的那个：`ConnectorActionSchema` 只描述动作的**形状**（`key` / `label` /
+  `inputSchema` / `outputSchema`），对它究竟读还是写只字未提，所以 `crm.push_opportunity`
+  和 `crm.lookup_account` 在运行时完全无法区分。`acted: 0` 会低报一次 Salesforce 创建，
+  让每一条健康的连接器扫描都触发告警，操作员很快学会忽略它；`acted: 1` 会高报一次查询，
+  让告警永不触发——那正是 #4354 要修的原始 bug 换个楼层重演。于是执行器报
+  `metrics: { unmeasuredEffect: true }`，运行汇总记一笔 `unmeasured`。
+
+  诚实，但也是盲区：**任何走连接器的自动化流程都贡献不出任何信号**——既无法证明自己
+  干过活，也无法在停止干活时被标记出来。
+
+  **现在动作可以自己声明。** `ConnectorActionSchema` 新增可选的 `effect`：
+
+  ```ts
+  actions: [
+    { key: "push_opportunity", label: "Push Opportunity", effect: "write" },
+    { key: "lookup_account", label: "Lookup Account", effect: "read" },
+    { key: "legacy_action", label: "Legacy" }, // 不声明 —— 行为完全不变
+  ];
+  ```
+
+  `connector_action` 执行器据此计数：声明 `write` 且派发成功 → `acted: 1`；声明 `read`
+  → `acted: 0`（这是一个**真实测得的零**，不是耸肩，所以只做查询的流程重新落入断扫告警
+  的射程）；不声明 → 维持原样 `unmeasuredEffect`。派发失败时，声明 `write` 的动作回落为
+  不可计数而非零——处理器抛错时上游可能已经写成了，这与 `http` 节点对被拒绝的写请求做的
+  判断一致；声明 `read` 的动作则仍报 `acted: 0`，它无论如何都不可能改动任何东西。
+
+  声明是可选的，这是有意为之：**已有的连接器一个字都不用改，报告的内容与之前逐字相同**，
+  声明它是纯增益而不是一次迁移。`unmeasuredEffect` 的含义和消费者一个都没变，它现在是
+  兜底而不是唯一答案。
+
+  同一个声明也随 `ConnectorActionDescriptor` 一路送到设计器：`GET /api/v1/automation/connectors`
+  现在会带上 `effect`，作者在流程设计器里挑动作时，"这个会写" 是关于这次选择的事实。
+
+  `effect` 落在**可作者化的** `ConnectorActionSchema` 上，而不只是描述符接口上，因为那是
+  唯一可能的产地：`AutomationEngine.registerConnector` 存的是 `ConnectorSchema.parse(def)`
+  的结果，描述符是从这份 def 投影出来的。插件注册路径和 ADR-0097 声明式 materialization
+  路径都经过这一次 parse，所以两条路都能声明；只加在描述符上则永远无法被任何东西填充
+  （`ConnectorSchema` 是非 strict 的 `z.object`，改动前作者写下的 `effect` 会被静默丢弃）。
+
+  bulk 场景的**计数型**效果（一次动作报告它在上游碰了多少条记录）暂不做，等真实需求。
+  读/写这一刀才是解开告警的那一刀。
+
+- 7f713b6: feat(spec): name the parsed state `XParsed` on every schema that has one (ADR-0122, #5551)
+
+  A Zod schema denotes two types — `z.input` (what an author writes: defaulted keys
+  optional, pre-transform) and `z.infer` (what `.parse()` returns) — and `packages/spec`
+  has been naming them two different ways with nothing written down about which is which.
+  Measurement on `origin/main`: **1384** bare aliases mean the parsed state, **86** mean
+  the author state, and three separate first-hand sources each described the 8-file
+  minority as "the house convention". No ADR recorded either spelling.
+
+  **[ADR-0122](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0122-schema-type-alias-naming-convention.md)
+  settles it: the bare name `X` is the AUTHOR state, `XParsed` is the PARSED state.** The
+  deciding argument is the keystroke every author writes first — `const c: Connector = { … }`
+  — which should be correct by default in every domain, without knowing which file you are in.
+
+  **This release is phase 1, and it is purely additive. Nothing is renamed or removed;
+  no existing annotation stops compiling.** It declares `XParsed` for the **657** aliases
+  whose schema genuinely has two distinct shapes, so that every consumer whose meaning
+  phase 2 will change already has a name to move to:
+
+  ```ts
+  // before — one name, meaning the parsed state
+  export type Connector = z.infer<typeof ConnectorSchema>;
+  export type ConnectorInput = z.input<typeof ConnectorSchema>;
+
+  // after — the parsed state also has a name that will keep meaning it
+  export type Connector = z.infer<typeof ConnectorSchema>;
+  export type ConnectorParsed = z.infer<typeof ConnectorSchema>; // new
+  export type ConnectorInput = z.input<typeof ConnectorSchema>; // unchanged
+  ```
+
+  Schemas whose `z.input` and `z.infer` are the _same_ type (enums, plain unions, objects
+  with no defaults or transforms anywhere in their tree) deliberately get **no** `XParsed`
+  — a permanent synonym is a name you can only pick wrongly. All 718 of them are pinned
+  with compile-time assertions so the exemption cannot rot silently when one later gains
+  a `.default()`.
+
+  One name to note if you are upgrading across protocol 17: `FieldMapping` does **not**
+  gain a `FieldMappingParsed`. #5552 retired `FieldMapping.transform` and the whole
+  `FieldMappingTransform` union in the same release, and that key was the only reason the
+  schema had two shapes — so it is now isomorphic, and under this convention it correctly
+  keeps exactly one name.
+
+  **What to do now (optional, and cheap).** If you hold the result of a `.parse()` — or of
+  a `defineX()` factory, which returns it — move that annotation to `XParsed`:
+
+  ```ts
+  -const c: Connector = ConnectorSchema.parse(raw);
+  +const c: ConnectorParsed = ConnectorSchema.parse(raw);
+  ```
+
+  Annotations on values you _write_ need no change now and will be correct after phase 2.
+  Doing nothing is also fine until then.
+
+  **What comes next.** Phase 2 flips the bare names to `z.input` and ships in a major, with
+  its own changeset and migration notes. `XInput` aliases are untouched by this release and
+  their fate is decided then.
+
+- def5919: refactor(client)!: `subscribeMetadata` 的 `type` 收窄为 `MetadataEventSubject`，订阅一个合同上永远不会来的事件改为编译报错 (#4627)
+
+  `MetadataEventType` 是一个封闭枚举：13 个 metadata 类型 × 3 个动作。#4602 已经把生产端钉成 declared = enforced —— 枚举外的类型（`translation`、`datasource`、`page`、`hook`、`trigger`、`validation` 等，全都是 `DEFAULT_METADATA_TYPE_REGISTRY` 里可注册的真实类型）**不发布**任何 realtime 事件，因为不存在能合法交付给 `(event: MetadataEvent) => void` 回调的事件形状。
+
+  消费端却一直是宽的 `string`。于是 `client.events.subscribeMetadata('translation', cb)` 编译全绿、运行永盲：回调永远不会被调用，而类型系统一个字都没说。这正是 AI 写订阅代码最容易踩的形状 —— 它看起来订阅上了。
+
+  本次把消费端也钉上，两端对齐后这种代码写不出来。
+
+  **新增导出**：`@objectstack/spec/api` 的 `MetadataEventSubject` —— `metadata.{type}.{action}` 的 `{type}` 半边，`'object' | 'field' | 'view' | …`。它是从 `MetadataEventType` **派生**的（模板字面量 + 分发式条件类型），不是在旁边重抄一份，所以两者不可能各说各话：枚举加一个成员，这个联合自动跟着长。`check:api-surface` 记录为 0 breaking / 1 added。
+
+  **签名收窄**（三处，全部只是把 `string` 换成这个联合）：
+
+  - `@objectstack/client` 的 `RealtimeAPI.subscribeMetadata(type, …)`
+  - `@objectstack/client-react` 的 `useMetadataSubscription(type, …)`
+  - `@objectstack/client-react` 的 `useMetadataSubscriptionCallback(type, …)`
+
+  **FROM → TO —— 原来传 `string` 的代码怎么改**
+
+  枚举内的字面量一个字都不用动，本仓 6 处调用点（`'object'`）零迁移：
+
+  ```ts
+  // 照常编译，没有变化
+  client.events.subscribeMetadata("object", onEvent);
+  useMetadataSubscription("view");
+  ```
+
+  真正被拒绝的只有两种写法，各有各的一行修复：
+
+  ```ts
+  // FROM —— 变量声明成了宽的 string
+  const type: string = route.params.metaType;
+  client.events.subscribeMetadata(type, onEvent); // TS2345
+
+  // TO —— 把变量（或 state、或路由参数）的类型改成这个联合
+  import type { MetadataEventSubject } from "@objectstack/spec/api";
+  const type: MetadataEventSubject = "object";
+  client.events.subscribeMetadata(type, onEvent);
+  ```
+
+  ```ts
+  // FROM —— 订阅一个没有 realtime 合同的类型
+  client.events.subscribeMetadata("translation", onEvent); // TS2345
+
+  // TO —— 删掉它。这段代码从 #4602 起就收不到任何事件，
+  //       编译器现在说的是它一直以来的运行时事实，不是新增的限制。
+  ```
+
+  编译器会把每一处指出来，错误码都是 **TS2345**（`Argument of type '"translation"' is not assignable to parameter of type 'MetadataEventSubject'`）。**运行时行为零变化** —— 被拒绝的调用本来就收不到事件，标 major 是因为这是源码级破坏性变更（#5181 的同一条先例：源码级破坏、运行时不变，仍走 major）。
+
+  **本次不做、也不预答的**：哪些可注册类型「应该」有 realtime 事件，是 #4627 的轴 2 —— 一个由真实需求驱动的产品覆盖面问题（例如 #4426 的 flow/workflow i18n 若落地会把 `translation` 推上来）。枚举没有动一个成员。派生关系保证了这件事将来只需要改一处：枚举加三个名字，两端同时跟上。
+
+- 1363084: feat(spec,objectql): `engine.transaction` 契约收紧第一批 —— `opts.require` fail-closed 与 `owned` 信号 (#5696)
+
+  `IObjectQLEngine.transaction` 的声明面(`packages/spec/src/contracts/objectql-engine.ts`,
+  ADR-0119 D1)此前把「默认驱动之外的对象写在事务外」与「驱动没有 `beginTransaction`
+  时静默降级」写成**声明语义**的一部分。#4619 把这两条降级变得可观测(PR #5724),本次
+  把其中两条收紧为调用方可选的契约,并同步修订 TSDoc 的事实性偏差。
+
+  **新增(可选,默认行为完全不变):**
+
+  - `transaction(cb, base, { require: true })` —— 驱动没有 `beginTransaction` 时
+    **抛 `TransactionUnsupportedError`(`code: 'ERR_TRANSACTION_UNSUPPORTED'`)**,
+    而不是静默降级成「无事务、无回滚」。在回调运行**之前**拒绝,所以调用方收到错误时
+    一行都还没写。这是把 `batchData` 的 atomic 门(ADR-0119 D4)泛化成通用能力:
+    只为「开事务的唯一理由就是回滚」的调用方而设,不传 `require` 的行为一字未变
+    (仍然降级 + warn-once)。
+  - 回调的**第二个参数** `{ owned: boolean }` —— `true` 表示本次调用开启了事务并拥有
+    提交/回滚,`false` 表示它 **join** 了外层已开的 ambient 事务(ADR-0067 D2),
+    或者处在降级路径上(那里根本没有事务可拥有)。join 语义本身正确且保留;缺的是
+    调用方**无从分辨**,而「整体一起回滚」这类担保只在 owned 时成立。单参数回调不受影响。
+
+  两点在 `ctx.api.transaction`(`ScopedContext.transaction`,沙箱 hook/action 体)上
+  同样生效 —— 同一个原语的第二份实现不该变成第二种方言。
+
+  **契约文本修订:** transaction 的 TSDoc 原先写「路由到别处的对象在事务**外**写入」,
+  实测不符 —— 引擎无条件把 ambient 事务句柄穿给了目标驱动,语句在**错误的连接**上执行
+  (#5351 在真 SQL driver 上实测为 `no such table`)。TSDoc 已按实测改写,并声明了随后
+  落地的两条语义:业务写跨驱动**响亮拒绝**、系统账本(`lifecycle.class` 为
+  `audit`/`telemetry`/`event`)**移出事务执行**。
+
+  **类型面:** `@objectstack/core` 的 `EngineWithTransaction` 从「手抄签名」改为
+  `transaction: IObjectQLEngine['transaction']`,窄接口可以窄,但不能与真签名漂移。
+  新导出 `EngineTransactionOptions` / `EngineTransactionInfo`(spec `contracts` 命名空间,
+  经 `@objectstack/core` 转出)。
+
+  升级须知:无破坏性变更。既有调用点全部保持原行为;要 fail-closed 的调用方显式传
+  `{ require: true }`。
+
+### Patch Changes
+
+- c960170: tooling: strictness 台账新增第九个判定词 `covered` —— 给「无门、无 parse,但每个消费者都已把守」的形状片段一个诚实的格子 (#5249)
+
+  `docs/audits/2026-07-unknown-key-strictness-ledger.md` 的 `Class` 列是**机读**的(按类小计是对它做算术),枚举值此前只有八个。`ui/app.zod.ts` 的 `BaseNavItemSchema` 八个都不合适,而这不是标签精度问题 —— **是词汇表返回了错误的动作**:
+
+  - 两轴表(carrier / parse)把「carrier 缺席 + parse 缺席」解析成 `no door`,其规定的后续动作是 ADR-0049 退役。**在这里是破坏性的**:这个基底的键被九个导航分支共享,九个分支各自 `.strict()` 并带 `navItemUnknownKeyError`,退役等于删掉九个活着的分支的共享键。
+  - `no gate` 反向错(门是存在的,就在成员上)。`authorable` 是 `view.zod.ts` 里 `FormFieldBaseSchema` 的先例,但**那个基底真的被 `.extend()`**,姿态会继承,所以它是一扇真门;把这个也记成 `authorable`,等于邀请下一轮 sweep 去「把活干完」—— 收紧一个没有任何 parse 的形状。
+  - `verify` 的语义是「待检查」,而检查在批 19 就做完了。
+
+  维护者 2026-08-06 裁定取 A:**加词,而不是四舍五入到最近的错误答案** —— 与批 15 加 `no gate` 同一条理由。同一个测量第二次返回相反方向的后续动作,说明缺的是一格判定,不是这个站点特殊。这一格的读者主要是后续 agent,一个指向错误**动作**的分类,会被执行它的人放大,正是「消费者侧宽容」在分类层的镜像。
+
+  **`covered` 的定义**:carrier 缺席、parse 缺席,但词汇在**每个消费者处都被完整把守**;后续动作是**无**。它拿到自己的桶而不是并入 `no door`:两者测量相同,但小计是一张工作清单,而两行规定的工作相反 —— 合并会把刚刚消除的歧义原样搬到上一层。
+
+  改动面:
+
+  - `packages/spec/scripts/lib/strictness-ledger-doc.ts` —— `VERDICTS` / `BUCKETS` / `BUCKET_OF` / `emptyBuckets()` / 渲染标签。`verify` 的**语义与归桶完全不动**(仍计入 authorable),它继续为下一个需要挂起的站点保留。
+  - 台账 `ui/app.zod.ts` 行 `verify` → `covered`;头部散文补上词表变更的出处一行(批 13 `no door` / 批 15 `no gate` / #5249 `covered`),分类表与两轴表各补一行。
+  - `.counts.md` 走 `gen:strictness-ledger` 整体重算:全局 authorable 43 → 42、新增 `covered` 1;`ui/` authorable 34 → 33、`covered` 1。总数仍是 197,分桶仍恰好划分。
+
+  **改判范围是测量出来的,不是走过场。** 判据是机械的:`covered` 要求键通过 `...X.shape` **展开**到达消费者 —— 展开把逐键 schema 复制进一个全新的 `z.object`,姿态是新对象自己的,所以基底是惰性的;而 `.extend()` / `.merge()` / `.omit()` **继承**姿态,基底就还是一扇真门。对五个已分诊目录的全部 **197** 个 strip 站点跑了这条判据,**只有一个**站点是展开的,就是本行。另外三个模块私有的 strip 基底各有归宿且**维持原判**:`view.zod.ts` 的 `FormFieldBaseSchema` 在 `:1475` 被 `.extend()`(姿态继承 → 真门 → 仍 `authorable`);`query.zod.ts` 的 `BaseQuerySchema` 在 `:485` 被 `.extend()` 成 `QuerySchema`(同理 → 仍 `open`);`component.zod.ts` 的 `EmptyProps` 作为**值**挂在 `ComponentPropsMap` 的十一个 carrier 键下(carrier 存在 → 根本不满足「carrier 缺席」)。其余约 50 个站点是属性下的内联嵌套字面量,天然自带 carrier,不可能是 `covered`。
+
+  不改任何 schema 姿态 —— 批 19 已测定关掉这个基底是保证的 no-op,而 #4583 明确 no-op 收紧并非中性(_"a precisely-validated dead slot is the more convincing lie"_)。
+
 ## 17.0.0-rc.4
 
 ### Major Changes

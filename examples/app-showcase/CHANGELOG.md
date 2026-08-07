@@ -1,5 +1,25 @@
 # @objectstack/example-showcase
 
+## 0.3.14-rc.4
+
+### Patch Changes
+
+- Updated dependencies [e8f8f6c]
+- Updated dependencies [7f713b6]
+- Updated dependencies [c960170]
+- Updated dependencies [def5919]
+- Updated dependencies [ce0cfe9]
+- Updated dependencies [1363084]
+  - @objectstack/spec@17.0.0-rc.5
+  - @objectstack/cloud-connection@17.0.0-rc.5
+  - @objectstack/connector-mcp@17.0.0-rc.5
+  - @objectstack/connector-openapi@17.0.0-rc.5
+  - @objectstack/connector-rest@17.0.0-rc.5
+  - @objectstack/connector-slack@17.0.0-rc.5
+  - @objectstack/driver-sql@17.0.0-rc.5
+  - @objectstack/runtime@17.0.0-rc.5
+  - @objectstack/service-datasource@17.0.0-rc.5
+
 ## 0.3.14-rc.3
 
 ### Patch Changes

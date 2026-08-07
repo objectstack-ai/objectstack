@@ -1,5 +1,97 @@
 # @objectstack/service-automation
 
+## 17.0.0-rc.5
+
+### Minor Changes
+
+- e8f8f6c: feat(integration): 连接器动作可以声明它在上游做了什么，`connector_action` 因此能被计数 (#4395)
+
+  #4354 给每次流程运行加上了 `selected` / `acted` 汇总，断扫告警是
+  `selected > 0 AND acted = 0 AND unmeasured = 0`。`connector_action` 当时只能给出三个
+  答案里最诚实的那个：`ConnectorActionSchema` 只描述动作的**形状**（`key` / `label` /
+  `inputSchema` / `outputSchema`），对它究竟读还是写只字未提，所以 `crm.push_opportunity`
+  和 `crm.lookup_account` 在运行时完全无法区分。`acted: 0` 会低报一次 Salesforce 创建，
+  让每一条健康的连接器扫描都触发告警，操作员很快学会忽略它；`acted: 1` 会高报一次查询，
+  让告警永不触发——那正是 #4354 要修的原始 bug 换个楼层重演。于是执行器报
+  `metrics: { unmeasuredEffect: true }`，运行汇总记一笔 `unmeasured`。
+
+  诚实，但也是盲区：**任何走连接器的自动化流程都贡献不出任何信号**——既无法证明自己
+  干过活，也无法在停止干活时被标记出来。
+
+  **现在动作可以自己声明。** `ConnectorActionSchema` 新增可选的 `effect`：
+
+  ```ts
+  actions: [
+    { key: "push_opportunity", label: "Push Opportunity", effect: "write" },
+    { key: "lookup_account", label: "Lookup Account", effect: "read" },
+    { key: "legacy_action", label: "Legacy" }, // 不声明 —— 行为完全不变
+  ];
+  ```
+
+  `connector_action` 执行器据此计数：声明 `write` 且派发成功 → `acted: 1`；声明 `read`
+  → `acted: 0`（这是一个**真实测得的零**，不是耸肩，所以只做查询的流程重新落入断扫告警
+  的射程）；不声明 → 维持原样 `unmeasuredEffect`。派发失败时，声明 `write` 的动作回落为
+  不可计数而非零——处理器抛错时上游可能已经写成了，这与 `http` 节点对被拒绝的写请求做的
+  判断一致；声明 `read` 的动作则仍报 `acted: 0`，它无论如何都不可能改动任何东西。
+
+  声明是可选的，这是有意为之：**已有的连接器一个字都不用改，报告的内容与之前逐字相同**，
+  声明它是纯增益而不是一次迁移。`unmeasuredEffect` 的含义和消费者一个都没变，它现在是
+  兜底而不是唯一答案。
+
+  同一个声明也随 `ConnectorActionDescriptor` 一路送到设计器：`GET /api/v1/automation/connectors`
+  现在会带上 `effect`，作者在流程设计器里挑动作时，"这个会写" 是关于这次选择的事实。
+
+  `effect` 落在**可作者化的** `ConnectorActionSchema` 上，而不只是描述符接口上，因为那是
+  唯一可能的产地：`AutomationEngine.registerConnector` 存的是 `ConnectorSchema.parse(def)`
+  的结果，描述符是从这份 def 投影出来的。插件注册路径和 ADR-0097 声明式 materialization
+  路径都经过这一次 parse，所以两条路都能声明；只加在描述符上则永远无法被任何东西填充
+  （`ConnectorSchema` 是非 strict 的 `z.object`，改动前作者写下的 `effect` 会被静默丢弃）。
+
+  bulk 场景的**计数型**效果（一次动作报告它在上游碰了多少条记录）暂不做，等真实需求。
+  读/写这一刀才是解开告警的那一刀。
+
+### Patch Changes
+
+- bdc8e70: fix(service-automation): runAs:'system' 的 create_record 按 ADR-0118 染全三列——组织、属主、创建者禁 NULL (#5494)
+
+  修的是缺陷,不是新语义——契约是 ADR-0118(#4608)既有的:显式 `isSystem`、fail-closed、
+  禁 NULL 歧义;`runAs` 声明的是授权姿态而非身份(ADR-0073 D2),提权不等于匿名。
+
+  根因:`resolveRunDataContext` 的 system 分支把触发上下文的 `userId` / `tenantId` 整个丢弃,
+  而三列的平台盖章恰好全部键在被丢弃的信息上——`created_by` 键在写上下文的 `userId`
+  (ObjectQL 审计钩子)、`owner_id` 键在安全中间件的 acting user(而整条中间件含盖章步骤在
+  `isSystem` 上短路)、`organization_id` 键在上下文 `tenantId`(驱动层租户机制)。于是用户
+  触发的 system 清扫流程建出的每一行三列全 NULL:落在组织分区之外(唯一索引跨 NULL 不生效、
+  org 作用域查询看不见),也落在所有 owner/creator 作用域授权之外——issue 里"admin 都
+  403"的由来。
+
+  修复(writer 侧,`packages/services/service-automation`):
+
+  - system 分支把触发身份原样带过去(`userId` + `tenantId`),与 action-body 缝的
+    `{ ...caller, isSystem: true }` 信封(hotcrm#548 同族修复)同形:`isSystem` 独自决定
+    授权(中间件在读到 `userId` 之前就短路),身份只驱动归因盖章(`created_by`/`updated_by`、
+    审计 actor)、驱动层的 `organization_id` 填充,以及下游 record-change 级联的触发身份;
+  - `create_record` 对 system 运行补 `owner_id` 填充(fill-only、schema 存在才染):所有权锚
+    的平台盖章在 `isSystem` 上被短路,payload 是唯一通道;染的是 acting user——与同一触发在
+    `runAs:'user'` 下会得到的默认一致,不是把系统身份塞进 owner(ADR-0118 D6 / ADR-0073 D3);
+  - 流程 `fields` 显式给值一律优先;真正无用户的运行(schedule)保持三列不染——没有 acting
+    user 时按 ADR-0118 D1,哨兵串与伪用户都是被禁的替代品,`svc:flow:*` actor 标签 +
+    `flowRunId` 继续承担溯源。
+
+  行为变化:`runAs:'system'` 且触发上下文带 org 的运行,其数据操作在驱动层按
+  `(org = 触发 org OR org IS NULL)` 作用域——与 action-body 缝一致的姿态;schedule 触发的
+  运行不带 org,行为不变。
+
+- Updated dependencies [e8f8f6c]
+- Updated dependencies [7f713b6]
+- Updated dependencies [c960170]
+- Updated dependencies [def5919]
+- Updated dependencies [ce0cfe9]
+- Updated dependencies [1363084]
+  - @objectstack/spec@17.0.0-rc.5
+  - @objectstack/core@17.0.0-rc.5
+  - @objectstack/formula@17.0.0-rc.5
+
 ## 17.0.0-rc.4
 
 ### Major Changes
