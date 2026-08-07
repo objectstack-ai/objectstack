@@ -5,26 +5,6 @@ description: Manifest protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Structured permission grants requested by a plugin (ADR-0025 §3.2).
-
-Each list scopes one capability surface the plugin may touch. The
-
-install-time consent flow (ADR §3.5 step 2) turns this declaration into
-
-the persisted `granted_permissions` set enforced at load by the
-
-PluginPermissionEnforcer.
-
-@example
-
-```jsonc
-
-\{ "services": ["object", "http"], "hooks": ["record.beforeInsert"],
-
-"network": ["api.acme.com"], "fs": [] \}
-
-```
-
 <Callout type="info">
 **Source:** `packages/spec/src/kernel/manifest.zod.ts`
 </Callout>
