@@ -152,6 +152,24 @@
 //               2026-08-06 on the objectql case: two back-to-back runs were
 //               byte-identical, so this gate has no known nondeterminism.
 //
+//               BOOTSTRAP MARGINS (#5278 option A). The two paragraphs above
+//               describe a race that the exact-calibration loop lost five times
+//               running -- objectql 333 -> 334 -> 335 -> 339 and lint 30 -> 32,
+//               each calibration stale within minutes of being pushed, while
+//               seven unrelated PRs were kicked from the queue as collateral.
+//               The maintainer's ruling was to land the invariant with a
+//               DOCUMENTED margin on the packages that proved hottest rather
+//               than run a sixth lap: `@objectstack/objectql`,
+//               `@objectstack/lint` and `@objectstack/rest` are recorded at
+//               their measurement PLUS TEN, and each says so in its own note,
+//               naming the measured number and the sha. This is the ledger's
+//               ONLY slack and it is deliberately loud: nothing else here may
+//               sit above its measurement, and a margin is not a place to hide
+//               a real increase. Because shrinkage is informational, each of
+//               the three prints its own `ℹ ... can be lowered` line on every
+//               run -- that line IS the tightening worklist, and closing it is
+//               a follow-up PR, not a thing to leave running for months.
+//
 // The root is the one asymmetry: its `typecheck` script is the workspace
 // aggregator, so its OWN top-level TypeScript is covered by a `typecheck:root`
 // script (tsc, invoked from lint.yml) or by a ledger entry like anyone else.
@@ -265,11 +283,14 @@ const DEBT = {
     note: 'code-tier 2 (TS2345).',
   },
   '@objectstack/service-analytics': {
-    errors: 7,
-    note: 'code-tier 6 (TS2339 x4, TS7053 x2) + 1 noise (TS6133). Re-measured 7 at 5ab08428, up from 3. '
-      + 'The 4 TS2339 are all in __tests__/measure-source-field-gate.test.ts, a file added after the entry '
-      + 'was written -- the package layer of this gate is closed to new debt, the ERROR-COUNT layer was '
-      + 'not, so a new test file walked its errors in past everything (#5278).',
+    errors: 10,
+    note: 'code-tier 9 (TS2339 x7, TS7053 x2) + 1 noise (TS6133). Re-measured 10 at e8db1a230, up from 7 '
+      + 'at 5ab08428 and 3 before that. All 7 TS2339 sit in __tests__/measure-source-field-gate.test.ts, '
+      + 'the same file that carried 4 of them when this entry was last written; the +3 arrived with #5716 '
+      + '/ PR #5963 rewriting that gate\'s refusals -- no new file, no new error class. This entry is the '
+      + 'standing specimen for why the ERROR-COUNT layer needed a ratchet of its own: the PACKAGE layer '
+      + 'of this gate has been closed to new debt the whole time, and the count still walked 3 -> 7 -> 10 '
+      + 'unremarked (#5278).',
   },
   '@objectstack/service-automation': {
     errors: 5,
@@ -298,8 +319,13 @@ const DEBT = {
     note: 'code-tier 12 (TS2345 x7: manifest action handlers called without `namespace`/`actionId`; TS2322) + 1 noise. Was ledgered at 44 with "no code-tier finding" -- wrong in both directions: 31 of those 44 were unresolved imports (see the NodeNext note at the top of this ledger), and the resolution they were blocking is what made the 12 real ones visible.',
   },
   '@objectstack/service-storage': {
-    errors: 42,
-    note: 'code-tier 5 (TS2339/TS2347); the rest is config-tier (TS2835) and noise (TS7006).',
+    errors: 41,
+    note: 'code-tier 8 (TS2339 x4, TS2347 x4); config-tier 19 (TS2835); noise 14 (TS7006 x12, TS6196, '
+      + 'TS6133). Re-measured 41 at e8db1a230, DOWN from 42 -- the -1 follows #5540 / PR #5983 retiring '
+      + '`IStorageService.list(prefix)`. Lowered rather than left standing: an entry kept above its own '
+      + 'measurement is undocumented slack, and this ledger carries slack in exactly one place -- the '
+      + 'three bootstrap margins that say so in their own note. 11 of the 41 are in '
+      + 'storage-route-ledger.conformance.test.ts and 7 in storage-service-plugin.test.ts.',
   },
   '@objectstack/spec-monorepo': {
     errors: 80,
@@ -360,8 +386,8 @@ const TEST_DEBT = {
       + 'but this ledger has ever seen it. 443 of the 547 are in one file, src/approval-service.test.ts.',
   },
   '@objectstack/objectql': {
-    tests: 127,
-    errors: 339,
+    tests: 130,
+    errors: 349,
     note: 'TS2339 x115, TS2554 x93 (wrong arity), TS7006 x47, TS2345 x19, TS2322 x12, TS2749 x11. '
       + 'Re-measured 333 at 5ab08428, up from 219 -- the largest absolute growth in either ledger. The '
       + 'shape held (TS2339/TS2554/TS7006 still lead) but every number roughly tripled, and the file count '
@@ -375,35 +401,52 @@ const TEST_DEBT = {
       + 'not this ledger\'s. This is the package that showed what the merge queue does to a frozen '
       + 'number: the queue builds the PR as merged onto the CURRENT queue head, so a count frozen minutes '
       + 'earlier is already stale, and #5278\'s own PR was kicked on this entry three times before it '
-      + 'landed.',
+      + 'landed. Re-measured at e8db1a230 (this PR merged with main after a day of drift): still 339, '
+      + 'and the histogram above is unchanged code for code -- the churn in this window missed the one '
+      + 'package that had absorbed the most of it. RECORDED 349 is a bootstrap margin (+10 over 339 '
+      + 'measured at e8db1a230) -- tighten via the ℹ hint immediately after landing (#5278 option A).',
   },
   '@objectstack/runtime': {
-    tests: 101,
-    errors: 218,
-    note: 'TS18048 x89 (possibly-undefined), TS2345 x26, TS18046 x20, TS2339 x16, TS2493 x15. Src '
-      + 'graduated in #4311 (declares `typecheck`); this is purely the hidden test layer. Re-measured 218 '
-      + 'at 5ab08428, DOWN from 220 -- one of only two entries that shrank. The TS6133 x25 the old note '
-      + 'named is down to x7, so unused-symbol cleanup happened somewhere in the test tree while '
-      + 'possibly-undefined grew; the net -2 hides a much larger churn in both directions.',
+    tests: 102,
+    errors: 227,
+    note: 'TS18048 x98 (possibly-undefined), TS2345 x26, TS18046 x20, TS2339 x16, TS2493 x15, TS2835 x11, '
+      + 'TS2554 x11. Src '
+      + 'graduated in #4311 (declares `typecheck`); this is purely the hidden test layer. Measured 220 -> '
+      + '218 (5ab08428, one of only two entries that ever shrank; TS6133 x25 collapsed to x7 while '
+      + 'possibly-undefined grew, so that net -2 hid a much larger churn in both directions) -> 227 '
+      + '(e8db1a230). The latest +9 is fully attributed and is ONE file: every one of the nine is a '
+      + 'TS18048 in src/domains/meta-item-envelope.test.ts, added by #5563 / PR #5895 (the '
+      + '`GET /meta/:type/:name` envelope convergence). Nothing else in the package moved.',
   },
   '@objectstack/rest': {
-    tests: 58,
-    errors: 143,
-    note: 'TS2835 x64 (NodeNext extensions), TS7006 x56, TS2554 x10, TS2550 x7. Also in DEBT. Re-measured '
-      + '136 at 5ab08428, up from 105, and 143 a few hours later at 77adf29 the same day. Read the '
+    tests: 62,
+    errors: 163,
+    note: 'TS2835 x67 (NodeNext extensions), TS7006 x57, TS2554 x13, TS2550 x10. Also in DEBT. Measured '
+      + '105 -> 136 (5ab08428) -> 143 (77adf29, hours later the same day) -> 153 (e8db1a230). Read the '
       + 'top-of-ledger NodeNext note before sizing this one: TS2835 and the implicit-any pile it causes '
-      + 'are 120 of the 143, and '
-      + 'they are one repair, not 120. This is also the fastest-moving entry in either ledger, and it is '
+      + 'are 124 of the 153, and '
+      + 'they are one repair, not 124. Of the latest +10, 8 are attributable to three test files this '
+      + 'window added -- rest-meta-save-receipt-envelope.test.ts x4 (#5265 / PR #5926), '
+      + 'meta-item-envelope.test.ts x2 (#5563 / PR #5895), '
+      + 'analytics-dataset-unlisted-refusal-envelope.test.ts x2; the remaining 2 landed in files that '
+      + 'already existed and are NOT attributed further, because the pre-merge per-file counts were not '
+      + 'retained and a made-up attribution is worse than an admitted gap. This is also the '
+      + 'fastest-moving entry in either ledger, and it is '
       + 'the one that proved the gate works: #5278\'s own PR went red in CI on it, because a `pull_request` '
       + 'run builds the branch MERGED INTO main and three rest-touching PRs had landed since the sweep. A '
-      + 'ledger number is always a number about a moment.',
+      + 'ledger number is always a number about a moment. RECORDED 163 is a bootstrap margin (+10 over 153 '
+      + 'measured at e8db1a230) -- tighten via the ℹ hint immediately after landing (#5278 option A).',
   },
   '@objectstack/plugin-auth': {
-    tests: 34,
-    errors: 129,
-    note: 'TS2493 x42 (tuple index out of range), TS18048 x24, TS2740 x19, TS2322 x11, TS2532 x9. '
-      + 'Re-measured 129 at 5ab08428, up from 124; composition unchanged in shape. 63 sit in '
-      + 'src/auth-manager.test.ts.',
+    tests: 38,
+    errors: 131,
+    note: 'TS2493 x42 (tuple index out of range), TS18048 x24, TS2740 x19, TS2322 x11, TS2532 x9, '
+      + 'TS2339 x8, TS2741 x8. '
+      + 'Measured 124 -> 129 (5ab08428, composition unchanged in shape) -> 131 (e8db1a230). Half of the '
+      + 'latest +2 is a TS2554 in src/last-admin-guard.test.ts, a file added by #5941 / PR #5993 '
+      + '(the break-glass delete guard); the other 1 landed in a file that already existed and is not '
+      + 'attributed further. 64 of the 131 sit in src/auth-manager.test.ts, 22 in '
+      + 'src/admin-import-users.test.ts and 18 in src/admin-user-endpoints.test.ts.',
   },
   '@objectstack/mcp': { tests: 8, errors: 52, note: 'TS18046 x51 -- `error` is of type unknown, one catch-block idiom repeated. Re-measured 52 at 5ab08428, exact.' },
   '@objectstack/driver-mongodb': {
@@ -415,8 +458,18 @@ const TEST_DEBT = {
       + 'entry that turned over two thirds of its content is exactly why counts alone cannot be trusted '
       + 'to describe debt (#5278).',
   },
-  '@objectstack/lint': { tests: 61, errors: 30, note: 'TS7006 x20, TS2835 x6, TS6059 x4. Re-measured 30 at 5ab08428, up from 26; the +4 is TS6059 (a file outside rootDir), a class the old note did not list.' },
-  '@objectstack/plugin-security': { tests: 34, errors: 21, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20.' },
+  '@objectstack/lint': {
+    tests: 61,
+    errors: 42,
+    note: 'TS7006 x22, TS2835 x6, TS6059 x4. Measured 26 -> 30 (5ab08428, the +4 being TS6059, a file '
+      + 'outside rootDir, a class the pre-#5278 note did not list) -> 32 (e8db1a230). The latest +2 are '
+      + 'both TS7006 and both in files that already existed; three lint test files changed in this window '
+      + '(#5762 / PR #5952, #5378 / PR #5904) and the pre-merge per-file counts were not retained, so the '
+      + 'delta is recorded rather than attributed. 10 of the 32 sit in '
+      + 'src/validate-visibility-predicates.test.ts. RECORDED 42 is a bootstrap margin (+10 over 32 '
+      + 'measured at e8db1a230) -- tighten via the ℹ hint immediately after landing (#5278 option A).',
+  },
+  '@objectstack/plugin-security': { tests: 35, errors: 21, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 across 35 test files rather than 34 -- the file count moved, the error count did not.' },
   '@objectstack/formula': { tests: 16, errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
   '@objectstack/trigger-record-change': { tests: 5, errors: 9, note: 'TS2353 x9 -- still the one unknown-property shape repeated, now in four files. Re-measured 9 at 5ab08428, up from 8.' },
   '@objectstack/verify': { tests: 4, errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
@@ -433,7 +486,7 @@ const TEST_DEBT = {
   },
   '@objectstack/platform-objects': { tests: 9, errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
   '@objectstack/plugin-sharing': { tests: 13, errors: 3, note: 'TS6133 x2, TS18048 x1. Re-measured 3 at 5ab08428, exact.' },
-  '@objectstack/service-sms': { tests: 4, errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured 1 at 5ab08428, exact; #5773 then added sms-manifest-providers.contract.test.ts (3 -> 4 files) and the file count moved while the error count did not -- the new file is type-clean with the exclusion lifted.' },
+  '@objectstack/service-sms': { tests: 5, errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured 1 at 5ab08428 and still 1 at e8db1a230, across 5 test files rather than 3: #5773 added sms-manifest-providers.contract.test.ts and #2814 / PR #6042 added sms-daily-quota.test.ts. The file count moved twice while the error count did not -- both new files are type-clean with the exclusion lifted.' },
   '@objectstack/connector-rest': { tests: 3, errors: 1, note: 'TS6133 x1. Re-measured 1 at 5ab08428, exact.' },
 };
 
