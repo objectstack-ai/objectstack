@@ -111,6 +111,150 @@ function firstRejectedOption(allowed: string[], value: unknown): { value: unknow
   return at === -1 ? null : { value: picked[at] };
 }
 
+/**
+ * The value bounds a specifier declares — `min`/`max` (numeric window) and
+ * `minLength`/`maxLength` (string length window), as `SpecifierSchema` spells
+ * them (#5932).
+ */
+interface DeclaredBounds {
+  min?: number;
+  max?: number;
+  minLength?: number;
+  maxLength?: number;
+}
+
+/** A breached bound, in the form both call sites need to report it. */
+interface RangeViolation {
+  /** `FieldErrorCode`, ADR-0114 — the member that mirrors the breached property. */
+  code: 'min_value' | 'max_value' | 'min_length' | 'max_length';
+  /** `range` (numeric window) or `length` (character window) — picks the prose. */
+  kind: 'range' | 'length';
+  /** The declared window in machine form, for `FieldError.constraint`. */
+  constraint: Record<string, unknown>;
+  /** The declared window in prose (`min 6, max 64`), for the env log line. */
+  declared: string;
+}
+
+/**
+ * The bounds this specifier declares, or `null` when it declares none.
+ *
+ * Keyed on the DECLARATION, not on the specifier `type` — deliberately, and
+ * unlike the `options` check next door, which keys on `OPTION_BEARING_TYPES`.
+ * The difference is the spec's, not a preference: `SpecifierSchema`'s
+ * superRefine *ties* an option table to exactly `select`/`radio`/`multiselect`
+ * (it rejects those three without one), so "types that must declare a table"
+ * and "types whose value is checked against it" are the same set and no third
+ * list can drift. It ties `min`/`max`/`minLength`/`maxLength` to nothing —
+ * doc comments say `number`/`slider` and `text`/`textarea`, but the schema
+ * accepts them on any specifier and only checks their ordering. Inventing a
+ * type list here would therefore BE the third list, and it would recreate this
+ * issue one level down: a `min` authored on a type not on my list would parse,
+ * render, and quietly not be enforced. So: declared is enforced, wherever it is
+ * declared. The value's SHAPE decides applicability instead (see
+ * {@link firstRangeViolation}), which is exactly how the `pattern` branch in
+ * `validatePatch` has always worked.
+ */
+function declaredBounds(spec: {
+  min?: unknown; max?: unknown; minLength?: unknown; maxLength?: unknown;
+}): DeclaredBounds | null {
+  const out: DeclaredBounds = {};
+  let any = false;
+  for (const k of ['min', 'max', 'minLength', 'maxLength'] as const) {
+    const v = spec[k];
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      out[k] = v;
+      any = true;
+    }
+  }
+  return any ? out : null;
+}
+
+/**
+ * The value as a number, or `null` when it is not a number at all.
+ *
+ * A string that parses is admitted for the same reason `declaredOptionValues`
+ * compares in string form: a stored value has been through JSON and, over the
+ * REST boundary, a form post, so a `number` specifier legitimately reads back
+ * as `'42'` and rejecting that would enforce the transport rather than the
+ * bound. Booleans, arrays and objects are NOT coerced (`Number(true)` is 1,
+ * `Number([])` is 0) — a value of the wrong shape is `invalid_type`, a
+ * different constraint with a different owner, and inventing it here would
+ * reject writes this check was never asked to touch. Same posture, same
+ * sentence, as `firstRejectedOption`.
+ */
+function numericValue(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * The bound this value breaches, or `null` when it sits inside every declared
+ * window.
+ *
+ * ONE comparison, shared by both paths that produce an effective value — the
+ * save path ({@link SettingsService.validatePatch}) and the env path
+ * ({@link SettingsService.effectiveEnvOverride}) — for the same reason
+ * {@link firstRejectedOption} is shared: #5204 exists precisely because one of
+ * those two consulted the declared table and the other did not, and #5932's
+ * triage ruled that the env half must reuse the one judgment point rather than
+ * open a second implementation of the same comparison.
+ *
+ * A value that is not comparable against a declared window is left alone (a
+ * non-numeric value under `min`/`max`, a non-string under
+ * `minLength`/`maxLength`). Check ordering mirrors `record-validator.ts`'s
+ * equivalent branches so the two report the same bound for the same value; a
+ * value can breach only one side of a well-ordered window anyway, and
+ * `SpecifierSchema` rejects `min > max` at parse time.
+ */
+function firstRangeViolation(bounds: DeclaredBounds, value: unknown): RangeViolation | null {
+  const { min, max, minLength, maxLength } = bounds;
+
+  if (typeof min === 'number' || typeof max === 'number') {
+    const n = numericValue(value);
+    if (n !== null) {
+      const constraint: Record<string, unknown> = {};
+      if (typeof min === 'number') constraint.min = min;
+      if (typeof max === 'number') constraint.max = max;
+      const declared = [
+        typeof min === 'number' ? `min ${min}` : null,
+        typeof max === 'number' ? `max ${max}` : null,
+      ].filter(Boolean).join(', ');
+      if (typeof min === 'number' && n < min) {
+        return { code: 'min_value', kind: 'range', constraint, declared };
+      }
+      if (typeof max === 'number' && n > max) {
+        return { code: 'max_value', kind: 'range', constraint, declared };
+      }
+    }
+  }
+
+  if (typeof minLength === 'number' || typeof maxLength === 'number') {
+    if (typeof value === 'string') {
+      const actual = value.length;
+      const constraint: Record<string, unknown> = {};
+      if (typeof minLength === 'number') constraint.minLength = minLength;
+      if (typeof maxLength === 'number') constraint.maxLength = maxLength;
+      constraint.actual = actual;
+      const declared = [
+        typeof minLength === 'number' ? `min ${minLength}` : null,
+        typeof maxLength === 'number' ? `max ${maxLength}` : null,
+      ].filter(Boolean).join(', ') + ' characters';
+      if (typeof maxLength === 'number' && actual > maxLength) {
+        return { code: 'max_length', kind: 'length', constraint, declared };
+      }
+      if (typeof minLength === 'number' && actual < minLength) {
+        return { code: 'min_length', kind: 'length', constraint, declared };
+      }
+    }
+  }
+
+  return null;
+}
+
 interface RegisteredManifest {
   manifest: SettingsManifest;
   /** Resolved specifier scopes for fast lookup. */
@@ -134,6 +278,16 @@ interface RegisteredManifest {
    * "check against an empty set", which would reject everything.
    */
   optionTables: Map<string, string[]>;
+  /**
+   * Declared value bounds for every specifier that declares at least one of
+   * `min` / `max` / `minLength` / `maxLength`, keyed by specifier key (#5932).
+   *
+   * Precomputed for the same reason and read the same way as `optionTables`:
+   * `get()` is the hottest path, and an ABSENT key means "this specifier
+   * declares no window" — nothing to enforce, unchanged behaviour — rather
+   * than "an empty window", which would reject everything.
+   */
+  bounds: Map<string, DeclaredBounds>;
 }
 
 /**
@@ -286,12 +440,18 @@ export class SettingsService {
     const encryptedKeys = new Set<string>();
     const defaults = new Map<string, unknown>();
     const optionTables = new Map<string, string[]>();
+    const bounds = new Map<string, DeclaredBounds>();
     const defaultScope = manifest.scope ?? 'tenant';
     for (const spec of manifest.specifiers) {
       if (!spec.key || LAYOUT_ONLY_TYPES.has(spec.type)) continue;
       scopes.set(spec.key, spec.scope ?? defaultScope);
       if (spec.encrypted || spec.type === 'password') encryptedKeys.add(spec.key);
       if (typeof spec.default !== 'undefined') defaults.set(spec.key, spec.default);
+      // Declared bounds are recorded wherever they are declared — see
+      // `declaredBounds` for why this is keyed on the declaration and the
+      // option table is keyed on the type (#5932).
+      const declared = declaredBounds(spec);
+      if (declared) bounds.set(spec.key, declared);
       if (OPTION_BEARING_TYPES.has(spec.type)) {
         // A manifest with no option table cannot say what is legal. The spec
         // refuses that shape at parse time, but `registerManifest` takes
@@ -311,6 +471,7 @@ export class SettingsService {
       defaults,
       actions,
       optionTables,
+      bounds,
     });
     this.auditEnvOverrides(manifest.namespace);
   }
@@ -334,11 +495,13 @@ export class SettingsService {
    */
   private auditEnvOverrides(namespace: string): void {
     const reg = this.registry.get(namespace);
-    if (!reg || reg.optionTables.size === 0) return;
-    // Only the option-bearing keys can be rejected, so only they are worth
-    // walking. `effectiveEnvOverride` does the judging (and the reporting);
-    // the value it returns is of no interest here.
-    for (const key of reg.optionTables.keys()) {
+    if (!reg) return;
+    // Only the keys that declare something enforceable can be rejected, so only
+    // they are worth walking: an option table (#5131/#5204) or a value window
+    // (#5932). `effectiveEnvOverride` does the judging (and the reporting); the
+    // value it returns is of no interest here.
+    const enforceable = new Set([...reg.optionTables.keys(), ...reg.bounds.keys()]);
+    for (const key of enforceable) {
       this.effectiveEnvOverride(reg, namespace, key);
     }
   }
@@ -364,6 +527,14 @@ export class SettingsService {
    *
    * Reporting lives here rather than at the call sites so no future fourth
    * caller can read an override without the rejection being heard.
+   *
+   * #5932 added the second family of declared constraints (`min`/`max`/
+   * `minLength`/`maxLength`) HERE rather than on the env path's own terms, for
+   * the reason #5204 is on file: the same comparison in two places is how the
+   * env half came to disagree with the save half in the first place. Both
+   * families are judged at this one point, by the same helpers the save path
+   * calls, and both produce the same verdict — an override that is not in force
+   * contributes no value and pins nothing.
    */
   private effectiveEnvOverride(
     reg: RegisteredManifest,
@@ -375,15 +546,36 @@ export class SettingsService {
     if (typeof envRaw !== 'string') return null;
 
     const value = coerceEnvValue(envRaw, reg.defaults.get(key));
+
     // A key with no declared table has nothing to enforce — unchanged behaviour.
     const allowed = reg.optionTables.get(key);
-    if (!allowed) return { envName, value };
+    if (allowed) {
+      const rejected = firstRejectedOption(allowed, value);
+      if (rejected) {
+        this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
+          what: 'is not a declared option for',
+          detail: `Allowed values: ${allowed.join(', ')}.`,
+          fix: 'one of the allowed values',
+        });
+        return null;
+      }
+    }
 
-    const rejected = firstRejectedOption(allowed, value);
-    if (!rejected) return { envName, value };
+    // Likewise a key with no declared window (#5932).
+    const bounds = reg.bounds.get(key);
+    if (bounds) {
+      const breach = firstRangeViolation(bounds, value);
+      if (breach) {
+        this.reportRejectedEnvOverride(reg, namespace, key, envName, value, {
+          what: `is outside the declared ${breach.kind} for`,
+          detail: `Allowed ${breach.kind}: ${breach.declared}.`,
+          fix: `a value within the allowed ${breach.kind}`,
+        });
+        return null;
+      }
+    }
 
-    this.reportRejectedEnvOverride(reg, namespace, key, envName, allowed, rejected.value);
-    return null;
+    return { envName, value };
   }
 
   /**
@@ -422,8 +614,14 @@ export class SettingsService {
     namespace: string,
     key: string,
     envName: string,
-    allowed: string[],
     offending: unknown,
+    /**
+     * What this particular declaration refused, as the three fragments the one
+     * sentence template needs. Passed in rather than branched on here so a
+     * third constraint family reuses the dedupe, the redaction rule and the
+     * consequence/fix prose instead of growing a second reporter beside them.
+     */
+    rejection: { what: string; detail: string; fix: string },
   ): void {
     const dedupeAt = `${envName}=${String(offending)}`;
     if (this.reportedEnvOverrides.has(dedupeAt)) return;
@@ -436,13 +634,13 @@ export class SettingsService {
     const secret = reg.encryptedKeys.has(key);
     const rejected = secret ? '' : ` Rejected value: '${String(offending)}'.`;
     const message =
-      `[SettingsService] env override ${envName} is not a declared option for ` +
-      `setting '${namespace}.${key}' — IGNORED.${rejected} Allowed values: ${allowed.join(', ')}. ` +
+      `[SettingsService] env override ${envName} ${rejection.what} ` +
+      `setting '${namespace}.${key}' — IGNORED.${rejected} ${rejection.detail} ` +
       `Consequence: this override does NOT take effect and nothing else looks wrong — ` +
       `'${namespace}.${key}' resolves from the next layer of the cascade instead ` +
       `(a stored global/tenant/user value, else the manifest default), and reads report ` +
       `THAT layer as the source rather than 'env'. ` +
-      `Fix: set ${envName} to one of the allowed values, or unset it and configure ` +
+      `Fix: set ${envName} to ${rejection.fix}, or unset it and configure ` +
       `'${namespace}.${key}' through the settings UI.`;
 
     if (this.logger?.error) this.logger.error(message);
@@ -884,6 +1082,9 @@ export class SettingsService {
    * - `pattern` (text fields) + non-empty value that mismatches → rejected.
    * - `options` (`select`/`radio`/`multiselect`) + non-empty value outside
    *   the declared table → rejected (`invalid_option`).
+   * - `min` / `max` / `minLength` / `maxLength` + non-empty value outside the
+   *   declared window → rejected (`min_value` / `max_value` / `min_length` /
+   *   `max_length`, #5932).
    * - All-null patches (namespace reset) and unparseable visibility
    *   expressions skip validation rather than block the write.
    *
@@ -894,7 +1095,15 @@ export class SettingsService {
    * alone is not rejected because a stale `provider` sits in the store —
    * otherwise every workspace carrying historical drift would be locked out
    * of its own settings page, unable to edit anything, which is worse than
-   * the gap this closes.
+   * the gap this closes. The value-window check (#5932) inherits that gate
+   * for the same reason and one more: bounds get TIGHTENED over a product's
+   * life (a `password_min_length` floor raised from 6 to 8), and a workspace
+   * sitting below the new floor must still be able to edit its unrelated
+   * settings — it is told about the key only when it writes that key.
+   *
+   * At most one `FieldError` per offending key: every branch above `continue`s
+   * once it has spoken, so a client is handed the first constraint the value
+   * broke rather than a pile it must rank itself.
    */
   private async validatePatch(
     namespace: string,
@@ -1020,6 +1229,45 @@ export class SettingsService {
             // The declared pattern, so a client can format its own message
             // rather than parsing ours (`FieldError.constraint`, ADR-0114).
             constraint: { pattern: spec.pattern },
+          });
+          continue;
+        }
+      }
+
+      // A declared value window is enforced at save time (#5932). Until this
+      // branch existed `min`/`max`/`minLength`/`maxLength` were, like the
+      // `options` table before #5131, a front-end convention: the console
+      // number input clamps to the declared bounds, so an admin going through
+      // the UI could not produce a bad one — but `PUT /api/settings/:ns` is an
+      // authorizable public surface, and a script, a migration or AI-authored
+      // bootstrap code could write anything at all. The load-bearing case is
+      // `auth.password_min_length`, which declares `min: 6` and accepted `1`
+      // (and negatives): the value reaches better-auth's password policy and
+      // is honoured there, so the declaration was the only thing claiming a
+      // floor existed and nothing was holding it.
+      if (!empty) {
+        const bounds = declaredBounds(spec);
+        const breach = bounds ? firstRangeViolation(bounds, value) : null;
+        if (breach) {
+          // Same redaction rule as `invalid_option`, same reason: a bound is
+          // not a secret, but `encrypted` is authorable on any specifier and
+          // this message travels back through the API (and into logs).
+          const secret = reg.encryptedKeys.has(key);
+          const got = secret ? '' : ` Received '${String(value)}'.`;
+          errors.push({
+            field: key,
+            code: breach.code,
+            message: breach.kind === 'length'
+              ? `${label} must be within the declared length (${breach.declared}).${got}`
+              : `${label} must be within the declared range (${breach.declared}).${got}`,
+            label,
+            // The declared window as discrete values, so a client composes its
+            // own sentence instead of parsing ours (`FieldError.constraint`,
+            // ADR-0114) — `{ min, max }` for a numeric window, and
+            // `{ minLength, maxLength, actual }` for a length one, the keys
+            // the spec's own examples and the record validator already use.
+            constraint: breach.constraint,
+            ...(secret ? {} : { value }),
           });
         }
       }

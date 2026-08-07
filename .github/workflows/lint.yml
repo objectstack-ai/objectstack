@@ -335,6 +335,26 @@ jobs:
       - name: Workflow status-function guard
         run: pnpm check:workflow-status-functions
 
+      # Shard positive-attestation gate (#6082). ci.yml's two aggregate gates
+      # used to decide from one `needs.<matrix>.result` word, which cannot carry
+      # three shards' verdicts: run 31120902911 read the undocumented
+      # `abandoned` produced by runner starvation and painted a false red (PR
+      # #6010 evicted 31s later), and run 31114735713 had a shard at
+      # conclusion=failure while that same read said `abandoned` — a real
+      # failure swallowed. Both gates now COUNT one "I ran and passed" artifact
+      # per declared shard. This guard holds that arrangement to its own
+      # declaration: the roster each gate counts must equal the matrix each job
+      # runs (GitHub cannot share one literal between `strategy.matrix` and a
+      # downstream step, so the two are reconciled here rather than remembered),
+      # the credential steps must be the LAST steps of their job with no `if:`
+      # (anything after them can fail the job while the credential already
+      # counts as a pass), and every attesting job must be counted by exactly
+      # one gate. Runs its own --self-test first — which is also where the
+      # dominance experiment lives, since a dev cannot fabricate a real
+      # runner-starved CI run.
+      - name: Shard attestation gate
+        run: pnpm check:shard-attestation
+
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared
       # none — so consumers installed TypeScript sources, unit tests and build

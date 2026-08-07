@@ -10,28 +10,47 @@ description: Flow Builder protocol schemas
 Studio Flow Builder Protocol
 
 Defines the specification for the visual Flow Builder (automation canvas)
+
 within ObjectStack Studio. Covers:
+
 - **Node Shape Registry**: Shape and visual style per FlowNodeAction type
+
 - **Canvas Node**: Position, size, and rendering hints for each node on canvas
+
 - **Canvas Edge**: Visual properties for sequence flows (normal, default, fault, back-edge)
+
 - **Flow Builder Config**: Canvas settings, palette, minimap, and toolbar
 
 ## Architecture
 
 ```
+
 ┌──────────────────────────────────────────────────────────────┐
+
 │  Toolbar (run / save / undo / zoom / layout)                │
+
 ├──────────┬───────────────────────────────────┬───────────────┤
+
 │  Node    │       Canvas                      │  Property     │
+
 │  Palette │  ┌─────┐    ┌──────────┐          │  Panel        │
+
 │          │  │start│───▶│ decision │──▶ ...   │  (node-aware) │
+
 │  ─ BPMN  │  └─────┘    └──────────┘          │               │
+
 │  ─ CRUD  │       ┌──────────┐                │  ─ config     │
+
 │  ─ Logic │       │parallel  │                │  ─ edges      │
+
 │  ─ HTTP  │       │ gateway  │                │  ─ validation │
+
 ├──────────┴───────────────────────────────────┴───────────────┤
+
 │  Minimap / Zoom Controls                                     │
+
 └──────────────────────────────────────────────────────────────┘
+
 ```
 
 <Callout type="info">
@@ -62,7 +81,7 @@ Studio Flow Builder configuration
 | **zoom** | `{ min: number; max: number; default: number; step: number }` | ✅ | Canvas zoom settings |
 | **layoutAlgorithm** | `Enum<'dagre' \| 'elk' \| 'force' \| 'manual'>` | ✅ | Default auto-layout algorithm |
 | **layoutDirection** | `Enum<'TB' \| 'BT' \| 'LR' \| 'RL'>` | ✅ | Default auto-layout direction |
-| **nodeDescriptors** | `{ action: string; shape: Enum<'rounded_rect' \| 'circle' \| 'diamond' \| 'parallelogram' \| 'hexagon' \| 'diamond_thick' \| 'attached_circle' \| 'screen_rect'>; icon: string; defaultLabel: string; … }[]` | optional | Custom node render descriptors (merged with built-in defaults) |
+| **nodeDescriptors** | `{ action: string; shape: Enum<'rounded_rect' \| 'circle' \| 'diamond' \| 'parallelogram' \| 'hexagon' \| … +3 more>; icon: string; defaultLabel: string; … }[]` | optional | Custom node render descriptors (merged with built-in defaults) |
 | **showMinimap** | `boolean` | ✅ | Show minimap panel |
 | **showPropertyPanel** | `boolean` | ✅ | Show property panel |
 | **showPalette** | `boolean` | ✅ | Show node palette sidebar |

@@ -39,7 +39,7 @@ Skills are versioned as **one bundle**. You do not track or update each skill in
 
 {/* BEGIN GENERATED: skills (packages/spec/scripts/build-skill-docs.ts) — DO NOT EDIT */}
 
-ObjectStack ships **10 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
+ObjectStack ships **11 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
 
 ## Quick Reference
 
@@ -55,6 +55,7 @@ ObjectStack ships **10 skills** — one per authoring domain, plus process skill
 | 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the per-locale source layout. |
 | 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. |
 | 10 | [PM Dispatch](#pm-dispatch) | `process` | `skills/objectstack-pm-dispatch/` | Run a project-manager dispatch loop over a GitHub backlog: triage and queue ready issues, claim each one, dispatch it to a parallel developer agent that returns a structured JSON report, review the results against GitHub, and drive accepted pull requests to landing — escalating to the maintainer only what genuinely needs a human decision. Ships the developer-agent operating template the loop injects into every dispatch (no custom agent types required) and the upstream-reporting procedure for platform defects an app project finds. |
+| 11 | [Upgrade](#upgrade) | `process` | `skills/objectstack-upgrade/` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
 
 ---
 
@@ -195,6 +196,20 @@ Use when asked to "work through the backlog", "batch-dispatch issues", "派发 i
 Do not use for authoring ObjectStack metadata (the domain skills cover that), for a single already-scoped change you can just make, or as a replacement for the project's own conventions file — that file always wins.
 
 **Tags:** `pm`, `dispatch`, `backlog`, `triage`, `multi-agent`, `delivery`, `github`, `escalation`, `upstream`
+
+---
+
+### Upgrade
+
+**Domain** `process` · **Path** `skills/objectstack-upgrade/`
+
+Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report.
+
+Use when a project is on an older protocol major and must move to the current one, when `@objectstack/spec` was bumped across a major and metadata or code stopped parsing, when a parse or `tsc` error quotes a `[REMOVED]` prescription, or when asked to "upgrade to v17" / "升级到 v17" / "一键升级元数据项目".
+
+Do not use to author new metadata (the domain skills cover that), to design a retirement in the ObjectStack platform repo itself (that is the platform's own internal playbook), or to hand-write a rewrite the conversion chain already applies — running the chain is always the first step, never a fallback.
+
+**Tags:** `upgrade`, `migration`, `protocol`, `major`, `retired-keys`, `tombstone`, `conversions`, `validate`, `report`
 
 ---
 

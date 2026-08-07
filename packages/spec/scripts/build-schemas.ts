@@ -20,6 +20,12 @@ import { RENAMED_DEFS, carryAuthorableKey, checkRenameTable } from './lib/rename
 // at #5317 so the pipe-direction rule (#4488) is assertable without running the
 // whole generator — see scripts/zod-graph.test.ts.
 import { zodChildSchemas, zodShapeOf } from './lib/zod-graph';
+// Who owns what under json-schema/. This generator shares that directory with
+// gen:openapi, and used to clear it by deleting the directory itself (#5371).
+import {
+  FOREIGN_JSON_SCHEMA_ARTIFACTS,
+  clearOwnedOutputs,
+} from './lib/json-schema-out-dir';
 import {
   AUTHORABLE_SURFACE_DESCRIPTION,
   AUTHORABLE_SURFACE_DIR_NAME,
@@ -272,36 +278,37 @@ function writeFileWithRetry(filePath: string, content: string, retries = MAX_RET
   }
 }
 
-// Clean output directory ensures no stale files remain
+// Clean THIS generator's outputs, so no stale file of ours remains — and only
+// ours (#5371). `json-schema/` is shared with `gen:openapi`, which writes
+// `openapi.json` there and is the last step of `pnpm build`; deleting the
+// directory itself (what this block used to do) left every entry point that
+// stops after `gen:schema` — `check:authorable-surface`, and therefore
+// `check:generated` — with the artifact gone, and `@objectstack/rest`'s openapi
+// route tests failing `expected 503 to be 200` in a package nobody had touched.
+// The ownership registry and the deny-list reasoning live in
+// scripts/lib/json-schema-out-dir.ts.
 if (fs.existsSync(OUT_DIR)) {
   console.log(`Cleaning output directory: ${OUT_DIR}`);
 
-  // Use a more robust cleanup with multiple retries and longer delays
-  // to handle filesystem race conditions in CI environments
-  for (let attempt = 0; attempt < MAX_RETRIES * 2; attempt++) {
-    try {
-      // Try removing with native Node.js rmSync
-      if (fs.existsSync(OUT_DIR)) {
-        fs.rmSync(OUT_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: RETRY_DELAY_BASE_MS * 2 });
-      }
+  // Retries and back-off unchanged: filesystem races in CI are why they exist.
+  const cleaned = clearOwnedOutputs(OUT_DIR, {
+    maxAttempts: MAX_RETRIES * 2,
+    retryDelayBaseMs: RETRY_DELAY_BASE_MS,
+    sleep: sleepSync,
+    onUnremovable: (entry, error) => {
+      // Continue rather than abort — ensureDir/writeFileWithRetry will regenerate
+      // over whatever is left, which is what this block did before #5371 too.
+      console.warn(
+        `Warning: Failed to fully clean ${entry} after ${MAX_RETRIES * 2} attempts:`,
+        error,
+      );
+    },
+  });
 
-      // Verify the directory is actually gone
-      if (!fs.existsSync(OUT_DIR)) {
-        break;
-      }
-
-      // If still exists, wait before retrying with exponential backoff
-      sleepSync(RETRY_DELAY_BASE_MS * (attempt + 1));
-    } catch (error) {
-      // If this is the last attempt, log but continue (we'll try to work with what's there)
-      if (attempt === (MAX_RETRIES * 2 - 1)) {
-        console.warn(`Warning: Failed to fully clean directory after ${attempt + 1} attempts:`, error);
-        // Try to continue anyway - ensureDir will create missing parts
-        break;
-      }
-      // Wait before retry with exponential backoff
-      sleepSync(RETRY_DELAY_BASE_MS * (attempt + 1));
-    }
+  // Say what was spared and who owns it. Silence here would make the exemption
+  // indistinguishable from a clean that quietly missed a file.
+  for (const entry of cleaned.preserved) {
+    console.log(`  ↳ kept ${entry} — owned by ${FOREIGN_JSON_SCHEMA_ARTIFACTS.get(entry)} (#5371)`);
   }
 
   // Wait a bit to ensure file system has synced

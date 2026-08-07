@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { ISmsTransport } from '@objectstack/spec/contracts';
-import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth';
+import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 import { SmsService, LogSmsTransport, maskPhoneNumber, normalizeSmsRecipient } from './sms-service.js';
 import { SmsDailyQuota } from './sms-daily-quota.js';
 import { makeSmsTransport, type SmsProviderTag } from './transports/index.js';

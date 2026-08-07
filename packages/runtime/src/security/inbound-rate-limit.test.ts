@@ -19,7 +19,7 @@ import {
     resolveRateLimitKey,
     SharedTokenBucketLimiter,
 } from './inbound-rate-limit.js';
-import type { CounterStore } from '@objectstack/plugin-auth';
+import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 
 /** An in-test counter store that also records whether it was ever consulted. */
 function memoryStore() {

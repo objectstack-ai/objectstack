@@ -5,7 +5,11 @@
   and wave 2's ownership model settled by the 2026-07-27 addendum.
   Strict-default flip of D1/D2 tracked in #3438 — the media half flips per
   deployment (#3681); evidence for the remaining halves decided by the
-  2026-07-30 addendum. Wave 2 sequence in #3459.
+  2026-07-30 addendum. Wave 2 sequence in #3459. The 2026-08-07 addendum is
+  **errata only** — it registers the outside vocabulary (`fieldRuntimeType`,
+  `FileRef`, `RecordRef`, "read-time expansion") against this ADR's names so a
+  grep for those words lands here, and corrects three membership facts; it
+  changes no decision.
 - **Date**: 2026-07-22
 - **Issue**: design follow-up generalizing #3405 / #3406 (inline lookup param
   silently stripped); relates #3407 (silently dropped writes), #1878 / #1891
@@ -949,3 +953,70 @@ fix it.
 17.0 train: the D2 default flip (validator default + env-var swap + dogfood
 duals + release notes), and the scan migration (command, engine wiring,
 creation-time attestation, upgrade-path advertisement).
+
+## Addendum (2026-08-07) — vocabulary aliases and three membership facts (errata; no decision changes)
+
+This addendum decides **nothing**. It exists because decisions recorded above
+were re-proposed as if they had never been made, and the sole cause was
+vocabulary. #5867 asked for a *new* ADR to settle four things — a spec-owned
+`fieldRuntimeType`, named `FileRef` / `RecordRef` reference types, read-time
+expansion, and a typed action handler — every one of which D1, D2 and D3
+settled on 2026-07-22 and shipped as code. The proposal was searched for
+duplicates before it was filed. A repo-wide grep for `fieldRuntimeType`,
+`FileRef` and `RecordRef` returned **zero** hits on the day it was filed — in
+`docs/adr/` and everywhere else, and it is this addendum that changed that —
+because this ADR spells the same contract `valueSchemaFor` /
+`FileReferenceIdValueSchema` / `ReferenceIdValueSchema` / `ValueForm`. One
+failed search produced a phantom design card and spent a maintainer approval
+before the premise check caught it (#5867, closed as already satisfied by this
+ADR; the errata card is #6189).
+
+The lesson is narrow and mechanical. Prime Directive #13 sends every author to
+**grep the ADRs** before changing behaviour under them, so an accepted ADR is
+binding only as far as it is findable — and a grep can only hit words that are
+present. The outside vocabulary is therefore registered here, inside the record
+the search is meant to land in. Nothing below alters D1–D4 or any earlier
+addendum; where a fact and this ADR's own prose disagree, the disagreement is
+named rather than edited away.
+
+### Alias registry — outside or colloquial name → the name this ADR uses
+
+| said elsewhere | this ADR / the shipped contract | defined in |
+|---|---|---|
+| `fieldRuntimeType(type, { multiple })` | **`valueSchemaFor(def, form)`** (D1.2) — the pure derivation from a field definition to its value schema. Note the shape difference: `multiple` is not an option argument, it is read off the definition by `isMultiValueField(def)`. | `packages/spec/src/data/field-value.zod.ts` |
+| `FileRef` | **`FileReferenceIdValueSchema`**, over the `FILE_REFERENCE_TYPES` class (D1.1, D3) | same file |
+| `RecordRef` | **`ReferenceIdValueSchema`**, over the `REFERENCE_VALUE_TYPES` class (D1.1) | same file |
+| "read-time expansion" (读时展开) | **`ValueForm`**, whose two members are `'stored'` and `'expanded'` (D1.2); `valueSchemaFor(def, form)` dispatches on it, and `expanded` ≡ `stored` for types with no expansion | same file |
+| `defineActionHandler` / "typed action handler" | **`ActionHandler`** and `ActionHandlerContext` plus `validateActionParams()` / `ACTION_PARAM_BUILTIN_KEYS` (D2) | `packages/spec/src/ui/action-params.zod.ts` |
+
+Add a row here whenever an outside proposal turns out to be asking for
+something D1–D4 already decided. An unregistered alias costs a duplicate ADR,
+and a duplicate ADR over a live contract is a *second source of truth* for the
+very thing this ADR's Context section opens by counting four of.
+
+### Three membership facts, as shipped
+
+#5867's framing carried three errors about the type classes it was naming.
+They are recorded here because an alias table is worse than useless if a reader
+carries the aliased vocabulary's *coverage* across with its names.
+
+1. **`owner` is not a `FieldType`.** The declared members are enumerated in
+   `packages/spec/src/data/field.zod.ts`, and `owner` is not among them; lines
+   52–53 say why: `user` is "NOT a separate storage primitive … Ownership stays
+   the existing `owner_id` convention (plugin-security); a declarative `owner`
+   is a possible future flag." So ownership is not part of the reference class
+   this ADR contracts over, and `RecordRef` coverage that lists `owner` is
+   describing a type that does not exist.
+2. **`REFERENCE_VALUE_TYPES` includes `tree`.** The shipped class is `lookup`,
+   `master_detail`, `user`, `tree` — `tree` is a hierarchical reference and
+   stores a record id like the rest, so `referenceTargetOf()` and every
+   consumer of the class already cover it. Two errata in one fact: D1.1 above
+   names this constant `REFERENCE_TYPES` and lists three members; the shipped
+   constant is **`REFERENCE_VALUE_TYPES`** and has four. The shipped set is the
+   contract — this sentence corrects the record of it, and changes no decision.
+3. **`FILE_REFERENCE_TYPES` includes `avatar`.** The class is `image`, `file`,
+   `avatar`, `video`, `audio` — as D1.1 already lists it, and as the whole
+   media family D3's 2026-07-24 addendum insists on covering together. A
+   `FileRef` scoped to `file`/`image`/`video`/`audio` would leave `avatar` on
+   the legacy inline shape, which is precisely the per-type carve-out that
+   addendum rejected.

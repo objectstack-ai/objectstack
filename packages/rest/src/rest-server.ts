@@ -2404,6 +2404,38 @@ export class RestServer {
                 // enforcement side reads the SAME value the resolver computed,
                 // instead of dropping it here (the boundary this issue closes).
                 ...(authz.posture ? { posture: authz.posture } : {}),
+                // [ADR-0090 D9/D10 / #6071] Principal taxonomy, resolved by the
+                // SAME rule the runtime / MCP entry applies
+                // (`packages/runtime/src/security/resolve-execution-context.ts`)
+                // so the two transports can no longer disagree about WHO is
+                // asking. Enforcement reads this field
+                // (`plugin-security/explain-engine.ts` derivePosture,
+                // `security-plugin.ts` agent baseline, `perf-timing.ts`
+                // disclosure gate), and until now it arrived on the dispatcher
+                // face only — every such judgment was silently never-true on
+                // REST.
+                //
+                // `'human'` is the ONLY kind this transport can produce, and
+                // that is the runtime rule restricted to the provenances this
+                // door accepts, not a second derivation:
+                //  - `agent` (+ the `onBehalfOf` delegation link, which ONLY
+                //    the agent arm sets) requires an OAuth access token naming
+                //    an authorized client. This transport never accepts one:
+                //    OAuth bearers are honoured on the `/mcp` door alone
+                //    (`acceptOAuthAccessToken`, set solely by the dispatcher's
+                //    `/mcp` path match) precisely so coarse tool-family scopes
+                //    cannot ride onto REST. So `onBehalfOf` is not
+                //    representable here — same as every human principal on the
+                //    dispatcher face, which also leaves it undefined.
+                //  - `guest` is not representable either: this method returned
+                //    `undefined` above when the envelope carried no `userId`,
+                //    so an anonymous REST caller gets NO context at all (and
+                //    `enforceAuth` 401s it). Anonymous REST is unchanged.
+                //  - A session-backed OR API-key-backed principal is `human` on
+                //    both faces (pinned on the runtime side by
+                //    resolve-execution-context.test.ts, "an authenticated
+                //    (API-key) request resolves as a human principal").
+                principalKind: 'human',
                 isSystem: false,
                 org_user_ids: authz.org_user_ids,
                 // [ADR-0105 D2] The caller's org access set — the `group`
