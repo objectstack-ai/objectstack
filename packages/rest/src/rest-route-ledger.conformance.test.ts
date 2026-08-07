@@ -35,10 +35,13 @@
  * dependency closure).
  */
 
+// `.js` on the relative imports: without it `moduleResolution: nodenext` does
+// not resolve them, every imported symbol degrades to `any`, and the callbacks
+// below turn into a TS7006 pile in this package's TEST_DEBT entry.
 import { describe, it, expect, vi } from 'vitest';
-import { RestServer } from './rest-server';
-import { mountAndRecordDirectRoutes } from './direct-mount-composition';
-import { REST_ROUTE_LEDGER } from './rest-route-ledger';
+import { RestServer } from './rest-server.js';
+import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
+import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
 
 /** Minimal IHttpServer mock that records registrations. */
 function createMockServer() {

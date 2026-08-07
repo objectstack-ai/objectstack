@@ -31,14 +31,18 @@
  * actually happen.
  */
 
+// Relative imports carry their `.js` extension: under `moduleResolution:
+// nodenext` an extension-less one does not resolve, every symbol it names
+// becomes `any`, and the callbacks over those symbols then report TS7006 — the
+// pile that dominates this package's TEST_DEBT entry (AGENTS.md, Build & Test).
 import { describe, it, expect, vi } from 'vitest';
-import { RestServer } from './rest-server';
-import { mountAndRecordDirectRoutes } from './direct-mount-composition';
-import { registerPackageRoutes } from './package-routes';
-import { registerExternalDatasourceRoutes } from './external-datasource-routes';
-import { createRestApiPlugin } from './rest-api-plugin';
-import { REST_ROUTE_LEDGER } from './rest-route-ledger';
-import { toTemplatePath } from './openapi-builtin-paths';
+import { RestServer } from './rest-server.js';
+import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
+import { registerPackageRoutes } from './package-routes.js';
+import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
+import { createRestApiPlugin } from './rest-api-plugin.js';
+import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
+import { toTemplatePath } from './openapi-builtin-paths.js';
 
 // ---------------------------------------------------------------------------
 // harness
@@ -125,7 +129,7 @@ function bootWith(
 
 /** Drive the mounted `GET {base}/openapi.json` handler and read the body. */
 async function serveOpenApi(server: ReturnType<typeof createMockServer>, base = '/api/v1') {
-  const call = server.get.mock.calls.find(([path]: [string]) => path === `${base}/openapi.json`);
+  const call = server.get.mock.calls.find((args: unknown[]) => args[0] === `${base}/openapi.json`);
   expect(call, `GET ${base}/openapi.json must be mounted for this pin to mean anything`).toBeDefined();
   let body: any;
   const res: any = {
@@ -267,7 +271,7 @@ describe('#5822 — an unmounted registrar is reported by nothing', () => {
     }
     // Not merely absent from the table: absent from the wire too — the gate
     // itself is unchanged, this pins that the record follows it.
-    const mountedPaths = server.get.mock.calls.map(([path]: [string]) => path);
+    const mountedPaths = server.get.mock.calls.map((args: unknown[]) => args[0]);
     expect(mountedPaths).not.toContain('/api/v1/packages');
 
     const body = await serveOpenApi(server);
