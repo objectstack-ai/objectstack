@@ -8,13 +8,18 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
+    },
+    "./rate-limit-storage": {
+      "types": "./dist/rate-limit-storage.d.ts",
+      "import": "./dist/rate-limit-storage.mjs",
+      "require": "./dist/rate-limit-storage.js"
     }
   },
   "scripts": {
-    "build": "tsup --config ../../../tsup.config.ts",
+    "build": "tsup",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

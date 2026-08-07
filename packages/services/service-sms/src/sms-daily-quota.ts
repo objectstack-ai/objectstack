@@ -70,7 +70,7 @@ import {
   InProcessCounterStore,
   incrementFixedWindow,
   type CounterStore,
-} from '@objectstack/plugin-auth';
+} from '@objectstack/plugin-auth/rate-limit-storage';
 
 /**
  * The error code a quota-refused send answers with, as the `CODE: message`
