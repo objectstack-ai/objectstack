@@ -77,7 +77,7 @@ describe('SqlDriver rejects an uncompilable filter instead of dropping it', () =
   // it — the type layer never excluded this input, which is exactly why the
   // runtime refusal has to.
   const find = (where: unknown) =>
-    driver.find('deal', { object: 'deal', fields: ['id'], where: where as FilterCondition });
+    driver.find('deal', { fields: ['id'], where: where as FilterCondition });
 
   // ── the array dialect is gone: every array shape is refused ───────────
 

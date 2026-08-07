@@ -112,17 +112,17 @@ describe('SqlDriver — contains escapes LIKE metacharacters (P0-3)', () => {
   });
 
   it('a "%" value matches only rows containing a literal %, not every row', async () => {
-    const r = await driver.find('docs', { object: 'docs', where: { title: { $contains: '%' } } });
+    const r = await driver.find('docs', { where: { title: { $contains: '%' } } });
     expect(r.map((x: any) => x.id)).toEqual(['1']);
   });
 
   it('a "_" value matches only rows containing a literal _, not any single char', async () => {
-    const r = await driver.find('docs', { object: 'docs', where: { title: { $contains: '_' } } });
+    const r = await driver.find('docs', { where: { title: { $contains: '_' } } });
     expect(r.map((x: any) => x.id)).toEqual(['3']);
   });
 
   it('an ordinary substring still matches normally', async () => {
-    const r = await driver.find('docs', { object: 'docs', where: { title: { $contains: 'sale' } } });
+    const r = await driver.find('docs', { where: { title: { $contains: 'sale' } } });
     expect(r.map((x: any) => x.id)).toEqual(['1']);
   });
 });
@@ -240,7 +240,6 @@ function declareLikeEscapeSweep(cell: DialectCell): void {
     for (const c of LIKE_ESCAPE_CASES) {
       it(c.name, async () => {
         const rows = await driver.find(LIKE_TABLE, {
-          object: LIKE_TABLE,
           where: { title: { $contains: c.value } },
         });
         const got = rows

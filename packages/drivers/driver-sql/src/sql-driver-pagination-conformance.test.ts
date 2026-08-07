@@ -194,7 +194,7 @@ function declarePartitionSweep(cell: DialectCell): void {
       for (let offset = 0; offset < PAGINATION_ROWS.length; offset += pageSize) {
         const page = await driver.find(
           PAGED_TABLE,
-          { object: PAGED_TABLE, ...query, limit: pageSize, offset },
+          { ...query, limit: pageSize, offset },
           { bypassTenantAudit: true },
         );
         paged.push(...page);
@@ -221,7 +221,7 @@ function declarePartitionSweep(cell: DialectCell): void {
         // user-facing half of the guarantee.
         const whole = await driver.find(
           PAGED_TABLE,
-          { object: PAGED_TABLE, orderBy: [...testCase.orderBy] },
+          { orderBy: [...testCase.orderBy] },
           { bypassTenantAudit: true },
         );
         expect(paged.map((r) => r.id)).toEqual(whole.map((r) => r.id));
@@ -253,7 +253,7 @@ function declarePartitionSweep(cell: DialectCell): void {
       // imposed ORDER BY would only change plan selection.
       const rows = await driver.find(
         PAGED_TABLE,
-        { object: PAGED_TABLE },
+        {},
         { bypassTenantAudit: true },
       );
       expect([...rows.map((r) => String(r.id))].sort()).toEqual([...PAGINATION_ALL_IDS].sort());
@@ -287,7 +287,7 @@ function declareClauseSweep(cell: DialectCell): void {
       });
       // One warm-up read before the recorder is installed: a live dialect may
       // introspect on first use, and that statement is not the one under test.
-      await driver.find(CLAUSE_TABLE, { object: CLAUSE_TABLE }, { bypassTenantAudit: true });
+      await driver.find(CLAUSE_TABLE, {}, { bypassTenantAudit: true });
       driver.captureStatements();
     });
 
@@ -298,7 +298,7 @@ function declareClauseSweep(cell: DialectCell): void {
 
     const sqlOfFind = (query: Omit<QueryAST, 'object'>) =>
       driver.sqlOf(CLAUSE_TABLE, () =>
-        driver.find(CLAUSE_TABLE, { object: CLAUSE_TABLE, ...query }, { bypassTenantAudit: true }),
+        driver.find(CLAUSE_TABLE, { ...query }, { bypassTenantAudit: true }),
       );
 
     it('appends `id` after a non-unique sort key', async () => {
@@ -353,7 +353,7 @@ function declareClauseSweep(cell: DialectCell): void {
       const sql = await driver.sqlOf(CLAUSE_TABLE, () =>
         driver.findOne(
           CLAUSE_TABLE,
-          { object: CLAUSE_TABLE, where: { status: 'open' } },
+          { where: { status: 'open' } },
           { bypassTenantAudit: true },
         ),
       );
@@ -365,7 +365,7 @@ function declareClauseSweep(cell: DialectCell): void {
       const sql = await driver.sqlOf(CLAUSE_TABLE, () =>
         driver.findOne(
           CLAUSE_TABLE,
-          { object: CLAUSE_TABLE, orderBy: [{ field: 'status', order: 'desc' }] },
+          { orderBy: [{ field: 'status', order: 'desc' }] },
           { bypassTenantAudit: true },
         ),
       );
@@ -382,7 +382,6 @@ function declareClauseSweep(cell: DialectCell): void {
       expect(driver['paginationTieBreaker']('some_remote_table')).toBeNull();
       expect(
         driver['orderKeysFor']('some_remote_table', {
-          object: 'some_remote_table',
           limit: 5,
           offset: 5,
         }),
@@ -402,8 +401,8 @@ function declareClauseSweep(cell: DialectCell): void {
       const remote = 'warned_remote_table';
       const warn = vi.spyOn(driver['logger'], 'warn').mockImplementation(() => {});
       try {
-        driver['orderKeysFor'](remote, { object: remote, limit: 5, offset: 5 });
-        driver['orderKeysFor'](remote, { object: remote, limit: 5, offset: 10 });
+        driver['orderKeysFor'](remote, { limit: 5, offset: 5 });
+        driver['orderKeysFor'](remote, { limit: 5, offset: 10 });
         expect(warn, 'once per object, not per query').toHaveBeenCalledTimes(1);
         const message = warn.mock.calls[0]![0];
         expect(message, 'names the object').toContain(remote);
@@ -411,11 +410,10 @@ function declareClauseSweep(cell: DialectCell): void {
         expect(message, 'names a remedy').toMatch(/orderBy/);
 
         // A managed table keeps the guarantee, so it must stay quiet.
-        driver['orderKeysFor'](CLAUSE_TABLE, { object: CLAUSE_TABLE, limit: 5, offset: 5 });
+        driver['orderKeysFor'](CLAUSE_TABLE, { limit: 5, offset: 5 });
         // So must an unpaged read, and a sorted one: neither is the silent case.
-        driver['orderKeysFor'](remote, { object: remote });
+        driver['orderKeysFor'](remote, {});
         driver['orderKeysFor'](remote, {
-          object: remote,
           orderBy: [{ field: 'status', order: 'asc' }],
           limit: 5,
         });

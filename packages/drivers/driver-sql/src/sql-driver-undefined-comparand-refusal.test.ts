@@ -105,7 +105,6 @@ describe('[#6050] SqlDriver refuses an undefined comparand', () => {
 
   const ids = async (where: unknown): Promise<string[]> => {
     const rows = await driver.find('deal', {
-      object: 'deal',
       fields: ['id'],
       where: where as FilterCondition,
     });

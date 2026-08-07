@@ -18,7 +18,7 @@ describe('InMemoryDriver', () => {
     it('should clear data on disconnect', async () => {
       await driver.create(testTable, { id: '1', name: 'test' });
       await driver.disconnect();
-      const results = await driver.find(testTable, { fields: ['id'], object: testTable });
+      const results = await driver.find(testTable, { fields: ['id'] });
       expect(results).toHaveLength(0);
     });
   });
@@ -51,7 +51,6 @@ describe('InMemoryDriver', () => {
 
       const results = await driver.find(testTable, { 
           fields: ['id', 'name', 'age'],
-          object: testTable
       });
       
       expect(results).toHaveLength(1);
@@ -70,7 +69,7 @@ describe('InMemoryDriver', () => {
       
       expect(updateResult.active).toBe(false);
       
-      const results = await driver.find(testTable, { fields: ['active'], object: testTable });
+      const results = await driver.find(testTable, { fields: ['active'] });
       expect(results[0].active).toBe(false);
     });
 
@@ -81,7 +80,7 @@ describe('InMemoryDriver', () => {
        const deleteResult = await driver.delete(testTable, '1');
        expect(deleteResult).toBe(true);
        
-       const results = await driver.find(testTable, { fields: ['name'], object: testTable });
+       const results = await driver.find(testTable, { fields: ['name'] });
        expect(results).toHaveLength(1);
        expect(results[0].name).toBe('David');
     });
@@ -90,7 +89,7 @@ describe('InMemoryDriver', () => {
       const created = await driver.create(testTable, { id: '1', name: 'Alice' });
       created.name = 'Modified';
       
-      const found = await driver.find(testTable, { object: testTable });
+      const found = await driver.find(testTable, {});
       expect(found[0].name).toBe('Alice');
     });
 
@@ -112,7 +111,6 @@ describe('InMemoryDriver', () => {
           
           const results = await driver.find(testTable, {
               fields: ['id'],
-              object: testTable,
               where: { role: 'user' }
           });
           
@@ -126,7 +124,6 @@ describe('InMemoryDriver', () => {
           
           const results = await driver.find(testTable, {
               fields: ['id'],
-              object: testTable,
               limit: 2
           });
           
@@ -138,7 +135,6 @@ describe('InMemoryDriver', () => {
         
         const results = await driver.find(testTable, {
           fields: ['name', 'age'],
-          object: testTable,
         });
         
         expect(results).toHaveLength(1);
@@ -165,11 +161,11 @@ describe('InMemoryDriver', () => {
       });
       await driverWithData.connect();
 
-      const users = await driverWithData.find('users', { object: 'users' });
+      const users = await driverWithData.find('users', {});
       expect(users).toHaveLength(2);
       expect(users[0].name).toBe('Alice');
 
-      const posts = await driverWithData.find('posts', { object: 'posts' });
+      const posts = await driverWithData.find('posts', {});
       expect(posts).toHaveLength(1);
     });
 
@@ -182,7 +178,7 @@ describe('InMemoryDriver', () => {
       });
       await driverWithData.connect();
 
-      const items = await driverWithData.find('items', { object: 'items' });
+      const items = await driverWithData.find('items', {});
       expect(items).toHaveLength(1);
       expect(items[0].id).toBeDefined();
       expect(typeof items[0].id).toBe('string');
@@ -227,7 +223,7 @@ describe('InMemoryDriver', () => {
       await driver.create(testTable, { id: '2', name: 'Bob' });
       await driver.commit(tx);
 
-      const results = await driver.find(testTable, { object: testTable });
+      const results = await driver.find(testTable, {});
       expect(results).toHaveLength(2);
     });
 
@@ -238,13 +234,13 @@ describe('InMemoryDriver', () => {
       await driver.create(testTable, { id: '2', name: 'Bob' });
       
       // Verify Bob exists before rollback
-      let results = await driver.find(testTable, { object: testTable });
+      let results = await driver.find(testTable, {});
       expect(results).toHaveLength(2);
 
       await driver.rollback(tx);
 
       // After rollback, Bob should be gone
-      results = await driver.find(testTable, { object: testTable });
+      results = await driver.find(testTable, {});
       expect(results).toHaveLength(1);
       expect(results[0].name).toBe('Alice');
     });
@@ -256,7 +252,7 @@ describe('InMemoryDriver', () => {
       await driver.update(testTable, '1', { name: 'Alice Modified' });
       await driver.rollback(tx);
 
-      const results = await driver.find(testTable, { object: testTable });
+      const results = await driver.find(testTable, {});
       expect(results[0].name).toBe('Alice');
     });
 
@@ -324,14 +320,14 @@ describe('InMemoryDriver', () => {
   describe('Schema Management', () => {
     it('should create table on syncSchema', async () => {
       await driver.syncSchema('new_table', {});
-      const results = await driver.find('new_table', { object: 'new_table' });
+      const results = await driver.find('new_table', {});
       expect(results).toHaveLength(0);
     });
 
     it('should drop table', async () => {
       await driver.create(testTable, { id: '1', name: 'test' });
       await driver.dropTable(testTable);
-      const results = await driver.find(testTable, { object: testTable });
+      const results = await driver.find(testTable, {});
       expect(results).toHaveLength(0);
     });
   });
@@ -358,7 +354,6 @@ describe('InMemoryDriver', () => {
       expect(total).toBe(3);
 
       const userCount = await driver.count(testTable, {
-        object: testTable,
         where: { role: 'user' },
       });
       expect(userCount).toBe(2);
@@ -486,7 +481,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $gt operator', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { age: { $gt: 28 } },
       });
       expect(results).toHaveLength(2);
@@ -495,7 +489,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $in operator', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { name: { $in: ['Alice', 'Diana'] } },
       });
       expect(results).toHaveLength(2);
@@ -503,7 +496,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $and operator', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { $and: [{ age: { $gte: 28 } }, { score: { $gt: 80 } }] },
       });
       expect(results).toHaveLength(2);
@@ -512,7 +504,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $or operator', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { $or: [{ age: { $lt: 26 } }, { score: { $gte: 95 } }] },
       });
       expect(results).toHaveLength(2);
@@ -521,7 +512,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $regex operator', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { name: { $regex: /^[AB]/ } },
       });
       expect(results).toHaveLength(2);
@@ -530,7 +520,6 @@ describe('InMemoryDriver', () => {
 
     it('should count with complex filter', async () => {
       const count = await driver.count(testTable, {
-        object: testTable,
         where: { age: { $gte: 30 } },
       });
       expect(count).toBe(2);
@@ -566,7 +555,6 @@ describe('InMemoryDriver', () => {
 
     it('should handle AST comparison node filter', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { type: 'comparison', field: 'age', operator: '>', value: 28 },
       });
       expect(results).toHaveLength(2);
@@ -574,7 +562,6 @@ describe('InMemoryDriver', () => {
 
     it('should handle AST logical node filter', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: {
           type: 'logical',
           operator: 'or',
@@ -589,7 +576,6 @@ describe('InMemoryDriver', () => {
 
     it('should handle empty where clause', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
       });
       expect(results).toHaveLength(3);
     });
@@ -605,7 +591,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $contains operator', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { name: { $contains: 'Evan' } },
       });
       expect(results).toHaveLength(1);
@@ -614,7 +599,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $contains case-insensitively', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { name: { $contains: 'alice' } },
       });
       expect(results).toHaveLength(1);
@@ -623,7 +607,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $notContains operator', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { email: { $notContains: 'example' } },
       });
       expect(results).toHaveLength(2);
@@ -632,7 +615,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $startsWith operator', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { name: { $startsWith: 'Ch' } },
       });
       expect(results).toHaveLength(1);
@@ -641,7 +623,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $endsWith operator', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { email: { $endsWith: '.com' } },
       });
       expect(results).toHaveLength(4);
@@ -649,7 +630,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $between operator', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { age: { $between: [26, 32] } },
       });
       expect(results).toHaveLength(2);
@@ -658,7 +638,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $null: true', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { bio: { $null: true } },
       });
       expect(results).toHaveLength(1);
@@ -667,7 +646,6 @@ describe('InMemoryDriver', () => {
 
     it('should filter with $null: false', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { bio: { $null: false } },
       });
       expect(results).toHaveLength(3);
@@ -675,7 +653,6 @@ describe('InMemoryDriver', () => {
 
     it('should handle $contains inside $and', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { $and: [{ name: { $contains: 'a' } }, { age: { $gte: 30 } }] },
       });
       expect(results).toHaveLength(2);
@@ -684,7 +661,6 @@ describe('InMemoryDriver', () => {
 
     it('should handle $startsWith inside $or', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { $or: [{ name: { $startsWith: 'Al' } }, { name: { $startsWith: 'Ev' } }] },
       });
       expect(results).toHaveLength(2);
@@ -693,7 +669,6 @@ describe('InMemoryDriver', () => {
 
     it('should handle AST-converted notcontains via convertConditionToMongo', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { type: 'comparison', field: 'name', operator: 'notcontains', value: 'Bob' },
       });
       expect(results).toHaveLength(3);
@@ -701,7 +676,6 @@ describe('InMemoryDriver', () => {
 
     it('should handle combined $startsWith + $endsWith on same field', async () => {
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { name: { $startsWith: 'A', $endsWith: 'son' } },
       });
       expect(results).toHaveLength(1);
@@ -713,7 +687,6 @@ describe('InMemoryDriver', () => {
       // Records without bio field at all should also match $null: true
       await driver.create(testTable, { id: '5', name: 'Frank', age: 40, email: 'frank@test.com' });
       const results = await driver.find(testTable, {
-        object: testTable,
         where: { bio: { $null: true } },
       });
       // Alice (bio: null), Frank (bio: missing)
@@ -735,19 +708,19 @@ describe('InMemoryDriver', () => {
     });
 
     it('find() returns copies — mutating a result does not change the store', async () => {
-      const first = await driver.find(testTable, { object: testTable, where: { id: '1' } });
+      const first = await driver.find(testTable, { where: { id: '1' } });
       (first[0] as any).secret_ref = '••••••••'; // simulate engine masking the row in place
 
-      const second = await driver.find(testTable, { object: testTable, where: { id: '1' } });
+      const second = await driver.find(testTable, { where: { id: '1' } });
       expect((second[0] as any).secret_ref).toBe('secret:abc123'); // store intact
       expect(second[0]).not.toBe(first[0]); // distinct object identity
     });
 
     it('findOne() returns a copy — mutating it does not change the store', async () => {
-      const first = await driver.findOne(testTable, { object: testTable, where: { id: '1' } });
+      const first = await driver.findOne(testTable, { where: { id: '1' } });
       (first as any).secret_ref = '••••••••';
 
-      const second = await driver.findOne(testTable, { object: testTable, where: { id: '1' } });
+      const second = await driver.findOne(testTable, { where: { id: '1' } });
       expect((second as any).secret_ref).toBe('secret:abc123');
       expect(second).not.toBe(first);
     });
@@ -767,7 +740,6 @@ describe('InMemoryDriver', () => {
 
     it('accepts the engine AST ({groupBy, aggregations}) and returns grouped sums', async () => {
       const rows = await driver.aggregate(tbl, {
-        object: tbl,
         groupBy: ['category'],
         aggregations: [{ function: 'sum', field: 'amount', alias: 'amount' }],
       } as any);
@@ -777,7 +749,6 @@ describe('InMemoryDriver', () => {
 
     it('AST with no groupBy returns a single total row; where filters first', async () => {
       const rows = await driver.aggregate(tbl, {
-        object: tbl,
         where: { category: 'travel' },
         aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }, { function: 'count', field: '*', alias: 'count' }],
       } as any);

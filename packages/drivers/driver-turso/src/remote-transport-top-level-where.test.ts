@@ -366,7 +366,7 @@ describe('TursoDriver remote — a refused top-level where touches no rows (#107
   it('the legitimate whole-table spellings still work on rows', async () => {
     expect(await ids({})).toEqual(['d_lost', 'd_open', 'd_won']);
     expect(await ids(undefined)).toEqual(['d_lost', 'd_open', 'd_won']);
-    expect(await driver.count('deal', { object: 'deal', where: {} })).toBe(3);
+    expect(await driver.count('deal', { where: {} })).toBe(3);
   });
 
   it('a well-formed filter still narrows to its rows', async () => {

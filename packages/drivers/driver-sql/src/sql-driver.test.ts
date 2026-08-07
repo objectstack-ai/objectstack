@@ -40,7 +40,6 @@ describe('SqlDriver (SQLite Integration)', () => {
 
   it('should find objects with filters', async () => {
     const results = await driver.find('users', {
-      object: 'users',
       fields: ['name', 'age'],
       where: { age: { $gt: 18 } },
       orderBy: [{ field: 'name', order: 'asc' }],
@@ -55,7 +54,6 @@ describe('SqlDriver (SQLite Integration)', () => {
     // image, ...) the object may not have. The unknown column must NOT zero
     // the whole result — the real rows still come back, minus the phantom field.
     const results = await driver.find('users', {
-      object: 'users',
       fields: ['id', 'name', 'status', 'due_date', 'image'],
       orderBy: [{ field: 'name', order: 'asc' }],
     });
@@ -68,13 +66,12 @@ describe('SqlDriver (SQLite Integration)', () => {
 
   it('still surfaces non-column errors (e.g. unknown table) instead of empty', async () => {
     await expect(
-      driver.find('no_such_table', { object: 'no_such_table', fields: ['id'] }),
+      driver.find('no_such_table', { fields: ['id'] }),
     ).rejects.toThrow();
   });
 
   it('should apply simple AND/OR logic', async () => {
     const results = await driver.find('users', {
-      object: 'users',
       where: {
         $or: [{ age: 17 }, { age: { $gt: 29 } }],
       },
@@ -84,10 +81,10 @@ describe('SqlDriver (SQLite Integration)', () => {
   });
 
   it('should find one object by id', async () => {
-    const [alice] = await driver.find('users', { object: 'users', where: { name: 'Alice' } });
+    const [alice] = await driver.find('users', { where: { name: 'Alice' } });
     expect(alice).toBeDefined();
 
-    const fetched = await driver.findOne('users', { object: 'users', where: { id: alice.id } });
+    const fetched = await driver.findOne('users', { where: { id: alice.id } });
     expect(fetched).toBeDefined();
     expect(fetched.name).toBe('Alice');
   });
@@ -95,29 +92,29 @@ describe('SqlDriver (SQLite Integration)', () => {
   it('should create an object', async () => {
     await driver.create('users', { name: 'Eve', age: 22 });
 
-    const [eve] = await driver.find('users', { object: 'users', where: { name: 'Eve' } });
+    const [eve] = await driver.find('users', { where: { name: 'Eve' } });
     expect(eve).toBeDefined();
     expect(eve.age).toBe(22);
   });
 
   it('should update an object', async () => {
-    const [bob] = await driver.find('users', { object: 'users', where: { name: 'Bob' } });
+    const [bob] = await driver.find('users', { where: { name: 'Bob' } });
     await driver.update('users', bob.id, { age: 18 });
 
-    const updated = await driver.findOne('users', { object: 'users', where: { id: bob.id } });
+    const updated = await driver.findOne('users', { where: { id: bob.id } });
     expect(updated.age).toBe(18);
   });
 
   it('should delete an object', async () => {
-    const [charlie] = await driver.find('users', { object: 'users', where: { name: 'Charlie' } });
+    const [charlie] = await driver.find('users', { where: { name: 'Charlie' } });
     await driver.delete('users', charlie.id);
 
-    const deleted = await driver.findOne('users', { object: 'users', where: { id: charlie.id } });
+    const deleted = await driver.findOne('users', { where: { id: charlie.id } });
     expect(deleted).toBeNull();
   });
 
   it('should count objects', async () => {
-    const count = await driver.count('users', { object: 'users', where: { age: 17 } });
+    const count = await driver.count('users', { where: { age: 17 } });
     expect(count).toBe(2);
   });
 
@@ -125,7 +122,7 @@ describe('SqlDriver (SQLite Integration)', () => {
     const created = await driver.create('users', { _id: 'custom-id', name: 'Frank', age: 40 });
 
     expect(created.id).toBe('custom-id');
-    const fetched = await driver.findOne('users', { object: 'users', where: { id: 'custom-id' } });
+    const fetched = await driver.findOne('users', { where: { id: 'custom-id' } });
     expect(fetched).toBeDefined();
     expect(fetched.name).toBe('Frank');
   });

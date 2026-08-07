@@ -89,7 +89,6 @@ describe('[#5347/#5348] SqlDriver refuses out-of-contract filter input', () => {
 
   const ids = async (where: unknown): Promise<string[]> => {
     const rows = await driver.find('deal', {
-      object: 'deal',
       fields: ['id'],
       where: where as FilterCondition,
     });

@@ -83,7 +83,6 @@ describe('[#5240] SqlDriver refuses a field constrained by zero operators', () =
   // lane's half of #5240 (#5239 / #5146 batch).
   const ids = async (where: unknown): Promise<string[]> => {
     const rows = await driver.find('deal', {
-      object: 'deal',
       fields: ['id'],
       where: where as FilterCondition,
     });
