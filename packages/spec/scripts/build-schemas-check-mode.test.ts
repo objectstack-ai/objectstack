@@ -1268,6 +1268,107 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// #5371 — the output clean is scoped to THIS generator's artifacts.
+//
+// `packages/spec/json-schema/` has two writers: this script emits
+// `<category>/<Name>.json` and `objectstack.json`, and `gen:openapi`
+// (build-openapi.ts) emits `openapi.json`. The clean used to remove the
+// DIRECTORY, so it took the sibling's file with it. `pnpm build` never shows
+// it (`gen:schema && gen:openapi` rewrites the file last), but every entry
+// point that stops after this script leaves the artifact gone — and the tree is
+// gitignored with no gate over it (`check:generated` says so itself: "Generated
+// but ungated (2): gen:openapi, gen:sbom"), so nothing reports the hole.
+//
+// It surfaces two packages away instead, as `@objectstack/rest`'s openapi route
+// tests failing `expected 503 to be 200` against a diff that never touched
+// them. Four independent reports, each one an attribution lap: #5371 itself,
+// then mid-#5126, mid-#5588 and mid-#5672.
+//
+// `--check` gets its own case because it is the reported trigger, not a variant
+// of the write path: `check:authorable-surface` IS this script with that flag,
+// `check:generated` runs it, and a command whose name says "check" destroying a
+// build artifact is precisely what made the cause so hard to reach.
+//
+// The unit-level behaviour of the clean (nested trees, back-off, an entry it
+// cannot remove) is pinned in scripts/json-schema-out-dir.test.ts. What these
+// two cases add is the half that file cannot assert: that this script still
+// routes its clean through it.
+describe('build-schemas.ts — the output clean spares a sibling generator (#5371)', () => {
+  const OUT = () => path.join(sandbox, 'json-schema');
+  const OPENAPI = 'openapi.json';
+  /** Bytes only `gen:openapi` could have written — identity, not just presence. */
+  const OPENAPI_BYTES = JSON.stringify(
+    { openapi: '3.1.0', 'x-fixture': 'written by gen:openapi, never by gen:schema' },
+    null,
+    2,
+  );
+  /** Output of this generator that no current build emits — the clean's own job. */
+  const STALE_FILE = 'zzStaleFromAnEarlierRun.json';
+  const STALE_DIR = 'zzretiredcategory';
+
+  /** Seed json-schema/ the way a completed `pnpm build` leaves it, plus stale debris. */
+  function seedOutDir(): void {
+    fs.mkdirSync(path.join(OUT(), STALE_DIR), { recursive: true });
+    fs.writeFileSync(path.join(OUT(), STALE_DIR, 'Gone.json'), '{}');
+    fs.writeFileSync(path.join(OUT(), STALE_FILE), '{}');
+    fs.writeFileSync(path.join(OUT(), OPENAPI), OPENAPI_BYTES);
+  }
+
+  /** The clean really ran, over a tree this run really regenerated. */
+  function expectCleanedAndRegenerated(): void {
+    expect(fs.existsSync(path.join(OUT(), STALE_FILE))).toBe(false);
+    expect(fs.existsSync(path.join(OUT(), STALE_DIR))).toBe(false);
+    expect(fs.existsSync(path.join(OUT(), 'objectstack.json'))).toBe(true);
+    expect(fs.existsSync(path.join(OUT(), 'data', 'Object.json'))).toBe(true);
+  }
+
+  beforeEach(() => {
+    // A current, self-consistent tree, so the run exits 0 and the assertions
+    // below are about the clean rather than about some ratchet upstream of it.
+    seedManifest((s) => s);
+    const tip = seedBase((s) => s);
+    seedSurface((s) => s);
+    seedSurfaceBase(tip, (k) => k);
+  });
+
+  it(
+    "leaves gen:openapi's artifact byte-identical while still sweeping its own stale output",
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedOutDir();
+
+      const { status, output } = run([]);
+
+      expect(status).toBe(0);
+      // "No stale files remain" is unchanged — this is not a narrower clean.
+      expectCleanedAndRegenerated();
+      // …and the sibling's artifact is neither deleted nor rewritten.
+      expect(fs.readFileSync(path.join(OUT(), OPENAPI), 'utf8')).toBe(OPENAPI_BYTES);
+      // Announced, so an exemption is never indistinguishable from a miss.
+      expect(output).toContain(`kept ${OPENAPI}`);
+      expect(output).toContain('gen:openapi');
+    },
+  );
+
+  it(
+    '--check does the same — the reported trigger was a command named check: (#5371)',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedOutDir();
+
+      const { status } = run(['--check']);
+
+      expect(status).toBe(0);
+      // `--check` still rebuilds the gitignored tree it computes from (that is
+      // #4711's boundary: it may not write a TRACKED file), so the clean runs
+      // here too — which is exactly why this path could delete the artifact.
+      expectCleanedAndRegenerated();
+      expect(fs.readFileSync(path.join(OUT(), OPENAPI), 'utf8')).toBe(OPENAPI_BYTES);
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // #4659 — check (b) registers a tombstone by its EXACT key, not by its leaf.
 //
 // Until this change, "live → retired must be registered" was satisfied by
