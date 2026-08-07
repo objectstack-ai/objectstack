@@ -788,6 +788,16 @@ export type Iso381 = Assert<Eq< z.input< typeof M78.ConnectorErrorCategorySchema
 export type Iso382 = Assert<Eq< z.input< typeof M78.ErrorMappingRuleSchema >, z.infer< typeof M78.ErrorMappingRuleSchema > >>;
 export type Iso383 = Assert<Eq< z.input< typeof M78.ConnectorTypeSchema >, z.infer< typeof M78.ConnectorTypeSchema > >>;
 export type Iso384 = Assert<Eq< z.input< typeof M78.ConnectorStatusSchema >, z.infer< typeof M78.ConnectorStatusSchema > >>;
+// [#4395] Added after the generated corpus, so its number continues from the
+// file's end rather than from its neighbours — the `IsoNNN` label is only a
+// unique name (the gate reads the `z.input< typeof Mn.XSchema >` occurrence,
+// not the label), and renumbering 300+ following lines to close the gap would
+// be a merge-conflict magnet for no reader benefit. Grouped with its siblings
+// here because the FILE heading is what a reader navigates by.
+// A bare `z.enum`, exactly like `ConnectorType` / `ConnectorStatus` two lines
+// up: no default, no transform, so author and parsed states coincide and D5
+// gives it no `XParsed`.
+export type Iso718 = Assert<Eq< z.input< typeof M78.ConnectorActionEffectSchema >, z.infer< typeof M78.ConnectorActionEffectSchema > >>;
 
 // kernel/cli-extension.zod.ts
 export type Iso385 = Assert<Eq< z.input< typeof M79.CLICommandContributionSchema >, z.infer< typeof M79.CLICommandContributionSchema > >>;
@@ -1361,7 +1371,7 @@ export type AFamilyParsedIsParseState = Assert<
 // ---------------------------------------------------------------------------
 
 describe('ADR-0122 type-alias convention', () => {
-  it('still declares all 718 isomorphic pins', () => {
+  it('still declares all 719 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1372,9 +1382,15 @@ describe('ADR-0122 type-alias convention', () => {
     // Rebalancing this number is normal — it drops by one whenever a schema
     // gains a shape and its alias gains an `XParsed`. Dropping it without that
     // corresponding alias is the edit this case exists to stop.
+    //
+    // It also RISES, which the count had not yet seen when it was written: a
+    // NEW isomorphic schema arrives with a bare alias, and `check:spec-parsed-alias`
+    // sends it here rather than to an `XParsed` (718 -> 719 was
+    // `ConnectorActionEffectSchema`, #4395 — a bare `z.enum`, like the
+    // `ConnectorType` / `ConnectorStatus` pins beside it).
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(718);
+    expect(pins).toHaveLength(719);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {
