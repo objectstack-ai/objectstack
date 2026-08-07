@@ -8,73 +8,43 @@ description: Identifiers protocol schemas
 System Identifier Schema
 
 Universal naming convention for all machine identifiers (API Names) in ObjectStack.
-
 Enforces lowercase with underscores or dots to ensure:
-
 - Cross-platform compatibility (case-insensitive filesystems)
-
 - URL-friendliness (no encoding needed)
-
 - Database consistency (no collation issues)
-
 - Security (no case-sensitivity bugs in permission checks)
 
 **Applies to all metadata that acts as a machine identifier:**
-
 - Object names (tables/collections)
-
 - Field names
-
 - Role names
-
 - Permission set names
-
 - Action/trigger names
-
 - Event keys
-
 - App IDs
-
 - Menu/page IDs
-
 - Select option values
-
 - Workflow names
-
 - Webhook names
 
 **Naming Convention Summary:**
-
 | Type | Pattern | Example |
-
 |------|---------|---------|
-
 | Machine ID | snake_case | `crm_account`, `btn_submit`, `role_admin` |
-
 | Event keys | dot.notation | `user.login`, `order.created` |
-
 | Labels | Any case | `Client Account`, `Submit Form` |
 
 @example Valid identifiers
-
 - 'account'
-
 - 'crm_account'
-
 - 'user_profile'
-
 - 'order.created' (for events)
-
 - 'api_v2_endpoint'
 
 @example Invalid identifiers (will be rejected)
-
 - 'Account' (uppercase)
-
 - 'CrmAccount' (camelCase)
-
 - 'crm-account' (kebab-case - use underscore instead)
-
 - 'user profile' (spaces)
 
 <Callout type="info">

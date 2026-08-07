@@ -8,31 +8,19 @@ description: Book protocol schemas
 Package Documentation Navigation — the `book` element (ADR-0046 §6).
 
 A `book` is the **spine** of a table of contents: an ordered set of groups
-
 (sections) plus identity and access. It deliberately does NOT store its
-
 members. Membership — which doc sits in which group — is **derived** from a
-
 rule on each group (`include` glob/tag) plus an optional per-doc
-
 `order`/`group`, never held in a central array.
 
 Why a spine and not a container (ADR-0046 §6.2.1): storing the whole tree in
-
 one array conflates low-cardinality group definitions (curated by a human,
-
 rarely changed) with high-cardinality membership (churned by the AI on every
-
 new doc). A central array forces a read-modify-write on every doc the AI
-
 adds — stale/concurrent edits silently drop or reorder siblings — and breaks
-
 overlay (RFC 7396 replaces arrays atomically, shadowing docs a later package
-
 version adds). A derived spine removes the write entirely: the AI creates a
-
 doc named to match a rule and it files itself (create-and-forget), and the
-
 only per-doc storage is the scalar `doc.order`, which merges cleanly.
 
 <Callout type="info">

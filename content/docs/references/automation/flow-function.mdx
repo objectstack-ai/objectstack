@@ -8,75 +8,48 @@ description: Flow Function protocol schemas
 @module automation/flow-function
 
 The contract for a **named handler function a `script` node invokes** —
-
-contributed by `defineStack(\{ functions \})` and resolved by name at execute
-
+contributed by `defineStack({ functions })` and resolved by name at execute
 time (#1870).
 
 ## The rule, and why it lives here instead of in a comment
 
 A flow function is a PURE compute step: it receives its mapped `input`,
-
 RETURNS a value, and the node's `outputVariable` exposes that value as a flow
-
-variable so a later DECLARATIVE node persists it (`update_record fields: \{
-
-ai_category: '\{aiResult.ai_category\}' \}`). Data I/O stays on the flow graph.
+variable so a later DECLARATIVE node persists it (`update_record fields: {
+ai_category: '{aiResult.ai_category}' }`). Data I/O stays on the flow graph.
 
 That is not style advice. #4354's per-run summary reports what a run did to
-
 the data, and the `script` node reports NO record metrics *because* of this
-
 rule: every write a script causes is a downstream `create_record` /
-
 `update_record` that counts itself, so "this node touched no records" is the
-
 accurate answer rather than a guess. A function that writes anyway makes its
-
 run under-report — `selected: 30, acted: 0` on a run that wrote 30 invoices,
-
 which reads exactly like the broken sweep #4354 exists to detect, and the
-
 durable `sys_automation_run` row says so permanently.
 
 Until #4396 that rule lived ONLY in a comment inside the executor, so neither
-
 an author, a lint, nor the runtime could see the contract the summary was
-
 relying on. It is now declared in two halves:
 
-1. `ActionDescriptor.handlerContract` — `script` publishes `'pure'`, so the
-
-action catalog and the designer palette carry the rule an author reads.
-
-2. `FlowFunctionEffectSchema` — a function that legitimately writes
-
-DECLARES it, and its step then reports `unmeasuredEffect`, so the run
-
-says "cannot count" instead of claiming it wrote nothing.
+ 1. `ActionDescriptor.handlerContract` — `script` publishes `'pure'`, so the
+    action catalog and the designer palette carry the rule an author reads.
+ 2. `FlowFunctionEffectSchema` — a function that legitimately writes
+    DECLARES it, and its step then reports `unmeasuredEffect`, so the run
+    says "cannot count" instead of claiming it wrote nothing.
 
 ## What is deliberately not here
 
 A blanket `unmeasuredEffect` on every `script` step (the escape hatch #4354
-
 gave `connector_action`) was rejected: it would suppress the broken-sweep
-
 signal on every flow that calls any function, in order to accommodate the
-
 flows that break the rule — paying for a rule-breaker with everyone else's
-
 signal, and fossilizing the violation as supported behaviour.
 
 Nor is this *enforcement*. The runtime hands a function no data reach —
-
 `FlowFunctionContext` in `@objectstack/service-automation` carries
-
 `input` / `variables` / `automation` / `logger` and no engine handle — but a
-
 function is ordinary host code and can close over a client at module scope.
-
 What the declaration buys is that the honest case is now *expressible*, and
-
 the platform's own counters stop being wrong for it.
 
 <Callout type="info">

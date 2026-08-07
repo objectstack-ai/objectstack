@@ -8,47 +8,29 @@ description: Field Value protocol schemas
 Field runtime VALUE-shape contract (ADR-0104 D1).
 
 `FieldSchema` owns what a field *definition* looks like; this module owns
-
 what a field's runtime *value* looks like — the shape the write path
-
 accepts, drivers persist, and an unexpanded API read returns. Before this
-
 module the knowledge lived as private, hand-copied type sets in objectql's
-
 record-validator, rest's import-coerce, driver-sql, and verify; adding one
-
 multi-capable or JSON-shaped type meant updating four lists or silently
-
 corrupting data. Those consumers now derive from the classes below.
 
 Two canonical forms exist per field (ADR-0104 D1):
-
-- `stored`   — the storage/wire form (e.g. lookup ⇒ record-id string,
-
-`date` ⇒ `YYYY-MM-DD`, select ⇒ option code).
-
-- `expanded` — the enriched `$expand` read form (lookup ⇒ the related
-
-record object). For types without an expansion,
-
-expanded ≡ stored.
+ - `stored`   — the storage/wire form (e.g. lookup ⇒ record-id string,
+                `date` ⇒ `YYYY-MM-DD`, select ⇒ option code).
+ - `expanded` — the enriched `$expand` read form (lookup ⇒ the related
+                record object). For types without an expansion,
+                expanded ≡ stored.
 
 "Reality wins": where the deployed stored shape is coherent, the contract
-
 adopts it — deployed data is a wire contract we don't get to rewrite by
-
 editing Zod. This is why `currency` is a bare number (not the never-consumed
-
-`CurrencyValueSchema` object) and `location` is `\{lat, lng\}` (what field-zoo
-
-stores), not the never-consumed `\{latitude, longitude\}` shape.
+`CurrencyValueSchema` object) and `location` is `{lat, lng}` (what field-zoo
+stores), not the never-consumed `{latitude, longitude}` shape.
 
 Purity: schemas/constants/derivation only — no runtime logic, no caching
-
 (Prime Directive #2). Consumers cache `valueSchemaFor` results per field
-
 definition; building a Zod schema per write is the one performance trap
-
 this contract has (ADR-0104 performance budget).
 
 <Callout type="info">

@@ -10,25 +10,17 @@ AI Usage Primitives
 Platform contract for measuring AI consumption.
 
 Scope (intentionally minimal):
-
 - Token usage per call.
-
 - Per-call cost (computed from a model's unit price).
-
 - Model unit pricing.
 
 NOT in scope (deferred to FinOps / product layer):
-
 - Budget definitions, enforcement, alerts.
-
 - Cost allocation / chargeback / reports.
-
 - Optimization recommendations.
 
 Rationale: the platform must record *what was used*; deciding what
-
 to do about it (block calls, send alerts, allocate to cost centers)
-
 is product policy that varies wildly between tenants.
 
 <Callout type="info">

@@ -8,19 +8,13 @@ description: Package protocol schemas
 Package Identity Protocol
 
 A **package** (also called a Solution in Power Platform, an Unlocked Package
-
 in Salesforce, or an Application in ServiceNow) is the first-class unit of
-
 distribution in ObjectStack. It groups related metadata — objects, views,
-
 flows, translations, agents — into a named, versioned artifact.
 
 Architecture:
-
 - `sys_package`         — identity (one row per logical package)
-
 - `sys_package_version` — immutable release snapshots (see package-version.zod.ts)
-
 - `sys_package_installation` — env ↔ version pairing (see environment-package.zod.ts)
 
 See `docs/adr/0003-package-as-first-class-citizen.md` for the full rationale.
