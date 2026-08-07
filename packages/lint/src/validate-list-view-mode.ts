@@ -12,13 +12,27 @@
 // A `dropdown` (value-chip) `userFilters` IS allowed on object views since the
 // ADR-0047 amendment (framework #2679 / objectui #2338) and is NOT flagged.
 //
-// Runs PRE-parse (on the normalizeStackInput output, before the
-// ObjectStackDefinition parse): the object-list schema (ObjectListViewSchema)
-// narrows `userFilters` to ObjectUserFiltersSchema (dropdown/toggle only), so a
-// post-parse stack has already had a `tabs` user-filter stripped and this rule
-// would never see it. The layering is deliberate — tsc rejects it at author
-// time, the schema strips it at runtime (no throw, back-compat), and this rule
-// reports it at `os validate` with a fix hint. See objectui #2338 and ADR-0047.
+// Registered `input: 'normalized'` — which means "needs no PARSED stack", so
+// `os lint` (which never parses) can run it and its findings survive an
+// unrelated schema error that would stop the parse.
+//
+// ## It is NOT the last line of defence any more (#6073)
+//
+// This header used to say the schema "strips a `tabs` user-filter at runtime
+// (no throw, back-compat)" and that a post-parse stack would therefore have
+// lost the evidence. Measured false at #6073: since #4001 `ObjectListViewSchema`
+// is strict and refuses `quickFilters` BY NAME (with the
+// `quickFilters` → `userFilters` suggestion), and `ObjectUserFiltersSchema`
+// refuses `element: 'tabs'` by enum ("Expected one of: dropdown, toggle").
+// `defineStack` throws on both, so a TS config carrying either never loads —
+// `os lint` and `os validate` report the schema's message, not this rule's.
+//
+// The rule still earns its place on the doors the strict parse never sees:
+// `os lint` on a raw object-literal config (measured: it names
+// `list-view-filters-in-views-mode` twice where `os validate` stops at the
+// schema step), `defineStack(x, { strict: false })`, and direct API callers.
+// tsc rejects it at author time on top of all of that. See objectui #2338 and
+// ADR-0047.
 
 export type ListViewModeSeverity = 'error' | 'warning';
 
