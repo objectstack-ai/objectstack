@@ -99,8 +99,9 @@ annotation to `XParsed`:
 **The grep that finds these:** `rg 'Schema\.parse\(' -A2` and `rg ': *\w+ *= *await'` in
 your own code, then check each annotation. **The reliable finder is the compiler**: every
 site that reads a defaulted key off an author-state value is a `TS18048` /
-`TS2532` ("possibly undefined") or a `TS2345`. Upgrade, run `tsc`, and fix what it names —
-in this repo that was the complete list, and it was 1 file outside `packages/spec`.
+`TS2532` ("possibly undefined") or a `TS2345`. Upgrade, run `tsc`, and fix what it names. In
+this repo — 1127 files annotate a value with a spec type — that came to **40 files outside
+`packages/spec`**, and every one of them was a compile error first, never a silent change.
 
 **The one case tsc cannot name for you:** a *function's declared return type*. A parse
 result is structurally assignable to the author state, so
