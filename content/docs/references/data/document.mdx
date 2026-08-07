@@ -8,31 +8,19 @@ description: Document protocol schemas
 Document Version Schema
 
 Represents a single version of a document in a version-controlled system.
-
 Each version is immutable and maintains its own metadata and download URL.
 
 @example
-
 ```json
-
-\{
-
-"versionNumber": 2,
-
-"createdAt": 1704067200000,
-
-"createdBy": "user_123",
-
-"size": 2048576,
-
-"checksum": "a1b2c3d4e5f6",
-
-"downloadUrl": "https://storage.example.com/docs/v2/file.pdf",
-
-"isLatest": true
-
-\}
-
+{
+  "versionNumber": 2,
+  "createdAt": 1704067200000,
+  "createdBy": "user_123",
+  "size": 2048576,
+  "checksum": "a1b2c3d4e5f6",
+  "downloadUrl": "https://storage.example.com/docs/v2/file.pdf",
+  "isLatest": true
+}
 ```
 
 <Callout type="info">

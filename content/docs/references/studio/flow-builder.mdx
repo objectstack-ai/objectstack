@@ -10,47 +10,28 @@ description: Flow Builder protocol schemas
 Studio Flow Builder Protocol
 
 Defines the specification for the visual Flow Builder (automation canvas)
-
 within ObjectStack Studio. Covers:
-
 - **Node Shape Registry**: Shape and visual style per FlowNodeAction type
-
 - **Canvas Node**: Position, size, and rendering hints for each node on canvas
-
 - **Canvas Edge**: Visual properties for sequence flows (normal, default, fault, back-edge)
-
 - **Flow Builder Config**: Canvas settings, palette, minimap, and toolbar
 
 ## Architecture
 
 ```
-
 ┌──────────────────────────────────────────────────────────────┐
-
 │  Toolbar (run / save / undo / zoom / layout)                │
-
 ├──────────┬───────────────────────────────────┬───────────────┤
-
 │  Node    │       Canvas                      │  Property     │
-
 │  Palette │  ┌─────┐    ┌──────────┐          │  Panel        │
-
 │          │  │start│───▶│ decision │──▶ ...   │  (node-aware) │
-
 │  ─ BPMN  │  └─────┘    └──────────┘          │               │
-
 │  ─ CRUD  │       ┌──────────┐                │  ─ config     │
-
 │  ─ Logic │       │parallel  │                │  ─ edges      │
-
 │  ─ HTTP  │       │ gateway  │                │  ─ validation │
-
 ├──────────┴───────────────────────────────────┴───────────────┤
-
 │  Minimap / Zoom Controls                                     │
-
 └──────────────────────────────────────────────────────────────┘
-
 ```
 
 <Callout type="info">

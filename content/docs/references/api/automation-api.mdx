@@ -8,29 +8,19 @@ description: Automation Api protocol schemas
 Automation API Protocol
 
 Defines REST CRUD endpoint schemas for managing automation flows,
-
 triggering executions, and querying execution history.
 
 Base path: /api/automation
 
 @example Endpoints
-
 GET    /api/automation                         — List flows
-
 GET    /api/automation/:name                   — Get flow
-
 POST   /api/automation                         — Create flow
-
 PUT    /api/automation/:name                   — Update flow
-
 DELETE /api/automation/:name                   — Delete flow
-
 POST   /api/automation/:name/trigger           — Trigger flow execution
-
 POST   /api/automation/:name/toggle            — Enable/disable flow
-
 GET    /api/automation/:name/runs              — List execution runs
-
 GET    /api/automation/:name/runs/:runId       — Get single execution run
 
 <Callout type="info">

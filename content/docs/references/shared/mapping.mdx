@@ -10,69 +10,43 @@ Base Field Mapping Protocol
 Shared by: Connector, External Lookup
 
 This module provides the canonical field mapping schema used across
-
 ObjectStack for data synchronization.
 
 **Use Cases:**
-
 - Integration connectors (integration/connector.zod.ts)
-
 - External lookups (data/external-lookup.zod.ts)
 
 @example Basic field mapping
-
 ```typescript
-
-const mapping: FieldMapping = \{
-
-source: 'external_user_id',
-
-target: 'user_id',
-
-\};
-
+const mapping: FieldMapping = {
+  source: 'external_user_id',
+  target: 'user_id',
+};
 ```
 
 @example With a fallback for missing source values
-
 ```typescript
-
-const mapping: FieldMapping = \{
-
-source: 'user_name',
-
-target: 'name',
-
-defaultValue: 'Unknown'
-
-\};
-
+const mapping: FieldMapping = {
+  source: 'user_name',
+  target: 'name',
+  defaultValue: 'Unknown'
+};
 ```
 
 ## What is NOT here any more: `transform` (#5552, protocol 17)
 
 This schema used to carry a `transform` key typed by a five-member
-
 discriminated union — `constant` / `cast` / `lookup` / `javascript` / `map`.
-
 No runtime ever executed one of the five, so the whole union was retired
-
 under ADR-0049 enforce-or-remove; the tombstone below carries the
-
 prescription, and the measurement behind it is written up on the
-
 `field-mapping-transform-removed` conversion in `src/conversions/registry.ts`.
 
-**Where transforms actually run:** `[data/mapping.zod.ts](/docs/references/data/mapping)`'s
-
+**Where transforms actually run:** `data/mapping.zod.ts`'s
 `ImportFieldMappingSchema.transform` — a flat string enum steering a `params`
-
 bag, applied row by row by the REST import path and recorded live, key by
-
 key, in `packages/spec/liveness/mapping.json`. Same word, opposite
-
 disposition: that one runs, and rejects its own `javascript` value with a 400
-
 rather than pretending to.
 
 <Callout type="info">

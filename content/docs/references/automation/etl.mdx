@@ -10,74 +10,51 @@ ETL (Extract, Transform, Load) Pipeline Protocol - LEVEL 2: Data Engineering
 Inspired by modern data integration platforms like Airbyte, Fivetran, and Apache NiFi.
 
 **Positioning in the sync/integration layering** (L1 "Simple Sync" was
-
 retired in #4738 — narrative-only, zero consumers; see
-
 `packages/spec/docs/SYNC_ARCHITECTURE.md`):
-
 - **ETL Pipeline** (THIS FILE) - Data engineers - Aggregate 10 sources to warehouse
-
 - **Enterprise Connector** (integration/connector.zod.ts) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
 
 ETL pipelines enable automated data synchronization between systems, transforming
-
 data as it moves from source to destination.
 
 **SCOPE: Advanced multi-source, multi-stage transformations.**
-
 Supports complex operations: joins, aggregations, filtering, custom SQL.
 
 ## When to Use This Layer
 
 **Use ETL Pipeline when:**
-
 - Combining data from multiple sources
-
 - Need aggregations, joins, transformations
-
 - Building data warehouses or analytics platforms
-
 - Complex data transformations required
 
 **Examples:**
-
 - Sales data from Salesforce + Marketing from HubSpot → Data Warehouse
-
 - Multi-region databases → Consolidated reporting
-
 - Legacy system migration with transformation
 
 **When to upgrade:**
-
 - Need full connector lifecycle (auth, webhooks, rate limits) → Use [Enterprise Connector](/docs/references/integration/connector)
 
-See also: [../[integration/connector.zod.ts](/docs/references/integration/connector)](/docs/references/integration/connector) for the Enterprise Connector layer
+See also: [../integration/connector.zod.ts](/docs/references/integration/connector) for the Enterprise Connector layer
 
 ## Use Cases
 
 1. **Data Warehouse Population**
-
-- Extract from multiple operational systems
-
-- Transform to analytical schema
-
-- Load into data warehouse
+   - Extract from multiple operational systems
+   - Transform to analytical schema
+   - Load into data warehouse
 
 2. **System Integration**
-
-- Sync data between CRM and Marketing Automation
-
-- Keep product catalog synchronized across e-commerce platforms
-
-- Replicate data for backup/disaster recovery
+   - Sync data between CRM and Marketing Automation
+   - Keep product catalog synchronized across e-commerce platforms
+   - Replicate data for backup/disaster recovery
 
 3. **Data Migration**
-
-- Move data from legacy systems to modern platforms
-
-- Consolidate data from multiple sources
-
-- Split monolithic databases into microservices
+   - Move data from legacy systems to modern platforms
+   - Consolidate data from multiple sources
+   - Split monolithic databases into microservices
 
 See also: https://airbyte.com/
 
@@ -86,45 +63,25 @@ See also: https://docs.fivetran.com/
 See also: https://nifi.apache.org/
 
 @example
-
 ```typescript
-
-const salesforceToDB: ETLPipeline = \{
-
-name: 'salesforce_to_postgres',
-
-label: 'Salesforce Accounts to PostgreSQL',
-
-source: \{
-
-type: 'api',
-
-connector: 'salesforce',
-
-config: \{ object: 'Account' \}
-
-\},
-
-destination: \{
-
-type: 'database',
-
-connector: 'postgres',
-
-config: \{ table: 'accounts' \}
-
-\},
-
-transformations: [
-
-\{ type: 'map', config: \{ 'Name': 'account_name' \} \}
-
-],
-
-schedule: '0 2 * * *' // Daily at 2 AM
-
-\}
-
+const salesforceToDB: ETLPipeline = {
+  name: 'salesforce_to_postgres',
+  label: 'Salesforce Accounts to PostgreSQL',
+  source: {
+    type: 'api',
+    connector: 'salesforce',
+    config: { object: 'Account' }
+  },
+  destination: {
+    type: 'database',
+    connector: 'postgres',
+    config: { table: 'accounts' }
+  },
+  transformations: [
+    { type: 'map', config: { 'Name': 'account_name' } }
+  ],
+  schedule: '0 2 * * *' // Daily at 2 AM
+}
 ```
 
 <Callout type="info">

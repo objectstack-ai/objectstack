@@ -6,47 +6,30 @@ description: Explain protocol schemas
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 [ADR-0090 D6] Access-explanation contract — `explain(principal, object,
-
 operation)` as a first-class API.
 
 The explain engine (`@objectstack/plugin-security`) walks the SAME code
-
 paths as the enforcement middleware — the same permission-set resolution,
-
 the same evaluator, the same RLS compiler — and reports what each layer of
-
 the evaluation pipeline contributed to the final decision. "Explained by
-
 construction": the report can never drift from enforcement because it IS
-
 enforcement, minus the throw.
 
 Layer order mirrors the runtime pipeline:
-
 tenant_isolation → principal → required_permissions → object_crud → fls →
-
 owd_baseline → depth → sharing → vama_bypass → rls.
 
 [C2 / ADR-0095] Record-grained explanation. The contract carries an optional
-
 `recordId` on the request and, when present, a per-layer `record` attribution
-
 plus a top-level `record` verdict on the response — so the sharing / rls / owd
-
 layers can report the ROW-LEVEL story for one concrete record (which share
-
 admitted it, which filter excluded it, whether the effective row filter
-
 matches). Object-level requests (no `recordId`) stay byte-compatible.
 
 [ADR-0095 D1/D2] The contract also reserves the kernel-chain vocabulary the
-
 β engine + UI will fill: the always-first tenant wall as `tenant_isolation`
-
 (Layer 0), a per-layer `kernelTier` marking Layer 0 vs. business RLS
-
 (Layer 1), and the monotonic posture ladder
-
 (PLATFORM_ADMIN > TENANT_ADMIN > MEMBER > EXTERNAL) on the resolved principal.
 
 <Callout type="info">

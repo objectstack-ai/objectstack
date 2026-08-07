@@ -8,25 +8,17 @@ description: Dispatcher protocol schemas
 # HttpDispatcher Protocol
 
 Defines how the ObjectStack HttpDispatcher routes incoming API requests
-
 to the correct kernel service based on URL prefix matching.
 
 The dispatcher is the central routing component that:
-
 1. Matches incoming request URLs against registered route prefixes
-
 2. Delegates to the corresponding CoreService implementation
-
 3. Returns 503 Service Unavailable when a service is not registered
-
 4. Supports dynamic route registration from plugins via contributes.routes
 
 Architecture alignment:
-
 - Kubernetes: API server aggregation layer
-
 - Eclipse: Extension registry routing
-
 - VS Code: Command palette routing
 
 <Callout type="info">

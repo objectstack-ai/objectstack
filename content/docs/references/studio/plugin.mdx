@@ -10,87 +10,51 @@ description: Plugin protocol schemas
 Studio Plugin Protocol
 
 Defines the specification for Studio plugins — a VS Code-like extension model
-
 that allows each metadata type to contribute custom viewers, designers,
-
 sidebar groups, actions, and commands.
 
 ## Architecture
 
 Like VS Code extensions, Studio plugins have two layers:
-
 1. **Manifest (Declarative)** — JSON-serializable contribution points
-
 2. **Activation (Imperative)** — Runtime registration of React components & handlers
 
 ```
-
 ┌─────────────────────────────────────────────────────────┐
-
 │                    Studio Host                          │
-
 │  ┌───────────────────────────────────────────────────┐  │
-
 │  │              Plugin Registry                      │  │
-
 │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐         │  │
-
 │  │  │ Object   │ │  Flow    │ │  Agent   │  ...     │  │
-
 │  │  │ Plugin   │ │  Plugin  │ │  Plugin  │         │  │
-
 │  │  └──────────┘ └──────────┘ └──────────┘         │  │
-
 │  └───────────────────────────────────────────────────┘  │
-
 │                                                         │
-
 │  ┌─── Sidebar ───┐  ┌──── Main Panel ────────────────┐ │
-
 │  │ [plugin icons] │  │  PluginHost renders viewer     │ │
-
 │  │ [plugin groups]│  │  from highest-priority plugin  │ │
-
 │  └────────────────┘  └────────────────────────────────┘ │
-
 └─────────────────────────────────────────────────────────┘
-
 ```
 
 @example
-
 ```typescript
+import { StudioPluginManifestSchema } from '@objectstack/spec/studio';
 
-import \{ StudioPluginManifestSchema \} from '@objectstack/spec/studio';
-
-const manifest = StudioPluginManifestSchema.parse(\{
-
-id: 'objectstack.object-designer',
-
-name: 'Object Designer',
-
-version: '1.0.0',
-
-contributes: \{
-
-metadataViewers: [\{
-
-id: 'object-explorer',
-
-metadataTypes: ['object', 'objects'],
-
-label: 'Object Explorer',
-
-priority: 100,
-
-modes: ['preview', 'design', 'data'],
-
-\}],
-
-\},
-
-\});
-
+const manifest = StudioPluginManifestSchema.parse({
+  id: 'objectstack.object-designer',
+  name: 'Object Designer',
+  version: '1.0.0',
+  contributes: {
+    metadataViewers: [{
+      id: 'object-explorer',
+      metadataTypes: ['object', 'objects'],
+      label: 'Object Explorer',
+      priority: 100,
+      modes: ['preview', 'design', 'data'],
+    }],
+  },
+});
 ```
 
 <Callout type="info">

@@ -8,17 +8,12 @@ description: Tenant protocol schemas
 Tenant Schema (Multi-Tenant Architecture)
 
 Defines the tenant/tenancy model for ObjectStack SaaS deployments.
-
 Supports different levels of data isolation to meet varying security,
-
 performance, and compliance requirements.
 
 Isolation Levels:
-
 - shared_schema: All tenants share the same database and schema (row-level isolation)
-
 - isolated_schema: Tenants have separate schemas within a shared database
-
 - isolated_db: Each tenant has a completely separate database
 
 <Callout type="info">
