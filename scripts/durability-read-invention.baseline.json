@@ -46,15 +46,6 @@
     },
     {
       "file": "packages/objectql/src/engine.ts",
-      "fn": "seedAutonumber",
-      "verdict": "unfixed-degradation",
-      "invents": "return 0 (catch has no log and no error-type discrimination)",
-      "why": "The #4825 shape, live, and the costly half of the family: this seeds an autonumber counter from `MAX(existing)` and answers `0` when the read fails. Against a table that already holds rows, the next allocation restarts at 1 and issues autonumbers that COLLIDE with existing ones — a value written wrong, which no retry and no restart repairs, with not one line logged. The code comment directly above the read already names the hazard ('the catch below would have swallowed the guard's rejection into \"seed from 0\", i.e. duplicate autonumbers') — the read was fixed there, the catch was not.",
-      "closes": "Discriminate by error type: a never-provisioned table genuinely has no rows and may seed from 0; every other failure must propagate so the write does not allocate a number derived from data it never read. Tracked separately — a gate PR does not edit the packages it scans.",
-      "tracked_by": "#5979"
-    },
-    {
-      "file": "packages/objectql/src/engine.ts",
       "fn": "referenceExists",
       "verdict": "reviewed-legitimate",
       "invents": "return null (catch has no log and no error-type discrimination)",
