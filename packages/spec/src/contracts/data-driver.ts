@@ -4,6 +4,42 @@ import type { DriverOptions, DriverCapabilities } from '../data/driver.zod.js';
 import type { QueryAST } from '../data/query.zod.js';
 
 /**
+ * DriverQuery — the query AST as a **driver** receives it: {@link QueryAST}
+ * minus its top-level `object`.
+ *
+ * Every {@link IDataDriver} method that takes a query already takes the object
+ * name as its FIRST argument, so requiring the AST to carry it again asked the
+ * caller to state one fact twice — and gave that fact two places to disagree.
+ * Both layers above the driver already pay for the ambiguity: the engine orders
+ * its keys deliberately (`{ ...query, object }`, objectql `engine.ts`) so a
+ * stray `query.object` cannot overwrite the resolved name, and the wire layer
+ * refuses a mismatch with a named 400 (`QUERY_OBJECT_MISMATCH`,
+ * metadata-protocol `protocol.ts`). Below the driver boundary the redundancy
+ * was paid for in blanket casts instead: a direct caller holding only a `where`
+ * could not name a type for it, reached for `as any`, and lost `where`'s type
+ * checking along with the object name — which is how an operator the filter
+ * dialect does not have (`$like`) survived compilation and reached the runtime
+ * (objectstack#5181, cloud#1053, cloud#1030).
+ *
+ * What this deliberately does NOT drop is the `object` inside an `expand`
+ * entry: those values stay full `QueryAST`, and there the key names the
+ * RELATED object — a fact no argument carries, so it is not redundant.
+ *
+ * Compatibility runs in both directions, and neither side is forced to move:
+ * - **Callers** may still hand over a whole `QueryAST` value. It carries every
+ *   property this type requires, and TypeScript admits the extra one on any
+ *   value that is not a fresh literal. What is newly rejected is precisely the
+ *   redundancy: a literal written inline at the call site that spells `object`.
+ * - **Implementations** that still declare `query: QueryAST` keep compiling,
+ *   because method parameters are compared bivariantly. What they may no
+ *   longer do is READ `query.object` — a caller is now free to omit it, so the
+ *   declaration would be lying about a value that is `undefined` at runtime.
+ *   No driver in this repository reads it; the object name arrives as argument
+ *   one, which is the whole point.
+ */
+export type DriverQuery = Omit<QueryAST, 'object'>;
+
+/**
  * IDataDriver - Comprehensive Database Driver Interface
  * 
  * Pure TypeScript interface for all storage adapters (Postgres, Mongo, Excel, Salesforce).
@@ -102,7 +138,7 @@ export interface IDataDriver {
    * imposing an order there would change plan selection for the majority of
    * reads to buy nothing (objectstack#4363).
    */
-  find(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown>[]>;
+  find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]>;
 
   // `findStream` was removed in 17.0.0 (#4484, ADR-0049 enforce-or-remove). It was a
   // REQUIRED method promising reads "optimized for large datasets to avoid memory
@@ -128,7 +164,7 @@ export interface IDataDriver {
    * a deterministic single-row read should be handed an `orderBy`, which is a
    * thing the caller can express (objectstack#4363).
    */
-  findOne(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown> | null>;
+  findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null>;
 
   /**
    * Create a new record.
@@ -156,7 +192,7 @@ export interface IDataDriver {
   /**
    * Count records matching a query.
    */
-  count(object: string, query?: QueryAST, options?: DriverOptions): Promise<number>;
+  count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number>;
 
   // ===========================================================================
   // Bulk Operations
@@ -172,10 +208,10 @@ export interface IDataDriver {
   bulkDelete(object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void>;
 
   /** Update multiple records matching a query (optional) */
-  updateMany?(object: string, query: QueryAST, data: Record<string, unknown>, options?: DriverOptions): Promise<number>;
+  updateMany?(object: string, query: DriverQuery, data: Record<string, unknown>, options?: DriverOptions): Promise<number>;
 
   /** Delete multiple records matching a query (optional) */
-  deleteMany?(object: string, query: QueryAST, options?: DriverOptions): Promise<number>;
+  deleteMany?(object: string, query: DriverQuery, options?: DriverOptions): Promise<number>;
 
   // ===========================================================================
   // Temporal Storage Convention (ADR-0053 D-A1/D-A2, #3912)
@@ -306,5 +342,5 @@ export interface IDataDriver {
    * Analyze query performance.
    * Returns execution plan without executing the query (optional).
    */
-  explain?(object: string, query: QueryAST, options?: DriverOptions): Promise<unknown>;
+  explain?(object: string, query: DriverQuery, options?: DriverOptions): Promise<unknown>;
 }

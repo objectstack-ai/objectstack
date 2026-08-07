@@ -4,8 +4,8 @@
  * [cloud ADR-0024 D5.2] Break-glass — a write may never leave this environment
  * with ZERO administrators able to sign in.
  *
- * THREE write shapes can take the last administrator away, and this guard
- * holds on all of them — they are one invariant, not three policies:
+ * FOUR write shapes can take the last administrator away, and this guard
+ * holds on all of them — they are one invariant, not four policies:
  *
  *  1. **`sys_user.banned = true`** (#5892) — how every *disable* lands: the
  *     better-auth admin plugin's ban endpoint writes it, and
@@ -26,6 +26,18 @@
  *     ADR-0091 validity window). The end state is identical to (2): everyone is
  *     still there, nobody can administer anything, and there is no recovery
  *     path from inside the product.
+ *  4. **deleting — or RENAMING — the `admin_full_access` `sys_permission_set`
+ *     row** (#6084) — the one table the enumeration reads that is not itself an
+ *     identity table. "Who is a platform admin" is resolved by NAME: the first
+ *     step of `resolveAdminUserIds` looks the permission set up as
+ *     `where: { name: 'admin_full_access' }` and only then reads the grants
+ *     pointing at its id. Remove that row, or call it something else, and every
+ *     grant, every `sys_user` row and every `sys_member` row survives untouched
+ *     while nobody is a platform admin any more — one write, the whole
+ *     platform-admin population. Unlike (3) this one is not driven by an IdP at
+ *     all: it is written by a metadata delete, an `os meta` run or a package
+ *     uninstall, which is why it needs its own two hooks rather than a wider
+ *     filter on the three tables above.
  *
  * In the case that matters both are driven by an EXTERNAL system: nobody reads
  * the payload before it commits, so one mis-scoped IdP group or one over-broad
@@ -34,8 +46,9 @@
  * recovery path from inside the product once that happens.
  *
  * So the invariant is enforced at the WRITE, on the chokepoints every path goes
- * through — `beforeUpdate` and `beforeDelete` on `sys_user`, `sys_member` and
- * `sys_user_permission_set` — rather than at any individual endpoint.
+ * through — `beforeUpdate` and `beforeDelete` on `sys_user`, `sys_member`,
+ * `sys_user_permission_set` and `sys_permission_set` — rather than at any
+ * individual endpoint.
  * HTTP-level guards protect only the endpoints they are attached to; these hold
  * for the admin ban / remove endpoints, `updateMemberRole`, the SCIM adapter
  * writes, an import, a script, and anything added later.
@@ -45,8 +58,11 @@
  * The row halves can answer by set arithmetic — "is every unbanned
  * administrator inside the doomed set of `sys_user` ids?". The standing halves
  * cannot: the write does not name users at all, it edits the evidence the
- * administrator set is DERIVED from. So they answer the way the issue framed
- * it — **enumerate, simulate, enumerate again**:
+ * administrator set is DERIVED from. (#6084's two permission-set halves are
+ * standing halves in exactly this sense, and reuse the same three steps — the
+ * `sys_permission_set` row is a step further from the user than a grant is, not
+ * a different kind of evidence.) So they answer the way the issue framed it —
+ * **enumerate, simulate, enumerate again**:
  *
  *  1. enumerate the administrators as the tables read now;
  *  2. replay the SAME enumeration over the rows as this write would leave them
@@ -107,6 +123,49 @@
  * guard takes in `auth-manager.ts`; the two directions are chosen deliberately
  * and are not a drift.
  *
+ * ## The bootstrap window, and the state that only LOOKS like one (#6084)
+ *
+ * Both verdicts open by asking "does this environment recognise any
+ * administrator at all", and answer "no" by PERMITTING the write: before the
+ * first admin is bootstrapped there is no break-glass account to protect, and
+ * refusing every identity write in that window would be a guard inventing a
+ * policy out of an empty measurement.
+ *
+ * Write shape (4) turns that exemption into an AMPLIFIER, which is the half of
+ * #6084 that matters more than the fourth pair of hooks: an environment whose
+ * `admin_full_access` row is gone reads as ZERO administrators, so the exemption
+ * fires and every OTHER path — ban, delete, downgrade, revoke — is waved through
+ * as well. One write does not just lock the environment out, it disables the
+ * whole guard on the way.
+ *
+ * So "zero administrators" is resolved into the two states it was conflating,
+ * and only one of them is the bootstrap window:
+ *
+ *  - **a genuinely fresh environment** — no evidence anybody was ever a platform
+ *    admin here. Permitted, exactly as before.
+ *  - **an environment that was EMPTIED** — an unscoped, in-window
+ *    `sys_user_permission_set` grant still points at a `sys_permission_set` row
+ *    that no longer exists. Refused, loudly, naming the dangling grants.
+ *
+ * The evidence is chosen so the FRESH-INSTALL answer cannot change: a dangling
+ * grant is unreachable on the happy path in either direction. Every writer
+ * inserts the permission set first and reads its id back to write the grant —
+ * `bootstrapPlatformAdmin` seeds the set rows in step 1 and only then promotes
+ * the first user in step 2, returning `admin_permission_set_missing` rather than
+ * granting when the set is absent — so no ordering of a fresh boot produces one.
+ * It is produced by exactly one thing: DELETING a permission set that grants
+ * already point at.
+ *
+ * A RENAME leaves no dangling grant, so this predicate cannot see it: the row is
+ * still there and every grant still resolves. That path is closed at the WRITE
+ * instead (`guardPermissionSetUpdate`), which narrows the residual to one state
+ * — an environment renamed away from `admin_full_access` by a write that landed
+ * while this guard was not registered. Widening the predicate to cover it ("no
+ * `admin_full_access` row exists AND some unscoped grant does") was considered
+ * and rejected: it changes the answer for a fresh environment that writes an
+ * unscoped grant before the admin set exists, and not changing the fresh-install
+ * answer is the one thing this predicate may not do.
+ *
  * ## Relationship to the `auth-manager.ts` break-glass HTTP guard
  *
  * `auth-manager.ts` already guards `/delete-user`, `/admin/remove-user` and
@@ -154,12 +213,19 @@
  * policy with its own product decisions (what happens to an org whose only
  * owner leaves the company); it is deliberately not invented here.
  *
- * Scope in the other direction: this guard watches writes to the three tables
- * the administrator population is derived from. It does NOT watch
- * `sys_permission_set` itself — deleting or renaming the row named
- * `admin_full_access` would un-make every platform admin at once, which is a
- * fourth write shape on a fourth table; filed as #6084 rather than
- * half-guarded from here.
+ * Scope in the other direction: this guard watches writes to the four tables
+ * the administrator population is derived from, and stops there. It has no
+ * opinion on what a permission set CONTAINS, and that is not a gap being left
+ * open — it was measured. `resolveAuthzContext` sets `hasPlatformAdminGrant`
+ * from `ps.name === 'admin_full_access'` alone and `derivePosture` returns
+ * `PLATFORM_ADMIN` off that boolean, so emptying the set's
+ * `system_permissions` does NOT un-make a platform admin: the posture rung and
+ * the superuser bypass ride on the NAME (ADR-0068 D2 / ADR-0095 D3). Such an
+ * edit costs the holder `setup.access` / `studio.access` — Setup and Studio go
+ * invisible — while the data plane still answers, so it is recoverable from
+ * inside the product and is a capability question (ADR-0086), not a break-glass
+ * one. The name is the whole of what makes an administrator here, so the name
+ * is the whole of what this guard reads.
  *
  * ## Relationship to the ADR-0092 identity write guard
  *
@@ -234,7 +300,7 @@ const DEFAULT_MAX_SCAN = 1000;
 const SYSTEM_READ: BaseEngineOptions = { context: { isSystem: true } };
 
 /**
- * The six writes this guard judges. Carried into every message so a refusal
+ * The eight writes this guard judges. Carried into every message so a refusal
  * describes the operation the caller actually attempted — an operator reading
  * "refusing this ban" after a SCIM `DELETE /Users/{id}` would go looking in the
  * wrong place, and one reading it after an `updateMemberRole` would go looking
@@ -242,7 +308,8 @@ const SYSTEM_READ: BaseEngineOptions = { context: { isSystem: true } };
  *
  * The first two take the administrator away with their `sys_user` row; the four
  * `standing` ops (#5978) leave the row untouched and take away what MAKES them
- * an administrator.
+ * an administrator; the last two (#6084) take away the `sys_permission_set` row
+ * that the platform-admin half of the enumeration resolves BY NAME.
  */
 type GuardedOp =
   | 'ban'
@@ -250,7 +317,9 @@ type GuardedOp =
   | 'member-update'
   | 'member-delete'
   | 'grant-update'
-  | 'grant-delete';
+  | 'grant-delete'
+  | 'permission-set-update'
+  | 'permission-set-delete';
 
 interface OpWords {
   /** Reads after "Refusing this …". */
@@ -314,7 +383,48 @@ const OP_WORDS: Record<GuardedOp, OpWords> = {
     subject: 'permission-set grants',
     table: USER_PERMISSION_SET,
   },
+  'permission-set-update': {
+    noun: 'permission-set rename',
+    verb: 'rename',
+    gerund: 'renaming',
+    Verb: 'Rename',
+    subject: 'permission sets',
+    table: SystemObjectName.PERMISSION_SET,
+  },
+  'permission-set-delete': {
+    noun: 'permission-set removal',
+    verb: 'remove',
+    gerund: 'removing',
+    Verb: 'Remove',
+    subject: 'permission sets',
+    table: SystemObjectName.PERMISSION_SET,
+  },
 };
+
+/**
+ * [#6084] The closing sentence of a standing refusal: where a write of THIS
+ * shape actually comes from, so the operator goes and fixes the source instead
+ * of this guard.
+ *
+ * The two identity tables are written by IdP integrations, so their refusals
+ * point at the SCIM group mapping. `sys_permission_set` is not — nothing in
+ * SCIM or better-auth writes it; a metadata delete, an `os meta` run or a
+ * package uninstall does. Sending THAT operator to look at an IdP group would
+ * send them into a system they may not even run.
+ */
+function standingOrigin(table: string, noun: string): string {
+  if (table === SystemObjectName.PERMISSION_SET) {
+    return (
+      `If the ${noun} came from a metadata delete, an 'os meta' run or a package uninstall, ` +
+      `revoke the '${ADMIN_FULL_ACCESS}' grants first — the permission-set row every platform ` +
+      'admin is derived from is the last thing an environment gives up, not the first.'
+    );
+  }
+  return (
+    `If the ${noun} came from an identity provider, the SCIM group mapping is too broad — fix ` +
+    'the IdP group, not this guard.'
+  );
+}
 
 /**
  * Boolean columns arrive spelled by whichever driver / transport wrote them:
@@ -370,7 +480,7 @@ function toId(value: unknown): string | undefined {
  * updated and `patch` is the caller's payload, applied over each row.
  */
 interface PendingStandingWrite {
-  /** `sys_member` or `sys_user_permission_set`. */
+  /** `sys_member`, `sys_user_permission_set` or `sys_permission_set` (#6084). */
   table: string;
   /** Ids of the rows this one write addresses (by-id, or the predicate's matches). */
   ids: Set<string>;
@@ -384,7 +494,8 @@ interface PendingStandingWrite {
  *
  * Deliberately one-directional: a pending write can only take standing AWAY in
  * this simulation, never add it. A payload that would *promote* someone (role
- * `member` → `admin`, a grant re-pointed AT `admin_full_access`) writes a row
+ * `member` → `admin`, a grant re-pointed AT `admin_full_access`, or — since
+ * #6084 — another permission set RENAMED INTO `admin_full_access`) writes a row
  * the enumeration's narrowing `where` never selected, so the simulation does
  * not see the new administrator and under-counts the survivors. That is the
  * fail-closed direction: the guard may refuse a write that would in fact have
@@ -432,6 +543,24 @@ const GRANT_STANDING_KEYS = [
   'valid_until',
   'validUntil',
 ] as const;
+
+/**
+ * [#6084] Same, for `sys_permission_set` — and it is a one-element list,
+ * because the platform-admin half of the enumeration reads exactly one column
+ * of that table: the `name` it looks the set up by. Everything else a
+ * permission-set write touches (`label`, `description`, the four permission
+ * JSON blobs, `active`, provenance) is invisible to "who is an administrator" —
+ * `resolveAuthzContext` derives `platform_admin` from the NAME, not from the
+ * capabilities the set carries — so those writes, which is every projection
+ * pass and every Setup edit, cost this guard no reads at all.
+ *
+ * `id` is deliberately NOT here even though the enumeration reads it. On this
+ * engine `data.id` on an update ADDRESSES the row (it is what
+ * `resolveTargetIds` resolves the target from) rather than proposing a new
+ * primary key, so a key rewrite is not expressible through this write path; the
+ * two standing key lists above exclude `id` for the same reason.
+ */
+const PERMISSION_SET_STANDING_KEYS = ['name'] as const;
 
 function touchesAny(data: Record<string, unknown>, keys: readonly string[]): boolean {
   return keys.some((k) => k in data);
@@ -490,11 +619,25 @@ export function registerLastAdminGuard(
     const now = Date.now();
 
     // 1) Platform admins — unscoped, in-window `admin_full_access` grants.
+    //
+    // [#6084] The set row is simulated exactly like the grant rows below it: a
+    // pending write on `sys_permission_set` can DELETE this row (it drops out of
+    // `adminSetIds`, and with it every grant that pointed at it) or RENAME it,
+    // and the name is RE-TESTED for the same reason the grant's
+    // `permission_set_id` is — the scan's own `where` only proved what the row
+    // was called BEFORE the write.
     const sets = await scan(op, SystemObjectName.PERMISSION_SET, {
       where: { name: ADMIN_FULL_ACCESS },
       fields: ['id', 'name'],
     });
-    const adminSetIds = sets.map((r) => toId(r.id)).filter((v): v is string => Boolean(v));
+    const adminSetIds: string[] = [];
+    for (const rawSet of sets) {
+      const set = applyPending(rawSet, pending, SystemObjectName.PERMISSION_SET);
+      if (!set) continue; // removed outright by the pending write
+      if (set.name !== ADMIN_FULL_ACCESS) continue; // renamed away — the row survives, the meaning does not
+      const sid = toId(set.id);
+      if (sid) adminSetIds.push(sid);
+    }
     if (adminSetIds.length > 0) {
       const links = await scan(op, USER_PERMISSION_SET, {
         where: { permission_set_id: { $in: adminSetIds } },
@@ -569,8 +712,82 @@ export function registerLastAdminGuard(
   };
 
   /**
+   * [#6084] Called at the ONE place both verdicts read zero administrators:
+   * decide whether that emptiness is the bootstrap window or an environment
+   * that has just been emptied, and refuse in the second case.
+   *
+   * The evidence is a DANGLING platform-admin-shaped grant: an unscoped,
+   * in-window `sys_user_permission_set` row whose `permission_set_id` names a
+   * `sys_permission_set` row that is not there any more. Nobody writes such a
+   * row — every producer inserts the set first and reads its id back — so it
+   * can only be left behind by deleting a permission set that grants already
+   * pointed at, which is write shape (4) landing on `admin_full_access`. A
+   * fresh environment has no grants at all, or grants whose sets exist; either
+   * way this returns without refusing and the bootstrap window is untouched.
+   *
+   * Deliberately an OVER-approximation of "the `admin_full_access` row was
+   * deleted": a dangling unscoped grant to some other set trips it too. The
+   * guard cannot tell the two apart (the name it would compare went away with
+   * the row), and refusing in an environment that has zero administrators AND a
+   * grant pointing into nowhere is the fail-closed direction.
+   */
+  const refuseIfEmptiedRatherThanFresh = async (op: GuardedOp): Promise<void> => {
+    const sets = await scan(op, SystemObjectName.PERMISSION_SET, { fields: ['id'] });
+    const known = new Set<string>();
+    for (const row of sets) {
+      const sid = toId(row.id);
+      if (sid) known.add(sid);
+    }
+    // With no permission set at all every grant is dangling, and `$nin: []` is
+    // not a predicate every driver agrees on — so that case reads unfiltered
+    // and lets the in-memory re-test below do the work.
+    const candidates = await scan(op, USER_PERMISSION_SET, {
+      ...(known.size > 0 ? { where: { permission_set_id: { $nin: [...known] } } } : {}),
+    });
+
+    const now = Date.now();
+    const dangling: string[] = [];
+    for (const link of candidates) {
+      const setId = toId(link.permission_set_id ?? link.permissionSetId);
+      // A grant that points at nothing names no deleted set.
+      if (!setId) continue;
+      // `$nin` is NULL-safe on this engine (#5298) and the drivers differ on
+      // the edges, so danglingness is re-tested in memory rather than trusted
+      // from the `where` — the same discipline the enumeration applies to
+      // `permission_set_id` and `name`.
+      if (known.has(setId)) continue;
+      // An org-SCOPED grant never conferred the environment's break-glass
+      // standing, and an out-of-window one never conferred it either, so
+      // neither is evidence that this environment once had a platform admin.
+      if (link.organization_id ?? link.organizationId) continue;
+      if (!isGrantActive(link, now)) continue;
+      const uid = toId(link.user_id ?? link.userId);
+      dangling.push(uid ? `'${uid}' → '${setId}'` : `'${setId}'`);
+    }
+    if (dangling.length === 0) return; // a genuinely fresh environment
+
+    const words = OP_WORDS[op];
+    logger?.warn(
+      `[LastAdminGuard] refused a ${words.noun} in an environment with no administrator that is ` +
+        `NOT a fresh install — ${dangling.length} dangling unscoped grant(s): ${dangling.join(', ')}`,
+    );
+    throw refuse(
+      `Refusing this ${words.noun}: this environment recognises NO administrator, and this is not ` +
+        `the bootstrap window — ${dangling.length} unscoped, in-window '${USER_PERMISSION_SET}' ` +
+        `grant(s) still point at a '${SystemObjectName.PERMISSION_SET}' row that no longer exists ` +
+        `(${dangling.join(', ')}). That is the state a DELETED '${ADMIN_FULL_ACCESS}' ` +
+        'permission-set row leaves behind (#6084): it un-makes every platform admin at once, and ' +
+        'reading the resulting emptiness as "no administrator to protect" would switch this guard ' +
+        `off for every other write too (${BREAK_GLASS_CITATION}). Restore the ` +
+        `'${ADMIN_FULL_ACCESS}' permission set — the grants naming it are still there — before ` +
+        'writing the identity tables again.',
+      words.table,
+    );
+  };
+
+  /**
    * Which rows of `object` this one write addresses — the same answer for all
-   * six halves. A scalar id when the engine dispatched by id (an update payload
+   * eight halves. A scalar id when the engine dispatched by id (an update payload
    * also carries it in `data.id`; a delete's `input` has no `data` at all),
    * and otherwise the caller's predicate, still on `input.options.where` while
    * `before*` runs (see the header: the composed `ast` is the part hooks
@@ -652,9 +869,14 @@ export function registerLastAdminGuard(
       const admins = await resolveAdminUserIds(op);
       // Nothing recognised as an administrator: there is no break-glass account
       // to protect and refusing every write would be a guard inventing a policy
-      // out of an empty measurement. (A deployment reaches this only before the
-      // first admin is bootstrapped.)
-      if (admins.size === 0) return;
+      // out of an empty measurement. [#6084] …provided the emptiness really IS
+      // the bootstrap window, and not an environment whose `admin_full_access`
+      // row was just deleted out from under it — reading THAT as "nothing to
+      // protect" is what switches this guard off wholesale.
+      if (admins.size === 0) {
+        await refuseIfEmptiedRatherThanFresh(op);
+        return;
+      }
 
       const unbanned = await resolveUnbannedAdmins(op, admins);
       const targets = await resolveTargetIds(
@@ -715,9 +937,14 @@ export function registerLastAdminGuard(
     const words = OP_WORDS[op];
     await failClosed(op, async () => {
       const before = await resolveAdminUserIds(op);
-      // Same bootstrap exemption the row halves make: with nobody recognised as
-      // an administrator there is no break-glass account to protect.
-      if (before.size === 0) return;
+      // Same bootstrap exemption the row halves make, with the same #6084
+      // qualification: with nobody recognised as an administrator there is no
+      // break-glass account to protect — unless the environment got there by
+      // being emptied rather than by being new.
+      if (before.size === 0) {
+        await refuseIfEmptiedRatherThanFresh(op);
+        return;
+      }
 
       const unbannedBefore = await resolveUnbannedAdmins(op, before);
       // Every administrator is already banned — this write cannot take away an
@@ -760,8 +987,7 @@ export function registerLastAdminGuard(
           `administrator, so ${words.gerund} it has the same end state as ${words.gerund} ` +
           `${many ? 'the users themselves' : 'the user themselves'}: nobody would be able to ` +
           `administer the environment or restore anyone's access (${BREAK_GLASS_CITATION}). ` +
-          `${REMEDY} If the ${words.noun} came from an identity provider, the SCIM group ` +
-          'mapping is too broad — fix the IdP group, not this guard.',
+          `${REMEDY} ${standingOrigin(table, words.noun)}`,
         words.table,
       );
     });
@@ -850,12 +1076,48 @@ export function registerLastAdminGuard(
     await enforceStanding('grant-delete', USER_PERMISSION_SET, ctx.input);
   };
 
+  /**
+   * [#6084] The fourth table. `resolveAdminUserIds` resolves "who is a platform
+   * admin" by looking the permission set up BY NAME, so renaming that row takes
+   * the standing away from everyone holding a grant to it, in one write, with
+   * no identity table touched at all.
+   *
+   * Only a payload that touches `name` can move the enumeration
+   * (PERMISSION_SET_STANDING_KEYS), which is what keeps every projection pass,
+   * every `os meta resync` and every Setup edit — none of which write `name` —
+   * free of any read. The data door refuses renames on its own (ADR-0094), and
+   * that is not this guard's coverage: this one holds for the engine-level and
+   * system-context writes that never pass the data door.
+   */
+  const guardPermissionSetUpdate = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== SystemObjectName.PERMISSION_SET) return;
+    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
+    if (!touchesAny(data, PERMISSION_SET_STANDING_KEYS)) return;
+    await enforceStanding(
+      'permission-set-update',
+      SystemObjectName.PERMISSION_SET,
+      ctx.input,
+      data,
+    );
+  };
+
+  const guardPermissionSetDelete = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== SystemObjectName.PERMISSION_SET) return;
+    // No payload to pre-filter on, and the same reasoning as the other delete
+    // halves: removing ANY permission-set row is judged, and the simulation
+    // answers "not `admin_full_access`, nothing changes" without a refusal for
+    // every row that is not the one the enumeration reads.
+    await enforceStanding('permission-set-delete', SystemObjectName.PERMISSION_SET, ctx.input);
+  };
+
   // Priority 20: AFTER the ADR-0092 identity write guard's checks (10), before
   // default-priority hooks (100) spend work on a write this may refuse. The
-  // four standing hooks (#5978) are registered in exactly the shape the two
-  // `sys_user` hooks established — same event names, same priority, same
-  // `packageId`, only the `object` filter differs — so the whole invariant
-  // binds and unbinds as one package.
+  // four standing hooks (#5978) and the two permission-set hooks (#6084) are
+  // registered in exactly the shape the two `sys_user` hooks established — same
+  // event names, same priority, same `packageId`, only the `object` filter
+  // differs — so the whole invariant binds and unbinds as one package.
   engine.registerHook('beforeUpdate', guardBan, {
     object: SystemObjectName.USER,
     priority: 20,
@@ -886,9 +1148,20 @@ export function registerLastAdminGuard(
     priority: 20,
     packageId,
   });
+  engine.registerHook('beforeUpdate', guardPermissionSetUpdate, {
+    object: SystemObjectName.PERMISSION_SET,
+    priority: 20,
+    packageId,
+  });
+  engine.registerHook('beforeDelete', guardPermissionSetDelete, {
+    object: SystemObjectName.PERMISSION_SET,
+    priority: 20,
+    packageId,
+  });
 
   logger?.info(
     '[LastAdminGuard] last-administrator guard registered on sys_user (ban + delete), ' +
-      'sys_member and sys_user_permission_set (standing revocation) — ADR-0024 D5.2',
+      'sys_member and sys_user_permission_set (standing revocation), and sys_permission_set ' +
+      '(the admin_full_access row every platform admin is derived from) — ADR-0024 D5.2',
   );
 }

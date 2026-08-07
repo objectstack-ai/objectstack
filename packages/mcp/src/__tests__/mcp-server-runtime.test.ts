@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { MCPServerRuntime } from '../mcp-server-runtime.js';
 import type { MCPServerRuntimeConfig } from '../mcp-server-runtime.js';
 import type { AIToolDefinition, ToolCallPart } from '@objectstack/spec/contracts';
@@ -83,15 +85,38 @@ function createMockMetadataService() {
     },
   };
 
+  const skills: Record<string, any> = {
+    case_management: {
+      name: 'case_management',
+      label: 'Case Management',
+      description: 'Handles support case lifecycle',
+      surface: 'ask',
+      instructions: 'Triage the case, then resolve it once the caller confirms.',
+      tools: ['action_resolve_case'],
+      active: true,
+    },
+    // No `instructions` half — nothing for an MCP client to fetch, so it is
+    // deliberately not projected (#3905).
+    toolbox: {
+      name: 'toolbox',
+      label: 'Toolbox',
+      surface: 'both',
+      tools: ['query_records'],
+      active: true,
+    },
+  };
+
   return {
     listObjects: vi.fn(async () => Object.values(objects)),
     getObject: vi.fn(async (name: string) => objects[name] ?? null),
     get: vi.fn(async (type: string, name: string) => {
       if (type === 'agent') return agents[name] ?? null;
+      if (type === 'skill') return skills[name] ?? null;
       return null;
     }),
     list: vi.fn(async (type: string) => {
       if (type === 'agent') return Object.values(agents);
+      if (type === 'skill') return Object.values(skills);
       return [];
     }),
     exists: vi.fn(async (type: string, name: string) => {
@@ -225,11 +250,61 @@ describe('MCPServerRuntime', () => {
   });
 
   describe('bridgePrompts', () => {
-    it('should register agent prompt', () => {
+    it('should register agent prompt', async () => {
       const metadataService = createMockMetadataService();
-      runtime.bridgePrompts(metadataService as any);
+      await runtime.bridgePrompts(metadataService as any);
 
       expect(mockLogger.info).toHaveBeenCalledWith('[MCP] Agent prompts bridged');
+    });
+
+    it('projects every skill that carries instructions, and only those (#3905)', async () => {
+      const metadataService = createMockMetadataService();
+      await runtime.bridgePrompts(metadataService as any);
+
+      // `case_management` has instructions; `toolbox` does not.
+      expect(mockLogger.info).toHaveBeenCalledWith('[MCP] Bridged 1 skill prompts');
+
+      // Drive the real wire: an MCP client sees the skill on prompts/list and
+      // gets its instructions back from prompts/get.
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: 'test-client', version: '0.0.0' });
+      await Promise.all([
+        runtime.server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+
+      const listed = await client.listPrompts();
+      const names = listed.prompts.map((p) => p.name);
+      expect(names).toContain('case_management');
+      expect(names).not.toContain('toolbox');
+      expect(listed.prompts.find((p) => p.name === 'case_management')?.description).toBe(
+        'Handles support case lifecycle',
+      );
+
+      const fetched = await client.getPrompt({ name: 'case_management' });
+      expect(fetched.messages[0].content).toEqual({
+        type: 'text',
+        text: 'Triage the case, then resolve it once the caller confirms.',
+      });
+
+      await client.close();
+      await runtime.stop().catch(() => {});
+    });
+
+    it('survives a metadata service that cannot list skills', async () => {
+      const metadataService = createMockMetadataService();
+      metadataService.list = vi.fn(async (type: string) => {
+        if (type === 'skill') throw new Error('unknown metadata type');
+        return [];
+      }) as any;
+
+      await runtime.bridgePrompts(metadataService as any);
+
+      // Agent prompts still bridged; the failure is reported, not swallowed.
+      expect(mockLogger.info).toHaveBeenCalledWith('[MCP] Agent prompts bridged');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Could not read skill metadata'),
+      );
     });
   });
 

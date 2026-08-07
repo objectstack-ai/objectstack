@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge, McpActionBridge } from './mcp-http-tools.js';
-import { renderSkillMarkdown } from './skill.js';
+import { renderSkillMarkdown } from './skill-md.js';
 
 /**
  * Drift guard: the generated SKILL.md must document every native tool the
@@ -16,6 +16,9 @@ import { renderSkillMarkdown } from './skill.js';
  * source every distribution shell copies (ADR-0036 Amendment C), so an
  * undocumented tool here means every agent installing the skill never learns
  * the tool exists.
+ *
+ * "Skill" here is the `SKILL.md` distributable (`skill-md.ts`), NOT the `skill`
+ * metadata type — those are projected onto MCP prompts (`skill-prompts.ts`).
  *
  * The registered surface is obtained by driving the REAL registration path —
  * a `tools/list` round-trip against `MCPServerRuntime` with a full
@@ -83,6 +86,6 @@ describe('SKILL.md ↔ native tool surface drift guard', () => {
 
     const md = renderSkillMarkdown();
     const undocumented = registered.filter((name) => !md.includes(name));
-    expect(undocumented, `tools registered but missing from SKILL.md — update packages/mcp/src/skill.ts: ${undocumented.join(', ')}`).toEqual([]);
+    expect(undocumented, `tools registered but missing from SKILL.md — update packages/mcp/src/skill-md.ts: ${undocumented.join(', ')}`).toEqual([]);
   });
 });

@@ -52,6 +52,7 @@ write state only through these signals:
 | label `needs-user-decision` | a decision is **pending** — never dispatch, never auto-answer; it sits in the maintainer's inbox and MAY be surfaced again in round reports |
 | label `pm:on-hold` | a decision was **made** and the answer is "not now" — never dispatch AND never nag; wait for the restart condition recorded in the hold comment |
 | label `pm:blocked` + body line `Blocked-by: #N` | waiting on another issue/PR — skip at selection; re-check when #N closes |
+| label `target:<major>`(如 `target:v17`) | 发版阻塞(发版板)—— 分诊座位唯一生产;step 3 优先、step 9 计数、维护者清单查询消费;详见「发版板」 |
 | label `pm:epic`(on a parent)| 整棵子树已委托给一个专职 epic PM(会话与文件领地写在**父单正文**;`label:pm:epic` 即全量索引,`pm:seat` 座位贴体系不重复记)— 其它 PM 一律不把该子树的 sub-issue 当候选(见「Epic 子树车道」) |
 | open PR referencing the issue | implemented, in review |
 | merged PR with `Fixes #n` | done (GitHub closes the issue) |
@@ -787,6 +788,33 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
   关系的发现挂进去等于让未分诊的东西静默入池;那种情况独立立单 +
   `Blocked-by:`(cloud#1045/#1046 之于 cloud#1050 即此形)。
 
+#### 发版板(`target:<major>` —— 发版视角的常设轴,维护者 2026-08-06 拍板)
+
+维护者的原始痛点:「我想发版了,不可能清单上这么多问题都处理,哪些优先,我始终
+没有渠道知道」—— `pm:queue` 是工作蓄水池,不是发版清单;此前的历次一次性标注
+都因**无生产者、无消费者、无所有者**而腐烂。本节把发版轴接进常设机器:
+
+- **判据(二元;⛔ 不做 P1-P5 渐变 —— 渐变没人维护,一周就烂)**:对 defect 类
+  issue 问一句「**不修它,当前 RC 能不能发?**」。判阻塞的四类:① 用户今天就会
+  撞的已发布面缺陷(数据错、静默丢、安全洞、跑不起来);② 公开契约的
+  declared≠enforced(发出去就是撒谎的 API/schema);③ 存量数据/迁移形状
+  (发布后修不回);④ 发布说明里需要为它道歉的(含「照文档抄即失败」的首小时
+  体验)。改进型、优化、重构、观察类 finding、内部工具、纯展示瑕疵默认**不
+  阻塞** —— 坐下一班车。
+- **生产者唯一 = 分诊座位**(与 `domain:*` 同款单一生产者纪律):step 0 分诊
+  defect 类新单时顺手判;执行座位不打不摘 `target:<major>`,误判走上报。存量
+  已于 2026-08-06 全量清过一次(309 条 → 46 条),此后只有增量,⛔ 永不再全量
+  重扫。
+- **消费者三处**(a label exists iff something reads it):维护者的发版清单 =
+  `label:target:<major> is:open` 一条查询(与 `pm:seat` 状态板同构,标签即
+  看板);step 3 批次选择板上项优先;step 9 轮次报告第四健康指标。
+- **鲜度**:与发现分诊轮同节奏(每 ~5 轮)对板上 open 项做过时前提检查 ——
+  已修/不成立的摘牌 + 一句评论(main 一天 ~18 合并,阻塞判断有半衰期)。
+- **发版时刻 = 清板,不是重扫**:板上每条三选一 —— 修掉 / 摘牌(不再成立)/
+  **明示接受带病发布**(摘标签 + 一句 accepted-for-GA 评论留痕,进 release
+  notes 的 known issues)。姊妹仓同标签:objectui 随 console bundle 入板;
+  cloud 独立部署不入板,advisory 单列。
+
 ### 1. Fetch candidates
 
 List open issues matching the filter, excluding anything assigned or labeled
@@ -934,6 +962,10 @@ an issue to a later round, record the known trap on it before the round ends.
 串行**(插队单与在飞单文件面相交时,照样让行或等待),⛔ **不豁免认领协议全套**
 (assign + claim comment + race check 一步不少)。此前协议通篇没有这个标签的
 消费者,违反「a label exists iff something reads it」—— 本段就是它的读取方。
+
+**发版板优先。** 批次选择时 `target:<major>` 板上项排在普通队列项之前(仅次于
+`priority:p0` 插队;两者叠加 = 最高优先)。板上项照常受同文件串行与认领协议
+约束 —— 优先是排序,不是豁免。
 
 ### 4. Claim
 
@@ -1765,7 +1797,9 @@ area; that is the loop working, not failing):
 
 - **dispatchable inventory** — open `pm:queue` unassigned, and its trend;
 - **decision inbox** — `needs-user-decision` count awaiting the maintainer;
-- **finding median age** — aging findings mean the 发现分诊轮 is overdue.
+- **finding median age** — aging findings mean the 发现分诊轮 is overdue;
+- **release blockers** — open `target:<major>` count and trend(归零 = 可发版;
+  清板协议见「发版板」)。
 
 **座位 Routine 没有交互通道。** fresh-session fire 没有对话对面的人,轮次报告
 因此走 Routine 的**完成通知**(`notifications`,fresh-session Routine 专有;

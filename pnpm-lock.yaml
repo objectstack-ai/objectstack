@@ -1210,6 +1210,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
+      '@objectstack/metadata':
+        specifier: workspace:*
+        version: link:../metadata
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../metadata-core

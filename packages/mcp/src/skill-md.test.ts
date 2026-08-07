@@ -6,7 +6,7 @@ import {
   renderSkillMarkdown,
   OBJECTSTACK_SKILL_NAME,
   OBJECTSTACK_SKILL_DESCRIPTION,
-} from './skill.js';
+} from './skill-md.js';
 
 /** Pull the YAML frontmatter block (between the first two `---` lines). */
 function frontmatter(md: string): Record<string, string> {
