@@ -388,14 +388,18 @@ const EXEMPT = {
     'Published objectui build artifact -- package.json/README/CHANGELOG plus a dist/ pulled in by `pnpm objectui:refresh`. No TypeScript sources, no tsconfig; the sources are type-checked in the objectui repo.',
 };
 
-// Package name -> { tests, errors, note? } for packages whose tsconfig excludes
-// their own test files. `tests` is the number of hidden `*.test.ts`/`*.spec.ts`
-// files, `errors` what `tsc --noEmit` reports once the exclusion is lifted --
-// both measured by re-running each package's own config with the test globs
-// dropped. These packages are NOT uncovered: their src type-checks and most
-// declare `typecheck`. What they hide is the test layer, which is where #4311
-// found the defects (a passing vitest run proves the code executes, not that
-// the call shapes match). Sorted by what each is hiding, worst first.
+// Package name -> { errors, note? } for packages whose tsconfig excludes their
+// own test files. `errors` is what `tsc --noEmit` reports once the exclusion is
+// lifted, measured by re-running each package's own config with the test globs
+// dropped. HOW MANY files that exclusion hides is NOT recorded here: this gate
+// counts them on every run (`testCoverage()` -> `pkg.testFiles`, sub-second, no
+// compiler), so the summary derives the number instead of reading a copy of it
+// (#5826). An entry that carries a `tests` field is rejected -- see the
+// RECONCILED loop in evaluate(). These packages are NOT uncovered: their src
+// type-checks and most declare `typecheck`. What they hide is the test layer,
+// which is where #4311 found the defects (a passing vitest run proves the code
+// executes, not that the call shapes match). Sorted by what each is hiding,
+// worst first.
 // `@objectstack/spec` graduated in #5286: `tsconfig.test.json` (a sibling of
 // the build config, named by the `typecheck` script) compiles its 295 test
 // files, so nothing is hidden any more and TESTS_COVERED no longer wants an
@@ -404,31 +408,38 @@ const EXEMPT = {
 // PER-FILE exact ratchet re-measured by tsc on every run, which is strictly
 // stronger than the frozen package-level number this ledger could hold. The
 // number that used to sit here (272 files / 902 errors) was also stale by 23
-// files, which is the other argument for a measurement the gate derives.
+// files, which is the other argument for a measurement the gate derives -- an
+// argument this ledger has now acted on rather than only recorded (#5826).
 //
 // Re-measured wholesale on main @ 5ab08428 (2026-08-06) with the DEBT ledger
 // above, for the same reason (#5278): 10 of these 19 `errors` numbers were
-// understated, 2 overstated, 7 exact. `errors` is now re-run by --re-measure;
-// `tests` is not, and it had drifted just as far in the same direction (66 ->
-// 101 for runtime, 87 -> 125 for objectql) because adding a test file to an
-// excluded package is invisible to everything. Both fields are accurate as of
-// that sha; only one of them is enforced, which is filed rather than silently
-// widened here.
+// understated, 2 overstated, 7 exact. That sweep also refreshed a SECOND
+// hand-written number, `tests`, which had drifted just as far in the same
+// direction (66 -> 101 for runtime, 87 -> 125 for objectql; 12 of 19 entries
+// stale, every one of them understated) because adding a test file to an
+// excluded package was invisible to everything. The two numbers needed
+// OPPOSITE repairs, which is why they were two issues: `errors` cannot be
+// known without running the compiler, so freeze + re-measure (#5278) is the
+// only shape available to it; the file count is FREE -- this gate already
+// computes it on every run to decide TESTS_COVERED -- so the fix is to delete
+// the copy and read the live count (#5826). A refreshed copy would have been
+// accurate for exactly as long as it took the next test file to land; a
+// derived one cannot drift at all, which is why this one is gone rather than
+// re-ratcheted.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
-    tests: 19,
     errors: 547,
     note: 'TS2339 x296, TS2345 x213, TS2550 x20, TS18048 x10. Re-measured 547 at 5ab08428, up from 467. '
       + 'Still larger than driver-sql ever was, and still entirely test-only (src is clean), so nothing '
       + 'but this ledger has ever seen it. 443 of the 547 are in one file, src/approval-service.test.ts.',
   },
   '@objectstack/objectql': {
-    tests: 130,
     errors: 355,
     note: 'TS2339 x115, TS2554 x93 (wrong arity), TS7006 x47, TS2345 x19, TS2322 x12, TS2749 x11. '
       + 'Re-measured 333 at 5ab08428, up from 219 -- the largest absolute growth in either ledger. The '
-      + 'shape held (TS2339/TS2554/TS7006 still lead) but every number roughly tripled, and the file count '
-      + 'went 87 -> 127; src/engine.test.ts alone carries 103. Then +2 at 909895dc (+1 TS2339 in '
+      + 'shape held (TS2339/TS2554/TS7006 still lead) but every number roughly tripled, and the hidden '
+      + 'test layer took on ~40 more files over the same window; src/engine.test.ts alone carries 103 of '
+      + 'the errors. Then +2 at 909895dc (+1 TS2339 in '
       + 'src/registry.test.ts, #5802 having added ~116 lines of registry tests; +1 TS2554 in the file '
       + '#5850 introduced, src/engine-update-prior-read-scope.test.ts), and +4 more at c15fcee4c -- ALL '
       + 'FOUR in one file #5861 added, src/save-meta-response-conformance.test.ts: one TS2554 at :115, '
@@ -447,7 +458,6 @@ const TEST_DEBT = {
       + 'after landing (#5278 option A).',
   },
   '@objectstack/runtime': {
-    tests: 102,
     errors: 227,
     note: 'TS18048 x98 (possibly-undefined), TS2345 x26, TS18046 x20, TS2339 x16, TS2493 x15, TS2835 x11, '
       + 'TS2554 x11. Src '
@@ -459,7 +469,6 @@ const TEST_DEBT = {
       + '`GET /meta/:type/:name` envelope convergence). Nothing else in the package moved.',
   },
   '@objectstack/rest': {
-    tests: 62,
     errors: 163,
     note: 'TS2835 x67 (NodeNext extensions), TS7006 x57, TS2554 x13, TS2550 x10. Also in DEBT. Measured '
       + '105 -> 136 (5ab08428) -> 143 (77adf29, hours later the same day) -> 153 (e8db1a230). Read the '
@@ -479,7 +488,6 @@ const TEST_DEBT = {
       + 'hint immediately after landing (#5278 option A).',
   },
   '@objectstack/plugin-auth': {
-    tests: 38,
     errors: 131,
     note: 'TS2493 x42 (tuple index out of range), TS18048 x24, TS2740 x19, TS2322 x11, TS2532 x9, '
       + 'TS2339 x8, TS2741 x8. '
@@ -490,7 +498,6 @@ const TEST_DEBT = {
       + 'src/admin-import-users.test.ts and 18 in src/admin-user-endpoints.test.ts.',
   },
   '@objectstack/mcp': {
-    tests: 9,
     errors: 63,
     note: 'TS18046 x51 -- `json` is of type unknown, one `await res.json()` idiom repeated across four '
       + 'files (23 in mcp-server-runtime.http.test.ts, 14 in mcp-action-tools.test.ts, 8 in '
@@ -502,7 +509,8 @@ const TEST_DEBT = {
       + 're-measured against a moving base. The +1 is fully attributed: '
       + 'src/skill-prompts.test.ts(185,23), a TS2352 casting `SkillPrompt | null` to `Record< string, '
       + 'unknown >` -- the file #3905 / PR #6077 added when it projected skill `instructions` as MCP '
-      + 'prompt primitives, which is also why the file count moved 8 -> 9. The old note\'s composition '
+      + 'prompt primitives, which is also why this package\'s hidden test-file count moved up by one '
+      + '(the count itself is derived by this gate, not recorded here -- #5826). The old note\'s composition '
       + 'was misleading in the way the top of this ledger warns about: it read "`error` is of type '
       + 'unknown, one catch-block idiom", while all 51 are the response-body `json` binding, not a '
       + 'catch block. packages/mcp took a feature landing the same day, so it is an actively-moving '
@@ -511,7 +519,6 @@ const TEST_DEBT = {
       + 'tighten via the ℹ hint immediately after landing (#5278 option A).',
   },
   '@objectstack/driver-mongodb': {
-    tests: 15,
     errors: 43,
     note: 'TS2345 x33, TS1309 x7, TS2550 x3. Re-measured 43 at 5ab08428, DOWN from 44 -- but the '
       + 'composition changed completely: the TS2591 x15 the old note pinned on a missing `types:["node"]` '
@@ -520,7 +527,6 @@ const TEST_DEBT = {
       + 'to describe debt (#5278).',
   },
   '@objectstack/lint': {
-    tests: 61,
     errors: 42,
     note: 'TS7006 x22, TS2835 x6, TS6059 x4. Measured 26 -> 30 (5ab08428, the +4 being TS6059, a file '
       + 'outside rootDir, a class the pre-#5278 note did not list) -> 32 (e8db1a230). The latest +2 are '
@@ -531,14 +537,13 @@ const TEST_DEBT = {
       + 'measured at e8db1a230 and re-confirmed at 32 an hour later at 77c7c884b) -- tighten via the ℹ '
       + 'hint immediately after landing (#5278 option A).',
   },
-  '@objectstack/plugin-security': { tests: 35, errors: 21, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 across 35 test files rather than 34 -- the file count moved, the error count did not.' },
-  '@objectstack/formula': { tests: 16, errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
-  '@objectstack/trigger-record-change': { tests: 5, errors: 9, note: 'TS2353 x9 -- still the one unknown-property shape repeated, now in four files. Re-measured 9 at 5ab08428, up from 8.' },
-  '@objectstack/verify': { tests: 4, errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
-  '@objectstack/connector-mcp': { tests: 3, errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
-  '@objectstack/connector-openapi': { tests: 3, errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
+  '@objectstack/plugin-security': { errors: 21, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 after the package gained a test file -- the file count moved, the error count did not (which is why the file count is derived here rather than written down, #5826).' },
+  '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
+  '@objectstack/trigger-record-change': { errors: 9, note: 'TS2353 x9 -- still the one unknown-property shape repeated, now in four files. Re-measured 9 at 5ab08428, up from 8.' },
+  '@objectstack/verify': { errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
+  '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
+  '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/http-conformance': {
-    tests: 2,
     errors: 4,
     note: 'TS2307 x2, TS2304 x1, TS2740 x1. Re-measured 4 at 5ab08428, up from 1. Worth knowing before '
       + 'anyone tries to graduate it: 2 of the 4 are reported inside node_modules `.d.ts` files '
@@ -546,10 +551,10 @@ const TEST_DEBT = {
       + 'this package\'s own code. Raw `tsc --noEmit` counts are what every number in these ledgers means, '
       + 'so they are counted here rather than filtered out -- but they are not this package\'s debt to fix.',
   },
-  '@objectstack/platform-objects': { tests: 9, errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
-  '@objectstack/plugin-sharing': { tests: 13, errors: 3, note: 'TS6133 x2, TS18048 x1. Re-measured 3 at 5ab08428, exact.' },
-  '@objectstack/service-sms': { tests: 5, errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured 1 at 5ab08428 and still 1 at e8db1a230, across 5 test files rather than 3: #5773 added sms-manifest-providers.contract.test.ts and #2814 / PR #6042 added sms-daily-quota.test.ts. The file count moved twice while the error count did not -- both new files are type-clean with the exclusion lifted.' },
-  '@objectstack/connector-rest': { tests: 3, errors: 1, note: 'TS6133 x1. Re-measured 1 at 5ab08428, exact.' },
+  '@objectstack/platform-objects': { errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
+  '@objectstack/plugin-sharing': { errors: 3, note: 'TS6133 x2, TS18048 x1. Re-measured 3 at 5ab08428, exact.' },
+  '@objectstack/service-sms': { errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured 1 at 5ab08428 and still 1 at e8db1a230, after two more hidden test files: #5773 added sms-manifest-providers.contract.test.ts and #2814 / PR #6042 added sms-daily-quota.test.ts. The file count moved twice while the error count did not -- both new files are type-clean with the exclusion lifted.' },
+  '@objectstack/connector-rest': { errors: 1, note: 'TS6133 x1. Re-measured 1 at 5ab08428, exact.' },
 };
 
 // Repo-relative path -> why this test file's `@ts-expect-error` directives are
@@ -778,7 +783,7 @@ function workspacePackages() {
  * @param {{name: string, scripts: Record<string,string>}} root
  * @param {{ debt: Record<string, {errors: number, note?: string}>,
  *           exempt: Record<string, string>,
- *           testDebt: Record<string, {tests: number, errors: number, note?: string}>,
+ *           testDebt: Record<string, {errors: number, note?: string}>,
  *           phantomPins: Record<string, string>,
  *           turboHasTask: boolean, ciInvokesTask: boolean, ciInvokesRoot: boolean }} state
  * @returns {string[]} problems, empty when the ratchet holds
@@ -937,9 +942,27 @@ function evaluate(packages, root, state) {
       problems.push(`EXEMPT entry for "${name}" names no workspace package -- remove it from ${SELF}.`);
     }
   }
-  for (const name of Object.keys(state.testDebt)) {
+  for (const [name, entry] of Object.entries(state.testDebt)) {
     if (!byName.has(name)) {
       problems.push(`TEST_DEBT entry for "${name}" names no workspace package -- remove it from ${SELF}.`);
+      continue;
+    }
+    // The ledger is closed to a hand-written file count (#5826). `errors` has to
+    // be recorded because knowing it means running the compiler; the number of
+    // hidden test files does NOT -- `testCoverage()` counts it on every run, in
+    // under a second, and TESTS_COVERED already judges by that live count. A
+    // copy beside it is a second source of truth for a fact the gate holds, and
+    // it drifted exactly as #5278's `errors` did: 12 of 19 entries were stale
+    // when this was measured, all understated, the worst by 53% (runtime 66 vs
+    // 101 real files). Deriving it removes the drift by construction; this
+    // branch is what stops the copy from being pasted back in.
+    if (entry && typeof entry === 'object' && Object.hasOwn(entry, 'tests')) {
+      problems.push(
+        `${name}: TEST_DEBT entry carries a hand-written \`tests\` count -- that number is DERIVED from ` +
+          `this run's own scan (\`testCoverage()\` already counts the hidden files to decide TESTS_COVERED), ` +
+          `so a copy here is a second source of truth that drifts silently and nothing compares. ` +
+          `Delete the field; the summary reports the live count (#5826).`,
+      );
     }
   }
   // RECONCILED for PINS_CHECKED: an entry survives only while the file really
@@ -977,6 +1000,32 @@ function evaluate(packages, root, state) {
   }
 
   return problems;
+}
+
+/**
+ * How many test files the TEST_DEBT packages are hiding RIGHT NOW -- summed from
+ * what this run's own scan counted, never from a number written down beside the
+ * entry (#5826).
+ *
+ * This is the one summary figure the gate can know for free: `testCoverage()`
+ * walks each package's include roots on every run to decide TESTS_COVERED, so
+ * `pkg.testFiles` is already in hand before the summary is printed. A recorded
+ * copy could only ever agree with it by coincidence -- adding a test file to an
+ * excluded package moves the real count and nothing asks the ledger to follow.
+ *
+ * Sums over PACKAGES rather than over ledger entries, so an entry naming no live
+ * package contributes nothing instead of throwing; RECONCILED has already made
+ * that state a failure, and the summary only prints after the verdict is clean.
+ *
+ * @param {Array<{name: string, testFiles?: number}>} packages
+ * @param {Record<string, unknown>} testDebt
+ * @returns {number}
+ */
+function hiddenTestFiles(packages, testDebt) {
+  return packages.reduce(
+    (sum, pkg) => (Object.hasOwn(testDebt, pkg.name) ? sum + (pkg.testFiles ?? 0) : sum),
+    0,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1206,8 +1255,21 @@ function selfTest() {
         pkg('b', { scripts: { typecheck: 'tsc --noEmit' }, excludesTests: true, testFiles: 4 }),
       ],
       root: okRoot,
-      state: { ...okState, testDebt: { a: { tests: 3, errors: 9 }, b: { tests: 4, errors: 0 } } },
+      state: { ...okState, testDebt: { a: { errors: 9 }, b: { errors: 0 } } },
       expect: [/b: TEST_DEBT entry has no measured error count/],
+    },
+    {
+      // #5826. The rejection is STRUCTURAL, not a reconciliation: this fixture's
+      // copy agrees exactly with the live count (7 and 7) and is still refused,
+      // because agreement is a property of the moment a number was written, not
+      // of the field. Comparing the two instead would bill the next author for
+      // adding a clean test file -- a bookkeeping toll on the one action this
+      // ledger exists to encourage, which is what #5278 ruled out for `errors`.
+      label: 'a TEST_DEBT entry that writes the derived file count down fails, even when it is right today',
+      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, excludesTests: true, testFiles: 7 })],
+      root: okRoot,
+      state: { ...okState, testDebt: { a: { tests: 7, errors: 9 } } },
+      expect: [/a: TEST_DEBT entry carries a hand-written `tests` count/],
     },
     {
       label: 'a pin in a file no tsc program compiles fails PINS_CHECKED',
@@ -1256,14 +1318,14 @@ function selfTest() {
       label: 'dropping the exclusion without deleting TEST_DEBT fails RECONCILED',
       packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, excludesTests: false, testFiles: 5 })],
       root: okRoot,
-      state: { ...okState, testDebt: { a: { tests: 5, errors: 7 } } },
+      state: { ...okState, testDebt: { a: { errors: 7 } } },
       expect: [/a: has a TEST_DEBT entry but no longer excludes its tests/],
     },
     {
       label: 'TEST_DEBT for a vanished package fails RECONCILED',
       packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' } })],
       root: okRoot,
-      state: { ...okState, testDebt: { gone: { tests: 1, errors: 1 } } },
+      state: { ...okState, testDebt: { gone: { errors: 1 } } },
       expect: [/TEST_DEBT entry for "gone" names no workspace package/],
     },
     {
@@ -1405,6 +1467,47 @@ function selfTest() {
     if (got !== c.expect) failures.push(`configCovers — ${c.label}: expected ${c.expect}, got ${got}`);
   }
 
+  // The summary's hidden-file figure (#5826). It used to be the sum of a
+  // hand-written `tests` field, which nothing reconciled -- so the third case
+  // below is the whole issue in one line: the same ledger, one more test file,
+  // a total that follows without anybody editing anything.
+  const derivedCases = [
+    {
+      label: 'the total is the live count of the ledgered packages',
+      packages: [pkg('a', { testFiles: 3 }), pkg('b', { testFiles: 4 })],
+      testDebt: { a: { errors: 9 }, b: { errors: 2 } },
+      expect: 7,
+    },
+    {
+      label: 'a package outside the ledger contributes nothing, however many tests it has',
+      packages: [pkg('a', { testFiles: 3 }), pkg('covered', { testFiles: 99 })],
+      testDebt: { a: { errors: 9 } },
+      expect: 3,
+    },
+    {
+      label: 'one more test file moves the total with no ledger edit — the drift, removed by construction',
+      packages: [pkg('a', { testFiles: 4 }), pkg('b', { testFiles: 4 })],
+      testDebt: { a: { errors: 9 }, b: { errors: 2 } },
+      expect: 8,
+    },
+    {
+      label: 'an entry naming no live package contributes nothing rather than throwing',
+      packages: [pkg('a', { testFiles: 3 })],
+      testDebt: { a: { errors: 9 }, gone: { errors: 1 } },
+      expect: 3,
+    },
+    {
+      label: 'a package the scan never counted reads as zero, not as NaN',
+      packages: [pkg('a', {})],
+      testDebt: { a: { errors: 9 } },
+      expect: 0,
+    },
+  ];
+  for (const c of derivedCases) {
+    const got = hiddenTestFiles(c.packages, c.testDebt);
+    if (got !== c.expect) failures.push(`hiddenTestFiles — ${c.label}: expected ${c.expect}, got ${got}`);
+  }
+
   // MEASURED (#5278). The whole point of this invariant is a DIRECTION, so both
   // directions are pinned: up is red, down is a note, equal is silence. A
   // symmetric implementation would pass a "does it notice a change" test and
@@ -1506,7 +1609,7 @@ function selfTest() {
   }
   console.log(
     `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
-      `${namedCases.length + coverCases.length} observation case(s) + ` +
+      `${namedCases.length + coverCases.length + derivedCases.length} observation case(s) + ` +
       `${driftCases.length + countCases.length} re-measure case(s) hold.`,
   );
 }
@@ -1529,7 +1632,9 @@ if (problems.length) {
 const covered = packages.filter((p) => p.scripts.typecheck !== undefined).length;
 const debtTotal = Object.values(DEBT).reduce((sum, e) => sum + (e.errors ?? 0), 0);
 const testDebtErrors = Object.values(TEST_DEBT).reduce((sum, e) => sum + (e.errors ?? 0), 0);
-const testDebtFiles = Object.values(TEST_DEBT).reduce((sum, e) => sum + (e.tests ?? 0), 0);
+// Counted on this run, not read from the ledger: the file count is the one
+// number here the gate already knows (#5826).
+const testDebtFiles = hiddenTestFiles(packages, TEST_DEBT);
 // Both numbers, always. Reporting only the src figure is how the first pass of
 // this gate read as 48/77 green while 568 test files went unchecked.
 console.log(
@@ -1537,7 +1642,7 @@ console.log(
     `(plus the root), ${Object.keys(DEBT).length} in the DEBT ledger (${debtTotal} frozen raw errors, ` +
     `${TRACKING_ISSUE}), ${Object.keys(EXEMPT).length} exempt.\n` +
     `  test layer: ${Object.keys(TEST_DEBT).length} package(s) still exclude their own tests ` +
-    `(${testDebtFiles} files, ${testDebtErrors} frozen raw errors in TEST_DEBT).`,
+    `(${testDebtFiles} files hidden as counted by this run, ${testDebtErrors} frozen raw errors in TEST_DEBT).`,
 );
 
 // MEASURED runs only when asked, and only after the structural verdict above is

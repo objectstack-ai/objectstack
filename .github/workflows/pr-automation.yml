@@ -217,7 +217,75 @@ jobs:
         if: steps.labels.outputs.skip != 'true'
         uses: actions/checkout@v7
         with:
+          # `fetch-depth: 0` is load-bearing for the step below, not just nice to
+          # have: it is what makes actions/checkout fetch
+          # `+refs/heads/*:refs/remotes/origin/*` (getRefSpecForAllHistory) on top
+          # of the PR merge ref, so `origin/<base branch>` exists locally and a
+          # merge base can be computed at all. A shallow checkout here would take
+          # the base resolution below straight to its #4690 failure branch.
           fetch-depth: 0
+
+      # #6129: every diff below starts HERE, and the one thing it must never be
+      # is `github.event.pull_request.base.sha`.
+      #
+      # The payload's `base.sha` is frozen when the PR is OPENED and does not
+      # move on `synchronize`. HEAD, meanwhile, is the merge ref
+      # (`refs/pull/N/merge`) that the checkout above resolves by default on a
+      # `pull_request` event -- a merge commit whose parent^1 is whatever main
+      # tipped at when the ref was built. So `diff base.sha HEAD` reports
+      # EVERYTHING main gained in between as "added by this PR", and with ~18
+      # merges a day that is a lot. Measured on PR #6117: identical diff, zero
+      # changesets of its own, `failure` at 02:22Z and `success` at 02:39Z --
+      # main had merged two other PRs' changesets into the merge ref and the
+      # counting step below took them for this PR's. A release-safety gate that
+      # goes GREEN because someone ELSE released something is the one direction
+      # nothing downstream corrects.
+      #
+      # The merge base fixes it because on a merge-ref HEAD it lands exactly on
+      # parent^1 -- verified on a real merge commit, not assumed -- so the diff
+      # is this PR's own side and nothing else. Same diff, same verdict, however
+      # long the PR sits and however far main runs ahead.
+      #
+      # Two spellings that look like fixes and are not:
+      #   - `git diff base.sha...HEAD` (three dots). Three-dot means
+      #     `merge-base(base.sha, HEAD)..HEAD`, and `base.sha` is ALREADY an
+      #     ancestor of HEAD, so the merge base is `base.sha` itself and the
+      #     count does not move. Measured: still 2 impostors in the #6117 repro.
+      #   - `HEAD^1`. Correct on a merge ref and silently catastrophic the day
+      #     someone gives the checkout a `ref:`, where parent^1 becomes the PR's
+      #     previous commit. `merge-base` is right under BOTH checkouts, which is
+      #     why it is the one written here.
+      - name: Resolve the diff base (merge base with the base branch)
+        id: diffbase
+        if: steps.labels.outputs.skip != 'true'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PINNED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -z "$BASE_REF" ]; then
+            echo "::error::This event carries no base branch, so the changeset diff base cannot be computed. A gate that cannot read its input has verified nothing, so this is a failure rather than a pass (#4690)."
+            exit 1
+          fi
+          if ! git rev-parse --verify --quiet "refs/remotes/origin/$BASE_REF^{commit}" >/dev/null; then
+            git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" \
+              || echo "::warning::Could not fetch origin/$BASE_REF; the merge-base resolution below will decide."
+          fi
+          # `if !` rather than a bare assignment on purpose: these steps run under
+          # `bash -e` (no `shell:` key anywhere in this file), where a failing
+          # command substitution kills the step with no message at all. The gate
+          # is allowed to fail here -- it is NOT allowed to fail unexplained.
+          if ! MERGE_BASE=$(git merge-base "refs/remotes/origin/$BASE_REF" HEAD); then
+            echo "::error::Could not compute merge-base(origin/$BASE_REF, HEAD), so the changeset diff has no trustworthy starting point. Failing rather than falling back to the frozen base.sha, which is the #6129 defect itself."
+            exit 1
+          fi
+          echo "merge_base=$MERGE_BASE" >> "$GITHUB_OUTPUT"
+          # The drift is printed, not just corrected. #6129 was invisible for as
+          # long as it was because nothing in the log ever said which commit the
+          # diff started from; this line is what makes the next occurrence of the
+          # family readable straight off the step output.
+          DRIFT=$(git rev-list --count "$PINNED_BASE_SHA..$MERGE_BASE" 2>/dev/null || echo '?')
+          echo "Diff base: $MERGE_BASE  (merge-base of origin/$BASE_REF and HEAD)"
+          echo "Frozen payload base.sha: $PINNED_BASE_SHA  -- $BASE_REF has moved $DRIFT commit(s) since it was frozen, and that drift is exactly what this gate used to count as this PR's own."
 
       - name: Setup Node.js
         if: steps.labels.outputs.skip != 'true'
@@ -236,7 +304,7 @@ jobs:
       - name: Check for a changeset added by this PR
         if: steps.labels.outputs.skip != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_BASE: ${{ steps.diffbase.outputs.merge_base }}
         run: |
           if [ ! -d ".changeset" ]; then
             echo "::warning::.changeset directory not found. Skipping changeset check."
@@ -248,8 +316,11 @@ jobs:
           # .md file, so the directory is permanently non-empty and the gate can
           # never go red. #3373 merged a real spec/api-surface fix with no
           # changeset while this step happily reported "Found 104 changeset(s)".
-          # Diffing against BASE_SHA ignores that residue and sees only what the
-          # PR itself introduced.
+          # Diffing against the merge base ignores that residue and sees only
+          # what the PR itself introduced. It has to be the MERGE BASE and not
+          # the payload's frozen `base.sha` -- see the base-resolution step above
+          # (#6129); with the frozen sha this count silently included every
+          # changeset main gained while the PR was open.
           #
           # An empty-frontmatter changeset still COUNTS here — this step counts
           # files, and that is deliberately unchanged. What has changed is that
@@ -268,7 +339,7 @@ jobs:
           # for new files. Splitting it across two steps is what keeps THIS
           # step's failure mode ("no changeset at all") distinct from that one's
           # ("the changeset you added declares nothing").
-          ADDED=$(git diff --name-only --diff-filter=A "$BASE_SHA" HEAD -- '.changeset/*.md' \
+          ADDED=$(git diff --name-only --diff-filter=A "$MERGE_BASE" HEAD -- '.changeset/*.md' \
                   | grep -v '/README\.md$' | wc -l | tr -d '[:space:]')
           if [ "$ADDED" -eq 0 ]; then
             # The full comparison goes to the job log — that is what an author
@@ -362,13 +433,19 @@ jobs:
       # one. A consistent exemption beats a nondeterministic gate, and the case
       # is empty of motive anyway: an author who already has the label gains
       # nothing by adding the file.
+      #
+      # `--base` takes the same merge base the counting step uses, for the same
+      # #6129 reason: fed the payload's frozen `base.sha`, this script reads every
+      # empty changeset main gained while the PR was open as one this PR added,
+      # and reports it against an author who never touched the file. Same defect,
+      # opposite direction (a false RED here, a false GREEN up there), one base.
       - name: Reject an empty-frontmatter changeset added by this PR
         if: steps.labels.outputs.skip != 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_BASE: ${{ steps.diffbase.outputs.merge_base }}
         run: |
           node scripts/check-empty-changeset.mjs --self-test
-          node scripts/check-empty-changeset.mjs --base "$BASE_SHA"
+          node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"
 
       - name: Guard against accidental major bumps (launch window)
         # Every publishable package is in one Changesets "fixed" (lockstep) group,
