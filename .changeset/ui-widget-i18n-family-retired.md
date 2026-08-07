@@ -138,3 +138,5 @@ The retirement kit:
   shape locally, so the instrument's measured bound survives its subject.
 
 No runtime behaviour changes. That impossibility is the reason for the removal.
+
+<!-- adr-0087: registered ui-widget-i18n-family-retired -->
