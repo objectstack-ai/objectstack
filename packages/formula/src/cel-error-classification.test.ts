@@ -15,7 +15,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { celEngine } from './cel-engine';
+import { celEngine, parseCelToAst } from './cel-engine';
 import type { Expression } from '@objectstack/spec';
 
 const cel = (source: string): Expression => ({ dialect: 'cel', source });
@@ -157,12 +157,11 @@ describe('celEngine error classification (#6133)', () => {
     });
   });
 
-  it('parseCelToAst never reaches the classifier — it returns null (#4812)', async () => {
+  it('parseCelToAst never reaches the classifier — it returns null (#4812)', () => {
     // Recorded because the classification fix has a natural blast radius
     // question: does the #4812 canonical parse entry re-emit `kind`? It does
     // not — it swallows the fault and answers `null`, leaving the verdict to
     // compile()/validateExpression. Nothing here changes for it.
-    const { parseCelToAst } = await import('./cel-engine');
     expect(parseCelToAst('((record.a)')).toBeNull();
     expect(parseCelToAst('record.a > 1')).not.toBeNull();
   });
