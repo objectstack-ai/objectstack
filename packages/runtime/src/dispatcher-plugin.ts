@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
-import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { looksLikeInternalErrorLeak, declaresServerFault, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService } from '@objectstack/spec/contracts';
 import type { CounterStore } from '@objectstack/plugin-auth';
@@ -441,6 +441,32 @@ function sendResultBase(
  * the dispatcher can highlight the field the way a form served by /data can.
  * `details` is only emitted for that shape — everything else keeps the exact
  * two-key body it had.
+ *
+ * [#5811] A fourth, and the reason (2)'s "shared predicate" is now two of them.
+ * `looksLikeInternalErrorLeak` is a heuristic over SQL/driver PHRASING, so it
+ * closes this exit only against faults that *sound* like a driver. It never saw
+ * `service-analytics`' fail-closed read-scope refusals — measured, all eleven
+ * shapes return FALSE — and those messages name the field names and comparands of
+ * the RLS POLICY the tenant is being filtered by:
+ *
+ * ```
+ * POST /analytics/query      (tenant caller, object with a broken sharing rule)
+ * → 500 {"success":false,"error":{"message":"[read-scope-sql] unsafe field
+ *        identifier \"secret_policy_field\" — refusing to build read scope
+ *        (fail-closed).","code":"READ_SCOPE_COMPILE_FAILED"}}
+ * ```
+ *
+ * The sibling face — `/analytics/dataset/query` in `@objectstack/rest` — closed
+ * this in #5367/#5808 by keying on the DECLARATION rather than the prose, but the
+ * rule was written in-line there because one consumer does not justify a shared
+ * surface. This exit is the second consumer, so it was promoted:
+ * {@link declaresServerFault}, next to the heuristic it complements, read by both
+ * boundaries. ⛔ It is NOT "withhold every 5xx" — #5667 kept UNDECLARED 5xx
+ * legible on purpose, and a bare `Error` still goes through the heuristic alone.
+ *
+ * The code still travels: `details.code` (#3842, below) carries
+ * `READ_SCOPE_COMPILE_FAILED` to the client untouched, so what a machine reads is
+ * unchanged and only the prose is withheld — into `errorReporter` and the log.
  */
 function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, string>): void {
     const validation = validationFailureDetails(err);
@@ -466,8 +492,12 @@ function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, 
         }
     }
     const raw = err?.message;
+    // [#5811] Two independent reasons to withhold, both 5xx-only. The
+    // declaration comes first because it needs no guess about the text:
+    // `declaresServerFault` already implies `status >= 500`, so it can never
+    // reach a 4xx answer the caller is entitled to read.
     const message =
-        httpStatus >= 500 && looksLikeInternalErrorLeak(raw)
+        declaresServerFault(err) || (httpStatus >= 500 && looksLikeInternalErrorLeak(raw))
             ? INTERNAL_ERROR_MESSAGE
             : raw || 'Internal Server Error';
     // [#3842] A thrown error's own `.code` finally has somewhere to go. This
