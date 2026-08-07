@@ -519,12 +519,19 @@ const TEST_DEBT = {
       + 'tighten via the ℹ hint immediately after landing (#5278 option A).',
   },
   '@objectstack/driver-mongodb': {
-    errors: 43,
-    note: 'TS2345 x33, TS1309 x7, TS2550 x3. Re-measured 43 at 5ab08428, DOWN from 44 -- but the '
-      + 'composition changed completely: the TS2591 x15 the old note pinned on a missing `types:["node"]` '
-      + 'are all gone, and TS1309 (await in a non-async context) has appeared. A -1 delta over a ledger '
-      + 'entry that turned over two thirds of its content is exactly why counts alone cannot be trusted '
-      + 'to describe debt (#5278).',
+    errors: 10,
+    note: 'TS1309 x7, TS2550 x3. Was 43 (TS2345 x33 + these 10), measured at 5ab08428 and still exactly '
+      + '43 at d367f03d6^ -- the commit immediately before PR #6210. That PR (#6075) narrowed this '
+      + "driver's six IDataDriver query methods to `DriverQuery`, which is what retired all 33 TS2345: "
+      + "they were this package's OWN test literals failing `Property 'object' is missing in type` "
+      + 'against a `QueryAST` that still required it. The ledger was never ratcheted down, so 33 errors '
+      + 'of slack sat here. #6212 batch C lowers it to the measured 10 because that slack made the batch '
+      + "OWN change unpinnable: this package's tsconfig excludes `*.test.ts`, so `pnpm typecheck` cannot "
+      + "see `aggregate`'s narrowing at all, and its only consumers are those excluded tests. Reverting "
+      + '`aggregate(object, query: DriverQuery)` back to `QueryAST` measures 12 here -- which the old '
+      + '43-ceiling would have swallowed in silence. At 10 it goes red, which is the whole point of a '
+      + 'ratchet. Re-measured 10 at 2bc187641, and the pristine tree at that commit reports the same 10, '
+      + "so none of the -33 is this PR's doing.",
   },
   '@objectstack/lint': {
     errors: 42,
