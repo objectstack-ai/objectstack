@@ -63,6 +63,13 @@
 // nothing and the receipt no longer claims it does. Neither the direction nor
 // the 5/7 split changes — only the noun in the resolved value.)
 //
+// (#5927 — and now the SECOND line, for the same reason on the reset path.
+// These fail-closed cases pass no `registryItems`, so `v1` is artifact-backed
+// on neither side; re-run today the delete resolves
+// `"Deleted view 'v1' — it no longer exists. …"`. Same treatment: the
+// measurement stands as taken, and the 5/7 split is untouched — what these
+// assertions read is the REJECTION, never the resolved sentence.)
+//
 // Predicted 4 (the four in the first describe); the fifth is the last case of
 // the artifact describe, which is itself a fail-closed assertion and only lives
 // there for narrative reasons. Recorded as measured rather than rounded to the
