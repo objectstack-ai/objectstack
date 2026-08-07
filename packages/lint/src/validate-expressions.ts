@@ -583,22 +583,48 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // at build time, so it is decided here rather than discovered as an
       // unwritable field in production — PD #12, declared rather than guessed.
       //
-      // Scoped to `readonlyWhen` on purpose: it is the one field predicate the
-      // server enforces as a write-path LOCK, so it is the one whose unbindable
-      // scope changes what lands in the database. `requiredWhen` /
-      // `visibleWhen` keep their existing verdicts untouched.
-      const roWhenSource = celSourceOf(f.readonlyWhen);
-      if (masters !== 1 && roWhenSource && readsParentRoot(roWhenSource)) {
+      // [#4977] Extended to `requiredWhen`, which the server enforces from the
+      // same declaration site through the same evaluator and which gained its
+      // own `parent` binding in the same issue. The two slots ask ONE question —
+      // "is `parent` a fact this object's metadata states?" — so they share one
+      // gate rather than growing a second copy of `masterDetailCount` +
+      // `readsParentRoot`.
+      //
+      // What they do NOT share is the CONSEQUENCE, and the message has to name
+      // the right one or it prescribes the wrong fix (the same reason #4811's
+      // null-guard gate passes its outcome in explicitly instead of inferring
+      // it). The two runtimes fail in OPPOSITE directions on an unbindable
+      // `parent`: `readonlyWhen` fails CLOSED (#4889 — an unbound scope root
+      // resolves to LOCKED, so the field becomes unwritable forever), while
+      // `requiredWhen` stays fail-OPEN (#4977's ruling deliberately did not copy
+      // the carve-out), so the requirement silently enforces NOTHING. This gate
+      // is why fail-open is affordable there: the declaration that would rot
+      // unnoticed at runtime cannot ship in the first place.
+      //
+      // `conditionalRequired` (retired alias) and `visibleWhen` (no
+      // server-enforced `parent` binding of its own) keep their verdicts
+      // untouched.
+      // Destructured in the loop head on purpose: both predicate slots stay
+      // LITERAL member reads (`f.readonlyWhen` / `f.requiredWhen`) rather than a
+      // computed `f[key]`, so the #5017 meta-test's source scan still sees every
+      // key this rule reads and can still check it against `FieldSchema`. An
+      // indexed read here would have disarmed that scan silently.
+      for (const [slot, raw, consequence] of [
+        ['readonlyWhen', f.readonlyWhen, `the field would be locked on every write`],
+        ['requiredWhen', f.requiredWhen, `the requirement would never be enforced — the predicate faults, the server logs and skips it, and the field stays optional in the database`],
+      ] as const) {
+        const source = celSourceOf(raw);
+        if (masters === 1 || !source || !readsParentRoot(source)) continue;
         issues.push({
-          where: `object '${objectName}' · field '${fname}' readonlyWhen`,
+          where: `object '${objectName}' · field '${fname}' ${slot}`,
           message:
-            `\`readonlyWhen\` reads \`parent\`, but object '${objectName}' declares ` +
+            `\`${slot}\` reads \`parent\`, but object '${objectName}' declares ` +
             `${masters === 0 ? 'no' : `${masters}`} \`master_detail\` relationship${masters === 1 ? '' : 's'} — ` +
-            `so the server has no header record to bind as \`parent\` and the field would be locked on every write. ` +
+            `so the server has no header record to bind as \`parent\` and ${consequence}. ` +
             (masters === 0
               ? `Declare the owning relationship as \`Field.masterDetail('<master>')\`, or rewrite the predicate against \`record\`.`
               : `\`parent\` needs exactly one master; name the header explicitly through \`record.<fk>\` state instead, or model the extra relationship as a \`lookup\`.`),
-          source: roWhenSource,
+          source,
           severity: 'error',
         });
       }

@@ -114,6 +114,42 @@
  * the grounds that it reads inconsistent with D5's table — the table is what
  * was amended, and ADR-0057 D10 (server enforces, client is courtesy) is why.
  *
+ * ## `requiredWhen`: the SCOPE is bound, the SEMANTICS are not changed (#4977)
+ *
+ * `requiredWhen` sits on the same field as `readonlyWhen`, is evaluated by this
+ * same module, and had the same hole one slot over: nothing bound `parent`, so
+ * ``requiredWhen: P`parent.status == 'sent'` `` — "once the header is Sent every
+ * line must carry a description" — evaluated in the inline grid and was a no-op
+ * on the server. The write was accepted with the field empty.
+ *
+ * Note this is the MIRROR of #4889's failure mode, not the same one: a
+ * `readonlyWhen` failing open WROTE a field that should have been frozen; a
+ * `requiredWhen` failing open ACCEPTS a record that should have been rejected.
+ * Both are `declared ≠ enforced` (PD #10) on one declaration site.
+ *
+ * The maintainer's ruling (2026-08-06) is deliberately narrower than #4889's:
+ *
+ *  - **Bind the scope.** The engine resolves the master-detail header with the
+ *    same `resolveMasterDetailParent(s)` helpers #4889 added and passes it as
+ *    {@link EvaluateRulesOptions.parent}; the requirement is now enforced where
+ *    it is documented to be enforced, on insert, single-id update and bulk.
+ *  - **Do NOT copy the fail-CLOSED carve-out.** An unevaluable predicate — an
+ *    unresolvable header included — stays fail-OPEN: logged, skipped, the write
+ *    proceeds. Rejecting it (a 422 on a write whose header is merely unreadable
+ *    at that moment) is a louder failure than the `readonlyWhen` case, where the
+ *    cost of the conservative answer is one refused field. That is option B of
+ *    #4977 and it was explicitly NOT taken; it is reserved for the next review
+ *    of ADR-0058 D5.
+ *  - **Catch it at BUILD time instead.** `@objectstack/lint`'s
+ *    `validate-expressions` rejects a `parent`-scoped `requiredWhen` on an object
+ *    that declares no single `master_detail`, so the unbindable declaration —
+ *    the one a runtime fail-open would silently swallow forever — never ships.
+ *
+ * Bound for the FIELD predicate only. The object-level `script` / `cross_field`
+ * rules evaluated further down this same function do NOT get the root: they are
+ * fail-CLOSED since #4649, so binding a new root there would flip writes they
+ * reject today into accepted ones. Pinned by test.
+ *
  * One consequence worth knowing before writing a predicate: because a declared
  * field is now always present, `has(record.<declared field>)` is uniformly TRUE
  * (a materialised `null` is a present key holding null — this is CEL's rule,
@@ -280,6 +316,38 @@ export interface EvaluateRulesOptions {
    * and fail-open (see {@link evaluateOptionVisibility}).
    */
   currentUser?: { id?: string; roles?: string[]; organizationId?: string | null; [k: string]: unknown } | null;
+  /**
+   * [#4977] The master-detail header this write's field `requiredWhen`
+   * predicates read as `parent` — the SAME binding, resolved by the SAME engine
+   * helpers, that #4889 gave `readonlyWhen`. Only the engine owns a driver, so
+   * it resolves the header and hands it over; `undefined` leaves `parent`
+   * unbound, which is what a non-detail object (or a payload whose predicates
+   * never name `parent`) passes.
+   *
+   * Scoped to the field-level `requiredWhen` block on purpose. It is NOT bound
+   * for the object-level `script` / `cross_field` / `conditional` rules that
+   * share this call: those have been fail-CLOSED since #4649, so introducing a
+   * root there would flip writes those rules reject today into accepted ones —
+   * the blast radius #4977's issue body called out and the reason the change was
+   * kept out of #4972. Pinned by test.
+   */
+  parent?: ParentBinding;
+  /**
+   * [#4977] The header the record hung off BEFORE this write, for the ADR-0113
+   * non-regression pre-check only ("did the stored state already violate?").
+   *
+   * It differs from {@link parent} in exactly one situation: a write that
+   * REPOINTS the detail at another master. `parent` is payload-FK-first (the
+   * master the write lands on, #4889's rule) and decides the merged verdict;
+   * the pre-check asks a question about the STORED row, which hung off the
+   * stored FK's master. Binding the landing header there would read a repoint
+   * onto a header that turns the requirement ON as a pre-existing violation and
+   * let it rest — the acceptance hole this issue exists to close, one case in.
+   *
+   * Defaults to {@link parent} when omitted: with no repoint the two headers are
+   * the same row, and the engine does not pay a second read to prove it.
+   */
+  previousParent?: ParentBinding;
   /**
    * When true, `state_machine` rules are skipped entirely — both the
    * `initialStates` entry-point check on insert (#3165) and the transition
@@ -449,6 +517,39 @@ export function hasParentScopedReadonlyWhenInPayload(
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
     if (readsParentRoot(def.readonlyWhen)) return true;
+  }
+  return false;
+}
+
+/**
+ * True when at least one field declares a `requiredWhen` predicate that reads
+ * the `parent` root (#4977) — the gate the engine uses to decide whether to
+ * resolve the master-detail header for {@link evaluateValidationRules}, so an
+ * object with no parent-scoped requirement pays no extra read.
+ *
+ * The `readonlyWhen` twin ({@link hasParentScopedReadonlyWhenInPayload}) filters
+ * by the payload; this one deliberately does NOT, and the asymmetry is the point
+ * rather than an oversight. `readonlyWhen` judges an incoming CHANGE, so a field
+ * the payload never touches cannot be locked out of anything. `requiredWhen`
+ * judges the MERGED record: the whole failure it exists to catch is a field left
+ * empty — i.e. absent from the payload — while the predicate says it must be
+ * filled. Filtering by `name in data` here would skip exactly the writes the
+ * rule is for.
+ *
+ * Same AST-based root reader as its twin ({@link readsParentRoot} over
+ * `collectCelRootIdentifiers`), so a field named `parent_id` or the string
+ * literal `'parent'` cannot be mistaken for the binding, and build-time lint,
+ * the `readonlyWhen` gate and this gate can never disagree about what "reads
+ * `parent`" means.
+ */
+export function hasParentScopedRequiredWhen(
+  objectSchema: { fields?: Record<string, ConditionalFieldDef> } | undefined | null,
+): boolean {
+  const fields = objectSchema?.fields;
+  if (!fields) return false;
+  for (const def of Object.values(fields)) {
+    if (!def?.requiredWhen) continue;
+    if (readsParentRoot(def.requiredWhen)) return true;
   }
   return false;
 }
@@ -1113,12 +1214,37 @@ export function evaluateValidationRules(
   // generalized from "always true"; it is what makes tightening a
   // conditional contract on a deployed object safe (#3929's objection).
   if (hasFieldRules && fields) {
+    // [#4977] `parent` — the master-detail header — bound for the field-level
+    // `requiredWhen` predicates exactly as #4889 binds it for `readonlyWhen`,
+    // and bound ONLY when the engine actually resolved one. An absent binding
+    // is left absent rather than bound to `null`: `null.status` would fault as
+    // `No such key` and lose the "which root was unbound" diagnostic below.
+    const parentScope = opts.parent != null ? { extra: { parent: opts.parent } } : {};
+    // The pre-check's header (see `EvaluateRulesOptions.previousParent`). Same
+    // row as `parent` unless this write repoints the detail at another master.
+    const prevParent = opts.previousParent !== undefined ? opts.previousParent : opts.parent;
+    const prevParentScope = prevParent != null ? { extra: { parent: prevParent } } : {};
     for (const [name, def] of Object.entries(fields)) {
       const pred = def?.requiredWhen;
       if (!pred) continue;
-      const res = ExpressionEngine.evaluate<boolean>(toExpression(pred), { record: merged, previous });
+      const res = ExpressionEngine.evaluate<boolean>(toExpression(pred), { record: merged, previous, ...parentScope });
       if (!res.ok) {
-        opts.logger?.warn?.(`requiredWhen for '${name}' failed to evaluate — skipped`);
+        // Fail-OPEN, unchanged (#4977 ruling: bind the scope, keep the
+        // evaluation semantics). An unevaluable `requiredWhen` — including one
+        // whose `parent` the engine could not resolve — is logged and skipped,
+        // NOT turned into a rejection: that is option B, deliberately not taken
+        // here and left to the next review of ADR-0058 D5. All that changes is
+        // the diagnostic: an unbound ROOT is named, because "the header could
+        // not be read" and "the author typo'd a key" are different faults with
+        // different remedies and only one line of signal to tell them apart.
+        const unbound = unknownVariableOf(res.error);
+        opts.logger?.warn?.(
+          unbound
+            ? `requiredWhen for '${name}' reads '${unbound}', which is not bound for this operation — ` +
+              `skipped (the requirement is NOT enforced for this write). ` +
+              `A 'parent'-scoped predicate needs the object to declare exactly one master_detail relationship.`
+            : `requiredWhen for '${name}' failed to evaluate — skipped`,
+        );
         continue;
       }
       if (res.value === true && isMissing(merged[name])) {
@@ -1127,7 +1253,7 @@ export function evaluateValidationRules(
         // record, treat the pre state as COMPLIANT — enforcement stays on
         // unless a legacy violation is proven.
         if (mode === 'update' && previous) {
-          const pre = ExpressionEngine.evaluate<boolean>(toExpression(pred), { record: previous, previous });
+          const pre = ExpressionEngine.evaluate<boolean>(toExpression(pred), { record: previous, previous, ...prevParentScope });
           const preViolated = pre.ok && pre.value === true && isMissing(previous[name]);
           if (preViolated) continue; // legacy rows rest
         }

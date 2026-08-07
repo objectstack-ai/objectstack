@@ -110,7 +110,7 @@ import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spe
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
+import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
@@ -3087,6 +3087,12 @@ export class ObjectQL implements IObjectQLEngine {
    * `stripReadonlyWhenFieldsMulti`. A bulk update of N details under M masters
    * costs ONE extra query, not N — the same "read the match set once" discipline
    * the #3106 prior-row fetch follows.
+   *
+   * [#4977] Serves three callers now, unchanged: the bulk `readonlyWhen` strip,
+   * the bulk `requiredWhen` evaluation, and the INSERT path — where `data` is
+   * passed as `null` and each inserted row supplies its own FK, so
+   * `masterIdOf(fk, null, row)` reads `row[fk]` and the batch costs one header
+   * read for the whole `insert()` call.
    */
   private async resolveMasterDetailParents(
     schema: any,
@@ -5447,12 +5453,22 @@ export class ObjectQL implements IObjectQLEngine {
             }
           }
         }
+        // [#4977] A `parent`-scoped `requiredWhen` ("once the header is Sent,
+        // every line must carry a description") is a SERVER guarantee, and the
+        // insert is where a line is first written empty — so unlike the
+        // `readonlyWhen` strip, which is an update-path concept, this binding
+        // has to exist here too. Gated on the schema actually declaring such a
+        // predicate, so an object with only `record`-scoped requirements pays
+        // nothing; batched, so N rows under M masters cost ONE header read.
+        const insertParentForRow = hasParentScopedRequiredWhen(schemaForValidation as any)
+          ? await this.resolveMasterDetailParents(schemaForValidation, null, rows)
+          : undefined;
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
             validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
-            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx });
+            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]) });
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
@@ -5932,8 +5948,34 @@ export class ObjectQL implements IObjectQLEngine {
                // is a pure function of what we hand it — resolve here, gated on
                // the payload actually touching such a predicate so a detail
                // object with only `record`-scoped locks pays no extra read.
-               const roWhenParent = hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhen)
+               //
+               // [#4977] `requiredWhen` reads the same root at the same write,
+               // so the two slots share ONE resolution rather than each buying
+               // a header read — and, more importantly, so a single write can
+               // never judge its lock and its requirement against two different
+               // headers. Payload-FK-first for both (#4889's rule: a repoint is
+               // judged against the master it lands on).
+               const schemaHasParentRequiredWhen = hasParentScopedRequiredWhen(updateSchema as any);
+               const wantsParentBinding =
+                   hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhen) ||
+                   schemaHasParentRequiredWhen;
+               const roWhenParent = wantsParentBinding
                    ? await this.resolveMasterDetailParent(updateSchema, preRoWhen, priorRecord)
+                   : undefined;
+               // [#4977] The ADR-0113 non-regression pre-check asks whether the
+               // STORED row already violated, so for a REPOINT it must read the
+               // header the row hung off BEFORE the write — not the one it is
+               // landing on. Resolved only when the payload actually moves the
+               // detail to another master; otherwise the two are the same row
+               // and `evaluateValidationRules` reuses `parent` for both.
+               const mdRel = schemaHasParentRequiredWhen ? resolveMasterDetailRelation(updateSchema as any) : null;
+               const priorMasterId = mdRel ? masterIdOf(mdRel.fk, null, priorRecord) : undefined;
+               const repointsMaster =
+                   mdRel != null &&
+                   priorMasterId != null &&
+                   masterIdOf(mdRel.fk, preRoWhen, priorRecord) !== priorMasterId;
+               const roWhenPreviousParent = repointsMaster
+                   ? await this.resolveMasterDetailParent(updateSchema, null, priorRecord)
                    : undefined;
                hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, roWhenParent) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
@@ -5955,7 +5997,7 @@ export class ObjectQL implements IObjectQLEngine {
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
                assertNoStrictDrops();
-               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
+               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent });
                // [#4441] A repoint is as capable of dangling as an initial link.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
@@ -6019,16 +6061,35 @@ export class ObjectQL implements IObjectQLEngine {
                // locked in any target row is fail-safe-dropped for all (narrow
                // `where` to reach the unlocked rows). Symmetric with the
                // single-id `stripReadonlyWhenFields`; INSERT stays exempt.
-               if (payloadHasReadonlyWhen) {
-                   const preRoWhenMulti = hookContext.input.data as Record<string, unknown>;
-                   // [#4889] N matched rows can hang off N different masters, so
-                   // the `parent` binding is per row here. Batch-read the
-                   // distinct headers ONCE (the same shape as the single-id
-                   // resolution, one query instead of one per row) and hand the
-                   // strip a lookup.
-                   const parentForRow = hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti)
+               //
+               // [#4889] N matched rows can hang off N different masters, so the
+               // `parent` binding is per row here. Batch-read the distinct
+               // headers ONCE (the same shape as the single-id resolution, one
+               // query instead of one per row) and hand out a lookup.
+               //
+               // [#4977] Hoisted out of the `readonlyWhen` block because the
+               // per-row `evaluateValidationRules` below needs the same lookup
+               // for `requiredWhen` — including on a batch whose payload writes
+               // no `readonlyWhen` field at all. One resolution, both consumers,
+               // so a bulk write cannot judge its lock and its requirement
+               // against different headers.
+               const preRoWhenMulti = hookContext.input.data as Record<string, unknown>;
+               const schemaHasParentRequiredWhenMulti = hasParentScopedRequiredWhen(updateSchema as any);
+               const parentForRow =
+                   hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti) ||
+                   schemaHasParentRequiredWhenMulti
                        ? await this.resolveMasterDetailParents(updateSchema, preRoWhenMulti, priorRows)
                        : undefined;
+               // [#4977] Pre-check headers for the ADR-0113 non-regression test,
+               // resolved only when the payload REPOINTS the matched rows at
+               // another master (see the single-id branch for why the stored
+               // row's own header is the one that question needs).
+               const mdRelMulti = schemaHasParentRequiredWhenMulti ? resolveMasterDetailRelation(updateSchema as any) : null;
+               const previousParentForRow =
+                   mdRelMulti != null && masterIdOf(mdRelMulti.fk, preRoWhenMulti, undefined) != null
+                       ? await this.resolveMasterDetailParents(updateSchema, null, priorRows)
+                       : undefined;
+               if (payloadHasReadonlyWhen) {
                    hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, parentForRow) as any;
                    reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
@@ -6059,7 +6120,7 @@ export class ObjectQL implements IObjectQLEngine {
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
-                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
+                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row) });
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -6068,6 +6129,13 @@ export class ObjectQL implements IObjectQLEngine {
                        }
                    }
                } else {
+                   // [#4977] No `parent` here, and it is not a hole: this branch
+                   // is unreachable for an object that has a `requiredWhen` at
+                   // all. `needsPriorRecord` is TRUE as soon as any field
+                   // declares one (`fieldsNeedPrior`), so `rulesNeedRows` sends
+                   // every such object down the per-row branch above, where the
+                   // binding is supplied. This branch only ever runs for the
+                   // rule families that never read a header.
                    evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
                }
                // [#4441] The bulk call site too — a guard wired into single-id

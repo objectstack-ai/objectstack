@@ -9,6 +9,7 @@ import {
   stripReadonlyWhenFieldsMulti,
   hasReadonlyWhenInPayload,
   hasParentScopedReadonlyWhenInPayload,
+  hasParentScopedRequiredWhen,
   stripReadonlyFields,
   stripRuntimeOwnedFields,
   isRuntimeOwnedField,
@@ -275,6 +276,179 @@ describe('hasParentScopedReadonlyWhenInPayload (#4889 gate)', () => {
       },
     };
     expect(hasParentScopedReadonlyWhenInPayload(decoys, { a: 'x', b: 'y' })).toBe(false);
+  });
+});
+
+// #4977 — PARENT-scoped `requiredWhen`, the mirror of the block above on the
+// same field. `readonlyWhen` failing open WROTE a field that should have been
+// frozen; `requiredWhen` failing open ACCEPTS a record that should have been
+// rejected. Ruling (2026-08-06): bind the scope, keep fail-OPEN, gate the
+// unbindable declaration at build time (option B — 422 — was NOT taken).
+const sentLineFields = {
+  fields: {
+    invoice: { type: 'master_detail', reference: 'showcase_invoice', required: true },
+    // THE SUBJECT.
+    description: { type: 'text', requiredWhen: "parent.status == 'sent'" },
+    // Row-scoped — unaffected by the parent binding, and here to prove it.
+    note: { type: 'text', requiredWhen: 'record.quantity >= 100' },
+    quantity: { type: 'number' },
+  },
+};
+
+/** Collect the ValidationError field codes, or `null` when the write is accepted. */
+function violations(
+  schema: unknown,
+  data: Record<string, unknown>,
+  mode: 'insert' | 'update',
+  opts: Record<string, unknown> = {},
+): string[] | null {
+  try {
+    evaluateValidationRules(schema as never, data, mode, opts as never);
+    return null;
+  } catch (err) {
+    if (err instanceof ValidationError) return err.fields.map((f) => f.field);
+    throw err;
+  }
+}
+
+describe('parent-scoped requiredWhen (#4977)', () => {
+  it('REQUIRES the field when the master-detail header says so', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 1 }, 'insert', {
+      parent: { id: 'inv1', status: 'sent' },
+    })).toEqual(['description']);
+  });
+
+  it('does NOT require it when the header does not match', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 1 }, 'insert', {
+      parent: { id: 'inv1', status: 'draft' },
+    })).toBeNull();
+  });
+
+  it('accepts the write once the field is supplied', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', description: 'seat' }, 'insert', {
+      parent: { id: 'inv1', status: 'sent' },
+    })).toBeNull();
+  });
+
+  it('is FAIL-OPEN when `parent` could not be bound — the #4889 asymmetry', () => {
+    // The twin above resolves an unbound root to LOCKED. Here the ruling
+    // deliberately kept the historical fail-open exit: the requirement is
+    // skipped and the write is ACCEPTED. Do not "restore symmetry" — that is
+    // option B, reserved for the next review of ADR-0058 D5.
+    const warnings: string[] = [];
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 1 }, 'insert', {
+      logger: { warn: (m: string) => warnings.push(m) },
+    })).toBeNull();
+    expect(warnings.some((w) => w.includes("reads 'parent'") && w.includes('NOT enforced'))).toBe(true);
+  });
+
+  it('keeps the plain fail-open message for a predicate that is simply broken', () => {
+    // Not an unbound root — `record` IS bound, the key under it is undeclared.
+    const warnings: string[] = [];
+    expect(violations(
+      { fields: { amount: { type: 'currency', requiredWhen: "record.no_such_field == 'x'" } } },
+      { amount: 1 },
+      'insert',
+      { logger: { warn: (m: string) => warnings.push(m) } },
+    )).toBeNull();
+    expect(warnings.some((w) => w.includes('failed to evaluate — skipped'))).toBe(true);
+    expect(warnings.some((w) => w.includes("reads 'parent'"))).toBe(false);
+  });
+
+  it('leaves the ROW-scoped requiredWhen on the same object working unchanged', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 500 }, 'insert', {
+      parent: { id: 'inv1', status: 'draft' },
+    })).toEqual(['note']);
+  });
+
+  // ── ADR-0113 non-regression, with a parent in scope ──────────────────────
+
+  it('lets a legacy row rest: the header ALREADY required it and it was already empty', () => {
+    expect(violations(sentLineFields, { quantity: 7 }, 'update', {
+      previous: { id: 'l1', invoice: 'inv1', description: '', quantity: 1 },
+      parent: { id: 'inv1', status: 'sent' },
+    })).toBeNull();
+  });
+
+  it('rejects a write that NULLS the field while the header requires it', () => {
+    expect(violations(sentLineFields, { description: '' }, 'update', {
+      previous: { id: 'l1', invoice: 'inv1', description: 'seat', quantity: 1 },
+      parent: { id: 'inv1', status: 'sent' },
+    })).toEqual(['description']);
+  });
+
+  it('judges a REPOINT by the header the write LANDS on, not the one it leaves', () => {
+    // The reason `previousParent` exists. The row complied under its draft
+    // header; the write moves it under a sent one. Binding the LANDING header
+    // to the pre-check too would read this as a pre-existing violation and let
+    // it rest — the acceptance hole this issue exists to close, one case in.
+    expect(violations(sentLineFields, { invoice: 'sent_inv' }, 'update', {
+      previous: { id: 'l1', invoice: 'draft_inv', description: '', quantity: 1 },
+      parent: { id: 'sent_inv', status: 'sent' },
+      previousParent: { id: 'draft_inv', status: 'draft' },
+    })).toEqual(['description']);
+  });
+
+  it('`previousParent` defaults to `parent` when the write does not repoint', () => {
+    // No repoint ⇒ the engine does not pay a second header read, and the
+    // legacy-row exemption must still apply.
+    expect(violations(sentLineFields, { quantity: 7 }, 'update', {
+      previous: { id: 'l1', invoice: 'inv1', description: '', quantity: 1 },
+      parent: { id: 'inv1', status: 'sent' },
+    })).toBeNull();
+  });
+
+  // ── blast radius: object-level rules at the SAME evaluation site ─────────
+
+  it('does NOT bind `parent` for object-level rules — still fail-CLOSED (#4649)', () => {
+    const withScriptRule = {
+      fields: { ...sentLineFields.fields },
+      validations: [{
+        type: 'script',
+        name: 'parent_in_object_rule',
+        message: 'nope',
+        condition: "parent.status == 'sent'",
+      }],
+    };
+    // A parent IS supplied, and the field predicate below evaluates with it —
+    // yet the object-level rule still faults on `parent` and still REJECTS.
+    expect(() => evaluateValidationRules(
+      withScriptRule as never,
+      { invoice: 'inv1', description: 'seat' },
+      'insert',
+      { parent: { id: 'inv1', status: 'sent' } } as never,
+    )).toThrow(/could not be evaluated/);
+  });
+});
+
+describe('hasParentScopedRequiredWhen (#4977 gate)', () => {
+  it('is TRUE when a field declares a parent-scoped requiredWhen', () => {
+    expect(hasParentScopedRequiredWhen(sentLineFields)).toBe(true);
+  });
+
+  it('is FALSE for record-scoped requiredWhen only (no needless header read)', () => {
+    expect(hasParentScopedRequiredWhen(invoiceFields)).toBe(false);
+  });
+
+  it('is FALSE for a parent-scoped READONLYWhen — that is the other gate', () => {
+    expect(hasParentScopedRequiredWhen(invoiceLineFields)).toBe(false);
+  });
+
+  it('does not mistake a field NAMED parent_id, or a string literal, for the binding', () => {
+    expect(hasParentScopedRequiredWhen({
+      fields: {
+        a: { type: 'text', requiredWhen: "record.parent_id != ''" },
+        b: { type: 'text', requiredWhen: "record.kind == 'parent'" },
+      },
+    })).toBe(false);
+  });
+
+  it('is NOT payload-filtered, unlike its readonlyWhen twin', () => {
+    // The whole failure `requiredWhen` catches is a field the payload OMITS, so
+    // filtering by `name in data` would skip exactly the writes it is for.
+    // (The twin takes a payload argument; this one deliberately does not.)
+    expect(hasParentScopedRequiredWhen(sentLineFields)).toBe(true);
+    expect(hasParentScopedReadonlyWhenInPayload(invoiceLineFields, { description: 'x' })).toBe(false);
   });
 });
 

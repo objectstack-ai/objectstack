@@ -539,13 +539,98 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         })).toHaveLength(0);
       });
 
-      it('is scoped to `readonlyWhen` — `requiredWhen`/`visibleWhen` verdicts are unchanged', () => {
+      // #4977 — this pin used to read "scoped to `readonlyWhen`, `requiredWhen`
+      // verdicts unchanged" over a fixture declaring BOTH. It pinned exactly the
+      // limb that issue removes, so it is replaced rather than re-spelled: the
+      // `requiredWhen` half moved to its own cases below, and what survives here
+      // is the genuinely-unchanged slot, `visibleWhen`, on a fixture that
+      // declares only that.
+      it('is still scoped OUT of `visibleWhen` — that verdict is unchanged', () => {
         expect(parentScopeIssues({
           name: 'orphan_line',
           fields: {
-            qty: { type: 'number', requiredWhen: "parent.status == 'paid'", visibleWhen: "parent.status == 'paid'" },
+            qty: { type: 'number', visibleWhen: "parent.status == 'paid'" },
           },
         })).toHaveLength(0);
+      });
+    });
+
+    // #4977 — the same gate, extended to the slot the same issue gave a server
+    // `parent` binding. `requiredWhen` stays FAIL-OPEN at runtime, so this build
+    // gate is the only thing that stops an unbindable declaration from shipping
+    // and enforcing nothing forever — which is why the message must name that
+    // consequence and not `readonlyWhen`'s opposite one.
+    describe('parent-scoped `requiredWhen` needs a resolvable master (#4977)', () => {
+      const parentScopeIssues = (obj: Record<string, unknown>) =>
+        validateStackExpressions({ objects: [obj] }).filter((i) => /reads `parent`/.test(i.message));
+
+      it('rejects it on an object that declares NO master_detail relationship', () => {
+        const issues = parentScopeIssues({
+          name: 'orphan_line',
+          fields: {
+            inv: { type: 'lookup', reference: 'inv' }, // a lookup is not a master
+            description: { type: 'text', requiredWhen: "parent.status == 'sent'" },
+          },
+        });
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.severity).toBe('error');
+        expect(issues[0]!.where).toMatch(/field 'description' requiredWhen/);
+        expect(issues[0]!.message).toMatch(/declares no `master_detail` relationships/);
+        // The CONSEQUENCE clause is what separates this from its `readonlyWhen`
+        // twin: fail-open there, fail-closed here, opposite fixes.
+        expect(issues[0]!.message).toMatch(/the requirement would never be enforced/);
+        expect(issues[0]!.message).not.toMatch(/locked on every write/);
+      });
+
+      it('rejects it when TWO masters leave "the parent" unstated', () => {
+        const issues = parentScopeIssues({
+          name: 'junction',
+          fields: {
+            left: { type: 'master_detail', reference: 'a' },
+            right: { type: 'master_detail', reference: 'b' },
+            description: { type: 'text', requiredWhen: "parent.status == 'sent'" },
+          },
+        });
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.message).toMatch(/declares 2 `master_detail` relationships/);
+      });
+
+      it('ACCEPTS it on a real detail object — the showcase shape must stay lintable', () => {
+        expect(parentScopeIssues({
+          name: 'showcase_invoice_line',
+          fields: {
+            invoice: { type: 'master_detail', reference: 'showcase_invoice' },
+            description: { type: 'text', requiredWhen: "parent.status == 'sent'" },
+          },
+        })).toHaveLength(0);
+      });
+
+      it('does not fire on a field named `parent_id` or a `parent` string literal', () => {
+        expect(parentScopeIssues({
+          name: 'node',
+          fields: {
+            parent_id: { type: 'text' },
+            kind: { type: 'text' },
+            a: { type: 'text', requiredWhen: "record.parent_id != ''" },
+            b: { type: 'text', requiredWhen: "record.kind == 'parent'" },
+          },
+        })).toHaveLength(0);
+      });
+
+      it('reports BOTH slots when one field declares two unbindable predicates', () => {
+        const issues = parentScopeIssues({
+          name: 'orphan_line',
+          fields: {
+            qty: {
+              type: 'number',
+              readonlyWhen: "parent.status == 'paid'",
+              requiredWhen: "parent.status == 'sent'",
+            },
+          },
+        });
+        expect(issues).toHaveLength(2);
+        expect(issues.map((i) => i.where.replace(/.* field 'qty' /, '')).sort())
+          .toEqual(['readonlyWhen', 'requiredWhen']);
       });
     });
 
