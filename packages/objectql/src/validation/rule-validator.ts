@@ -158,6 +158,23 @@
  * `record.x == null`. Pinned by test so the app-side `has(...)` idiom cannot be
  * broken silently from under it.
  *
+ * ## `readonlyWhen` sees a TOTAL record too (#4953)
+ *
+ * The paragraph above ("Deliberately NOT changed here") is about the fail-open
+ * POLICY, and that policy is still what the field-level predicates use. What
+ * changed in #4953 is the other half — what the predicate is evaluated
+ * AGAINST. `materializeDeclaredFields` was wired into two seams and not the
+ * third: the strip functions on the write path merged `{ ...previous, ...data }`
+ * and evaluated it raw, so a `readonlyWhen` faulted (and, failing open, WROTE
+ * the field it was declared to freeze) on exactly the rows whose driver did not
+ * echo back the column its predicate reads — while `requiredWhen`, on the same
+ * field, in this same file, read a total record and worked. The maintainer's
+ * ruling (2026-08-06) unifies the SERVER seams: totality is a platform
+ * guarantee wherever the server evaluates, and the cross-process bindings
+ * (objectui action `visible`/`disabled`) stay sparse and are documented as
+ * such. See {@link readonlyWhenBindings} for the exact bindings, the
+ * ground-truth rule they obey, and the verdicts that move in BOTH directions.
+ *
  * ## Prior-record plumbing
  *
  * `state_machine` and the field-spanning predicates are meaningful only with
@@ -390,6 +407,88 @@ export function needsPriorRecord(
 export type ParentBinding = Record<string, unknown> | null | undefined;
 
 /**
+ * The two CEL roots a field `readonlyWhen` predicate reads — `record` (the
+ * prior row overlaid with the PATCH) and `previous` — made TOTAL over the
+ * object's DECLARED fields (#4953).
+ *
+ * ## Why this seam had to join the other two
+ *
+ * `materializeDeclaredFields` existed since #1871/#4649 and was wired into
+ * exactly two evaluation seams: {@link evaluateValidationRules} (object rules,
+ * field `requiredWhen`, option `visibleWhen`) and the declarative hook
+ * `condition`s in `hook-wrappers.ts`. `readonlyWhen` — declared on the SAME
+ * field as `requiredWhen`, evaluated by THIS module, one function away — merged
+ * `{ ...previous, ...data }` and evaluated it raw. So one field's two
+ * predicates disagreed about what "the record" contains: ``requiredWhen:
+ * P`record.b != null` `` was a working guard while ``readonlyWhen:
+ * P`record.b != null` `` on the same field faulted whenever the driver did not
+ * return `b` — and a faulting `readonlyWhen` is fail-OPEN, so the field the
+ * author declared frozen was written. Whether it was written depended on which
+ * columns a driver happened to echo back, which is not something an author can
+ * see or control (#4953; maintainer ruling 2026-08-06: the SERVER seams are
+ * unified, the cross-process ones are deferred).
+ *
+ * The `parent` root is deliberately NOT materialised here. #4889 owns that
+ * binding's semantics — an ABSENT `parent` is the signal that makes the
+ * unbound-root branch of {@link isReadonlyWhenLocked} reachable, and the header
+ * is a row of a DIFFERENT object whose declared fields this function does not
+ * have.
+ *
+ * ## Consequences, both directions (measured, not asserted)
+ *
+ * A total record makes a predicate that used to fault evaluate for real, so
+ * verdicts move — the point of the change, and in both directions:
+ *
+ *  - ``record.b == null`` / ``record.b != null`` / ``previous.b == null`` on a
+ *    row the driver returned without `b`: fault → fail-open → the change was
+ *    WRITTEN. Now they evaluate, and a TRUE predicate strips the change. This
+ *    is enforcement being restored, and it is the direction the ruling asked
+ *    for.
+ *  - ``has(record.b)`` becomes uniformly TRUE and ``!has(record.b)`` uniformly
+ *    FALSE for a DECLARED field, because a materialised `null` is a present key
+ *    holding null (CEL's own rule). A ``readonlyWhen: !has(record.b)`` that
+ *    used to lock the field therefore stops locking it. That is the same
+ *    consequence #4649 documented for the validation seam and
+ *    `declared-fields.ts` states as the contract — `has()` guards against an
+ *    UNDECLARED key, not against an empty value; test emptiness with
+ *    `!= null`. Pinned by test in both spellings so this is a recorded
+ *    consequence rather than a discovery.
+ *
+ * Ordering comparisons still fault over a total record (`null < null` is `no
+ * such overload`), so the fail-open branch is not dead — the very reason
+ * `@objectstack/lint`'s null-guard gate exists.
+ *
+ * ## Only materialise when the persisted state is IN HAND
+ *
+ * Same rule {@link evaluateValidationRules} applies with its `groundTruth`
+ * flag, and the reason `declared-fields.ts` states: defaulting a declared field
+ * to `null` when the prior row was NOT read does not materialise an absent
+ * value, it FABRICATES one that contradicts the stored row. `previous` absent
+ * (never fetched, or a single-id update whose row is gone) therefore leaves
+ * both bindings exactly as they were. The engine reads the prior row whenever
+ * the object declares a `readonlyWhen` field ({@link needsPriorRecord} →
+ * `fieldsNeedPrior`), so the materialised branch is the normal one. INSERT is
+ * exempt from the strip entirely (`engine.ts`), so unlike the validation seam
+ * there is no insert case to answer here.
+ */
+function readonlyWhenBindings(
+  data: Record<string, unknown>,
+  prior: Record<string, unknown> | undefined | null,
+  fields: Record<string, ConditionalFieldDef>,
+): { merged: Record<string, unknown>; previous: Record<string, unknown> | undefined } {
+  const previous = prior ?? undefined;
+  const merged: Record<string, unknown> = { ...(previous ?? {}), ...data };
+  if (!previous) return { merged, previous };
+  return {
+    merged: materializeDeclaredFields(merged, fields),
+    // COPIED before materialising: the caller's object is the engine's
+    // `hookContext.previous`, which after-hooks observe — it must not gain
+    // materialised nulls (the same copy `evaluateValidationRules` makes).
+    previous: materializeDeclaredFields({ ...previous }, fields),
+  };
+}
+
+/**
  * Strip fields whose `readonlyWhen` CEL predicate is TRUE for the (merged)
  * record from an UPDATE payload — the field is locked, so an incoming change is
  * ignored (the persisted value is kept) rather than rejected. Returns the same
@@ -405,6 +504,9 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
  *
  * A predicate that faults is fail-open (the change is allowed through) EXCEPT
  * when the fault is an unbound scope root — see {@link isReadonlyWhenLocked}.
+ *
+ * The `record` / `previous` bindings are TOTAL over the object's declared
+ * fields (#4953) — see {@link readonlyWhenBindings}.
  */
 export function stripReadonlyWhenFields(
   objectSchema: { fields?: Record<string, ConditionalFieldDef> } | undefined | null,
@@ -415,11 +517,11 @@ export function stripReadonlyWhenFields(
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
-  const merged = { ...(previous ?? {}), ...data };
+  const view = readonlyWhenBindings(data, previous, fields);
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
-    if (isReadonlyWhenLocked(def, merged, previous ?? undefined, name, logger, parent)) {
+    if (isReadonlyWhenLocked(def, view.merged, view.previous, name, logger, parent)) {
       if (result === data) result = { ...data };
       delete (result as Record<string, unknown>)[name];
       logger?.warn?.(`Field '${name}' is read-only (readonlyWhen) — ignoring incoming change`);
@@ -614,6 +716,14 @@ export function hasReadonlyWhenInPayload(
  * binding absent for that row, which {@link isReadonlyWhenLocked} reads as
  * LOCKED for a predicate that needs it.
  *
+ * Each matched row's `record` / `previous` bindings are made TOTAL over the
+ * declared fields (#4953, {@link readonlyWhenBindings}) exactly as on the
+ * single-id path — a bulk write must not judge the same predicate by a
+ * different record shape than a one-row write does. The views are built ONCE
+ * per row (they do not depend on which field is being judged) and only when a
+ * `readonlyWhen` field is actually in the payload, so a batch that touches none
+ * still pays nothing.
+ *
  * Returns the same object when nothing is stripped, else a shallow copy with the
  * locked keys removed.
  */
@@ -627,17 +737,23 @@ export function stripReadonlyWhenFieldsMulti(
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const rows = priorRows ?? [];
+  // Built lazily: a payload writing no `readonlyWhen` field never reaches the
+  // `.some()` below, and then no row view is materialised at all.
+  let views: Array<ReturnType<typeof readonlyWhenBindings>> | null = null;
+  const rowViews = () => (views ??= rows.map((row) => readonlyWhenBindings(data, row, fields)));
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
-    const lockedInSomeRow = rows.some((row) =>
+    const lockedInSomeRow = rowViews().some((view, i) =>
       isReadonlyWhenLocked(
         def,
-        { ...(row ?? {}), ...data },
-        row ?? undefined,
+        view.merged,
+        view.previous,
         name,
         logger,
-        parentForRow?.(row ?? undefined),
+        // Resolved per (field, row) exactly as before — the header lookup is
+        // the caller's, and its call pattern is not this change's business.
+        parentForRow?.(rows[i] ?? undefined),
       ),
     );
     if (lockedInSomeRow) {
