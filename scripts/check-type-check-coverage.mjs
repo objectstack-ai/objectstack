@@ -160,20 +160,22 @@
 //               The maintainer's ruling was to land the invariant with a
 //               DOCUMENTED margin on the packages that proved hottest rather
 //               than run a sixth lap: `@objectstack/objectql`,
-//               `@objectstack/lint`, `@objectstack/rest` and
-//               `@objectstack/service-storage` are recorded at their
-//               measurement PLUS TEN, and each says so in its own note, naming
-//               the measured number and the sha. This is the ledger's ONLY
+//               `@objectstack/lint`, `@objectstack/rest`,
+//               `@objectstack/service-storage` and `@objectstack/mcp` are
+//               recorded at their measurement PLUS TEN, and each says so in its
+//               own note, naming the measured number and the sha. This is the
+//               ledger's ONLY
 //               slack and it is deliberately loud: nothing else here may sit
 //               above its measurement, and a margin is not a place to hide a
 //               real increase. Because shrinkage is informational, each of the
-//               four prints its own `ℹ ... can be lowered` line on every run --
+//               five prints its own `ℹ ... can be lowered` line on every run --
 //               that line IS the tightening worklist, and closing it is a
 //               follow-up PR, not a thing to leave running for months.
 //
-//               The margins were not a precaution; two of the four were paid
-//               out inside a single hour of the landing flight. objectql moved
-//               339 -> 345 (#5749 / PR #6013 extending summary-rollup.test.ts)
+//               The margins were not a precaution; two of the first four were
+//               paid out inside a single hour of the landing flight. objectql
+//               moved 339 -> 345 (#5749 / PR #6013 extending
+//               summary-rollup.test.ts)
 //               and service-storage 42 -> 41 -> 42 (the two halves of the
 //               `IStorageService.list(prefix)` retirement, #5540 / PR #5983 then
 //               #5541 / PR #6061, landing hours apart). Recorded exactly, both
@@ -181,6 +183,23 @@
 //               advance. Note the second shape especially: a retirement split
 //               across two PRs moves a count DOWN and then back UP, so an exact
 //               number recorded between the halves is stale before it is pushed.
+//
+//               The FIFTH margin, `@objectstack/mcp`, is the one the gate found
+//               by itself, and it is the cleanest evidence that this invariant
+//               does what it was built for. #5278's own PR reached the merge
+//               queue and was kicked at 03:25:18Z on a single red line: mcp
+//               TEST_DEBT recorded 52, tsc reported 53. The +1 was NOT
+//               introduced by the PR ahead of it in the queue (#6077's own
+//               queue generation was green) -- it is a pre-existing drift that
+//               nothing in this repo had ever been able to see, surfaced the
+//               first time the ledger was re-measured against a moving base.
+//               A ratchet whose introducing PR is the first thing it catches is
+//               a ratchet that works. It takes a margin rather than an exact
+//               number for the same reason the other four do: packages/mcp took
+//               a feature landing the same day (#6077 projecting skill
+//               `instructions` as MCP prompts), so it is an actively-moving
+//               package, and an exact number on an actively-moving package is
+//               precisely the bet option D lost five times running.
 //
 // The root is the one asymmetry: its `typecheck` script is the workspace
 // aggregator, so its OWN top-level TypeScript is covered by a `typecheck:root`
@@ -470,7 +489,27 @@ const TEST_DEBT = {
       + 'attributed further. 64 of the 131 sit in src/auth-manager.test.ts, 22 in '
       + 'src/admin-import-users.test.ts and 18 in src/admin-user-endpoints.test.ts.',
   },
-  '@objectstack/mcp': { tests: 8, errors: 52, note: 'TS18046 x51 -- `error` is of type unknown, one catch-block idiom repeated. Re-measured 52 at 5ab08428, exact.' },
+  '@objectstack/mcp': {
+    tests: 9,
+    errors: 63,
+    note: 'TS18046 x51 -- `json` is of type unknown, one `await res.json()` idiom repeated across four '
+      + 'files (23 in mcp-server-runtime.http.test.ts, 14 in mcp-action-tools.test.ts, 8 in '
+      + 'mcp-http-tools.scopes.test.ts, 6 in mcp-validate-expression.test.ts); TS6133 x1; TS2352 x1. '
+      + 'Measured 52 at 5ab08428 -> 53 at 34558c2cc. This entry is the fifth bootstrap margin and the '
+      + 'one the ratchet found on its OWN introducing PR: #5278 reached the merge queue and was kicked '
+      + 'at 03:25:18Z on this single +1, which is not #6077\'s doing (that PR\'s own queue generation '
+      + 'was green) but a pre-existing drift no gate in this repo could see until the ledger was '
+      + 're-measured against a moving base. The +1 is fully attributed: '
+      + 'src/skill-prompts.test.ts(185,23), a TS2352 casting `SkillPrompt | null` to `Record< string, '
+      + 'unknown >` -- the file #3905 / PR #6077 added when it projected skill `instructions` as MCP '
+      + 'prompt primitives, which is also why the file count moved 8 -> 9. The old note\'s composition '
+      + 'was misleading in the way the top of this ledger warns about: it read "`error` is of type '
+      + 'unknown, one catch-block idiom", while all 51 are the response-body `json` binding, not a '
+      + 'catch block. packages/mcp took a feature landing the same day, so it is an actively-moving '
+      + 'package and an exact number here would very likely lose the same race that killed option D '
+      + 'five times over. RECORDED 63 is a bootstrap margin (+10 over 53 measured at 34558c2cc) -- '
+      + 'tighten via the ℹ hint immediately after landing (#5278 option A).',
+  },
   '@objectstack/driver-mongodb': {
     tests: 15,
     errors: 43,
