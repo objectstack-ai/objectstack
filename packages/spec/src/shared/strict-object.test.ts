@@ -171,6 +171,81 @@ describe('strictObject', () => {
 });
 
 /**
+ * The ORDER the message emits its parts in — pinned as order, not as presence.
+ *
+ * Every assertion above this block is a `toContain` on one fragment, so all of
+ * them stayed green while `history` sat in the MIDDLE of the message, between
+ * "which key is wrong" and "here is the fix". That mattered once #5762 promoted
+ * `flow-time-relative-descriptor-invalid` to **error**: several consumers render
+ * a finding on ONE line (`os validate`'s `• where: message`, CI logs, and
+ * `validateFlowTriggerReadiness`, which flattens the newlines out of the schema's
+ * own text), and `TimeRelativeTriggerSchema`'s history sentence is 224
+ * characters — so the author, often an AI, read the front of the line and found
+ * a sentence about 2026 instead of the key to write (#5955).
+ *
+ * Direction A of that issue's ruling: move the sentence to the end. Nothing is
+ * deleted and nothing is conditional — which is exactly why it needs an ORDER
+ * pin rather than another presence check. A future edit that folds `history`
+ * back into the front matter passes every `toContain` in this file; it fails
+ * here.
+ */
+describe('message order — the fix comes before the history (#5955)', () => {
+  const HISTORY = 'Until #4001 these were dropped silently — the widget still rendered.';
+
+  const messageFor = (body: Record<string, unknown>) => {
+    const r = WidgetSchema.safeParse({ name: 'x', ...body });
+    expect(r.success).toBe(false);
+    return r.error!.issues[0]!.message;
+  };
+
+  it('names the wrong key first, then the rename, then the history', () => {
+    const m = messageFor({ colummSpan: 2 });
+    // 1. which key is wrong — and nothing before it
+    expect(m.startsWith('Unrecognized key(s) on this widget: `colummSpan`.')).toBe(true);
+    // 2. the fix, immediately after it (this is the whole point of the reorder)
+    expect(m).toContain('`colummSpan`. Did you mean `colummSpan` → `columnSpan`?');
+    // 3. the history sentence, verbatim, last — moved, never dropped
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+    expect(m.indexOf('Did you mean')).toBeLessThan(m.indexOf(HISTORY));
+  });
+
+  it('puts a guidance prescription ahead of the history too', () => {
+    // The other fix channel. A tombstone/wrong-layer prescription is as
+    // actionable as a rename, so it cannot sit behind the sentence either.
+    const m = messageFor({ span: 2 });
+    expect(m.startsWith('Unrecognized key(s) on this widget: `span`.')).toBe(true);
+    expect(m).toContain('\n  • `span` was retired in vX. Use `columnSpan`.');
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+    expect(m.indexOf('was retired in vX')).toBeLessThan(m.indexOf(HISTORY));
+  });
+
+  it('keeps BOTH fix channels ahead of the history in one message', () => {
+    const m = messageFor({ span: 2, colummSpan: 3 });
+    expect(m.startsWith('Unrecognized key(s) on this widget: `span`, `colummSpan`.')).toBe(true);
+    expect(m.indexOf('Did you mean')).toBeLessThan(m.indexOf(HISTORY));
+    expect(m.indexOf('was retired in vX')).toBeLessThan(m.indexOf(HISTORY));
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+  });
+
+  it('emits the history exactly once, whatever the key count', () => {
+    // It is a per-SURFACE sentence, not a per-key one: zod raises a single
+    // `unrecognized_keys` issue naming every offending key, so the sentence is
+    // appended to that one message once — the property that makes "last" a
+    // well-defined position at all.
+    const m = messageFor({ colummSpan: 2, alsoWrong: 3, andThis: 4 });
+    expect(m.split(HISTORY)).toHaveLength(2);
+  });
+
+  it('is unchanged when there is no fix to offer', () => {
+    // No rename, no prescription — the sentence follows the key statement
+    // directly, exactly as it always did. Full-message pin, so any stray
+    // separator or duplicated clause fails here.
+    expect(messageFor({ nonsense: 1 }))
+      .toBe(`Unrecognized key(s) on this widget: \`nonsense\`. ${HISTORY}`);
+  });
+});
+
+/**
  * Never suggest a key the schema cannot accept.
  *
  * `retiredKey` declares a removed key as `z.never().optional()` so the removal
