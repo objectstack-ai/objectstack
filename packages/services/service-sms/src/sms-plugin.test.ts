@@ -153,3 +153,83 @@ describe('SmsServicePlugin', () => {
     expect(good.message).not.toContain('5550006'); // masked
   });
 });
+
+describe('SmsServicePlugin — daily quota binding (#2814)', () => {
+  it('applies sms.daily_quota from settings at kernel:ready', async () => {
+    const harness = fakeCtx({ settingsValues: { provider: 'log', daily_quota: 2 } });
+    const plugin = new SmsServicePlugin();
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    const svc = harness.services.get('sms') as SmsService;
+    expect((await svc.send({ to: '+8613800000001', body: 'a' })).status).toBe('sent');
+    expect((await svc.send({ to: '+8613800000002', body: 'b' })).status).toBe('sent');
+    const refused = await svc.send({ to: '+8613800000003', body: 'c' });
+    expect(refused.status).toBe('failed');
+    expect(refused.error).toContain('TOO_MANY_REQUESTS');
+  });
+
+  it('live-applies a quota change without a restart', async () => {
+    const harness = fakeCtx({ settingsValues: { provider: 'log', daily_quota: 1 } });
+    const plugin = new SmsServicePlugin();
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    const svc = harness.services.get('sms') as SmsService;
+    await svc.send({ to: '+8613800000001', body: 'a' });
+    expect((await svc.send({ to: '+8613800000002', body: 'b' })).status).toBe('failed');
+
+    harness.setValues({ provider: 'log', daily_quota: 0 }); // admin lifts the cap
+    await harness.notifyChange();
+    expect((await svc.send({ to: '+8613800000003', body: 'c' })).status).toBe('sent');
+  });
+
+  it('binds the quota even when the host injected its own transport', async () => {
+    // "How much may this deployment spend today" is an operator policy about
+    // the deployment, not a property of whichever transport delivers — so the
+    // host-transport short-circuit that skips the PROVIDER settings must not
+    // skip this one.
+    const send = vi.fn(async () => ({ messageId: 'host_1' }));
+    const harness = fakeCtx({ settingsValues: { provider: 'aliyun', daily_quota: 1 } });
+    const plugin = new SmsServicePlugin({ transport: { send } });
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    const svc = harness.services.get('sms') as SmsService;
+    expect((await svc.send({ to: '+8613800000001', body: 'a' })).status).toBe('sent');
+    expect((await svc.send({ to: '+8613800000002', body: 'b' })).status).toBe('failed');
+    // …and the injected transport is still the one that delivered.
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('degrades an unusable quota value to "no limit" and says so', async () => {
+    const harness = fakeCtx({ settingsValues: { provider: 'log', daily_quota: -3 } });
+    const plugin = new SmsServicePlugin();
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    const svc = harness.services.get('sms') as SmsService;
+    for (let i = 0; i < 5; i++) {
+      expect((await svc.send({ to: '+8613800000001', body: 'x' })).status).toBe('sent');
+    }
+    const warned = harness.logger.warn.mock.calls.map((c: any[]) => String(c[0])).join('\n');
+    expect(warned).toContain("daily_quota value '-3'");
+  });
+
+  it('an unset namespace leaves the gate off', async () => {
+    const harness = fakeCtx({ settingsValues: { provider: 'log' } });
+    const plugin = new SmsServicePlugin();
+    await plugin.init(harness.ctx);
+    await plugin.start(harness.ctx);
+    await harness.fireReady();
+
+    const svc = harness.services.get('sms') as SmsService;
+    for (let i = 0; i < 10; i++) {
+      expect((await svc.send({ to: '+8613800000001', body: 'x' })).status).toBe('sent');
+    }
+  });
+});

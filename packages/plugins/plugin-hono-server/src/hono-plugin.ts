@@ -228,6 +228,13 @@ export class HonoServerPlugin implements Plugin {
      * Init phase - Setup HTTP server and register as service
      */
     init = async (ctx: PluginContext) => {
+        // Hand the adapter the host's logger BEFORE the server is reachable as
+        // a service — that is the earliest point `ctx` exists (the adapter is
+        // constructed in this plugin's constructor, which has no context), and
+        // it is what routes an escaped handler throw into the host's log
+        // pipeline instead of the adapter's own default (#5848).
+        this.server.setLogger(ctx.logger);
+
         ctx.logger.debug('Initializing Hono server plugin', {
             port: this.options.port,
             staticRoot: this.options.staticRoot

@@ -52,7 +52,7 @@ write state only through these signals:
 | label `needs-user-decision` | a decision is **pending** — never dispatch, never auto-answer; it sits in the maintainer's inbox and MAY be surfaced again in round reports |
 | label `pm:on-hold` | a decision was **made** and the answer is "not now" — never dispatch AND never nag; wait for the restart condition recorded in the hold comment |
 | label `pm:blocked` + body line `Blocked-by: #N` | waiting on another issue/PR — skip at selection; re-check when #N closes |
-| label `pm:epic`(on a parent)| 整棵子树已委托给一个专职 epic PM(会话与文件领地写在**父单正文**;`label:pm:epic` 即全量索引,座位表 #4604 不重复记)— 其它 PM 一律不把该子树的 sub-issue 当候选(见「Epic 子树车道」) |
+| label `pm:epic`(on a parent)| 整棵子树已委托给一个专职 epic PM(会话与文件领地写在**父单正文**;`label:pm:epic` 即全量索引,`pm:seat` 座位贴体系不重复记)— 其它 PM 一律不把该子树的 sub-issue 当候选(见「Epic 子树车道」) |
 | open PR referencing the issue | implemented, in review |
 | merged PR with `Fixes #n` | done (GitHub closes the issue) |
 
@@ -84,6 +84,19 @@ write state only through these signals:
   absent from the issue. Finish the pair or revert the half before you stop;
   the next reader (possibly your own post-compact self) has only GitHub to
   read.
+- **写后回读。** PR/issue 正文、评论、标签的写操作**发出后回读校验** —— 一班实测
+  四次「写成功但内容不对」全靠回读才抓到:两次裸 ESC 字节被实体化、两次 GitHub
+  sanitizer 吞内容(#5885);Auto Label bot 的整组 PUT 还会**冲掉刚打的手工标签**
+  (devx/engine-core 两车道各实测一次)—— 标签写后复读不是多余动作,是唯一能
+  发现它的动作。notes 12 的「读取端截断」是本条的读侧对偶:写侧同样不能拿
+  「API 返回 200」当「落地内容正确」。
+
+**GitHub 书写语言 —— issue/PR 上的一切新内容用英文(维护者 2026-08-06 指令)。**
+凡写到 GitHub 上的:issue 标题与正文、issue/PR 评论(认领、分诊审计、裁决、
+hold/blocked 注记、让行、座位贴登记与审计)、PR 标题与正文 —— 一律**英文**。
+issue 是仓库的公开持久记录,语言随仓库;中文保留给两个通道:**step 9 的轮次
+报告**(chat,对维护者)与派发令里需要原样传达的中文裁决引文(引文照抄,不翻
+译 —— 改写引文就是改写裁决)。存量中文内容 ⛔ 不追溯改写。
 
 **One-time setup** (idempotent, run at the start of the first round):
 
@@ -107,7 +120,7 @@ protocol is identical.)
 
 ## Operational notes(实测坑位)
 
-队列与平台层的十二条实测结论。共同点:**判据取命令的输出,不取 API 字段的字面值,
+队列与平台层的十三条实测结论。共同点:**判据取命令的输出,不取 API 字段的字面值,
 也不取本地工作树的现状,更不取「看起来相邻」的两行日志** —— 每一条都是在这一步上
 咬过人之后写下来的。
 
@@ -155,6 +168,19 @@ flaky 连踢五个互不相关的 PR,核对失败签名一致后原样重投,五
 
 - 复核意见不等配额 —— 先用 REST 评论把结论发出去,入队、切 ready 这类 GraphQL 动作
   事后补;维护者拿到的信息不该被配额延迟。
+
+配额期的**动作交接**四条(services 车道一班六次配额耗尽的沉淀,#5885;含一次
+「读成功写被拒」卡在转 ready 半途 —— 读写配额独立,写被拒不代表读也死了,反之
+亦然):
+
+- 被配额挡下的动作,把**完整待执行状态写进 send_later 定点文本**(哪个 PR、哪个
+  动作、判据是什么)—— 幂等、抗上下文丢失,恢复后照文本执行,不靠会话记忆;
+- 重试用 **10–12 分钟阶梯定点**至成功,⛔ 绝不忙轮询;REST core 配额是**整点
+  重置**,对齐 `:00` 重试优于指数退避(实测一次盲退避白等半个窗口);
+- search 与 core 是**独立配额**,一侧打满时另一侧可作退路(用 search 拿清单、
+  用 core 读详情,或反之);
+- REST core(15000/时)在共享身份下**同样会打满** —— 本条的三份判据(rate_limit
+  读数、整点重置、独立计费)对它一体适用,别把「走 REST」读成「不限量」。
 
 **4. 核验 main 的事实用 `origin/main`,不用共享检出的工作树。** 共享检出的 HEAD 由
 别的 agent 摆布,可能落后 origin/main 数十提交(今天 PM 与一名 dev 都在落后 63 提交的
@@ -305,7 +331,17 @@ REST 取 `body`(原文 4321 / 5183 / 4181 字符)+ 取 `body_html`(渲染版)—
   已发出的重贴指令若事后证伪,**要在同一处公开作废**(同 notes 7:诊断结论一旦
   公开发出又被推翻,更正要发在同样公开的位置)。
 
-## Multi-repo coordination (backend / frontend / cloud)
+**13. MCP 工具的两个参数语义陷阱 —— 过滤是 OR、labels 是整组替换。** spec 车道
+一任内两次实测(#5925),都是 notes 6「命令没在回答你以为的问题」的 API 参数版:
+
+- **MCP `list_issues` 的多标签过滤是 OR 不是 AND**:查 `domain:spec` + `pm:queue`
+  拿到的是**并集**,队列读数直接错(多出一堆别的车道的单)。要 AND 就手工求交集,
+  或走 REST search —— `label:a label:b` 在 search 语法里才是 AND。
+- **`issue_write` 的 `labels` 参数是整组替换不是追加**:不先取现值合并再写,会
+  静默剥掉 `priority:p0` / `domain:*` —— 与 label discipline「标签即状态机」直接
+  冲突,掉一个标签 = 状态机丢一位。追加用 REST 的
+  `POST /issues/{n}/labels`(真追加),或读-合-写三步;写后照上面 label
+  discipline 的「写后回读」核对。
 
 The product spans three repos with a fixed dependency direction:
 `objectstack` (backend; `packages/spec` is the single contract) →
@@ -396,7 +432,14 @@ issues that collide on shared files — and「谁来分诊」原本是每个 PM 
   是「同仓多 PM 并发」的切法,不是第二套仓库标签。
 - **分诊座位空缺时**:欠账由任一**会话型**执行 PM **代扫** —— 只做分诊动作
   (标签、拆分、查重、审计评论),⛔ 代扫不解除双射,仍不得跨车道认领 —— 并在
-  座位表「说明」栏写明处于代扫状态。座位有主后代扫立即停止。
+  自己座位贴「说明」段写明处于代扫状态。座位有主后代扫立即停止。
+- **分诊座位在任时,车道 PM ⛔ 不自跑 step 0 与发现分诊轮** —— 代扫仅限空缺期。
+  反例是 #5367:分诊 Routine 17:00 晋级、车道 18:08 持有,70 分钟内对同一
+  finding 出了**相反处置**;两个分类产者并存,单一生产者的全部保障当场归零。
+  三条配套:`finding` 的**晋级/持有是分诊座位的单通道**(车道对定级有异议走
+  上报,不自行改);处置评论必须**连带改标签**(那次的处置评论写「留 finding」
+  而标签是 `pm:queue` —— 评论与标签失同步,正是 label discipline 成对纪律禁止
+  的半状态);车道在 finding 上只做两件事 —— 补充实测证据、上报异议。
 
 **跨域例外路径 —— 唯一的越界通道。** 真拆不动的跨域单 PR(拆分成本大于收益,
 判据同 rule 2 的 contract-first 拆分):由**分诊 PM 指定一个**车道 PM 认领,该
@@ -405,26 +448,67 @@ issues that collide on shared files — and「谁来分诊」原本是每个 PM 
 旧条款要求每个 PM 每次批次选择都扫全仓在飞单,开销 O(PM 数 × 在飞数)、每轮
 重复,而判据只是自由文本申报 —— 越贵越不可靠。
 
-**座位表协议 —— 正文表格即真相(#4604)。** 主 backlog 的登记 issue
-(`[PM] 分片分工登记表`,#4604)**正文的座位表格是唯一权威现状**:
+**座位贴协议 —— 一座位一贴,单写手(维护者 2026-08-06 拍板,取代单正文座位表)。**
+座位登记曾是 #4604 单正文里的一张表,12 个座位共编一个 body;issue 正文更新是
+**全文覆盖**(PATCH 整体替换,无条件写入/CAS),从过期快照出发编辑 = 静默回滚
+其它座位的行 —— 与 os-regen 静默吞并同形:操作成功、零冲突标记、丢一侧改动,
+08-06 一天内多次实测互吞。多写手共编一个 body 在**机制上**防不住,所以架构改为
+**每个座位一张登记贴**:
 
-- **行 = 座位**(分诊 + 各 `domain:*` + 姊妹仓整仓),**列 = 座位 | 范围 |
-  当前 PM(会话或 Routine ID) | 说明**。接管 / 移交 = **就地编辑你那一行**
-  外加一条审计评论;**评论只作交接审计,不承载状态** —— 不要靠读评论流对账
-  现状。起因是实测:#4604 三天累积 79 条登记评论,「现状」与「历史」挤在同一
-  通道,对账成本随评论数线性涨。
+- **贴 = 座位**(分诊、队列管家、各 `domain:*`、姊妹仓整仓),打标签 **`pm:seat`**,
+  正文三段:**范围 | 当前 PM | 说明**。`label:pm:seat`
+  即全量索引(与 `pm:epic` 同构);#4604 只作**指针页**(座位 → 贴的静态索引,
+  仅拆域加座位时更新)。**单写手**:贴正文只由**在任座位 PM** 编辑,互吞类
+  问题机制性消失,而不是纪律性缓解。
+- **标题即状态板(维护者 2026-08-06 拍板)**:座位贴标题固定格式
+  `[PM seat] <座位名> — <状态>`,状态词表:`🟢 <github-login>`(在任,账号已知)/
+  `🟢 Routine`(Routine 座位)/ `⏳ vacant`(待认领)/ `⏸️ paused`(维护者暂停)。
+  `label:pm:seat` 的列表页因此就是全舰队状态板,不必逐贴点开。**标题只放慢状态**
+  (在任者/空缺/暂停 —— 换班级频率);轮次、在飞、队列快照等快状态 ⛔ 不进标题,
+  留在正文「说明」段 —— 快状态进标题会让 title-change 事件流淹掉审计评论。标题是
+  正文「当前 PM」段的**派生视图**:两者**同笔更新**(成对纪律),正文为权威。
+  附带收益:GitHub 的标题改动是独立时间线事件(改动者 + 时刻 + 旧→新,平台盖章),
+  每次接管/退场天然多一条不可自述错的审计流。
+- **assignee = 在任 PM 的 GitHub 账号(维护者 2026-08-06 拍板)**:接管时把座位贴
+  assign 给自己的账号,退场/回收时摘除 —— 列表页显示头像,**无 assignee = 空缺**,
+  与标题 `⏳ vacant` 互为校验。例外:Routine 座位(bot 身份通常不可被 assign)
+  以标题 `🟢 Routine` 为准,assignee 留空。标题、assignee、正文「当前 PM」段
+  **三者同笔更新**(成对纪律的三元版),正文为权威。
+- **「当前 PM」段固定登记三元(维护者 2026-08-06 要求可辨识 GitHub 用户)**:
+  **GitHub 账号**(会话启动时 `GET /user` / `get_me` 自查 login —— 舰队实际在用
+  多个账号,`os-zhuang`/`qq9340100`/`hotlong`/`baozhoutao` 已各自在岗,「共享单一
+  身份」的旧假设不再全真)+ **会话 ID 或 Routine ID** + **上任时刻**。正文自述
+  之外还有一条**平台盖章的硬读数**:该座位审计/认领评论的**作者字段**就是该
+  会话的 GitHub 用户,不可自述错 —— 接管仲裁与活性判定优先用它对账正文。
+- **接管 / 移交 = 改该座位贴正文 + 在该贴留一条审计评论**;**评论只作交接审计,
+  不承载状态** —— 不要靠读评论流对账现状(实测教训:#4604 曾三天累积 79 条登记
+  评论,「现状」与「历史」挤在同一通道,对账成本随评论数线性涨)。
+- **残余竞态纪律(唯一还剩的多写手场景是空缺座位争用)**:动手前**重新 fetch
+  贴正文**;审计评论**时间戳先到先得**(同 step 4 认领竞态的裁决方式);**写后
+  回读**核对。新增座位贴(拆域)同样先查 `pm:seat` 索引再立贴 —— 加贴与改贴
+  一样要先读现状。
 - **无心跳。** 座位不定期报活;活性是**惰性判定**,只在**接管冲突**时评估一次
   —— Routine 座位查调度器(`last_fired` / `next_run`),会话座位查它最近一条
-  产出评论的时间戳,**>24h 无产出即可回收**(编辑该行 + 一条审计评论)。子树/
+  产出评论的时间戳,**>24h 无产出即可回收**(改贴正文 + 一条审计评论)。子树/
   批次里在飞的认领仍按认领协议由原认领者跟完。
-- **每轮巡检核对自己的正文行。** 协议或表格结构升级会迁移状态:2026-08-05
-  spec 座位的在任 PM(接管时按升级前惯例只发过登记评论)在正文表格化迁移后
-  被记为「⏳ 待认领 / 前任已收官」—— 而上一条的惰性回收会把这个错位变成
-  误回收,别的会话也可能照着「待认领」真来接管。自查一行的成本是零;发现
-  不符,当场改行 + 审计评论,不等冲突发生。这与「从 labels 重建状态」同源:
-  正文行也是状态,读它、修它,不靠记忆。
-- **epic 委托不在座位表登记** —— `pm:epic` 父单正文自带会话与领地,
-  `label:pm:epic` 即全量索引(见「Epic 子树车道」)。座位表只记常设座位,一件
+- **每轮巡检核对自己的座位贴正文。** 协议或结构升级会迁移状态(单正文表时代
+  实测过一次:spec 座位在迁移后被误记为「⏳ 待认领」,差点被惰性回收误伤)。
+  自查一贴的成本是零;发现不符,当场改正文 + 审计评论,不等冲突发生。这与
+  「从 labels 重建状态」同源:贴正文也是状态,读它、修它,不靠记忆。Routine
+  座位的**收尾简报**也落自己的座位贴(它是下一轮自退守卫的读数)。
+- **交接收尾清单(座位退场序列,漏一步就是给接任者留残缺现场)**:
+  1. ⛔ 立即停止新派发(交接令生效即冻结);
+  2. 在手工件清零 —— 在飞 dev 收单、已 ACCEPT 的 PR 跟到 MERGED 或明确移交;
+  3. 全量枚举本车道队列 + 决策箱 + findings,形成接任台账;
+  4. 本座位贴正文改写为「⏳ 待认领」+ 完整台账(前任会话 ID、注销时间、账面、
+     队列快照、跨车道备忘);
+  5. 审计评论存档(session ID + 接任指引:`/pm-dispatch 接手` + 先读座位贴);
+  6. `list_triggers` 清理**或随移交物转交**本会话全部自设定时器(⛔ 不再重挂;
+     守夜随座位移交 —— 绑着移交中 PR 的定时器随该 PR 转交,不清);
+  7. 向维护者交最终报告(含本任期沉淀的 SKILL 更新建议清单,查重后立单 ——
+     换班复盘是交接的固定产物,不是可选项)。
+- **epic 委托不入座位贴体系** —— `pm:epic` 父单正文自带会话与领地,
+  `label:pm:epic` 即全量索引(见「Epic 子树车道」)。座位贴只记常设座位,一件
   事只记一处。
 - **`packages/spec` 恒归 spec 座位**(见下「shared contract surfaces have one
   owner」),无论谁需要它。
@@ -458,12 +542,12 @@ workflow 按 `pm:*` / `domain:*` / `repo:*` 把三个仓聚合成维护者的**�
 它的定位必须写死在协议里,否则视图迟早长成第二个 tracker:
 
 - **没有任何机器读它。** 候选获取、认领、在飞检查、僵尸回收、轮次报告的三项
-  指标 —— 全部读 issue 标签与 #4604 正文。Project 的字段不参与**任何**判据;
+  指标 —— 全部读 issue 标签与 `pm:seat` 座位贴正文。Project 的字段不参与**任何**判据;
   一旦有判据读它,它就是 rule 5 禁止的第二个 tracker,而且是一个**没有历史**
   的 tracker(Project 字段改动不留 diff,issue 正文改动留)。
 - **权威层坚持 issue 正文 + REST。** Project 的读写只有 GraphQL 入口,而
   GraphQL 配额(5000/时)实测极易打满(Operational note 3:峰值 10402/5000,
-  一天三次归零、每次卡死整个循环),所以 **Project 绝不进循环的热路径**;座位表
+  一天三次归零、每次卡死整个循环),所以 **Project 绝不进循环的热路径**;座位贴
   是 issue 正文,读写走 REST,成本落在 core 配额(15000/时,与 GraphQL 独立计)。
   视图层可以在配额耗尽时不可用而循环照跑 —— 这个不对称正是分层的目的。
 - PM 在 GitHub 之外**不维护任何跟踪状态** —— 这条不变量是循环可从零本地状态
@@ -531,7 +615,7 @@ objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
 - **迁移**:存量带 `domain:engine` 的 open issue 由**分诊座位**按落点逐条改标为
   `engine-core` / `drivers`,清零后删除旧标签 —— 双射要求「域 X 谁管」有唯一
   答案,一个仍在流通的旧标签就是一个无主车道。
-- **座位表(#4604)同批加行**:`domain:engine` 那一行一分为二,各自的范围列
+- **座位贴同批新立**:`domain:engine` 那一个座位一分为二,各自的范围段
   照抄上表(维护者 2026-08-05 对 `driver-memory` / `driver-mongodb` 族的投入
   冻结指令锚在 `drivers` 那一行,`formula` / `driver-sql` 不受影响)。
 
@@ -542,7 +626,7 @@ sweep(round loop step 0)产出,全仓唯一(rule 4)。**打标签 ≠ 认领**:�
 单个 PM 的私有视野,车道协议当场归零。执行座位认为标签错了走上报(rule 4 的
 误标路径),⛔ 不自行改写 `domain:*`。
 
-**Claim scope.** 执行 PM 的车道 = 座位表(#4604)正文里它那一行的 `domain:*`,
+**Claim scope.** 执行 PM 的车道 = 它的座位贴(`label:pm:seat`,总入口 #4604)登记的 `domain:*`,
 **恰好一个**;认领只发生在车道内。旧条款允许「一个域集合」,双射之后不再允许:
 一个 PM 一个座位,「域 X 谁管 / PM Y 管什么」各只有一个答案。需要更细的分工就
 拆域(rule 4),不是给某个 PM 塞第二个域。
@@ -589,8 +673,8 @@ sub-issue(递归)。**每轮重新读子树,不缓存清单** —— 这一条�
 **委托信号(标签 + 正文登记成对落地,同 label discipline)**:
 
 - 父 issue 打 `pm:epic`,同时**在父单正文**写清:会话 ID、**声明的文件领地**
-  (packages/ 目录清单)。⛔ **不在座位表(#4604)重复登记** —— `label:pm:epic`
-  就是全量索引,座位表只记常设座位,一件事只记一处(rule 4 的座位表协议)。
+  (packages/ 目录清单)。⛔ **不入 `pm:seat` 座位贴体系** —— `label:pm:epic`
+  就是全量索引,座位贴只记常设座位,一件事只记一处(rule 4 的座位贴协议)。
   标签与正文登记仍是成对落地,缺一半就是 label discipline 禁止的过夜半状态。
 - 其它 PM(分诊 / 域座位)的候选获取(step 1)**跳过 `pm:epic` 父单的整棵
   子树** —— 这是该标签的第一消费点;第二消费点是 `label:pm:epic` 这个索引
@@ -677,7 +761,7 @@ label and classify each:
 
 **扫描范围的三处排除**(#5474 试点定稿时补入,否则每轮都要现场判一次):
 `tracking` 与 `status:parked` 的 issue(它们的状态由别的机制管,分诊不重判)、
-以及**座位表 #4604 本身**(它是协议载体,不是待分诊的工作)。存量大时**每轮
+以及 **#4604 与全部 `pm:seat` 座位贴**(协议载体,不是待分诊的工作)。存量大时**每轮
 限量、优先最新**(试点用 ~15 条/轮),防一轮吃光存量把轮次拖过一个调度周期。
 
 #### 发现分诊轮 —— 队列的出水口(objectstack#4949)
@@ -762,8 +846,9 @@ routing isn't already decided:
   itself is a coordination node — **never dispatched to a dev**; it stays
   open as the progress view and the PM closes it with a summary comment when
   the last sub-issue closes.
-- **Leave a one-comment audit trail** on the issue (Chinese), so the
-  maintainer can veto cheaply: 「分诊:落地 objectui;理由:…」.
+- **Leave a one-comment audit trail** on the issue (English, per the
+  language policy), so the maintainer can veto cheaply:
+  "Triage: lands in objectui; rationale: …".
 - Routing is a **technical judgment — never escalate "which repo?" to the
   maintainer.** If after reading the code you genuinely cannot tell where a
   change lands, the issue is underspecified: escalate the *underlying
@@ -844,6 +929,12 @@ an issue to a later round, record the known trap on it before the round ends.
 同一个契约或数据表示**;形态迥异的批次(纯 UI、纯文档)里前后单往往不共享成本面,这
 一项问不出信息,不必强加。
 
+**P0 插队(`priority:p0`)。** 带该标签的单可**超出 `batch` 上限、打破轮次节奏
+立即派发**(两例实测闭环:#5701、#5248)。豁免仅止于此:⛔ **不豁免同文件/同包
+串行**(插队单与在飞单文件面相交时,照样让行或等待),⛔ **不豁免认领协议全套**
+(assign + claim comment + race check 一步不少)。此前协议通篇没有这个标签的
+消费者,违反「a label exists iff something reads it」—— 本段就是它的读取方。
+
 ### 4. Claim
 
 All agents share one GitHub identity, so the assignee alone says "some agent
@@ -853,19 +944,25 @@ execute as **one atomic pair**, in order:
 
 1. **Assign** to yourself (`@me`) and add `pm:dispatched`. Skip — and drop
    from the batch — any issue that acquired an assignee since step 1.
-2. **Claim comment** (Chinese), fixed shape — the branch name is the key,
+2. **Claim comment** (English, per the language policy), fixed shape — the
+   branch name is the key,
    every later artifact (worktree, push, PR) hangs off it. The session ID is
    NOT optional: under the shared identity it is the only line that lets a
    later reader — including your own future self after a context reset —
    answer "is this claim mine?". A claim without it caused the #4555/#4559
    duplicate (#4588): the second session saw its own shared name as assignee
    and could not tell the claim was someone else's.
-   > 认领:PM 循环第 N 轮
-   > 会话:`session_<id>`
-   > 分支:`claude/issue-<n>-<slug>`
-   > Worktree:`<repo>-issue-<n>`
-   > 域:`domain:<x>`
-   > 文件面:`<预计触碰的目录列表>`(越界即停,报告说明)
+   > Claim: PM loop round N
+   > Session: `session_<id>`
+   > Branch: `claude/issue-<n>-<slug>`
+   > Worktree: `<repo>-issue-<n>`
+   > Domain: `domain:<x>`
+   > File surface: `<directories you expect to touch>` (stop on breach; explain in the report)
+   > Serial constraints cleared: `<name the same-file/same-package predecessor PRs and in-flight claims; "none" if none>`
+
+   最后一行是 services 车道一班 28 PR 零合并冲突的机制(#5885):把「查过串行
+   约束」从内心活动变成落在评论里的读数,竞态复读与串行判断都成了 30 秒的事 ——
+   同包在飞单在 ~18 merges/日的环境下不点名就等于没查。
 
    「文件面」is **required** for 跨域例外路径的认领(rule 4 —— 那是唯一的
    越界形态)and **recommended** for ordinary in-lane ones —
@@ -886,7 +983,7 @@ execute as **one atomic pair**, in order:
    the claim comments' **timestamps are the only tiebreaker**, whatever the
    assignee field seems to say. An earlier claim comment with a *different*
    session ID or branch means you lost: touch nothing of theirs, reply
-   「已有认领,让行」, and pick another issue. First comment wins. #5032 is
+   "already claimed — yielding", and pick another issue. First comment wins. #5032 is
    the 20-second version: claims at 00:39:44 and 00:40:04, the later one
    composed **without re-reading the thread** — and both aimed at
    `pnpm-lock.yaml`, where two parallel re-resolutions produce mutually
@@ -965,8 +1062,33 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
   hand-mirrored `if (!where?.id && !multi)` — `check:engine-double-contract`
   went red on four dev agents' new tests in two days (#5173 / #5191 / #5192 /
   #5584), one CI lap each. Copy a pinned fake, don't write the guard.
+- Before opening the PR, run the gate list ENUMERATED FROM
+  `.github/workflows/lint.yml` (and the workflow files it names) — every
+  `check:*` step, one by one. ⛔ 禁止凭记忆挑门:#5738 的首轮 CI 红就是本地跑了
+  六个门却漏掉不在记忆清单里的 `check:engine-double-contract`;改为「从 lint.yml
+  逐个列门跑全」后被后续四个 dev 继承,再无门红。门禁族跑在 ESLint / TypeScript
+  Type Check 两个 job 里(Operational notes 10)。
+- If your change touches `packages/spec`: spec build(`gen:schema`)会**重写锚点**
+  `authorable-surface.base.json` —— 那是预期产物,⛔ 不要 revert、不要手改;
+  何时写/往哪写见 #5358/#5370,字节门见 #4650。
+- Everything you post to GitHub — the PR title and body, and any issues you
+  file for out-of-scope findings — is written in ENGLISH (maintainer policy,
+  2026-08-06). Quote existing Chinese rulings verbatim without translating.
 Return ONLY the JSON report defined in your agent definition.
 ```
+
+**派发令里的机制性指导分两个区块,措辞决定 dev 敢不敢证伪。** 一班三次前提证伪
+(#5885)都发生在 PM 附带的机制说明上:#5561(「注册告警无需动 spec」—— 实测
+Zod default 抹掉未声明,不可表示)、#5808(「500 自动进 withhold 路径」——
+启发式 11/11 不认)、#5669(「数组 where 闸门不看」—— 下沉后逐字同谓词)。三次
+dev 都用实测顶回并保住了裁决意图 —— 因为派发令把两类内容分开标注了:
+
+- **「裁决(不可重裁)」**:维护者/PM 已拍板的方向与语义 —— dev 执行,不重开;
+- **「PM 机制假设(须实测,鼓励证伪)」**:PM 对代码机制的判断 —— dev 动手前
+  验证,证伪了照实报告并按裁决意图换实现路径,⛔ 不许为了顺从假设硬做。
+
+不分区块的派发令里,机制假设穿着裁决的衣服,dev 要么盲从错误假设、要么连裁决
+一起重开 —— 两个方向都是返工。
 
 **Same-day churn on the issue's files goes INTO the prompt.** Step 1's
 stale-premise check protects against issues that aged; the same-day variant is
@@ -1133,7 +1255,8 @@ to `mode:subagent`). Per issue:
 Routine**(`create_new_session_on_fire: true`),频率**随该座位的队列深度独立
 调**(轻域每日,重域每小时)。每次 fire:
 
-1. 读 **#4604 正文**拿到本座位的范围(座位表即真相,⛔ 不读评论流);
+1. 读**自己的座位贴正文**(`label:pm:seat` 索引,总入口 #4604 指针页;贴正文
+   即真相,⛔ 不读评论流);
 2. **从 labels 重建状态** —— 没有本地状态,`pm:queue` / `pm:dispatched` /
    `domain:*` / assignee / `Blocked-by:` 就是全部输入(见「State model」);
 3. 跑一轮 —— 执行座位 step 1 → 9;分诊座位 step 0 与 step 2 的分类半边,
@@ -1165,13 +1288,13 @@ connector grant 只能传递调用会话自身持有的,CCR 平台注入的 gith
 
 **现役两例(都由维护者从 UI 创建、都先过一轮烟测)。** 首例是**分诊座位**(#5474):
 只扫/分类/打标签,⛔ 永不认领。第二例是维护者 2026-08-06 拍板的**三仓队列管家**(锚点
-#5810,#4604 已登记行,cron 与分诊错开半个周期),管「入队与落地 B」里入队之后的那一
+#5810,座位贴在 `pm:seat` 索引,cron 与分诊错开半个周期),管「入队与落地 B」里入队之后的那一
 半:签名分诊四分支、队列停滞检测、跨仓 pin 链观测。**档位按职责挑,不按重要性挑** ——
-管家的正确性主要来自**查表**(#5810 的签名台账 + 座位表说明列,两者都优先于它的现场
+管家的正确性主要来自**查表**(#5810 的签名台账 + 座位贴说明段,两者都优先于它的现场
 判断)与**机械兜底**(每轮限量、双向让行、只守落地的授权面),判断面窄、判例法已写死,
 因此**不需要最强档**;吃最强档的是要现场设计取舍的执行座位。档位与 cron 一样是维护者
-在 UI 上的可调项(上一条),试点判据不达标即升档 —— 本文 ⛔ 不复制其当前值,座位表
-#4604 的那一行才是现状。
+在 UI 上的可调项(上一条),试点判据不达标即升档 —— 本文 ⛔ 不复制其当前值,它的
+`pm:seat` 座位贴才是现状。
 
 **跨 fire 的长流程照旧可行,因为它们的状态本来就在 GitHub 上。**「串行接力」
 (step 7)一棒就是一整圈、棒间还夹一次 PM 复核,必然跨多个 fire;能跨得过去的
@@ -1362,7 +1485,7 @@ against the report's own claims:
 
 Verdict per issue:
 
-- **ACCEPT** — comment on the issue (Chinese) linking the PR and summarizing
+- **ACCEPT** — comment on the issue (English) linking the PR and summarizing
   what shipped. Then drive it to landing (maintainer policy: review passed +
   CI green ⇒ merge): once every check on the PR is green, mark it ready for
   review and **add it to the merge queue** — the queue rebuilds the PR
@@ -1370,10 +1493,18 @@ Verdict per issue:
   the repo's sanctioned path. Never `--auto`-merge outside the queue; where
   no queue exists, merge serially per AGENTS.md §7 only after remote CI is
   fully green. This applies to **dev-agent PRs dispatched by this loop
-  only** — the PM's own tooling PRs stay with the maintainer.
+  only** — the PM's own tooling PRs stay with the maintainer(唯一例外见
+  Guardrails:维护者明示授权的 `.claude/` 工具 PR,授权引用于 PR 正文 +
+  walkthrough 复核,不得自审自合)。
 - **REWORK** — concrete, itemized feedback; re-dispatch the same issue with
   the feedback block filled (same claim, new dev agent). **Max 2 rework
   rounds** per issue; a third failure escalates instead.
+  **补丁轮优先 SendMessage 续派原 dev,而不是新派一个。** 适用判据:认领未变、
+  原 dev 会话仍可达(活着,或能从 transcript 复活 —— step 6 的探活回包会告诉你)。
+  一班四次续派全部一轮成功(#5738/#5808 的 CI 红补丁、#5561 的分析→实现、#5808
+  的裁决→收尾),上下文保留省掉全部重验;新派 dev 则要从零重建现场。例外照旧:
+  第三次停摆判 unreliable(step 6),或会话已不可 resume —— 走 step 5 的 worktree
+  接手协议。
 - **ESCALATE** — see step 8.
 
 #### 入队与落地 —— ACCEPT 之后才是最容易丢单的一段
@@ -1385,9 +1516,10 @@ file-disjoint;它管不到**先后两单都碰 `packages/spec` 生成物**的情
 
 ```
 packages/spec/spec-changes.json
-packages/spec/authorable-surface.json
-packages/spec/json-schema.manifest.json
-packages/spec/api-surface.json
+packages/spec/authorable-surface/**
+packages/spec/authorable-surface.base.json
+packages/spec/json-schema.manifest/**
+packages/spec/api-surface/**
 packages/spec/api-surface-signatures.json
 docs/protocol-upgrade-guide.md
 docs/audits/2026-07-unknown-key-strictness-ledger.counts.md
@@ -1413,7 +1545,15 @@ content/docs/references/**
 
 一个比「条目还在」更硬的旁证:去查**上一单的实现体**是否完好(#4878 合并后核
 `conversions/registry.ts` 里 #4391 的 D2 conversion 仍有 16 处命中)。条目是索引,
-实现体才是被吞的重灾区。驱动本身另有缺陷(把绝对路径写死进最后跑过 `pnpm install`
+实现体才是被吞的重灾区。命令形固定(此前是口头惯例,#5885 第 10 条入册):
+
+```bash
+git grep "<兄弟单的符号/条目名>" origin/main -- <生成物路径>   # 兄弟单条目仍在
+git grep "<上一单实现体符号>" origin/main -- <实现文件>        # 实现体完好
+```
+
+带引号精确名、查声明式而非提及(Operational notes 6 的查法在这里逐字适用)。
+驱动本身另有缺陷(把绝对路径写死进最后跑过 `pnpm install`
 的那个 worktree),见 #4868。
 
 **锚点(`authorable-surface.base.json`)的断言措辞 —— 写错会教唆 dev 手改锚点。**
@@ -1423,7 +1563,7 @@ content/docs/references/**
 
 > 断言 `pnpm --filter @objectstack/spec check:authorable-surface` **绿**即可。锚点
 > authenticity 的定义是两件事:`baseRev` 是 `origin/main` 的**祖先**,且它记录的 keys
-> 与**该 commit** 的 `authorable-surface.json` 逐行一致(`verifyCommittedSurfaceBase`
+> 与**该 commit** 的 authorable surface 逐行一致(`verifyCommittedSurfaceBase`
 > 就查这两条)。`baseRev` **允许滞后** —— `gen:schema` 只在 keys 真的漂移时才重写它
 > (在 `main` 上 merge base 就是 HEAD,该文件**必然**落后自己的 surface 一个 PR),
 > 滞后只打一行 `ℹ️`,不是错误。⛔ 禁止为了凑「相等」手改锚点文件 —— 那正是 #4650
@@ -1443,12 +1583,18 @@ content/docs/references/**
 
 **B. 跟到 MERGED 为止,不是跟到「已入队」为止 —— 但入队之后的看护已归专责座位。**
 「auto-merge 已挂上」不是终点,维护者对此有过明确纠正;2026-08-06 起这一段按下表分工
-(维护者拍板设**三仓队列管家** Routine 座位,锚点 #5810,#4604 已登记行):
+(维护者拍板设**三仓队列管家** Routine 座位,锚点 #5810,座位贴见 `pm:seat` 索引):
 
 | 谁 | 管什么 |
 |---|---|
 | **车道 PM**(权责不变) | 验收(step 7);**首次入队**(转 ready + 挂 auto-merge);确认 **MERGED** —— 每轮同时读**队列分支**与 `origin/main`(Operational notes 1) |
 | **队列管家**(三仓一座,#5810) | 入队之后的看护:红/踢出的**签名分诊四分支**、队列停滞检测、跨仓 pin 链观测 |
+
+车道 PM 的「首次入队」有一个标准动作:**ACCEPT 后立即挂 6–9 分钟的 send_later
+flip 定点**,到点核对门禁 job 结论(notes 10)、绿即转 ready + 挂 auto-merge,
+未绿再阶梯重挂。CI success webhook 不可靠是环境明示的前提 —— 一班 13 次转 ready
+全部由定点驱动、零漏接(#5885);定点文本按 notes 3 的配额交接纪律携带完整待执行
+状态(哪个 PR、什么判据),抗上下文丢失。⛔ 不要坐等 webhook,也不要忙轮询。
 
 车道 PM 因此**不再自挂 flaky 盯守定时器** —— 已入过队的 PR 被踢出后,认签名与原样重投
 是管家的活。管家的四分支照 #5810 的签名台账机械执行:**已知 flaky** ⇒ 原样重投;
@@ -1570,12 +1716,14 @@ is too vague to dispatch, or rework has failed twice:
    the maintainer's inbox (filter `label:needs-user-decision` shows
    everything awaiting them); when they answer, the label comes off and the
    issue re-enters the queue. No bookkeeping issues accumulate. File a
-   separate issue (titled `[决策] <一句话说清要拍板什么>`, same label) ONLY
+   separate issue (titled `[Decision] <one sentence naming what must be
+   decided>`, same label; legacy `[决策]` titles stay as-is) ONLY
    when the decision has no natural anchor — it spans several issues (file
    one, link it from each rather than duplicating the analysis) or arose
    with no issue of its own.
-2. The analysis, wherever it lands (Chinese): 背景、具体问题、可选方案、
-   你的建议、关联的 issue / PR / 分支。**每个方案必须沿三条固定评估轴
+2. The analysis, wherever it lands (English, per the language policy):
+   background / the concrete question / options / your recommendation /
+   related issues, PRs, branches。**每个方案必须沿三条固定评估轴
    分析,这是决策分析的核心原则,不是可选项:**
    - **实际业务需求** — 每个方案先问:它服务的是**真实存在的业务场景**,
      还是投机性的能力面?判据来源要求**实测**——谁在写这个键、谁在读这个
@@ -1605,7 +1753,8 @@ is too vague to dispatch, or rework has failed twice:
 
 ### 9. Round report, then next round
 
-Print a round report to the maintainer **in Chinese**: a table of
+Print a round report to the maintainer **in Chinese**(chat 通道,语言政策的
+显式例外 —— 报告不落 GitHub): a table of
 issue → verdict → PR link → notes, plus anything escalated. Then start the
 next round at step 1 (rework re-dispatches count against the next round's
 `batch` budget).
@@ -1628,18 +1777,37 @@ area; that is the loop working, not failing):
 
 Stop the loop and report when any of these hits:
 
-- the queue is empty, or `rounds` is exhausted;
+- the queue is empty, or `rounds` is exhausted — **一次性调用适用;常设座位不适用,
+  见下「待命姿态」**;
 - **≥ half of a round's dispatches failed or escalated** — that is a systemic
   problem (bad queue hygiene, broken main, wrong tooling), and burning the
   rest of the backlog against it wastes every remaining dispatch;
 - the maintainer interrupts.
+
+**待命姿态 —— 常设座位的队列清空 ≠ 退场。** 双射座位制下,座位 PM 的队列空了
+不是 stop condition,是切换姿态(#5925;此前协议只写「queue 空 → 停循环」,与
+座位模型直接矛盾):巡检间隔放宽到 **60–70 分钟**(与探活五条的待命节奏一致;
+有任何 dev 在飞即收紧回 ≤45),待命职责五项 ——
+
+1. findings 分诊配合(执行座位侧:补实测证据、上报异议;分诊本身归分诊座位);
+2. `pm:blocked` 解锁扫描(上游 issue/PR 关闭即回队);
+3. 在飞/已入队 PR 跟到 MERGED(入队与落地 B 的车道半边);
+4. 决策箱提醒 —— 仅在轮次报告中列出待决清单,⛔ 不 nag 维护者;
+5. 跨车道备忘跟进(转席单、`Blocked-by:` 链的对侧动静)。
+
+退场只有两个入口:维护者的交接令(走座位贴协议的交接收尾清单),或座位被
+惰性回收。
 
 ## Guardrails (binding)
 
 - PM writes **no files**. Merging is allowed for **reviewed, fully-green
   dev-agent PRs via the merge queue only** (see the ACCEPT verdict) — never
   its own PRs, never a red or unreviewed one, never bypassing the queue
-  where one exists.
+  where one exists. **唯一例外(#5925-6,维护者 2026-08-06 批准)**:维护者
+  **明示授权**的 `.claude/` 内部工具 PR(先例 #5597/#5872),PM 可自行实施并
+  挂队 —— 授权出处(维护者原话/指令记录)**必须引用在 PR 正文**;复核仍需
+  另一个座位或维护者 walkthrough,⛔ 不得自审自合。授权是逐 PR(或逐项明示
+  指令)的,不是常设豁免。
 - Never force-push, never push `main`, never reassign an issue claimed by
   someone else, never dispatch a `needs-user-decision` issue.
 - Every dev agent works in its **own worktree per repo** (enforced by
