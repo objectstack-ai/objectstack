@@ -1,107 +1,423 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "platform-core",
-  "title": "Platform core — boot, health, console shell",
+  "title": "Platform core — boot, health, console shell, metadata pipeline",
   "items": [
     {
       "id": "platform-core.boot-health",
-      "title": "Showcase boots clean: health 200, no degraded startup banners",
+      "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "mixed",
       "preconditions": [
-        "isolated run per dogfood-verification §0: own free port, own file DB (--seed-admin -d file:/tmp/<run>/data.db)"
+        "isolated run per dogfood-verification §0: own free port (not 3000/3001/3210, checked with lsof), own file DB (--seed-admin -d file:/tmp/<run>/data.db)"
       ],
       "steps": [
-        "boot examples/app-showcase via `objectstack dev --ui --seed-admin` on an isolated port",
-        "poll GET /api/v1/health until 200",
-        "read the full boot log"
+        "boot examples/app-showcase via `objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db`",
+        "poll GET http://localhost:<port>/api/v1/health until 200; record time-to-healthy",
+        "GET /api/v1/ready and record the status (the readiness probe is a separate route — packages/runtime/src/route-ledger.ts)",
+        "read the FULL boot log: capture the Flows: banner, any ⚠ lines, any ERROR-level lines, and every SeedLoader line",
+        "GET /_console/ and confirm the console shell HTML is served (200, text/html)",
+        "GET /api/v1/meta/app?id=com.example.showcase and capture the merged app/nav metadata",
+        "cross-check the nav payload: the grp_data group lists the seeded objects (showcase_project, showcase_task, showcase_account, showcase_contact, showcase_invoice, showcase_field_zoo, …)"
       ],
       "acceptance": [
         {
           "clause": "GET /api/v1/health returns 200 within the boot window",
           "oracle": "api",
           "verify": "curl -s -o /dev/null -w '%{http_code}' http://localhost:<port>/api/v1/health → 200",
+          "evidence": "the curl output + time-to-healthy"
+        },
+        {
+          "clause": "GET /api/v1/ready returns 200 once boot completes (readiness, not just liveness)",
+          "oracle": "api",
+          "verify": "curl the /ready probe after health goes green",
           "evidence": "the curl output"
         },
         {
-          "clause": "the `Flows:` startup banner reports no ⚠ misauthored flows and no ERROR lines appear during boot",
+          "clause": "the `Flows:` startup banner reports no ⚠ misauthored flows and no ERROR-level lines appear anywhere in the boot log",
           "oracle": "log",
-          "verify": "grep the boot log for '⚠' in the Flows banner and for ERROR-level lines; seed rejections count as failures (see #3415 — SeedLoader rejections were silent)",
+          "verify": "grep the boot log for '⚠' in the Flows banner and for ERROR lines; seed rejections count as failures (see #3415 — SeedLoader rejections were silent)",
           "evidence": "the grepped log excerpt"
         },
         {
-          "clause": "the console shell is served at /_console/ and the seeded app resolves",
+          "clause": "the console shell is served at /_console/ and the seeded app's merged metadata resolves",
           "oracle": "api",
-          "verify": "GET /api/v1/meta/app?id=<showcase appId> returns the merged app/nav metadata",
-          "evidence": "response status + top-level keys"
+          "verify": "GET /_console/ → 200 text/html; GET /api/v1/meta/app?id=com.example.showcase returns the merged app/nav metadata (dogfood skill §1 names this exact endpoint)",
+          "evidence": "response statuses + top-level keys"
+        },
+        {
+          "clause": "the served nav matches the authored app: every grp_data object entry from src/ui/apps/index.ts appears in the meta/app response — nothing silently dropped at merge",
+          "oracle": "api",
+          "verify": "diff the nav object names in the response against examples/app-showcase/src/ui/apps/index.ts",
+          "evidence": "the diff (empty)"
         }
       ],
-      "traps": ["seed-data-thin"],
-      "source": ["dogfood-verification skill §0–§1", "#3415"],
-      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — standing P0 smoke distilled from the dogfood boot protocol", "ref": "#3358" }]
+      "negative": [
+        "any SeedLoader rejection line in the boot log is a FAIL against the seed (RUNNER rule 3: a defect in the fixture is a fail, not a block — #3408/#3415)",
+        "a health 200 with ERROR lines in the log is NOT a clean boot — the log clause fails independently of the probe"
+      ],
+      "traps": ["seed-data-thin", "stale-dist"],
+      "source": [
+        "dogfood-verification skill §0–§1",
+        "#3415",
+        "packages/runtime/src/route-ledger.ts (GET /health, GET /ready)",
+        "examples/app-showcase/src/ui/apps/index.ts (authored nav)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — standing P0 smoke distilled from the dogfood boot protocol", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
     },
     {
-      "id": "platform-core.console-login",
-      "title": "Seeded admin can sign in through the console login page",
+      "id": "platform-core.seed-integrity",
+      "title": "Seed integrity: row counts match the authored seed, values land verbatim, replay is idempotent",
       "since": "v15",
       "status": "active",
       "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a FRESH isolated boot (new file DB) so first-boot seed behavior is what is measured, then a restart against the SAME DB for the idempotence clause"
+        ]
+      },
+      "steps": [
+        "after a clean fresh boot, derive the expected per-object row counts from the app's own seed module (examples/app-showcase/src/data/seed/index.ts — count the records arrays; re-derive rather than trusting a stale list if seeds changed)",
+        "authoring-time baseline for cross-checking the derivation: showcase_account=14, showcase_contact=33 (9 named + 24 bulk prospects), showcase_project=5, showcase_task=10, showcase_invoice=12, showcase_invoice_line=5, showcase_expense_report=4, showcase_expense_line=13, showcase_field_zoo=2",
+        "for each seeded object, GET /api/v1/data/<object>?$top=1 and read the server total; build the expected-vs-actual table",
+        "GET the Field Zoo 'Specimen — Full' row and spot-diff authored values (f_multiselect ['red','green'] as a set, f_lookup resolving to the Northwind account id, f_json nested object intact)",
+        "re-read the boot log's seed lines: every seed reports success; no rejection or partial-load line",
+        "restart the server against the SAME file DB; re-run the count sweep and diff against the first sweep (upsert mode must no-op, not duplicate)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every seeded object's server row count equals the count authored in the seed module — no silent partial load",
+          "oracle": "api",
+          "verify": "expected-vs-actual table from GET /api/v1/data/<object>?$top=1 totals vs the records arrays in src/data/seed/index.ts; zero mismatches",
+          "evidence": "the table"
+        },
+        {
+          "clause": "seed VALUES land verbatim, not just rows: the Specimen — Full spot-diff matches the authored literal (arrays as sets, JSON objects structurally, references resolved to real ids)",
+          "oracle": "api",
+          "verify": "field-by-field diff of the API read against the seed literal for the sampled fields",
+          "evidence": "the diff"
+        },
+        {
+          "clause": "the boot log reports every seed load as success — a rejection is a FAIL against the seed even when the server otherwise boots green (#3415: four of five projects were silently rejected once)",
+          "oracle": "log",
+          "verify": "grep the boot log for SeedLoader/seed lines; no rejected/failed entries",
+          "evidence": "the log excerpt"
+        },
+        {
+          "clause": "seed replay is idempotent: a restart against the same DB changes no count (upsert with externalId no-ops on unchanged rows)",
+          "oracle": "api",
+          "verify": "second count sweep diffs empty against the first",
+          "evidence": "both sweeps"
+        },
+        {
+          "clause": "deliberately-unseeded fields stay unseeded for their documented reasons (f_user/f_users: sys_user rows come from sign-up; f_secret: no CryptoProvider on the seed path; task.cover: a managed sys_file cannot be honestly seeded, #4891/ADR-0104) — their absence is CORRECT, not a gap to 'fix'",
+          "oracle": "api",
+          "verify": "the Specimen reads show these fields null/absent; record them as expected-absent in the run, never as findings",
+          "evidence": "the reads + the expected-absent list"
+        }
+      ],
+      "negative": [
+        "a count of 0 on any nav-visible object is a FAIL against the seed, never 'feature has nothing to show' (seed-data-thin trap: check row counts vs the built artifact, read the boot log)",
+        "counts that GROW on restart are a FAIL of upsert idempotence even though every row individually looks valid"
+      ],
+      "traps": ["seed-data-thin", "single-datapoint"],
+      "source": [
+        "examples/app-showcase/src/data/seed/index.ts (authored counts + expected-value comments)",
+        "#3408",
+        "#3415",
+        "packages/spec/src/data/seed-loader.zod.ts",
+        "RUNNER.md trap 'seed-data-thin'"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — makes the #3408/#3415 class of silent seed failure a standing P0 check with exact authored baselines", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.console-login",
+      "title": "Seeded admin signs in through the console; the session survives reload and re-authenticates cleanly after expiry",
+      "since": "v15",
+      "status": "active",
+      "revision": 2,
       "priority": "P0",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
       "steps": [
-        "open /_console/ in the browser",
-        "sign in with the seeded admin credentials",
-        "reload the page"
+        "open /_console/ in the browser; screenshot the login form",
+        "sign in with the seeded admin credentials — drive the React controlled inputs with the native setter + input/change events, or POST the auth endpoint from the page (dogfood skill §4; naive fills submit empty)",
+        "screenshot the post-login shell; capture the first authed API responses",
+        "reload the page; capture the first authed API request after reload",
+        "expire the session: clear the auth cookies for the origin; then trigger an authed navigation/API call",
+        "observe the console's reaction (redirect to login vs dead shell); screenshot",
+        "sign in again and verify the console restores a working session on the same route",
+        "negative pass: sign out, then attempt login with a wrong password; capture the auth response and the UI"
       ],
       "acceptance": [
         {
-          "clause": "login succeeds and lands in the console shell",
+          "clause": "login succeeds and lands in the console shell (nav + header rendered, not the login form)",
           "oracle": "screenshot",
-          "verify": "post-login screenshot shows the app shell (nav + header), not the login form",
+          "verify": "post-login screenshot shows the app shell",
           "evidence": "screenshot"
         },
         {
-          "clause": "the session survives a reload",
+          "clause": "the session survives a reload — the first authed API call after reload returns 200 with no redirect back to login",
           "oracle": "network",
-          "verify": "after reload, authed API calls return 200 (no redirect back to login)",
-          "evidence": "network trace of the first authed request after reload"
+          "verify": "network trace of the first authed request after reload (e.g. GET /api/v1/meta/app?id=com.example.showcase)",
+          "evidence": "the trace"
+        },
+        {
+          "clause": "an expired/cleared session is answered 401 by the SERVER on authed API calls — the deny side of the auth gate, proven on the wire",
+          "oracle": "network",
+          "verify": "after clearing cookies, the authed API call in the trace returns 401 (auth is the better-auth passthrough at /api/v1/auth/** — packages/runtime/src/route-ledger.ts; plugin-auth/src/auth-route-ledger.ts)",
+          "evidence": "the 401 trace"
+        },
+        {
+          "clause": "the console reacts to expiry by returning the user to login (or an explicit re-auth prompt) — never a dead shell rendering stale data as if authed",
+          "oracle": "screenshot",
+          "verify": "post-expiry screenshot shows the login/re-auth surface",
+          "evidence": "screenshot"
+        },
+        {
+          "clause": "re-authentication after expiry restores a working session: the same authed calls return 200 again and the shell renders current data",
+          "oracle": "network",
+          "verify": "post-re-login trace shows 200s; a mutation or fresh read succeeds",
+          "evidence": "the trace + screenshot"
         }
       ],
       "negative": [
-        "a wrong password is rejected with a visible error, not a silent no-op"
+        "a wrong password is rejected with a visible, named error AND no session cookie is set — a silent no-op or an error-free bounce is a FAIL",
+        "an expired session that keeps serving the shell with cached data (no 401, no redirect) is a FAIL of the expiry clause"
       ],
-      "traps": ["automation-input"],
-      "source": ["dogfood-verification skill §4 (React controlled inputs)"],
-      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial", "ref": "#3358" }]
+      "traps": ["automation-input", "shared-browser-tab"],
+      "source": [
+        "dogfood-verification skill §4 (React controlled inputs; auth POST fallback)",
+        "packages/runtime/src/route-ledger.ts ('* /auth/**' better-auth passthrough)",
+        "--seed-admin credentials: dogfood-verification skill §0"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
     },
     {
       "id": "platform-core.nav-surfaces-render",
-      "title": "Every showcase nav surface renders without page errors",
+      "title": "Every showcase nav surface renders without page errors, and failures surface the error boundary — never a blank page",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "knownGaps": [
+          "no stock showcase fixture deliberately throws inside a route, so the ErrorBoundary fallback ('Something went wrong' + Try Again / Go Home — objectui packages/app-shell/src/chrome/ErrorBoundary.tsx) is verified opportunistically on any failure encountered, plus via the bad-route probe below"
+        ]
+      },
       "steps": [
-        "walk every nav destination in the showcase app (pages, list views, dashboards, reports, view gallery)",
-        "on each: wait for render, then check for pageerror / empty main / placeholder leaks"
+        "run the pinned suite: pnpm -C examples/app-showcase test:smoke (the SURFACES array in e2e/showcase-smoke.spec.ts — 31 surfaces: pages, object lists, dashboards, reports, the view-gallery pages)",
+        "GET /api/v1/meta/app?id=com.example.showcase and extract every nav destination from the response",
+        "diff the served nav destinations against the SURFACES array; hand-walk any destination the suite does not cover (screenshot first, then DOM)",
+        "on each hand-walked surface: wait for render, screenshot, then check for pageerror / empty <main> / placeholder leaks ('no actions configured')",
+        "probe the failure path: navigate to a nonexistent route under the app (/_console/apps/com.example.showcase/object_that_does_not_exist); screenshot what renders",
+        "if ANY surface fails during the sweep, verify the failure presents as the shell's error boundary or a named empty/error state — capture it"
       ],
       "acceptance": [
         {
           "clause": "no surface throws a pageerror, renders an empty <main>, or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG",
           "oracle": "test",
-          "verify": "run the pinned suite: pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts)",
+          "verify": "pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts) — green",
           "evidence": "test run output"
+        },
+        {
+          "clause": "the smoke's coverage is CURRENT: every nav destination served in meta/app is either in the SURFACES array or hand-walked this run — no surface silently outside the net",
+          "oracle": "api",
+          "verify": "diff of served nav destinations vs SURFACES + the hand-walk records for the remainder",
+          "evidence": "the diff + per-surface screenshots"
+        },
+        {
+          "clause": "a bad route renders a NAMED not-found/error state inside the shell — nav and header stay alive, never a white page or dead shell",
+          "oracle": "dom",
+          "verify": "after the screenshot confirms the shell rendered, assert the main region carries an explicit empty/error message for the nonexistent object",
+          "evidence": "screenshot + DOM excerpt"
+        },
+        {
+          "clause": "any render failure encountered anywhere in the sweep surfaces the route-level ErrorBoundary fallback (recoverable via Try Again), not a blank page",
+          "oracle": "screenshot",
+          "verify": "if a failure occurs: screenshot shows the boundary fallback; Try Again re-mounts the route; record none-encountered explicitly otherwise",
+          "evidence": "failure screenshot or the explicit none-encountered note"
         }
       ],
+      "negative": [
+        "a surface that renders a blank <main> is a FAIL even with no console error — transitional emptiness must be ruled out by the screenshot-first protocol, then the persistent blank is the finding",
+        "a bad route producing a white page (shell gone) is a FAIL of the error-boundary clause"
+      ],
       "automated": { "kind": "e2e", "ref": "examples/app-showcase/e2e/showcase-smoke.spec.ts" },
-      "traps": ["hydration-race", "single-datapoint"],
-      "source": ["examples/app-showcase/e2e/showcase-smoke.spec.ts", ".github/workflows/showcase-smoke.yml"],
-      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — wraps the existing automated smoke as a checklist row so runs report it alongside manual items", "ref": "#3358" }]
+      "traps": ["hydration-race", "single-datapoint", "stale-console-bundle"],
+      "source": [
+        "examples/app-showcase/e2e/showcase-smoke.spec.ts (SURFACES)",
+        ".github/workflows/showcase-smoke.yml",
+        "objectui: packages/app-shell/src/chrome/ErrorBoundary.tsx (route-level fallback + recovery actions)",
+        "examples/app-showcase/src/ui/apps/index.ts (nav truth)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — wraps the existing automated smoke as a checklist row so runs report it alongside manual items", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.metadata-registry-serving",
+      "title": "The metadata registry is served over REST: /meta lists every registered type with its spec-derived create seed",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": { "app": "showcase" },
+      "steps": [
+        "authenticated GET /api/v1/meta — the types listing (entries[]); capture the response",
+        "check the entries against DEFAULT_METADATA_TYPE_REGISTRY (packages/spec/src/kernel/metadata-plugin.zod.ts): the built-in kinds the showcase registers are present (object, view, page, dashboard, app, action, report, dataset, flow, seed, mapping, permission, position, translation, email_template, doc, book, datasource, api, …)",
+        "GET /api/v1/meta/types (the richer Studio listing — a distinct server-only route per packages/runtime/src/route-ledger.ts) and capture it",
+        "GET /api/v1/meta/view/showcase_task and confirm the stored view item is served with its authored shape (list + listViews + formViews keys)",
+        "GET /api/v1/meta/:type for 'view' and confirm the showcase's authored views are enumerated",
+        "run the pinned create-seed contract: pnpm --filter @objectstack/dogfood exec vitest run test/meta-types-create-seed.dogfood.test.ts"
+      ],
+      "acceptance": [
+        {
+          "clause": "GET /api/v1/meta answers 200 with a non-empty entries[] naming the registered metadata types",
+          "oracle": "api",
+          "verify": "response parses; entries.length > 0; the registry kinds listed in the steps are all present",
+          "evidence": "the response + the presence table"
+        },
+        {
+          "clause": "entries carry the AUTHORITATIVE spec-derived create seeds: dashboard's seed is {widgets: []}, action's is a script with a valid js body, and report exposes NO seed by design (canvas-create) — consumers derive create defaults from the spec, not re-invent them",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/dogfood exec vitest run test/meta-types-create-seed.dogfood.test.ts — green (it asserts entry.createSeed equals getMetadataCreateSeed(type) for every seeded registered type)",
+          "evidence": "test run output"
+        },
+        {
+          "clause": "GET /api/v1/meta/types (the richer Studio-facing listing) is served — a real route distinct from GET /meta, per the route ledger",
+          "oracle": "api",
+          "verify": "authenticated GET returns 200 with the type registry payload",
+          "evidence": "the response"
+        },
+        {
+          "clause": "a stored item is retrievable by type+name with its authored shape: GET /api/v1/meta/view/showcase_task returns the task view gallery as authored",
+          "oracle": "api",
+          "verify": "the response carries the authored keys (list, listViews incl. in_progress/board/gantt, formViews incl. wizard/quick)",
+          "evidence": "the response's key inventory"
+        },
+        {
+          "clause": "type-scoped listing works: GET /api/v1/meta/view enumerates the showcase's authored views (task, project, contact, field-zoo, business-unit, inquiry families present)",
+          "oracle": "api",
+          "verify": "the listing contains the expected view names from examples/app-showcase/src/ui/views/",
+          "evidence": "the listing"
+        }
+      ],
+      "negative": [
+        "a registered type missing from GET /meta (or served without its registry contract) is a FAIL — the Studio designer derives its create UX from this response, and drift here produced real create-save 422s (the dashboard-layout / action-body incidents the pinned test memorializes)",
+        "an unauthenticated GET /api/v1/meta that returns the full registry is a finding for the access-security area — capture and cross-file it, do not tick past it"
+      ],
+      "traps": ["dispatcher-vs-hono-route"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/meta-types-create-seed.dogfood.test.ts" },
+      "source": [
+        "packages/spec/src/kernel/metadata-plugin.zod.ts (MetadataTypeSchema + DEFAULT_METADATA_TYPE_REGISTRY)",
+        "packages/spec/src/kernel/metadata-create-seeds.ts",
+        "packages/runtime/src/route-ledger.ts (GET /meta, GET /meta/types, GET /meta/:type, GET /meta/:type/:name)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — pins the registry-serving contract the Studio create path depends on", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.metadata-authoring-roundtrip",
+      "title": "Metadata authoring round-trip: draft → publish on a WRITABLE package; read-only packages and locked types are server-side refused",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a runtime-created WRITABLE package to author into (create one via Studio or POST /api/v1/packages) — the showcase's own code package is read-only by design (ADR-0070)"
+        ]
+      },
+      "steps": [
+        "create a writable package (Studio package switcher → new, or POST /api/v1/packages); record its id",
+        "save a draft view into it: PUT /api/v1/meta/view/os_qa_view_<runid> with a minimal valid ListView body bound to showcase_task and the writable packageId; capture the response",
+        "GET /api/v1/meta/_drafts and confirm the draft is listed",
+        "publish: POST /api/v1/packages/<id>/publish-drafts; then GET /api/v1/meta/view/os_qa_view_<runid>/published and capture it",
+        "verify in the console that the published view is live for showcase_task (reload, open the view switcher)",
+        "denied side A: attempt the same runtime create targeting the read-only CODE package; capture the refusal (expect writable_package_required — ADR-0070 D1)",
+        "denied side B: attempt a PUT overlay against a PACKAGED object item (type 'object' has allowOrgOverride: false); capture the refusal (expect HTTP 403 not_overridable)",
+        "Studio browser half: create a new record page via Studio bound to an object and capture the PUT /api/v1/meta/page/... it issues"
+      ],
+      "acceptance": [
+        {
+          "clause": "a draft saved via PUT /api/v1/meta/view/:name persists and is listed by GET /api/v1/meta/_drafts",
+          "oracle": "api",
+          "verify": "the PUT succeeds; the drafts listing contains os_qa_view_<runid> (routes per packages/runtime/src/route-ledger.ts: PUT /meta/:type/:name, GET /meta/_drafts)",
+          "evidence": "PUT response + drafts listing"
+        },
+        {
+          "clause": "publish-drafts promotes the draft: GET /meta/view/:name/published serves the authored body afterwards, and the console renders the view after reload",
+          "oracle": "api",
+          "verify": "POST /packages/:id/publish-drafts → success; the /published read returns the body; console screenshot shows the view in the switcher",
+          "evidence": "publish response + published read + screenshot"
+        },
+        {
+          "clause": "Studio's designer authors through the same pipeline: creating a record page issues PUT /api/v1/meta/page/<name> bound to its object and seeded from the default layout",
+          "oracle": "network",
+          "verify": "capture the PUT during Studio create (pinned by objectui e2e/live/studio-record-page.spec.ts, which waits on exactly that request)",
+          "evidence": "the captured PUT"
+        },
+        {
+          "clause": "DENY side of the package gate: a runtime-only create targeting a read-only code/installed package is REJECTED with writable_package_required — not silently coerced to a package-less orphan (the pre-ADR-0070 #2252 bug)",
+          "oracle": "api",
+          "verify": "the refusal names writable_package_required (pinned by packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts)",
+          "evidence": "the refusal response"
+        },
+        {
+          "clause": "DENY side of the overlay gate: a per-org overlay write against a type with allowOrgOverride unset (object/field) answers HTTP 403 not_overridable, while view/dashboard (the ADR-0005 Phase 1 opt-ins) accept",
+          "oracle": "api",
+          "verify": "the object-targeting PUT returns 403 not_overridable (contract stated on allowOrgOverride in packages/spec/src/kernel/metadata-plugin.zod.ts); the view PUT from the happy path succeeded",
+          "evidence": "both responses side by side"
+        },
+        {
+          "clause": "a malformed body is refused by schema validation, never stored: a PUT with an invalid shape for the type answers a named validation error (validateOnWrite; the #5206 lesson — an unvalidated store is the defect)",
+          "oracle": "api",
+          "verify": "PUT /api/v1/meta/view/os_qa_bad_<runid> with a nonsense body (e.g. columns: 42) → 4xx naming the validation failure; a subsequent GET finds no stored item",
+          "evidence": "the refusal + the empty GET"
+        }
+      ],
+      "negative": [
+        "a 200 on either deny-side attempt (read-only package, locked overlay type) is a FAIL — both gates are server-side contracts, not Studio courtesies",
+        "a malformed metadata body stored as-is (200 on PUT, garbage on GET) is a FAIL — this is the exact pre-#5271 'api' kind hole",
+        "a published view that never appears in the console after reload is a FAIL of the round-trip even though every API call returned success (check against a fresh objectui build before filing — stale-console-bundle)"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "stale-console-bundle"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts; objectui: e2e/live/studio-record-page.spec.ts, e2e/live/studio-object-designer.spec.ts" },
+      "source": [
+        "packages/runtime/src/route-ledger.ts (PUT /meta/:type/:name, GET /meta/_drafts, GET /meta/:type/:name/published, POST /packages/:id/publish-drafts)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts (allowOrgOverride 403 not_overridable contract; validateOnWrite; registry flags per type)",
+        "ADR-0070 via packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts (writable_package_required)",
+        "ADR-0033 (drafts / publish)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — grounds the Studio authoring pipeline end-to-end with both deny gates as first-class clauses", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
     }
   ]
 }
