@@ -315,6 +315,12 @@ describe('#6251 — reachable on a REAL parsed app stack', () => {
     ]);
   });
 
+  // EMPTY-GREEN, declared. Revert the container ladder and this test still
+  // passes — because nothing was read, not because nothing is wrong. It is kept
+  // (a false-positive guard is worth having) but it is only meaningful PAIRED
+  // with the test above, which proves on the same fixture family that the
+  // traversal does read these sites. If that one is ever weakened, this one
+  // stops guarding anything; do not treat it as independent cover.
   it('a CLEAN app stack of the same shape reports nothing — the fix adds no false positives', () => {
     const clean = structuredClone(appShape);
     const view = (clean.views as AnyRec[])[0];
