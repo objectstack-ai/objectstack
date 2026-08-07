@@ -241,6 +241,7 @@
     "PageComponentParsed (type)",
     "PageComponentSchema (const)",
     "PageComponentType (const)",
+    "PageContainerProps (type)",
     "PageHeaderProps (const)",
     "PageInput (type)",
     "PageNavItem (type)",
