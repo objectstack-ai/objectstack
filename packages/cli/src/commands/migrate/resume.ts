@@ -137,13 +137,11 @@ export default class MigrateResume extends Command {
       // ── list mode (no --run): read-only ──────────────────────────────
       if (!flags.run) {
         if (flags.json) {
-          await emitJson(
-            {
-              interrupted: interrupted.map((r) => ({ ...r, resumable: Boolean(plans?.get(r.planId)) })),
-              count: interrupted.length,
-            },
-            timer.elapsed(),
-          );
+          await emitJson({
+            interrupted: interrupted.map((r) => ({ ...r, resumable: Boolean(plans?.get(r.planId)) })),
+            count: interrupted.length,
+            duration: timer.elapsed(),
+          });
           return;
         }
         if (interrupted.length === 0) {
@@ -167,7 +165,7 @@ export default class MigrateResume extends Command {
           : `Run '${flags.run}' is not interrupted — it already concluded (${
               events.some((e) => e.kind === 'run_done') ? 'run_done' : 'fully compensated'
             }). Nothing to do.`;
-        if (flags.json) { await emitJson({ error: msg, runId: flags.run }, timer.elapsed(), { compact: true }); this.exit(events.length === 0 ? 1 : 0); return; }
+        if (flags.json) { await emitJson({ error: msg, runId: flags.run, duration: timer.elapsed() }, 0, { compact: true }); this.exit(events.length === 0 ? 1 : 0); return; }
         if (events.length === 0) { printError(msg); this.exit(1); return; }
         printSuccess(msg);
         return;
@@ -179,7 +177,7 @@ export default class MigrateResume extends Command {
           `Run '${target.runId}' belongs to plan '${target.planId}', which no loaded package registers. ` +
           `A resume needs the plan's code — the journal stores its hash, not its callbacks. ` +
           `Load the package that owns this migration and re-run.`;
-        if (flags.json) { await emitJson({ error: msg, runId: target.runId, planId: target.planId }, timer.elapsed(), { compact: true }); this.exit(1); return; }
+        if (flags.json) { await emitJson({ error: msg, runId: target.runId, planId: target.planId, duration: timer.elapsed() }, 0, { compact: true }); this.exit(1); return; }
         printError(msg);
         this.exit(1);
         return;
@@ -190,7 +188,7 @@ export default class MigrateResume extends Command {
         const summary = `${policy === 'compensate' ? 'UNWIND' : 'RESUME FORWARD'} run '${target.runId}' (plan '${plan.id}')`;
         if (flags.json || !process.stdin.isTTY) {
           const msg = `Confirmation required: ${summary}. Re-run with --yes.`;
-          if (flags.json) { await emitJson({ error: 'confirmation_required', hint: 'pass --yes', summary }, timer.elapsed(), { compact: true }); this.exit(1); return; }
+          if (flags.json) { await emitJson({ error: 'confirmation_required', hint: 'pass --yes', summary, duration: timer.elapsed() }, 0, { compact: true }); this.exit(1); return; }
           printWarning(msg);
           this.exit(1);
           return;
@@ -206,7 +204,7 @@ export default class MigrateResume extends Command {
       const result = await resumeMigrationJournal(engine, plan, target.runId);
 
       if (flags.json) {
-        await emitJson({ ...result, error: result.error ? String(result.error) : undefined }, timer.elapsed());
+        await emitJson({ ...result, error: result.error ? String(result.error) : undefined, duration: timer.elapsed() });
         // A run that ended `failed` left the database in a state no clean story
         // covers, so the exit code has to say so — a zero here would let a
         // scripted recovery move on from a migration that needs a human.
@@ -237,7 +235,7 @@ export default class MigrateResume extends Command {
         // A refusal is the runner working, not breaking — say what it refused.
         ? `Refused (${error.code}): ${error.message}`
         : (error?.message || String(error));
-      if (flags.json) { await emitJson({ error: msg }, timer.elapsed(), { compact: true }); this.exit(1); return; }
+      if (flags.json) { await emitJson({ error: msg, duration: timer.elapsed() }, 0, { compact: true }); this.exit(1); return; }
       printError(msg);
       this.exit(1);
     } finally {
