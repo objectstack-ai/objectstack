@@ -227,7 +227,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
           throw make();
         });
 
-        const rows = await engine.find('doc', {} as any);
+        const rows = await engine.find('doc');
 
         // The read that ASKED for the file still answers. This is the pin that
         // makes #6116 a diagnosability fix and not a behaviour change: if a
@@ -243,7 +243,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
         throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' });
       });
 
-      const row = await engine.findOne('doc', { where: { id: 'd1' } } as any);
+      const row = await engine.findOne('doc', { where: { id: 'd1' } });
 
       expect(row?.attachment).toBe(FILE_ID);
     });
@@ -258,7 +258,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
           throw make();
         });
 
-        await engine.find('doc', {} as any);
+        await engine.find('doc');
 
         // There are genuinely no committed rows, so the un-hydrated answer IS
         // the truth and there is nothing to report. Reporting it anyway would
@@ -293,7 +293,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
       await boot(async () => {
         throw make();
       });
-      await engine.find('doc', {} as any);
+      await engine.find('doc');
       return logger.lines.error.map((l: any) => l.msg);
     }
 
@@ -313,7 +313,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
         throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' });
       });
 
-      await engine.find('doc', {} as any);
+      await engine.find('doc');
 
       // `error(message, error, meta)` — the meta says which object was read…
       const [, meta] = logger.lines.error[0].args;
@@ -333,7 +333,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
           throw make();
         });
 
-        await engine.find('doc', {} as any);
+        await engine.find('doc');
 
         expect(logger.lines.warn).toHaveLength(1);
         // Functional degradation, not durability: nothing here claims to have
@@ -352,7 +352,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
         throw Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' });
       });
 
-      await engine.find('doc', {} as any);
+      await engine.find('doc');
 
       const [line] = logger.lines.warn;
       // The CONSEQUENCE, spelled out — this is the whole point of the issue:
@@ -375,7 +375,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
       storeFor('doc').set('d2', { id: 'd2', title: 'Invoice', attachment: 'f_zz11yy22xx' });
       storeFor('doc').set('d3', { id: 'd3', title: 'Receipt', attachment: 'f_aa33bb44cc' });
 
-      const rows = await engine.find('doc', {} as any);
+      const rows = await engine.find('doc');
 
       expect(rows).toHaveLength(3);
       // One batched lookup fails once, so it is reported once — AGENTS: "Say it
@@ -393,7 +393,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
         { id: FILE_ID, name: 'contract.pdf', size: 1024, mime_type: 'application/pdf', status: 'committed' },
       ]);
 
-      const rows = await engine.find('doc', {} as any);
+      const rows = await engine.find('doc');
 
       expect(rows[0].attachment).toMatchObject({
         id: FILE_ID,
@@ -407,7 +407,7 @@ describe('sys_file hydrate read fault — distinguishable from "no file" (#6116)
     it('an id with no committed row is a MISS, not a fault — still silent', async () => {
       await boot(async () => []);
 
-      const rows = await engine.find('doc', {} as any);
+      const rows = await engine.find('doc');
 
       // A clean miss (the read happened, nothing matched) is legitimate absent
       // data — exactly the fact the outage branch must not be confused with.
