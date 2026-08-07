@@ -118,7 +118,7 @@ export const WidgetLifecycleSchema = lazySchema(() => z.object({
   onError: z.string().optional().describe('Error handling code'),
 }));
 
-export type WidgetLifecycle = z.infer<typeof WidgetLifecycleSchema>;
+export type WidgetLifecycle = z.input<typeof WidgetLifecycleSchema>;
 
 /**
  * Widget Event Schema
@@ -183,7 +183,7 @@ export const WidgetEventSchema = lazySchema(() => z.object({
   payload: z.record(z.string(), z.unknown()).optional().describe('Event payload schema'),
 }));
 
-export type WidgetEvent = z.infer<typeof WidgetEventSchema>;
+export type WidgetEvent = z.input<typeof WidgetEventSchema>;
 /** Post-parse shape of {@link WidgetEvent} — defaults applied, transforms run (ADR-0122). */
 export type WidgetEventParsed = z.infer<typeof WidgetEventSchema>;
 
@@ -257,7 +257,7 @@ export const WidgetPropertySchema = lazySchema(() => z.object({
   category: z.string().optional().describe('Property category'),
 }));
 
-export type WidgetProperty = z.infer<typeof WidgetPropertySchema>;
+export type WidgetProperty = z.input<typeof WidgetPropertySchema>;
 /** Post-parse shape of {@link WidgetProperty} — defaults applied, transforms run (ADR-0122). */
 export type WidgetPropertyParsed = z.infer<typeof WidgetPropertySchema>;
 
@@ -307,7 +307,7 @@ export const WidgetSourceSchema = lazySchema(() => z.discriminatedUnion('type', 
   }),
 ]));
 
-export type WidgetSource = z.infer<typeof WidgetSourceSchema>;
+export type WidgetSource = z.input<typeof WidgetSourceSchema>;
 /** Post-parse shape of {@link WidgetSource} — defaults applied, transforms run (ADR-0122). */
 export type WidgetSourceParsed = z.infer<typeof WidgetSourceSchema>;
 
@@ -422,7 +422,7 @@ export const WidgetManifestSchema = lazySchema(() => z.object({
   ),
 }));
 
-export type WidgetManifest = z.infer<typeof WidgetManifestSchema>;
+export type WidgetManifest = z.input<typeof WidgetManifestSchema>;
 /** Post-parse shape of {@link WidgetManifest} — defaults applied, transforms run (ADR-0122). */
 export type WidgetManifestParsed = z.infer<typeof WidgetManifestSchema>;
 
@@ -512,6 +512,6 @@ export const FieldWidgetPropsSchema = lazySchema(() => z.object({
 /**
  * TypeScript type for Field Widget Props
  */
-export type FieldWidgetProps = z.infer<typeof FieldWidgetPropsSchema>;
+export type FieldWidgetProps = z.input<typeof FieldWidgetPropsSchema>;
 /** Post-parse shape of {@link FieldWidgetProps} — defaults applied, transforms run (ADR-0122). */
 export type FieldWidgetPropsParsed = z.infer<typeof FieldWidgetPropsSchema>;

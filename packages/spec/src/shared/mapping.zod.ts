@@ -105,4 +105,4 @@ export const FieldMappingSchema = lazySchema(() => z.object({
   defaultValue: z.unknown().optional().describe('Default if source is null/undefined'),
 }));
 
-export type FieldMapping = z.infer<typeof FieldMappingSchema>;
+export type FieldMapping = z.input<typeof FieldMappingSchema>;

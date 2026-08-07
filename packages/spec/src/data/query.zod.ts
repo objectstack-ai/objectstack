@@ -333,7 +333,7 @@ export const FullTextSearchSchema = lazySchema(() => z.object({
   highlight: z.boolean().optional().default(false).describe('[EXPERIMENTAL — not enforced] Search result highlighting. No executor emits highlights (#4286).'),
 }));
 
-export type FullTextSearch = z.infer<typeof FullTextSearchSchema>;
+export type FullTextSearch = z.input<typeof FullTextSearchSchema>;
 /** Post-parse shape of {@link FullTextSearch} — defaults applied, transforms run (ADR-0122). */
 export type FullTextSearchParsed = z.infer<typeof FullTextSearchSchema>;
 
@@ -495,12 +495,12 @@ export const QuerySchema: z.ZodType<QueryAST, QueryInput> = lazySchema(() => Bas
   ),
 }));
 
-export type SortNode = z.infer<typeof SortNodeSchema>;
+export type SortNode = z.input<typeof SortNodeSchema>;
 /** Post-parse shape of {@link SortNode} — defaults applied, transforms run (ADR-0122). */
 export type SortNodeParsed = z.infer<typeof SortNodeSchema>;
-export type AggregationNode = z.infer<typeof AggregationNodeSchema>;
-export type GroupByNode = z.infer<typeof GroupByNodeSchema>;
-export type DateGranularityValue = z.infer<typeof DateGranularity>;
+export type AggregationNode = z.input<typeof AggregationNodeSchema>;
+export type GroupByNode = z.input<typeof GroupByNodeSchema>;
+export type DateGranularityValue = z.input<typeof DateGranularity>;
 // `FieldNode` is declared next to its schema rather than here: since #4196 it
 // is no longer recursive, it is just the name the docs and the engine give to
 // "one entry of a select list". (`JoinNode` and `WindowFunctionNode`/`WindowSpec`

@@ -7,7 +7,7 @@ import type {
     IKV,
     ICounter,
 } from '@objectstack/spec/contracts';
-import type { ClusterCapabilityConfigInput } from '@objectstack/spec/kernel';
+import type { ClusterCapabilityConfig } from '@objectstack/spec/kernel';
 import { ClusterCapabilityConfigSchema } from '@objectstack/spec/kernel';
 
 import { MemoryPubSub } from './memory/pubsub.js';
@@ -54,7 +54,7 @@ export class ComposedClusterService implements IClusterService {
  *   await cluster.pubsub.publish('metadata.changed', { id: 'x' });
  */
 export function defineCluster(
-    config: ClusterCapabilityConfigInput = {},
+    config: ClusterCapabilityConfig = {},
 ): IClusterService {
     const parsed = ClusterCapabilityConfigSchema.parse(config);
     const nodeId = parsed.nodeId ?? generateNodeId();

@@ -27,7 +27,7 @@ export const TenantDatabaseStatusSchema = lazySchema(() => z.enum([
   'failed',        // Provisioning or migration failed
 ]));
 
-export type TenantDatabaseStatus = z.infer<typeof TenantDatabaseStatusSchema>;
+export type TenantDatabaseStatus = z.input<typeof TenantDatabaseStatusSchema>;
 
 /**
  * Tenant Plan Tier
@@ -40,7 +40,7 @@ export const TenantPlanSchema = lazySchema(() => z.enum([
   'custom',
 ]));
 
-export type TenantPlan = z.infer<typeof TenantPlanSchema>;
+export type TenantPlan = z.input<typeof TenantPlanSchema>;
 
 /**
  * Tenant Database Registry Entry
@@ -126,7 +126,7 @@ export const TenantDatabaseSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom tenant configuration'),
 }));
 
-export type TenantDatabase = z.infer<typeof TenantDatabaseSchema>;
+export type TenantDatabase = z.input<typeof TenantDatabaseSchema>;
 /** Post-parse shape of {@link TenantDatabase} — defaults applied, transforms run (ADR-0122). */
 export type TenantDatabaseParsed = z.infer<typeof TenantDatabaseSchema>;
 
@@ -141,7 +141,7 @@ export const PackageInstallationStatusSchema = lazySchema(() => z.enum([
   'failed',        // Installation failed
 ]));
 
-export type PackageInstallationStatus = z.infer<typeof PackageInstallationStatusSchema>;
+export type PackageInstallationStatus = z.input<typeof PackageInstallationStatusSchema>;
 
 /**
  * Package Installation Record
@@ -197,7 +197,7 @@ export const PackageInstallationSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().describe('Last update timestamp'),
 }));
 
-export type PackageInstallation = z.infer<typeof PackageInstallationSchema>;
+export type PackageInstallation = z.input<typeof PackageInstallationSchema>;
 /** Post-parse shape of {@link PackageInstallation} — defaults applied, transforms run (ADR-0122). */
 export type PackageInstallationParsed = z.infer<typeof PackageInstallationSchema>;
 
@@ -239,7 +239,7 @@ export const TenantContextSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom tenant metadata'),
 }));
 
-export type TenantContext = z.infer<typeof TenantContextSchema>;
+export type TenantContext = z.input<typeof TenantContextSchema>;
 
 /**
  * Tenant Identification Source
@@ -255,7 +255,7 @@ export const TenantIdentificationSourceSchema = lazySchema(() => z.enum([
   'default',         // Default/fallback tenant
 ]));
 
-export type TenantIdentificationSource = z.infer<typeof TenantIdentificationSourceSchema>;
+export type TenantIdentificationSource = z.input<typeof TenantIdentificationSourceSchema>;
 
 /**
  * Tenant Routing Configuration
@@ -306,7 +306,7 @@ export const TenantRoutingConfigSchema = lazySchema(() => z.object({
     .describe('JWT claim name for organization ID'),
 }));
 
-export type TenantRoutingConfig = z.infer<typeof TenantRoutingConfigSchema>;
+export type TenantRoutingConfig = z.input<typeof TenantRoutingConfigSchema>;
 /** Post-parse shape of {@link TenantRoutingConfig} — defaults applied, transforms run (ADR-0122). */
 export type TenantRoutingConfigParsed = z.infer<typeof TenantRoutingConfigSchema>;
 
@@ -342,7 +342,7 @@ export const ProvisionTenantRequestSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom tenant metadata'),
 }));
 
-export type ProvisionTenantRequest = z.infer<typeof ProvisionTenantRequestSchema>;
+export type ProvisionTenantRequest = z.input<typeof ProvisionTenantRequestSchema>;
 /** Post-parse shape of {@link ProvisionTenantRequest} — defaults applied, transforms run (ADR-0122). */
 export type ProvisionTenantRequestParsed = z.infer<typeof ProvisionTenantRequestSchema>;
 
@@ -368,6 +368,6 @@ export const ProvisionTenantResponseSchema = lazySchema(() => z.object({
   warnings: z.array(z.string()).optional().describe('Provisioning warnings'),
 }));
 
-export type ProvisionTenantResponse = z.infer<typeof ProvisionTenantResponseSchema>;
+export type ProvisionTenantResponse = z.input<typeof ProvisionTenantResponseSchema>;
 /** Post-parse shape of {@link ProvisionTenantResponse} — defaults applied, transforms run (ADR-0122). */
 export type ProvisionTenantResponseParsed = z.infer<typeof ProvisionTenantResponseSchema>;

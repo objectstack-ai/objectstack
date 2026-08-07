@@ -245,6 +245,8 @@ export const ParallelBranchSchema = lazySchema(() => strictObject(
 ));
 
 export type ParallelBranch = z.input<typeof ParallelBranchSchema>;
+/** Post-parse shape of {@link ParallelBranch} — defaults applied, transforms run (ADR-0122). */
+export type ParallelBranchParsed = z.infer<typeof ParallelBranchSchema>;
 
 /**
  * `parallel` block config — N branch regions that run concurrently and **join

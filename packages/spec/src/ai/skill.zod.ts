@@ -28,7 +28,7 @@ export const SkillTriggerConditionSchema = lazySchema(() => z.object({
   value: z.union([z.string(), z.array(z.string())]).describe('Expected value or values'),
 }));
 
-export type SkillTriggerCondition = z.infer<typeof SkillTriggerConditionSchema>;
+export type SkillTriggerCondition = z.input<typeof SkillTriggerConditionSchema>;
 
 // ==========================================
 // Skill Schema
@@ -232,7 +232,7 @@ export const SkillSchema = lazySchema(() => strictObject({
 
 }));
 
-export type Skill = z.infer<typeof SkillSchema>;
+export type Skill = z.input<typeof SkillSchema>;
 /** Post-parse shape of {@link Skill} — defaults applied, transforms run (ADR-0122). */
 export type SkillParsed = z.infer<typeof SkillSchema>;
 
@@ -260,6 +260,6 @@ export type SkillParsed = z.infer<typeof SkillSchema>;
  * });
  * ```
  */
-export function defineSkill(config: z.input<typeof SkillSchema>): Skill {
+export function defineSkill(config: z.input<typeof SkillSchema>): SkillParsed {
   return SkillSchema.parse(config);
 }

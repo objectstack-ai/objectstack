@@ -376,17 +376,12 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
   traceId: z.string().optional(),
 }));
 
-export type ExecutionContext = z.infer<typeof ExecutionContextSchema>;
-/** Post-parse shape of {@link ExecutionContext} — defaults applied, transforms run (ADR-0122). */
-export type ExecutionContextParsed = z.infer<typeof ExecutionContextSchema>;
-
 /**
- * The CALLER-SUPPLIED form of {@link ExecutionContext} — any subset of the
- * envelope.
+ * The CALLER-SUPPLIED form of the execution envelope — any subset of it.
  *
  * `positions`/`permissions`/`isSystem` carry parse-time defaults, so they are
- * required in the inferred *output* type ({@link ExecutionContext}) even though
- * a caller never has to write them. This is the *input* side: what a data
+ * required in the parsed shape ({@link ExecutionContextParsed}) even though a
+ * caller never has to write them. This is the *input* side: what a data
  * operation may actually be handed. Use it wherever a context arrives from a
  * caller rather than out of a parse — `options.context` and everything the
  * engine threads it into.
@@ -394,5 +389,11 @@ export type ExecutionContextParsed = z.infer<typeof ExecutionContextSchema>;
  * Some callers have no principal to state at all: a system read passes
  * `{ isSystem: true }`, and a flow run with no resolvable identity passes
  * provenance alone (`{ flowRunId }`, #3712).
+ *
+ * Spelled `ExecutionContextInput` until protocol 17; ADR-0122 phase 2 moved the
+ * author state onto the bare name and retired that synonym.
  */
-export type ExecutionContextInput = z.input<typeof ExecutionContextSchema>;
+export type ExecutionContext = z.input<typeof ExecutionContextSchema>;
+/** Post-parse shape of {@link ExecutionContext} — defaults applied, transforms run (ADR-0122). */
+export type ExecutionContextParsed = z.infer<typeof ExecutionContextSchema>;
+

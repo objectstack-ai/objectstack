@@ -3,7 +3,7 @@
 import type {
   SeedLoaderRequest,
   SeedLoaderResult,
-  SeedLoaderConfigInput,
+  SeedLoaderConfig,
   ObjectDependencyGraph,
 } from '../data/seed-loader.zod.js';
 
@@ -58,5 +58,5 @@ export interface ISeedLoaderService {
    * @param config - Optional loader config overrides
    * @returns Structured result with validation errors (no data written)
    */
-  validate(datasets: Seed[], config?: SeedLoaderConfigInput): Promise<SeedLoaderResult>;
+  validate(datasets: Seed[], config?: SeedLoaderConfig): Promise<SeedLoaderResult>;
 }

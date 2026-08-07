@@ -22,7 +22,7 @@ export const EventPriority = z.enum([
   'background', // 4 - Process during idle time
 ]);
 
-export type EventPriority = z.infer<typeof EventPriority>;
+export type EventPriority = z.input<typeof EventPriority>;
 
 /**
  * Event Priority Values
@@ -99,7 +99,7 @@ export const EventTypeDefinitionSchema = lazySchema(() => z.object({
   tags: z.array(z.string()).optional().describe('Event type tags'),
 }));
 
-export type EventTypeDefinition = z.infer<typeof EventTypeDefinitionSchema>;
+export type EventTypeDefinition = z.input<typeof EventTypeDefinitionSchema>;
 /** Post-parse shape of {@link EventTypeDefinition} — defaults applied, transforms run (ADR-0122). */
 export type EventTypeDefinitionParsed = z.infer<typeof EventTypeDefinitionSchema>;
 
@@ -132,6 +132,6 @@ export const EventSchema = lazySchema(() => z.object({
   metadata: EventMetadataSchema.describe('Event metadata'),
 }));
 
-export type Event = z.infer<typeof EventSchema>;
+export type Event = z.input<typeof EventSchema>;
 /** Post-parse shape of {@link Event} — defaults applied, transforms run (ADR-0122). */
 export type EventParsed = z.infer<typeof EventSchema>;

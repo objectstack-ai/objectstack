@@ -60,7 +60,7 @@ export const AppManifestSchema = lazySchema(() => z.object({
   dependencies: z.array(z.string()).default([]).describe('Required app dependencies'),
 }).describe('App manifest for marketplace installation'));
 
-export type AppManifest = z.infer<typeof AppManifestSchema>;
+export type AppManifest = z.input<typeof AppManifestSchema>;
 /** Post-parse shape of {@link AppManifest} — defaults applied, transforms run (ADR-0122). */
 export type AppManifestParsed = z.infer<typeof AppManifestSchema>;
 
@@ -91,7 +91,7 @@ export const AppCompatibilityCheckSchema = lazySchema(() => z.object({
   })).default([]).describe('Compatibility issues'),
 }).describe('App compatibility check result'));
 
-export type AppCompatibilityCheck = z.infer<typeof AppCompatibilityCheckSchema>;
+export type AppCompatibilityCheck = z.input<typeof AppCompatibilityCheckSchema>;
 /** Post-parse shape of {@link AppCompatibilityCheck} — defaults applied, transforms run (ADR-0122). */
 export type AppCompatibilityCheckParsed = z.infer<typeof AppCompatibilityCheckSchema>;
 
@@ -116,7 +116,7 @@ export const AppInstallRequestSchema = lazySchema(() => z.object({
   skipSeedData: z.boolean().default(false).describe('Skip seed data population'),
 }).describe('App install request'));
 
-export type AppInstallRequest = z.infer<typeof AppInstallRequestSchema>;
+export type AppInstallRequest = z.input<typeof AppInstallRequestSchema>;
 /** Post-parse shape of {@link AppInstallRequest} — defaults applied, transforms run (ADR-0122). */
 export type AppInstallRequestParsed = z.infer<typeof AppInstallRequestSchema>;
 
@@ -149,6 +149,6 @@ export const AppInstallResultSchema = lazySchema(() => z.object({
   error: z.string().optional().describe('Error message on failure'),
 }).describe('App install result'));
 
-export type AppInstallResult = z.infer<typeof AppInstallResultSchema>;
+export type AppInstallResult = z.input<typeof AppInstallResultSchema>;
 /** Post-parse shape of {@link AppInstallResult} — defaults applied, transforms run (ADR-0122). */
 export type AppInstallResultParsed = z.infer<typeof AppInstallResultSchema>;

@@ -310,31 +310,31 @@ export const ConversationAnalyticsSchema = lazySchema(() => z.object({
   lastMessageAt: z.string().datetime().optional().describe('ISO 8601 timestamp'),
 }));
 
-export type MessageRole = z.infer<typeof MessageRoleSchema>;
-export type MessageContentType = z.infer<typeof MessageContentTypeSchema>;
-export type MessageContent = z.infer<typeof MessageContentSchema>;
+export type MessageRole = z.input<typeof MessageRoleSchema>;
+export type MessageContentType = z.input<typeof MessageContentTypeSchema>;
+export type MessageContent = z.input<typeof MessageContentSchema>;
 /** Post-parse shape of {@link MessageContent} — defaults applied, transforms run (ADR-0122). */
 export type MessageContentParsed = z.infer<typeof MessageContentSchema>;
-export type FunctionCall = z.infer<typeof FunctionCallSchema>;
-export type ToolCall = z.infer<typeof ToolCallSchema>;
+export type FunctionCall = z.input<typeof FunctionCallSchema>;
+export type ToolCall = z.input<typeof ToolCallSchema>;
 /** Post-parse shape of {@link ToolCall} — defaults applied, transforms run (ADR-0122). */
 export type ToolCallParsed = z.infer<typeof ToolCallSchema>;
-export type ConversationMessage = z.infer<typeof ConversationMessageSchema>;
+export type ConversationMessage = z.input<typeof ConversationMessageSchema>;
 /** Post-parse shape of {@link ConversationMessage} — defaults applied, transforms run (ADR-0122). */
 export type ConversationMessageParsed = z.infer<typeof ConversationMessageSchema>;
-export type TokenBudgetStrategy = z.infer<typeof TokenBudgetStrategySchema>;
-export type TokenBudgetConfig = z.infer<typeof TokenBudgetConfigSchema>;
+export type TokenBudgetStrategy = z.input<typeof TokenBudgetStrategySchema>;
+export type TokenBudgetConfig = z.input<typeof TokenBudgetConfigSchema>;
 /** Post-parse shape of {@link TokenBudgetConfig} — defaults applied, transforms run (ADR-0122). */
 export type TokenBudgetConfigParsed = z.infer<typeof TokenBudgetConfigSchema>;
-export type TokenUsageStats = z.infer<typeof TokenUsageStatsSchema>;
+export type TokenUsageStats = z.input<typeof TokenUsageStatsSchema>;
 /** Post-parse shape of {@link TokenUsageStats} — defaults applied, transforms run (ADR-0122). */
 export type TokenUsageStatsParsed = z.infer<typeof TokenUsageStatsSchema>;
-export type ConversationContext = z.infer<typeof ConversationContextSchema>;
-export type ConversationSession = z.infer<typeof ConversationSessionSchema>;
+export type ConversationContext = z.input<typeof ConversationContextSchema>;
+export type ConversationSession = z.input<typeof ConversationSessionSchema>;
 /** Post-parse shape of {@link ConversationSession} — defaults applied, transforms run (ADR-0122). */
 export type ConversationSessionParsed = z.infer<typeof ConversationSessionSchema>;
-export type ConversationSummary = z.infer<typeof ConversationSummarySchema>;
-export type MessagePruningEvent = z.infer<typeof MessagePruningEventSchema>;
-export type ConversationAnalytics = z.infer<typeof ConversationAnalyticsSchema>;
+export type ConversationSummary = z.input<typeof ConversationSummarySchema>;
+export type MessagePruningEvent = z.input<typeof MessagePruningEventSchema>;
+export type ConversationAnalytics = z.input<typeof ConversationAnalyticsSchema>;
 /** Post-parse shape of {@link ConversationAnalytics} — defaults applied, transforms run (ADR-0122). */
 export type ConversationAnalyticsParsed = z.infer<typeof ConversationAnalyticsSchema>;

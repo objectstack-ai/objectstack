@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 import { AnalyticsQuerySchema, defineCube } from '@objectstack/spec/data';
-import type { AnalyticsQuery, AnalyticsQueryInput, Cube } from '@objectstack/spec/data';
+import type { AnalyticsQuery, Cube } from '@objectstack/spec/data';
 
 /**
  * Validate a literal through the schema before handing it to the service —
@@ -14,10 +14,10 @@ import type { AnalyticsQuery, AnalyticsQueryInput, Cube } from '@objectstack/spe
  * [#4538] The two tiers collapsed: `AnalyticsQuerySchema` no longer carries
  * any `.default()`/`.transform()` (`timezone` is genuinely optional — absence
  * means the engine resolves org timezone, #1982/#2018), so `AnalyticsQuery`
- * and `AnalyticsQueryInput` are the same shape and the parse is validation
+ * and `AnalyticsQuery` are the same shape and the parse is validation
  * only. The helper stays so every test query is proven schema-valid.
  */
-const asQuery = (input: AnalyticsQueryInput): AnalyticsQuery => AnalyticsQuerySchema.parse(input);
+const asQuery = (input: AnalyticsQuery): AnalyticsQuery => AnalyticsQuerySchema.parse(input);
 
 describe('MemoryAnalyticsService', () => {
   let driver: InMemoryDriver;

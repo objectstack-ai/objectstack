@@ -22,7 +22,6 @@
     "ConnectorHealth (type)",
     "ConnectorHealthParsed (type)",
     "ConnectorHealthSchema (const)",
-    "ConnectorInput (type)",
     "ConnectorInstanceAPIKeyAuthSchema (const)",
     "ConnectorInstanceAuth (type)",
     "ConnectorInstanceAuthSchema (const)",

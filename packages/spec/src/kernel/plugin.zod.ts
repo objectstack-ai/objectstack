@@ -50,7 +50,7 @@ export const PluginContextSchema = lazySchema(() => z.object({
   }).passthrough().describe('Driver Registry'),
 }));
 
-export type PluginContextData = z.infer<typeof PluginContextSchema>;
+export type PluginContextData = z.input<typeof PluginContextSchema>;
 export type PluginContext = PluginContextData;
 
 // ---------------------------------------------------------------------------
@@ -133,4 +133,4 @@ export const PluginSchema = lazySchema(() => z.object({
   homepage: z.string().url().optional(),
 }));
 
-export type PluginDefinition = z.infer<typeof PluginSchema>;
+export type PluginDefinition = z.input<typeof PluginSchema>;

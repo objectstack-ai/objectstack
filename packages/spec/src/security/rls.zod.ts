@@ -112,7 +112,7 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { lazySchema } from '../shared/lazy-schema';
 export const RLSOperation = z.enum(['select', 'insert', 'update', 'delete', 'all']);
 
-export type RLSOperation = z.infer<typeof RLSOperation>;
+export type RLSOperation = z.input<typeof RLSOperation>;
 
 /**
  * Row-Level Security Policy Schema
@@ -569,11 +569,11 @@ export const RLSEvaluationResultSchema = lazySchema(() => z.object({
 /**
  * Type exports
  */
-export type RowLevelSecurityPolicy = z.infer<typeof RowLevelSecurityPolicySchema>;
+export type RowLevelSecurityPolicy = z.input<typeof RowLevelSecurityPolicySchema>;
 /** Post-parse shape of {@link RowLevelSecurityPolicy} — defaults applied, transforms run (ADR-0122). */
 export type RowLevelSecurityPolicyParsed = z.infer<typeof RowLevelSecurityPolicySchema>;
-export type RLSUserContext = z.infer<typeof RLSUserContextSchema>;
-export type RLSEvaluationResult = z.infer<typeof RLSEvaluationResultSchema>;
+export type RLSUserContext = z.input<typeof RLSUserContextSchema>;
+export type RLSEvaluationResult = z.input<typeof RLSEvaluationResultSchema>;
 
 /**
  * Helper factory for creating RLS policies

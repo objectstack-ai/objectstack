@@ -166,8 +166,8 @@ export const TransitionSchema = lazySchema(() => strictObject(
 // kernel-side analogue of a signal *declaration* is `EventTypeDefinitionSchema`
 // in the same file.
 
-export type ActionRef = z.infer<typeof ActionRefSchema>;
-export type Transition = z.infer<typeof TransitionSchema>;
+export type ActionRef = z.input<typeof ActionRefSchema>;
+export type Transition = z.input<typeof TransitionSchema>;
 
 export type StateNodeConfig = {
   type?: 'atomic' | 'compound' | 'parallel' | 'final' | 'history';
@@ -291,4 +291,4 @@ export const StateMachineSchema = lazySchema(() => strictObject(
   },
 ));
 
-export type StateMachineConfig = z.infer<typeof StateMachineSchema>;
+export type StateMachineConfig = z.input<typeof StateMachineSchema>;

@@ -81,7 +81,7 @@ export const EventWebhookConfigSchema = lazySchema(() => z.object({
   enabled: z.boolean().default(true).describe('Whether webhook is enabled'),
 }));
 
-export type EventWebhookConfig = z.infer<typeof EventWebhookConfigSchema>;
+export type EventWebhookConfig = z.input<typeof EventWebhookConfigSchema>;
 /** Post-parse shape of {@link EventWebhookConfig} — defaults applied, transforms run (ADR-0122). */
 export type EventWebhookConfigParsed = z.infer<typeof EventWebhookConfigSchema>;
 
@@ -149,7 +149,7 @@ export const EventMessageQueueConfigSchema = lazySchema(() => z.object({
   flushIntervalMs: z.number().int().positive().default(1000).describe('Flush interval for batching'),
 }));
 
-export type EventMessageQueueConfig = z.infer<typeof EventMessageQueueConfigSchema>;
+export type EventMessageQueueConfig = z.input<typeof EventMessageQueueConfigSchema>;
 /** Post-parse shape of {@link EventMessageQueueConfig} — defaults applied, transforms run (ADR-0122). */
 export type EventMessageQueueConfigParsed = z.infer<typeof EventMessageQueueConfigSchema>;
 
@@ -216,6 +216,6 @@ export const RealTimeNotificationConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Rate limiting configuration'),
 }));
 
-export type RealTimeNotificationConfig = z.infer<typeof RealTimeNotificationConfigSchema>;
+export type RealTimeNotificationConfig = z.input<typeof RealTimeNotificationConfigSchema>;
 /** Post-parse shape of {@link RealTimeNotificationConfig} — defaults applied, transforms run (ADR-0122). */
 export type RealTimeNotificationConfigParsed = z.infer<typeof RealTimeNotificationConfigSchema>;

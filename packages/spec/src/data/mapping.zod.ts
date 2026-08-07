@@ -241,20 +241,18 @@ export const MappingSchema = lazySchema(() => strictObject({
   ...MetadataProtectionFields,
 }));
 
-export type Mapping = z.infer<typeof MappingSchema>;
+export type Mapping = z.input<typeof MappingSchema>;
 /** Post-parse shape of {@link Mapping} — defaults applied, transforms run (ADR-0122). */
 export type MappingParsed = z.infer<typeof MappingSchema>;
-/** Authoring input for {@link Mapping} — defaulted fields are optional. */
-export type MappingInput = z.input<typeof MappingSchema>;
 
 /**
  * Type-safe factory for a data import/export mapping. Validates at authoring time via
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: Mapping` literal.
  */
-export function defineMapping(config: z.input<typeof MappingSchema>): Mapping {
+export function defineMapping(config: z.input<typeof MappingSchema>): MappingParsed {
   return MappingSchema.parse(config);
 }
-export type ImportFieldMapping = z.infer<typeof ImportFieldMappingSchema>;
+export type ImportFieldMapping = z.input<typeof ImportFieldMappingSchema>;
 /** Post-parse shape of {@link ImportFieldMapping} — defaults applied, transforms run (ADR-0122). */
 export type ImportFieldMappingParsed = z.infer<typeof ImportFieldMappingSchema>;

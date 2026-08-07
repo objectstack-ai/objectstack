@@ -34,7 +34,7 @@ export const DeployStatusEnum = z.enum([
   'rolling_back', // Rollback in progress
 ]).describe('Deployment lifecycle status');
 
-export type DeployStatus = z.infer<typeof DeployStatusEnum>;
+export type DeployStatus = z.input<typeof DeployStatusEnum>;
 
 // ==========================================================================
 // 2. Deploy Diff
@@ -63,7 +63,7 @@ export const SchemaChangeSchema = lazySchema(() => z.object({
   newValue: z.unknown().optional().describe('New value'),
 }).describe('Individual schema change'));
 
-export type SchemaChange = z.infer<typeof SchemaChangeSchema>;
+export type SchemaChange = z.input<typeof SchemaChangeSchema>;
 
 /**
  * Deploy Diff — what changed between current and desired state.
@@ -83,7 +83,7 @@ export const DeployDiffSchema = lazySchema(() => z.object({
   hasBreakingChanges: z.boolean().default(false).describe('Whether diff contains breaking changes'),
 }).describe('Schema diff between current and desired state'));
 
-export type DeployDiff = z.infer<typeof DeployDiffSchema>;
+export type DeployDiff = z.input<typeof DeployDiffSchema>;
 /** Post-parse shape of {@link DeployDiff} — defaults applied, transforms run (ADR-0122). */
 export type DeployDiffParsed = z.infer<typeof DeployDiffSchema>;
 
@@ -108,7 +108,7 @@ export const MigrationStatementSchema = lazySchema(() => z.object({
   order: z.number().int().min(0).describe('Execution order'),
 }).describe('Single DDL migration statement'));
 
-export type MigrationStatement = z.infer<typeof MigrationStatementSchema>;
+export type MigrationStatement = z.input<typeof MigrationStatementSchema>;
 /** Post-parse shape of {@link MigrationStatement} — defaults applied, transforms run (ADR-0122). */
 export type MigrationStatementParsed = z.infer<typeof MigrationStatementSchema>;
 
@@ -129,7 +129,7 @@ export const MigrationPlanSchema = lazySchema(() => z.object({
   estimatedDurationMs: z.number().int().min(0).optional().describe('Estimated execution time'),
 }).describe('Ordered migration plan'));
 
-export type MigrationPlan = z.infer<typeof MigrationPlanSchema>;
+export type MigrationPlan = z.input<typeof MigrationPlanSchema>;
 /** Post-parse shape of {@link MigrationPlan} — defaults applied, transforms run (ADR-0122). */
 export type MigrationPlanParsed = z.infer<typeof MigrationPlanSchema>;
 
@@ -154,7 +154,7 @@ export const DeployValidationIssueSchema = lazySchema(() => z.object({
   code: z.string().optional().describe('Validation error code'),
 }).describe('Validation issue'));
 
-export type DeployValidationIssue = z.infer<typeof DeployValidationIssueSchema>;
+export type DeployValidationIssue = z.input<typeof DeployValidationIssueSchema>;
 
 /**
  * Zod validation result for the entire deploy bundle.
@@ -173,7 +173,7 @@ export const DeployValidationResultSchema = lazySchema(() => z.object({
   warningCount: z.number().int().min(0).default(0).describe('Number of warnings'),
 }).describe('Bundle validation result'));
 
-export type DeployValidationResult = z.infer<typeof DeployValidationResultSchema>;
+export type DeployValidationResult = z.input<typeof DeployValidationResultSchema>;
 /** Post-parse shape of {@link DeployValidationResult} — defaults applied, transforms run (ADR-0122). */
 export type DeployValidationResultParsed = z.infer<typeof DeployValidationResultSchema>;
 
@@ -207,7 +207,7 @@ export const DeployManifestSchema = lazySchema(() => z.object({
   createdAt: z.string().datetime().optional().describe('Bundle creation time'),
 }).describe('Deployment manifest'));
 
-export type DeployManifest = z.infer<typeof DeployManifestSchema>;
+export type DeployManifest = z.input<typeof DeployManifestSchema>;
 /** Post-parse shape of {@link DeployManifest} — defaults applied, transforms run (ADR-0122). */
 export type DeployManifestParsed = z.infer<typeof DeployManifestSchema>;
 
@@ -235,6 +235,6 @@ export const DeployBundleSchema = lazySchema(() => z.object({
   seedData: z.array(z.record(z.string(), z.unknown())).default([]).describe('Seed data records'),
 }).describe('Deploy bundle containing all metadata for deployment'));
 
-export type DeployBundle = z.infer<typeof DeployBundleSchema>;
+export type DeployBundle = z.input<typeof DeployBundleSchema>;
 /** Post-parse shape of {@link DeployBundle} — defaults applied, transforms run (ADR-0122). */
 export type DeployBundleParsed = z.infer<typeof DeployBundleSchema>;

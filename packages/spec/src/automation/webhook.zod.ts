@@ -47,7 +47,7 @@ export const WebhookTriggerType = z.enum([
   'bulk_delete',
 ]);
 
-export type WebhookTriggerType = z.infer<typeof WebhookTriggerType>;
+export type WebhookTriggerType = z.input<typeof WebhookTriggerType>;
 
 /**
  * CANONICAL WEBHOOK DEFINITION
@@ -228,17 +228,15 @@ export const WebhookSchema = lazySchema(() => strictObject({
   ...MetadataProtectionFields,
 }));
 
-export type Webhook = z.infer<typeof WebhookSchema>;
+export type Webhook = z.input<typeof WebhookSchema>;
 /** Post-parse shape of {@link Webhook} — defaults applied, transforms run (ADR-0122). */
 export type WebhookParsed = z.infer<typeof WebhookSchema>;
-/** Authoring input for {@link Webhook} — defaulted fields are optional. */
-export type WebhookInput = z.input<typeof WebhookSchema>;
 
 /**
  * Type-safe factory for an outbound webhook. Validates at authoring time via
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: Webhook` literal.
  */
-export function defineWebhook(config: z.input<typeof WebhookSchema>): Webhook {
+export function defineWebhook(config: z.input<typeof WebhookSchema>): WebhookParsed {
   return WebhookSchema.parse(config);
 }

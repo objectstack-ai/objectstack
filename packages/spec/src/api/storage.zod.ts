@@ -86,20 +86,20 @@ export const RawUploadResponseSchema = lazySchema(() => BaseResponseSchema.exten
   }),
 }));
 
-export type GetPresignedUrlRequest = z.infer<typeof GetPresignedUrlRequestSchema>;
+export type GetPresignedUrlRequest = z.input<typeof GetPresignedUrlRequestSchema>;
 /** Post-parse shape of {@link GetPresignedUrlRequest} — defaults applied, transforms run (ADR-0122). */
 export type GetPresignedUrlRequestParsed = z.infer<typeof GetPresignedUrlRequestSchema>;
-export type CompleteUploadRequest = z.infer<typeof CompleteUploadRequestSchema>;
-export type PresignedUrlResponse = z.infer<typeof PresignedUrlResponseSchema>;
+export type CompleteUploadRequest = z.input<typeof CompleteUploadRequestSchema>;
+export type PresignedUrlResponse = z.input<typeof PresignedUrlResponseSchema>;
 /** Post-parse shape of {@link PresignedUrlResponse} — defaults applied, transforms run (ADR-0122). */
 export type PresignedUrlResponseParsed = z.infer<typeof PresignedUrlResponseSchema>;
-export type FileUploadResponse = z.infer<typeof FileUploadResponseSchema>;
+export type FileUploadResponse = z.input<typeof FileUploadResponseSchema>;
 /** Post-parse shape of {@link FileUploadResponse} — defaults applied, transforms run (ADR-0122). */
 export type FileUploadResponseParsed = z.infer<typeof FileUploadResponseSchema>;
-export type FileDownloadUrlResponse = z.infer<typeof FileDownloadUrlResponseSchema>;
+export type FileDownloadUrlResponse = z.input<typeof FileDownloadUrlResponseSchema>;
 /** Post-parse shape of {@link FileDownloadUrlResponse} — defaults applied, transforms run (ADR-0122). */
 export type FileDownloadUrlResponseParsed = z.infer<typeof FileDownloadUrlResponseSchema>;
-export type RawUploadResponse = z.infer<typeof RawUploadResponseSchema>;
+export type RawUploadResponse = z.input<typeof RawUploadResponseSchema>;
 /** Post-parse shape of {@link RawUploadResponse} — defaults applied, transforms run (ADR-0122). */
 export type RawUploadResponseParsed = z.infer<typeof RawUploadResponseSchema>;
 
@@ -126,7 +126,7 @@ export const FileTypeValidationSchema = lazySchema(() => z.object({
   minFileSize: z.number().int().min(0).optional()
     .describe('Minimum file size in bytes (e.g., reject empty files)'),
 }));
-export type FileTypeValidation = z.infer<typeof FileTypeValidationSchema>;
+export type FileTypeValidation = z.input<typeof FileTypeValidationSchema>;
 
 /**
  * Initiate Chunked Upload Request
@@ -145,7 +145,7 @@ export const InitiateChunkedUploadRequestSchema = lazySchema(() => z.object({
   bucket: z.string().optional().describe('Specific bucket override (admin only)'),
   metadata: z.record(z.string(), z.string()).optional().describe('Custom metadata key-value pairs'),
 }));
-export type InitiateChunkedUploadRequest = z.infer<typeof InitiateChunkedUploadRequestSchema>;
+export type InitiateChunkedUploadRequest = z.input<typeof InitiateChunkedUploadRequestSchema>;
 /** Post-parse shape of {@link InitiateChunkedUploadRequest} — defaults applied, transforms run (ADR-0122). */
 export type InitiateChunkedUploadRequestParsed = z.infer<typeof InitiateChunkedUploadRequestSchema>;
 
@@ -163,7 +163,7 @@ export const InitiateChunkedUploadResponseSchema = lazySchema(() => BaseResponse
     expiresAt: z.string().datetime().describe('Upload session expiration timestamp'),
   }),
 }));
-export type InitiateChunkedUploadResponse = z.infer<typeof InitiateChunkedUploadResponseSchema>;
+export type InitiateChunkedUploadResponse = z.input<typeof InitiateChunkedUploadResponseSchema>;
 /** Post-parse shape of {@link InitiateChunkedUploadResponse} — defaults applied, transforms run (ADR-0122). */
 export type InitiateChunkedUploadResponseParsed = z.infer<typeof InitiateChunkedUploadResponseSchema>;
 
@@ -178,7 +178,7 @@ export const UploadChunkRequestSchema = lazySchema(() => z.object({
   chunkIndex: z.number().int().min(0).describe('Zero-based chunk index'),
   resumeToken: z.string().describe('Resume token from initiate response'),
 }));
-export type UploadChunkRequest = z.infer<typeof UploadChunkRequestSchema>;
+export type UploadChunkRequest = z.input<typeof UploadChunkRequestSchema>;
 
 /**
  * Upload Chunk Response
@@ -191,7 +191,7 @@ export const UploadChunkResponseSchema = lazySchema(() => BaseResponseSchema.ext
     bytesReceived: z.number().int().describe('Bytes received for this chunk'),
   }),
 }));
-export type UploadChunkResponse = z.infer<typeof UploadChunkResponseSchema>;
+export type UploadChunkResponse = z.input<typeof UploadChunkResponseSchema>;
 /** Post-parse shape of {@link UploadChunkResponse} — defaults applied, transforms run (ADR-0122). */
 export type UploadChunkResponseParsed = z.infer<typeof UploadChunkResponseSchema>;
 
@@ -208,7 +208,7 @@ export const CompleteChunkedUploadRequestSchema = lazySchema(() => z.object({
     eTag: z.string().describe('ETag returned from chunk upload'),
   })).min(1).describe('Ordered list of uploaded parts for assembly'),
 }));
-export type CompleteChunkedUploadRequest = z.infer<typeof CompleteChunkedUploadRequestSchema>;
+export type CompleteChunkedUploadRequest = z.input<typeof CompleteChunkedUploadRequestSchema>;
 
 /**
  * Complete Chunked Upload Response
@@ -224,7 +224,7 @@ export const CompleteChunkedUploadResponseSchema = lazySchema(() => BaseResponse
     url: z.string().optional().describe('Download URL for the assembled file'),
   }),
 }));
-export type CompleteChunkedUploadResponse = z.infer<typeof CompleteChunkedUploadResponseSchema>;
+export type CompleteChunkedUploadResponse = z.input<typeof CompleteChunkedUploadResponseSchema>;
 /** Post-parse shape of {@link CompleteChunkedUploadResponse} — defaults applied, transforms run (ADR-0122). */
 export type CompleteChunkedUploadResponseParsed = z.infer<typeof CompleteChunkedUploadResponseSchema>;
 
@@ -250,7 +250,7 @@ export const UploadProgressSchema = lazySchema(() => BaseResponseSchema.extend({
     expiresAt: z.string().datetime().describe('Session expiration timestamp'),
   }),
 }));
-export type UploadProgress = z.infer<typeof UploadProgressSchema>;
+export type UploadProgress = z.input<typeof UploadProgressSchema>;
 /** Post-parse shape of {@link UploadProgress} — defaults applied, transforms run (ADR-0122). */
 export type UploadProgressParsed = z.infer<typeof UploadProgressSchema>;
 

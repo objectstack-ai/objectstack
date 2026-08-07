@@ -39,7 +39,7 @@
  * the half both real failures landed in.
  */
 
-import type { AppInput, NavigationItem, NavigationItemInput } from './app.zod';
+import type { App, NavigationItem, NavigationItemInput } from './app.zod';
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Output side (`z.infer`) — what a parse RETURNS.
@@ -173,28 +173,28 @@ asItem(inputOmitsDefaults);
  * leaves `z.input<typeof AppSchema>` at `unknown` and every authoring path
  * unchecked — which is precisely the state this file was written to end.
  *
- * These go through `AppInput`, the type `defineApp` takes, so they fail the
+ * These go through `App`, the type `defineApp` takes, so they fail the
  * moment the annotation loses its second parameter (verified by mutation:
  * dropping it back to `z.ZodType<NavigationItem>` turns all three into unused
  * suppressions).
  * ──────────────────────────────────────────────────────────────────────────── */
 
-const asAppInput = (x: AppInput): AppInput => x;
+const asApp = (x: App): App => x;
 
 /** The shape every downstream author writes — defaulted keys omitted. */
-export const appInputOmitsDefaults: AppInput = {
+export const appInputOmitsDefaults: App = {
   name: 'probe_app',
   label: 'Probe',
   navigation: [{ id: 'grp', type: 'group', label: 'G', children: [] }],
 };
 
 // @ts-expect-error — nav entries are checked; `unknown` would swallow this
-asAppInput({ name: 'probe_app', label: 'Probe', navigation: [42] });
+asApp({ name: 'probe_app', label: 'Probe', navigation: [42] });
 
 // @ts-expect-error — …and this
-asAppInput({ name: 'probe_app', label: 'Probe', navigation: [{ totally: 'made up' }] });
+asApp({ name: 'probe_app', label: 'Probe', navigation: [{ totally: 'made up' }] });
 
 // NOTE: kept on one line — `@ts-expect-error` suppresses the NEXT LINE only, and
-// the excess-property error lands on the nav entry, not on the opening `asAppInput(`.
+// the excess-property error lands on the nav entry, not on the opening `asApp(`.
 // @ts-expect-error — …and this, the strictness the nav members declare
-asAppInput({ name: 'p', label: 'P', navigation: [{ id: 'grp', type: 'group', label: 'G', children: [], defaultOpen: true }] });
+asApp({ name: 'p', label: 'P', navigation: [{ id: 'grp', type: 'group', label: 'G', children: [], defaultOpen: true }] });

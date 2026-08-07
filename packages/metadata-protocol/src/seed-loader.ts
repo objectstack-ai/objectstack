@@ -5,7 +5,7 @@ import type {
   SeedLoaderRequest,
   SeedLoaderResult,
   SeedLoaderConfig,
-  SeedLoaderConfigInput,
+  SeedLoaderConfig,
   ObjectDependencyGraph,
   ObjectDependencyNode,
   ReferenceResolution,
@@ -331,7 +331,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     return fromMetadata;
   }
 
-  async validate(datasets: Seed[], config?: SeedLoaderConfigInput): Promise<SeedLoaderResult> {
+  async validate(datasets: Seed[], config?: SeedLoaderConfig): Promise<SeedLoaderResult> {
     const parsedConfig = SeedLoaderConfigSchema.parse({ ...config, dryRun: true });
     return this.load({ seeds: datasets, config: parsedConfig });
   }

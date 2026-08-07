@@ -207,7 +207,7 @@ export const ODataQuerySchema = lazySchema(() => z.object({
   $apply: z.string().optional().describe('Aggregation expression'),
 }));
 
-export type ODataQuery = z.infer<typeof ODataQuerySchema>;
+export type ODataQuery = z.input<typeof ODataQuerySchema>;
 
 // `ODataFilterOperatorSchema` — one more spelling of comparison
 // (eq/ne/lt/le/gt/ge, and/or/not, `(`/`)`, in/has) — lived here with no
@@ -267,7 +267,7 @@ export const ODataFilterFunctionSchema = lazySchema(() => z.enum([
   'all',           // collection/all(d:d/prop eq value)
 ]));
 
-export type ODataFilterFunction = z.infer<typeof ODataFilterFunctionSchema>;
+export type ODataFilterFunction = z.input<typeof ODataFilterFunctionSchema>;
 
 /**
  * OData Response Schema
@@ -297,7 +297,7 @@ export const ODataResponseSchema = lazySchema(() => z.object({
   value: z.array(z.record(z.string(), z.unknown())).describe('Results array'),
 }));
 
-export type ODataResponse = z.infer<typeof ODataResponseSchema>;
+export type ODataResponse = z.input<typeof ODataResponseSchema>;
 
 /**
  * OData Error Response Schema
@@ -337,7 +337,7 @@ export const ODataErrorSchema = lazySchema(() => z.object({
   }),
 }));
 
-export type ODataError = z.infer<typeof ODataErrorSchema>;
+export type ODataError = z.input<typeof ODataErrorSchema>;
 
 /**
  * OData Metadata Configuration
@@ -377,7 +377,7 @@ export const ODataMetadataSchema = lazySchema(() => z.object({
   })).describe('Entity sets'),
 }));
 
-export type ODataMetadata = z.infer<typeof ODataMetadataSchema>;
+export type ODataMetadata = z.input<typeof ODataMetadataSchema>;
 /** Post-parse shape of {@link ODataMetadata} — defaults applied, transforms run (ADR-0122). */
 export type ODataMetadataParsed = z.infer<typeof ODataMetadataSchema>;
 
@@ -458,6 +458,6 @@ export const ODataConfigSchema = lazySchema(() => z.object({
   metadata: ODataMetadataSchema.optional().describe('OData metadata configuration'),
 }).passthrough()); // Allow additional properties for flexibility
 
-export type ODataConfig = z.infer<typeof ODataConfigSchema>;
+export type ODataConfig = z.input<typeof ODataConfigSchema>;
 /** Post-parse shape of {@link ODataConfig} — defaults applied, transforms run (ADR-0122). */
 export type ODataConfigParsed = z.infer<typeof ODataConfigSchema>;

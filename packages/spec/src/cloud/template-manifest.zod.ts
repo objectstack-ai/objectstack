@@ -32,4 +32,4 @@ export const TemplateManifestSchema = lazySchema(() =>
     .describe('objectstack.manifest.json — template / package source descriptor')
 );
 
-export type TemplateManifest = z.infer<typeof TemplateManifestSchema>;
+export type TemplateManifest = z.input<typeof TemplateManifestSchema>;

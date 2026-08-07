@@ -38,7 +38,7 @@ import { lazySchema } from '../shared/lazy-schema';
 export const PackagePathParamsSchema = lazySchema(() => z.object({
   packageId: z.string().describe('Package identifier'),
 }));
-export type PackagePathParams = z.infer<typeof PackagePathParamsSchema>;
+export type PackagePathParams = z.input<typeof PackagePathParamsSchema>;
 
 // ==========================================
 // 2. List Packages (GET /api/v1/packages)
@@ -61,7 +61,7 @@ export const ListInstalledPackagesRequestSchema = lazySchema(() => z.object({
   cursor: z.string().optional()
     .describe('Cursor for pagination'),
 }).describe('List installed packages request'));
-export type ListInstalledPackagesRequest = z.infer<typeof ListInstalledPackagesRequestSchema>;
+export type ListInstalledPackagesRequest = z.input<typeof ListInstalledPackagesRequestSchema>;
 /** Post-parse shape of {@link ListInstalledPackagesRequest} — defaults applied, transforms run (ADR-0122). */
 export type ListInstalledPackagesRequestParsed = z.infer<typeof ListInstalledPackagesRequestSchema>;
 
@@ -76,7 +76,7 @@ export const ListInstalledPackagesResponseSchema = lazySchema(() => BaseResponse
     hasMore: z.boolean().describe('Whether more packages are available'),
   }),
 }).describe('List installed packages response'));
-export type ListInstalledPackagesResponse = z.infer<typeof ListInstalledPackagesResponseSchema>;
+export type ListInstalledPackagesResponse = z.input<typeof ListInstalledPackagesResponseSchema>;
 /** Post-parse shape of {@link ListInstalledPackagesResponse} — defaults applied, transforms run (ADR-0122). */
 export type ListInstalledPackagesResponseParsed = z.infer<typeof ListInstalledPackagesResponseSchema>;
 
@@ -88,7 +88,7 @@ export type ListInstalledPackagesResponseParsed = z.infer<typeof ListInstalledPa
  * Request for getting a single installed package.
  */
 export const GetInstalledPackageRequestSchema = lazySchema(() => PackagePathParamsSchema);
-export type GetInstalledPackageRequest = z.infer<typeof GetInstalledPackageRequestSchema>;
+export type GetInstalledPackageRequest = z.input<typeof GetInstalledPackageRequestSchema>;
 
 /**
  * Response for getting a single installed package.
@@ -96,7 +96,7 @@ export type GetInstalledPackageRequest = z.infer<typeof GetInstalledPackageReque
 export const GetInstalledPackageResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: InstalledPackageSchema.describe('Installed package details'),
 }).describe('Get installed package response'));
-export type GetInstalledPackageResponse = z.infer<typeof GetInstalledPackageResponseSchema>;
+export type GetInstalledPackageResponse = z.input<typeof GetInstalledPackageResponseSchema>;
 /** Post-parse shape of {@link GetInstalledPackageResponse} — defaults applied, transforms run (ADR-0122). */
 export type GetInstalledPackageResponseParsed = z.infer<typeof GetInstalledPackageResponseSchema>;
 
@@ -130,7 +130,7 @@ export const PackageInstallRequestSchema = lazySchema(() => z.object({
   artifactRef: ArtifactReferenceSchema.optional()
     .describe('Artifact reference for marketplace installation'),
 }).describe('Install package request'));
-export type PackageInstallRequest = z.infer<typeof PackageInstallRequestSchema>;
+export type PackageInstallRequest = z.input<typeof PackageInstallRequestSchema>;
 /** Post-parse shape of {@link PackageInstallRequest} — defaults applied, transforms run (ADR-0122). */
 export type PackageInstallRequestParsed = z.infer<typeof PackageInstallRequestSchema>;
 
@@ -152,7 +152,7 @@ export const PackageInstallResponseSchema = lazySchema(() => BaseResponseSchema.
     message: z.string().optional().describe('Installation status message'),
   }),
 }).describe('Install package response'));
-export type PackageInstallResponse = z.infer<typeof PackageInstallResponseSchema>;
+export type PackageInstallResponse = z.input<typeof PackageInstallResponseSchema>;
 /** Post-parse shape of {@link PackageInstallResponse} — defaults applied, transforms run (ADR-0122). */
 export type PackageInstallResponseParsed = z.infer<typeof PackageInstallResponseSchema>;
 
@@ -195,7 +195,7 @@ export const PackageUpgradeRequestSchema = lazySchema(() => z.object({
   skipValidation: z.boolean().default(false)
     .describe('Skip pre-upgrade compatibility checks'),
 }).describe('Upgrade package request'));
-export type PackageUpgradeRequest = z.infer<typeof PackageUpgradeRequestSchema>;
+export type PackageUpgradeRequest = z.input<typeof PackageUpgradeRequestSchema>;
 /** Post-parse shape of {@link PackageUpgradeRequest} — defaults applied, transforms run (ADR-0122). */
 export type PackageUpgradeRequestParsed = z.infer<typeof PackageUpgradeRequestSchema>;
 
@@ -218,7 +218,7 @@ export const PackageUpgradeResponseSchema = lazySchema(() => BaseResponseSchema.
     message: z.string().optional().describe('Human-readable status message'),
   }),
 }).describe('Upgrade package response'));
-export type PackageUpgradeResponse = z.infer<typeof PackageUpgradeResponseSchema>;
+export type PackageUpgradeResponse = z.input<typeof PackageUpgradeResponseSchema>;
 /** Post-parse shape of {@link PackageUpgradeResponse} — defaults applied, transforms run (ADR-0122). */
 export type PackageUpgradeResponseParsed = z.infer<typeof PackageUpgradeResponseSchema>;
 
@@ -240,7 +240,7 @@ export const ResolveDependenciesRequestSchema = lazySchema(() => z.object({
   platformVersion: z.string().optional()
     .describe('Current platform version for compatibility filtering'),
 }).describe('Resolve dependencies request'));
-export type ResolveDependenciesRequest = z.infer<typeof ResolveDependenciesRequestSchema>;
+export type ResolveDependenciesRequest = z.input<typeof ResolveDependenciesRequestSchema>;
 /** Post-parse shape of {@link ResolveDependenciesRequest} — defaults applied, transforms run (ADR-0122). */
 export type ResolveDependenciesRequestParsed = z.infer<typeof ResolveDependenciesRequestSchema>;
 
@@ -250,7 +250,7 @@ export type ResolveDependenciesRequestParsed = z.infer<typeof ResolveDependencie
 export const ResolveDependenciesResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: DependencyResolutionResultSchema.describe('Dependency resolution result with topological sort'),
 }).describe('Resolve dependencies response'));
-export type ResolveDependenciesResponse = z.infer<typeof ResolveDependenciesResponseSchema>;
+export type ResolveDependenciesResponse = z.input<typeof ResolveDependenciesResponseSchema>;
 /** Post-parse shape of {@link ResolveDependenciesResponse} — defaults applied, transforms run (ADR-0122). */
 export type ResolveDependenciesResponseParsed = z.infer<typeof ResolveDependenciesResponseSchema>;
 
@@ -281,7 +281,7 @@ export const UploadArtifactRequestSchema = lazySchema(() => z.object({
   releaseNotes: z.string().optional()
     .describe('Release notes for this version'),
 }).describe('Upload artifact request'));
-export type UploadArtifactRequest = z.infer<typeof UploadArtifactRequestSchema>;
+export type UploadArtifactRequest = z.input<typeof UploadArtifactRequestSchema>;
 /** Post-parse shape of {@link UploadArtifactRequest} — defaults applied, transforms run (ADR-0122). */
 export type UploadArtifactRequestParsed = z.infer<typeof UploadArtifactRequestSchema>;
 
@@ -302,7 +302,7 @@ export const UploadArtifactResponseSchema = lazySchema(() => BaseResponseSchema.
     message: z.string().optional().describe('Upload status message'),
   }),
 }).describe('Upload artifact response'));
-export type UploadArtifactResponse = z.infer<typeof UploadArtifactResponseSchema>;
+export type UploadArtifactResponse = z.input<typeof UploadArtifactResponseSchema>;
 /** Post-parse shape of {@link UploadArtifactResponse} — defaults applied, transforms run (ADR-0122). */
 export type UploadArtifactResponseParsed = z.infer<typeof UploadArtifactResponseSchema>;
 
@@ -321,7 +321,7 @@ export const PackageRollbackRequestSchema = lazySchema(() => PackagePathParamsSc
   rollbackCustomizations: z.boolean().default(true)
     .describe('Whether to restore pre-upgrade customizations'),
 }).describe('Rollback package request'));
-export type PackageRollbackRequest = z.infer<typeof PackageRollbackRequestSchema>;
+export type PackageRollbackRequest = z.input<typeof PackageRollbackRequestSchema>;
 /** Post-parse shape of {@link PackageRollbackRequest} — defaults applied, transforms run (ADR-0122). */
 export type PackageRollbackRequestParsed = z.infer<typeof PackageRollbackRequestSchema>;
 
@@ -335,7 +335,7 @@ export const PackageRollbackResponseSchema = lazySchema(() => BaseResponseSchema
     message: z.string().optional().describe('Rollback status message'),
   }),
 }).describe('Rollback package response'));
-export type PackageRollbackResponse = z.infer<typeof PackageRollbackResponseSchema>;
+export type PackageRollbackResponse = z.input<typeof PackageRollbackResponseSchema>;
 /** Post-parse shape of {@link PackageRollbackResponse} — defaults applied, transforms run (ADR-0122). */
 export type PackageRollbackResponseParsed = z.infer<typeof PackageRollbackResponseSchema>;
 
@@ -347,7 +347,7 @@ export type PackageRollbackResponseParsed = z.infer<typeof PackageRollbackRespon
  * Request for uninstalling a package.
  */
 export const UninstallPackageApiRequestSchema = lazySchema(() => PackagePathParamsSchema);
-export type UninstallPackageApiRequest = z.infer<typeof UninstallPackageApiRequestSchema>;
+export type UninstallPackageApiRequest = z.input<typeof UninstallPackageApiRequestSchema>;
 
 /**
  * Response after uninstalling a package.
@@ -359,7 +359,7 @@ export const UninstallPackageApiResponseSchema = lazySchema(() => BaseResponseSc
     message: z.string().optional().describe('Uninstall status message'),
   }),
 }).describe('Uninstall package response'));
-export type UninstallPackageApiResponse = z.infer<typeof UninstallPackageApiResponseSchema>;
+export type UninstallPackageApiResponse = z.input<typeof UninstallPackageApiResponseSchema>;
 /** Post-parse shape of {@link UninstallPackageApiResponse} — defaults applied, transforms run (ADR-0122). */
 export type UninstallPackageApiResponseParsed = z.infer<typeof UninstallPackageApiResponseSchema>;
 
@@ -385,7 +385,7 @@ export const PackageApiErrorCode = z.enum([
   'snapshot_not_found',
   'upload_failed',
 ]);
-export type PackageApiErrorCode = z.infer<typeof PackageApiErrorCode>;
+export type PackageApiErrorCode = z.input<typeof PackageApiErrorCode>;
 
 // ==========================================
 // 11. Package API Contract Registry

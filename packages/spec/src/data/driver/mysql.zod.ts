@@ -119,7 +119,7 @@ export const MysqlConfigSchema = lazySchema(() => z.object({
     }
   }));
 
-export type MysqlConfig = z.infer<typeof MysqlConfigSchema>;
+export type MysqlConfig = z.input<typeof MysqlConfigSchema>;
 /** Post-parse shape of {@link MysqlConfig} — defaults applied, transforms run (ADR-0122). */
 export type MysqlConfigParsed = z.infer<typeof MysqlConfigSchema>;
 

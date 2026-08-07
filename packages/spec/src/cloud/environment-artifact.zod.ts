@@ -21,5 +21,5 @@ export {
 export type {
   Sha256Digest,
   EnvironmentArtifact,
-  EnvironmentArtifactInput,
+  EnvironmentArtifactParsed,
 } from '../system/environment-artifact.zod';

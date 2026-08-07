@@ -34,7 +34,8 @@ So if a change here turns red:
 ## What it checks
 
 - `pnpm --filter @objectstack/downstream-contract typecheck` — the fixtures are typed
-  with real spec types (`ActionInput`, `ReportInput`, `PageInput`, …). A removed or
+  with real spec author-state types (`Action`, `Report`, `Page`, …; spelled `XInput`
+  until ADR-0122 phase 2 retired those synonyms in protocol 17). A removed or
   narrowed export fails here (the #2023 class of break).
 - `pnpm --filter @objectstack/downstream-contract test` — runs each bare-literal fixture
   through its schema's `.parse()` and assembles everything via `defineStack` (schema +

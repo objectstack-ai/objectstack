@@ -16,7 +16,7 @@ export const RuntimeMode = z.enum([
   'preview',     // Demo/preview mode — bypass auth, simulate admin identity
 ]).describe('Kernel operating mode');
 
-export type RuntimeMode = z.infer<typeof RuntimeMode>;
+export type RuntimeMode = z.input<typeof RuntimeMode>;
 
 /**
  * Preview Mode Configuration Schema
@@ -88,7 +88,7 @@ export const PreviewModeConfigSchema = lazySchema(() => z.object({
     .describe('Banner message displayed in the UI during preview mode'),
 }));
 
-export type PreviewModeConfig = z.infer<typeof PreviewModeConfigSchema>;
+export type PreviewModeConfig = z.input<typeof PreviewModeConfigSchema>;
 /** Post-parse shape of {@link PreviewModeConfig} — defaults applied, transforms run (ADR-0122). */
 export type PreviewModeConfigParsed = z.infer<typeof PreviewModeConfigSchema>;
 
@@ -134,7 +134,7 @@ export const KernelContextSchema = lazySchema(() => z.object({
     .describe('Preview/demo mode configuration (used when mode is "preview")'),
 }));
 
-export type KernelContext = z.infer<typeof KernelContextSchema>;
+export type KernelContext = z.input<typeof KernelContextSchema>;
 /** Post-parse shape of {@link KernelContext} — defaults applied, transforms run (ADR-0122). */
 export type KernelContextParsed = z.infer<typeof KernelContextSchema>;
 
@@ -167,6 +167,6 @@ export const TenantRuntimeContextSchema = lazySchema(() => KernelContextSchema.e
   tenantQuotas: TenantQuotaSchema.optional().describe('Tenant resource quotas'),
 }).describe('Tenant-aware kernel runtime context'));
 
-export type TenantRuntimeContext = z.infer<typeof TenantRuntimeContextSchema>;
+export type TenantRuntimeContext = z.input<typeof TenantRuntimeContextSchema>;
 /** Post-parse shape of {@link TenantRuntimeContext} — defaults applied, transforms run (ADR-0122). */
 export type TenantRuntimeContextParsed = z.infer<typeof TenantRuntimeContextSchema>;
