@@ -2306,12 +2306,13 @@ const step17: MigrationStep = {
     },
     {
       id: 'spec-type-alias-input-suffix-retired',
+      // Plain text, no markdown: build-upgrade-guide.ts renders this field inside a
+      // code span AND inside a table cell, so backticks here break both.
       surface:
-        'the 102 `XInput` TYPE ALIASES of `@objectstack/spec` — `ConnectorInput`, `AppInput`, '
-        + '`PageInput`, `ActionInput`, `ReportInput`, `ThemeInput`, `ServiceObjectInput`, '
-        + '`ExecutionContextInput`, `TaskInput`, … (every `export type XInput = z.input<typeof '
-        + 'XSchema>` whose schema also had a bare alias, across 52 files in api/ automation/ '
-        + 'data/ identity/ integration/ kernel/ security/ system/ ui/)',
+        'type alias: the 102 XInput names of @objectstack/spec '
+        + '(ConnectorInput, AppInput, PageInput, ActionInput, ServiceObjectInput, '
+        + 'ExecutionContextInput, TaskInput, … — 52 files across api/ automation/ data/ '
+        + 'identity/ integration/ kernel/ security/ system/ ui/)',
       replacement:
         'the BARE name. ADR-0122 phase 2 moved the author state onto `X`, which makes `XInput` '
         + 'a character-for-character synonym of it — the permanent synonym D3 forbids. Drop the '
@@ -2350,7 +2351,7 @@ const step17: MigrationStep = {
         + '#6083 (PR #6279).',
       acceptanceCriteria:
         'No source imports a name ending `Input` from `@objectstack/spec` except the nine listed '
-        + 'above: `rg "\\bw+Input\\b" --type ts` over consumer code resolves only to those. A '
+        + 'above: `rg "\\b\\w+Input\\b" --type ts` over consumer code resolves only to those. A '
         + 'literal annotated with a bare spec type compiles while listing ONLY the keys the '
         + 'author means — `const c: Connector = { name, label, type }` type-checks, which it did '
         + 'not in 16.x — and a value read out of `XSchema.parse()` annotated with the bare name '
