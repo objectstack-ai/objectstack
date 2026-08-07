@@ -16,17 +16,26 @@
  * Auto-detects the appropriate driver from the database URL scheme:
  *   - `memory://*`              → InMemoryDriver
  *   - `postgres[ql]://`, `pg://` → SqlDriver (pg)
- *   - `mongodb[+srv]://`        → MongoDBDriver (peer-dep `@objectstack/driver-mongodb`)
+ *   - `mongodb[+srv]://`        → MongoDBDriver (optional `@objectstack/driver-mongodb`)
+ *   - `libsql://`, `http(s)://*.turso.*` → TursoDriver (optional `@objectstack/driver-turso`)
  *   - `file:` / no scheme       → SqlDriver (better-sqlite3)
  *
  * Unknown URL schemes throw — we never silently fall back to sqlite, since
  * that historically created bogus directories on disk (e.g. `mongodb:/`)
  * when an unsupported URL was treated as a file path.
  *
- * NOTE: `libsql://` / Turso support is provided by `@objectstack/driver-turso`,
- * which ships separately in the ObjectStack Cloud distribution. The open-core
- * runtime no longer dispatches `libsql://` URLs; cloud builds register the
- * Turso driver via their own stack composition (`cloud-stack.ts`).
+ * NOTE: `libsql://` / Turso support comes from `@objectstack/driver-turso`,
+ * which lives in THIS repository (`packages/drivers/driver-turso`) since #4645
+ * but is an OPTIONAL install: it drags `@libsql/client` plus native bindings,
+ * which a default install of a stack that never talks to libSQL should not pay
+ * for. So this stack loads it lazily, through the driver-factory seam
+ * `DefaultDatasourcePlugin` exposes for exactly this case
+ * (`turso-driver-factory.ts`), and fails LOUDLY with the install command when
+ * the package is absent — never a silent step-down to SQLite (#3276). This is
+ * the same shape and the same ruling the CLI's `os serve`/`os start` path landed
+ * under (#5602 / PR #5819); before #5820 the two disagreed, and one
+ * `OS_DATABASE_URL=libsql://…` booted under `os start` while `os migrate` — which
+ * comes through here — refused it as an unsupported scheme.
  */
 
 import { resolve as resolvePath } from 'node:path';
@@ -34,7 +43,9 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { readEnvWithDeprecation, stampSearchPinyinEnabled } from '@objectstack/types';
+import type { IDatasourceDriverFactory } from '@objectstack/service-datasource';
 import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
+import { loadTursoDriverFactory } from './turso-driver-factory.js';
 
 /**
  * Resolve the ObjectStack home directory used to store cwd-independent
@@ -60,8 +71,14 @@ export function resolveObjectStackHome(): string {
 
 export const StandaloneStackConfigSchema = z.object({
     databaseUrl: z.string().optional(),
+    /**
+     * libSQL/Turso JWT, read ONLY by the `turso` kind — every other kind carries
+     * its credentials inside the URL. Falls back to `OS_DATABASE_AUTH_TOKEN`,
+     * then to the vendor's own `TURSO_AUTH_TOKEN` (the same pair `os serve`
+     * reads, and the same pair `--database-auth-token` forwards into).
+     */
     databaseAuthToken: z.string().optional(),
-    databaseDriver: z.enum(['sqlite', 'sqlite-wasm', 'memory', 'postgres', 'mongodb']).optional(),
+    databaseDriver: z.enum(['sqlite', 'sqlite-wasm', 'memory', 'postgres', 'mongodb', 'turso']).optional(),
     environmentId: z.string().optional(),
     artifactPath: z.string().optional(),
     /**
@@ -142,12 +159,22 @@ export interface StandaloneStackResult {
     positions?: any[];
 }
 
-type ResolvedDriverKind = 'memory' | 'postgres' | 'mongodb' | 'sqlite' | 'sqlite-wasm';
+type ResolvedDriverKind = 'memory' | 'postgres' | 'mongodb' | 'turso' | 'sqlite' | 'sqlite-wasm';
 
 function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     if (/^memory:\/\//i.test(dbUrl)) return 'memory';
     if (/^(postgres(ql)?|pg):\/\//i.test(dbUrl)) return 'postgres';
     if (/^mongodb(\+srv)?:\/\//i.test(dbUrl)) return 'mongodb';
+    // libSQL / Turso (#5820). The same two spellings the CLI classifies as
+    // `turso` (`utils/storage-driver.ts` `inferDriverTypeFromUrl`, #5602) — kept
+    // identical on purpose: this function and that one answer the same question
+    // for the same `OS_DATABASE_URL`, and until #5820 they disagreed, so
+    // `os start` booted a libSQL URL that `os migrate` refused. The driver is
+    // built from the OPTIONAL `@objectstack/driver-turso` package; when it is
+    // missing the boot fails loudly with the install command instead of
+    // stepping down to SQLite (#3276).
+    if (/^libsql:\/\//i.test(dbUrl)) return 'turso';
+    if (/^https?:\/\//i.test(dbUrl) && /\.turso\./i.test(dbUrl)) return 'turso';
     if (/^wasm-sqlite:\/\//i.test(dbUrl)) return 'sqlite-wasm';
     if (/\.wasm\.db$/i.test(dbUrl)) return 'sqlite-wasm';
     if (/^file:/i.test(dbUrl)) return 'sqlite';
@@ -155,7 +182,8 @@ function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(dbUrl)) return 'sqlite';
     throw new Error(
         `[StandaloneStack] Unsupported database URL scheme: ${dbUrl}. ` +
-        `Supported schemes: memory://, postgres://, pg://, mongodb://, mongodb+srv://, file:`
+        `Supported schemes: memory://, postgres://, pg://, mongodb://, mongodb+srv://, ` +
+        `libsql:// (optional @objectstack/driver-turso), file:`
     );
 }
 
@@ -196,6 +224,11 @@ export interface ResolvedStandaloneDatabase {
  * `OS_DATABASE_URL`/`DATABASE_URL` → `TURSO_DATABASE_URL` → `OS_HOME` →
  * project root → user home), factored out so a caller can answer "which file
  * am I about to open?" first. Pure: reads env, touches no filesystem.
+ *
+ * The `TURSO_DATABASE_URL` source only started meaning something in #5820: the
+ * URL was read here and then rejected by `detectDriverFromUrl` as an unsupported
+ * scheme, so a host that set it got a hard failure rather than a libSQL
+ * connection. Reading a source you cannot dispatch is worse than not reading it.
  */
 export function resolveStandaloneDatabase(config?: StandaloneStackConfig): ResolvedStandaloneDatabase {
     const cfg = StandaloneStackConfigSchema.parse(config ?? {});
@@ -223,6 +256,31 @@ function resolveDatabaseUrl(cfg: z.output<typeof StandaloneStackConfigSchema>): 
                 : `file:${resolvePath(resolveObjectStackHome(), 'data/standalone.db')}`));
 }
 
+/**
+ * The libSQL/Turso auth token for this boot, or `undefined` when none was given.
+ *
+ * Read ONLY by the `turso` kind: every other kind carries its credentials inside
+ * the URL. Precedence mirrors `os serve` exactly (`commands/serve.ts`) so the
+ * same environment produces the same credential on both paths — explicit config,
+ * then `OS_DATABASE_AUTH_TOKEN` (which is where `--database-auth-token` lands),
+ * then the vendor's own `TURSO_AUTH_TOKEN` (a documented third-party exception
+ * to the `OS_` prefix rule, AGENTS.md Prime Directive #9).
+ *
+ * Empty/blank values are treated as absent — `authToken: ''` is not a credential,
+ * and passing one to the driver would fail differently than not passing it.
+ *
+ * Exported (module-level, not from the package barrel) so this precedence has a
+ * pin of its own: the boot itself cannot expose it, because a libSQL boot in a
+ * workspace without the optional driver package fails before any definition is
+ * observable.
+ */
+export function resolveDatabaseAuthToken(cfg: StandaloneStackConfig = {}): string | undefined {
+    const token = cfg.databaseAuthToken?.trim()
+        || process.env.OS_DATABASE_AUTH_TOKEN?.trim()
+        || process.env.TURSO_AUTH_TOKEN?.trim();
+    return token ? token : undefined;
+}
+
 export async function createStandaloneStack(config?: StandaloneStackConfig): Promise<StandaloneStackResult> {
     const cfg = StandaloneStackConfigSchema.parse(config ?? {});
 
@@ -242,9 +300,10 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             ? artifactPathInput
             : resolvePath(cwd, artifactPathInput));
 
-    // `databaseAuthToken` / `OS_DATABASE_AUTH_TOKEN` are preserved in the
-    // config schema for cloud builds that compose their own turso driver;
-    // the standalone (open-core) runtime no longer consumes them directly.
+    // `databaseAuthToken` / `OS_DATABASE_AUTH_TOKEN` / `TURSO_AUTH_TOKEN` are
+    // consumed by the `turso` kind below (#5820). They used to be declared here
+    // and read by nobody — the same "reads it in, cannot dispatch it out" split
+    // `TURSO_DATABASE_URL` had.
     const { url: dbUrl, driver: dbDriver } = resolveStandaloneDatabase(cfg);
 
     // Translate the database URL into the `default` datasource DEFINITION
@@ -262,6 +321,13 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     const factoryDev = cfg.dev ?? process.env.NODE_ENV === 'development';
     let driverId: string;
     let driverConfig: Record<string, unknown>;
+    /**
+     * Host-injected driver factory — set ONLY for `turso`, whose driver the
+     * shared open-core factory cannot build (the package is an optional
+     * install). `DefaultDatasourcePlugin` documents this seam for exactly that
+     * case; everything else about the connect stays shared.
+     */
+    let hostFactory: IDatasourceDriverFactory | undefined;
     if (dbDriver === 'memory') {
         driverId = 'memory';
         driverConfig = {};
@@ -275,6 +341,22 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         // message rides inside it) — add the peer dependency to fix.
         driverId = 'mongodb';
         driverConfig = { url: dbUrl };
+    } else if (dbDriver === 'turso') {
+        // libSQL / Turso (#5820). Unlike every other kind, the driver comes from
+        // an OPTIONAL package, so the stack loads it here and hands the result
+        // to the plugin as its host factory. The load runs BEFORE the plugin is
+        // constructed, so a missing package produces one clear message with the
+        // install command instead of a connect error later in boot — and never
+        // a step-down to SQLite, which would open an empty local database while
+        // the operator's libSQL data stays untouched (#3276).
+        //
+        // No `autoMigrate` passthrough: `TursoDriverConfig` declares no such
+        // key, and handing the driver a config it silently ignores is the kind
+        // of "declared ≠ enforced" the CLI side deliberately avoided too.
+        driverId = 'turso';
+        const authToken = resolveDatabaseAuthToken(cfg);
+        driverConfig = { url: dbUrl, ...(authToken ? { authToken } : {}) };
+        hostFactory = await loadTursoDriverFactory();
     } else if (dbDriver === 'sqlite-wasm') {
         driverId = 'sqlite-wasm';
         const filename = sqliteFilenameFromUrl(dbUrl, 'sqlite-wasm');
@@ -291,7 +373,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     }
     const defaultDatasourcePlugin = new DefaultDatasourcePlugin(
         { driver: driverId, config: driverConfig },
-        { dev: factoryDev },
+        { dev: factoryDev, ...(hostFactory ? { factory: hostFactory } : {}) },
     );
 
     const artifactBundle = await loadArtifactBundle(artifactPath, {
