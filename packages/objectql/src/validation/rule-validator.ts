@@ -565,10 +565,44 @@ export function stripReadonlyWhenFieldsMulti(
  * ownership here makes it enforced rather than merely asserted — the same
  * `declared ≠ enforced` correction as #4447 (`created_at`), one type over.
  *
- * Deliberately NOT `formula` / `summary`: those are computed on read from a
- * plan, never stored from the write payload, so there is no caller value to
- * strip. Keep this set to types whose value is (a) persisted and (b) issued by
- * the runtime.
+ * Deliberately NOT `formula`: a formula field IS computed on read from a plan
+ * (`applyFormulaPlan`) and never stored from the write payload, so there is no
+ * caller value to strip in the first place.
+ *
+ * Deliberately NOT `summary` either — but for a COMPLETELY DIFFERENT reason,
+ * and conflating the two is what this note exists to prevent (#6014). A roll-up
+ * `summary` is NOT computed on read: it is a real stored column the runtime
+ * maintains. `ObjectQL.recomputeSummaries` writes it with an ordinary
+ * `update(parent, { [summaryField]: value })` after any child write, and since
+ * #5749 / PR #6013 `initializeSummaryFields` also seeds it at parent INSERT.
+ * Reads hit that stored column directly — which is exactly why
+ * `["task_count","=",0]` is an in-database comparison, and why a never-seeded
+ * `null` silently dropped rows from it (#5749). So `summary` satisfies BOTH
+ * clauses a naive membership rule would use — persisted AND runtime-issued —
+ * and is STILL excluded. Persistence and runtime ownership do not decide it.
+ *
+ * What decides it is the third clause: a runtime-owned type must have NO
+ * legitimate caller-supplied value. `autonumber` qualifies — a client-chosen
+ * record number bypasses the sequence and forges a business identifier nothing
+ * later corrects. `summary` does not qualify: the value is a derived cache of
+ * the child aggregate, self-healing on the next child write, and supplying an
+ * initial value is a SUPPORTED authoring path — `initializeSummaryFields`
+ * deliberately keeps a caller-supplied one ("author supplied a value"), so
+ * historical imports and seed data may carry pre-computed totals.
+ *
+ * DO NOT "fix the code to match this comment" by adding `summary` here. The
+ * insert-side strip ({@link stripRuntimeOwnedFields}) keys on the RAW caller
+ * payload and runs in `engine.insert` AFTER the seed pass, so a plain
+ * (non-`isSystem`, non-`preserveAudit`) import of a parent carrying
+ * `task_count: 42` would lose the 42 to the strip and get no 0 from the seed
+ * either — the seed already skipped that field precisely BECAUSE the caller
+ * supplied it. The column lands `null`, the exact state #6013 was written to
+ * eliminate, and the write still reports success. Only `isSystem: true` (whole
+ * pass skipped) or `preserveAudit: true` (kept by {@link isPreservableUnderAudit},
+ * since a summary field is not `system: true`) would survive it.
+ *
+ * Keep this set to types whose value is (a) persisted, (b) issued by the
+ * runtime, and (c) never legitimately supplied by a caller.
  */
 const RUNTIME_OWNED_FIELD_TYPES: ReadonlySet<string> = new Set(['autonumber']);
 
