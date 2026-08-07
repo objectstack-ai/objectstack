@@ -60,7 +60,7 @@
 //   node scripts/check-skill-frame-sync.mjs [--self-test]
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -99,8 +99,16 @@ function soft(template) {
  * the sentence that makes it binding; the axis entries are whatever lies between
  * them. Both anchors must match exactly once per file — an ambiguous anchor is
  * reported rather than silently resolved to the first hit.
+ *
+ * EXPORTED for scripts/check-skill-frame-freshness.mjs (#5866), which asks the
+ * OTHER invariant about the same documents — "is this working tree's copy of the
+ * frame still current with origin/main?" as opposed to this gate's "are the four
+ * copies in one tree isomorphic?". Two invariants, two scripts (the #5866 triage
+ * ruled explicitly against merging them), but exactly ONE definition of what
+ * "the frame's structure" is — forking these anchors into a second script would
+ * reproduce, in the gates, the very hand-copied-text disease they police.
  */
-const COPIES = [
+export const COPIES = [
   {
     id: 'internal-pm',
     file: '.claude/skills/pm-dispatch/SKILL.md',
@@ -143,8 +151,12 @@ const COPIES = [
  * Order is the canonical axis order; a copy that lists them in another order
  * fails. A copy whose axis matches no entry fails too: renaming an axis is a
  * frame change, and the map is where that change gets recorded.
+ *
+ * EXPORTED for the freshness gate (#5866) — see the note on COPIES above. The
+ * #5866 triage named this map as the structural criterion to reuse, precisely
+ * so that "the same axis" means the same thing to both gates forever.
  */
-const AXIS_MAP = [
+export const AXIS_MAP = [
   {
     id: 'business-need',
     zh: /实际业务需求/,
@@ -242,8 +254,13 @@ function matchAllOf(text, source) {
 /**
  * Analyze one copy. Returns null after recording a problem when the section
  * cannot be extracted — extraction failure is a red, never a skip (#4690).
+ *
+ * EXPORTED for the freshness gate (#5866): it runs exactly this extraction over
+ * the SAME copy shapes, once against the working tree's bytes and once against
+ * `origin/main`'s, and compares the two structures. Sharing the extractor is
+ * what makes the two gates provably talk about the same "structure".
  */
-function analyzeCopy(copy, axisMap, problems) {
+export function analyzeCopy(copy, axisMap, problems) {
   const label = `${copy.id} (${copy.file} — ${copy.what})`;
 
   const starts = matchAllOf(copy.text, copy.start);
@@ -369,8 +386,16 @@ function analyzeCopy(copy, axisMap, problems) {
   return { copy, label, declared: declaredAtStart, ids, sectionStart, sectionEnd };
 }
 
-/** Every check, over an explicit copy set — the shape the self-test drives. */
-function runAllChecks(copies, axisMap = AXIS_MAP, scanFiles = null) {
+/**
+ * Every check, over an explicit copy set — the shape the self-test drives.
+ *
+ * EXPORTED so the freshness gate's self-test (#5866) can assert the claim its
+ * whole existence rests on: on a tree that is CONSISTENTLY the old two-axis
+ * frame, THIS gate is green (the copies really are isomorphic) while the
+ * freshness gate is red. That independence is what makes them two scripts; it is
+ * pinned there rather than merely written down here.
+ */
+export function runAllChecks(copies, axisMap = AXIS_MAP, scanFiles = null) {
   const problems = [];
   const results = [];
   for (const copy of copies) {
@@ -765,4 +790,11 @@ function main() {
   );
 }
 
-main();
+// Run the gate only when this file IS the entry point. Without the guard, the
+// freshness gate's `import { COPIES, AXIS_MAP, analyzeCopy }` (#5866) would run
+// this whole gate — and its `process.exit(1)` — as an import side effect. Same
+// idiom as scripts/objectui-changeset-digest.mjs, which is imported the same way
+// by scripts/check-objectui-pin-fresh.mjs.
+if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+  main();
+}
