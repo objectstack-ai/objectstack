@@ -31,6 +31,7 @@
 // the case is pinned here next to the fix so the two verdicts are read together.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 function makeDriver() {
@@ -129,7 +130,10 @@ describe('update strip acts on CALLER-submitted values (#5591)', () => {
     // before-hook runs, which is how a transition is expressed in one.
     engine.registerHook('beforeUpdate', async (ctx: any) => {
       if (!ctx.previous && ctx.input?.id) {
-        ctx.previous = await engine.findOne(ctx.object, { where: { id: ctx.input.id } } as any);
+        // Typed, not `as any`: the #4918 ratchet counts an erased engine
+        // query-options bag even in test code.
+        const priorQuery: EngineQueryOptions = { where: { id: ctx.input.id }, limit: 1 };
+        ctx.previous = await engine.findOne(ctx.object, priorQuery);
       }
     }, { priority: 5 });
 
