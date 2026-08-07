@@ -126,8 +126,13 @@ export const CrmTranslationBundle = defineTranslationBundle({
           discount_percent: { label: '折扣 (%)' },
           owner_id: { label: '负责人' },
         },
+        // No `default` key here, deliberately (#5164). This container's default
+        // `list` is structurally identical to `listViews.all`, so the composer
+        // COLLAPSES the two and the only registry entry is
+        // `crm_opportunity.all` — `all` below already carries its label. The
+        // `list` key that used to sit here was dead weight that looked correct:
+        // it matched no runtime view under either spelling.
         _views: {
-          list: { label: '全部商机' },
           all: { label: '全部商机' },
           pipeline: { label: '商机看板' },
         },
@@ -143,8 +148,8 @@ export const CrmTranslationBundle = defineTranslationBundle({
           lead_score: { label: '线索评分' },
           source: { label: '来源' },
         },
+        // `list` removed — collapsed into `all`, see crm_opportunity (#5164).
         _views: {
-          list: { label: '全部线索' },
           all: { label: '全部线索' },
           pipeline: { label: '线索看板' },
         },
@@ -160,8 +165,8 @@ export const CrmTranslationBundle = defineTranslationBundle({
           contact: { label: '联系人' },
           opportunity: { label: '商机' },
         },
+        // `list` removed — collapsed into `all`, see crm_opportunity (#5164).
         _views: {
-          list: { label: '全部活动' },
           all: { label: '全部活动' },
           calendar: { label: '活动日历' },
         },

@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 // the suites build them through `createQuery` / `createFilter`, so importing the
 // classes themselves left two unused bindings (TS6133) the moment this file
 // entered a tsc program (#5449).
+import { WELL_KNOWN_CAPABILITY_KEYS } from '@objectstack/spec/api';
 import { ObjectStackClient, createQuery, createFilter } from './index';
 
 /** Helper: create a client with mocked fetch that returns the given response body */
@@ -33,17 +34,49 @@ describe('ObjectStackClient', () => {
     });
 
     it('should make discovery request on connect', async () => {
+        // [#5787] This double is shaped on the REAL `/discovery` body, measured
+        // off `ObjectStackProtocolImplementation.getDiscovery()`
+        // (`packages/metadata-protocol/src/protocol.ts`) — not invented.
+        //
+        // It used to spell two shapes no producer has ever emitted:
+        //
+        //   capabilities: ['metadata', 'data', 'ui'],   // an array
+        //   endpoints: {}                               // retired in #4828
+        //
+        // `endpoints` was the dispatcher-only verbatim copy of `routes`, removed
+        // under ADR-0049; the producer emits `routes` (`ApiRoutesSchema`, and
+        // REQUIRED by `DiscoverySchema`). `capabilities` was a string array in
+        // some pre-history and is now a CLOSED object over the one vocabulary,
+        // each entry a `CapabilityDescriptor` (#5672 ruling A).
+        //
+        // Both were inert — the assertion below only counts the fetch — which is
+        // exactly why they survived two retirements. The harm is authoring-time:
+        // a test double is the most-copied artifact there is, and this one
+        // taught a producer shape that never existed (#5674's 25 siblings in
+        // `packages/rest` were the same defect). `discovery-double-retired-key.test.ts`
+        // beside this file pins both keys so the next copy cannot reintroduce them.
+        //
+        // The capability map is BUILT from `WELL_KNOWN_CAPABILITY_KEYS` rather
+        // than hand-listed: that constant is the vocabulary's single source of
+        // truth precisely so no consumer becomes a fourth dialect of it, and a
+        // hand-written key list here would silently fall behind the day the
+        // vocabulary grows.
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
-            json: async () => ({ 
-                version: 'v1', 
-                apiName: 'ObjectStack',
-                capabilities: ['metadata', 'data', 'ui'],
-                endpoints: {}
+            json: async () => ({
+                version: '1.0',
+                name: 'ObjectStack API',
+                environment: 'development',
+                routes: { data: '/api/v1/data', metadata: '/api/v1/meta' },
+                locale: { default: 'en', supported: ['en'], timezone: 'UTC' },
+                services: {},
+                capabilities: Object.fromEntries(
+                    WELL_KNOWN_CAPABILITY_KEYS.map((key) => [key, { enabled: false }]),
+                ),
             })
         });
 
-        const client = new ObjectStackClient({ 
+        const client = new ObjectStackClient({
             baseUrl: 'http://localhost:3000',
             fetch: fetchMock
         });

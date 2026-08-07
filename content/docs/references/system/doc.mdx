@@ -5,40 +5,6 @@ description: Doc protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Package Documentation Metadata Protocol (ADR-0046)
-
-One `doc` item per Markdown file under the package's flat `src/docs/`
-
-directory (no subdirectories — flatness is the contract that keeps
-
-cross-references stable). The CLI compiles each file into this shape at
-
-build time; TS-first stacks may also declare items inline via
-
-`defineStack(\{ docs: [...] \})`.
-
-Identity model: `name` = filename stem (lowercase snake_case). A namespace
-
-prefix (`crm_lead_guide`) is a *recommended convention*, no longer required:
-
-per ADR-0048, single-doc resolution is package-scoped (`getItem('doc', name,
-
-packageId)` via `?package=` on the detail route), so two packages may ship a
-
-doc with the same bare name and each resolves within its own package — just
-
-like `page`/`dashboard`/`report`. The prefix stays useful for readable,
-
-globally-unique filenames but is not load-bearing for uniqueness.
-
-Docs are inert data: the kernel registers them without parsing
-
-`content`, and they participate in no runtime behavior. Renderers
-
-resolve relative links between docs (`[guide](./crm_lead_guide.md)`)
-
-by stripping `./` and `.md` to obtain the target doc name.
-
 <Callout type="info">
 **Source:** `packages/spec/src/system/doc.zod.ts`
 </Callout>

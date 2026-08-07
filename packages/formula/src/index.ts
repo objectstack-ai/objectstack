@@ -15,6 +15,12 @@ export { celEngine, DEFAULT_LIMITS } from './cel-engine';
 // (approval `expression` approvers): lint and the runtime pre-check share this
 // one helper so what they accept can never drift.
 export { collectCelRootIdentifiers } from './cel-engine';
+// #4812 — the canonical parse-to-AST entry. Any consumer that needs the AST of
+// an authored CEL source takes it from here, so "what parses" has exactly ONE
+// answer across build, lint and runtime. Building a private `new Environment()`
+// instead silently opts out of the platform's rewrite AND its bounds.
+export { parseCelToAst } from './cel-engine';
+export type { CelAstNode } from './cel-engine';
 export { cronEngine } from './cron-engine';
 export { templateEngine, TEMPLATE_FORMATTERS, formatValue } from './template-engine';
 export { registerStdLib, buildScope } from './stdlib';

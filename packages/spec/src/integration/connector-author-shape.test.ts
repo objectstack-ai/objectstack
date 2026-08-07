@@ -202,12 +202,32 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
       };
       void c;
     `,
-    'transform-custom': `${HEAD}
+    // #5515 filed this as "`custom` is not a member of the union". #5552 then
+    // retired the union outright, so the probe now measures the stronger fact:
+    // the KEY is gone, and it is gone for `custom` and for every real member
+    // alike. The probe body is unchanged on purpose — it is the same wrong
+    // snippet an author copies out of the L3 document.
+    'transform-retired': `${HEAD}
       const c: ConnectorInput = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
         fieldMappings: [{
           source: 'order_value', target: 'order_total',
           transform: { type: 'custom', function: 'value => parseFloat(value) / 100' },
+        }],
+      };
+      void c;
+    `,
+    // The other half, and the one that would silently rot otherwise: a
+    // previously-VALID member must now fail too. Without this, a regression that
+    // restored the union would leave `transform-retired` red for the old reason
+    // ("custom is not a member") and nothing would notice the retirement had
+    // been undone.
+    'transform-retired-valid-member': `${HEAD}
+      const c: ConnectorInput = {
+        name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
+        fieldMappings: [{
+          source: 'order_value', target: 'order_total',
+          transform: { type: 'javascript', expression: 'value / 100' },
         }],
       };
       void c;
@@ -230,7 +250,6 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
         fieldMappings: [{
           source: 'order_value', target: 'order_total',
-          transform: { type: 'javascript', expression: 'value / 100' },
         }],
         webhooks: [{
           name: 'order_created_webhook',
@@ -250,14 +269,34 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
     expect(message).toContain('sourceField');
   });
 
-  it("`transform.type: 'custom'` is not a member of the transform union", () => {
-    const message = render(results.get('transform-custom')!);
-    expect(message).toContain('"custom"');
-    // The five real members, named, so that adding or removing one is a
-    // decision that surfaces here rather than silently widening the doc's claim.
-    for (const member of ['constant', 'cast', 'lookup', 'javascript', 'map']) {
-      expect(message, `the union must still offer ${member}`).toContain(member);
-    }
+  // ⚠ Measured, not assumed — and it is the one place the two tombstone
+  // channels are NOT equally good. `retiredKey()` is `z.never().optional()`, so
+  // its `z.input` type is `undefined`, and tsc reports the assignment failure
+  // against that type: "Type '{ … }' is not assignable to type 'undefined'".
+  // The compile channel therefore REFUSES the key but does not NAME it, while
+  // the parse channel (the `[#5515]`/`[#5552]` runtime block below) carries the
+  // full prescription. Asserting `toContain('transform')` here was the first
+  // draft and it was simply wrong about the diagnostic text; pinning the real
+  // shape is what keeps this test honest about which channel says what.
+  it('[#5552] `transform` is retired — the key no longer type-checks', () => {
+    // Was: "`custom` is not a member of the transform union", asserting all five
+    // member names appeared in the message. That assertion cannot be re-spelled
+    // — the union it enumerated is gone — so it is replaced by the fact that
+    // survived: the key itself fails to compile.
+    const message = render(results.get('transform-retired')!);
+    expect(message).toContain('TS2322');
+    expect(message).toContain("not assignable to type 'undefined'");
+  });
+
+  it('[#5552] …and a member that used to be VALID fails identically', () => {
+    // The guard against a silent restoration: if the union came back, this probe
+    // would compile and go green, which is the only signal distinguishing "the
+    // key is retired" from "that one value was never a member". Identical
+    // diagnostic to the probe above — same key, same refusal, regardless of the
+    // value's shape.
+    const message = render(results.get('transform-retired-valid-member')!);
+    expect(message).toContain('TS2322');
+    expect(message).toContain("not assignable to type 'undefined'");
   });
 
   it('`webhooks[].retryPolicy` does not exist on the webhook shape', () => {
@@ -312,31 +351,45 @@ describe('[#5515] the schema rejects them at RUNTIME too, and how it says so', (
     expect(JSON.stringify(result.error!.issues)).not.toContain('sourceField');
   });
 
-  it("`transform.type: 'custom'` is a VALUE verdict, and the message lists the five real members", () => {
-    const result = ConnectorFieldMappingSchema.safeParse({
-      source: 'order_value',
-      target: 'order_total',
-      transform: { type: 'custom', function: 'value => parseFloat(value) / 100' },
-    });
-    expect(result.success).toBe(false);
-    expect(result.error!.issues[0]!.message).toContain("Expected 'constant' | 'cast' | 'lookup' | 'javascript' | 'map'");
+  it('[#5552] `transform` is now a KEY verdict carrying the retirement prescription', () => {
+    // The verdict CHANGED CLASS here, and that is the point worth pinning.
+    // #5515 measured a VALUE verdict — the key was real, `'custom'` was not a
+    // member, and the message enumerated the five that were. #5552 retired the
+    // key, so the same input is now refused one level up, by the key, and every
+    // member is equally out. Both spellings below get the identical message,
+    // which is what "the union is gone" means as opposed to "your value was
+    // wrong".
+    for (const transform of [
+      { type: 'custom', function: 'value => parseFloat(value) / 100' },
+      { type: 'javascript', expression: 'value / 100' },
+    ]) {
+      const result = ConnectorFieldMappingSchema.safeParse({
+        source: 'order_value',
+        target: 'order_total',
+        transform,
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'transform');
+      expect(issue).toBeDefined();
+      expect(issue!.message).toMatch(/`FieldMapping\.transform`.*removed.*#5552/s);
+      // It must point at the transform pipeline that DOES run, not just refuse.
+      expect(issue!.message).toMatch(/mapping\.fieldMapping\[\]\.transform/s);
+    }
   });
 
-  it('the corrected mapping parses, and a bare expression string is wrapped into its envelope', () => {
+  it('the corrected mapping parses — with the transform dropped, not re-spelled', () => {
+    // There is no replacement member to move to: the L3 connector surface never
+    // transformed anything. What the author keeps is the plain source→target
+    // mapping; what they must move elsewhere is the transformation itself.
     const parsed = ConnectorFieldMappingSchema.parse({
       source: 'order_value',
       target: 'order_total',
       dataType: 'number',
-      transform: { type: 'javascript', expression: 'value / 100' },
       syncMode: 'bidirectional',
     });
-    // `ExpressionInputSchema` shorthand: the string the document writes is the
-    // INPUT, the envelope is what a parse returns. Stated here so the doc's
-    // one-line form is known to be the schema's own shorthand and not a guess.
-    expect(parsed.transform).toEqual({
-      type: 'javascript',
-      expression: { dialect: 'cel', source: 'value / 100' },
-    });
+    expect(parsed).not.toHaveProperty('transform');
+    expect(parsed.source).toBe('order_value');
+    expect(parsed.dataType).toBe('number');
   });
 });
 

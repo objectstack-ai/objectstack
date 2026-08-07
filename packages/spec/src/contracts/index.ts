@@ -66,5 +66,6 @@ export * from './external-datasource-service.js';
 export * from './deploy-pipeline-service.js';
 export * from './app-lifecycle-service.js';
 export * from './seed-loader-service.js';
+export * from './seed-settlement.js';
 export * from './crypto-provider.js';
 export * from './cluster-service.js';

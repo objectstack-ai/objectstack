@@ -14,6 +14,7 @@
  */
 
 import { Environment, serialize } from '@marcbachmann/cel-js';
+import type { ASTNode } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
 import { buildScope, registerNumericCoercions, registerStdLib } from './stdlib';
@@ -174,6 +175,78 @@ export function collectCelRootIdentifiers(
   } catch (err) {
     const classified = classifyError(err);
     return { ok: false, error: classified.ok === false ? classified.error.message : String(err) };
+  }
+}
+
+/**
+ * A parsed CEL AST node, re-exported so a consumer can name the type this
+ * package already hands it without importing `@marcbachmann/cel-js` itself.
+ *
+ * The alias is not cosmetic. {@link lowerCelAst} has always *taken* a cel-js
+ * `ASTNode` while the type stayed unexported, so every caller that wanted to
+ * hold an AST had to reach past this package to the parser — which is precisely
+ * how a second, differently-configured parse entry gets built (#4812). Prefixed
+ * `Cel` to match the package's other CEL-domain public names
+ * (`CelFilterCompileResult`, `collectCelRootIdentifiers`, `isPushdownableCel`);
+ * bare `ASTNode` would be ambiguous in a package that also owns the cron and
+ * template dialects.
+ */
+export type CelAstNode = ASTNode;
+
+/**
+ * The canonical parse env. Identical in configuration to the one
+ * {@link celEngine.compile} builds per call — same `unlistedVariablesAreDyn`,
+ * same `enableOptionalTypes`, same {@link DEFAULT_LIMITS}, same stdlib — and
+ * built once because `parse` neither mutates the environment nor depends on the
+ * `now()` it was given (the same reasoning `recordScopeEnv` already relies on).
+ * The parity suite pins the equivalence against a freshly-built env, so this
+ * memo cannot silently drift away from `compile`.
+ */
+let canonicalParseEnv: Environment | undefined;
+
+/**
+ * Parse a CEL source to its AST through the **canonical** front end — the one
+ * answer in this repo to "what parses" (#4812).
+ *
+ * Every other entry point in this package (`compile`, `evaluate`,
+ * {@link collectCelRootIdentifiers}) reaches the parser through the same three
+ * things, and so does this one:
+ *
+ *  1. {@link rewriteNullableTernary} — the #3306 `cond ? value : null` rewrite,
+ *     so the AST a consumer analyses is the AST the runtime will execute, not
+ *     the shape the author happened to type;
+ *  2. {@link DEFAULT_LIMITS} — the platform's bounds. A source over
+ *     `maxAstNodes` / `maxDepth` / `maxListElements` does **not** parse here,
+ *     because it does not parse anywhere else on the platform either;
+ *  3. the registered stdlib and `unlistedVariablesAreDyn: true` env.
+ *
+ * A consumer that built its own `new Environment(...)` instead got a different
+ * answer to (2) in particular — it would happily parse, and then reason about,
+ * a predicate `compile()` rejects outright. That is not a hypothetical: it is
+ * what `@objectstack/lint`'s null-guard pass did until #4812.
+ *
+ * Returns `null` — never throws — when the source is empty or does not parse,
+ * so a caller whose job is *not* to adjudicate syntax can skip it in one line
+ * and leave the verdict to the gate that owns it (`validateExpression`, which
+ * reports both the syntax fault and the bounds fault with a message written for
+ * self-correction).
+ *
+ * This is `parse` only, deliberately **not** `parse + check`: `compile()` is the
+ * entry that also type-checks. A caller that wants the AST of an expression
+ * which parses but does not type-check (a great many predicates over `dyn`
+ * operands) must not be denied it, and a caller that wants the type verdict
+ * should ask `compile()` for it. The parity suite pins both halves of that
+ * asymmetry so neither side drifts.
+ */
+export function parseCelToAst(source: string): CelAstNode | null {
+  if (typeof source !== 'string' || !source.trim()) return null;
+  try {
+    // A wall-clock-free `now()` — the stdlib is registered for parse-time shape
+    // only and is never called on this path.
+    canonicalParseEnv ??= buildEnv(() => new Date(0));
+    return canonicalParseEnv.parse(rewriteNullableTernary(source)).ast;
+  } catch {
+    return null;
   }
 }
 

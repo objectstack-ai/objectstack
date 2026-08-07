@@ -9,6 +9,12 @@ import os from 'os';
 import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
 import { redactConnectionUrl } from '../utils/connection-display.js';
+import {
+  DEV_WATCH_IGNORED,
+  ServeRestartCoordinator,
+  assessArtifactStaleness,
+  formatMtimeGap,
+} from '../utils/dev-restart.js';
 import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
 
 /**
@@ -45,7 +51,8 @@ export function resolveDefaultDevDbUrl(opts: {
 }
 
 export default class Dev extends Command {
-  static override description = 'Start development mode with hot-reload';
+  static override description =
+    'Start development mode — watch sources, rebuild the artifact, and restart the server on change';
 
   static override args = {
     package: Args.string({ description: 'Package name or filter pattern', default: 'all', required: false }),
@@ -66,6 +73,12 @@ export default class Dev extends Command {
     compile: Flags.boolean({
       description: 'Compile objectstack.config.ts to dist/objectstack.json before starting (auto if artifact missing). Ignored when --artifact is set.',
       default: false,
+      allowNo: true,
+    }),
+    restart: Flags.boolean({
+      description:
+        'Restart the server after each successful rebuild so the running server always matches dist/objectstack.json (#5148). With --no-restart the watcher only rebuilds the artifact — the running server keeps the build it booted with until you restart it yourself, and every rebuild says so.',
+      default: true,
       allowNo: true,
     }),
 
@@ -178,6 +191,35 @@ export default class Dev extends Command {
         }
       }
 
+      // ── Startup staleness warning (#5148 startup variant) ───────────
+      // Without --compile, `os dev` boots whatever dist/objectstack.json
+      // holds. When the sources are NEWER than the artifact (edited while
+      // the server was down, stale checkout), the boot silently serves the
+      // old build — measured in #5148: the config had gained a capability
+      // and dev still printed `Plugins: 38 loaded` until a manual build.
+      // Warn loudly and name the remedy; never gate the boot (per triage:
+      // remove the silence, not the start).
+      const watchActive = flags.watch !== false && !flags.artifact && configExists;
+      if (!needsCompile && !flags.artifact && configExists) {
+        const stale = assessArtifactStaleness({
+          artifactPath,
+          configPath,
+          srcDir: path.resolve(process.cwd(), 'src'),
+        });
+        if (stale) {
+          const relArtifact = path.relative(process.cwd(), artifactPath);
+          const relSource = path.relative(process.cwd(), stale.newestSourcePath);
+          const gap = formatMtimeGap(stale.newestSourceMtimeMs - stale.artifactMtimeMs);
+          console.log(chalk.yellow.bold(`  ⚠ ${relArtifact} is OLDER than your sources — this boot serves the STALE build.`));
+          console.log(chalk.yellow(`     newest source: ${relSource} (${gap} newer than the artifact)`));
+          console.log(chalk.yellow(
+            '     fix: run `objectstack build` or start with `--compile`'
+            + (watchActive ? ', or save a watched file to trigger a rebuild' + (flags.restart ? ' + restart' : '') : '')
+            + '.',
+          ));
+        }
+      }
+
       printStep('Starting dev server (local mode)...');
 
       const environmentId = flags['environment-id'] ?? process.env.OS_ENVIRONMENT_ID ?? 'env_local';
@@ -287,81 +329,123 @@ export default class Dev extends Command {
 
       const port = flags.port ?? readEnvWithDeprecation('OS_PORT', 'PORT', { silent: true });
       const binPath = process.argv[1];
-      const serveChild = spawn(
-        process.execPath,
-        [
-          binPath,
-          'serve',
-          '--dev',
-          ...(port ? ['--port', port] : []),
-          ...(flags.ui ? ['--ui'] : []),
-          ...(flags.verbose ? ['--verbose'] : []),
-          ...(flags['log-level'] ? ['--log-level', flags['log-level']] : []),
-          ...(flags.preset ? ['--preset', flags.preset] : []),
-        ],
-        // 'ipc' adds a message channel so the serve child can report the
-        // port it ACTUALLY bound (dev auto-shifts off a busy port). Without
-        // this, the parent only knows the requested port.
-        { stdio: ['inherit', 'inherit', 'inherit', 'ipc'], env: localEnv },
-      );
-
-      // ── Learn the actually-bound port from the serve child ──────────
-      // The child emits `{ type: 'objectstack:listening', port, url }` once
-      // its HTTP server is up. We surface it so the printed URL is correct
-      // even when the port was auto-shifted (e.g. 3000 busy → 3001).
       const requestedPort = port ?? '3000';
-      serveChild.on('message', (msg: any) => {
-        if (msg?.type === 'objectstack:listening' && msg.port) {
-          const actual = String(msg.port);
-          if (actual !== requestedPort) {
-            console.log(chalk.dim(`  ↪ server bound to port ${actual} (requested ${requestedPort})`));
+
+      // ── Serve child under restart supervision (#5148) ───────────────
+      // The watcher below rebuilds dist/objectstack.json, but a running
+      // server only PARTIALLY receives a rebuilt artifact: MetadataPlugin's
+      // own artifact watcher re-ingests the registry, syncs DDL + seeds for
+      // new objects and broadcasts the SSE HMR event — while hook bodies
+      // and already-registered view metadata from the compiled bundle are
+      // applied at boot only (#5148 measured both staying stale). Boot-time
+      // load is the one path that applies the whole artifact, so the
+      // coordinator restarts the serve child after each successful rebuild
+      // (nodemon-style, default-on; opt out with --no-restart).
+      const spawnServeChild = (info: { restartIndex: number }) => {
+        const child = spawn(
+          process.execPath,
+          [
+            binPath,
+            'serve',
+            '--dev',
+            ...(port ? ['--port', port] : []),
+            ...(flags.ui ? ['--ui'] : []),
+            ...(flags.verbose ? ['--verbose'] : []),
+            ...(flags['log-level'] ? ['--log-level', flags['log-level']] : []),
+            ...(flags.preset ? ['--preset', flags.preset] : []),
+          ],
+          // 'ipc' adds a message channel so the serve child can report the
+          // port it ACTUALLY bound (dev auto-shifts off a busy port). Without
+          // this, the parent only knows the requested port.
+          { stdio: ['inherit', 'inherit', 'inherit', 'ipc'], env: localEnv },
+        );
+
+        // ── Learn the actually-bound port from the serve child ────────
+        // The child emits `{ type: 'objectstack:listening', port, url }` once
+        // its HTTP server is up. We surface it so the printed URL is correct
+        // even when the port was auto-shifted (e.g. 3000 busy → 3001).
+        child.on('message', (msg: any) => {
+          if (msg?.type === 'objectstack:listening' && msg.port) {
+            const actual = String(msg.port);
+            if (actual !== requestedPort) {
+              console.log(chalk.dim(`  ↪ server bound to port ${actual} (requested ${requestedPort})`));
+            }
+            if (info.restartIndex > 0) {
+              // A restarted child is listening — the running server matches
+              // dist/objectstack.json again. The MCP hint below is boot
+              // noise on a restart, so it prints on the initial boot only.
+              console.log(chalk.green('  ✓ server restarted — the new build is live'));
+              return;
+            }
+            // ── MCP connect hint (#3167) ────────────────────────────────
+            // The app IS an MCP server: the dispatcher serves /api/v1/mcp
+            // per-request, default-on (isMcpServerEnabled). Print how a
+            // coding agent (Claude Code, Cursor, any MCP client) attaches so
+            // the "AI builds the app it's running" loop is discoverable at the
+            // moment it's most useful — dev boot. An opted-out deployment
+            // (OS_MCP_SERVER_ENABLED=false) advertises nothing, mirroring the
+            // connect-UI / discovery gates that follow the same switch.
+            if (isMcpServerEnabled()) {
+              const base =
+                typeof msg.url === 'string' && msg.url ? msg.url.replace(/\/+$/, '') : `http://localhost:${actual}`;
+              const name = path.basename(process.cwd()) || 'objectstack';
+              console.log();
+              console.log(chalk.cyan('  🤖 MCP server — connect a coding agent:'));
+              console.log(`     Endpoint  ${base}/api/v1/mcp`);
+              console.log(`     Skill     ${base}/api/v1/mcp/skill`);
+              console.log(chalk.dim(`     Connect   claude mcp add --transport http ${name} ${base}/api/v1/mcp`));
+              console.log(chalk.dim('     Disable   OS_MCP_SERVER_ENABLED=false'));
+            }
           }
-          // ── MCP connect hint (#3167) ────────────────────────────────
-          // The app IS an MCP server: the dispatcher serves /api/v1/mcp
-          // per-request, default-on (isMcpServerEnabled). Print how a
-          // coding agent (Claude Code, Cursor, any MCP client) attaches so
-          // the "AI builds the app it's running" loop is discoverable at the
-          // moment it's most useful — dev boot. An opted-out deployment
-          // (OS_MCP_SERVER_ENABLED=false) advertises nothing, mirroring the
-          // connect-UI / discovery gates that follow the same switch.
-          if (isMcpServerEnabled()) {
-            const base =
-              typeof msg.url === 'string' && msg.url ? msg.url.replace(/\/+$/, '') : `http://localhost:${actual}`;
-            const name = path.basename(process.cwd()) || 'objectstack';
-            console.log();
-            console.log(chalk.cyan('  🤖 MCP server — connect a coding agent:'));
-            console.log(`     Endpoint  ${base}/api/v1/mcp`);
-            console.log(`     Skill     ${base}/api/v1/mcp/skill`);
-            console.log(chalk.dim(`     Connect   claude mcp add --transport http ${name} ${base}/api/v1/mcp`));
-            console.log(chalk.dim('     Disable   OS_MCP_SERVER_ENABLED=false'));
-          }
-        }
+        });
+        return child;
+      };
+
+      const coordinator = new ServeRestartCoordinator({
+        spawnChild: spawnServeChild,
+        exitParent: (code) => process.exit(code),
+        log: (line) => {
+          const trimmed = line.trimStart();
+          if (trimmed.startsWith('✗')) console.log(chalk.red(line));
+          else if (trimmed.startsWith('⚠')) console.log(chalk.yellow(line));
+          else console.log(chalk.dim(line));
+        },
       });
+      // Forward parent signals to the child (covers non-TTY parents where no
+      // process group delivers Ctrl-C to the child for us), and never leave
+      // an orphaned serve child behind whatever path ends the parent — e.g.
+      // --fresh's SIGINT handler calls process.exit before later SIGINT
+      // listeners run, but 'exit' listeners still do.
+      process.on('SIGINT', () => coordinator.beginShutdown('SIGINT'));
+      process.on('SIGTERM', () => coordinator.beginShutdown('SIGTERM'));
+      process.on('exit', () => coordinator.killChildOnParentExit());
+      coordinator.start();
 
       // ── Watch-recompile loop ────────────────────────────────────────
       // When the agent edits an objectstack source file (config or
-      // src/**), debounce-rebuild dist/objectstack.json. The server
-      // (MetadataPlugin) watches the artifact path directly and
-      // broadcasts the HMR event to UI consumers (ADR-0008 PR-8); no POST
-      // ping required.
+      // src/**), debounce-rebuild dist/objectstack.json, then ask the
+      // coordinator to restart the serve child so the running server
+      // matches the artifact (#5148). With --no-restart the rebuild still
+      // lands on disk and the messaging says, on every rebuild, that the
+      // running server keeps the old build.
       //
       // Skipped when:
       //   - --watch=false (user opted out)
       //   - --artifact was passed (no source to watch)
       //   - the environment has no objectstack.config.ts
-      if (flags.watch !== false && !flags.artifact && configExists) {
+      if (watchActive) {
         this.startWatchRecompile({
           cwd: process.cwd(),
           configPath,
           artifactPath,
           binPath,
           verbose: flags.verbose,
+          autoRestart: flags.restart,
+          onRebuildLanded: flags.restart
+            ? (label) => coordinator.requestRestart(label)
+            : undefined,
         });
       }
-
-      serveChild.on('exit', (code) => {
-        process.exit(code ?? 0);
-      });
       return;
     }
 
@@ -396,14 +480,24 @@ export default class Dev extends Command {
    * Watch objectstack source files (config + src/**) and on change:
    *   1. Debounce 250ms
    *   2. Run `os compile` to rebuild `dist/objectstack.json`
+   *   3. Report the rebuild via `onRebuildLanded` so the restart
+   *      coordinator can restart the serve child (#5148)
    *
-   * The server (MetadataPlugin) watches `dist/objectstack.json`
-   * directly and broadcasts the HMR event to UI consumers (ADR-0008 PR-8);
-   * the CLI no longer POSTs `/api/v1/dev/metadata-events`. That POST
-   * endpoint remains available for external trigger sources (cloud
-   * webhooks, git hooks, ad-hoc curl) but is not used here.
+   * Why a restart and not in-place reload: the server (MetadataPlugin)
+   * does watch `dist/objectstack.json` directly (ADR-0008 PR-8) — but that
+   * reload path only re-ingests the metadata registry, syncs DDL + seeds
+   * for NEW objects, and broadcasts the SSE HMR event to UI consumers.
+   * Hook bodies and already-registered view metadata from the compiled
+   * bundle are applied at boot only, so #5148 measured a rebuilt artifact
+   * with the running server still executing the old hooks and serving the
+   * old views — silently. Until the runtime can apply a full artifact
+   * in-place (ADR-0008's target state), the restart is what keeps the
+   * running server and the artifact from disagreeing without a word.
+   * The `/api/v1/dev/metadata-events` POST endpoint remains available for
+   * external trigger sources (cloud webhooks, git hooks, ad-hoc curl) but
+   * is not used here.
    *
-   * The watcher runs in this parent process; the serve child stays untouched.
+   * The watcher runs in this parent process, across serve child restarts.
    */
   private startWatchRecompile(opts: {
     cwd: string;
@@ -411,6 +505,10 @@ export default class Dev extends Command {
     artifactPath: string;
     binPath: string;
     verbose?: boolean;
+    /** Whether a successful rebuild auto-restarts the serve child (#5148). */
+    autoRestart: boolean;
+    /** Called after a rebuild landed on disk (label = what changed). */
+    onRebuildLanded?: (label: string) => void;
   }): void {
     void (async () => {
       const chokidar = (await import('chokidar')).default;
@@ -419,13 +517,9 @@ export default class Dev extends Command {
       if (fs.existsSync(srcDir)) watchPaths.push(srcDir);
 
       const watcher = chokidar.watch(watchPaths, {
-        ignored: [
-          /node_modules/,
-          /\.git/,
-          /\.objectstack\//,
-          /\bdist\b/,
-          /\.test\.[jt]sx?$/,
-        ],
+        // Shared with the boot-time staleness check (#5148) so both judge
+        // the same source surface.
+        ignored: DEV_WATCH_IGNORED,
         ignoreInitial: true,
         persistent: true,
         // Use polling to avoid `fs.watch` EMFILE on macOS when other
@@ -481,14 +575,21 @@ export default class Dev extends Command {
         if (r.status !== 0) {
           const stderr = r.stderr?.toString().trim();
           console.log(chalk.red(`  ✗ compile failed (${dt}ms)${stderr ? '\n' + stderr : ''}`));
+          // A failed compile writes no artifact — the running server still
+          // matches dist/objectstack.json, so no restart and no warning.
         } else {
-          // ADR-0008 PR-8: the server now watches the artifact file
-          // directly via MetadataPlugin and reloads + broadcasts
-          // HMR events autonomously. The CLI no longer needs to POST
-          // /api/v1/dev/metadata-events. The endpoint remains
-          // available for external trigger sources (cloud webhooks,
-          // git hooks, ad-hoc curl).
-          console.log(chalk.green(`  ✓ recompiled in ${dt}ms — server will auto-reload`));
+          if (opts.autoRestart) {
+            console.log(chalk.green(`  ✓ recompiled in ${dt}ms`));
+          } else {
+            // --no-restart: the artifact and the running server now
+            // disagree — say so on EVERY rebuild (#5148: the old
+            // "server will auto-reload" line advertised a hot reload the
+            // runtime only partially performs).
+            console.log(chalk.green(`  ✓ recompiled in ${dt}ms — artifact updated on disk`));
+            console.log(chalk.yellow(
+              '  ⚠ auto-restart is off (--no-restart): the running server keeps the build it booted with — restart dev to apply',
+            ));
+          }
           const objectsNow = readArtifactObjects();
           if (objectsNow) {
             const prior = knownObjects;
@@ -497,11 +598,12 @@ export default class Dev extends Command {
             if (fresh.length > 0) {
               console.log(
                 chalk.cyan(
-                  `  ✚ new object(s): ${fresh.join(', ')} — table & seeds sync on reload`,
+                  `  ✚ new object(s): ${fresh.join(', ')} — table & seeds sync on ${opts.autoRestart ? 'restart' : 'reload'}`,
                 ),
               );
             }
           }
+          opts.onRebuildLanded?.(label);
         }
         inFlight = false;
         if (queued) { queued = false; setTimeout(compileAndPing, 50); }
@@ -517,7 +619,13 @@ export default class Dev extends Command {
       watcher.on('add', schedule);
       watcher.on('unlink', schedule);
       watcher.on('ready', () => {
-        console.log(chalk.dim(`  👁  watching ${watchPaths.map(p => path.relative(opts.cwd, p) || '.').join(', ')} for changes`));
+        // Honest banner (#5148): say what a rebuild actually does to the
+        // running server in the current mode, instead of implying a hot
+        // reload the runtime only partially performs.
+        const what = opts.autoRestart
+          ? 'rebuild + restart on change'
+          : 'rebuild on change (auto-restart off — running server keeps its build)';
+        console.log(chalk.dim(`  👁  watching ${watchPaths.map(p => path.relative(opts.cwd, p) || '.').join(', ')} — ${what}`));
       });
 
       // Clean up on process exit

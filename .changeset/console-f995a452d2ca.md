@@ -18,7 +18,7 @@ Derived from the changesets objectui declared over the range — 64 releasing of
 - **minor** — Field widgets no longer spread renderer-only props — or arbitrary keys from a field config — onto the DOM element they render (objectui#3291). (objectui `19b8c9be3`)
 - **minor** — `RichTextField` honours `mobile_fullscreen`, so `mobile.fullscreenLongText` is finally true of rich text too (objectui#3301). (objectui `30ae33a77`)
 - **minor** — `mobile.fullscreenLongText` finally reaches auto-generated long-text fields, and `mobile_fullscreen` gets one declared carrier (objectui#3245). (objectui `f44d8727f`)
-- **minor** — The flow designer writes node geometry as the spec's `FlowNode.position`, not its own `ui: { x, y }` (objectui#3172). (objectui `6e794a19e`)
+- **minor** — **BREAKING (v17)** — The flow designer writes node geometry as the spec's `FlowNode.position`, not its own `ui: { x, y }` (objectui#3172). (objectui `6e794a19e`)
 - **minor** — **BREAKING (v17)** — field widgets receive their metadata on ONE key, `field`. `schema` is removed from the widget contract (objectui#3233). (objectui `042e09d77`)
 - **patch** — `UserFilters` no longer carries its own operator table when it lowers a `ViewTab.filter` preset into an ObjectQL AST node. The private `specOperatorToAst` was the second hand-kept… (objectui `d7f350a89`)
 - **patch** — Name `CommentThread`'s three emoji-only buttons, and follow the session language past the 7-day mark (objectui#3441) (objectui `65516ba4a`)
