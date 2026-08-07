@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
+import { PAGE_COMPONENT_COPY_KEYS } from './i18n-resolver';
 import {
   TranslationDataSchema,
   TranslationBundleSchema,
@@ -813,6 +814,82 @@ describe('translation unknown-key strictness (#4001)', () => {
     expect(result.success).toBe(false);
     expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
       .toContain('`help` → `helpText`');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // #6080 — `pages.<name>.components.<id>`, the page half of `dashboards.widgets`
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('page component copy (#6080)', () => {
+    const parse = (components: unknown) =>
+      TranslationDataSchema.safeParse({ pages: { sales_home_page: { label: 'Sales', components } } });
+
+    it('accepts the measured key face, keyed by component id', () => {
+      const result = parse({
+        quick_create: { title: 'Quick Create' },
+        kpi_revenue_won: { label: 'Revenue (Won)' },
+        ai_briefing: { title: 'Ask the AI', description: 'Open the panel.' },
+        lead_picker: { placeholder: 'Search…', emptyText: 'No records' },
+        new_lead_form: { submitLabel: 'Create' },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('stays `.strict()` — an invented key is still refused', () => {
+      const result = parse({ quick_create: { tooltip: 'Create a record' } });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+    });
+
+    it('sends `help` to `description` rather than declaring a key no component has', () => {
+      // The issue proposed `help` in this face. No component in
+      // `ComponentPropsMap` declares it, so declaring it would parse clean and
+      // translate nothing (ADR-0078). It is an alias instead.
+      const result = parse({ ai_briefing: { help: 'Open the panel.' } });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+        .toContain('`help` → `description`');
+    });
+
+    it('keeps `subtitle` at the page level — one string, one spelling', () => {
+      // `page:header` is `subtitle`'s only declarer and is addressed by page
+      // name, so a per-component `subtitle` would be a second route to it.
+      expect(parse({ some_header: { subtitle: 'Welcome back' } }).success).toBe(false);
+      expect(TranslationDataSchema.safeParse({
+        pages: { sales_home_page: { subtitle: 'Welcome back' } },
+      }).success).toBe(true);
+    });
+
+    it('names this surface in the error, not the dashboard widget one', () => {
+      const result = parse({ quick_create: { titel: 'Quick Create' } });
+      expect(result.error?.issues[0]?.message).toContain('this page component translation');
+      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+        .toContain('→ `title`');
+    });
+
+    it('declares exactly the keys the resolver and the extractor act on', () => {
+      // `PAGE_COMPONENT_COPY_KEYS` drives both `translatePage`'s overlay and
+      // the CLI's skeleton extraction. If this schema declared a key missing
+      // from that list the extractor would offer a slot nothing reads; if the
+      // list carried one this schema lacks, `.strict()` would reject the very
+      // key the extractor just wrote. Pin the two together.
+      for (const key of PAGE_COMPONENT_COPY_KEYS) {
+        expect(parse({ some_component: { [key]: 'x' } }).success, `\`${key}\` must be declared`).toBe(true);
+      }
+      const declared = Object.keys(
+        (TranslationDataSchema.safeParse({
+          pages: { p: { components: { c: Object.fromEntries(PAGE_COMPONENT_COPY_KEYS.map((k) => [k, 'x'])) } } },
+        }) as { success: true; data: any }).data.pages.p.components.c,
+      ).sort();
+      expect(declared).toEqual([...PAGE_COMPONENT_COPY_KEYS].sort());
+    });
+
+    it('carries the `label`/`title` trap alias the dashboard widget face carries', () => {
+      // A page's headline is `label`; a component's is `title`. One level
+      // apart, opposite spellings — the same trap `dashboards.widgets` names.
+      const result = parse({ quick_create: { name: 'Quick Create' } });
+      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+        .toContain('`name` → `title`');
+    });
   });
 
   it('names which action surface the key landed on', () => {
