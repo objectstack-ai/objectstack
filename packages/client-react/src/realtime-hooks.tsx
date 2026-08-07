@@ -8,14 +8,24 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { MetadataEvent, DataEvent, BulkDataEvent } from '@objectstack/spec/api';
+import type {
+  MetadataEvent,
+  MetadataEventSubject,
+  DataEvent,
+  BulkDataEvent,
+} from '@objectstack/spec/api';
 import { useClient } from './context';
 import { useEventCallback } from './internal-deps';
 
 /**
  * Hook to subscribe to metadata events
  *
- * @param type - Metadata type to subscribe to (e.g., 'object', 'view', 'agent')
+ * @param type - Metadata type to subscribe to (e.g., 'object', 'view', 'agent').
+ *   Typed {@link MetadataEventSubject}, the closed set derived from
+ *   `MetadataEventType` (#4627) — a metadata type with no realtime event
+ *   contract (`'translation'`, `'datasource'`, …) is a compile error here
+ *   rather than a subscription that never fires. This hook only forwards the
+ *   argument to `subscribeMetadata`, so it must not be the looser of the two.
  * @param options - Optional filters (packageId)
  * @returns Latest metadata event or null
  *
@@ -36,7 +46,7 @@ import { useEventCallback } from './internal-deps';
  * ```
  */
 export function useMetadataSubscription(
-  type: string,
+  type: MetadataEventSubject,
   options?: { packageId?: string }
 ): MetadataEvent | null {
   const client = useClient();
@@ -112,7 +122,8 @@ export function useDataSubscription(
  * This variant doesn't store events in state, it just triggers a callback.
  * Useful for triggering refetches or side effects without re-renders.
  *
- * @param type - Metadata type to subscribe to
+ * @param type - Metadata type to subscribe to. Same {@link MetadataEventSubject}
+ *   narrowing as {@link useMetadataSubscription} (#4627).
  * @param callback - Callback to invoke on events
  * @param options - Optional filters
  *
@@ -130,7 +141,7 @@ export function useDataSubscription(
  * ```
  */
 export function useMetadataSubscriptionCallback(
-  type: string,
+  type: MetadataEventSubject,
   callback: (event: MetadataEvent) => void,
   options?: { packageId?: string }
 ): void {

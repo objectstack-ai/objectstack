@@ -526,6 +526,7 @@
     "MetadataEndpointsConfigSchema (const)",
     "MetadataEvent (type)",
     "MetadataEventSchema (const)",
+    "MetadataEventSubject (type)",
     "MetadataEventType (type)",
     "MetadataExistsResponse (type)",
     "MetadataExistsResponseSchema (const)",
