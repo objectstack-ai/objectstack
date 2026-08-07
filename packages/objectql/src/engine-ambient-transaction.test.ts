@@ -341,6 +341,55 @@ describe('ScopedContext.transaction joins the ambient transaction (ADR-0067 D2, 
     expect(committedNames('thing')).toEqual(['standalone']);
   });
 
+  /**
+   * The OTHER half of ADR-0067 D2's rationale: the second `beginTransaction`
+   * asks the pool for a second connection, and on a single-connection pool
+   * (the knex/SQLite one D2 names) there is no second connection to give.
+   *
+   * The real pool BLOCKS there — that is the deadlock — and a test that
+   * modelled the block faithfully would fail only by hitting vitest's timeout:
+   * slow, and flaky under parallel load. So this double models a pool of size 1
+   * WITH an acquire timeout, which refuses the second checkout instead of
+   * queueing for it. The refusal is a stand-in for the hang; what is measured
+   * honestly either way is the thing that causes both — whether a second
+   * connection is asked for at all.
+   */
+  it('never asks for a second connection — a single-connection pool survives the nested call', async () => {
+    let checkedOut = false;
+    const checkouts: number[] = [];
+    const d = makeRollbackHonestDriver();
+    d.driver.beginTransaction = async () => {
+      if (checkedOut) {
+        // Where a real single-connection pool would wait forever.
+        throw new Error('pool exhausted: no connection available (max=1)');
+      }
+      checkedOut = true;
+      checkouts.push(checkouts.length + 1);
+      return { __trx: 'only' };
+    };
+    d.driver.commit = async () => { checkedOut = false; };
+    d.driver.rollback = async () => { checkedOut = false; };
+
+    const oneConn = new ObjectQL();
+    oneConn.registerDriver(d.driver, true);
+    await oneConn.init();
+    oneConn.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+    (oneConn as any).registerHook(
+      'afterInsert',
+      async (ctx: any) => {
+        if (ctx.result?.name !== 'outer') return;
+        await ctx.api.transaction(async () => { /* joins — asks for nothing */ });
+      },
+      { object: 'thing' },
+    );
+
+    await expect(
+      oneConn.transaction(async () => { await oneConn.insert('thing', { name: 'outer' }); }),
+    ).resolves.toBeUndefined();
+
+    expect(checkouts).toHaveLength(1);
+  });
+
   it('does not join a transaction that has already closed — the store does not leak', async () => {
     await engine.transaction(async () => {
       await engine.insert('thing', { name: 'covered' });
