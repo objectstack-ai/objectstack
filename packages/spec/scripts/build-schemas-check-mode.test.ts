@@ -1746,7 +1746,7 @@ describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, 
       // The anchor moved, and the line says which rev and on whose authority.
       expect(output).toContain(`anchors on ${forkBase.slice(0, 12)} rather than on`);
       expect(output).toContain("origin/main's own authorable-surface.base.json names the same commit");
-      expect(output).not.toContain('using origin/main tip');
+      expect(output).not.toContain('no merge base is walkable here');
       // The defect itself: under the tip anchor this run exited 1 naming
       // MAIN_ADDED_KEY as an unproven deletion.
       expect(output).not.toContain('deleted without proof');
@@ -1847,8 +1847,8 @@ describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, 
 
       const { status, output } = run(['--check']);
 
-      expect(output).toContain(`using origin/main tip ${mainTip.slice(0, 12)} as the baseline anchor`);
-      expect(output).toContain('no upstream anchor was usable here');
+      expect(output).toContain('no merge base is walkable here, and no upstream anchor was usable');
+      expect(output).toContain(`anchors on the origin/main TIP ${mainTip.slice(0, 12)} instead`);
       expect(output).toContain('fetch-depth: 0');
       expect(status).toBe(1);
       expect(output).toContain('deleted without proof');

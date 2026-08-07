@@ -790,8 +790,48 @@ in-scope,验收依据 …」),维护者可否决。
 
 (**分诊座位的活** —— 执行座位跳过本步,rule 4。)
 The maintainer does not pre-sort the backlog. On every round (and every
-idle check-in), sweep issues that carry no `pm:*` / `needs-user-decision`
-label and classify each:
+idle check-in), sweep every issue matching **任一**析取,并逐张分类:
+
+1. **无 `pm:*`、无 `needs-user-decision`、也无 `domain:*`** —— 全裸卡。今天的
+   规则,判据不变;`domain:*` 一项此前只活在实践里(带车道标签的单被读作
+   「已路由」而跳过),析取 3 出现后必须写明,否则两条互相吞掉。
+2. **有 `pm:queue` 但无 `domain:*`** —— ⚠️ **仅限 `objectstack-ai/objectstack`**。
+3. **有 `domain:*` 但无 pm-state**(`pm:queue` / `pm:dispatched` / `pm:blocked` /
+   `pm:on-hold` / `finding` / `needs-user-decision`)。
+
+⏳ **析取 2、3 只取 `updated_at` 早于 ~2 分钟前的卡**(析取 1 无此限)。
+
+**为什么 2、3 不是可选项。** `domain:*` 是**路由**、pm-state 是**状态机**,只带
+其一的单对两个视图**同时**不可见 —— 队列按 pm-state 取,车道认领按 `domain:*`
+取,而旧判据「带了 `pm:*` 就跳过」把补票的最后一道也关上了。这不是假想:同形
+已四次实测(两次各停滞整日,一次同日六张 11:00–13:55Z 立、16:47Z 才被两个 PM
+会话**手工**报回来才捞起)。
+
+- 析取 2 的生产者是**协议本身**,不是某个车道的坏习惯:跨座位转移卡(转出方
+  按转移协议自带 `pm:queue`)与队列管家 Routine 的队列健康卡,**按设计**预先
+  带队列标签,又**按单一生产者规则不准自打 `domain:*`**(管家原话:「no
+  `domain:*` / `repo:*` label applied — routing labels are the triage seat's
+  single-producer territory. Only `pm:queue` is set here.」)。于是它们在看板上
+  显示可派、实际**谁都不能认领**。
+- 析取 3 那张实测卡是**分诊自己写的纪律的反例**:同一条「立单方别自打
+  `domain:*`、留给分诊」当天早上刚写在另一张卡上,几小时后 PM 立单时照犯,
+  卡片对队列与扫描同时隐身 ~69 分钟。⇒ **纪律写在别处不够,判据本身必须兜
+  住** —— 这是本节存在的理由,不是修辞。
+
+⚠️ **析取 2 必须 repo-scoped,否则它自己就是噪声源。** 兄弟仓(objectui /
+cloud)是**整仓座位**,车道标签在那里**根本不存在**(实测 2026-08-07:objectui
+的 `domain:devx` 查无此标签),所以「有 `pm:queue`、无 `domain:*`」是它们**每一
+张**队列卡的正常形状 —— 不限定就一次扫进 objectui 38 + cloud 19 张(同日实测
+open 计数),把分诊轮淹掉。
+
+⏳ **年龄下限键在 `updated_at`,不是 `created_at`。** 部分标注状态有两个来源:
+刚立还没打完标签的新卡,以及**一次标签写入**把老卡打成半标注 —— 分诊自己打
+标签就是分开的两次写(`domain:*` 与 `pm:queue` 各一次),中间那几秒正好落在
+析取 2 / 3 里。按 `created_at` 判会漏掉后一种,按 `updated_at` 两种都兜住;代价
+是一条评论也会把卡推迟一轮,可接受(下一轮即取到)。
+
+**分类动作**(对上面选中的每一张;析取 2 选中的卡只欠 `domain:*`,补它即可,
+⛔ 不重打已在位的 `pm:queue`):
 
 - **Auto-queue (`pm:queue`)**: a concrete defect with a named location or
   repro; a scoped tooling/gate fix; a restore-invariant finding; a
@@ -816,6 +856,9 @@ label and classify each:
 `tracking` 与 `status:parked` 的 issue(它们的状态由别的机制管,分诊不重判)、
 以及 **#4604 与全部 `pm:seat` 座位贴**(协议载体,不是待分诊的工作)。存量大时**每轮
 限量、优先最新**(试点用 ~15 条/轮),防一轮吃光存量把轮次拖过一个调度周期。
+⚠️ 排除项在析取 3 下更吃重:parked 单**正常形状**就是「带 `domain:*`、无
+pm-state」(2026-08-07 实测:3 张 `status:parked` 全部长这样),漏判排除就是每轮
+把它们重新扫回来一次。
 
 #### 发现分诊轮 —— 队列的出水口(objectstack#4949)
 

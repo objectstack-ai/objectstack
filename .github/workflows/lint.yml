@@ -489,6 +489,22 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # The authorable-surface deletion gate (#4650) below anchors on the
+          # MERGE BASE of HEAD with origin/main — that is the only anchor under
+          # which "a key this PR deleted" and "a key main gained since the fork
+          # point" are different facts. A shallow clone has no walkable
+          # ancestry, so `merge-base` fails and the gate falls back to
+          # origin/main's TIP, where those two facts collapse into one and the
+          # SECOND one is reported as the first: #6359 had PR #6356 (which
+          # touches no spec file at all) go red for "deleting"
+          # ui/BulkActionDef:requiredPermissions — a key main had just ADDED.
+          #
+          # Same line as the ESLint job above, opposite failure mode, and that
+          # is why it is spelled out here rather than cross-referenced: shallow
+          # degrades the slot-lookup ratchet to "not verified" (a false GREEN),
+          # and degrades this gate to a false RED on an innocent PR.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7

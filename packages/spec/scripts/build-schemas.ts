@@ -1664,8 +1664,17 @@ function resolveSurfaceBase(): SurfaceBaseResolution | null {
   const git = gitInPackage;
   const committed = readCommittedSurfaceBase();
 
-  // CI's typecheck job checks out shallow with no branch refs, so fetch the
-  // one ref this check needs (depth 1 — a single snapshot) before giving up.
+  // A checkout with no branch refs (any `fetch-depth: 1` job) cannot name
+  // origin/main at all, so fetch the one ref this check needs before giving up.
+  //
+  // This fetch is GUARDED by the probe above and that is load-bearing (#6359):
+  // where the ref already resolves — every full clone, and every CI job that
+  // checks out `fetch-depth: 0` — it does not run, so it cannot undo the depth
+  // its job asked for. Where it does run, it is `--depth=1` because the only
+  // thing it is trying to buy is the ability to NAME origin/main; deepening it
+  // here would silently make every shallow build pay for a full history it was
+  // configured not to want. The job that needs walkable ancestry declares that
+  // in its checkout step, which is where the cost is visible.
   let tipProbe = git('rev-parse', '--verify', '--quiet', 'origin/main^{commit}');
   if (tipProbe.status !== 0) {
     git('fetch', '--quiet', '--depth=1', 'origin', '+refs/heads/main:refs/remotes/origin/main');
@@ -1703,11 +1712,20 @@ function resolveSurfaceBase(): SurfaceBaseResolution | null {
             `   keys are read from git at that commit, never from ${SURFACE_BASE_FILE_NAME} itself.`,
         );
       } else {
+        // #6359's diagnostic, kept for the one arm it still describes. With no
+        // upstream anchor to move to, the tip is all this run has — so the
+        // direction it misjudges is exactly what the reader needs spelled out,
+        // because the verdict it produces ("deleted without proof") reads like a
+        // severe spec violation and costs far more to diagnose than to fix
+        // (#6359 was one CI job missing `fetch-depth: 0`, and the PR it reddened,
+        // #6356, had not touched packages/spec at all).
         console.log(
-          `   (shallow history — using origin/main tip ${tip.slice(0, 12)} as the baseline anchor)\n` +
-            `   ⚠️  no upstream anchor was usable here, so this run keeps the tip (#6452). If this is\n` +
-            `      CI, the job's checkout needs \`fetch-depth: 0\`: under a tip anchor a key main added\n` +
-            `      after this branch forked is indistinguishable from a key this branch deleted.`,
+          `   (shallow history — no merge base is walkable here, and no upstream anchor was usable\n` +
+            `    either (#6452), so this run anchors on the origin/main TIP ${tip.slice(0, 12)} instead.\n` +
+            `    ⚠️  Under a tip anchor a key that main ADDED after this branch forked is\n` +
+            `    indistinguishable from a key this branch DELETED. If a deletion is reported below for\n` +
+            `    a file you did not touch, check that first — and if this is CI, the job's checkout\n` +
+            `    step needs \`fetch-depth: 0\` (#6359).)`,
         );
       }
     }

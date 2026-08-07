@@ -125,6 +125,91 @@ describe('DashboardWidgetSchema (dataset-bound)', () => {
   });
 });
 
+/**
+ * Message ORDER on `strictWidgetAnalyticsError` (#6416, applying #5955's ruling).
+ *
+ * This map is a hand-written `$ZodErrorMap`, so neither #5955 (which moved the
+ * history sentence to the end inside the shared `strictUnknownKeyError`) nor
+ * #5593 (which migrates the direct call sites to `strictObject`) reached it. It
+ * carried the same defect: a ~150-char history sentence sitting BETWEEN the
+ * offending key and whichever of the three prescription branches fixes it —
+ * the ADR-0021 dataset migration, the objectui `component`/`data` quarantine,
+ * and the #5022 drill near-key answer — pushing all three past the front of the
+ * single-line renders several consumers use.
+ *
+ * ORDER pins, not presence checks: the reorder deletes nothing, so every
+ * `toContain` in the block above stays green either way. An edit that folds the
+ * sentence back into the middle passes all of them and fails here.
+ */
+describe('strictWidgetAnalyticsError message order — fix before history (#6416)', () => {
+  const HISTORY =
+    'Undeclared top-level keys were dropped silently before strict validation, ' +
+    'shipping inert metadata; a stale or mis-layered key is now a loud parse error.';
+
+  const base = { id: 'w1', type: 'metric', dataset: 'sales', values: ['revenue'] };
+  const messageFor = (extra: Record<string, unknown>) => {
+    const res = DashboardWidgetSchema.safeParse({ ...base, ...extra } as any);
+    expect(res.success).toBe(false);
+    const unknown = res.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown).toBeDefined();
+    return unknown!.message;
+  };
+
+  const orderPin = (label: string, extra: Record<string, unknown>, key: string, fix: string) => {
+    it(label, () => {
+      const m = messageFor(extra);
+      // 1. which key is wrong — and nothing before it
+      expect(m.startsWith(`Unrecognized key(s) on this dashboard widget: \`${key}\`.`)).toBe(true);
+      // 2. the fix, ahead of the history
+      expect(m).toContain(fix);
+      expect(m.indexOf(fix)).toBeLessThan(m.indexOf(HISTORY));
+      // 3. the history sentence, verbatim, last — moved, never dropped
+      expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+    });
+  };
+
+  orderPin(
+    'legacy inline-analytics branch: the ADR-0021 dataset prescription comes first',
+    { categoryField: 'stage' },
+    'categoryField',
+    'The pre-ADR-0021 inline analytics shape',
+  );
+
+  orderPin(
+    'quarantine branch: the objectui-internal verdict comes first',
+    { component: {} },
+    'component',
+    '`component` and inline `data` are objectui-internal renderer capabilities',
+  );
+
+  orderPin(
+    'drill branch (#5022): the "AUTOMATIC" answer comes first',
+    { drillDown: { enabled: true } },
+    'drillDown',
+    'Drill-through on a dashboard is AUTOMATIC and not configurable per widget',
+  );
+
+  it('keeps the whole drill answer ahead of the history, not just its opening', () => {
+    // The #5022 branch is the longest of the three; its two "where the real
+    // drills live" pointers are the actionable part and must not slip behind.
+    const m = messageFor({ drillDown: { enabled: true } });
+    expect(m.indexOf('`ChartDrillDownSchema`')).toBeLessThan(m.indexOf(HISTORY));
+    expect(m.indexOf('`ReportSchema.drilldown` (ADR-0021 D2, on by default).'))
+      .toBeLessThan(m.indexOf(HISTORY));
+  });
+
+  it('is unchanged in SHAPE when no branch matches — full-message pin', () => {
+    expect(messageFor({ colourVariant: 'blue' }))
+      .toBe(`Unrecognized key(s) on this dashboard widget: \`colourVariant\`. ${HISTORY}`);
+  });
+
+  it('emits the history exactly once, whatever the key count', () => {
+    const m = messageFor({ categoryField: 'stage', alsoWrong: 1, andThis: 2 });
+    expect(m.split(HISTORY)).toHaveLength(2);
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+  });
+});
+
 describe('DashboardSchema', () => {
   it('parses a dataset-bound dashboard', () => {
     const d = DashboardSchema.parse({
