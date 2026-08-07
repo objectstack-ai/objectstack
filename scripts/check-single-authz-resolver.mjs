@@ -238,8 +238,9 @@ const EXCLUDED_EXT = /\.(?:test|d)\.[mc]?ts$/;
  * Kept deliberately broad on the callee (any identifier CONTAINING one of these, so
  * `ql.find`, `dataEngine.findOne`, a bare `query(...)` and the canonical resolver's own
  * `tryFind` helper all count) and strict on the argument (the table as a quoted literal,
- * reached without crossing another quote or a closing paren — i.e. an early argument of
- * THAT call, not of something nested inside it).
+ * reached without crossing another quote or EITHER paren — i.e. an early argument of THAT
+ * call, not of something nested inside it, so `find(wrap('sys_user_position'))` is not a
+ * read of that table).
  */
 const READ_VERBS = 'find|query|select|count|aggregate';
 
