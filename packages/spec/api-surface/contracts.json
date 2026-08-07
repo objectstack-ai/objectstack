@@ -72,6 +72,8 @@
     "EmailAttachment (interface)",
     "EmailDeliveryStatus (type)",
     "EngineSchemaRegistryView (interface)",
+    "EngineTransactionInfo (interface)",
+    "EngineTransactionOptions (interface)",
     "ExecuteUpgradeInput (interface)",
     "ExplainAccessRequest (interface)",
     "ExportJobDownload (interface)",

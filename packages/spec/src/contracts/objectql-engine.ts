@@ -108,6 +108,55 @@ export interface EngineSchemaRegistryView {
 }
 
 /**
+ * Options for {@link IObjectQLEngine.transaction} (#5696 — the tightening half
+ * of #4619, revising ADR-0119 D1).
+ *
+ * One member today, deliberately: the surface grows when a consumer proves it
+ * needs more, the same evidence bar this file's header sets for members.
+ */
+export interface EngineTransactionOptions {
+    /**
+     * Fail CLOSED when the datasource cannot give a real transaction.
+     *
+     * Default (`undefined` / `false`) keeps ADR-0119 D1's declared degrade: a
+     * driver without `beginTransaction` runs the callback with no transaction
+     * and no rollback, warning once. That degrade is right for callers who can
+     * live without atomicity (test doubles, in-memory drivers) and wrong for
+     * callers whose whole reason to open a transaction is the rollback.
+     *
+     * With `require: true` the engine THROWS instead of degrading, before the
+     * callback runs — so a caller that cannot tolerate losing atomicity states
+     * it once, at the call site, instead of re-deriving `batchData`'s probe.
+     * That probe is the precedent being generalized here (ADR-0119 D4, cited in
+     * older text as ADR-0118 D4 — see that ADR's renumbering note): an `atomic`
+     * request refuses rather than silently running best-effort.
+     */
+    require?: boolean;
+}
+
+/**
+ * What {@link IObjectQLEngine.transaction} tells its callback about the
+ * transaction the callback is running in (#5696).
+ */
+export interface EngineTransactionInfo {
+    /**
+     * `true` when THIS call opened the transaction and therefore owns its
+     * commit/rollback; `false` when it JOINED an already-open ambient one
+     * (ADR-0067 D2) and some outer caller owns the outcome.
+     *
+     * The join is correct and stays — a nested `begin` would take a second
+     * connection (deadlocking a single-connection SQLite pool) and would not be
+     * covered by the outer rollback. What was missing is that the callback
+     * could not TELL: a joined callback's `throw` unwinds work the outer owner
+     * may still commit or roll back on its own terms, and guarantees phrased
+     * as "this whole unit rolls back together" (`batchData`'s rollback
+     * response, ADR-0119 D4) hold only for the owner. A callback that must not
+     * promise what it does not control reads `owned` and says so.
+     */
+    owned: boolean;
+}
+
+/**
  * The full ObjectQL engine, as the `objectql` slot's consumers use it.
  *
  * Members beyond {@link IDataEngine} are REQUIRED, not optional: `ObjectQL`
@@ -193,7 +242,7 @@ export interface IObjectQLEngine extends IDataEngine {
     /** Drop the memoized migration-flag reads (the attestation may race a fast boot's first read). */
     invalidateDataMigrationFlags(): void;
 
-    // ── Transactions (ADR-0119 D1) ───────────────────────────────────────
+    // ── Transactions (ADR-0119 D1, revised by #5696/#5351) ───────────────
     /**
      * Run `callback` inside ONE driver transaction — the ADR-0034 ambient
      * transaction. The callback receives a context carrying the handle, which
@@ -213,18 +262,60 @@ export interface IObjectQLEngine extends IDataEngine {
      * header; callers that tolerate test doubles keep their runtime
      * `typeof === 'function'` probes, which types do not replace.
      *
-     * TWO CAVEATS ARE PART OF THE DECLARED MEANING (ADR-0119 D1), not
-     * behaviour to be discovered: this covers the DEFAULT driver only — objects
-     * routed elsewhere by `setDatasourceMapping` are written outside it — and
-     * when that driver has no `beginTransaction` the callback runs with NO
-     * transaction and NO rollback. A caller that cannot tolerate silently
-     * losing atomicity must fail closed itself rather than assume it held; see
-     * `batchData`'s atomic gate (ADR-0119 D4). Tightening both is tracked by
-     * the ADR's follow-up.
+     * ## The transaction still covers ONE datasource — but no longer silently
+     *
+     * A transaction is opened on the DEFAULT driver and covers only that
+     * driver's connection; cross-driver atomicity is NOT provided (no
+     * two-phase commit — deliberately out of scope, #4619). What changes with
+     * #5696/#5351 is what happens to a write inside the transaction that
+     * routes somewhere else. Until v17 the engine handed the OTHER driver the
+     * default driver's transaction handle unconditionally, so the statement
+     * executed on the wrong connection — the text here used to say such writes
+     * ran "outside" the transaction, which measurement disproved (#5351: on a
+     * real SQL driver the write reached a database that has no such table, and
+     * the row was lost with only a log line behind it). The engine now compares
+     * the resolved driver against the transaction's OWNER (by instance
+     * identity) and takes one of two paths:
+     *
+     * - **Business writes are REFUSED**, loudly and by name, instead of
+     *   silently partially committing. The caller chooses explicitly: keep the
+     *   objects of one transaction on one datasource, or split the work into
+     *   per-datasource units and reconcile them. Refusing is the point — a
+     *   caller who asked for atomicity must not be handed best-effort without
+     *   being told (the same posture as `batchData`'s atomic gate).
+     * - **System writes carved out (#5351)**: objects whose `lifecycle.class`
+     *   is `audit` / `telemetry` / `event` — the append-only ledgers ADR-0057
+     *   §3.6 routes to a dedicated datasource — are executed OUTSIDE the
+     *   ambient transaction, on their own connection, with NO handle from
+     *   another driver. They therefore SURVIVE a rollback of the business
+     *   transaction ("orphan rows"): an audit row may describe a write that was
+     *   rolled back. That is the deliberate direction of error for an
+     *   append-only compliance ledger — an extra reconcilable row beats a
+     *   missing row for a write that DID commit — and it is what lets a hook
+     *   author write an ordinary `afterInsert` audit hook without knowing
+     *   datasource routing exists. Recorded in the ADR-0067/ADR-0119 revision.
+     *
+     * ## The degrade is now a caller's choice, not a fixed caveat
+     *
+     * When the default driver has no `beginTransaction`, the callback still
+     * runs with NO transaction and NO rollback (warning once) — unchanged, and
+     * still declared. `opts.require: true` turns that degrade into a THROW for
+     * callers who cannot tolerate it; see {@link EngineTransactionOptions}.
+     *
+     * ## The callback is told whether it owns the transaction
+     *
+     * The second callback argument carries `owned` — `true` when this call
+     * opened the transaction, `false` when it joined an outer one (ADR-0067
+     * D2). See {@link EngineTransactionInfo}. Existing one-argument callbacks
+     * are unaffected.
      *
      * `trxCtx`/`baseContext` are the engine-local execution-context shape, left
      * loose here per this file's edge-typing rule; consumers narrow at the call
      * site.
      */
-    transaction<T>(callback: (trxCtx: any) => Promise<T>, baseContext?: any): Promise<T>;
+    transaction<T>(
+        callback: (trxCtx: any, info: EngineTransactionInfo) => Promise<T>,
+        baseContext?: any,
+        opts?: EngineTransactionOptions,
+    ): Promise<T>;
 }

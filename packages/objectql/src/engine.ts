@@ -33,6 +33,8 @@ import {
   IDataDriver,
   IDataEngine,
   type IObjectQLEngine,
+  type EngineTransactionInfo,
+  type EngineTransactionOptions,
   Logger,
   createLogger,
   withTransientRetry,
@@ -41,6 +43,7 @@ import {
   resolveFilterTokens,
 } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
+import { TransactionUnsupportedError } from './transaction-errors.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import {
   DriverConnectError,
@@ -6653,24 +6656,31 @@ export class ObjectQL implements IObjectQLEngine {
    *   the API safe to call on drivers without ACID support (e.g. the
    *   in-memory driver in tests). It is DECLARED behaviour (ADR-0119 D1), not
    *   a bug to be discovered — but since v17 it is no longer *silent*: the
-   *   degrade warns once per driver (#4619, {@link warnTransactionUnsupported}).
+   *   degrade warns once per driver (#4619, {@link warnTransactionUnsupported}),
+   *   and a caller who cannot live with it says so with `opts.require: true`,
+   *   which THROWS {@link TransactionUnsupportedError} instead (#5696 point 1).
    * - On callback success the transaction is committed; on any thrown error
    *   it is rolled back and the original error is re-thrown.
    * - The transaction covers the DEFAULT datasource only — also declared
    *   (ADR-0119 D1). A write that `setDatasourceMapping` routes elsewhere runs
-   *   OUTSIDE it and survives the rollback; that split is now reported at
-   *   `error` from the write path (#4619,
-   *   {@link reportWriteOutsideTransaction}). Reporting it does not fix it:
-   *   refusing, or committing across drivers, would change the declared
-   *   contract and is tracked by #4619's spec half.
+   *   OUTSIDE it and survives the rollback; that split is reported at `error`
+   *   from the write path (#4619, {@link reportWriteOutsideTransaction}).
+   * - The callback's SECOND argument says whether this call owns the
+   *   transaction (#5696 point 3): `owned: true` when this call opened it,
+   *   `false` when it JOINED an outer one (ADR-0067 D2) — and `false` on the
+   *   degrade path too, where there is no transaction to own. A callback whose
+   *   own guarantees are phrased as "this all rolls back together" only holds
+   *   that promise when it owns the transaction; before this signal it had no
+   *   way to tell. One-argument callbacks are unaffected.
    *
    * Use case: multi-step operations that must be atomic (e.g. CRM
    * `convertLead`, which creates an account + contact + opportunity + flips
    * the lead in a single unit of work).
    */
   async transaction<T>(
-    callback: (trxCtx: any) => Promise<T>,
+    callback: (trxCtx: any, info: EngineTransactionInfo) => Promise<T>,
     baseContext?: any,
+    opts?: EngineTransactionOptions,
   ): Promise<T> {
     // ADR-0067 D2 — JOIN an already-open ambient transaction instead of
     // opening a nested driver transaction. A nested begin would acquire a
@@ -6682,15 +6692,29 @@ export class ObjectQL implements IObjectQLEngine {
     // sys-metadata repository's `withTxn`, hook-driven writes, …).
     const ambient = this.txStore.getStore();
     if (ambient?.transaction) {
-      return callback({ ...(baseContext ?? {}), transaction: ambient.transaction });
+      // JOINED, not owned: some outer caller decides commit vs rollback (#5696).
+      return callback(
+        { ...(baseContext ?? {}), transaction: ambient.transaction },
+        { owned: false },
+      );
     }
     const driver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
     const drv = driver as any;
     if (!drv?.beginTransaction) {
+      const datasource = this.defaultDriver ?? drv?.name;
+      if (opts?.require === true) {
+        // Fail CLOSED (#5696 point 1): the caller declared it cannot tolerate
+        // running without a rollback, so refuse BEFORE the callback writes
+        // anything rather than degrade behind a warning it may never read.
+        // Generalizes `batchData`'s atomic gate (ADR-0119 D4).
+        throw new TransactionUnsupportedError(datasource ?? '<no default datasource>');
+      }
       // Declared degrade (ADR-0119 D1) — behaviour unchanged, but no longer
       // mute: the caller asked for atomicity and is not getting it (#4619).
-      this.warnTransactionUnsupported(this.defaultDriver ?? drv?.name);
-      return callback(baseContext);
+      this.warnTransactionUnsupported(datasource);
+      // `owned: false` — honest: there is no transaction here to own, and no
+      // rollback the callback may promise on the strength of it.
+      return callback(baseContext, { owned: false });
     }
     const trx = await drv.beginTransaction();
     const trxCtx = { ...(baseContext ?? {}), transaction: trx };
@@ -6699,7 +6723,7 @@ export class ObjectQL implements IObjectQLEngine {
       // queries during writes reuse this transaction's connection (ADR-0034).
       const result = await this.txStore.run(
         { transaction: trx, scope: this.newTransactionScope(driver!) },
-        () => callback(trxCtx),
+        () => callback(trxCtx, { owned: true }),
       );
       if (drv.commit) await drv.commit(trx);
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
@@ -7292,8 +7316,16 @@ export class ScopedContext {
    * caveats report through the SAME engine-side helpers the engine's own
    * `transaction()` uses, so the sandbox surface is no quieter than the direct
    * one and "say it once" holds across both.
+   *
+   * `opts.require` and the callback's `owned` argument (#5696) are honoured
+   * here for the same reason: a second implementation of one primitive must not
+   * become a second DIALECT of it. A hook body that fails closed through
+   * `ctx.api.transaction` gets the same refusal the engine's own surface gives.
    */
-  async transaction(callback: (trxCtx: ScopedContext) => Promise<any>): Promise<any> {
+  async transaction(
+    callback: (trxCtx: ScopedContext, info: EngineTransactionInfo) => Promise<any>,
+    opts?: EngineTransactionOptions,
+  ): Promise<any> {
     const engine = this.engine as any;
 
     // Find the default driver for transaction support
@@ -7302,11 +7334,16 @@ export class ScopedContext {
       : undefined;
 
     if (!driver?.beginTransaction) {
+      const datasource = engine.defaultDriver ?? driver?.name;
+      if (opts?.require === true) {
+        // Same fail-closed refusal as the engine surface (#5696 point 1).
+        throw new TransactionUnsupportedError(datasource ?? '<no default datasource>');
+      }
       // No transaction support — execute directly. Declared (ADR-0119 D1), but
       // said out loud since #4619: the caller asked for atomicity and the
       // callback is about to run without any.
-      engine.warnTransactionUnsupported?.(engine.defaultDriver ?? driver?.name);
-      return callback(this);
+      engine.warnTransactionUnsupported?.(datasource);
+      return callback(this, { owned: false });
     }
 
     const trx = await driver.beginTransaction();
@@ -7327,7 +7364,9 @@ export class ScopedContext {
       txStore ? txStore.run({ transaction: trx, scope }, fn) : fn();
 
     try {
-      const result = await runIn(() => callback(trxCtx));
+      // This surface always OPENS (it has no ADR-0067 D2 join branch of its
+      // own), so a callback that reaches here owns the outcome.
+      const result = await runIn(() => callback(trxCtx, { owned: true }));
       if (driver.commit) await driver.commit(trx);
       else if (driver.commitTransaction) await driver.commitTransaction(trx);
       return result;

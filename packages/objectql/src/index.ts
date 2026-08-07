@@ -67,6 +67,10 @@ export type {
   DatasourceUnavailableKind,
 } from './driver-connect-errors.js';
 export type { InsertManyRowOutcome } from './engine.js';
+// [#5696] Thrown by `transaction(cb, base, { require: true })` when the
+// datasource cannot give a real transaction. Exported so a caller that fails
+// closed can narrow on the class; `code` is the boundary-crossing identity.
+export { TransactionUnsupportedError } from './transaction-errors.js';
 
 // [#4550] The delete-dispatch contract, exported so a TEST DOUBLE that stands
 // in for the engine can import the producer's own decision rather than

@@ -99,9 +99,18 @@ export function engineCanRollBack<T>(engine: T): engine is T & EngineWithTransac
   return !defaultDriver || typeof (defaultDriver as { beginTransaction?: unknown }).beginTransaction === 'function';
 }
 
-/** What {@link engineCanRollBack} proves is present. Mirrors `IObjectQLEngine['transaction']`. */
+/**
+ * What {@link engineCanRollBack} proves is present.
+ *
+ * Typed FROM the contract rather than transcribed from it (#5696): a hand-copy
+ * mirrors the signature only until the contract moves, and this one had already
+ * started to — it predates `opts.require` and the callback's `owned` argument.
+ * ADR-0119 D1 blessed exactly this shape for the narrow host surfaces
+ * (`transaction?: IObjectQLEngine['transaction']`); a *narrow* surface may stay
+ * narrow, but it may not drift from the real signature.
+ */
 export interface EngineWithTransaction {
-  transaction<R>(callback: (trxCtx: any) => Promise<R>, baseContext?: any): Promise<R>;
+  transaction: IObjectQLEngine['transaction'];
 }
 
 /** What a forward/compensate callback is told about the chunk it is running. */
