@@ -541,10 +541,14 @@ const DECLARED_AGGREGATE_FUNCTIONS: readonly string[] = AggregationFunction.opti
  *
  * Judged against the declared enum CASE-SENSITIVELY, which is what the enum is:
  * `COUNT_DISTINCT` is not `count_distinct`, and answering "declared but not
- * implemented" for it would be false. It also keeps the two faces in step —
- * this driver reads the name raw while the remote transport lowercases it
- * before its own lookup, so classifying on each face's post-normalisation name
- * would hand `COUNT_DISTINCT` a 400 here and a 501 there for one query.
+ * implemented" for it would be false. When this was written the remote transport
+ * still lowercased the name before its own lookup while this driver read it raw,
+ * so classifying on each face's post-normalisation name would have handed
+ * `COUNT_DISTINCT` a 400 here and a 501 there for one query. #6203 has since
+ * removed that lowercasing, so the two faces now normalise alike — but the
+ * case-sensitive judgement here is not merely a survivor of that fork: the enum
+ * IS case-sensitive (`AggregationFunction.parse('COUNT')` throws), so this is
+ * what "declared" means, whatever any transport does before asking.
  */
 function undeclaredAggregateFunctionError(func: string): Error {
   const err = new Error(
