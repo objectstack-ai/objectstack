@@ -188,18 +188,32 @@ const dataWarehousePipeline: ETLPipeline = {
 
 ### Purpose
 
-Complete, production-grade integration with external systems. Includes authentication, security, webhooks, rate limiting, and full lifecycle management.
+Complete, production-grade integration with external systems. Includes authentication, security, webhooks, retry policies, and full lifecycle management.
 
 ### Key Features
 
 - ✅ **Authentication**: OAuth2, JWT, SAML, API Key, Basic Auth
 - ✅ **Webhooks**: Bidirectional event notifications
-- ✅ **Rate Limiting**: Token bucket, leaky bucket algorithms
 - ✅ **Retry Policies**: Exponential backoff, circuit breaker
 - ✅ **Field Mapping**: With transformations and data type conversion
 - ✅ **Conflict Resolution**: Multiple strategies (`ConnectorConflictResolution`)
 - ✅ **Security**: Signature verification, encryption
 - ✅ **Monitoring**: Health checks, metrics, logging
+- ❌ **Outbound rate limiting**: **not provided** — at this or any other level; see below
+
+> **There is no outbound rate limiting.** This list used to carry a ticked
+> "**Rate Limiting**: Token bucket, leaky bucket algorithms" line. It named two
+> algorithms that never existed. `connector.rateLimitConfig` — and the entire
+> `ConnectorRateLimitConfig` / `RateLimitStrategy` shape behind it — was removed
+> in `@objectstack/spec` 17.0.0 (#4911, ADR-0049 D2), because **no outbound
+> rate-limiting engine ever existed**. The platform's only token bucket
+> (runtime `security/rate-limit.ts`) throttles **INBOUND** requests *to* us;
+> nothing throttles the calls a connector makes *out*. Do **not** substitute
+> `shared`'s `RateLimitConfig` — that is the inbound limiter and would cap the
+> wrong direction. **Until an outbound throttle exists, rate-limit at the
+> connector provider or upstream gateway.** What L3 does declare for a
+> rate-limited upstream is `retryConfig` — whose `retryableStatusCodes` default
+> `[408, 429, 500, 502, 503, 504]` includes `429` — and `health.circuitBreaker`.
 
 ### Use Cases
 
@@ -353,7 +367,10 @@ const sapConnector: ConnectorInput = {
 ### Best Practices
 
 - **Security First**: Always use encrypted credentials and secure storage
-- **Rate Limiting**: Respect external API rate limits to avoid throttling
+- **Rate Limiting**: Respect the upstream API's limits — and enforce that at the
+  connector provider or upstream gateway, since the connector shape declares no
+  outbound throttle (#4911). `retryConfig` handles the `429` you get for exceeding a
+  limit; it does not keep you under one
 - **Error Handling**: Implement comprehensive retry logic with exponential backoff
 - **Monitoring**: Set up health checks and alerting for connector failures
 - **Testing**: Test authentication, sync, and webhook flows thoroughly
@@ -371,7 +388,7 @@ const sapConnector: ConnectorInput = {
 | Do you need multi-source aggregation? | **Yes** → L2 (ETL) |
 | Do you need real-time webhooks? | **Yes** → L3 (Connector) |
 | Do you need advanced authentication (OAuth2, SAML)? | **Yes** → L3 (Connector) |
-| Do you need rate limiting and retry policies? | **Yes** → L3 (Connector) |
+| Do you need retry policies and circuit breaking? | **Yes** → L3 (Connector) — `retryConfig`, `health.circuitBreaker`. Outbound **rate limiting** is not a reason to pick any level: no level provides it (#4911); throttle at the provider or gateway |
 | Is it a simple point-to-point sync with an external system? | **Yes** → L3 (Connector) with `syncConfig` |
 | Are you building a data warehouse pipeline? | **Yes** → L2 (ETL) |
 | Are you integrating with an enterprise system? | **Yes** → L3 (Connector) |
@@ -391,7 +408,7 @@ Use **L2 ETL Pipeline** for multi-source data warehousing.
 ```
 ObjectStack ↔ Enterprise Connector ↔ SAP
                     ↓
-               Webhooks, Auth, Rate Limiting
+               Webhooks, Auth, Retry / Circuit Breaker
 ```
 Use **L3 Enterprise Connector** for production-grade integrations — including
 straightforward point-to-point sync, via a connector instance with simple `auth`
@@ -444,7 +461,8 @@ and `ETLPipeline` is the author shape.
 
 ### From L2 to L3
 
-When your ETL pipeline needs webhooks, advanced auth, or rate limiting:
+When your ETL pipeline needs webhooks, advanced auth, or retry / circuit-breaker
+policies:
 
 **Before (L2):**
 ```typescript
