@@ -9,7 +9,7 @@
  */
 
 import type { QueryAST, DriverOptions } from '@objectstack/spec/data';
-import type { IDataDriver } from '@objectstack/spec/contracts';
+import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import {
   MongoClient,
   Db,
@@ -198,7 +198,7 @@ export class MongoDBDriver implements IDataDriver {
    * (#4484), which subsumes that divergence rather than fixing it.
    */
   private buildFindOptions(
-    query: QueryAST,
+    query: DriverQuery,
     session: FindOptions['session'],
     opts?: { singleRowLookup?: boolean },
   ): FindOptions {
@@ -233,7 +233,7 @@ export class MongoDBDriver implements IDataDriver {
     return findOptions;
   }
 
-  async find(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
@@ -245,7 +245,7 @@ export class MongoDBDriver implements IDataDriver {
     return results as Record<string, unknown>[];
   }
 
-  async findOne(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+  async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
@@ -363,7 +363,7 @@ export class MongoDBDriver implements IDataDriver {
     return result.deletedCount > 0;
   }
 
-  async count(object: string, query?: QueryAST, options?: DriverOptions): Promise<number> {
+  async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
@@ -434,7 +434,7 @@ export class MongoDBDriver implements IDataDriver {
     );
   }
 
-  async updateMany(object: string, query: QueryAST, data: Record<string, unknown>, options?: DriverOptions): Promise<number> {
+  async updateMany(object: string, query: DriverQuery, data: Record<string, unknown>, options?: DriverOptions): Promise<number> {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
@@ -452,7 +452,7 @@ export class MongoDBDriver implements IDataDriver {
     return result.modifiedCount;
   }
 
-  async deleteMany(object: string, query: QueryAST, options?: DriverOptions): Promise<number> {
+  async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
@@ -541,7 +541,7 @@ export class MongoDBDriver implements IDataDriver {
   // Query Plan Analysis
   // ===========================================================================
 
-  async explain(object: string, query: QueryAST, _options?: DriverOptions): Promise<unknown> {
+  async explain(object: string, query: DriverQuery, _options?: DriverOptions): Promise<unknown> {
     const collection = this.getCollection(object);
     const filter = translateFilter(query.where, this.temporalKindFor(object));
     const explanation = await collection.find(filter).explain('executionStats');
@@ -620,7 +620,7 @@ export class MongoDBDriver implements IDataDriver {
    * is still honoured, tie-breaker and all — that is the half this driver used
    * to drop entirely (objectstack#4419).
    */
-  private buildSortSpec(query: QueryAST, opts?: { singleRowLookup?: boolean }): Document | undefined {
+  private buildSortSpec(query: DriverQuery, opts?: { singleRowLookup?: boolean }): Document | undefined {
     const sort: Document = {};
     let lastDirection: 1 | -1 = 1;
     if (Array.isArray(query.orderBy)) {

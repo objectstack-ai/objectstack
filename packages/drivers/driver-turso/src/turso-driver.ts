@@ -20,6 +20,7 @@
  */
 
 import { SqlDriver, type SqlDriverConfig } from '@objectstack/driver-sql';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { Client } from '@libsql/client';
 import { RemoteTransport } from './remote-transport.js';
 import {
@@ -503,12 +504,12 @@ export class TursoDriver extends SqlDriver {
   // CRUD (remote mode overrides)
   // ===================================
 
-  override async find(object: string, query: any, options?: any): Promise<any[]> {
+  override async find(object: string, query: DriverQuery, options?: any): Promise<any[]> {
     if (this.isRemote) return this.formatRemoteRows(object, await this.remoteTransport!.find(object, this.toRemoteReadQuery(object, query)));
     return super.find(object, query, options);
   }
 
-  override async findOne(object: string, query: any, options?: any): Promise<any> {
+  override async findOne(object: string, query: DriverQuery, options?: any): Promise<any> {
     if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.findOne(object, this.toRemoteReadQuery(object, query, { singleRowLookup: true })));
     return super.findOne(object, query, options);
   }
@@ -539,7 +540,7 @@ export class TursoDriver extends SqlDriver {
     return super.delete(object, id, options);
   }
 
-  override async count(object: string, query?: any, options?: any): Promise<number> {
+  override async count(object: string, query?: DriverQuery, options?: any): Promise<number> {
     if (this.isRemote) return this.remoteTransport!.count(object, this.toRemoteQuery(object, query));
     return super.count(object, query, options);
   }
@@ -725,7 +726,7 @@ export class TursoDriver extends SqlDriver {
   }
 
   /** A query with its `where` compiled through {@link toRemoteFilter}. */
-  private toRemoteQuery(object: string, query: any): any {
+  private toRemoteQuery(object: string, query?: DriverQuery): any {
     if (!query || typeof query !== 'object' || query.where == null) return query;
     return { ...query, where: this.toRemoteFilter(object, query.where) };
   }
@@ -765,7 +766,7 @@ export class TursoDriver extends SqlDriver {
    */
   private toRemoteReadQuery(
     object: string,
-    query: any,
+    query: DriverQuery,
     opts?: { singleRowLookup?: boolean },
   ): any {
     if (!query || typeof query !== 'object') return query;
@@ -969,14 +970,14 @@ export class TursoDriver extends SqlDriver {
     return super.bulkDelete(object, ids, options);
   }
 
-  override async updateMany(object: string, query: any, data: any, options?: any): Promise<number> {
+  override async updateMany(object: string, query: DriverQuery, data: any, options?: any): Promise<number> {
     if (this.isRemote) {
       return this.remoteTransport!.updateMany(object, this.toRemoteQuery(object, query), this.toRemoteWriteForms(object, data));
     }
     return super.updateMany(object, query, data, options);
   }
 
-  override async deleteMany(object: string, query: any, options?: any): Promise<number> {
+  override async deleteMany(object: string, query: DriverQuery, options?: any): Promise<number> {
     if (this.isRemote) return this.remoteTransport!.deleteMany(object, this.toRemoteQuery(object, query));
     return super.deleteMany(object, query, options);
   }

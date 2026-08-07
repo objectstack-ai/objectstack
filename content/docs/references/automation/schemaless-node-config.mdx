@@ -8,159 +8,98 @@ description: Schemaless Node Config protocol schemas
 @module automation/schemaless-node-config
 
 Config contracts for the **descriptor-schemaless** builtins whose designer
-
 form lives ONLY in objectui's hand-written `FLOW_NODE_CONFIG` table —
-
 `script`, `subflow` and `decision` (#4278).
 
 ## Why these nodes publish no descriptor `configSchema` — and still need this
 
 `config-schemas.test.ts` in `service-automation` pins the schemaless class
-
 with each member's reason: `decision`'s virtual Target column is derived from
-
 the out-edges, `subflow` carries a top-level `timeoutMs` — a published
-
 partial schema would DROP those editors (the #4210 `connector_action`
-
 incident). So the Studio form for these types is objectui's hand-written
-
 group, and until #4278 **nothing reconciled that hand-written table against
-
 the executors**: `script`'s form offered an `outputVariables` key nothing
-
 reads, two `actionType` options that fail every run, a no-op default — and
-
 could not author the `function`/`inputs`/`outputVariable` path that works.
 
 `script`'s own reason for staying schemaless was that its form switched on
-
 `actionType`. #4343 retired that switch, so the node is now three flat keys
-
 and could graduate to a published descriptor `configSchema` the way `map`
-
 did — a follow-up, deliberately not folded into the retirement.
 
 These schemas are the machine-readable half of that reconciliation. They are
-
 **written from the executors** (`service-automation/builtin/screen-nodes.ts`
-
 for `script`, `subflow-node.ts`, `logic-nodes.ts` for `decision`), not from
-
 any form, and objectui's `flow-node-config` reconciliation test compares its
-
 hand-written key sets against them — the same bidirectional ledger the
-
 descriptor-schema'd builtins get from `builtin-node-form-zod-ledger.test.ts`,
-
 carried across the repo seam by the `@objectstack/spec` dependency objectui
-
 already has.
 
 `wait` and `connector_action` — the other two schemaless members — need no
-
 entry here: their contracts are the spec-structured sibling blocks on
-
 `FlowNodeSchema` (`waitEventConfig` / `connectorConfig`), which the
-
 same objectui test reconciles directly.
 
 ## What these schemas are wired to
 
 `script` and `subflow` are **parsed at execute time** since #4343, through
-
 the same `parseNodeConfig()` seam #4277 gave the flat builtins
-
 (`service-automation`'s `parse-config.ts`): a config that fails its contract
-
 refuses the node as a GUARD — wrong metadata, so a rerun cannot help and no
-
 `fault` edge may route it (#3863).
 
 `script` could not be parsed while its legal key set depended on
-
 `actionType`; #4343 removed that dependence instead of modelling it.
-
 Converging the node to its one real path — call a registered function — left
-
 a flat three-key contract a flat parse fits exactly, and the five keys the
-
 other branches read became `retiredKey` tombstones.
 
 The two halves reach different audiences, which is why they shipped together:
 
-- the **tombstones** teach whoever authors the key — `tsc` types it `never`,
-
-and a direct parse raises the prescription. They do NOT reach a stored
-
-flow: `FlowNodeSchema.config` is `z.record(z.unknown())`, so no load-path
-
-parse ever descends into a node's config;
-
-- the **execute-time parse** is what a stored flow meets. `registerFlow`
-
-canonicalizes data at rest through the retired conversion too (#3903), so
-
-a stored `actionType: 'email'` node arrives here stripped of the keys
-
-nothing read — and then refuses, naming the `function` it does not have,
-
-instead of logging a line and reporting success as it used to.
+ - the **tombstones** teach whoever authors the key — `tsc` types it `never`,
+   and a direct parse raises the prescription. They do NOT reach a stored
+   flow: `FlowNodeSchema.config` is `z.record(z.unknown())`, so no load-path
+   parse ever descends into a node's config;
+ - the **execute-time parse** is what a stored flow meets. `registerFlow`
+   canonicalizes data at rest through the retired conversion too (#3903), so
+   a stored `actionType: 'email'` node arrives here stripped of the keys
+   nothing read — and then refuses, naming the `function` it does not have,
+   instead of logging a line and reporting success as it used to.
 
 `decision` stays export-only, deliberately: it may carry no `conditions` at
-
 all when it branches purely on edge predicates (a plain BPMN exclusive
-
 gateway), and `conditions` is its only key — so a parse would have nothing
-
 left to check. Its enforcement remains the objectui reconciliation test,
-
 which is what #4278 was actually about (a form authoring keys nothing reads).
 
 Undeclared aliases are NOT part of these contracts: `subflow`'s historical
-
 `flow` spelling graduated into the ADR-0087 D2 conversion
-
 `flow-node-subflow-flow-alias` (the `map.flow` path), so the executor only
-
 ever sees `flowName`.
 
 ## Unknown keys — closed as of #4001 批 9, and this class had NO other door
 
 The descriptor-schema'd builtins have a registration-time key gate:
-
 `registerFlow()` walks each node's `config` against the descriptor's
-
 `configSchema` and hard-rejects what it does not declare (#4277). **These
-
 three node types are exempt from that walk** — by construction, since it
-
 derives the declared set from a `configSchema` they publish none of
-
 (`validateNodeConfigKeys`' schemaless exemption). So until now the entire
-
 `script` / `subflow` / `decision` config surface had exactly zero unknown-key
-
 enforcement at any layer: the execute-time parse #4343 added checks types and
-
 requiredness, and Zod's default `.strip` deleted everything else in silence.
 
 That is the #4001 asymmetry in its purest form — a guard was written for the
-
 door in front of its author, and the class it structurally could not cover is
-
 precisely the class with no second door. Closing these shapes is therefore
-
 not a duplicate check for `script` and `subflow`; it is their first one.
 
 `decision` is still export-only, so its strictness binds at authoring
-
 (`tsc`), in the published JSON Schema, and in objectui's reconciliation —
-
 not at run time. It is closed anyway, because the campaign's whole finding
-
 is that a shape left open accretes a test, a form and a fixture that assert
-
 the openness, and then closing it is a migration instead of an edit.
 
 <Callout type="info">

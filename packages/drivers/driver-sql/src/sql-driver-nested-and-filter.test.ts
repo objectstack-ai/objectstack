@@ -68,7 +68,7 @@ describe('SqlDriver — field key alongside a nested $and (#3650)', () => {
   });
 
   it('intersects every level on find()', async () => {
-    const rows = await driver.find('opportunity', { object: 'opportunity', where: NESTED_AND });
+    const rows = await driver.find('opportunity', { where: NESTED_AND });
     expect(rows.map((r: any) => r.id)).toEqual(['b']);
   });
 

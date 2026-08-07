@@ -8,59 +8,34 @@ description: Package Artifact protocol schemas
 # Package Artifact Format Protocol
 
 Defines the standard structure of a package artifact (.tgz) produced by
-
 the build pipeline. The marketplace uses these schemas to validate, store,
-
 and distribute package artifacts.
 
 ## Artifact Internal Structure
-
 ```
-
 ├── manifest.json          ← ManifestSchema serialized
-
 ├── metadata/              ← 30+ metadata types (JSON)
-
 │   ├── objects/            ← *.object.json
-
 │   ├── views/              ← *.view.json
-
 │   ├── pages/              ← *.page.json
-
 │   ├── flows/              ← *.flow.json
-
 │   ├── dashboards/         ← *.dashboard.json
-
 │   ├── permissions/        ← *.permission.json
-
 │   ├── agents/             ← *.agent.json
-
 │   └── ...                 ← Other metadata types
-
 ├── assets/                ← Static resources
-
 │   ├── icon.svg
-
 │   └── screenshots/
-
 ├── data/                  ← Seed data (SeedSchema serialized)
-
 ├── locales/               ← i18n translation files
-
 ├── checksums.json         ← SHA256 checksum per file
-
 └── signature.sig          ← RSA-SHA256 package signature
-
 ```
 
 ## Architecture Alignment
-
 - **Salesforce**: Managed Package .zip with metadata components
-
 - **npm**: .tgz with package.json + contents
-
 - **Helm**: Chart .tgz with Chart.yaml + templates
-
 - **VS Code**: .vsix (zip) with extension manifest + assets
 
 <Callout type="info">
@@ -165,7 +140,7 @@ Package artifact structure and metadata
 | **size** | `integer` | optional | Total artifact file size in bytes |
 | **builtAt** | `string` | ✅ | ISO 8601 timestamp of when the artifact was built |
 | **builtWith** | `string` | optional | Build tool identifier (e.g. "os-cli@3.2.0") |
-| **files** | `{ path: string; size: integer; category?: Enum<'objects' \| 'views' \| 'pages' \| 'flows' \| 'dashboards' \| 'permissions' \| 'agents' \| 'reports' \| 'actions' \| 'translations' \| 'themes' \| 'datasets' \| 'apis' \| 'triggers' \| 'workflows'> }[]` | optional | List of files contained in the artifact |
+| **files** | `{ path: string; size: integer; category?: Enum<'objects' \| 'views' \| 'pages' \| 'flows' \| 'dashboards' \| 'permissions' \| … +9 more> }[]` | optional | List of files contained in the artifact |
 | **metadataCategories** | `Enum<'objects' \| 'views' \| 'pages' \| 'flows' \| 'dashboards' \| 'permissions' \| 'agents' \| 'reports' \| 'actions' \| 'translations' \| 'themes' \| 'datasets' \| 'apis' \| 'triggers' \| 'workflows'>[]` | optional | Metadata categories included in this artifact |
 | **checksums** | `{ algorithm: Enum<'sha256' \| 'sha384' \| 'sha512'>; files: Record<string, string> }` | optional | SHA256 checksums for artifact integrity verification |
 | **signature** | `{ algorithm: Enum<'RSA-SHA256' \| 'RSA-SHA384' \| 'RSA-SHA512' \| 'ECDSA-SHA256'>; publicKeyRef: string; signature: string; signedAt?: string; … }` | optional | Digital signature for artifact authenticity verification |

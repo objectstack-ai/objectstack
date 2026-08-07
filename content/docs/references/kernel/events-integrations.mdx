@@ -6,21 +6,14 @@ description: Events Integrations protocol schemas
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 Event Webhook Configuration Schema
-
 Configuration for sending events to webhooks
 
 @example
-
 \{
-
-"eventPattern": "order.*",
-
-"url": "https://api.example.com/webhooks/orders",
-
-"method": "POST",
-
-"headers": \{ "Authorization": "Bearer token" \}
-
+  "eventPattern": "order.*",
+  "url": "https://api.example.com/webhooks/orders",
+  "method": "POST",
+  "headers": \{ "Authorization": "Bearer token" \}
 \}
 
 <Callout type="info">

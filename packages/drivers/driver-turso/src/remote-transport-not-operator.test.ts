@@ -582,7 +582,7 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
     // Un-lowered, the transport (correctly) refuses `$between` and names a
     // lowering step that had been skipped for this depth.
     await expect(
-      driver.find('deal', { object: 'deal', where: { $not: { amount: { $between: [15, 35] } } } }),
+      driver.find('deal', { where: { $not: { amount: { $between: [15, 35] } } } }),
     ).resolves.toBeDefined();
     expect(await ids({ $not: { amount: { $between: [15, 35] } } })).toEqual(['d_null', 'd_won']);
   });
@@ -591,9 +591,9 @@ describe('TursoDriver remote — $not on real rows (#1076)', () => {
     // Three since #5903 — `d_null` is inside the negation now, and a count that
     // disagreed with the list under it is exactly the local/remote split this
     // issue closed, wearing a total instead of a row set.
-    expect(await driver.count('deal', { object: 'deal', where: { $not: { stage: 'won' } } })).toBe(3);
+    expect(await driver.count('deal', { where: { $not: { stage: 'won' } } })).toBe(3);
     expect((await ids({ $not: { stage: 'won' } })).length).toBe(3);
-    expect(await driver.count('deal', { object: 'deal', where: { $not: {} } })).toBe(0);
+    expect(await driver.count('deal', { where: { $not: {} } })).toBe(0);
   });
 
   it('`deleteMany` with `$not: {}` deletes NOTHING', async () => {

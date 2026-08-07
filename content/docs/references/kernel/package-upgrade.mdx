@@ -8,37 +8,23 @@ description: Package Upgrade protocol schemas
 # Package Upgrade Protocol
 
 Defines the complete lifecycle for upgrading installed packages,
-
 including pre-upgrade analysis, snapshot/backup, execution, validation,
-
 and rollback capabilities.
 
 ## Architecture Alignment
-
 - **Salesforce**: Managed Package upgrade with push upgrades and subscriber control
-
 - **ServiceNow**: Update Sets with preview, commit, and back-out support
-
 - **Helm**: Helm upgrade with rollback to previous release
-
 - **Kubernetes**: Rolling update with readiness probes and automatic rollback
 
 ## Upgrade Flow
-
 ```
-
 1. PreCheck    → Validate compatibility, check dependencies
-
 2. Plan        → Generate upgrade plan with metadata diff
-
 3. Snapshot    → Backup current state (metadata + customizations)
-
 4. Execute     → Apply new package metadata with 3-way merge
-
 5. Validate    → Run post-upgrade health checks
-
 6. Commit      → Finalize upgrade (or Rollback on failure)
-
 ```
 
 <Callout type="info">

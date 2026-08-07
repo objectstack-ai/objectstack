@@ -493,7 +493,7 @@ describe('[#5769] a refused node-position $-key touches no rows', () => {
     expect(await ids({})).toEqual(['d_lost', 'd_open', 'd_won']);
     expect(await ids({ $and: [] })).toEqual(['d_lost', 'd_open', 'd_won']);
     expect(await ids({ $or: [] })).toEqual([]);
-    expect(await driver.count('deal', { object: 'deal', where: { stage: 'won' } })).toBe(1);
+    expect(await driver.count('deal', { where: { stage: 'won' } })).toBe(1);
   });
 });
 
@@ -552,10 +552,10 @@ describe('[#5769] local and remote give the same verdict', () => {
   for (const [label, where] of PARITY) {
     it(`${label}: both transports refuse with INVALID_FILTER / 400`, async () => {
       const l = (await local
-        .find('deal', { object: 'deal', where } as unknown as QueryAST)
+        .find('deal', { where } as unknown as QueryAST)
         .catch((e) => e)) as WireBearingError;
       const r = (await remote
-        .find('deal', { object: 'deal', where } as unknown as QueryAST)
+        .find('deal', { where } as unknown as QueryAST)
         .catch((e) => e)) as WireBearingError;
       expect(l, `local resolved ${label}`).toBeInstanceOf(Error);
       expect(r, `remote resolved ${label}`).toBeInstanceOf(Error);
@@ -567,8 +567,8 @@ describe('[#5769] local and remote give the same verdict', () => {
   }
 
   it('and both still answer a well-formed filter identically', async () => {
-    const l = (await local.find('deal', { object: 'deal', where: { stage: 'won' } })) as any[];
-    const r = (await remote.find('deal', { object: 'deal', where: { stage: 'won' } })) as any[];
+    const l = (await local.find('deal', { where: { stage: 'won' } })) as any[];
+    const r = (await remote.find('deal', { where: { stage: 'won' } })) as any[];
     expect(l.map((x) => x.id)).toEqual(['d_won']);
     expect(r.map((x) => x.id)).toEqual(['d_won']);
   });

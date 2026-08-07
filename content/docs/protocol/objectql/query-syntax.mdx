@@ -718,10 +718,14 @@ const query: QueryAST = {
 **Schema enum:** `count`, `sum`, `avg`, `min`, `max`, `count_distinct`, `array_agg`, `string_agg`.
 
 <Callout type="warn">
-Only `count`, `sum`, `avg`, `min`, and `max` are portable. `SqlDriver.mapAggregateFunc()`
-throws `Unsupported aggregate function: <name>` for `count_distinct`, `array_agg`, and
-`string_agg`; those three are implemented by the MongoDB driver and by the engine's
-in-memory aggregation fallback, but not by the SQL drivers.
+Only `count`, `sum`, `avg`, `min`, and `max` are portable. `count_distinct`, `array_agg`
+and `string_agg` are implemented by the MongoDB driver and by the engine's in-memory
+aggregation fallback, but not by the SQL drivers — on `SqlDriver` (and on the Turso
+driver, both transports) they are refused as a **capability gap**:
+`501 NOT_IMPLEMENTED`, "declared but not implemented by this backend". That is
+deliberately a different answer from a function the schema enum never declared
+(`median`), which is `400 INVALID_QUERY` — the caller's mistake — so an author who
+wrote `count_distinct` is never told they made a typo (#5907).
 </Callout>
 
 ### Group By Multiple Fields

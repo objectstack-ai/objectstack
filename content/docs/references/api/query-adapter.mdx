@@ -8,13 +8,10 @@ description: Query Adapter protocol schemas
 API Query DSL Adapter Protocol
 
 Defines mapping rules between the internal unified query DSL
-
-(defined in `[data/query.zod.ts](/docs/references/data/query)`) and external API protocol formats:
-
+(defined in `data/query.zod.ts`) and external API protocol formats:
 REST and OData.
 
 This enables ObjectStack to expose a single internal query representation
-
 while supporting multiple API standards for external consumers.
 
 See also: [data/query.zod.ts](/docs/references/data/query) - Unified internal query DSL
@@ -74,7 +71,7 @@ const result = ODataQueryAdapterSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **operatorMappings** | `{ operator: string; rest?: string; odata?: string }[]` | optional | Custom operator mappings |
 | **rest** | `{ filterStyle: Enum<'bracket' \| 'dot' \| 'flat' \| 'rsql'>; pagination?: object; sorting?: object; fieldsParam: string }` | optional | REST query adapter configuration |
-| **odata** | `{ version: Enum<'v2' \| 'v4'>; usePrefix: boolean; stringFunctions?: Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| 'concat' \| 'substring' \| 'length'>[]; expand?: object }` | optional | OData query adapter configuration |
+| **odata** | `{ version: Enum<'v2' \| 'v4'>; usePrefix: boolean; stringFunctions?: Enum<'contains' \| 'startswith' \| 'endswith' \| 'tolower' \| 'toupper' \| 'trim' \| … +3 more>[]; expand?: object }` | optional | OData query adapter configuration |
 
 
 ---

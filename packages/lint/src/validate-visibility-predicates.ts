@@ -13,10 +13,15 @@
  * to see what the author actually wrote.
  *
  * Two advisory rules (both `warning` — nothing is broken, the alias still works
- * and a mis-rooted predicate just never matches):
+ * and a mis-rooted predicate just never matches) plus one **gating** rule
+ * (`error` — the predicate can never evaluate at all):
  *
  * - `visibility-alias-deprecated` — a `visibleOn` / `visibility` key in authored
  *   source. Autofix intent: rename the key to `visibleWhen` (same value).
+ * - `visibility-bare-identifier` (**error**, #6128 / #5149 requirement 3) — a
+ *   predicate referencing a top-level identifier that no binding root can
+ *   resolve (`status == 'active'` instead of `record.status == 'active'`). See
+ *   the §Bare identifiers block below for the mechanism and the boundaries.
  * - `visibility-root-mislayered` — a visibility predicate whose binding root does
  *   not match its layer (ADR-0089 D3, §Context). The check is **bidirectional**:
  *   - **runtime** view/page surfaces (`*.view.ts` / `*.page.ts`) bind
@@ -28,13 +33,114 @@
  *   app-lint path (`os validate` / `compile`) always lints runtime surfaces, while a
  *   file-aware caller linting a `*.form.ts` passes `layer: 'metadata'`.
  *
- * Scope: `views` (form `sections` / legacy `groups`, and their `fields`) and
- * `pages` (`regions[].components[]`). Data-field `visibleWhen` is already covered
- * by `validate-expressions` and is not re-checked here.
+ * Scope: `views` — every form view reachable from a `views[]` entry (the entry
+ * itself when it IS a form view, plus the container's `form` and each
+ * `formViews.<key>`; see {@link formViewSites} for why reading only the first
+ * shape left this rule reporting clean on real metadata) — and `pages`, through
+ * the shared `walkPageComponents` traversal. Data-field `visibleWhen` is already
+ * covered by `validate-expressions` and is not re-checked here.
+ *
+ * The predicate family is read off the schema, not guessed: `visibleWhen` is the
+ * canonical key on all three carriers (`FormFieldBaseSchema` `view.zod.ts:1416`,
+ * `FormSectionSchema` `view.zod.ts:1510`, `PageComponentSchema`
+ * `page.zod.ts:143`), `visibleOn` is the view-side deprecated alias
+ * (`view.zod.ts:1418` / `:1512`) and `visibility` the page-side one
+ * (`page.zod.ts:145`). There is no fourth spelling on this surface.
+ *
+ * ## Bare identifiers — the gap between two gates that both wave it through
+ *
+ * `visibility-bare-identifier` exists because #5149 Repro 1 measured a predicate
+ * written with bare field names (`status == 'active'`) passing **every** gate the
+ * platform has and then failing OPEN in the console: the identifier resolves to
+ * nothing, `evalFieldPredicate` returns its `fallback`, and for visibility that
+ * fallback is `true` — so a predicate that never works is pixel-identical to no
+ * predicate at all. The maintainer's 2026-08-06 ruling on #5149 kept fail-open
+ * and closed the silence from both ends instead: warn-once at runtime
+ * (objectui#3541, requirement 2) and refuse the metadata at build time (this
+ * rule, requirement 3).
+ *
+ * The two gates that already exist each miss it for a structural reason, and
+ * BOTH reasons must stay written down or this rule reads like a duplicate and
+ * gets merged away:
+ *
+ * - **ADR-0032's identifier gate** (`validate-expressions.ts`) resolves bare
+ *   refs on `record`-scoped sites — but its traversal covers objects, flows,
+ *   actions, sharing rules and hooks. It never walks `views` or `pages`, so a
+ *   view form field's `visibleWhen` is outside it entirely.
+ * - **ADR-0089 D3b** (the two rules above, same file) walks exactly this
+ *   surface — but it judges the *root* of a predicate that HAS one
+ *   (`data.` in a runtime view, `record.` in a metadata form). A predicate with
+ *   no root at all matches neither direction and falls through clean.
+ *
+ * ### How the verdict is decided (two oracles, neither of them ours)
+ *
+ * The declaredness verdict comes from `@objectstack/formula`'s
+ * `firstUndeclaredReference` — the same strict-environment check
+ * `validateExpression` uses for the `record`-scoped bare-ref error, so "what
+ * resolves" has one answer across the platform. This rule builds no
+ * `Environment` of its own: that is the #4812 lesson (a private parse front end
+ * silently answers a different question), and the AST it does read comes from
+ * `parseCelToAst`, the canonical entry.
+ *
+ * The checker alone is not enough, because cel-js reports every undeclared
+ * top-level identifier — including the ROOT of a dotted path nobody binds
+ * (`my_record.x`). Those are deliberately out of scope here: the set of legal
+ * roots is not yet trustworthy enough to gate on (#6146 measured `current_user`
+ * as documented-but-unbound at both ends), and the two ADR-0089 rules above
+ * already own the wrong-root directions the spec DOES state. So the AST is
+ * walked first for every identifier used in a **receiver position** (`a.b`,
+ * `a?.b`, `a['b']`, `a.exists(…)`) and those names are declared before the
+ * check runs. What survives is an identifier used as a bare VALUE — the one
+ * shape that cannot resolve under any binding convention.
+ *
+ * ### What this rule deliberately does NOT reject
+ *
+ * - **Comprehension-macro variables.** `record.tags.all(t, t != '')` binds `t`
+ *   inside the macro body; the AST reports it as a top-level id, the strict
+ *   checker does not. Measured, not assumed — which is exactly why the verdict
+ *   is the checker's and not a hand-rolled AST scan.
+ * - **Shapes that are legal only under a SPARSE binding (#4953).** That issue
+ *   measured the same evaluator giving opposite verdicts on a total vs sparse
+ *   record: `has(record.a)` is `true`/`false` and `record.a != null` is
+ *   `false`/FAULT depending on which one the surface binds. This rule is immune
+ *   to that fork by construction — it never asks whether a KEY is present on a
+ *   bound root, only whether the identifier has a root at all, and a rootless
+ *   identifier resolves under neither binding. `has(record.x)`,
+ *   `record.x != null` and every other guard idiom stay green here, whichever
+ *   way #4953 is eventually settled.
+ * - **A predicate the canonical front end will not parse.** `parseCelToAst`
+ *   returns `null` for a syntax fault or a `DEFAULT_LIMITS` overrun, and this
+ *   rule then stays silent rather than inventing a second syntax verdict
+ *   (`validate-null-guards.ts` states the same policy for the same reason).
+ *   Worth knowing where that leaves the surface: unlike the object/flow/action
+ *   sites, NOTHING validates view/page predicate syntax today, so a `=` typo is
+ *   still un-diagnosed here. Widening this rule to own that verdict is a
+ *   separate decision about what authors may write, not a wiring gap to close
+ *   in passing.
+ * - **Nested composite / repeater sub-fields** (`fields[].fields[]`,
+ *   `view.zod.ts:1477`). The traversal stops at a section's direct fields. A
+ *   sub-field of a repeater row is evaluated against a binding this rule cannot
+ *   cite a spec sentence for, and an `error`-level gate must not judge a
+ *   convention it cannot name.
+ * - **A field whose name collides with a CEL TYPE** — `type`, `int`, `string`,
+ *   `bool`, `double`, `bytes`, `list`, `map`, `timestamp`, `duration`,
+ *   `null_type`. CEL declares those identifiers itself (they denote type
+ *   values), so bare `type == 'grid'` reaches the checker as a type-overload
+ *   error rather than an unknown variable, and only the latter is a verdict
+ *   here. It cannot be closed by reading the overload message instead:
+ *   `type(record.x) == string` is legitimate CEL over the very same names. A
+ *   measured blind spot in the safe direction — a missed catch, never a false
+ *   build error — pinned by a test so it reads as a decision.
  */
+
+import { firstUndeclaredReference, parseCelToAst } from '@objectstack/formula';
+import type { CelAstNode } from '@objectstack/formula';
+
+import { walkPageComponents } from './page-walk.js';
 
 export const VISIBILITY_ALIAS_DEPRECATED = 'visibility-alias-deprecated';
 export const VISIBILITY_ROOT_MISLAYERED = 'visibility-root-mislayered';
+export const VISIBILITY_BARE_IDENTIFIER = 'visibility-bare-identifier';
 
 export type VisibilitySeverity = 'error' | 'warning';
 
@@ -52,7 +158,10 @@ export interface VisibilityOptions {
 }
 
 export interface VisibilityFinding {
-  /** Always `warning` today — both rules are advisory (see module note). */
+  /**
+   * `warning` for the two ADR-0089 D3b advisories; `error` for
+   * `visibility-bare-identifier`, which gates (see module note).
+   */
   severity: VisibilitySeverity;
   /** Diagnostic rule id, e.g. `visibility-alias-deprecated`. */
   rule: string;
@@ -72,11 +181,28 @@ type AnyRec = Record<string, unknown>;
 const CANONICAL = 'visibleWhen';
 const ALIASES = ['visibleOn', 'visibility'] as const;
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
+/**
+ * Every record in a collection authored either as an array or as a name-keyed
+ * map, each with its config PATH — `pages[2]` for the array shape,
+ * `pages.my_page` for the map. Findings on this surface are consumed as edit
+ * targets (`os lint --json`, Studio's finding renderer), so a map-shaped
+ * collection must not report a synthetic index nobody can look up. The map
+ * shape also contributes the entry's KEY as its `name`, which is how an
+ * unnamed-but-keyed view still locates itself in a message.
+ */
+function collectionEntries(v: unknown, base: string): Array<{ rec: AnyRec; path: string }> {
+  if (Array.isArray(v)) {
+    const out: Array<{ rec: AnyRec; path: string }> = [];
+    for (let i = 0; i < v.length; i++) {
+      const rec = v[i];
+      if (rec && typeof rec === 'object' && !Array.isArray(rec)) out.push({ rec: rec as AnyRec, path: `${base}[${i}]` });
+    }
+    return out;
+  }
   if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
+    return Object.entries(v as AnyRec)
+      .filter(([, def]) => !!def && typeof def === 'object' && !Array.isArray(def))
+      .map(([name, def]) => ({ rec: { name, ...(def as AnyRec) }, path: `${base}.${name}` }));
   }
   return [];
 }
@@ -97,6 +223,94 @@ function usesRoot(source: string, root: string): boolean {
   // `data`) or `my_record.x` (an identifier that merely ends in `record`).
   return new RegExp(`(^|[^.\\w$])${root}\\.\\w`).test(source);
 }
+
+// ── `visibility-bare-identifier` (#6128) ────────────────────────────
+
+/**
+ * Binding roots this surface exposes BEYOND the generous set
+ * `@objectstack/formula`'s strict environment already declares (`record`,
+ * `previous`, `data`, `parent`, `user`, `ctx`, … — `cel-engine.ts` SCOPE_ROOTS,
+ * which errs toward declaring more precisely because a missing root is a false
+ * build error while an extra one is only a missed catch).
+ *
+ * Both entries are read off the schema rather than chosen here:
+ * `view.zod.ts:1416` / `:1510` state the runtime form binding as
+ * `record` + `current_user`, and `page.zod.ts:143` adds page state as
+ * `page.<var>` for a page component. The runtime side binds `record` +
+ * `previous` + a caller-supplied extra scope (objectui
+ * `packages/core/src/evaluator/fieldRules.ts` `evalFieldPredicate`), so the
+ * union — not either list alone — is the safe set for an `error`-level gate.
+ *
+ * `current_user` is declared here even though #6146 measured it as
+ * documented-but-unbound at both ends: whether that root RESOLVES is that
+ * issue's verdict to give, and this rule must not pre-empt it by reporting a
+ * spelling the spec currently tells authors to write.
+ */
+const VIEW_PAGE_EXTRA_ROOTS = ['current_user', 'page'] as const;
+
+type AnyNode = { op?: string; args?: unknown };
+
+function isNode(v: unknown): v is AnyNode & CelAstNode {
+  return !!v && typeof v === 'object' && typeof (v as AnyNode).op === 'string';
+}
+
+/**
+ * Every identifier the source uses in a **receiver position** — `a.b`, `a?.b`,
+ * `a['b']`, `a.exists(…)`. The author is treating each of these as a namespace,
+ * so an unbound one is a wrong-ROOT defect (ADR-0089 D3b's territory, or an
+ * undocumented root this rule deliberately does not adjudicate), never the bare
+ * field name #5149 Repro 1 is about.
+ *
+ * Declaring them before the strict check is what narrows this rule to bare
+ * VALUE references. It is uniformly the conservative direction: every name it
+ * adds can only remove a finding, so the widening costs coverage and can never
+ * produce a false build error.
+ */
+function namespaceRoots(node: unknown, out: Set<string>): void {
+  if (Array.isArray(node)) {
+    for (const child of node) namespaceRoots(child, out);
+    return;
+  }
+  if (!isNode(node)) return;
+  const args = node.args;
+  if (Array.isArray(args)) {
+    // `.` / `.?` / `[]` hold the receiver first; `rcall` (a receiver-style call
+    // such as `record.tags.all(t, …)`) holds the method NAME first and the
+    // receiver second.
+    const receiver = node.op === 'rcall' ? args[1] : args[0];
+    if ((node.op === '.' || node.op === '.?' || node.op === '[]' || node.op === 'rcall')
+      && isNode(receiver) && receiver.op === 'id' && typeof receiver.args === 'string') {
+      out.add(receiver.args);
+    }
+  }
+  namespaceRoots(args, out);
+}
+
+/**
+ * The first identifier in `source` that no binding root can resolve, or `null`
+ * when every reference is rooted. See the module note for why this is two
+ * oracles (the canonical AST for namespace roots, the shared strict-environment
+ * checker for the verdict) and for the shapes it deliberately leaves alone.
+ */
+function firstBareIdentifier(source: string): string | null {
+  const ast = parseCelToAst(source);
+  // Not parseable through the canonical front end (syntax fault, or over
+  // DEFAULT_LIMITS) — not this rule's verdict to give.
+  if (!ast) return null;
+  const rooted = new Set<string>();
+  namespaceRoots(ast, rooted);
+  return firstUndeclaredReference(source, [...VIEW_PAGE_EXTRA_ROOTS, ...rooted]);
+}
+
+/**
+ * The root an author on this layer should have written. Runtime view/page
+ * surfaces bind the live record as `record`; a `*.form.ts` metadata-editing
+ * form binds the row under edit as `data` (ADR-0089 D3, §Context).
+ */
+const CANONICAL_ROOT_BY_LAYER: Record<VisibilityLayer, string> = {
+  runtime: 'record',
+  metadata: 'data',
+};
 
 /**
  * Per-layer mis-rooted-predicate description. The `runtime` layer forbids the
@@ -176,6 +390,35 @@ function checkElement(
       hint: rule.hint,
     });
   }
+
+  // (3) #6128 — a reference no binding root can resolve. Unlike (2) this one
+  // GATES: a mis-rooted predicate is at least a statement about a namespace
+  // someone binds somewhere, while a bare identifier resolves nowhere, on no
+  // layer, under neither a total nor a sparse record (#4953) — so there is no
+  // reading of the metadata under which it was going to work.
+  if (source) {
+    const bare = firstBareIdentifier(source);
+    if (bare) {
+      const root = CANONICAL_ROOT_BY_LAYER[layer];
+      findings.push({
+        severity: 'error',
+        rule: VISIBILITY_BARE_IDENTIFIER,
+        where,
+        path,
+        message:
+          `visibility predicate references \`${bare}\` as a bare identifier. ` +
+          `Values are bound under a namespace on this surface — they are never ` +
+          `flattened to top level — so \`${bare}\` resolves to nothing, the predicate ` +
+          `can never evaluate, and the console falls OPEN: the element renders ` +
+          `unconditionally and looks exactly like one with no predicate at all (#5149).`,
+        hint:
+          `Write \`${root}.${bare}\` instead of \`${bare}\`` +
+          (layer === 'runtime'
+            ? ' (runtime view/page surfaces bind `record` + `current_user`; a page component also exposes page state as `page.<var>`).'
+            : ' (a `*.form.ts` metadata-editing form binds the row under edit as `data`).'),
+      });
+    }
+  }
 }
 
 /** A section field entry is either a bare field name or `{ field, visibleWhen, … }`. */
@@ -184,12 +427,65 @@ function isFieldObject(entry: unknown): entry is AnyRec {
 }
 
 /**
+ * Every FORM VIEW reachable from one `views[]` entry, with the path each sits at.
+ *
+ * Two shapes, and reading only the first is how this rule was dead on real
+ * metadata until #6128 measured it. `os build` on `examples/app-showcase` emits
+ * its one form predicate at
+ * `views[0].formViews.edit.sections[0].fields[6].visibleWhen` — the traversal
+ * read `views[0].sections`, found nothing, and reported clean on a stack that
+ * DOES carry a view-form predicate:
+ *
+ *  - **View CONTAINER** (the runtime app shape). `ViewSchema` declares exactly
+ *    `name` / `label` / `object` / `list` / `form` / `listViews` / `formViews`
+ *    (`view.zod.ts:1890-1903` — the strict error map spells the container's own
+ *    keys out in prose). Form sections therefore live one level down, under
+ *    `form` and each `formViews.<key>`; `list` / `listViews.<key>` are
+ *    `ObjectListViewSchema` and carry no `sections`, so they are not walked.
+ *  - **A bare FORM VIEW** (`FormViewSchema`, `view.zod.ts:1623-1624`), whose
+ *    `sections` / `groups` sit at the top. This is the `defineForm` shape the
+ *    `*.form.ts` metadata-editing forms use, i.e. the `layer: 'metadata'` caller.
+ *
+ * `objects[].views` is deliberately absent: `object.zod.ts:1833` tombstones the
+ * key ("`views` is not an ObjectSchema field"), so a branch keyed on it could
+ * only ever fire for stacks the schema already rejects by name — the phantom
+ * check #4984 / #5017 removed from two neighbouring rules. Object-level
+ * `listViews` (`object.zod.ts:1616`) is a list view, so it carries none of this
+ * either.
+ */
+function formViewSites(
+  view: AnyRec,
+  basePath: string,
+): Array<{ form: AnyRec; path: string; surface: string }> {
+  // `surface` names the sub-container in the human-readable `where`. It earns
+  // its place on exactly the shape this traversal was extended for: a runtime
+  // container carries neither `name` nor `object` in the emitted artifact, so
+  // without it every finding under one view reads `view "views[0]"` and the
+  // author cannot tell the `edit` form from the `tabbed` one.
+  const sites = [{ form: view, path: basePath, surface: '' }];
+  const dflt = view.form;
+  if (dflt && typeof dflt === 'object' && !Array.isArray(dflt)) {
+    sites.push({ form: dflt as AnyRec, path: `${basePath}.form`, surface: 'form' });
+  }
+  const named = view.formViews;
+  if (named && typeof named === 'object' && !Array.isArray(named)) {
+    for (const [key, sub] of Object.entries(named as AnyRec)) {
+      if (sub && typeof sub === 'object' && !Array.isArray(sub)) {
+        sites.push({ form: sub as AnyRec, path: `${basePath}.formViews.${key}`, surface: `formViews.${key}` });
+      }
+    }
+  }
+  return sites;
+}
+
+/**
  * Validate conditional-visibility keys across authored views and pages.
  *
  * Runs on the **pre-parse** (normalized) stack so it can see the deprecated
  * `visibleOn` / `visibility` aliases before the schema folds them into
- * `visibleWhen`. Returns findings (empty = clean); all advisory (`warning`) —
- * the caller must never fail the build on these alone.
+ * `visibleWhen`. Returns findings (empty = clean). The two ADR-0089 D3b rules
+ * are advisory (`warning`); `visibility-bare-identifier` is `error` and the
+ * caller is expected to fail the build on it (#6128).
  *
  * The binding-root check is layer-directional (ADR-0089 D3): pass
  * `opts.layer = 'metadata'` when linting a `*.form.ts` metadata-editing form (so a
@@ -204,54 +500,60 @@ export function validateVisibilityPredicates(
   const layer: VisibilityLayer = opts.layer ?? 'runtime';
   const findings: VisibilityFinding[] = [];
 
-  // ── Views: form sections / legacy groups, and their fields ──────────
-  const views = asArray(stack.views);
-  for (let i = 0; i < views.length; i++) {
-    const view = views[i];
-    if (!view || typeof view !== 'object') continue;
-    const viewName = typeof view.name === 'string' ? view.name : `(view ${i})`;
-    const where = `view "${viewName}"`;
+  // ── Views: every reachable form view's sections / groups, and their fields ──
+  for (const { rec: view, path: viewPath } of collectionEntries(stack.views, 'views')) {
+    // A container names itself with `name`, or binds with `object` — and an
+    // artifact-emitted one may carry neither, so the path is the last resort.
+    const viewName = typeof view.name === 'string' ? view.name
+      : typeof view.object === 'string' ? view.object
+        : viewPath;
 
-    // `sections` (canonical) and `groups` (legacy alias → sections) both hold
-    // FormSection objects with an optional visibility predicate + `fields`.
-    for (const bucket of ['sections', 'groups'] as const) {
-      const sections = Array.isArray(view[bucket]) ? (view[bucket] as unknown[]) : [];
-      for (let s = 0; s < sections.length; s++) {
-        const sec = sections[s];
-        if (!sec || typeof sec !== 'object') continue;
-        const secPath = `views[${i}].${bucket}[${s}]`;
-        checkElement(sec as AnyRec, where, secPath, layer, findings);
+    for (const site of formViewSites(view, viewPath)) {
+      const where = site.surface ? `view "${viewName}" · ${site.surface}` : `view "${viewName}"`;
+      // `sections` (canonical) and `groups` (legacy alias → sections) both hold
+      // FormSection objects with an optional visibility predicate + `fields`.
+      for (const bucket of ['sections', 'groups'] as const) {
+        const sections = Array.isArray(site.form[bucket]) ? (site.form[bucket] as unknown[]) : [];
+        for (let s = 0; s < sections.length; s++) {
+          const sec = sections[s];
+          if (!sec || typeof sec !== 'object') continue;
+          const secPath = `${site.path}.${bucket}[${s}]`;
+          checkElement(sec as AnyRec, where, secPath, layer, findings);
 
-        const secFields = Array.isArray((sec as AnyRec).fields) ? ((sec as AnyRec).fields as unknown[]) : [];
-        for (let f = 0; f < secFields.length; f++) {
-          const entry = secFields[f];
-          if (isFieldObject(entry)) {
-            checkElement(entry, where, `${secPath}.fields[${f}]`, layer, findings);
+          const secFields = Array.isArray((sec as AnyRec).fields) ? ((sec as AnyRec).fields as unknown[]) : [];
+          for (let f = 0; f < secFields.length; f++) {
+            const entry = secFields[f];
+            if (isFieldObject(entry)) {
+              checkElement(entry, where, `${secPath}.fields[${f}]`, layer, findings);
+            }
           }
         }
       }
     }
   }
 
-  // ── Pages: regions[].components[] ───────────────────────────────────
-  const pages = asArray(stack.pages);
-  for (let i = 0; i < pages.length; i++) {
-    const page = pages[i];
-    if (!page || typeof page !== 'object') continue;
-    const pageName = typeof page.name === 'string' ? page.name : `(page ${i})`;
-    const where = `page "${pageName}"`;
-    const regions = Array.isArray(page.regions) ? (page.regions as unknown[]) : [];
-    for (let r = 0; r < regions.length; r++) {
-      const region = regions[r];
-      const components = region && typeof region === 'object' && Array.isArray((region as AnyRec).components)
-        ? ((region as AnyRec).components as unknown[])
-        : [];
-      for (let c = 0; c < components.length; c++) {
-        const comp = components[c];
-        if (comp && typeof comp === 'object') {
-          checkElement(comp as AnyRec, where, `pages[${i}].regions[${r}].components[${c}]`, layer, findings);
-        }
-      }
+  // ── Pages: every component, through the SHARED walk ─────────────────
+  //
+  // `walkPageComponents` (#3583) is the one traversal that knows where page
+  // components actually live: `regions[].components[]`, the slotted-page
+  // `slots.<slot>` map (single component OR array), and the sub-trees hidden in
+  // the untyped `properties` bag (`page:tabs` / `page:accordion`
+  // `items[].children`, `page:card` `body` / `footer`). It also skips
+  // source-authored (`html` / `react` / `jsx`) pages, whose `regions` are a
+  // derived cache the author never wrote — reporting a gating error against
+  // that cache would be a build failure over metadata nobody authored.
+  //
+  // Taken rather than hand-rolled for the reason that file states in its own
+  // header: duplicating this walk has already produced one dead rule. A
+  // hand-rolled `regions[].components[]` loop is exactly the copy that misses
+  // slots and nested children — and `visibility-bare-identifier` GATES, so
+  // `authoring-rules.ts`'s standard applies: partial coverage is not a stricter
+  // check, it is a coin flip.
+  for (const { rec: page, path: pagePath } of collectionEntries(stack.pages, 'pages')) {
+    const pageName = typeof page.name === 'string' ? page.name : undefined;
+    const where = `page "${pageName ?? pagePath}"`;
+    for (const walked of walkPageComponents(page, pagePath)) {
+      checkElement(walked.component, where, walked.path, layer, findings);
     }
   }
 

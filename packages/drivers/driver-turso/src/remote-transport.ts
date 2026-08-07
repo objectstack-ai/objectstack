@@ -15,6 +15,10 @@
 import type { Client, InStatement, ResultSet } from '@libsql/client';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { FILTER_OPERATORS, LOGICAL_OPERATORS } from '@objectstack/spec/data';
+// The DECLARED aggregate vocabulary (#5907) — read from the spec so this
+// transport's "the protocol has no such function" refusal cannot drift from what
+// `AggregationNodeSchema.function` admits, nor from the local driver's twin.
+import { AggregationFunction } from '@objectstack/spec/data';
 import { nanoid } from 'nanoid';
 
 /**
@@ -504,6 +508,112 @@ function invalidFilterError(message: string): Error {
 }
 
 /**
+ * [#5907] The aggregate functions this TRANSPORT lowers into SQL, and the SQL
+ * function each becomes.
+ *
+ * The twin of `driver-sql`'s `SQL_AGGREGATE_FUNCTIONS`, and separate on purpose:
+ * this transport is deliberately free of knex and of `SqlDriver` (see the file
+ * header), so the two faces state their own capability and the refusals below
+ * read it off the table instead of a hand-kept list (#5345). They compile the
+ * same five today; a face that gains one says so here, alone.
+ */
+const REMOTE_AGGREGATE_FUNCTIONS: ReadonlyMap<string, string> = new Map([
+  ['count', 'count'],
+  ['sum', 'sum'],
+  ['avg', 'avg'],
+  ['min', 'min'],
+  ['max', 'max'],
+]);
+
+/**
+ * [#5907] The aggregate vocabulary the Query Protocol DECLARES, read from the
+ * spec rather than restated — `AggregationNodeSchema.function` is this enum.
+ */
+const DECLARED_AGGREGATE_FUNCTIONS: readonly string[] = AggregationFunction.options;
+
+/**
+ * [#5907] Class 1 — a function name the Query Protocol does not declare.
+ *
+ * The twin of `driver-sql`'s `undeclaredAggregateFunctionError`, word for word,
+ * and that is the point of this whole issue: the same `median` had to stop
+ * meaning two different things depending on whether `url` put the caller on the
+ * local driver or on this transport. #5240's rule — one condition, one wording —
+ * is pinned across the two packages by
+ * `remote-transport-aggregate-function-refusal.test.ts`, which compares the two
+ * RUNTIME messages rather than two copies of a literal.
+ *
+ * `INVALID_QUERY` / 400: the caller wrote a name no backend can run, and 400
+ * puts it on `@objectstack/rest`'s `isExpectedQueryRejection` list so a client
+ * mistake stops being logged as an unhandled server fault. It is the code the
+ * PROTOCOL DOOR already gives this condition — `metadata-protocol`'s
+ * `invalidQueryError` refuses "a function outside the spec enum" on the
+ * aggregations axis with `400 INVALID_QUERY` (#4254) — so the in-process caller
+ * and the REST caller now read the same answer.
+ */
+function undeclaredAggregateFunctionError(func: string): Error {
+  const err = new Error(
+    `Aggregate function "${func}" is not a declared aggregate function. ` +
+    `Declared functions: ${DECLARED_AGGREGATE_FUNCTIONS.join(', ')} ` +
+    `(@objectstack/spec AggregationFunction). Fix the "function" key of the aggregations[] ` +
+    `entry — the Query Protocol has no such function, so this is a query no backend can run, ` +
+    `not a gap in this one (#5907).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  return err;
+}
+
+/**
+ * [#5907] Class 2 — a DECLARED function this transport cannot compile.
+ *
+ * The twin of `driver-sql`'s `uncompilableAggregateFunctionError`; its docblock
+ * carries the full rationale for `NOT_IMPLEMENTED` / 501 and for why the two
+ * classes must not be collapsed. In one line: `count_distinct`, `array_agg` and
+ * `string_agg` are declared and other backends compile them, so a caller who
+ * wrote one has made no mistake — this is the backend's gap, and an error that
+ * says otherwise tells a dashboard author to fix a query that is already right.
+ */
+function uncompilableAggregateFunctionError(func: string): Error {
+  const err = new Error(
+    `Aggregate function "${func}" is declared but not implemented by this backend. ` +
+    `Compiled here: ${[...REMOTE_AGGREGATE_FUNCTIONS.keys()].join(', ')}. The name is spelled ` +
+    `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
+    `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
+    `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
+    `itself should stand is #6188 (ADR-0049 enforce-or-remove) (#5907).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  return err;
+}
+
+/**
+ * [#5907] Which refusal a name this transport cannot compile deserves — the
+ * twin of `driver-sql`'s `refuseAggregateFunction`.
+ *
+ * `func` is the name the CALLER wrote, before this transport's `toLowerCase()`.
+ * Measured on `origin/main` @ `80f7dc6a3`, the two faces do not normalise alike:
+ *
+ * ```
+ * COUNT           REMOTE -> RESOLVED  ("SELECT count(...)")   LOCAL -> threw
+ * COUNT_DISTINCT  REMOTE -> threw "…: count_distinct"         LOCAL -> threw "…: COUNT_DISTINCT"
+ * ```
+ *
+ * Judging the CALLER's spelling against the case-sensitive enum is what keeps
+ * that pre-existing fork from spreading into the envelope: on the lowercased
+ * name this transport would call `COUNT_DISTINCT` a capability gap (501) while
+ * the local driver, reading the name raw, called it undeclared (400) — one
+ * query, two wire identities, which is the fork this issue exists to close.
+ * The normalisation difference itself — `COUNT` compiles here and is refused by
+ * the local driver — is untouched by this change and filed as #6203.
+ */
+function refuseAggregateFunction(func: string): never {
+  throw DECLARED_AGGREGATE_FUNCTIONS.includes(func)
+    ? uncompilableAggregateFunctionError(func)
+    : undeclaredAggregateFunctionError(func);
+}
+
+/**
  * How a filtered column must be READ so it is in the same storage form the
  * comparand was coerced into — the column half of the driver's temporal seam
  * (`SqlDriver.temporalFilterColumnSql`), injected by TursoDriver.
@@ -721,10 +831,13 @@ export class RemoteTransport {
 
     const aggregations = query?.aggregations || query?.aggregate || [];
     for (const agg of aggregations) {
-      const funcRaw = String(agg.function || agg.func || '').toLowerCase();
-      if (!['count', 'sum', 'avg', 'min', 'max'].includes(funcRaw)) {
-        throw new Error(`Unsupported aggregate function: ${funcRaw}`);
-      }
+      // [#5907] `funcWritten` is the caller's spelling — what the refusal quotes
+      // back and what the declared-vocabulary check is judged against; `funcRaw`
+      // is this transport's own normalised lookup key, unchanged.
+      const funcWritten = String(agg.function || agg.func || '');
+      const funcRaw = funcWritten.toLowerCase();
+      const sqlFunc = REMOTE_AGGREGATE_FUNCTIONS.get(funcRaw);
+      if (sqlFunc === undefined) refuseAggregateFunction(funcWritten);
       const field = agg.field || '*';
       let fieldSql: string;
       if (field === '*') {
@@ -733,9 +846,13 @@ export class RemoteTransport {
         this.assertSafeIdentifier(field);
         fieldSql = `"${field}"`;
       }
+      // The default alias keeps spelling itself with the normalised NAME
+      // (`count_stage`), unchanged; the emitted SQL uses the lowering table's
+      // value so that table is what decides the statement, not a membership
+      // check beside it. Identical text for all five entries today.
       const alias = agg.alias || `${funcRaw}_${field === '*' ? 'all' : field}`;
       this.assertSafeIdentifier(alias);
-      selectParts.push(`${funcRaw}(${fieldSql}) AS "${alias}"`);
+      selectParts.push(`${sqlFunc}(${fieldSql}) AS "${alias}"`);
     }
 
     if (selectParts.length === 0) selectParts.push('*');

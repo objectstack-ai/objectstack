@@ -8,33 +8,21 @@ description: Seed Loader protocol schemas
 # Seed Loader Protocol
 
 Defines the schemas for metadata-driven seed data loading with automatic
-
 relationship resolution, dependency ordering, and multi-pass insertion.
 
 ## Architecture Alignment
-
 - **Salesforce Data Loader**: External ID-based upsert with relationship resolution
-
 - **ServiceNow**: Sys ID and display value mapping during import
-
 - **Airtable**: Linked record resolution via display names
 
 ## Loading Flow
-
 ```
-
 1. Build object dependency graph from field metadata (lookup/master_detail)
-
 2. Topological sort → determine insert order (parents before children)
-
 3. Pass 1: Insert/upsert records, resolve references via externalId
-
 4. Pass 2: Fill deferred references (circular/delayed dependencies)
-
 5. Validate & report unresolved references
-
 6. Return structured result with per-object stats
-
 ```
 
 <Callout type="info">

@@ -8,74 +8,44 @@ description: Protection protocol schemas
 # Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 
 Public, type-safe author surface for package authors to declare
-
 how much of one of their metadata items the runtime (and the
-
 tenant's Studio) is allowed to mutate. Internally this is what
-
 gets translated into the `_lock` / `_lockReason` / `_lockDocsUrl`
-
-private envelope (`[kernel/metadata-protection.zod.ts](/docs/references/kernel/metadata-protection)`) that the
-
+private envelope (`kernel/metadata-protection.zod.ts`) that the
 protocol layer enforces.
 
 Why two layers?
-
-- **`protection`** is the *author DX* surface — typed, validated,
-
-and discoverable via IntelliSense on every `*.app.ts` /
-
-`*.object.ts` / `*.view.ts` etc.
-
-- **`_lock` envelope** is the *runtime* surface — strips off the
-
-protection block on load and stamps the private fields so the
-
-persistence and overlay layers don't drag the author-facing
-
-block through every `sys_metadata` overlay diff.
+ - **`protection`** is the *author DX* surface — typed, validated,
+   and discoverable via IntelliSense on every `*.app.ts` /
+   `*.object.ts` / `*.view.ts` etc.
+ - **`_lock` envelope** is the *runtime* surface — strips off the
+   protection block on load and stamps the private fields so the
+   persistence and overlay layers don't drag the author-facing
+   block through every `sys_metadata` overlay diff.
 
 Example:
-
 ```ts
-
-export const SETUP_APP: App = \{
-
-name: 'setup',
-
-label: 'Setup',
-
-protection: \{
-
-lock: 'full',
-
-reason: 'Core admin UI shipped by @objectstack/platform-objects.',
-
-docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
-
-\},
-
-// ...
-
-\};
-
+export const SETUP_APP: App = {
+  name: 'setup',
+  label: 'Setup',
+  protection: {
+    lock: 'full',
+    reason: 'Core admin UI shipped by @objectstack/platform-objects.',
+    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+  },
+  // ...
+};
 ```
 
 The loader (`metadata/plugin.ts` + `objectql/registry.ts`) calls
-
 `applyProtection` to translate this block into the private
-
 `_lock` envelope at registration time. Authors should NEVER set
-
 the underscored fields directly — they are an implementation
-
 detail.
 
 See also:
-
-- ADR-0010 §3.7 — Future work → now implemented.
-
-- `[kernel/metadata-protection.zod.ts](/docs/references/kernel/metadata-protection)` — the runtime envelope.
+ - ADR-0010 §3.7 — Future work → now implemented.
+ - `kernel/metadata-protection.zod.ts` — the runtime envelope.
 
 <Callout type="info">
 **Source:** `packages/spec/src/shared/protection.zod.ts`

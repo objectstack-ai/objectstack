@@ -8,23 +8,15 @@ description: Migration protocol schemas
 Migration protocol — the two kinds of migration, kept apart on purpose.
 
 A **schema migration** (`ChangeSet` + its atomic operations) reshapes the
-
 physical database to match metadata: add a field, change a type, create an
-
 object, run SQL. It is derivable from the metadata and applied by
-
 `os migrate plan` / `os migrate apply`.
 
 A **data migration** rewrites the rows themselves, and whether it is done is
-
 a property of ONE DEPLOYMENT's database rather than of the installed code
-
 version — so it cannot be expressed as a ChangeSet, and its completion cannot
-
 be inferred from a release. `DataMigrationFlag` is the per-deployment record
-
 that one ran here and its self-check passed; consumers that would act
-
 irreversibly on migrated data gate on the flag instead of the version.
 
 <Callout type="info">
@@ -54,7 +46,7 @@ Add a new field to an existing object
 | **type** | `'add_field'` | ✅ |  |
 | **objectName** | `string` | ✅ | Target object name |
 | **fieldName** | `string` | ✅ | Name of the field to add |
-| **field** | `{ name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; description?: string; … }` | ✅ | Full field definition to add |
+| **field** | `{ name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; description?: string; … }` | ✅ | Full field definition to add |
 
 
 ---
@@ -195,7 +187,7 @@ Add a new field to an existing object
 | **type** | `'add_field'` | ✅ |  |
 | **objectName** | `string` | ✅ | Target object name |
 | **fieldName** | `string` | ✅ | Name of the field to add |
-| **field** | `{ name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; description?: string; … }` | ✅ | Full field definition to add |
+| **field** | `{ name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; description?: string; … }` | ✅ | Full field definition to add |
 
 ---
 

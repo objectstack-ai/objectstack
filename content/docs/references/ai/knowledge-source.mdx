@@ -6,17 +6,12 @@ description: Knowledge Source protocol schemas
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 Knowledge Source — declarative metadata describing what to index and
-
 which adapter to use.
 
 A KnowledgeSource is the metadata-level equivalent of an
-
 `IDataEngine` driver binding: it pairs a logical source description
-
 (object/file/http) with the *id* of an `IKnowledgeAdapter` plugin
-
 that will actually do the work. The adapter resolves the id at
-
 runtime via `IKnowledgeService.registerAdapter`.
 
 See `content/docs/protocol/knowledge.mdx` for the full design.
@@ -88,7 +83,7 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | **adapterConfig** | `Record<string, any>` | optional |  |
 | **source** | `{ kind: 'object'; object: string; contentFields: string[]; metadataFields?: string[]; … } \| { kind: 'file'; prefix: string; mimeTypes?: string[] } \| { kind: 'http'; urls: string[]; userAgent?: string }` | ✅ |  |
 | **embedding** | `{ provider: Enum<'openai' \| 'cohere' \| 'azure_openai' \| 'huggingface' \| 'local' \| 'custom'>; model: string; dimensions: integer; endpoint?: string; … }` | optional |  |
-| **vectorStore** | `{ provider: Enum<'pgvector' \| 'chroma' \| 'qdrant' \| 'pinecone' \| 'weaviate' \| 'milvus' \| 'redis' \| 'opensearch' \| 'elasticsearch' \| 'custom'>; collection: string; endpoint?: string; secretRef?: string; … }` | optional |  |
+| **vectorStore** | `{ provider: Enum<'pgvector' \| 'chroma' \| 'qdrant' \| 'pinecone' \| 'weaviate' \| 'milvus' \| 'redis' \| … +3 more>; collection: string; endpoint?: string; secretRef?: string; … }` | optional |  |
 | **refresh** | `{ onRecordChange?: boolean; cron?: string }` | optional |  |
 | **aiExposed** | `boolean` | optional |  |
 

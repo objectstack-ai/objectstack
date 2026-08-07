@@ -98,7 +98,6 @@ describe('[#5134] SqlDriver compiles empty $and/$or/$not to their boolean identi
   // boolean algebra says rather than by accident of what Knex renders.
   const ids = async (where: unknown): Promise<string[]> => {
     const rows = await driver.find('deal', {
-      object: 'deal',
       fields: ['id'],
       where: where as FilterCondition,
     });

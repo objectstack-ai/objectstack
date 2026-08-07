@@ -143,7 +143,7 @@ describe('SqlDriver canonical audit-timestamp format (SQLite)', () => {
     // Simulate a row written by the OLD update stamp / CURRENT_TIMESTAMP default,
     // bypassing the driver write path entirely.
     await raw('thing').insert({ id: 'legacy', name: 'L', created_at: '2026-01-15 08:30:00', updated_at: '2026-01-15 08:30:00.246' });
-    const row: any = await driver.findOne('thing', { object: 'thing', where: { id: 'legacy' } }, { bypassTenantAudit: true });
+    const row: any = await driver.findOne('thing', { where: { id: 'legacy' } }, { bypassTenantAudit: true });
     expect(row.created_at).toBe('2026-01-15T08:30:00.000Z');
     expect(row.updated_at).toBe('2026-01-15T08:30:00.246Z');
   });
@@ -151,14 +151,14 @@ describe('SqlDriver canonical audit-timestamp format (SQLite)', () => {
   it('REGRESSION (freshness probe): the repaired instant equals the UTC wall-clock, host-timezone-independent', async () => {
     // The zone-naive '2026-01-15 08:30:00' must mean 08:30 UTC, NOT 08:30 local.
     await raw('thing').insert({ id: 'fr', name: 'F', created_at: '2026-01-15 08:30:00', updated_at: '2026-01-15 08:30:00' });
-    const row: any = await driver.findOne('thing', { object: 'thing', where: { id: 'fr' } }, { bypassTenantAudit: true });
+    const row: any = await driver.findOne('thing', { where: { id: 'fr' } }, { bypassTenantAudit: true });
     expect(new Date(row.updated_at as string).getTime()).toBe(Date.parse('2026-01-15T08:30:00.000Z'));
   });
 
   it('read-repair is idempotent: an already-canonical value is returned unchanged', async () => {
     const canonical = '2026-02-02T02:02:02.222Z';
     await raw('thing').insert({ id: 'canon', name: 'C', created_at: canonical, updated_at: canonical });
-    const row: any = await driver.findOne('thing', { object: 'thing', where: { id: 'canon' } }, { bypassTenantAudit: true });
+    const row: any = await driver.findOne('thing', { where: { id: 'canon' } }, { bypassTenantAudit: true });
     expect(row.created_at).toBe(canonical);
     expect(row.updated_at).toBe(canonical);
   });
@@ -175,7 +175,7 @@ describe('SqlDriver canonical audit-timestamp format (SQLite)', () => {
     try {
       await dd.initObjects([{ name: 'evt', fields: { created_at: { type: 'datetime' }, label: { type: 'string' } } }]);
       await dd.create('evt', { id: 'e1', label: 'x', created_at: new Date('2026-04-04T04:04:04.004Z') }, { bypassTenantAudit: true });
-      const row: any = await dd.findOne('evt', { object: 'evt', where: { id: 'e1' } }, { bypassTenantAudit: true });
+      const row: any = await dd.findOne('evt', { where: { id: 'e1' } }, { bypassTenantAudit: true });
       expect(typeof row.created_at).toBe('string');
       expect(row.created_at).toBe('2026-04-04T04:04:04.004Z');
     } finally {

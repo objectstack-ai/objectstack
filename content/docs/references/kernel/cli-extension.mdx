@@ -8,95 +8,60 @@ description: Cli Extension protocol schemas
 # CLI Extension Protocol
 
 Defines the contract for plugins that extend the ObjectStack CLI with
-
 custom commands. This enables third-party packages (e.g., marketplace,
-
 cloud deployment tools) to register new CLI commands via oclif's
-
 built-in plugin system.
 
 ## How It Works (oclif Plugin Model)
 
 1. **Declare** — Plugin's `package.json` includes an `oclif` config section
-
-declaring its commands directory and any topics.
-
+   declaring its commands directory and any topics.
 2. **Discover** — The main CLI (`@objectstack/cli`) lists the plugin in its
-
-`oclif.plugins` array, or users install it via `os plugins install <pkg>`.
-
+   `oclif.plugins` array, or users install it via `os plugins install <pkg>`.
 3. **Load** — oclif automatically discovers and registers all Command classes
-
-exported from the plugin's commands directory.
+   exported from the plugin's commands directory.
 
 ## Plugin Package Contract
 
 The plugin must be a valid oclif plugin:
 
 ```json
-
 // package.json of the plugin
-
-\{
-
-"name": "@acme/plugin-marketplace",
-
-"oclif": \{
-
-"commands": \{
-
-"strategy": "pattern",
-
-"target": "./dist/commands",
-
-"glob": "**\/*.js"
-
-\}
-
-\}
-
-\}
-
+{
+  "name": "@acme/plugin-marketplace",
+  "oclif": {
+    "commands": {
+      "strategy": "pattern",
+      "target": "./dist/commands",
+      "glob": "**\/*.js"
+    }
+  }
+}
 ```
 
 Commands are standard oclif Command classes:
 
 ```typescript
-
 // src/commands/marketplace/search.ts
+import { Args, Command, Flags } from '@oclif/core';
 
-import \{ Args, Command, Flags \} from '@oclif/core';
-
-export default class MarketplaceSearch extends Command \{
-
-static override description = 'Search marketplace apps';
-
-static override args = \{
-
-query: Args.string(\{ description: 'Search query', required: true \}),
-
-\};
-
-async run() \{
-
-const \{ args \} = await this.parse(MarketplaceSearch);
-
-// ...
-
-\}
-
-\}
-
+export default class MarketplaceSearch extends Command {
+  static override description = 'Search marketplace apps';
+  static override args = {
+    query: Args.string({ description: 'Search query', required: true }),
+  };
+  async run() {
+    const { args } = await this.parse(MarketplaceSearch);
+    // ...
+  }
+}
 ```
 
 ## Migration from Commander.js
 
 The previous plugin model required `contributes.commands` in the manifest
-
 and exported Commander.js `Command` instances. The new model uses oclif's
-
 native plugin system for automatic command discovery and registration.
-
 The `objectstack.config.ts` plugins array no longer determines CLI commands.
 
 <Callout type="info">

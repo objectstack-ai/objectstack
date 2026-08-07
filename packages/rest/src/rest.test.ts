@@ -3375,9 +3375,12 @@ describe('filterDashboardForUser — ADR-0057 D10 widget requiresService gate', 
     const rest: any = new RestServer(
       createMockServer() as any,
       protocol,
-      // The widget gate lives on the uncached read; the cached branch — which
-      // is the DEFAULT — does not run it at all (pre-existing and unrelated to
-      // #5563, filed as #5881), so this pins the gate where it exists.
+      // [#5881] `enableCache: false` is no longer what makes this reachable —
+      // dashboard reads bypass the cache unconditionally now, and the DEFAULT
+      // configuration is pinned separately below. Kept explicit because an
+      // operator who disables the cache must get the same answer, and because
+      // this case is what the fix had to leave untouched: it was the only
+      // green proof the gate worked at all while the default path skipped it.
       { api: { requireAuth: false }, metadata: { enableCache: false } } as any,
     );
     rest.resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
@@ -3393,6 +3396,114 @@ describe('filterDashboardForUser — ADR-0057 D10 widget requiresService gate', 
     expect(body).toMatchObject({ type: 'dashboard', name: 'system_overview' });
     expect(ids(body.item)).not.toContain('widget_organizations');
     expect(ids(body.item)).toContain('widget_total_users');
+  });
+
+  // -------------------------------------------------------------------------
+  // [#5881] The gate on the DEFAULT path.
+  //
+  // `enableCache` defaults to true, and the single-item read had a cached
+  // branch that excluded `app` (per-user RBAC) and `doc`/`book` (per-caller
+  // audience) but NOT `dashboard` — so the widget gate above, which lives in
+  // the uncached branch, never ran in a default deployment. Measured on
+  // `origin/main` @ 8e2bbba24 before the fix, against the real RestServer:
+  //
+  //     cachedCalls: 1 | uncachedCalls: 0 | widgetsServed: ["w_users","w_orgs"]
+  //
+  // The fix excludes `dashboard` from the cached branch, as `app` already was.
+  // Why not instead hoist the gate so both branches run it once — which reads
+  // like the tidier shape? Because the ETag cannot carry the gate's verdict:
+  // it is a hash of the UNFILTERED document, and `notModified` is decided
+  // inside the protocol before this layer sees it. Measured, same baseline:
+  //
+  //     etag(unfiltered): 2504e71e | etag(gated body): 75ca17c1 | same? false
+  //     revalidate-with-unfiltered-etag -> notModified: true
+  //     cacheControl: {"directives":["private","no-cache"]}
+  //
+  // So a hoisted gate would ship a filtered body under a validator naming the
+  // unfiltered one. Within one boot that is harmless (the registered-service
+  // set cannot change: `Kernel.use()` throws after bootstrap and nothing
+  // deregisters), but `private, no-cache` means the client stores the body and
+  // only revalidates — and the stored body outlives the process. Turn the
+  // optional service off in a redeploy and the document is unchanged, so every
+  // revalidation answers 304 and the dead tile survives the very deploy that
+  // removed its service. The full-read cost of not caching is nil:
+  // `getMetaItemCached` delegates to `getMetaItem`, so the server does the same
+  // work either way and only the 304's saved bytes are given up.
+  // -------------------------------------------------------------------------
+  /** A protocol offering BOTH reads, so the branch choice is the thing tested. */
+  const bothReads = () => {
+    const protocol: any = createMockProtocol();
+    protocol.getMetaItem = vi.fn().mockResolvedValue({
+      type: 'dashboard', name: 'system_overview', item: dash(),
+    });
+    protocol.getMetaItemCached = vi.fn().mockResolvedValue({
+      data: dash(),
+      etag: { value: 'etag-unfiltered', weak: false },
+      lastModified: new Date().toISOString(),
+      cacheControl: { directives: ['private', 'no-cache'] },
+      notModified: false,
+    });
+    return protocol;
+  };
+  /** Default config — no `metadata` block at all, so `enableCache` is its default. */
+  const defaultServer = (protocol: any) => {
+    const rest: any = new RestServer(createMockServer() as any, protocol, ANON_API as any);
+    rest.resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
+    rest.serviceExistsProvider = (n: string) => n !== 'org-scoping';
+    rest.registerRoutes();
+    return rest;
+  };
+  const readMeta = async (rest: any, type: string, name: string) => {
+    const route = rest.getRoutes().find(
+      (r: any) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:name',
+    );
+    const res = { json: vi.fn(), status: vi.fn().mockReturnThis(), header: vi.fn(), send: vi.fn() };
+    await route.handler({ params: { type, name }, query: {}, headers: {} }, res);
+    return res;
+  };
+
+  it('runs the gate under the DEFAULT configuration, not only when the cache is off', async () => {
+    const protocol = bothReads();
+    const res = await readMeta(defaultServer(protocol), 'dashboard', 'system_overview');
+
+    const body = res.json.mock.calls.at(-1)![0];
+    expect(ids(body.item)).not.toContain('widget_organizations');
+    expect(ids(body.item)).toContain('widget_total_users');
+    // The envelope the route owes its caller is unchanged by the branch switch.
+    expect(body).toMatchObject({ type: 'dashboard', name: 'system_overview' });
+  });
+
+  it('a dashboard read takes the uncached branch — while other types still cache', async () => {
+    // The positive control matters as much as the assertion above it: excluding
+    // one type from the cached branch is only correct if it excludes exactly
+    // that type. A fix that disabled the cache wholesale would satisfy every
+    // gate assertion here and quietly cost every other metadata read its ETag.
+    const protocol = bothReads();
+    const rest = defaultServer(protocol);
+
+    const dashRes = await readMeta(rest, 'dashboard', 'system_overview');
+    expect(protocol.getMetaItemCached).not.toHaveBeenCalled();
+    expect(protocol.getMetaItem).toHaveBeenCalledTimes(1);
+    // The observable price of the bypass, pinned rather than hidden: a
+    // dashboard read carries no ETag validator now.
+    expect(dashRes.header.mock.calls.map((c: any[]) => c[0])).not.toContain('ETag');
+
+    const viewRes = await readMeta(rest, 'view', 'account_list');
+    expect(protocol.getMetaItemCached).toHaveBeenCalledTimes(1);
+    expect(viewRes.header.mock.calls.map((c: any[]) => c[0])).toContain('ETag');
+  });
+
+  it('the plural spelling cannot spell its way around the exclusion', async () => {
+    // `/meta/dashboards/x` is the CANONICAL REST spelling (Prime Directive #3)
+    // and the route serves both, so an exclusion compared against the literal
+    // `'dashboard'` would leave the default path ungated under the spelling
+    // most callers use — the #3984 defect class, which `metaTypeSingular`'s own
+    // docstring exists to remember.
+    const protocol = bothReads();
+    const res = await readMeta(defaultServer(protocol), 'dashboards', 'system_overview');
+
+    expect(protocol.getMetaItemCached).not.toHaveBeenCalled();
+    expect(ids(res.json.mock.calls.at(-1)![0].item)).not.toContain('widget_organizations');
   });
 
   it('resolveRegisteredServices discovers requiresService declared on widgets', async () => {

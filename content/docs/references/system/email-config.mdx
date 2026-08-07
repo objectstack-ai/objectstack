@@ -8,45 +8,29 @@ description: Email Config protocol schemas
 Email Service Configuration Protocol
 
 Operator-facing configuration that selects the outbound email
-
 transport for the EmailServicePlugin. Provider is a `provider` tag
-
 + provider-specific settings; concrete `IEmailTransport`
-
 implementations live in `@objectstack/plugin-email/transports/*`.
 
 Resolution order in `serve.ts`:
-
-1. `config.email.*` from objectstack.config.ts
-
-2. `OS_EMAIL_*` environment variables (override per setting)
-
-3. Default → provider='log' (LogTransport, no real send)
+  1. `config.email.*` from objectstack.config.ts
+  2. `OS_EMAIL_*` environment variables (override per setting)
+  3. Default → provider='log' (LogTransport, no real send)
 
 `appName` is the one key whose env layer is not `OS_EMAIL_*` — it is
-
 `OS_APP_NAME`, because the same product name names the whole deployment,
-
 not just its mail.
 
 Every key here is one `resolveEmailCapabilityArg` reads (the single reader
-
 of `config.email`); the schema is the operator-facing contract for that
-
 function, so a key the runtime honours and this object omits is a type
-
 error on a config that boots fine — the declared ≠ implemented gap of
-
 #5104 (provider='smtp') and #5307 (queueDelivery / appName /
-
 defaultTemplateContext), both times with the spec on the lagging side.
 
 SMTP delivery is built in (ADR-0012): select it with provider='smtp'
-
 and supply the connection through `options` (host / port / secure /
-
 user / password) or the matching OS_EMAIL_SMTP_HOST / _PORT /
-
 _SECURE / _USER / _PASSWORD environment variables.
 
 <Callout type="info">

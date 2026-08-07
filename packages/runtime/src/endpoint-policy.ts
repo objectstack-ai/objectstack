@@ -270,7 +270,23 @@ export function computeCacheControl(
     return `private, max-age=${Math.floor(ttl)}`;
 }
 
-/** The 401 every seam on this platform answers — same code, same message, same envelope. */
+/**
+ * The anonymous 401 this seam answers: the same DECISION, {@link ANONYMOUS_DENY_CODE}
+ * and {@link ANONYMOUS_DENY_MESSAGE} as every other seam — in the **dispatcher's**
+ * envelope, `{ success: false, error: { code, message, httpStatus } }`, which is
+ * what `apiErrorResponse` builds.
+ *
+ * NOT the platform's only 401 body, and this comment used to say it was ("same
+ * code, same message, same envelope"). The REST seam — `@objectstack/rest`'s
+ * `enforceAuth`, writing `ANONYMOUS_DENY_BODY` — answers the flat
+ * `{ error, message }`. Both envelopes are live and sanctioned by ADR-0112's
+ * 2026-07-30 amendment (#4007); converging them is a breaking wire change owned
+ * by the envelope-convergence line (#3843 family), not by this function. The
+ * full two-envelope table lives on `ANONYMOUS_DENY_BODY`
+ * (`@objectstack/core`, `security/anonymous-deny.ts`), narrowed there by #5632
+ * — this was the same claim surviving on the side that PRODUCES the wrapper,
+ * where it reads as authoritative (#5800).
+ */
 function anonymousDenial(): EndpointPolicyVerdict {
     const { status, body } = apiErrorResponse({
         code: ANONYMOUS_DENY_CODE,

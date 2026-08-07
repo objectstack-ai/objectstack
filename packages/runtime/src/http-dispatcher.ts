@@ -1409,8 +1409,13 @@ export class HttpDispatcher {
                 // (`registerBatchEndpoints`) — this dispatcher has no batch
                 // branch at all: `domains/data.ts` routes only `query` as a
                 // custom action, and `callData`'s vestigial `action === 'batch'`
-                // arm is unreachable from here and returns `{ results: [] }`
-                // without opening a transaction. Answering `engine.transaction`
+                // arm — unreachable from here, and returning `{ results: [] }`
+                // without opening a transaction — was REMOVED under ADR-0049
+                // enforce-or-remove (#5856), so `batch` now falls to the same
+                // `400 Unknown data action` as any other unhandled action.
+                // Nothing about this verdict changed with it: the reason was
+                // "this face does not serve `/batch`" both before and after.
+                // Answering `engine.transaction`
                 // instead would advertise atomicity for an endpoint this host
                 // does not serve — the `declared ≠ enforced` lie the flag was
                 // introduced (#3298/#1604) to remove. A host that mounts REST

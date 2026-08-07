@@ -63,7 +63,7 @@ describe('InMemoryDriver Persistence', () => {
       });
       await driver2.connect();
 
-      const users = await driver2.find('users', { object: 'users' });
+      const users = await driver2.find('users', {});
       expect(users).toHaveLength(2);
       expect(users[0].name).toBe('Alice');
       expect(users[1].name).toBe('Bob');
@@ -103,7 +103,7 @@ describe('InMemoryDriver Persistence', () => {
       });
       await driver2.connect();
 
-      const tasks = await driver2.find('tasks', { object: 'tasks' });
+      const tasks = await driver2.find('tasks', {});
       expect(tasks).toHaveLength(1);
       expect(tasks[0].id).toBe('1');
       expect(tasks[0].done).toBe(true);
@@ -117,7 +117,7 @@ describe('InMemoryDriver Persistence', () => {
       });
       await driver.connect();
 
-      const users = await driver.find('users', { object: 'users' });
+      const users = await driver.find('users', {});
       expect(users).toHaveLength(0);
 
       await driver.disconnect();
@@ -153,7 +153,7 @@ describe('InMemoryDriver Persistence', () => {
         persistence: { adapter: customAdapter },
       });
       await driver2.connect();
-      const projects = await driver2.find('projects', { object: 'projects' });
+      const projects = await driver2.find('projects', {});
       expect(projects).toHaveLength(1);
       expect(projects[0].name).toBe('Alpha');
 
@@ -167,13 +167,13 @@ describe('InMemoryDriver Persistence', () => {
       await driver.connect();
 
       await driver.create('items', { id: '1', name: 'Widget' });
-      const items = await driver.find('items', { object: 'items' });
+      const items = await driver.find('items', {});
       expect(items).toHaveLength(1);
 
       await driver.disconnect();
 
       // After disconnect, data is gone
-      const itemsAfter = await driver.find('items', { object: 'items' });
+      const itemsAfter = await driver.find('items', {});
       expect(itemsAfter).toHaveLength(0);
     });
   });
@@ -209,7 +209,7 @@ describe('InMemoryDriver Persistence', () => {
         persistence: { type: 'auto', path: filePath, autoSaveInterval: 100 },
       });
       await driver2.connect();
-      const users = await driver2.find('users', { object: 'users' });
+      const users = await driver2.find('users', {});
       expect(users).toHaveLength(1);
       expect(users[0].name).toBe('Alice');
       await driver2.disconnect();
@@ -234,7 +234,7 @@ describe('InMemoryDriver Persistence', () => {
         persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveInterval: 100 },
       });
       await driver2.connect();
-      const items = await driver2.find('items', { object: 'items' });
+      const items = await driver2.find('items', {});
       expect(items).toHaveLength(3);
       await driver2.disconnect();
     });
@@ -268,7 +268,7 @@ describe('InMemoryDriver Persistence', () => {
             { id: 'n1', title: 'first' },
             { id: 'n2', title: 'second' },
           ]);
-          const rows = await driver.find('ext_note', { object: 'ext_note' });
+          const rows = await driver.find('ext_note', {});
           expect(rows.map((r: any) => r.title).sort()).toEqual(['first', 'second']);
           await driver.disconnect();
         }
@@ -328,7 +328,7 @@ describe('InMemoryDriver Persistence', () => {
       await driver.create('items', { id: '1', name: 'Widget' });
 
       // Should work as pure in-memory without errors
-      const items = await driver.find('items', { object: 'items' });
+      const items = await driver.find('items', {});
       expect(items).toHaveLength(1);
 
       await driver.disconnect();

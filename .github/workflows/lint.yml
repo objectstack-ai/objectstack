@@ -717,6 +717,27 @@ jobs:
       - name: Check the decision frame is in sync across its four copies
         run: pnpm check:skill-frame-sync
 
+      # The third gate over SKILL.md, covering the one line the other two cannot see
+      # (#5331). check:skill-docs / check:skill-refs compare generated artifacts and
+      # check:skill-examples typechecks `os:check` blocks; none of them reads the
+      # `compatibility:` frontmatter line. That blind spot is measured, not theoretical:
+      # nine of ten skills declared `@objectstack/spec 16.x` for an entire major cycle
+      # while teaching 17's capabilities, with all three gates green throughout (#5245).
+      # #5245 corrected the values by hand; this reconciles them against
+      # packages/spec/package.json on every run so they cannot drift again.
+      #
+      # Note the contract is the wording that actually LANDED for #5245 — an exact
+      # `<major>.x` pin. If the wording is ever changed to an unpinned range, this gate
+      # goes RED rather than quietly matching nothing (#4690): a gate that cannot find
+      # its input must fail, never skip.
+      #
+      # Same job and same reasons as its neighbours: no paths filter and required, so it
+      # cannot go dormant on exactly the PR that breaks it — and a `skills/**` filter in
+      # particular would blind it to the other half of its input, packages/*/package.json,
+      # where a major bump is what makes the declarations stale in the first place.
+      - name: Check SKILL.md compatibility declarations match the workspace majors
+        run: pnpm check:skill-compatibility
+
       - name: Check the react-blocks contract is in sync with the spec
         run: pnpm --filter @objectstack/spec check:react-blocks
 
