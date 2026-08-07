@@ -201,8 +201,13 @@ const actionDefUnknownKeyError = strictUnknownKeyError({
  * nothing while making a shape fragment look load-bearing (#4583: *"a
  * precisely-validated dead slot is the more convincing lie"*).
  *
- * The `Class` cell it should carry is an OPEN question (#5249): the ledger's
- * enumerated vocabulary has no word for a shape that is neither a door nor dead.
+ * The `Class` cell it should carry was an open question (#5249), because the
+ * ledger's enumerated vocabulary had no word for a shape that is neither a door
+ * nor dead. **Ruled 2026-08-06: the vocabulary grew one — `covered`** (carrier
+ * absent, parse absent, vocabulary fully gated at every consumer; follow-up:
+ * none), and this schema is its only instance in the five triaged directories —
+ * a spread is what makes the base inert, and it is the only strip site in all
+ * 197 that is spread rather than `.extend()`ed or carried under a key.
  *
  * Pinned in `app-strictness-batch19.test.ts`, including the mechanism itself
  * (`.extend()` inherits posture, `...shape` does not) and a guard that fails if
