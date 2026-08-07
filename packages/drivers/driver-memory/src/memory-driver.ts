@@ -2,7 +2,7 @@
 
 import type { QueryAST, QueryInput, DriverOptions } from '@objectstack/spec/data';
 import { canonicalAstOperator } from '@objectstack/spec/data';
-import type { IDataDriver } from '@objectstack/spec/contracts';
+import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import { getValueByPath } from './memory-matcher.js';
@@ -280,7 +280,7 @@ export class InMemoryDriver implements IDataDriver {
   // CRUD
   // ===================================
 
-  async find(object: string, query: QueryAST, options?: DriverOptions) {
+  async find(object: string, query: DriverQuery, options?: DriverOptions) {
     this.logger.debug('Find operation', { object, query });
     
     const table = this.getTable(object);
@@ -339,7 +339,7 @@ export class InMemoryDriver implements IDataDriver {
   // row — the whole table was already in memory before the first `yield`. Nothing
   // called it. Page through `find()` with `limit`/`offset`.
 
-  async findOne(object: string, query: QueryAST, options?: DriverOptions) {
+  async findOne(object: string, query: DriverQuery, options?: DriverOptions) {
     this.logger.debug('FindOne operation', { object, query });
     
     const results = await this.find(object, { ...query, limit: 1 }, options);
@@ -441,7 +441,7 @@ export class InMemoryDriver implements IDataDriver {
     return true;
   }
 
-  async count(object: string, query?: QueryAST, options?: DriverOptions) {
+  async count(object: string, query?: DriverQuery, options?: DriverOptions) {
     let records = this.getTable(object);
     if (query?.where) {
         const mongoQuery = this.convertToMongoQuery(query.where, object);
@@ -466,7 +466,7 @@ export class InMemoryDriver implements IDataDriver {
     return results;
   }
   
-  async updateMany(object: string, query: QueryAST, data: Record<string, any>, options?: DriverOptions): Promise<number> {
+  async updateMany(object: string, query: DriverQuery, data: Record<string, any>, options?: DriverOptions): Promise<number> {
       this.logger.debug('UpdateMany operation', { object, query });
       
       const table = this.getTable(object);
@@ -499,7 +499,7 @@ export class InMemoryDriver implements IDataDriver {
       return count;
   }
 
-  async deleteMany(object: string, query: QueryAST, options?: DriverOptions): Promise<number> {
+  async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
       this.logger.debug('DeleteMany operation', { object, query });
       
       const table = this.getTable(object);
@@ -1035,7 +1035,7 @@ export class InMemoryDriver implements IDataDriver {
   // Aggregation Logic
   // ===================================
 
-  private performAggregation(records: any[], query: QueryInput): any[] {
+  private performAggregation(records: any[], query: Omit<QueryInput, 'object'>): any[] {
     const { groupBy, aggregations } = query;
     const groups: Map<string, any[]> = new Map();
 

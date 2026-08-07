@@ -2152,10 +2152,18 @@ export const MIGRATION_MAJORS: readonly number[] = Object.keys(MIGRATIONS_BY_MAJ
  *
  * ## What reads it
  *
- * Check (b) of `scripts/build-schemas.ts` (`check:authorable-surface`): a key
- * that flips live → retired must appear here, by exact set membership, or the
- * build fails. Nothing else consumes the table, and nothing infers an entry —
- * the author writes the key down or the gate stays red.
+ * Two gates in `scripts/build-schemas.ts` (`check:authorable-surface`), and
+ * nothing infers an entry for either — the author writes the key down or the
+ * gate stays red:
+ *
+ * - **Check (b)**, the retirement gate: a key that flips live → retired must
+ *   appear here, by exact set membership, or the build fails. (Check (b2) is its
+ *   inverse: an entry naming a key this build still emits as LIVE is rejected.)
+ * - **Check (c)**, the baseline-deletion gate (#4650): the major recorded here
+ *   is what starts a tombstone's ~two-major aging clock, so it is also what
+ *   eventually lets its `authorable-surface/` line be deleted. Since #5898 —
+ *   before that, (c) dated the clock by matching the key's LEAF against the
+ *   conversion registry, and took the `Math.min` of the matches.
  *
  * ## Why exact keys, and not the conversion `surface`
  *
@@ -2184,26 +2192,45 @@ export const MIGRATION_MAJORS: readonly number[] = Object.keys(MIGRATIONS_BY_MAJ
  * table. An entry here is the *proof the retirement was declared*; the
  * conversion is the *prescription a consumer follows*. A retirement needs both.
  *
- * ## Not a backfill of history
+ * ## Historical tombstones: absent, and therefore not deletable
  *
  * Check (b) fires only on a NEW live → retired transition — measured against the
  * committed `authorable-surface.json` baseline, which already records every
- * older tombstone as `[RETIRED]`. Retirements that landed before this table
- * existed therefore never re-trigger it and are deliberately absent: this reads
- * "retirements registered under the exact-key gate", not "every retirement
- * ever". Do not reconstruct the missing history by leaf-matching the conversion
- * registry — that is precisely the inference #4659 removed.
+ * older tombstone as `[RETIRED]`. The 97 retirements that landed before this
+ * table existed therefore never re-trigger it and are deliberately absent: this
+ * reads "retirements registered under the exact-key gate", not "every retirement
+ * ever".
+ *
+ * #5898 measured what it would take to backfill them, and neither available
+ * source can date a row honestly:
+ *
+ * - **Leaf-matching the conversion registry** is precisely the inference #4659
+ *   removed. It is also demonstrably wrong in both directions on this very data:
+ *   of the two rows it dated as aged-out, `data/Index:type` was dated by
+ *   `flow.node.type` (an unrelated cluster) and `api/RestApiConfig:requireAuth`
+ *   by `api.requireAuth` at major 12 — which is the secure-default FLIP, a
+ *   different kind of change to the same surface, not its retirement.
+ * - **The git history of `authorable-surface.json`** begins at 17.0.0-rc.0, so
+ *   every one of the 97 rows first carries `[RETIRED]` at major 17. That is an
+ *   artifact of the baseline file's birth, not archaeology.
+ *
+ * So the rows stay undeclared, and check (c) is fail-closed about it: a
+ * tombstone with no entry here cannot prove its age and its baseline line may
+ * not be deleted. Deleting one is a deliberate, reviewable act — establish the
+ * true major for that key, add it below, and check (b2) verifies the entry still
+ * names a key this build tombstones. Do NOT add a row you cannot date; an
+ * estimate written down here reads as a fact to every later gate.
  *
  * ## Lifecycle
  *
- * Entries are permanent. A tombstone ages out after ~two majors and its line
- * leaves `authorable-surface.json` (check (c)); its entry here stays, and then
- * names a key the build no longer emits — the expected steady state, not an
- * error. The one state the gate rejects is an entry naming a key that is still
- * LIVE: a registration nothing consumed, pre-approving a retirement that has not
- * happened.
+ * Entries are permanent. A declared tombstone ages out after ~two majors and its
+ * line may then leave `authorable-surface.json` (check (c)); its entry here
+ * stays, and then names a key the build no longer emits — the expected steady
+ * state, not an error. The one state the gate rejects is an entry naming a key
+ * that is still LIVE: a registration nothing consumed, pre-approving a
+ * retirement that has not happened.
  *
- * @see scripts/build-schemas.ts — checks (b)/(b2), the only consumers
+ * @see scripts/build-schemas.ts — checks (b)/(b2)/(c), the only consumers
  */
 export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {
   // The first entries since #4659 built this table (#5552). ONE tombstone

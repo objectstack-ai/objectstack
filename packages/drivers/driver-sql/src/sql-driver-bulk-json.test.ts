@@ -50,7 +50,7 @@ describe('SqlDriver bulkCreate JSON marshaling (#2735)', () => {
     expect(result).toHaveLength(2);
 
     // Read-back parity: JSON columns decode to objects, same as single insert.
-    const v1 = await driver.findOne('venue', { object: 'venue', where: { id: 'v1' } });
+    const v1 = await driver.findOne('venue', { where: { id: 'v1' } });
     expect(v1.location).toEqual({ lat: 47.6062, lng: -122.3321 });
     expect(v1.tags).toEqual(['a', 'b']);
     expect(v1.meta).toEqual({ tier: 1 });

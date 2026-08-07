@@ -26,6 +26,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { TursoDriver } from './turso-driver.js';
 import { RemoteTransport } from './remote-transport.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
@@ -60,7 +61,7 @@ async function makeRemoteDriver(schema: Record<string, unknown>, rows: Record<st
   return { driver, stub };
 }
 
-const ids = async (driver: TursoDriver, object: string, where: unknown) =>
+const ids = async (driver: TursoDriver, object: string, where: DriverQuery['where']) =>
   ((await driver.find(object, { where })) as any[]).map((r) => r.id).sort();
 
 describe('TursoDriver remote — declared text predicates return rows', () => {

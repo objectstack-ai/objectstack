@@ -109,43 +109,60 @@ const ACTION_PARAM_KEY_ALIASES: Readonly<Record<string, string>> = {
  * the canonical one.
  */
 /**
- * Guidance for the two per-option keys that ARE declared one layer down, on
- * `SelectOptionSchema` (`data/field.zod.ts`) — `color` and `visibleWhen`.
+ * Guidance for `color` — declared one layer down on `SelectOptionSchema`
+ * (`data/field.zod.ts`), and still not a key of THIS shape.
  *
- * Built per key rather than shared, because `guidance` emits one bullet per
- * offending key and a shared string prints the same sentence N times (the
- * 批 10 `join`/`joinGateway` lesson).
+ * `visibleWhen` shared this text until #5016. The two were separated on
+ * measurement rather than on symmetry: both are declared on a FIELD's option
+ * list, but only one of them has a consumer an ACTION PARAM's option list can
+ * reach.
  *
- * Note what it deliberately does NOT say. The obvious advice — "make the param
- * field-backed and inherit the field's options" — is FALSE for these two:
- * objectui's `resolveActionParams` lowers an inherited list through
- * `normaliseOptions`, which rebuilds every entry as `{ label, value }`. Both
- * directions drop the key, so the sentence names where the vocabulary is real
- * without promising a route that does not exist (ledger finding 18: prose in a
- * rejection is behaviour, and a confidently wrong one is worse than none).
+ *  - `visibleWhen` is now declared below, because the reader is on this path.
+ *    An inline param's `options` are lowered VERBATIM (objectui
+ *    `resolveActionParam`'s inline branch → `paramToField` →
+ *    `getLazyFieldWidget`), and every option widget narrows the offered set
+ *    through `useCascadingOptions` → `resolveCascadingOptions`, which reads
+ *    exactly this key (ADR-0058 / objectui#2284).
+ *  - `color` has no reader here. It is consumed only where a STORED value is
+ *    displayed — the grid cell / detail badge (`SelectCellRenderer`) and the
+ *    state-machine viewer. An action param's option list never reaches those:
+ *    the dialog builds an input from it, submits the picked value, and drops
+ *    the list. The select / multiselect / radio / checkboxes INPUT widgets read
+ *    `label`, `value` and `visibleWhen`, and nothing else.
+ *
+ * So `color` here is not "not yet, pending #5016" — #5016 measured it and the
+ * answer is no. Declaring it would add exactly the key that parses clean and
+ * changes nothing (ADR-0078), and would delete the only sentence telling an
+ * author where the vocabulary IS real.
  */
-const actionParamOptionDeclaredOnFieldOnly = (key: 'color' | 'visibleWhen'): string =>
-  `\`${key}\` is a per-option key of a FIELD's option list (\`SelectOptionSchema\` in `
-  + `\`data/field.zod.ts\`), where the object form and grid do read it. An action param's `
-  + `options are \`{ label, value }\` — and the action metadata door has always stripped `
-  + `anything else before a renderer could see it, so writing \`${key}\` here has never had `
-  + `an effect. Whether this surface should carry the full per-option vocabulary is `
-  + `#5016; do not rely on it today.`;
+const actionParamOptionColorGuidance =
+  '`color` is a per-option key of a FIELD\'s option list (`SelectOptionSchema` in '
+  + '`data/field.zod.ts`), read where a STORED value is displayed — the grid cell and the '
+  + 'detail badge. An action param\'s options are never rendered that way: the dialog builds '
+  + 'an INPUT from them, submits the picked value and discards the list, so no renderer would '
+  + 'read `color` here even if this shape declared it (#5016 measured this). Drop the key — to '
+  + 'colour the value once it is stored, declare the option list on the FIELD.';
 
 /**
  * Guidance for per-option keys that no spec shape declares at all.
  *
  * `icon` / `disabled` exist only in objectui's internal `SelectOptionMetadata`
- * interface, which nothing populates from metadata — so unlike `color` /
- * `visibleWhen` there is no "one layer down" to point at, and saying there was
- * would be the false-prescription class this campaign has already shipped four
- * times (ledger finding 18).
+ * interface, which nothing populates from metadata and no widget reads — so
+ * unlike `color` / `visibleWhen` there is no "one layer down" to point at, and
+ * saying there was would be the false-prescription class this campaign has
+ * already shipped four times (ledger finding 18).
+ *
+ * #5016 re-measured both before deciding whether to converge the spec on
+ * objectui's interface (its option C) and found the same thing the batch-14
+ * pass did: `SelectOptionMetadata.icon` has no reader anywhere in objectui, and
+ * every `disabled` in the four option widgets is the FIELD-level `props.disabled`,
+ * never a per-option one. C was therefore not taken.
  */
 const actionParamOptionUndeclaredAnywhere = (key: 'icon' | 'disabled'): string =>
   `no option shape in the spec declares \`${key}\` — not this one, and not the field-level `
   + `\`SelectOptionSchema\`. It exists only inside objectui's own `
-  + `\`SelectOptionMetadata\` type, which no metadata path populates. An action param's `
-  + `options are \`{ label, value }\`; drop the key.`;
+  + `\`SelectOptionMetadata\` type, which no metadata path populates and no widget reads. An `
+  + `action param's options are \`{ label, value, visibleWhen }\`; drop the key.`;
 
 const actionParamUnknownKeyError = strictUnknownKeyError({
   surface: 'this action param',
@@ -209,14 +226,40 @@ export const ActionParamSchema = lazySchema(() => z.object({
    *    `visibleWhen`), not an index signature. A closed target vocabulary is
    *    exactly the case where declaring beats tolerating.
    *
-   * So the answer legitimately differs from the sibling's. What that leaves is
-   * a real, separable question — *should* an action param's option list speak
-   * the full per-option vocabulary that a FIELD's `options`
-   * (`SelectOptionSchema`, `data/field.zod.ts`) already declares and the object
-   * form already honours? That is a capability addition, not a strictness
-   * change, and it is filed as #5016 rather than guessed at here. Until it is decided,
-   * the honest contract is the one this schema has always had — `{ label,
-   * value }` — now said out loud instead of enforced by deletion.
+   * So the answer legitimately differs from the sibling's. What that left was a
+   * real, separable question — *should* an action param's option list speak the
+   * per-option vocabulary that a FIELD's `options` (`SelectOptionSchema`,
+   * `data/field.zod.ts`) already declares? That was filed as #5016 rather than
+   * guessed at here, and #5016 answered it **per key, on measurement**:
+   *
+   * - **`visibleWhen` — opened.** The reader is on this exact path and it works
+   *   today. An inline param's `options` are lowered VERBATIM (objectui
+   *   `resolveActionParam`'s inline branch does `options: param.options`;
+   *   `ActionParamDialog` re-spreads each entry to localise `label`;
+   *   `paramToField` passes the array straight into the widget's field
+   *   metadata), and `SelectField` / `MultiSelectField` / `RadioField` /
+   *   `CheckboxesField` all narrow the offered set through
+   *   `useCascadingOptions` → `resolveCascadingOptions`, which reads this key
+   *   and accepts the `{ dialect, source }` envelope `ExpressionInputSchema`
+   *   emits. The spec door was the ONLY thing between an author and a working
+   *   per-option gate.
+   * - **`color` / `default` — not opened**, and `icon` / `disabled` not added to
+   *   `SelectOptionSchema` either (#5016's option C). None has a reader an
+   *   action param's option list can reach; each keeps a `guidance` entry
+   *   saying where the vocabulary IS real. Declaring them would be the
+   *   parses-clean-changes-nothing key ADR-0078 exists to keep out — and for
+   *   `default` it would actively mislead, since a dialog param defaults
+   *   through `defaultValue` one level up.
+   *
+   * **What this does NOT fix**, deliberately, because it is objectui's and not
+   * the spec's: a FIELD-BACKED param that inherits its list instead of declaring
+   * one still loses the key. `resolveActionParam` reaches
+   * `param.options ?? normaliseOptions(field.options, …)`, and `normaliseOptions`
+   * rebuilds every inherited entry as `{ label, value }`. That drop predates
+   * this change, is invisible to it (an authored `options` array wins over the
+   * inherited one), and is tracked in objectui — so the guidance below still
+   * refuses to prescribe "make it field-backed and inherit" (ledger finding 18:
+   * a confidently wrong prescription is worse than none).
    *
    * The aliases are anchored on `SelectOptionSchema`'s own curated table (the
    * same idea, one layer down) rather than on edit distance, and deliberately
@@ -240,20 +283,51 @@ export const ActionParamSchema = lazySchema(() => z.object({
       optionValue: 'value',
       optionLabel: 'label',
       displayName: 'label',
+      // #5016 declared `visibleWhen` here, so `SelectOptionSchema`'s two
+      // spellings for it now point at a key this shape accepts and can carry
+      // across under the same finding-12 rule as the five above.
+      visible: 'visibleWhen',
+      showWhen: 'visibleWhen',
     },
     guidance: {
-      // The four per-option keys that ARE real one layer down. Each says where
-      // the vocabulary lives and — critically — does NOT promise that a
-      // field-backed param inherits them: `resolveActionParams`'
-      // `normaliseOptions` rebuilds each entry as `{ label, value }`, so that
-      // promise would be false in exactly the way ledger finding 18 warns about.
-      color: actionParamOptionDeclaredOnFieldOnly('color'),
-      visibleWhen: actionParamOptionDeclaredOnFieldOnly('visibleWhen'),
+      // The per-option keys that are real one layer down but have no reader on
+      // THIS path, plus the two that no spec shape declares at all. Each says
+      // where the vocabulary lives and — critically — does NOT promise that a
+      // field-backed param inherits it: `resolveActionParams`' `normaliseOptions`
+      // rebuilds each inherited entry as `{ label, value }`, so that promise
+      // would be false in exactly the way ledger finding 18 warns about.
+      //
+      // `visibleWhen` is deliberately absent: it is a declared key now, and
+      // `guidance` is consulted only from the `unrecognized_keys` path, so an
+      // entry for it would be dead prose (`shared/alias-integrity.test.ts`).
+      color: actionParamOptionColorGuidance,
       icon: actionParamOptionUndeclaredAnywhere('icon'),
       disabled: actionParamOptionUndeclaredAnywhere('disabled'),
       default: '`default` on an OPTION is the field-level picklist default (`SelectOptionSchema.default`). A dialog param defaults through `defaultValue` on the PARAM itself, one level up — write `defaultValue: \'<value>\'` there.',
     },
-  }, { label: I18nLabelSchema, value: z.string() })).optional(),
+  }, {
+    label: I18nLabelSchema,
+    value: z.string(),
+    /**
+     * Per-option visibility predicate (CEL) — the option is offered only when
+     * this evaluates TRUE. Omit = always available (#5016).
+     *
+     * Same key, same engine and same binding environment as
+     * `SelectOptionSchema.visibleWhen` one layer down, so one vocabulary covers
+     * both surfaces: it expresses dependent options (`record.country == 'cn'`)
+     * AND role/context gating (`'admin' in current_user.positions`). In a
+     * dialog `record` is the live param bag overlaid on the row, so a param can
+     * gate its options on a SIBLING param the user has already filled.
+     *
+     * ⚠️ Client-side hiding is UX, not authorization. `enforceActionParams`
+     * validates the submitted value against this param's option VALUES
+     * (ADR-0104 D2) — it does not evaluate per-option `visibleWhen` — so an
+     * option gated for access-control reasons must also be refused by the
+     * action's own body or a permission check. Hiding it in the dropdown is
+     * bypassable.
+     */
+    visibleWhen: ExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as the field-level per-option visibleWhen (record + current_user). e.g. P`record.tier == 'gold'`"),
+  })).optional(),
   /** Placeholder override. */
   placeholder: z.string().optional(),
   /** Help/description override. */

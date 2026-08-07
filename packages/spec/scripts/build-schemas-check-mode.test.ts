@@ -389,19 +389,32 @@ const CURRENT_MAJOR = Number.parseInt(
 const DELETED_LIVE = 'data/Object:zzNeverRetired4650';
 /** Reachable def, tombstoned at base but never registered in the ADR-0087 registries. */
 const DELETED_UNREGISTERED = 'data/Object:zzRetiredButUnregistered4650 [RETIRED]';
-/** Tombstoned AND registered, but too recently: `skill.triggerPhrases` was
- *  registered at protocol 17. The guard below fails loudly once that ages out —
- *  re-pick a clause registered within the last TOMBSTONE_AGE_MAJORS majors. */
-const DELETED_UNAGED_LEAF = 'triggerPhrases';
-const DELETED_UNAGED = `ai/Agent:${DELETED_UNAGED_LEAF} [RETIRED]`;
+/** #5898's pin, in the shape the issue measured it. A tombstone whose LEAF is
+ *  spoken for by an old, unrelated ADR-0087 clause — `.type` is registered at
+ *  protocol 11 by `flow-node-http-callout-rename` (`flow.node.type`, a flow
+ *  node's type) — and which nothing declares in RETIRED_KEYS_BY_MAJOR.
+ *
+ *  Until #5898 check (c) dated the aging clock by exactly this leaf match and
+ *  took the `Math.min`, so this deletion was WAVED THROUGH as an aged-out
+ *  tombstone: `data/Index:type`, the live specimen, was deletable at major 17
+ *  one major after its own honest clause (`object.indexes[].type`, major 17)
+ *  registered it. The def here is real and root-reachable, the prop is
+ *  synthetic — the real key cannot be used, because check (c) only ever sees a
+ *  key the build STOPPED emitting. */
+const DELETED_LEAF_COLLIDER_LEAF = 'type';
+const DELETED_LEAF_COLLIDER = `data/Object:${DELETED_LEAF_COLLIDER_LEAF} [RETIRED]`;
 /** Emitted but not reachable from any metadata-type root: a REST response
  *  envelope no metadata document is ever parsed against (the issue's own
  *  over-collection example). */
 const DELETED_UNREACHABLE = 'api/SessionResponse:zzOverCollected4650';
 /** Def the build no longer emits at all — the literal #4643 cluster. */
 const DELETED_GONE_DEF = ['identity/Session:userId', 'identity/Session:token'];
-/** Aged-out tombstone: `object.compactLayout` registered at protocol 11 —
- *  ≥ 2 majors behind any current major, so this fixture never goes stale. */
+/** Aged-out tombstone. Since #5898 the proof is a DECLARATION, not a clause
+ *  match: the key must be named exactly in RETIRED_KEYS_BY_MAJOR under an old
+ *  major. That cannot be exercised in this sandbox — it symlinks `src/`, so the
+ *  registry is not writable here — so the aged-out and not-yet-aged branches
+ *  moved to the #5898 block at the bottom, which copies `src/` and substitutes
+ *  the table. What stays here is the branch that needs no declaration. */
 const DELETED_AGED_LEAF = 'compactLayout';
 const DELETED_AGED = `data/Object:${DELETED_AGED_LEAF} [RETIRED]`;
 /** Base key under a def RENAMED_DEFS moved: carried, so never a deletion.
@@ -420,7 +433,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
     for (const injected of [
       DELETED_LIVE,
       DELETED_UNREGISTERED,
-      DELETED_UNAGED,
+      DELETED_LEAF_COLLIDER,
       DELETED_UNREACHABLE,
       ...DELETED_GONE_DEF,
       DELETED_AGED,
@@ -435,26 +448,35 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       keys.some((k) => k.startsWith('identity/Session:')),
       'identity/Session is emitted again — the vanished-def fixture needs a new def',
     ).toBe(false);
-    const unagedMajor = minRegisteredMajorForLeaf(DELETED_UNAGED_LEAF);
+    // The #5898 pin is only a pin while its leaf STILL collides with a clause
+    // old enough that the pre-#5898 matcher would have waved the deletion
+    // through. If either half stops holding, the test below still passes while
+    // asserting nothing about leaf-name matching — so both are loud here.
+    const colliderMajor = minRegisteredMajorForLeaf(DELETED_LEAF_COLLIDER_LEAF);
     expect(
-      unagedMajor !== null && CURRENT_MAJOR - unagedMajor < 2,
-      `'.${DELETED_UNAGED_LEAF}' (registered at major ${unagedMajor}) has aged out at major ` +
-        `${CURRENT_MAJOR} — re-pick a clause registered within the last 2 majors`,
+      colliderMajor !== null,
+      `'.${DELETED_LEAF_COLLIDER_LEAF}' is no longer registered by ANY ADR-0087 clause — the ` +
+        `#5898 fixture has stopped modelling a leaf collision; re-pick a colliding leaf`,
     ).toBe(true);
-    const agedMajor = minRegisteredMajorForLeaf(DELETED_AGED_LEAF);
     expect(
-      agedMajor !== null && CURRENT_MAJOR - agedMajor >= 2,
-      `'.${DELETED_AGED_LEAF}' is no longer an aged-out registration`,
+      colliderMajor !== null && CURRENT_MAJOR - colliderMajor >= 2,
+      `'.${DELETED_LEAF_COLLIDER_LEAF}' collides only at major ${colliderMajor}, which has NOT ` +
+        `aged out at major ${CURRENT_MAJOR} — the pre-#5898 matcher would have rejected this ` +
+        `deletion anyway, so the pin no longer discriminates; re-pick an older colliding leaf`,
     ).toBe(true);
+    expect(
+      Object.values(RETIRED_KEYS_BY_MAJOR).flat(),
+      `${DELETED_LEAF_COLLIDER} is now declared for real — the pin needs an UNdeclared key`,
+    ).not.toContain(DELETED_LEAF_COLLIDER.replace(RETIRED_MARK, ''));
     // The manifest ratchet runs first; keep it current so every run reaches (c).
     seedManifest((s) => s);
   });
 
   it(
-    'fails on deletions of reachable keys — live, unregistered, and not-yet-aged tombstones each say why',
+    'fails on deletions of reachable keys — a live key and an undeclared tombstone each say why',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      seedBase((s) => [...s, DELETED_LIVE, DELETED_UNREGISTERED, DELETED_UNAGED].sort());
+      seedBase((s) => [...s, DELETED_LIVE, DELETED_UNREGISTERED].sort());
       const canonical = seedSurface((s) => s);
 
       const { status, output } = run(['--check']);
@@ -462,11 +484,47 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(status).toBe(1);
       expect(output).toContain('authorable baseline line(s) were deleted without proof (#4650)');
       expect(output).toMatch(/data\/Object:zzNeverRetired4650 — def reachable .* LIVE \(never tombstoned\)/);
-      expect(output).toMatch(/data\/Object:zzRetiredButUnregistered4650 — .*tombstoned, but no conversion\/migration clause/);
-      expect(output).toMatch(new RegExp(`ai/Agent:${DELETED_UNAGED_LEAF} — .*registered at major \\d+`));
-      expect(output).toMatch(/must age ≥ 2 majors/);
+      expect(output).toMatch(
+        /data\/Object:zzRetiredButUnregistered4650 — .*tombstoned, but no entry in RETIRED_KEYS_BY_MAJOR/,
+      );
       // The remedy names the retirement route, not a hand-edit.
       expect(output).toContain('gen:schema');
+      expect(readSurface()).toBe(canonical);
+    },
+  );
+
+  it(
+    "#5898 pin — an undeclared tombstone is NOT dated by an unrelated clause that ends in its leaf",
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The gate's own vocabulary, stated as the fixture guard above proves it:
+      // `.type` IS registered — at protocol 11, by a flow-node rename — and this
+      // key is NOT in RETIRED_KEYS_BY_MAJOR. Before #5898 those two facts
+      // combined into "registered at major 11 ⇒ aged out ⇒ deletion allowed",
+      // exit 0. The retirement it actually belongs to (`object.indexes[].type`)
+      // is major 17; the clock was started six majors early by a coincidence of
+      // spelling, and `Math.min` guaranteed the earliest such coincidence won.
+      seedBase((s) => [...s, DELETED_LEAF_COLLIDER].sort());
+      const canonical = seedSurface((s) => s);
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('authorable baseline line(s) were deleted without proof (#4650)');
+      expect(output).toMatch(
+        new RegExp(
+          `data/Object:${DELETED_LEAF_COLLIDER_LEAF} — .*tombstoned, but no entry in RETIRED_KEYS_BY_MAJOR`,
+        ),
+      );
+      // Specifically NOT the aged-out verdict, and specifically not dated by the
+      // colliding clause's major. Asserting the absence is the pin: a leaf-name
+      // matcher restored here makes the run exit 0 with exactly these strings.
+      expect(output).not.toMatch(
+        new RegExp(`data/Object:${DELETED_LEAF_COLLIDER_LEAF} — .*tombstone aged out`),
+      );
+      expect(output).not.toMatch(
+        new RegExp(`data/Object:${DELETED_LEAF_COLLIDER_LEAF} — .*registered at major \\d+`),
+      );
       expect(readSurface()).toBe(canonical);
     },
   );
@@ -498,10 +556,14 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
   );
 
   it(
-    'allows deletions that carry their own proof: unreachable def, vanished def, aged-out tombstone — each with its reason printed',
+    'allows deletions that carry their own proof: unreachable def, vanished def — each with its reason printed',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      seedBase((s) => [...s, DELETED_UNREACHABLE, ...DELETED_GONE_DEF, DELETED_AGED].sort());
+      // The third proof — an aged-out tombstone — needs a RETIRED_KEYS_BY_MAJOR
+      // entry since #5898, so it is exercised in the block at the bottom that can
+      // write the table. `DELETED_AGED` stays out of this fixture deliberately:
+      // left in, it would now be a violation, and this test asserts on `allowed`.
+      seedBase((s) => [...s, DELETED_UNREACHABLE, ...DELETED_GONE_DEF].sort());
       const canonical = seedSurface((s) => s);
 
       const { status, output } = run(['--check']);
@@ -516,9 +578,6 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       // Whole-def removal is the manifest ratchet's jurisdiction.
       expect(output).toContain('identity/Session:* (2 line(s))');
       expect(output).toContain('json-schema.manifest/ (#2978)');
-      // Aged-out tombstone names its registration major.
-      expect(output).toMatch(/data\/Object:compactLayout — \[RETIRED\] at [0-9a-f]+ and registered at major 11/);
-      expect(output).toContain('tombstone aged out');
       expect(readSurface()).toBe(canonical);
       expect(status).toBe(0);
     },
@@ -2066,6 +2125,211 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
       // 0. The gate now exits before check (c) reaches that branch at all.
       expect(output).not.toContain('carry their own proof');
       expect(output).not.toContain('baseline deletion(s) since');
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #5898 — check (c) dates a tombstone by its EXACT key, not by its leaf.
+//
+// #4659 moved check (b) off leaf-name matching and left check (c) on it, in the
+// open, with a comment saying so: (c) adjudicates HISTORICAL tombstones, all 97
+// of which predate RETIRED_KEYS_BY_MAJOR, so pointing it at that table meant
+// first deciding what to do about rows nothing could date.
+//
+// The two consequences both pointed at "release early", and both were live on
+// the real baseline — 2 of the 97 rows were deletable, and BOTH were false
+// positives, by different mechanisms:
+//
+//   - `data/Index:type` was dated by `flow.node.type` (protocol 11,
+//     `flow-node-http-callout-rename`) — an unrelated cluster that merely ends
+//     in the same leaf. Its own clause, `object.indexes[].type`, is major 17.
+//   - `api/RestApiConfig:requireAuth` was dated by `api.requireAuth` at major
+//     12 — which is `rest-requireauth-default-flip`, a secure-DEFAULT flip whose
+//     step states "No metadata shape changed". Its retirement is the protocol 17
+//     conversion `stack.api.requireAuth` (#3963). Same surface, different KIND
+//     of change, five majors early.
+//
+// So the backfill was not attempted: leaf-matching the registry is the very
+// inference #4659 removed, and `authorable-surface.json`'s git history starts at
+// 17.0.0-rc.0 and therefore dates all 97 rows at major 17 — the file's birth,
+// not archaeology. Undated ⇒ undeletable, and the after-count is 0 of 97 by
+// design. The gate below is what that costs and what it buys.
+//
+// This block needs its own sandbox because the aged-out branch is now a claim
+// about `src/migrations/registry.ts`, which the main sandbox symlinks.
+
+/** A tombstone declared at a major far enough back to have aged out. */
+const AGED_DECLARED_MAJOR = 11;
+/** …and one declared at the current major, which has not. */
+const UNAGED_DECLARED_KEY = 'data/Object:zzDeclaredThisMajor5898';
+const UNAGED_DECLARED = `${UNAGED_DECLARED_KEY} [RETIRED]`;
+
+describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#5898)', () => {
+  let box: string;
+  let boxScript: string;
+  let boxSurfaceDir: string;
+  let boxRegistry: string;
+  let pristineRegistry: string;
+
+  const boxGit = (...args: string[]): string => {
+    const r = spawnSync(
+      'git',
+      ['-c', 'user.name=build-schemas-test', '-c', 'user.email=test@example.invalid', ...args],
+      { cwd: box, encoding: 'utf8' },
+    );
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed (${r.status}): ${r.stderr}`);
+    return (r.stdout ?? '').trim();
+  };
+
+  const runBox = (args: string[] = []): { status: number; output: string } => {
+    const r = spawnSync(TSX, [boxScript, ...args], {
+      cwd: box,
+      encoding: 'utf8',
+      timeout: SPAWN_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+
+  /** Substitute RETIRED_KEYS_BY_MAJOR in this box's own copy of the registry. */
+  const seedRetiredKeys = (table: Record<number, readonly string[]>): void => {
+    const rendered =
+      `export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {\n` +
+      Object.keys(table)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((m) => `  ${m}: [\n${table[m]!.map((k) => `    '${k}',\n`).join('')}  ],\n`)
+        .join('') +
+      `};\n`;
+    const anchor = /export const RETIRED_KEYS_BY_MAJOR[\s\S]*?\n\};\n/;
+    expect(
+      anchor.test(pristineRegistry),
+      'RETIRED_KEYS_BY_MAJOR is no longer a single object literal in src/migrations/registry.ts — ' +
+        'this fixture substitutes it textually and can no longer find it',
+    ).toBe(true);
+    fs.writeFileSync(boxRegistry, pristineRegistry.replace(anchor, rendered));
+  };
+
+  /** Commit a BASE carrying extra lines; the worktree keeps the pristine set,
+   *  so those lines read as deleted by this build (the main sandbox's shape). */
+  const seedBoxBase = (...extra: string[]): void => {
+    writeSurfaceShards(boxSurfaceDir, [...pristineSurface, ...extra].sort());
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('commit', '-q', '--allow-empty', '-m', 'base variant');
+    boxGit('update-ref', 'refs/remotes/origin/main', boxGit('rev-parse', 'HEAD'));
+    writeSurfaceShards(boxSurfaceDir, pristineSurface);
+  };
+
+  beforeAll(() => {
+    // Fixture validity, loud. The aged fixture must NOT owe its verdict to a
+    // clause match — that is the whole point — so its leaf is checked to be
+    // registered no earlier than the major we declare it at is irrelevant; what
+    // matters is that the key is not already in the baseline or the real table.
+    for (const injected of [DELETED_AGED, UNAGED_DECLARED]) {
+      expect(
+        pristineSurface.includes(injected) ||
+          pristineSurface.includes(injected.replace(RETIRED_MARK, '')),
+        `fixture ${injected} already exists in the committed baseline — pick another`,
+      ).toBe(false);
+    }
+    expect(CURRENT_MAJOR - AGED_DECLARED_MAJOR).toBeGreaterThanOrEqual(2);
+
+    box = fs.mkdtempSync(path.join(os.tmpdir(), 'build-schemas-tombstone-age-'));
+    fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
+    fs.cpSync(path.join(PKG, 'src'), path.join(box, 'src'), { recursive: true });
+    for (const entry of ['node_modules', 'package.json']) {
+      fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
+    }
+    writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
+    boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
+    writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    boxScript = path.join(box, 'scripts', 'build-schemas.ts');
+    boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
+    pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
+
+    boxGit('init', '-q', '-b', 'main', '.');
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
+    fs.writeFileSync(
+      path.join(box, 'authorable-surface.base.json'),
+      JSON.stringify(
+        { description: surfaceBaseDescription, baseRev: boxGit('rev-parse', 'HEAD'), keys: pristineSurface },
+        null,
+        2,
+      ) + '\n',
+    );
+    boxGit('add', 'authorable-surface.base.json');
+    boxGit('commit', '-q', '-m', 'baseline anchor');
+    boxGit('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  });
+
+  afterAll(() => {
+    if (box) fs.rmSync(box, { recursive: true, force: true });
+  });
+
+  it(
+    'a tombstone DECLARED at an aged major may have its baseline line deleted',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The surviving positive route. Note what supplies the major: the table,
+      // not the leaf — `compactLayout` happens to have an old clause too, so
+      // this case alone cannot tell the two mechanisms apart. The pin that can
+      // is in the main sandbox (`data/Object:type`) and in the last test here.
+      seedRetiredKeys({ [AGED_DECLARED_MAJOR]: [DELETED_AGED.replace(RETIRED_MARK, '')] });
+      seedBoxBase(DELETED_AGED);
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).toContain('carry their own proof (#4650)');
+      expect(output).toMatch(
+        new RegExp(
+          `data/Object:${DELETED_AGED_LEAF} — \\[RETIRED\\] at [0-9a-f]+ and registered at major ${AGED_DECLARED_MAJOR}`,
+        ),
+      );
+      expect(output).toContain('tombstone aged out');
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'a tombstone DECLARED at the current major is not deletable yet',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedRetiredKeys({ [CURRENT_MAJOR]: [UNAGED_DECLARED_KEY] });
+      seedBoxBase(UNAGED_DECLARED);
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('deleted without proof (#4650)');
+      expect(output).toMatch(
+        new RegExp(`${UNAGED_DECLARED_KEY} — .*tombstone registered at major ${CURRENT_MAJOR}`),
+      );
+      expect(output).toMatch(/must age ≥ 2 majors/);
+    },
+  );
+
+  it(
+    'the pin: with the table EMPTY, a leaf collision proves nothing — the deletion is refused',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // `compactLayout` is registered at protocol 11 by an ADR-0087 clause, so
+      // the pre-#5898 matcher dated it there and allowed the deletion — exit 0,
+      // "tombstone aged out". With the declaration removed and nothing else
+      // changed, the only thing that can still supply major 11 is leaf matching.
+      expect(minRegisteredMajorForLeaf(DELETED_AGED_LEAF)).toBe(AGED_DECLARED_MAJOR);
+      seedRetiredKeys({});
+      seedBoxBase(DELETED_AGED);
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('deleted without proof (#4650)');
+      expect(output).toMatch(
+        new RegExp(`data/Object:${DELETED_AGED_LEAF} — .*no entry in RETIRED_KEYS_BY_MAJOR`),
+      );
+      expect(output).not.toContain('tombstone aged out');
     },
   );
 });

@@ -39,12 +39,7 @@ import {
   writeShards,
   type GitRun,
 } from './lib/sharded-artifacts';
-import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
-import {
-  MIGRATIONS_BY_MAJOR,
-  RETIRED_DEFS_BY_MAJOR,
-  RETIRED_KEYS_BY_MAJOR,
-} from '../src/migrations/registry';
+import { RETIRED_DEFS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../src/migrations/registry';
 import {
   getMetadataTypeSchema,
   listMetadataTypeSchemaTypes,
@@ -887,10 +882,15 @@ if (surfaceDoc) {
 // A deletion is legitimate on exactly one of three proofs, each computed
 // inside this gate — never argued in a PR description:
 //
-//   1. aged-out tombstone — the base entry carried `[RETIRED]` AND its surface
-//      is registered in CONVERSIONS_BY_MAJOR / MIGRATIONS_BY_MAJOR at a major
+//   1. aged-out tombstone — the base entry carried `[RETIRED]` AND its EXACT
+//      `${defKey}:${name}` is declared in RETIRED_KEYS_BY_MAJOR at a major
 //      ≥ TOMBSTONE_AGE_MAJORS behind the current one (the "~two majors" this
-//      file's description has always promised, now enforced);
+//      file's description has always promised, now enforced). Since #5898 this
+//      reads the same exact-key table check (b) reads, not a leaf-name match
+//      against the conversion registry — see TOMBSTONE_AGE_MAJORS below for the
+//      two false positives that matching produced and why the 97 pre-existing
+//      tombstones are left undeclared (and therefore undeletable) rather than
+//      backfilled from a source that cannot date them;
 //   2. the def is not reachable from the metadata-type roots (2026-08-02
 //      ruling on #4650): no metadata document is ever parsed by it, so its
 //      entry was over-collection and there is no author to tombstone for.
@@ -909,37 +909,40 @@ if (surfaceDoc) {
 /** A tombstone may be deleted once its registration is this many majors old. */
 const TOMBSTONE_AGE_MAJORS = 2;
 
-/**
- * Every ' / '-separated surface clause registered across the ADR-0087
- * registries, mapped to the EARLIEST major that registered it — the moment the
- * retirement became visible to consumers, which is when its aging clock
- * started.
- *
- * This is now the LAST leaf-name matcher in this file: check (b) above moved to
- * exact `${defKey}:${name}` membership in RETIRED_KEYS_BY_MAJOR (#4659). Check
- * (c) cannot follow it there, because it adjudicates tombstones that predate
- * that table and were deliberately not backfilled into it — so the aging proof
- * still reads the conversion clauses, leaf and all, and inherits the same
- * coincidence (an unrelated cluster's `.type` can date a tombstone's clock).
- * Narrowing it needs the historical mapping #4659 would have had to invent —
- * all 97 current tombstones predate that table — so it is tracked in #5898.
- */
-function registeredClauseMajors(): Map<string, number> {
-  const out = new Map<string, number>();
-  const add = (clause: string, major: number): void => {
-    const prev = out.get(clause);
-    if (prev === undefined || major < prev) out.set(clause, major);
-  };
-  for (const [major, list] of Object.entries(CONVERSIONS_BY_MAJOR)) {
-    for (const c of list) for (const clause of c.surface.split(' / ')) add(clause, Number(major));
-  }
-  for (const [major, step] of Object.entries(MIGRATIONS_BY_MAJOR)) {
-    for (const sem of step.semantic ?? []) {
-      for (const clause of sem.surface.split(' / ')) add(clause, Number(major));
-    }
-  }
-  return out;
-}
+// The aging clock reads RETIRED_KEYS_BY_MAJOR — `registeredRetiredKeys()` above,
+// the same exact-key map check (b) reads. There is no leaf-name matching left in
+// this file (#5898).
+//
+// Until #5898 check (c) dated a tombstone by matching the key's LEAF against
+// every ' / ' clause of every major in CONVERSIONS_BY_MAJOR / MIGRATIONS_BY_MAJOR
+// and taking `Math.min` — structurally the matcher #4659 had just removed from
+// check (b), and permissive in both of its halves: an unrelated clause ending in
+// the same leaf proved "this was registered at all", and `Math.min` then started
+// the clock at the EARLIEST such coincidence. Both of the two rows it let through
+// on the real baseline were false positives, by two different mechanisms:
+//
+//   - `data/Index:type` (#5898's specimen) matched protocol 11's
+//     `flow.node.type` — a flow node's type, nothing to do with index types — so
+//     its clock started at 11 while its own honest clause `object.indexes[].type`
+//     is major 17. At major 17 the row was deletable one major after its
+//     retirement became visible.
+//   - `api/RestApiConfig:requireAuth` matched protocol 12's `api.requireAuth`,
+//     which is `rest-requireauth-default-flip`: a secure-DEFAULT flip whose own
+//     step says "No metadata shape changed". Its retirement is the protocol 17
+//     conversion `stack.api.requireAuth` (#3963). The clock was started from a
+//     different KIND of change to the same surface.
+//
+// Why the historical mapping is not backfilled, and what happens instead: a
+// tombstone with no entry in RETIRED_KEYS_BY_MAJOR cannot prove its age, so its
+// baseline line stays. That is fail-closed by construction rather than by
+// estimate — see the table's "Historical tombstones" section for why neither
+// available source could date the 97 pre-existing rows honestly (leaf-matching
+// the conversion registry is the very inference #4659 removed; this file's own
+// git history begins at 17.0.0-rc.0, so it dates every one of them at major 17
+// — an artifact of the baseline's birth, not archaeology). Deleting one of those
+// lines is therefore a deliberate, reviewable act: declare its exact key under
+// its true major in the table, and check (b2) verifies the entry still names a
+// key this build tombstones.
 
 interface SurfaceReachability {
   /** The metadata-type roots the BFS started from. */
@@ -1641,7 +1644,7 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
     const deletedKeys = [...baseSnapshot.keys()].filter((k) => !currentKeys.has(k));
     if (deletedKeys.length > 0) {
       const baseRev = base.rev.slice(0, 12);
-      const clauseMajors = registeredClauseMajors();
+      const declaredRetired = registeredRetiredKeys();
       const reachability = computeSurfaceReachability();
       const allowed: string[] = [];
       const violations: string[] = [];
@@ -1674,16 +1677,17 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
           violations.push(`${key} — def ${how}; the entry at ${baseRev} was LIVE (never tombstoned).`);
           continue;
         }
-        const matches = [...clauseMajors.entries()].filter(([clause]) => clause.endsWith('.' + prop));
-        if (matches.length === 0) {
+        const registeredAt = declaredRetired.get(key);
+        if (registeredAt === undefined) {
           violations.push(
-            `${key} — def ${how}; tombstoned, but no conversion/migration clause matching '.${prop}'\n` +
-              `       is registered in the ADR-0087 registries, so the retirement never reached\n` +
-              `       spec-changes.json or \`os migrate meta\`.`,
+            `${key} — def ${how}; tombstoned, but no entry in RETIRED_KEYS_BY_MAJOR names this\n` +
+              `       EXACT key, so there is nothing that dates the retirement and its aging clock\n` +
+              `       has no start. Until #5898 a leaf-name match against unrelated ADR-0087\n` +
+              `       clauses supplied one by coincidence (a flow node's '.type' dated an index\n` +
+              `       type's tombstone) — always erring early, since it took the Math.min.`,
           );
           continue;
         }
-        const registeredAt = Math.min(...matches.map(([, major]) => major));
         if (CURRENT_MAJOR - registeredAt < TOMBSTONE_AGE_MAJORS) {
           violations.push(
             `${key} — def ${how}; tombstone registered at major ${registeredAt}, current major is\n` +
@@ -1718,9 +1722,15 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
             `   compared against the baseline at merge base ${baseRev} with origin/main,\n` +
             `   which this commit cannot rewrite.\n\n` +
             `   A line may only leave this file when:\n` +
-            `     1. its key was tombstoned (\`retiredKey()\` → "[RETIRED]") with a D2 conversion\n` +
-            `        (src/conversions/registry.ts) or migration step registered for its surface,\n` +
-            `        AND that registration is ≥ ${TOMBSTONE_AGE_MAJORS} majors old (≤ v${CURRENT_MAJOR - TOMBSTONE_AGE_MAJORS}); or\n` +
+            `     1. its key was tombstoned (\`retiredKey()\` → "[RETIRED]") AND that key is\n` +
+            `        declared — EXACTLY, as '\${defKey}:\${name}' — in RETIRED_KEYS_BY_MAJOR\n` +
+            `        (src/migrations/registry.ts) under a major ≥ ${TOMBSTONE_AGE_MAJORS} behind this one\n` +
+            `        (≤ v${CURRENT_MAJOR - TOMBSTONE_AGE_MAJORS}). Tombstones that predate that table are deliberately\n` +
+            `        undeclared: nothing could date them honestly, so they are NOT deletable\n` +
+            `        until someone establishes the true major and writes it down (#5898). The\n` +
+            `        D2 conversion (src/conversions/registry.ts) naming the surface stays\n` +
+            `        required — it is the prescription consumers follow — but it is no longer\n` +
+            `        what dates the clock; or\n` +
             `     2. its def is not reachable from the metadata-type roots — this gate computes\n` +
             `        that itself (it would have said so above); or\n` +
             `     3. its whole def stopped being emitted — adjudicated by the manifest deletion\n` +

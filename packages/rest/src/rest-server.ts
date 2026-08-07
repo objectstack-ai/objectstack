@@ -4246,7 +4246,48 @@ export class RestServer {
                         // `doc` and `book` bypass the shared cache: their §6.7
                         // audience gate is per-caller, and a shared ETag would
                         // leak gated content across viewers.
-                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDraftRead && !previewDrafts && !packageScoped && req.params.type !== 'doc' && req.params.type !== 'book') {
+                        //
+                        // [#5881] `dashboard` bypasses it too, and the reason is
+                        // NOT the one above — worth writing down, because the
+                        // obvious reading says a dashboard needn't bypass at all.
+                        // Its ADR-0057 D10 widget gate (`filterDashboardForUser`,
+                        // below) is per-DEPLOYMENT — it asks which optional kernel
+                        // services are registered — never per-caller, so there is
+                        // no cross-viewer leak to avoid. What rules out sharing
+                        // the cached path is the validator itself: the ETag is
+                        // `simpleHash(locale + JSON.stringify(item))` over the
+                        // UNFILTERED document (metadata-protocol `getMetaItemCached`),
+                        // so it cannot express the gate dimension at all, and
+                        // `notModified` is decided inside the protocol before this
+                        // layer could re-judge it. Gating the cached body would
+                        // therefore ship a filtered body under a validator that
+                        // identifies the unfiltered one.
+                        //
+                        // That mismatch is not academic, because the two have
+                        // different lifetimes. Within one boot the registered-service
+                        // set is fixed (`Kernel.use()` throws once bootstrap has
+                        // started, and no deregistration API exists), so the gate
+                        // verdict is stable per process — but `Cache-Control:
+                        // private, no-cache` means the client STORES the body and
+                        // revalidates, and that stored body outlives the process.
+                        // A redeploy that turns the optional service off does not
+                        // change the document, so the ETag is unchanged, every
+                        // revalidation answers 304, and the stale unfiltered body
+                        // stands: the dead tile D10 exists to prevent, now cached
+                        // indefinitely. Bypassing costs nothing to weigh against
+                        // that — `getMetaItemCached` delegates to `getMetaItem`,
+                        // so the server does identical work either way and only
+                        // the 304's saved body bytes are given up.
+                        //
+                        // Compared on the NORMALIZED type, like `isAppType` and
+                        // unlike the two literals at the end of this condition
+                        // (`/meta/dashboards/x` is the canonical plural spelling
+                        // under Prime Directive #3, and an exclusion it could be
+                        // spelled around would not be an exclusion). The `doc` /
+                        // `book` literals have exactly that hole — measured and
+                        // filed as #6241, deliberately not fixed here.
+                        const isDashboardType = RestServer.metaTypeSingular(req.params.type) === 'dashboard';
+                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && req.params.type !== 'doc' && req.params.type !== 'book') {
                             const cacheRequest = {
                                 ifNoneMatch: req.headers['if-none-match'] as string,
                                 ifModifiedSince: req.headers['if-modified-since'] as string,
@@ -4367,7 +4408,18 @@ export class RestServer {
                             // ADR-0057 D10: gate dashboard widgets by `requiresService`
                             // (mirrors the app-nav gate above) so the console never
                             // renders a tile bound to an absent optional service.
-                            if (RestServer.metaTypeSingular(req.params.type) === 'dashboard' && visible) {
+                            //
+                            // [#5881] This is now on the DEFAULT path. It reads as
+                            // ordinary code either way, which is exactly why the
+                            // defect was invisible: `enableCache` defaults to true
+                            // and `dashboard` was not excluded above, so every
+                            // default deployment took the cached branch and this
+                            // gate ran only where an operator had turned the cache
+                            // off. Declared, tested, and never executed in
+                            // production — the exclusion above is what makes the
+                            // ADR's "the server is the authoritative gate" true
+                            // rather than merely written down.
+                            if (isDashboardType && visible) {
                                 const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
                                 const registered = await this.resolveRegisteredServices((ctx as any)?.__kernel, [visible]);
                                 const serviceGate = registered ? (n: string) => registered.has(n) : undefined;

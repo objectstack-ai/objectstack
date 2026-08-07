@@ -146,7 +146,7 @@ describe('[#5324] InMemoryDriver.find — filter logic conformance (the LIVE que
   });
 
   const ids = async (where: FilterCondition): Promise<string[]> => {
-    const rows = await driver.find(TABLE, { object: TABLE, fields: ['id'], where });
+    const rows = await driver.find(TABLE, { fields: ['id'], where });
     return (rows as Array<Record<string, unknown>>).map((r) => String(r.id)).sort((x, y) => x.localeCompare(y));
   };
 
@@ -369,7 +369,7 @@ describe('[#5373] comparand types — the analytics face against the live query 
   const sorted = (ids: string[]): string[] => [...ids].sort((x, y) => x.localeCompare(y));
 
   const findIds = async (where: FilterCondition): Promise<string[]> => {
-    const rows = await driver.find(COMPARAND_TABLE, { object: COMPARAND_TABLE, fields: ['id'], where });
+    const rows = await driver.find(COMPARAND_TABLE, { fields: ['id'], where });
     return sorted((rows as Array<Record<string, unknown>>).map((r) => String(r.id)));
   };
 
@@ -418,7 +418,6 @@ describe('[#5373] comparand types — the analytics face against the live query 
    */
   it('the fixture stores real booleans and real nulls, not their stringified forms', async () => {
     const rows = (await driver.find(COMPARAND_TABLE, {
-      object: COMPARAND_TABLE,
       fields: ['id', 'is_active', 'closed_at', 'code'],
     })) as Array<Record<string, unknown>>;
     const one = rows.find((r) => r.id === '1')!;
@@ -606,7 +605,7 @@ describe('[#5374] operator semantics — the analytics face against the live que
   const sorted = (ids: string[]): string[] => [...ids].sort((x, y) => x.localeCompare(y));
 
   const findIds = async (where: FilterCondition): Promise<string[]> => {
-    const rows = await driver.find(COMPARAND_TABLE, { object: COMPARAND_TABLE, fields: ['id'], where });
+    const rows = await driver.find(COMPARAND_TABLE, { fields: ['id'], where });
     return sorted((rows as Array<Record<string, unknown>>).map((r) => String(r.id)));
   };
 
