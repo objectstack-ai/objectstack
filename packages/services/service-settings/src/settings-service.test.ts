@@ -6,6 +6,7 @@ import { SettingsLockedError, UnknownKeyError, UnknownNamespaceError, envKeyOf }
 import { NoopCryptoAdapter } from './crypto-adapter.js';
 import { mailSettingsManifest, mailTestActionHandler } from './manifests/mail.manifest.js';
 import { aiSettingsManifest } from './manifests/ai.manifest.js';
+import { authSettingsManifest } from './manifests/auth.manifest.js';
 import { brandingSettingsManifest } from './manifests/branding.manifest.js';
 import { featureFlagsSettingsManifest } from './manifests/feature-flags.manifest.js';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
@@ -721,12 +722,17 @@ describe('SettingsService — env overrides are checked against declared options
   });
 
   it('leaves keys with no declared option table completely alone', async () => {
-    // The check must not widen past `select`/`radio`/`multiselect` with a table:
-    // a free-text, a boolean and a number env override behave exactly as before.
+    // The OPTION check must not widen past `select`/`radio`/`multiselect` with
+    // a table. Note the two values below are legal on every axis, so this stays
+    // a pin for the option check specifically: `branding.workspace_name` is
+    // free text to the enumeration but does declare `minLength: 1,
+    // maxLength: 60`, and since #5932 that window IS enforced on this same path
+    // — `EnvCorp` (7) simply sits inside it. `feature_flags.ai_enabled` is a
+    // toggle and declares no window at all.
     const { errors, logger } = spyLogger();
     const svc = new SettingsService({
       env: {
-        OS_BRANDING_WORKSPACE_NAME: 'EnvCorp', // text — any string is legal
+        OS_BRANDING_WORKSPACE_NAME: 'EnvCorp', // no option table; length 7 of [1, 60]
         OS_FEATURE_FLAGS_AI_ENABLED: 'true',   // boolean — coerced, not enumerated
       },
       logger,
@@ -942,6 +948,426 @@ describe('SettingsService — env overrides are checked against declared options
     // …but it still names the var and the legal set, so the message stays useful.
     expect(errors[0]).toContain('OS_VAULT_KEY_REF');
     expect(errors[0]).toContain('primary, backup');
+  });
+});
+
+/**
+ * #5932 — a manifest's declared value WINDOW is enforced at SAVE time.
+ *
+ * The third member of the family `required`/`pattern` (#4224) and `options`
+ * (#5131) already belong to. `SpecifierSchema` has declared five value
+ * constraints since it existed — `pattern`, `min`, `max`, `minLength`,
+ * `maxLength` — and `validatePatch` read exactly one of them. The other four
+ * had no reader anywhere on the write path: 42 specifiers across the shipped
+ * manifests declared a window, and every one of those windows was decoration.
+ *
+ * The load-bearing case is `auth.password_min_length`. It declares `min: 6`,
+ * the console renders a number input with that floor, and `PUT
+ * /api/settings/auth` accepted `1` — or `-3` — and stored it, whereupon
+ * better-auth's password policy honoured the stored number. The declaration was
+ * the only thing claiming a floor existed, and nothing at all was holding it.
+ */
+describe('SettingsService — save-time validation (declared value windows are enforced, #5932)', () => {
+  /** The issue's own probe manifest, verbatim. */
+  const boundsManifest = {
+    namespace: 'probe',
+    version: 1,
+    label: 'Probe',
+    scope: 'tenant',
+    readPermission: 'setup.access',
+    writePermission: 'setup.access',
+    specifiers: [
+      { type: 'number', key: 'quota', label: 'Quota', required: false, default: 10, min: 0, max: 100 },
+      { type: 'text', key: 'code', label: 'Code', required: false, minLength: 2, maxLength: 4 },
+      { type: 'slider', key: 'ratio', label: 'Ratio', required: false, default: 0.5, min: 0, max: 1 },
+    ],
+  } as any;
+
+  const probeService = () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(boundsManifest);
+    return svc;
+  };
+
+  it('refuses a number below the declared min, naming the window', async () => {
+    const svc = probeService();
+    await expect(svc.setMany('probe', { quota: -500 })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        {
+          field: 'quota',
+          // The `FieldErrorCode` member that mirrors the breached property
+          // (ADR-0114 D2) — the same one `record-validator.ts` emits for the
+          // same breach on a field def.
+          code: 'min_value',
+          label: 'Quota',
+          // BOTH declared bounds travel as a discrete constraint, which is the
+          // shape `errors.zod.ts` documents by example (`{ min: 0, max: 120 }`
+          // on a `max_value`): a client rendering the input needs the whole
+          // window, not only the side that was breached.
+          constraint: { min: 0, max: 100 },
+          value: -500,
+        },
+      ],
+    });
+    // Atomic: the rejected batch persisted nothing.
+    expect((await svc.get('probe', 'quota')).source).toBe('default');
+  });
+
+  it('refuses a number above the declared max', async () => {
+    const svc = probeService();
+    await expect(svc.setMany('probe', { quota: 999999 })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'quota', code: 'max_value', constraint: { min: 0, max: 100 }, value: 999999 }],
+    });
+  });
+
+  it('refuses a string shorter than minLength and longer than maxLength', async () => {
+    const svc = probeService();
+    await expect(svc.setMany('probe', { code: 'X' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        {
+          field: 'code',
+          code: 'min_length',
+          // `actual` rides along for the length codes, the way the record
+          // validator already emits it — a client formatting "3 of 4 max"
+          // should not have to measure the string it just sent back.
+          constraint: { minLength: 2, maxLength: 4, actual: 1 },
+        },
+      ],
+    });
+    await expect(svc.setMany('probe', { code: 'ABCDEFGHIJ' })).rejects.toMatchObject({
+      fields: [
+        { field: 'code', code: 'max_length', constraint: { minLength: 2, maxLength: 4, actual: 10 } },
+      ],
+    });
+  });
+
+  it('refuses a slider outside its declared window', async () => {
+    const svc = probeService();
+    await expect(svc.setMany('probe', { ratio: 42 })).rejects.toMatchObject({
+      fields: [{ field: 'ratio', code: 'max_value', constraint: { min: 0, max: 1 } }],
+    });
+  });
+
+  it('accepts every value inside the window, bounds INCLUSIVE', async () => {
+    // `min`/`max` name the window's members, not the values just outside it —
+    // an off-by-one here would reject `password_history_count: 0` (declared
+    // `min: 0`, and the value that DISABLES the check) on every workspace.
+    const svc = probeService();
+    await expect(svc.setMany('probe', { quota: 0 })).resolves.toBeDefined();
+    await expect(svc.setMany('probe', { quota: 100 })).resolves.toBeDefined();
+    await expect(svc.setMany('probe', { quota: 50 })).resolves.toBeDefined();
+    await expect(svc.setMany('probe', { code: 'ab' })).resolves.toBeDefined();
+    await expect(svc.setMany('probe', { code: 'abcd' })).resolves.toBeDefined();
+    await expect(svc.setMany('probe', { ratio: 0 })).resolves.toBeDefined();
+    await expect(svc.setMany('probe', { ratio: 1 })).resolves.toBeDefined();
+  });
+
+  it('compares a number that arrived as a string, so a form post is not enforced-as-transport', async () => {
+    // Same rule the option table applies for the same reason: a stored value
+    // has been through JSON and, over REST, a form post.
+    const svc = probeService();
+    await expect(svc.setMany('probe', { quota: '50' })).resolves.toBeDefined();
+    await expect(svc.setMany('probe', { quota: '999999' })).rejects.toMatchObject({
+      fields: [{ field: 'quota', code: 'max_value' }],
+    });
+  });
+
+  it('checks the window only when the patch TOUCHES the key', async () => {
+    // The #5131 gate, inherited. Bounds get TIGHTENED over a product's life, so
+    // a workspace can hold a value that was legal when it was written — here,
+    // written under `max: 1000` and re-registered under `max: 100`. It must not
+    // be locked out of its own settings page over that.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      ...boundsManifest,
+      specifiers: boundsManifest.specifiers.map((s: any) =>
+        s.key === 'quota' ? { ...s, max: 1000 } : s,
+      ),
+    } as any);
+    await svc.setMany('probe', { quota: 900 });
+    svc.registerManifest(boundsManifest); // the narrowed window
+
+    // The stale value is still there …
+    expect((await svc.get('probe', 'quota')).value).toBe(900);
+    // … and a patch that never mentions `quota` is not rejected on its account.
+    await expect(svc.setMany('probe', { code: 'abc' })).resolves.toBeDefined();
+    expect((await svc.get('probe', 'code')).value).toBe('abc');
+    // Only re-writing the key itself is refused.
+    await expect(svc.setMany('probe', { quota: 900 })).rejects.toMatchObject({
+      fields: [{ field: 'quota', code: 'max_value' }],
+    });
+    // And a reset still clears it — an all-null patch is never blocked.
+    await expect(svc.resetNamespace('probe')).resolves.toBeGreaterThan(0);
+    expect((await svc.get('probe', 'quota')).value).toBe(10); // back to the default
+  });
+
+  it('leaves a specifier that declares no window completely alone', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'freeform', version: 1, label: 'Freeform', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'number', key: 'anything', label: 'Anything' },
+        { type: 'text', key: 'note', label: 'Note' },
+      ],
+    } as any);
+    await expect(svc.setMany('freeform', { anything: -1e9 })).resolves.toBeDefined();
+    await expect(svc.setMany('freeform', { note: '' })).resolves.toBeDefined();
+    await expect(svc.setMany('freeform', { note: 'x'.repeat(5000) })).resolves.toBeDefined();
+  });
+
+  it('leaves a value it cannot compare alone — that is a different constraint', async () => {
+    // Policing the value's SHAPE is `invalid_type`/`invalid_number`, a different
+    // constraint with a different owner. Coercing here would be worse than
+    // silent: `Number(true)` is 1 and `Number([])` is 0, so a boolean written to
+    // a `min: 6` key would be REJECTED as "1" — inventing a verdict about a
+    // shape this check was never asked to judge.
+    const svc = probeService();
+    await expect(svc.setMany('probe', { quota: true })).resolves.toBeDefined();
+    await expect(svc.setMany('probe', { quota: 'not-a-number' })).resolves.toBeDefined();
+    await expect(svc.setMany('probe', { code: 12345 })).resolves.toBeDefined();
+    // Empty is `required`'s business, not the window's — a blank text field
+    // under `minLength: 2` is "unset", not "too short".
+    await expect(svc.setMany('probe', { code: '' })).resolves.toBeDefined();
+    await expect(svc.setMany('probe', { code: null })).resolves.toBeDefined();
+  });
+
+  it('never echoes the out-of-window value for an encrypted specifier', async () => {
+    // Same rule as `invalid_option`, same reason: a bound is not a secret, but
+    // `encrypted` is authorable on any specifier and this message travels back
+    // through the API and into logs.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'vault', version: 1, label: 'Vault', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'text', key: 'token', label: 'Token', encrypted: true, minLength: 32 },
+      ],
+    } as any);
+    const err = await svc.setMany('vault', { token: 's3cr3t' }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields[0]).toMatchObject({ field: 'token', code: 'min_length' });
+    expect(err.fields[0].value).toBeUndefined();
+    expect(err.message).not.toContain('s3cr3t');
+    // The window still travels, so the caller learns what to do.
+    expect(err.fields[0].constraint).toMatchObject({ minLength: 32, actual: 6 });
+  });
+
+  it('reports one FieldError per key — the first constraint the value broke', async () => {
+    // `required` and `invalid_option` already `continue` once they have spoken;
+    // the window check keeps that contract so a client is handed one verdict to
+    // render rather than a pile it must rank itself.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'both', version: 1, label: 'Both', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'text', key: 'slug', label: 'Slug', pattern: '^[a-z]+$', minLength: 5 },
+      ],
+    } as any);
+    const err = await svc.setMany('both', { slug: 'AB' }).catch((e) => e);
+    expect(err.fields).toHaveLength(1);
+    expect(err.fields[0].code).toBe('invalid_format'); // pattern is checked first
+  });
+
+  it('closes the password-policy hole end-to-end on the real auth manifest', async () => {
+    // THE case the issue was filed for. `auth.password_min_length` declares
+    // `min: 6, max: 64`; before this gate a `PUT /api/settings/auth` writing `1`
+    // was accepted, stored, and honoured by better-auth's password policy.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(authSettingsManifest);
+
+    await expect(svc.setMany('auth', { password_min_length: 1 })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        {
+          field: 'password_min_length',
+          code: 'min_value',
+          label: 'Minimum password length',
+          constraint: { min: 6, max: 64 },
+          value: 1,
+        },
+      ],
+    });
+    // Nothing was stored — the floor is still whatever the manifest says.
+    expect((await svc.get('auth', 'password_min_length')).value).toBe(8);
+    // Negatives, the other half of the issue's table.
+    await expect(svc.setMany('auth', { password_history_count: -1 })).rejects.toMatchObject({
+      fields: [{ field: 'password_history_count', code: 'min_value', constraint: { min: 0, max: 24 } }],
+    });
+    await expect(svc.setMany('auth', { password_expiry_days: -1 })).rejects.toMatchObject({
+      fields: [{ field: 'password_expiry_days', code: 'min_value' }],
+    });
+    // …and a legal tightening still goes through.
+    await expect(svc.setMany('auth', { password_min_length: 12 })).resolves.toBeDefined();
+    expect((await svc.get('auth', 'password_min_length')).value).toBe(12);
+  });
+
+  it('covers the rest of the six password-policy keys the issue tabulated', async () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(authSettingsManifest);
+    // `password_min_classes` is visible only with complexity on, so the patch
+    // carries the toggle it depends on — otherwise the TOUCH gate skips it as
+    // an invisible specifier, which is the required/visible contract, not a hole.
+    await expect(
+      svc.setMany('auth', { password_require_complexity: true, password_min_classes: 9 }),
+    ).rejects.toMatchObject({
+      fields: [{ field: 'password_min_classes', code: 'max_value', constraint: { min: 1, max: 4 } }],
+    });
+    await expect(svc.setMany('auth', { password_max_length: 4 })).rejects.toMatchObject({
+      fields: [{ field: 'password_max_length', code: 'min_value', constraint: { min: 16, max: 256 } }],
+    });
+  });
+});
+
+/**
+ * #5932, env half — the declared window is enforced on the ENV side too, at the
+ * ONE decision point the option table is already judged at.
+ *
+ * This is the explicit ruling on the issue: #5204 exists because the same
+ * comparison lived in two places and the two drifted, so the window check goes
+ * through `effectiveEnvOverride` rather than opening a second implementation on
+ * the env path. Consequences follow from that single point, not from a second
+ * copy of the policy: a rejected override is IGNORED (never repaired), it
+ * contributes no cascade entry, it pins nothing, and it is reported once.
+ */
+describe('SettingsService — env overrides are checked against declared windows (#5932)', () => {
+  const spyLogger = () => {
+    const errors: string[] = [];
+    return { errors, logger: { error: (m: string) => void errors.push(m) } };
+  };
+
+  it('ignores OS_AUTH_PASSWORD_MIN_LENGTH=1 and resolves the manifest default instead', async () => {
+    // The issue's own env repro: the same value the save path now refuses,
+    // arriving through the one door that had no gate on it.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_AUTH_PASSWORD_MIN_LENGTH: '1' }, logger });
+    svc.registerManifest(authSettingsManifest);
+
+    const r = await svc.get('auth', 'password_min_length');
+    expect(r.value).toBe(8); // the manifest default, not 1
+    expect(r.source).toBe('default');
+    // Not in force, so it pins nothing either — read and write agree.
+    expect(r.locked).toBe(false);
+    expect(r.cascadeChain?.some((e) => e.scope === 'env')).toBe(false);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_AUTH_PASSWORD_MIN_LENGTH');
+    expect(errors[0]).toContain('min 6, max 64');
+    expect(errors[0]).toContain('IGNORED');
+    expect(errors[0]).toContain('does NOT take effect');
+  });
+
+  it('an in-window override still wins at the top of the cascade and locks the key', async () => {
+    // The regression pin for the untouched path — the check must not turn into
+    // "env never applies to a bounded key".
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_AUTH_PASSWORD_MIN_LENGTH: '12' }, logger });
+    svc.registerManifest(authSettingsManifest);
+
+    const r = await svc.get('auth', 'password_min_length');
+    expect(r.value).toBe(12);
+    expect(r.source).toBe('env');
+    expect(r.locked).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('a REJECTED override pins nothing — the key stays editable', async () => {
+    // The `locked` coherence rule #5204 established, extended to the second
+    // family for free BECAUSE both are judged at the one point: a key
+    // configurable by nothing (env ignored, UI refused) would be a lockout only
+    // an env edit could clear.
+    const { logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_AUTH_PASSWORD_MIN_LENGTH: '1' }, logger });
+    svc.registerManifest(authSettingsManifest);
+
+    expect((await svc.get('auth', 'password_min_length')).locked).toBe(false);
+    await expect(svc.set('auth', 'password_min_length', 10)).resolves.toBeDefined();
+    const after = await svc.get('auth', 'password_min_length');
+    expect(after.value).toBe(10);
+    expect(after.source).toBe('global'); // the auth manifest is `scope: 'global'`
+  });
+
+  it('rejects a too-long text override by the same rule', async () => {
+    // `branding.workspace_name` declares `minLength: 1, maxLength: 60`.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({
+      env: { OS_BRANDING_WORKSPACE_NAME: 'N'.repeat(61) },
+      logger,
+    });
+    svc.registerManifest(brandingSettingsManifest);
+
+    const r = await svc.get('branding', 'workspace_name');
+    expect(r.source).toBe('default');
+    expect(r.locked).toBe(false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('min 1, max 60 characters');
+    expect(errors[0]).toContain('outside the declared length');
+  });
+
+  it('reports the misconfiguration at registration, before anything reads the key', async () => {
+    // Same contract as the option table: a boot-time line for an override that
+    // will never take effect, including for keys nothing reads this process.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_AUTH_PASSWORD_MIN_LENGTH: '1' }, logger });
+    expect(errors).toHaveLength(0);
+    svc.registerManifest(authSettingsManifest);
+    expect(errors).toHaveLength(1);
+  });
+
+  it('registration REPORTS but never refuses — a stale pin must not block a boot', async () => {
+    const { logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_AUTH_PASSWORD_MIN_LENGTH: '1' }, logger });
+    expect(() => svc.registerManifest(authSettingsManifest)).not.toThrow();
+    await expect(svc.setMany('auth', { password_min_length: 10 })).resolves.toBeDefined();
+  });
+
+  it('says it ONCE, not once per read', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_AUTH_PASSWORD_MIN_LENGTH: '1' }, logger });
+    svc.registerManifest(authSettingsManifest);
+    for (let i = 0; i < 5; i++) await svc.get('auth', 'password_min_length');
+    await svc.getNamespace('auth');
+    expect(errors).toHaveLength(1);
+  });
+
+  it('never echoes the rejected value for an encrypted specifier', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_VAULT_TOKEN: 's3cr3t' }, logger });
+    svc.registerManifest({
+      namespace: 'vault', version: 1, label: 'Vault', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'text', key: 'token', label: 'Token', required: false, encrypted: true, minLength: 32 },
+      ],
+    } as any);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).not.toContain('s3cr3t');
+    expect(errors[0]).toContain('OS_VAULT_TOKEN');
+    expect(errors[0]).toContain('min 32 characters');
+  });
+
+  it('leaves an env value it cannot compare alone', async () => {
+    // A `number` specifier with no declared default: `coerceEnvValue` has no
+    // type hint, so the raw string survives. A non-numeric one is not judged
+    // here — the same "different constraint, different owner" rule the save
+    // path takes.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOOSE_COUNT: 'lots' }, logger });
+    svc.registerManifest({
+      namespace: 'loose', version: 1, label: 'Loose', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [{ type: 'number', key: 'count', label: 'Count', min: 0, max: 10 }],
+    } as any);
+
+    const r = await svc.get('loose', 'count');
+    expect(r.value).toBe('lots');
+    expect(r.source).toBe('env');
+    expect(errors).toHaveLength(0);
   });
 });
 

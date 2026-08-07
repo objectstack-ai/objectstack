@@ -57,8 +57,12 @@ describe('normalizeDailyQuota — the clamp lives on the CONSUMER side (#5932)',
   });
 
   it('rejects garbage to "no limit" and NAMES the offending value', () => {
-    // Manifest `min: 0` is inert today (#5932) — every one of these can reach
-    // this reader intact, so each is pinned rather than assumed impossible.
+    // #5932 has closed the producer half — `daily_quota: -1` is now refused at
+    // `PUT /api/settings/sms` — but every value below can still reach this
+    // reader: the window check judges only comparable NUMBERS (a shape verdict
+    // belongs to `invalid_type`), and it runs under the TOUCH gate, so rows
+    // stored before the gate survive. Each stays pinned rather than assumed
+    // impossible.
     expect(normalizeDailyQuota(-1)).toEqual({ limit: 0, rejected: '-1' });
     expect(normalizeDailyQuota(Number.NaN)).toEqual({ limit: 0, rejected: 'NaN' });
     expect(normalizeDailyQuota(Number.POSITIVE_INFINITY)).toEqual({ limit: 0, rejected: 'Infinity' });
