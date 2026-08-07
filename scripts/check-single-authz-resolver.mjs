@@ -182,6 +182,13 @@ const GRANT_TABLES = ['sys_user_position', 'sys_user_permission_set'];
  *
  * A reason is mandatory — an exemption nobody can justify in a sentence is an exemption
  * that outlived its cause, which is how the old list rotted unnoticed.
+ *
+ * REMOVED in the same pass: `plugin-security/src/objects/default-permission-sets.ts`, the
+ * old list's second entry. It names both tables in prose and as UNQUOTED object keys
+ * (`sys_user_permission_set: { allowRead: true, ... }`) and queries neither, so the
+ * query-shaped criterion does not reach it — measured, 0 hits. An exemption that no longer
+ * exempts anything is dead weight, and dead weight in an allow-list is indistinguishable
+ * from a live suppression on the day someone reads it.
  */
 const ALLOW = new Map([
   [
@@ -190,12 +197,6 @@ const ALLOW = new Map([
     'the heuristic (assertCanonicalStillMatches) and is exempted only from being reported.',
   ],
   [
-    // KEPT-BUT-RESHAPED note: `default-permission-sets.ts` was the second entry under the
-    // old predicate and is NOT carried over. It names both tables in prose and as unquoted
-    // object keys (`sys_user_permission_set: { allowRead: true, ... }`) and never queries
-    // either, so the query-shaped criterion does not reach it — measured, 0 hits. An
-    // exemption that no longer exempts anything is dead weight, and dead weight in an
-    // allow-list is indistinguishable from a live suppression on the day someone reads it.
     'packages/plugins/plugin-security/src/explain-engine.ts',
     'Explain/diagnostic mirror, NOT a request-context resolver. buildContextForUser() ' +
     'reconstructs an ARBITRARY user\'s grants for the explain API\'s `userId` parameter; ' +
@@ -203,8 +204,8 @@ const ALLOW = new Map([
     'CALLER separately (manage_users or a delegated adminScope, ADR-0090 D6/D12) through ' +
     'the normal path. It resolves nobody\'s enforcement context, so it is not the ' +
     'drift-into-enforcement this gate guards. Its parity with the canonical resolver is a ' +
-    'real but DIFFERENT invariant, unguarded today and filed separately — do not fold it ' +
-    'in here by widening this gate\'s remit without saying so in the header.',
+    'real but DIFFERENT invariant, unguarded today and filed as #6352 — do not fold it in ' +
+    'here by widening this gate\'s remit without saying so in the header.',
   ],
 ]);
 
