@@ -32,7 +32,7 @@
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
-import type { ApiEndpoint, ApiEndpoint } from '@objectstack/spec/api';
+import type { ApiEndpoint } from '@objectstack/spec/api';
 
 /** One object, so the `object_operation` endpoints have something real to read. */
 export const PolicyNote = ObjectSchema.create({

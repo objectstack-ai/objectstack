@@ -2,13 +2,17 @@
 
 import { describe, it, expect } from 'vitest';
 import type { ISeedLoaderService } from './seed-loader-service';
-import type { SeedLoaderRequest, SeedLoaderResult, ObjectDependencyGraph } from '../data/seed-loader.zod';
+import type {
+  SeedLoaderRequestParsed,
+  SeedLoaderResultParsed,
+  ObjectDependencyGraphParsed,
+} from '../data/seed-loader.zod';
 import type { Seed } from '../data/seed.zod';
 
 describe('Seed Loader Service Contract', () => {
   it('should allow a minimal implementation with required methods', () => {
     const service: ISeedLoaderService = {
-      load: async (_request: SeedLoaderRequest): Promise<SeedLoaderResult> => {
+      load: async (_request: SeedLoaderRequestParsed): Promise<SeedLoaderResultParsed> => {
         return {
           success: true,
           dryRun: false,
@@ -24,15 +28,17 @@ describe('Seed Loader Service Contract', () => {
             totalErrored: 0,
             totalReferencesResolved: 0,
             totalReferencesDeferred: 0,
+            totalReferencesDropped: 0,
+            totalSummariesStale: 0,
             circularDependencyCount: 0,
             durationMs: 0,
           },
         };
       },
-      buildDependencyGraph: async (_objectNames: string[]): Promise<ObjectDependencyGraph> => {
+      buildDependencyGraph: async (_objectNames: string[]): Promise<ObjectDependencyGraphParsed> => {
         return { nodes: [], insertOrder: [], circularDependencies: [] };
       },
-      validate: async (_datasets: Seed[]): Promise<SeedLoaderResult> => {
+      validate: async (_datasets: Seed[]): Promise<SeedLoaderResultParsed> => {
         return {
           success: true,
           dryRun: true,
@@ -48,6 +54,8 @@ describe('Seed Loader Service Contract', () => {
             totalErrored: 0,
             totalReferencesResolved: 0,
             totalReferencesDeferred: 0,
+            totalReferencesDropped: 0,
+            totalSummariesStale: 0,
             circularDependencyCount: 0,
             durationMs: 0,
           },
@@ -77,6 +85,8 @@ describe('Seed Loader Service Contract', () => {
           totalErrored: 0,
           totalReferencesResolved: 0,
           totalReferencesDeferred: 0,
+          totalReferencesDropped: 0,
+          totalSummariesStale: 0,
           circularDependencyCount: 0,
           durationMs: 42,
         },
@@ -91,7 +101,8 @@ describe('Seed Loader Service Contract', () => {
         summary: {
           objectsProcessed: 0, totalRecords: 0, totalInserted: 0, totalUpdated: 0,
           totalSkipped: 0, totalErrored: 0, totalReferencesResolved: 0,
-          totalReferencesDeferred: 0, circularDependencyCount: 0, durationMs: 0,
+          totalReferencesDeferred: 0, totalReferencesDropped: 0, totalSummariesStale: 0,
+          circularDependencyCount: 0, durationMs: 0,
         },
       }),
     };

@@ -2,7 +2,6 @@
 
 import type { IDataEngine, IMetadataService, ISeedLoaderService } from '@objectstack/spec/contracts';
 import type {
-  SeedLoaderRequest,
   SeedLoaderRequestParsed,
   SeedLoaderResultParsed,
   SeedLoaderConfig,
@@ -334,7 +333,12 @@ export class SeedLoaderService implements ISeedLoaderService {
 
   async validate(datasets: Seed[], config?: SeedLoaderConfig): Promise<SeedLoaderResultParsed> {
     const parsedConfig = SeedLoaderConfigSchema.parse({ ...config, dryRun: true });
-    return this.load({ seeds: datasets, config: parsedConfig });
+    // `datasets` is the AUTHOR state (that is what `validate` takes); `load`
+    // takes the parsed request, and `SeedLoaderSchema` fills the per-seed defaults
+    // this cast stands in for. Parsing each dataset here would be a second
+    // validation pass with its own failure mode — `load` already reports every
+    // seed problem it finds, which is the whole point of `dryRun`.
+    return this.load({ seeds: datasets, config: parsedConfig } as SeedLoaderRequestParsed);
   }
 
   // ==========================================================================
@@ -1979,7 +1983,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     return Array.isArray(externalId) ? externalId.join('+') : externalId;
   }
 
-  private buildEmptyResult(config: SeedLoaderConfig, durationMs: number): SeedLoaderResultParsed {
+  private buildEmptyResult(config: SeedLoaderConfigParsed, durationMs: number): SeedLoaderResultParsed {
     return {
       success: true,
       dryRun: config.dryRun,
