@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { TimeRelativeTriggerSchema, LoopConfigSchema } from '@objectstack/spec/automation';
+import { TimeRelativeTriggerSchema, LoopConfigSchema, FlowSchema } from '@objectstack/spec/automation';
+import { AUTHORING_RULES } from './authoring-rules.js';
 import {
   lintFlowPatterns,
   FLOW_TIME_RELATIVE_ANTIPATTERN,
@@ -339,7 +340,8 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
     expect(fnds).toHaveLength(1);
     expect(fnds[0].rule).toBe(FLOW_RUNAS_UNSCOPED);
     expect(fnds[0].where).toContain('nightly_sweep');
-    expect(fnds[0].message).toMatch(/default .*runAs:'user'/);
+    // #5693 — one wording for both authoring inputs; see the dedicated block below.
+    expect(fnds[0].message).toMatch(/runAs:'user'` \(the default when none is declared\)/);
     expect(fnds[0].message).toMatch(/REFUSED/);
     expect(fnds[0].hint).toMatch(/runAs:'system'/);
   });
@@ -552,8 +554,11 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
     });
 
     // The A/B twin. Same flow, same node, moved out of the body — this was
-    // already flagged before #5633, and its message must not have moved a byte.
-    it('leaves the TOP-LEVEL twin byte-identical (no region clause, no regression)', () => {
+    // already flagged before #5633, and its message must carry no region clause.
+    // (The sentence itself was re-worded once since, by #5693 — see the block at
+    // the end of this file for why the authored-vs-defaulted branch it used to
+    // carry could not survive.)
+    it('leaves the TOP-LEVEL twin without a region clause (no regression)', () => {
       const fnds = lintFlowPatterns({
         flows: [{
           name: 'nightly_sweep',
@@ -568,8 +573,8 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
       expect(fnds).toHaveLength(1);
       expect(fnds[0].where).toBe("flow 'nightly_sweep' · runAs");
       expect(fnds[0].message).toBe(
-        "schedule-triggered flow runs as the default `runAs:'user'`, but a schedule run has no trigger " +
-        "user — so its data node 'touch' (update_record) has no identity to scope to and " +
+        "schedule-triggered flow runs under `runAs:'user'` (the default when none is declared), but a " +
+        "schedule run has no trigger user — so its data node 'touch' (update_record) has no identity to scope to and " +
         "will be REFUSED at run time.",
       );
       expect(fnds[0].message).not.toContain('in loop');
@@ -671,6 +676,104 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
         expect(lintFlowPatterns(sweepFlow({ bodyNodeType: 'notify' }))
           .filter((f) => f.rule === FLOW_RUNAS_UNSCOPED)).toHaveLength(0);
       });
+    });
+  });
+
+  /**
+   * #5693 — ONE wording, true whether the author declared `runAs:'user'` or
+   * declared nothing.
+   *
+   * The message used to branch: `` `runAs:'user'` `` when `flow.runAs` was a
+   * string, `the default …` when it was absent. The distinction is real and
+   * useful — "you wrote something incoherent" is not "you inherited a default
+   * that does not fit a user-less trigger" — but *this rule cannot observe it*,
+   * and which arm an author got depended on the SURFACE rather than on their
+   * file:
+   *
+   *  - **CLI** — always the explicit arm. `FlowSchema.runAs` carries
+   *    `.default('user')` and the registry wires this rule `input: 'parsed'`, so
+   *    `flow.runAs` is the string `'user'` either way. `os lint` does not parse,
+   *    but `defineStack`/`defineFlow` parse at *definition* time, so even it
+   *    receives the default already materialized. Measured on `app-todo` with the
+   *    `runAs` line deleted: `os validate` AND `os lint` both told an author who
+   *    had declared nothing that their flow "runs as `runAs:'user'`".
+   *  - **Runtime publish gate (#4463)** — both arms, because it judges the
+   *    verbatim authored body (`saveMetaItem` keeps `request.item` past the
+   *    schema check).
+   *
+   * So the branch was not merely dead: it made one flow get two different
+   * sentences from two shipped surfaces, and on the surface authors meet first it
+   * produced the one that reads as an accusation. #5693 removed it in favour of a
+   * sentence that is true of both inputs on every surface.
+   *
+   * These two cases split the work deliberately, and only the second has teeth
+   * against a re-introduction — say so rather than let the pair read as one
+   * assertion made twice:
+   *
+   *  - the PARSED case pins *why* the branch was pointless (both inputs arrive as
+   *    the same object). A re-introduced branch would still pass it — that is the
+   *    point: the CLI cannot tell these apart, which is the whole defect.
+   *  - the UNPARSED case is the regression guard. It is the one input shape where
+   *    the two authoring choices are still distinguishable (and the shape the
+   *    runtime gate really passes), so any future `typeof flow.runAs === 'string'`
+   *    branch in the message fails it immediately.
+   */
+  describe("#5693 — one wording for authored `runAs:'user'` and for none at all", () => {
+    /**
+     * Authorable on purpose: `FlowSchema` requires `label` on the flow and on
+     * every node, so the raw literals the rest of this file feeds would fail the
+     * parse — and a fixture that cannot be parsed cannot demonstrate anything
+     * about the parsed tier. This one is the same sweep, declared in full.
+     */
+    const sweep = (runAs?: 'user') => ({
+      name: 'nightly_sweep',
+      label: 'Nightly Sweep',
+      type: 'schedule',
+      ...(runAs ? { runAs } : {}),
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { triggerType: 'schedule', cron: '0 8 * * *' } },
+        { id: 'op', type: 'update_record', label: 'Touch', config: { objectName: 'thing', fields: { a: 1 } } },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'op' }],
+    });
+
+    const EXPECTED =
+      "schedule-triggered flow runs under `runAs:'user'` (the default when none is declared), but a " +
+      "schedule run has no trigger user — so its data node 'op' (update_record) has no identity to scope to and " +
+      "will be REFUSED at run time.";
+
+    const messagesFor = (flow: unknown) =>
+      lintFlowPatterns({ flows: [flow] })
+        .filter((f) => f.rule === FLOW_RUNAS_UNSCOPED)
+        .map((f) => f.message);
+
+    it('is wired to the tier where the default has already been filled in', () => {
+      const wiring = AUTHORING_RULES.find((r) => r.name === 'lintFlowPatterns');
+      expect(wiring?.input).toBe('parsed');
+    });
+
+    it('PARSED input: the two authoring choices are literally the same object here', () => {
+      const authored = FlowSchema.parse(sweep('user'));
+      const defaulted = FlowSchema.parse(sweep());
+      // The premise, asserted rather than assumed: the parse materializes the
+      // default, so `flow.runAs` carries no trace of what was authored.
+      expect(defaulted.runAs).toBe('user');
+      expect(authored.runAs).toBe('user');
+
+      expect(messagesFor(defaulted)).toEqual([EXPECTED]);
+      expect(messagesFor(authored)).toEqual([EXPECTED]);
+    });
+
+    it('UNPARSED input: an absent key and an explicit one still get the same sentence', () => {
+      // The runtime publish gate's shape — the only surface where the omission
+      // survives to the rule. Both must read the same, or the surfaces disagree
+      // about one flow again.
+      expect(messagesFor(sweep())).toEqual([EXPECTED]);
+      expect(messagesFor(sweep('user'))).toEqual([EXPECTED]);
+    });
+
+    it('says the same thing to both surfaces about the same flow', () => {
+      expect(messagesFor(FlowSchema.parse(sweep()))).toEqual(messagesFor(sweep()));
     });
   });
 });

@@ -329,6 +329,7 @@
     "cloud/ProvisionEnvironmentResponse:credential",
     "cloud/ProvisionEnvironmentResponse:durationMs",
     "cloud/ProvisionEnvironmentResponse:environment",
+    "cloud/ProvisionEnvironmentResponse:hostnameAssignment",
     "cloud/ProvisionEnvironmentResponse:warnings",
     "cloud/ProvisionOrganizationRequest:createdBy",
     "cloud/ProvisionOrganizationRequest:defaultEnvironmentDisplayName",
