@@ -6,7 +6,28 @@ description: CRUD runtime helper API for records (`get`, `find`, `create`, `upda
 # `services.data`
 
 - **Stability:** `stable`
-- **Canonical source:** `packages/client/src/index.ts`
+- **Canonical source:** `packages/client/src/index.ts` — the `ObjectStackClient.data`
+  surface (see [Canonical source](#canonical-source) for why this page names the SDK
+  rather than a `contracts/*-service.ts` interface)
+
+<Callout type="warn" title="Who holds this binding — a hook does not">
+
+This page documents the `services.data` **contract surface**: the signatures, not a
+binding every runtime surface receives (see the
+[binding note](/docs/kernel/runtime-services)). A **data hook never gets one.** The engine
+builds a hook context key by key — `object` / `event` / `input` / `session` / `provenance`
+/ `user` / `api` / `transaction` / `ql` — and sets no `services` key at any of its
+construction sites, so `services.data.get(…)` written beside a `ctx.input.…` read throws
+on `services` at the first call rather than reading anything
+([#5720](https://github.com/objectstack-ai/objectstack/issues/5720)).
+
+A hook's own cross-object channel is `ctx.api`: see
+[Examples §2](/docs/kernel/runtime-services/examples) for a
+`ctx.api.object('crm_account').findOne(…)` read inside a real `beforeInsert` /
+`beforeUpdate` handler. The [Example](#example) below is written the other way round — as
+the code that **holds** the binding calls it, with plain arguments and no `ctx` in sight.
+
+</Callout>
 
 ## Methods
 
@@ -17,6 +38,22 @@ services.data.create<T = any>(object: string, data: Partial<T>): Promise<CreateD
 services.data.update<T = any>(object: string, id: string, data: Partial<T>): Promise<UpdateDataResult<T>>
 services.data.delete(object: string, id: string): Promise<DeleteDataResult>
 ```
+
+## Canonical source
+
+Every sibling page in this chapter names a contract interface
+(`packages/spec/src/contracts/sharing-service.ts`, `queue-service.ts`, …). This one names
+the **client SDK** instead, and the difference is real rather than an oversight: the spec
+declares no `IDataService`. Its nearest neighbour, `IDataEngine`
+(`packages/spec/src/contracts/data-engine.ts`), is a *lower* surface with a different
+shape — `find(objectName, query, options): Promise<any[]>` straight at the engine — not
+the object-name-plus-options protocol call documented above.
+
+So the signatures come from `ObjectStackClient.data` (`packages/client/src/index.ts`), and
+the payloads they resolve to are the spec's wire schemas — `GetDataResponseSchema`,
+`CreateDataResponseSchema`, `UpdateDataResponseSchema`, `DeleteDataResponseSchema` in
+`packages/spec/src/api/protocol.zod.ts` — which the SDK's `*DataResult` interfaces mirror
+key for key. A managed runtime binds `services.data` to this same shape.
 
 ## Parameters
 
@@ -41,11 +78,37 @@ services.data.delete(object: string, id: string): Promise<DeleteDataResult>
 
 ## Example
 
+Call these methods from code that **holds** the binding — a managed runtime hands it in as
+`services.data` — so the record id arrives as an ordinary argument. It is deliberately not
+a hook body: a hook has no `services` key to reach through (see above), and reads other
+objects via `ctx.api`.
+
 ```ts
-const contact = await services.data.get('contact', ctx.input.contact_id);
-const orders = await services.data.find('sales_order', {
-  filter: { contact_id: contact.id },
-  sort: [{ field: 'created_at', order: 'desc' }],
-  top: 20,
-});
+import type { ObjectStackClient } from '@objectstack/client';
+
+/** The `services.data` binding, exactly as this page's Canonical source declares it. */
+type DataService = ObjectStackClient['data'];
+
+export async function recentOrdersForContact(data: DataService, contactId: string) {
+  // `get` resolves the response envelope `{ object, id, record }` — the row is `record`.
+  const { record: contact } = await data.get<{ id: string; name: string }>('contact', contactId);
+
+  // `find` resolves `{ records, total?, hasMore? }`.
+  const { records: orders } = await data.find<{ id: string; amount: number }>('sales_order', {
+    filter: { contact_id: contact.id },
+    sort: [{ field: 'created_at', order: 'desc' }],
+    top: 20,
+  });
+
+  return { contact, orders };
+}
 ```
+
+The block carries no `{/* os:check */}` marker, and that is a measurement rather than an
+omission: `check:skill-examples` compiles marked blocks against the built
+`@objectstack/spec` declarations only — its `paths` map is derived from that package's own
+`exports`, and `@objectstack/spec` does not depend on `@objectstack/client`. A marked
+block here would therefore have to hand-declare `DataService` instead of importing it,
+which pins the example to itself and nothing else. The marker becomes worth adding the day
+this surface has a spec-side contract to import (see the
+[Canonical source](#canonical-source) note).

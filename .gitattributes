@@ -6,8 +6,16 @@
 # two PRs each add or drop a few lines the result is a set union — fully
 # composable — but a three-way TEXT merge reports it as a conflict a human must
 # resolve by hand. The correct resolution is always the same: discard both sides
-# and re-run the generator. `authorable-surface.json` alone is a 8k-line sorted
-# array, so any two PRs landing near each other collide.
+# and re-run the generator.
+#
+# ⚠️ The driver is a LOCAL git facility, and that bounds what it can fix (#5837).
+# The GitHub merge queue rebuilds each PR server-side, where no custom merge
+# driver runs — so for the three hottest artifacts a driver could not stop the
+# queue from evicting the second PR that touched them. Those three are now
+# SHARDED, one file per category / entry point, so PRs touching different
+# categories touch disjoint files and the queue has nothing to conflict on. They
+# stay routed here as directories: the driver still owns a same-category
+# collision, which is the residue sharding cannot remove.
 #
 # `merge=os-regen` hands those paths to `scripts/git-merge-regen.mjs`, which does
 # NOT text-merge them. See that file for why it also does not regenerate them
@@ -36,10 +44,10 @@
 # ledger's prose is hand-written and must never be resolved by regenerating.
 
 packages/spec/spec-changes.json                              merge=os-regen
-packages/spec/authorable-surface.json                        merge=os-regen
+packages/spec/authorable-surface/**                          merge=os-regen
 packages/spec/authorable-surface.base.json                   merge=os-regen
-packages/spec/json-schema.manifest.json                      merge=os-regen
-packages/spec/api-surface.json                               merge=os-regen
+packages/spec/json-schema.manifest/**                        merge=os-regen
+packages/spec/api-surface/**                                 merge=os-regen
 packages/spec/api-surface-signatures.json                    merge=os-regen
 docs/protocol-upgrade-guide.md                               merge=os-regen
 docs/audits/2026-07-unknown-key-strictness-ledger.counts.md  merge=os-regen

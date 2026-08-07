@@ -9,10 +9,10 @@ description: >
   / plugin events (see objectstack-platform). CEL expressions in flow
   conditions / edge guards: load objectstack-formula alongside.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "1.2"
+  version: "1.3"
   domain: automation
   tags: flow, workflow, trigger, approval, state-machine, scheduled, webhook
 ---

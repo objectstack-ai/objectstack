@@ -9,7 +9,7 @@
  * segment instead of its suffix. Four schemas published under names that
  * exist nowhere in the export surface (`data/ModeSchema` for
  * `SchemaModeSchema`, …), which poisoned all three public projections of the
- * name: the `$id` URL, the json-schema.manifest.json ratchet key, and the
+ * name: the `$id` URL, the json-schema.manifest/ ratchet key, and the
  * docs section + import example (the docs then dropped the import entirely
  * because the mangled name resolved to no real export — #4570).
  *

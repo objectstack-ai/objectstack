@@ -529,15 +529,39 @@ function planFormulaProjection(
 }
 
 /**
- * Evaluate read-time formula virtual fields against the raw rows.
+ * Evaluate formula virtual fields against the raw rows a driver handed back —
+ * the read path (`find` / `findOne`) and, since #5504, the write path's
+ * response hydration.
  *
- * The eval context mirrors `applyFieldDefaults` so formula and default
- * expressions see the same shape: a `now` pinned ONCE per operation (every row
- * and every formula field in one `find()` observes the same instant —
- * determinism, and no per-eval `new Date()` drift), plus `os.user` / `os.org`
- * resolved from the execution context (so a computed field can reference the
- * caller, e.g. `os.user.id`). Previously this passed only `{ record }`, so
- * `now()`/`today()` ran against live wall-clock and user/org were unreachable.
+ * The eval context is built ONCE per call and reused for every row × every
+ * formula field, and that is where this function's determinism comes from: one
+ * `now`, so a `now()`/`today()` formula cannot drift mid-operation, plus
+ * `os.user` / `os.org` resolved from the execution context (so a computed field
+ * can reference the caller, e.g. `os.user.id`). Previously this passed only
+ * `{ record }`, so `now()`/`today()` ran against live wall-clock and user/org
+ * were unreachable.
+ *
+ * That context has the same SHAPE as `applyFieldDefaults`' — the same keys, so
+ * one expression vocabulary serves `formula` and `defaultValue` alike — but NOT
+ * the same `now` value, and the two are sourced independently on purpose
+ * (#5699):
+ *  - `applyFieldDefaults` is handed the insert's `nowSnapshot`, so every
+ *    defaulted field of every row in one write carries the same PRE-write
+ *    instant;
+ *  - this function reads the clock itself, once per call, because a formula is
+ *    evaluated when a record is MATERIALIZED — at read time, and on the write
+ *    response — not at the moment that row's defaults were resolved.
+ *
+ * So inside a single `insert` a `NOW()` default and a `now()` formula observe
+ * two instants one driver round-trip apart (sub-millisecond in practice; across
+ * a second/day boundary they can land on different calendar days). Making them
+ * share one instant would hand the write path a determinism guarantee the read
+ * path cannot have — a semantic decision, not a tidy-up, argued in #5699. Until
+ * it is decided this function takes NO snapshot parameter: the zero-caller
+ * `nowSnapshot?: Date` it carried from birth was retired there, in the same
+ * enforce-or-remove reflex ADR-0049 applies to spec properties, because a
+ * dormant parameter reads as a live one and anyone reasoning from it concludes
+ * the two sides already share an instant.
  *
  * (ADR-0053 Phase 2 will additionally thread `timezone` here once
  * `ExecutionContext.timezone` exists — see #1980; this change is independent
@@ -547,10 +571,9 @@ function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
   execCtx?: ExecutionContextInput,
-  nowSnapshot?: Date,
 ): void {
   if (!plan.length) return;
-  const now = nowSnapshot ?? new Date();
+  const now = new Date();
   const timezone = execCtx?.timezone;
   const user = execCtx?.userId ? { id: String(execCtx.userId), positions: execCtx?.positions ?? [] } : undefined;
   const org = execCtx?.tenantId ? { id: String(execCtx.tenantId) } : undefined;
@@ -2186,8 +2209,17 @@ export class ObjectQL implements IObjectQLEngine {
         // Automation Protocol
         'flows', 'workflows', 'approvals', 'webhooks',
         'jobs',
-        // Security Protocol
-        'roles', 'permissions', 'profiles', 'sharingRules', 'policies',
+        // Security Protocol — `capabilities` is here for the same reason as
+        // `permissions` (#5870, #4967 Part 2): the ONLY seam that stamps
+        // ADR-0010 provenance is `registerItem` → `applyProtection`, so a
+        // collection missing from this list reaches no registry with a
+        // `_packageId`. `bootstrapDeclaredCapabilities` resolves the owning
+        // package as `cap._packageId ?? cap.packageId`; while `capabilities`
+        // sat outside this list the first half could never be satisfied and
+        // `readDeclared(ql, 'capability')` returned nothing, which made the
+        // author-side `packageId` — documented as the FALLBACK — mandatory,
+        // and its omission a silent, unenforced authorization declaration.
+        'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
         // AI Protocol
         'agents', 'tools', 'skills', 'ragPipelines',
         // API Protocol
@@ -2351,7 +2383,11 @@ export class ObjectQL implements IObjectQLEngine {
       const metadataArrayKeys = [
           'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
           'flows', 'workflows', 'approvals', 'webhooks',
-          'roles', 'permissions', 'profiles', 'sharingRules', 'policies',
+          // `capabilities` per #5870 — same stamping seam, one level down: a
+          // nested plugin's declarations must carry the parent package's
+          // provenance too, or the same declared-≠-enforced hole reopens for
+          // packages that ship their capabilities from a nested plugin.
+          'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
           'agents', 'ragPipelines', 'apis',
           'hooks', 'mappings', 'analyticsCubes', 'connectors',
           'docs', 'books',

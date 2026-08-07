@@ -20,6 +20,12 @@
 import fs from 'fs';
 import path from 'path';
 
+// One staleness rule, shared with the merge driver's pre-commit half and with
+// `check:generated`'s `--fix` refusal — a second copy of "is this artifact older
+// than src" would drift, and the direction it drifts in is the one that renders
+// a confident page from a tree nobody rebuilt (#4675, #4723).
+import { schemaTreeIsStale } from '../../../scripts/check-regen-pending.mjs';
+
 import {
   evaluateBaseline,
   loadEntrySurfaces,
@@ -44,6 +50,7 @@ import {
   type ZodFileInput,
 } from './lib/schema-index';
 import { schemaNameFromExportKey } from './lib/schema-name';
+import { API_SURFACE_DIR_NAME, readApiSurfaceFrom } from './lib/sharded-artifacts';
 
 const SCHEMA_DIR = path.resolve(__dirname, '../json-schema');
 const SRC_DIR = path.resolve(__dirname, '../src');
@@ -51,11 +58,55 @@ const SRC_DIR = path.resolve(__dirname, '../src');
 // ⚠️  Everything inside category sub-folders is auto-generated and disposable.
 const DOCS_ROOT = path.resolve(__dirname, '../../../content/docs/references');
 const REPO_ROOT = path.resolve(__dirname, '../../..');
-const API_SURFACE_PATH = path.resolve(__dirname, '../api-surface.json');
+const API_SURFACE_DIR = path.resolve(__dirname, `../${API_SURFACE_DIR_NAME}`);
 const IMPORT_BASELINE_PATH = path.resolve(__dirname, '../docs-import-surface.baseline.json');
 
 const CHECK = process.argv.includes('--check');
 const UPDATE_IMPORT_BASELINE = process.argv.includes('--update-import-baseline');
+
+// ── The input tree is a BUILD ARTIFACT, and it must be current (#4723) ────────
+//
+// Every mode below renders from `SCHEMA_DIR` — `packages/spec/json-schema/`,
+// which is gitignored, so no checkout carries it and nothing in git can tell you
+// how old it is.
+//
+// Until #4723 the question could not come up: `check:docs` was
+// `pnpm gen:schema && tsx scripts/build-docs.ts --check`, so the tree was rebuilt
+// on every run. That first step is what made a script called `check:` WRITE two
+// TRACKED files — `json-schema.manifest/` and `authorable-surface/` are
+// projections `gen:schema` repairs whenever they are behind — so running the gate
+// silently edited the tree of whoever ran it and left the staleness unreported.
+// #4711 removed exactly that from `--check`; this was the same defect at a
+// different entry, and the fix is the same shape: the check checks, and the
+// CALLER generates (lint.yml's `check:authorable-surface` step, `check:generated`'s
+// declared gate order, `pnpm build`, `apps/docs`' build).
+//
+// What the old first step also provided, silently, was FRESHNESS. Dropping it
+// without asserting freshness would trade a tracked-file write for something
+// worse: a green `check:docs` computed against a tree that predates the edit
+// under test — a false green on precisely the change (`.describe()` added, a key
+// renamed) this gate exists to catch. So the prerequisite is stated, in every
+// mode, and it is fatal rather than a warning: `gen:docs` on a stale tree does
+// not fail, it WRITES stale pages, which is the `readsDist` trap one artifact
+// over (AGENTS.md records what that one cost).
+if (schemaTreeIsStale(path.resolve(__dirname, '..'))) {
+  const missing = !fs.existsSync(SCHEMA_DIR);
+  console.error(
+    `\n❌ ${path.relative(REPO_ROOT, SCHEMA_DIR)} is ${missing ? 'missing' : 'older than packages/spec/src'}.\n\n` +
+      `   The reference docs are rendered from that tree, and it is a gitignored build\n` +
+      `   artifact — nothing in a checkout carries it, and a merge never brings it along.\n` +
+      `   Rendering ${CHECK ? 'a verdict' : 'pages'} from a stale tree would ${
+        CHECK ? 'report the docs in sync with sources this run never read' : 'WRITE pages describing sources this run never read'
+      }.\n\n` +
+      `   Generate it first:\n\n` +
+      `     pnpm --filter @objectstack/spec gen:schema\n\n` +
+      `   (\`pnpm --filter @objectstack/spec build\` does this as its first step, and so does\n` +
+      `   \`check:authorable-surface\`, which runs before this gate in CI and in check:generated.\n` +
+      `   This script no longer runs it for you: a check that regenerates is a check that\n` +
+      `   repairs the two tracked projections instead of reporting them — #4711, #4723.)`,
+  );
+  process.exit(1);
+}
 
 // ── Output sink ──────────────────────────────────────────────────────────────
 // Shared with the spec's other generators — see lib/generated-output.ts for why
@@ -185,14 +236,14 @@ function sourcePathFor(category: string, zodFile: string): string | undefined {
 const schemaIndex = scanCategories();
 
 // ── Import examples: the package's real export surface ───────────────────────
-// `api-surface.json` is the committed record of every `name (kind)` per public
+// `api-surface/` is the committed record of every `name (kind)` per public
 // entry point, kept honest by `check:api-surface`. Import examples are spelled
 // from it rather than from the schema file name, so a page can only advertise
 // an import that actually exists (#4570). Names it cannot account for are
 // collected here and ratcheted against the committed baseline after flush().
 
 const ENTRY_SURFACES: ReadonlyMap<string, CategorySurface> = loadEntrySurfaces(
-  JSON.parse(fs.readFileSync(API_SURFACE_PATH, 'utf-8')),
+  readApiSurfaceFrom(API_SURFACE_DIR),
 );
 
 /** Every unresolvable import name this run met, one stable line each. */
@@ -205,7 +256,7 @@ const IMPORT_BASELINE_COMMENT =
   'omitted from the generated import line — the docs never advertise an import that cannot compile ' +
   '— and listed here so the omission is countable instead of silent. Shrink-only ratchet: a NEW gap ' +
   'fails check:docs (fix it by adding `export type X = z.infer<typeof XSchema>;` next to the schema ' +
-  'and regenerating api-surface.json, or by retiring the schema together with its alias), and a ' +
+  'and regenerating api-surface/, or by retiring the schema together with its alias), and a ' +
   'stale entry fails until its line is deleted. Growing this list is a maintainer decision that ' +
   'shows up as this file in the diff. Regenerate with: ' +
   'tsx scripts/build-docs.ts --update-import-baseline (after gen:schema).';
@@ -661,7 +712,12 @@ Object.keys(CATEGORIES).forEach(category => {
     && fs.readdirSync(schemaDir).some(f => f.endsWith('.json'));
   if (!hasSchemas) {
     if (fs.existsSync(dir)) {
-      console.warn(`⚠ Skipping clean of ${category}/ — no JSON schemas found in ${schemaDir}. Run \`pnpm gen:schema\` first.`);
+      // NOT "run gen:schema first" any more: the freshness guard at the top of
+      // this file has already proved the tree is newer than src, so this is the
+      // steady state for a category whose schemas are all unrepresentable in JSON
+      // Schema (`contracts/` is the standing example) — the old line sent readers
+      // after a regeneration that would change nothing (#4723).
+      console.warn(`⚠ Skipping clean of ${category}/ — this build published no JSON Schema under ${schemaDir}; leaving its pages as they are.`);
     }
     return;
   }
@@ -868,7 +924,7 @@ emit(path.join(DOCS_ROOT, 'meta.json'), JSON.stringify(meta, null, 2));
 //
 // Diffing generated output against committed docs proves the two agree; it
 // cannot prove either is TRUE. Now that import examples are spelled from
-// `api-surface.json`, a schema whose type alias is missing quietly loses its
+// `api-surface/`, a schema whose type alias is missing quietly loses its
 // name from the `import type` line — correct output, silent regression. The
 // baseline turns that silence into a red gate: a NEW gap fails (that is #4539
 // exactly — deleting a zero-consumer type alias while its schema keeps its
@@ -927,7 +983,7 @@ if (managedCount > 0) {
     }
 
     if (!importSurfaceFailed) {
-      console.log(`✅ import examples resolve against api-surface.json (${gaps.length} accepted gap(s) in the baseline)`);
+      console.log(`✅ import examples resolve against ${API_SURFACE_DIR_NAME}/ (${gaps.length} accepted gap(s) in the baseline)`);
     }
   }
 }
@@ -938,13 +994,19 @@ flush({
   regenerate:
     '  pnpm --filter @objectstack/spec gen:schema && pnpm --filter @objectstack/spec gen:docs\n' +
     '  git add content/docs/references',
-  // json-schema/ is gitignored, so a fresh checkout that forgot gen:schema has no
-  // input at all: every category is skipped, nothing is managed, and "nothing
-  // differs" would read as success — green while checking no pages. Fail loudly.
+  // Backstop to the freshness guard at the top of this file. That one catches the
+  // common shape — an absent or stale tree — before a single page is rendered.
+  // This one catches what mtimes cannot see: a tree that is NEWER than src and
+  // still has no category with schemas in it (a truncated or half-written
+  // generation). Either way "nothing differs" must never read as success — green
+  // while checking no pages is the silent shape this whole file guards against.
+  // `check:docs` no longer regenerates for you, deliberately: that first step is
+  // what made a check repair two tracked projections (#4711, #4723).
   guard: () =>
     managedCount === 0
       ? `No JSON schemas found under ${path.relative(REPO_ROOT, SCHEMA_DIR)} — nothing to check against.\n` +
-        '  Run `pnpm --filter @objectstack/spec gen:schema` first (`check:docs` does this for you).'
+        '  The tree is newer than packages/spec/src but published no category, which means a\n' +
+        '  partial generation. Run `pnpm --filter @objectstack/spec gen:schema` again.'
       : null,
 });
 

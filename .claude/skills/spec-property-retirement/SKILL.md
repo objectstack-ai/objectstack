@@ -147,7 +147,8 @@ Note template for a tombstone entry (verbatim house style, e.g.
 - 把「整 def 删除」的零变化**判成正常** → 放过一个**根本没真正删掉**的 def。
 
 所以验收顺序是:**先确定路线,再决定该期待什么读数**,不要反过来用读数去猜路线。
-整 def 删除还有一条自证信号:`json-schema.manifest.json` 的 ratchet(#2978)会先开火,
+整 def 删除还有一条自证信号:`json-schema.manifest/`(#5837 起按 category 分片)的
+ratchet(#2978)会先开火,
 要求你**有意删除**对应的 manifest key;删完重跑,per-key ratchet 会自行判定为 #4650
 路径 3(`def no longer emitted by this build`)。这串输出本身就是路线的证据,留在 PR 里。
 
@@ -171,10 +172,15 @@ jumping several majors at once, whom the load-path conversion no longer covers.
 
 ## 3. Register the surface (ADR-0087 D2/D3) — or the gate stops you
 
-`scripts/build-schemas.ts` gate (b) fails any newly-tombstoned key with no
-registered migration surface: the tombstone is audible only to whoever *hits*
-it, while `spec-changes.json`, the generated upgrade guide and the
-`spec_changes` MCP tool are the primary channel and would stay empty.
+`scripts/build-schemas.ts` gate (b) fails any newly-tombstoned key that is not
+registered by its **exact** `${defKey}:${name}` in `RETIRED_KEYS_BY_MAJOR`: the
+tombstone is audible only to whoever *hits* it, while `spec-changes.json`, the
+generated upgrade guide and the `spec_changes` MCP tool are the primary channel
+and would stay empty.
+
+⚠ **This is two separate obligations, and only one of them is a string match.**
+The registry entry is what the gate reads; the conversion is what a consumer
+follows. Write both.
 
 - [ ] **A `MetadataConversion`** in `packages/spec/src/conversions/registry.ts`:
       kebab-case `id` ending `-removed`, `toMajor`, one
@@ -183,13 +189,27 @@ it, while `spec-changes.json`, the generated upgrade guide and the
       not the item count. Walkers (`mapCollection`, `mapFlowNodes`, `renameKey`)
       live in `conversions/walk.ts` and are copy-on-write — return the input
       reference untouched when nothing matched.
-- [ ] **`surface` must end with the bare key.** The matcher is
-      `surfaces.some((s) => s.endsWith('.' + key))` after
-      `.flatMap((s) => s.split(' / '))`. Multi-key conversions join clauses with
-      exactly `' / '` (house style since the tool sweep) and **each clause must
-      end with its own key**. Caveat: only the last dotted segment is compared,
-      so the schema name is never checked — `dashboard.aria` would satisfy
-      `ui/FormView:aria`. Don't lean on the gate for attribution.
+- [ ] **A `RETIRED_KEYS_BY_MAJOR` entry** in
+      `packages/spec/src/migrations/registry.ts` — the literal
+      `'<defKey>:<name>'` as `authorable-surface/<category>.json` spells it, minus the
+      `[RETIRED]` mark, under this major. This is the string gate (b) reads, by
+      exact set membership; nothing is inferred and nothing radiates from a
+      neighbouring key. The gate's failure prints the line to paste. ⚠ Do **not**
+      add the entry before the tombstone lands: an entry naming a key that is
+      still live fails gate (b2) as a registration nothing consumed.
+      *Why a second table:* until #4659 gate (b) matched the key's **leaf** against
+      every registered `surface` (`endsWith('.' + name)`, all majors, def
+      ignored), so `dashboard.aria` registered `ui/FormView:aria` and protocol
+      11's `flow.node.type` registered any `.type` at all (#4658). The guarantee
+      had lapsed for every common leaf.
+- [ ] **`surface` stays prose — it is no longer matched.** Write it the way an
+      author writes metadata (`flow.nodes[].outputSchema`), which is what the
+      upgrade guide prints. Multi-key conversions still join clauses with exactly
+      `' / '` (house style since the tool sweep). Nothing downstream parses it
+      for attribution any more — that job moved to the entry above. ⚠ One
+      consumer still does read the clauses by leaf: gate (c)'s *aged-out
+      tombstone* proof, which adjudicates retirements older than
+      `RETIRED_KEYS_BY_MAJOR` and could not be moved with it (#5898).
 - [ ] **`retiredFromLoadPath: true`** — for a retirement, always. Two distinct
       justifications, and they are not interchangeable: for a *rename* it means
       "no alias window, deliberately" (the tombstone owns the refusal; the entry
@@ -238,20 +258,23 @@ Work top to bottom; each line has a gate behind it.
       consumer goes with it (`PerformanceConfigSchema`, `AIKnowledgeSchema`,
       `ToolCategorySchema`). An exported schema with no consumer is read as a
       capability by whoever finds it (#3950 precedent). This — and *only* this —
-      moves `api-surface.json`: that snapshot prints type *references*, not
+      moves `api-surface/`: that snapshot prints type *references*, not
       expanded shapes, so it is blind to key-level narrowing (#3883 removed three
       keys from `defineAction`'s input and the snapshot did not change). Its gate
       also lives in a different workflow (`TypeScript Type Check`, not
       `Check Generated Artifacts`) and reads the built `dist/*.d.ts`.
-- [ ] **Conversion + chain step** (§3).
+- [ ] **Conversion + chain step + the exact-key `RETIRED_KEYS_BY_MAJOR` entry** (§3).
 - [ ] **Liveness ledger** — per §2's route table, with `verifiedAt`. Update the
       README's per-type row **and its counts** (that table has drifted badly
       once; regenerate the counts with the python snippet in the README rather
       than hand-editing).
 - [ ] **Generated baselines** — `pnpm --filter @objectstack/spec gen:schema`
-      moves `authorable-surface.json` (tombstone → a new `… [RETIRED]` line;
-      strict removal → the line **vanishes**, which is gate (a)'s trip wire, so
-      delete it in the same PR deliberately) and `json-schema.manifest.json`.
+      moves `authorable-surface/<category>.json` (tombstone → a new
+      `… [RETIRED]` line; strict removal → the line **vanishes**, which is gate
+      (a)'s trip wire, so delete it in the same PR deliberately) and
+      `json-schema.manifest/<category>.json`. Both are sharded by category since
+      #5837 — the gates read the whole directory as one set, so the retirement
+      procedure is unchanged; only which file the line lives in moved.
       Then `gen:spec-changes`, `gen:upgrade-guide`, `gen:api-surface`,
       `gen:docs`. See AGENTS.md for the you-changed-X → regenerate-Y table.
 - [ ] **Forms** — prune the `{ field: '<key>' }` input from

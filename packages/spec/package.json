@@ -178,7 +178,7 @@
     "README.md",
     "src/**/*.zod.ts",
     "CHANGELOG.md",
-    "api-surface.json",
+    "api-surface",
     "spec-changes.json"
   ],
   "scripts": {
@@ -189,7 +189,7 @@
     "gen:authorable-surface-base": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts --update-base",
     "gen:openapi": "tsx scripts/build-openapi.ts",
     "gen:docs": "tsx scripts/build-docs.ts",
-    "check:docs": "pnpm gen:schema && tsx scripts/build-docs.ts --check",
+    "check:docs": "tsx scripts/build-docs.ts --check",
     "check:generated": "tsx scripts/check-generated.ts",
     "gen:skill-refs": "tsx scripts/build-skill-references.ts",
     "check:skill-refs": "tsx scripts/build-skill-references.ts --check",
@@ -217,7 +217,7 @@
     "gen:react-blocks": "tsx scripts/build-react-blocks-contract.ts",
     "check:react-blocks": "tsx scripts/build-react-blocks-contract.ts --check",
     "check:react-declaration-parity": "tsx scripts/check-react-blocks-declaration-parity.ts",
-    "check:skill-examples": "tsx scripts/check-skill-examples.ts",
+    "check:skill-examples": "tsx scripts/check-skill-examples.ts --self-test && tsx scripts/check-skill-examples.ts",
     "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/spec --project tsconfig.test.json",
     "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/spec --project tsconfig.test.json",
     "typecheck": "tsc --noEmit && pnpm check:test-typecheck"

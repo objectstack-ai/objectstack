@@ -136,10 +136,11 @@ function zodLikeRejection(): Error {
  * probes with `{ where: {}, limit: 1 }` and lists with
  * `{ where: { status: 'paused' }, limit: 1000 }`. A real missing table fails
  * both, and the second failure is reported by a DIFFERENT seam — `wait-node.ts`'s
- * `[wait] … re-arm ABORTED … Cause: ${err.message}`, which still interpolates
- * (out of this issue's scope, filed separately). Narrowing the fixture to the
- * probe keeps these assertions about the seam they name instead of measuring
- * someone else's record.
+ * `[wait] … re-arm ABORTED …`, which #5737 has since brought into this same
+ * shape (one-line message, cause in meta) and pinned in
+ * `builtin/wait-node-log-cause.test.ts`. So the narrowing no longer dodges a
+ * shredded record, only a second seam's record: the counts below are per-seam
+ * (`toHaveLength(1)`), and this keeps them measuring the seam they name.
  *
  * ## No `delete` on purpose (#4550 / #5629)
  *

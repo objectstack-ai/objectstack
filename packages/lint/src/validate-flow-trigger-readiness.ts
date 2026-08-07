@@ -46,6 +46,44 @@
 // second copy of the descriptor's shape living in this file. It stays inside the
 // package's stated dependency direction — lint → `@objectstack/spec`, never onto
 // a runtime.
+//
+// ## Severity: the never-fire family gates, the hedged rules advise (#5762)
+//
+// The file's rules do not share a severity, and the line between them is not
+// how bad the outcome is — every rule here describes a flow that does not run.
+// It is whether THIS STACK is enough to know that:
+//
+//   - `error` — the never-fire family. `flow-time-relative-descriptor-invalid`,
+//     `flow-time-relative-descriptor-unroutable` and
+//     `flow-trigger-unknown-event` each read a value whose verdict is settled by
+//     a contract that ships in this repo: `TimeRelativeTriggerSchema` for the
+//     first, the engine's own `typeof … === 'object'` routing predicate for the
+//     second, `triggerTypeToHookEvents`' closed token grammar for the third.
+//     Nothing an author or a tenant can INSTALL changes any of those verdicts,
+//     so there is no reading of the stack under which the flow fires. A rule
+//     that can prove a declared trigger is dead should not be asking the author
+//     to notice a warning about it.
+//   - `warning` — `flow-trigger-unknown-object`, both halves. An object name
+//     this stack does not define may be defined by another installed package,
+//     and this rule cannot see that package's objects. The hedge is real, so the
+//     rule advises and says so in its own hint. It is the deliberate control for
+//     the paragraph above: the family was reviewed together (#5762) and this is
+//     the one that stayed advisory.
+//   - `warning` — `flow-draft-status-ambiguous`. Draft flows DO fire, so this is
+//     an ambiguity of intent, not a dead flow. Gating it would refuse a stack
+//     whose flows all work.
+//
+// The consequence of `error` is not confined to `os validate`: this rule runs at
+// the runtime publish gate too (`surfaces: CLI_AND_RUNTIME` in
+// `authoring-rules.ts`), which refuses a `state: 'active'` metadata write whose
+// findings include one. What that does and does NOT reach is worth stating,
+// because the obvious guess is wrong in the tenant's favour: the gate hands this
+// rule a snapshot whose `flows` array holds ONLY the item being written
+// (`runtime-gate.ts` — `candidate = { objects, [stackKey]: [item] }`), and
+// subtracts every finding the baseline already produced. So publishing flow A is
+// never refused because stored flow B is dead, and a tenant's existing dead
+// flows keep being served. What IS refused is the dead flow's own publish — and,
+// on the CLI surface, a package build whose stack contains one.
 
 import { TimeRelativeTriggerSchema } from '@objectstack/spec/automation';
 
@@ -273,7 +311,12 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
           .map((i) => `${i.path.join('.') || '(root)'}: ${i.message.replace(/\s+/g, ' ').trim()}`)
           .join('; ');
         findings.push({
-          severity: 'warning',
+          // `error` (#5762): the verdict is `TimeRelativeTriggerSchema`'s, and it
+          // is the same schema the trigger safeParses at bind time. A descriptor
+          // it refuses is refused at bind too — the sweep is never installed, on
+          // every deployment, with no installed package able to change the
+          // answer. Nothing is left for the author to weigh.
+          severity: 'error',
           rule: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
           where: `flow "${flowName}" › start node`,
           path: `flows[${flowIndex}].nodes[${start.index}].config.timeRelative`,
@@ -297,7 +340,15 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     //     (only a runtime warn). Surface the never-fire defect at authoring time.
     if (start && isRecordTriggered && !VALID_RECORD_TRIGGER.test((triggerType ?? '').trim())) {
       findings.push({
-        severity: 'warning',
+        // `error` (#5762). The token grammar is CLOSED and local: the engine
+        // routes any `record-`-prefixed string to the record-change trigger by a
+        // hardcoded prefix test (no registry lookup, so installing a package
+        // cannot claim a new `record-*` token), and that trigger maps the token
+        // with `triggerTypeToHookEvents` — the same regex this file's
+        // `VALID_RECORD_TRIGGER` mirrors. Off-grammar means zero hook events,
+        // which means bound-to-nothing on every deployment. Unlike an object
+        // name, there is no other-package reading that rescues it.
+        severity: 'error',
         rule: FLOW_TRIGGER_UNKNOWN_EVENT,
         where: `flow "${flowName}" › start node`,
         path: `flows[${flowIndex}].nodes[${start.index}].config.triggerType`,
@@ -317,7 +368,14 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     //     single tokens above (same rule id — both are "this token never fires").
     if (start && isArrayRecordTriggered) {
       findings.push({
-        severity: 'warning',
+        // `error` (#5762), same id and same reason as 1c: an array maps to no
+        // hook event either. The engine routes it to the record-change trigger
+        // for the express purpose of making it loud, and its own comment names
+        // THIS rule as the primary catch — a primary catch that only warns is
+        // the "declared ≠ enforced" shape the registry's tier exists to close.
+        // Multi-event arrays are deferred, not unsupported-by-accident (#3457),
+        // so if they land the grammar widens here in the same commit.
+        severity: 'error',
         rule: FLOW_TRIGGER_UNKNOWN_EVENT,
         where: `flow "${flowName}" › start node`,
         path: `flows[${flowIndex}].nodes[${start.index}].config.triggerType`,
@@ -384,7 +442,14 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
           `never fires — with zero diagnostics at any layer, not even the one bind-time warn a ` +
           `descriptor that IS an object gets when the trigger refuses it.`;
       findings.push({
-        severity: 'warning',
+        // `error` (#5762). The criterion IS the engine's routing predicate, so a
+        // value that fails it is not routed to the time-relative trigger by any
+        // deployment — the strongest verdict in this file, and the one case with
+        // no runtime channel to fall back on (not even the bind-time warn 1b-ii
+        // moves earlier). Note the two consequences below are both defects: one
+        // never fires, the other silently drops the descriptor. Neither is a
+        // shape the author can have meant, so both gate.
+        severity: 'error',
         rule: FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
         where: `flow "${flowName}" › start node`,
         path: `flows[${flowIndex}].nodes[${start.index}].config.timeRelative`,

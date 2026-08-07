@@ -19,9 +19,11 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/service-settings": "workspace:*",
     "@types/node": "^26.1.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

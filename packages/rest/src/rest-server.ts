@@ -42,7 +42,7 @@ import {
     type ExportFieldMeta,
 } from './export-format.js';
 import { runImport } from './import-runner.js';
-import { prepareImportRequest, isMetaEnvelope } from './import-prepare.js';
+import { prepareImportRequest } from './import-prepare.js';
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
 import { buildBuiltinPaths } from './openapi-builtin-paths.js';
 import {
@@ -2455,18 +2455,17 @@ export class RestServer {
      * Returns `null` when the app should be hidden from the user. Returns a
      * shallow copy with filtered `navigation` / `areas` otherwise — the original
      * is never mutated so cached metadata stays clean.
+     *
+     * Takes the **app document itself**, never the `getMetaItem` envelope
+     * (#5563). Both callers now hand it a document: the list path always did,
+     * and the single-item route unwraps `.item` once, gates the document, and
+     * rebuilds the envelope around the result. Filtering an envelope would be a
+     * silent no-op (its `.navigation` is undefined), bypassing BOTH
+     * `requiredPermissions` and the ADR-0057 D10 `requiresService` gate — which
+     * is why this used to sniff the shape. There is one shape now.
      */
     private filterAppForUser(item: any, sysPerms: Set<string>, serviceGate?: (name: string) => boolean): any | null {
         if (!item || typeof item !== 'object') return item;
-        // getMetaItem returns an envelope { type, name, item: <app>, ... } while the
-        // list path passes the raw app. Unwrap + re-wrap so gating runs on both —
-        // filtering the envelope directly is a silent no-op (its .navigation is
-        // undefined), which would bypass BOTH requiredPermissions and the ADR-0057
-        // D10 requiresService gate.
-        if (isMetaEnvelope(item)) {
-            const body = this.filterAppForUser((item as any).item, sysPerms, serviceGate);
-            return body == null ? null : { ...(item as any), item: body };
-        }
         // ADR-0045: an unpublished app (`hidden: true`) is externally
         // unobservable — only builders (studio/setup access) receive it at all,
         // for direct-URL preview. The launcher's client-side hidden filter is a
@@ -2549,13 +2548,13 @@ export class RestServer {
      *
      * Fail-open when the gate can't be probed (serviceGate undefined). Never
      * mutates the original — returns a shallow copy only when a widget is dropped.
+     *
+     * Takes the **dashboard document**, never the `getMetaItem` envelope — see
+     * {@link filterAppForUser} for why that distinction stopped being a runtime
+     * question in #5563.
      */
     private filterDashboardForUser(item: any, serviceGate?: (name: string) => boolean): any {
         if (!item || typeof item !== 'object' || !serviceGate) return item;
-        if (isMetaEnvelope(item)) {
-            const body = this.filterDashboardForUser((item as any).item, serviceGate);
-            return body === (item as any).item ? item : { ...(item as any), item: body };
-        }
         if (!Array.isArray(item.widgets)) return item;
         const widgets = item.widgets.filter(
             (w: any) => !(w && typeof w.requiresService === 'string' && serviceGate(w.requiresService) === false),
@@ -2569,6 +2568,9 @@ export class RestServer {
      * when the kernel can't be probed — callers then SKIP service gating
      * (fail-open, matching the prior "send everything, let the client hide"
      * behaviour). ADR-0057 addendum D10.
+     *
+     * `items` are metadata **documents** (#5563) — the single-item route
+     * unwraps the envelope before probing, exactly as it does before gating.
      */
     private async resolveRegisteredServices(kernel: any, items: any[]): Promise<Set<string> | null> {
         // Prefer the per-request kernel (multi-env, resolved via kernelManager).
@@ -2586,7 +2588,6 @@ export class RestServer {
         const wanted = new Set<string>();
         const walk = (e: any): void => {
             if (!e || typeof e !== 'object') return;
-            if (isMetaEnvelope(e)) { walk((e as any).item); return; }
             if (typeof e.requiresService === 'string') wanted.add(e.requiresService);
             // [#4722] EVERY child list, not the first one that happens to be an
             // array. An app may carry `navigation` AND `areas` at once, and now
@@ -2669,10 +2670,17 @@ export class RestServer {
     }
 
     /**
-     * Translate a single metadata document (view or action) when an i18n
+     * Translate a single metadata **document** (view or action) when an i18n
      * service is registered for the request's project and the requested
      * locale yields a match. Falls through unchanged for unsupported types
      * or missing translations.
+     *
+     * Takes the document, never the `getMetaItem` envelope (#5563): nav/field
+     * labels live on the document, so translating an envelope's top level
+     * (which has no `navigation`) would leave the menu untranslated. Route
+     * handlers that hold an envelope go through
+     * {@link translateMetaEnvelope} instead of asking, at runtime, which shape
+     * they were handed.
      */
     private async translateMetaItem(req: any, type: string, environmentId: string | undefined, item: any, i18nService?: any): Promise<any> {
         if (!item || typeof item !== 'object') return item;
@@ -2689,16 +2697,32 @@ export class RestServer {
         const locale = this.extractLocale(req, i18n);
         if (!locale) return item;
         const { translateMetadataDocument } = await import('@objectstack/spec/system');
-        // `getMetaItem` returns an envelope `{ type, name, item, lock, ... }`
-        // whose translatable document is nested at `.item`; the cached read
-        // path hands us the already-unwrapped document. Translate whichever
-        // shape we received — nav/field labels live on the inner doc, so
-        // translating the envelope's top level (which has no `navigation`)
-        // would leave the menu untranslated.
-        if (isMetaEnvelope(item)) {
-            return { ...item, item: translateMetadataDocument(type, item.item, bundle, { locale }) };
-        }
         return translateMetadataDocument(type, item, bundle, { locale });
+    }
+
+    /**
+     * Translate the document inside a `GET /meta/:type/:name` response
+     * envelope and hand the envelope back with that document in place.
+     *
+     * This is the ONE place the single-item read paths rebuild their response
+     * body, so every one of them — cached, non-cached, compound-name — answers
+     * the spec's `GetMetaItemResponseSchema` shape (#5563). `envelope` supplies
+     * the identity and the ADR-0008 OCC carriers (`lock`, `provenance`, …);
+     * `document` is the (possibly RBAC-filtered, possibly locale-collapsed)
+     * metadata document that belongs under `item`.
+     */
+    private async translateMetaEnvelope(
+        req: any,
+        type: string,
+        environmentId: string | undefined,
+        envelope: Record<string, any>,
+        document: any,
+        i18nService?: any,
+    ): Promise<any> {
+        return {
+            ...envelope,
+            item: await this.translateMetaItem(req, type, environmentId, document, i18nService),
+        };
     }
 
     /**
@@ -2720,11 +2744,10 @@ export class RestServer {
         const locale = this.extractLocale(req, i18n);
         if (!locale) return items;
         const { translateMetadataDocument } = await import('@objectstack/spec/system');
-        const translated = arr.map((item) =>
-            isMetaEnvelope(item)
-                ? { ...item, item: translateMetadataDocument(type, item.item, bundle, { locale }) }
-                : translateMetadataDocument(type, item, bundle, { locale }),
-        );
+        // `getMetaItems` elements are metadata documents (the list envelope is
+        // the OUTER `{ type, items }`), so every element translates directly —
+        // #5563 removed the per-element shape sniff that stood here.
+        const translated = arr.map((item) => translateMetadataDocument(type, item, bundle, { locale }));
         return Array.isArray(items) ? translated : { ...items, items: translated };
     }
 
@@ -4126,6 +4149,20 @@ export class RestServer {
                         // asks for `?layers=true` (or any non-empty value).
                         // Skips the cache path entirely — layered view is a
                         // diagnostic endpoint, not on the hot read path.
+                        //
+                        // [#5563] This is a DIFFERENT RESOURCE reached through a
+                        // query flag, not a variant body of the same one: it
+                        // answers `{ type, name, code, overlay, overlayScope,
+                        // effective, validation }` — three layers side by side,
+                        // where `effective` is what the plain read would return.
+                        // Collapsing it into `GetMetaItemResponseSchema`'s single
+                        // `item` would delete the diagnostic (the whole point is
+                        // seeing code vs overlay vs effective separately), so the
+                        // convergence deliberately stops at the ordinary read.
+                        // What remains is a spec gap, not a runtime split: the
+                        // route declares ONE `responseSchema` while `?layers=`
+                        // answers a second, undeclared shape — filed as #5882
+                        // for a spec seat.
                         const wantLayered = req.query?.layers !== undefined && req.query?.layers !== '';
                         if (wantLayered && typeof (p as any).getMetaItemLayered === 'function') {
                             // ADR-0048 — thread `?package=` so the layered (Studio
@@ -4224,35 +4261,63 @@ export class RestServer {
                             }
 
                             res.header('Vary', 'Accept-Language');
-                            res.json(await this.translateMetaItem(req, req.params.type, environmentId, result.data, cacheI18n));
+                            // [#5563] `getMetaItemCached` hands back the metadata
+                            // document with the envelope already stripped
+                            // (`result.data`; it does `const item = result?.item`
+                            // internally). This branch is the DEFAULT — `enableCache`
+                            // defaults to `true` — so leaving it unwrapped made the
+                            // one shape `packages/spec` declares for this route the
+                            // one a default deployment could never obtain. Rebuild
+                            // the declared envelope here, in the REST layer that
+                            // owns the response contract.
+                            //
+                            // `type` is folded to the canonical singular exactly as
+                            // `metadata-protocol` folds it (#4432), so `/meta/objects/x`
+                            // and `/meta/object/x` cannot answer two different `type`
+                            // values across a configuration switch. The cached read
+                            // carries no `lock` — it is the fast published-value path
+                            // and never consulted the lock resolver; a caller that
+                            // needs the ADR-0008 OCC carriers reads the uncached path.
+                            const cachedEnvelope = {
+                                type: RestServer.metaTypeSingular(req.params.type),
+                                name: req.params.name,
+                            };
+                            res.json(await this.translateMetaEnvelope(
+                                req, req.params.type, environmentId, cachedEnvelope, result.data, cacheI18n,
+                            ));
                         } else {
                             // Non-cached version
                             const packageId = req.query?.package || undefined;
                             const stateParam = typeof req.query?.state === 'string'
                                 ? req.query.state.toLowerCase()
                                 : undefined;
-                            const item = await p.getMetaItem({
+                            const envelope = await p.getMetaItem({
                                 type: req.params.type,
                                 name: req.params.name,
                                 packageId,
                                 ...(stateParam === 'draft' ? { state: 'draft' } : {}),
                                 ...(previewDrafts ? { previewDrafts: true } : {}),
-                            } as any);
+                            } as any) as Record<string, any>;
 
+                            // [#5563] `getMetaItem` answers the envelope
+                            // `{ type, name, item, lock, … }`. Unwrap ONCE here;
+                            // every gate below operates on the document, and the
+                            // envelope is rebuilt around the result at `res.json`.
+                            // Nothing downstream asks which shape it holds.
+                            let visible: any = envelope?.item;
                             // Same per-user RBAC filtering as the list endpoint:
                             // for `app` items, drop entirely (404) when the user
                             // lacks the app's `requiredPermissions`, and strip
                             // forbidden nav entries from the returned schema.
-                            let visible: any = item;
-                            if (isAppType && item) {
+                            if (isAppType && visible) {
                                 const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
                                 if (ctx?.userId) {
                                     const sysPerms = new Set<string>(
                                         Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : [],
                                     );
-                                    const registered = await this.resolveRegisteredServices((ctx as any).__kernel, [item]);
+                                    const registered = await this.resolveRegisteredServices((ctx as any).__kernel, [visible]);
                                     const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                    visible = this.filterAppForUser(item, sysPerms, serviceGate);
+                                    visible = this.filterAppForUser(visible, sysPerms, serviceGate);
                                     if (visible == null) {
                                         res.status(404).json({
                                             error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
@@ -4282,7 +4347,14 @@ export class RestServer {
                             if ((audienceGatedType === 'book' || audienceGatedType === 'doc') && visible) {
                                 const { audienceAllows, docAudienceAllows, resolveDocAudiences } =
                                     await import('@objectstack/spec/system');
-                                const target = isMetaEnvelope(visible) ? (visible as any).item : visible;
+                                // The document under audience test. [#5563] This
+                                // used to unwrap an envelope-or-document here;
+                                // `visible` is always the document now, so the
+                                // name is all that is left — and it is worth
+                                // keeping, because `audience` is read off the
+                                // DOCUMENT and reading it off an envelope would
+                                // silently grant everyone (`undefined` audience).
+                                const target = visible;
                                 let caller: { authenticated: boolean; permissionSets?: string[] };
                                 let allowed: boolean;
                                 if (audienceGatedType === 'book') {
@@ -4330,13 +4402,13 @@ export class RestServer {
                             if (audienceGatedType === 'doc' && visible) {
                                 const locale = this.extractLocale(req);
                                 const { resolveDocLocale } = await import('@objectstack/spec/system');
-                                visible = isMetaEnvelope(visible)
-                                    ? { ...visible, item: resolveDocLocale(visible.item as any, locale) }
-                                    : resolveDocLocale(visible as any, locale);
+                                visible = resolveDocLocale(visible as any, locale);
                             }
 
                             res.header('Vary', 'Accept-Language');
-                            res.json(await this.translateMetaItem(req, req.params.type, environmentId, visible));
+                            res.json(await this.translateMetaEnvelope(
+                                req, req.params.type, environmentId, envelope, visible,
+                            ));
                         }
                     } catch (error: any) {
                         handleRouteError(res, error);
@@ -4708,13 +4780,15 @@ export class RestServer {
                         const p = await this.resolveProtocol(environmentId, req);
                         const compoundName = `${req.params.section}/${req.params.name}`;
                         const packageId = req.query?.package || undefined;
-                        const item = await p.getMetaItem({
+                        const envelope = await p.getMetaItem({
                             type: req.params.type,
                             name: compoundName,
                             packageId,
-                        } as any);
+                        } as any) as Record<string, any>;
                         res.header('Vary', 'Accept-Language');
-                        res.json(await this.translateMetaItem(req, req.params.type, environmentId, item));
+                        res.json(await this.translateMetaEnvelope(
+                            req, req.params.type, environmentId, envelope, envelope?.item,
+                        ));
                     } catch (error: any) {
                         handleRouteError(res, error);
                     }
@@ -5806,14 +5880,15 @@ export class RestServer {
                         // Field metadata comes from the same place `findData` resolves
                         // the object: `getMetaItem` is registry-first (DB fallback), so
                         // it returns the live `ObjectSchema` whose `fields` is an object
-                        // map. The read hands back an envelope `{ type, name, item }`;
-                        // the schema document lives at `.item` (a cached/bare read may
-                        // already be unwrapped). Legacy `getObjectSchema` is consulted
-                        // as a last resort so existing test doubles keep working.
+                        // map. The read hands back the envelope `{ type, name, item }`
+                        // — one shape, unconditionally, since #5563 — so the schema
+                        // document is read straight off `.item`. Legacy
+                        // `getObjectSchema` is consulted as a last resort so existing
+                        // test doubles keep working.
                         let schema: any = undefined;
                         if (typeof (p as any).getMetaItem === 'function') {
-                            const res = await (p as any).getMetaItem({ type: 'object', name: objectName });
-                            schema = isMetaEnvelope(res) ? res.item : res;
+                            const res: any = await (p as any).getMetaItem({ type: 'object', name: objectName });
+                            schema = res?.item;
                         }
                         if (!schema && typeof (p as any).getObjectSchema === 'function') {
                             schema = await (p as any).getObjectSchema(objectName, environmentId);

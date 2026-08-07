@@ -399,6 +399,33 @@ jobs:
       - name: Resume-authority declaration gate
         run: pnpm check:resume-authority-declared
 
+      # Merge-driver wiring gate (#6008, from #4675 / #4868). `merge=os-regen`
+      # is what stops generator-owned artifacts (spec-changes.json, the ADR-0087
+      # registries, the api-surface baselines) from text-merging into a
+      # plausible-looking wrong file: the driver defers the path and records it,
+      # and `.githooks/pre-commit` refuses the commit until the regeneration has
+      # actually happened. Both halves are CONFIG — `.gitattributes` routing on
+      # one side, the table in scripts/regen-artifacts.mjs on the other — and
+      # they drift apart in either direction with nothing failing: a path
+      # declared in the table but unmapped still text-merges, and a path mapped
+      # but undeclared leaves the merge CONFLICTED with no explanation. The
+      # self-test reconciles them both ways, checks the gen:/check: names the
+      # driver advises still resolve, that the hook is executable IN THE INDEX
+      # (git ignores a non-executable hook and says only `advice.ignoredHook`),
+      # that the driver registered in THIS clone resolves here (#4868: it
+      # pointed at a deleted worktree for weeks while every other check stayed
+      # green), and proves the behaviour end to end against real git. The
+      # second half pins the staleness rules' dangerous direction — "says fresh
+      # when stale".
+      # It ran nowhere until now: `pre-commit` runs check-regen-pending's MAIN
+      # path (which exits immediately with no pending marker), never
+      # `--self-test`, and no workflow named the command — so the reconciliation
+      # was verified only when someone happened to run the root script by hand
+      # (#4690's family: a gate archived as "runs elsewhere" that ran nowhere).
+      # Pure git + fs, no build, seconds — so it belongs in this job.
+      - name: Merge-driver wiring gate
+        run: pnpm check:merge-driver
+
   typecheck:
     name: TypeScript Type Check
     runs-on: ubuntu-latest
@@ -551,18 +578,27 @@ jobs:
       # generated page and the filter kept watching the old path, so hand-edits
       # went unchecked for months; #3855 listed specific spec paths but no schema
       # dirs, so `check:authorable-surface` went dormant on exactly the PRs that
-      # remove an authorable key; and `json-schema.manifest.json` — the #2978
+      # remove an authorable key; and the json-schema manifest — the #2978
       # ratchet that is the ONLY durable record of every emitted schema, since
       # json-schema/ is gitignored — was never watched at all, so a PR retiring a
       # key from it skipped its own verifier. Six gates had already escaped to
       # this job one at a time, each with a comment saying the filter had failed
       # it; these four finish the migration and retire the duplicate ledger.
       #
-      # Affordable because the work was already being done here: `check:docs`
-      # below runs `gen:schema` — the same scripts/build-schemas.ts that backs
-      # `check:authorable-surface` — and that whole step measures 4s in CI. All
-      # four read source via tsx and need no build, so they run before the
-      # workspace build, as the gates below already do.
+      # Affordable because the work was already being done here: one run of
+      # scripts/build-schemas.ts serves both `check:authorable-surface` and the
+      # `check:docs` gate below, and that whole step measures 4s in CI. All four
+      # read source via tsx and need no build, so they run before the workspace
+      # build, as the gates below already do.
+      #
+      # It used to be `check:docs` that ran `gen:schema`, and that is the half
+      # #4723 removed: `gen:schema` is a generator, so a step named `check:` was
+      # rewriting two TRACKED files (json-schema.manifest.json,
+      # authorable-surface.json) whenever they were behind — silently repairing
+      # locally what it was supposed to report, and running the same ~1600-schema
+      # generation twice per job. The generation now happens once, in the
+      # `check:authorable-surface` step below, whose `--check` mode writes the
+      # gitignored json-schema/ tree and refuses to touch a tracked file (#4711).
       - name: Check skill docs are generated from SKILL.md frontmatter
         run: pnpm --filter @objectstack/spec check:skill-docs
 
@@ -573,12 +609,20 @@ jobs:
         run: pnpm --filter @objectstack/spec check:upgrade-guide
 
       # The authorable KEY surface — what a metadata author may write, which for
-      # this platform is the third-party API. `api-surface.json` records exported
+      # this platform is the third-party API. `api-surface/` records exported
       # names and `api-surface-signatures.json` hashes factory types as TypeScript
       # PRINTS them (a reference, never structurally expanded), so neither sees a
       # key added to or removed from a schema. #3883 removed three authorable keys
       # with every witness green; #3733 did it by accident. ADR-0059 §5 deferred
       # this gate until a narrowing actually slipped both — it has.
+      #
+      # ⚠ ORDER: this step must stay ABOVE the `check:docs` step below. Its
+      # `--check` run of scripts/build-schemas.ts writes the gitignored
+      # packages/spec/json-schema/ tree that `check:docs` renders from — the
+      # explicit generation that replaced the `gen:schema` `check:docs` used to run
+      # itself (#4723). Nothing here silently depends on that: `build-docs.ts`
+      # refuses on a missing or stale tree, so a reordering fails loudly with the
+      # prescription rather than reporting on last run's schemas.
       - name: Check the authorable key surface is recorded and nothing vanished
         run: pnpm --filter @objectstack/spec check:authorable-surface
 
@@ -594,6 +638,11 @@ jobs:
       # job has no paths filter and is a required status check, so the gate cannot go
       # dormant. It reads src/ + json-schema/ via tsx and needs no build, so it runs
       # before the workspace build and fails in ~2s.
+      #
+      # It CONSUMES the json-schema/ tree the `check:authorable-surface` step above
+      # generated; it no longer generates one itself (#4723). Two things came off
+      # this step with that: the duplicate ~1600-schema generation, and the tracked
+      # files a `check:` script had no business writing.
       - name: Check generated reference docs are in sync with the spec
         run: pnpm --filter @objectstack/spec check:docs
 
@@ -729,7 +778,7 @@ jobs:
       - name: Check @objectstack/spec public API surface
         run: pnpm --filter @objectstack/spec run check:api-surface
 
-      # Same surface, the other axis: api-surface.json records that an export
+      # Same surface, the other axis: api-surface/ records that an export
       # EXISTS, never what it resolves to — so four exported types sat at `any`
       # across a whole major with every gate green (#4171). #4115 tells consumers
       # to replace a local declaration with the spec import, which for those four
@@ -742,7 +791,7 @@ jobs:
       - name: Check no exported spec type resolves to `any`
         run: pnpm --filter @objectstack/spec run check:exported-any
 
-      # Third axis on the same surface: api-surface.json shows a name on two
+      # Third axis on the same surface: api-surface/ shows a name on two
       # entries but not whether the two are ONE declaration re-exported (fine)
       # or TWO declarations sharing a name — the #4411 trap, where which type a
       # consumer gets depends on nothing but the import path and the copy that

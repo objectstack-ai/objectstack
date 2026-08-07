@@ -60,12 +60,18 @@ function createFakeClient() {
     records: [],
     total: 0,
   }));
+  // Both doubles speak the real `GET /meta/:type/:name` body: the
+  // `{ type, name, item }` envelope the spec declares and — since #5563 — every
+  // read path actually answers. A double that teaches a shape no producer emits
+  // is its own defect (#5674).
   const getCached = vi.fn(async (_objectName: string, _options?: Record<string, unknown>) => ({
-    data: { name: 'todo_task' },
+    data: { type: 'object', name: 'todo_task', item: { name: 'todo_task' } },
     etag: { value: 'W/"1"' },
     notModified: false,
   }));
-  const getItem = vi.fn(async (_kind: string, _objectName: string) => ({ name: 'todo_task' }));
+  const getItem = vi.fn(async (_kind: string, _objectName: string) => ({
+    type: 'object', name: 'todo_task', item: { name: 'todo_task' },
+  }));
   const getView = vi.fn(async (_objectName: string, _viewType: string) => ({
     name: 'todo_task_list',
   }));

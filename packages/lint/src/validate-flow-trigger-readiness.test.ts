@@ -223,7 +223,7 @@ describe('validateFlowTriggerReadiness', () => {
       expect(findings).toHaveLength(1);
       const [f] = findings;
       expect(f.rule).toBe(FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID);
-      expect(f.severity).toBe('warning');
+      expect(f.severity).toBe('error');
       // Criterion 1: the finding NAMES config.timeRelative, in both channels the
       // CLI prints (`• where: message` then `at path`).
       expect(f.path).toBe('flows[0].nodes[0].config.timeRelative');
@@ -410,7 +410,7 @@ describe('validateFlowTriggerReadiness', () => {
         expect(findings).toHaveLength(1);
         const [f] = findings;
         expect(f.rule).toBe(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE);
-        expect(f.severity).toBe('warning');
+        expect(f.severity).toBe('error');
         expect(f.path).toBe('flows[0].nodes[0].config.timeRelative');
         expect(f.where).toBe('flow "task_due_reminder" › start node');
         // The value the author wrote AND why it is not a descriptor.
@@ -622,7 +622,7 @@ describe('validateFlowTriggerReadiness', () => {
     const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(FLOW_TRIGGER_UNKNOWN_EVENT);
-    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).toBe('error');
     expect(findings[0].message).toContain("'record-after-updated'");
     expect(findings[0].message).toMatch(/never fires/i);
     expect(findings[0].path).toBe('flows[0].nodes[0].config.triggerType');
@@ -691,7 +691,7 @@ describe('validateFlowTriggerReadiness', () => {
     ];
     const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
     expect(findings.map((f) => f.rule)).toEqual([FLOW_TRIGGER_UNKNOWN_EVENT]);
-    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).toBe('error');
     expect(findings[0].message).toMatch(/array/i);
     expect(findings[0].message).toMatch(/never fires/i);
     expect(findings[0].path).toBe('flows[0].nodes[0].config.triggerType');
@@ -718,6 +718,166 @@ describe('validateFlowTriggerReadiness', () => {
     (flow.nodes[0] as { config: Record<string, unknown> }).config.triggerType = ['schedule', 'manual'];
     const findings = validateFlowTriggerReadiness({ objects: [candidateObject], flows: [flow] });
     expect(findings.some((f) => f.rule === FLOW_TRIGGER_UNKNOWN_EVENT)).toBe(false);
+  });
+
+  // ── #5762 — the family's severity map ────────────────────────────────────
+  //
+  // The rules in this file were reviewed as ONE family and split on a single
+  // question: is this stack enough to know the flow is dead? Three rules answer
+  // yes and gate; two hedge and advise. The split is the contract, so it is
+  // pinned as a map rather than as five scattered `severity` lines — a later
+  // rule added to this file has to decide which side it is on, and a later edit
+  // that quietly demotes one of the three has to come past this test.
+  //
+  // Every entry is provoked through a real stack, so an id whose criterion stops
+  // firing fails here instead of passing vacuously (the empty-verdict trap: an
+  // assertion about findings that are never produced is green for the wrong
+  // reason).
+  describe('severity (#5762)', () => {
+    /** Minimal stacks, one per rule id, each provoking exactly that finding. */
+    const provoke: Array<[string, 'error' | 'warning', Record<string, unknown>]> = [
+      [
+        FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
+        'error',
+        {
+          objects: [{ name: 'task', label: 'Task', fields: {} }],
+          flows: [
+            {
+              name: 'bad_shape',
+              type: 'schedule',
+              status: 'active',
+              nodes: [
+                {
+                  id: 'start',
+                  type: 'start',
+                  config: { timeRelative: { object: 'task', field: 'due_at', offsetDays: -1 } },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      [
+        FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+        'error',
+        {
+          objects: [{ name: 'task', label: 'Task', fields: {} }],
+          flows: [
+            {
+              name: 'scalar_descriptor',
+              type: 'autolaunched',
+              status: 'active',
+              nodes: [{ id: 'start', type: 'start', config: { timeRelative: 'daily' } }],
+            },
+          ],
+        },
+      ],
+      [
+        FLOW_TRIGGER_UNKNOWN_EVENT,
+        'error',
+        {
+          objects: [candidateObject],
+          flows: [
+            {
+              name: 'typo_token',
+              type: 'autolaunched',
+              status: 'active',
+              nodes: [
+                {
+                  id: 'start',
+                  type: 'start',
+                  config: { objectName: 'app_candidate', triggerType: 'record-after-updated' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      // ── The controls. Both are hedged, and the hedge is the whole reason the
+      //    promotion above is not "everything in this file is an error now".
+      [
+        FLOW_TRIGGER_UNKNOWN_OBJECT,
+        'warning',
+        {
+          objects: [candidateObject],
+          flows: [
+            {
+              name: 'other_package_object',
+              type: 'autolaunched',
+              status: 'active',
+              nodes: [
+                {
+                  id: 'start',
+                  type: 'start',
+                  config: { objectName: 'billing_invoice', triggerType: 'record-after-update' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      [
+        FLOW_DRAFT_STATUS_AMBIGUOUS,
+        'warning',
+        {
+          objects: [candidateObject],
+          flows: [recordFlow()],
+        },
+      ],
+    ];
+
+    for (const [rule, severity, stack] of provoke) {
+      it(`${rule} is ${severity}`, () => {
+        const matching = validateFlowTriggerReadiness(stack).filter((f) => f.rule === rule);
+        // Non-vacuous first: the fixture really does provoke this id.
+        expect(matching.length, `${rule} was not provoked by its own fixture`).toBeGreaterThan(0);
+        for (const f of matching) expect(f.severity).toBe(severity);
+      });
+    }
+
+    it('the hedged rules say so in their own hint, and the gating ones do not', () => {
+      // The severity claim and the prose have to agree. A rule that gates while
+      // telling the author the finding "can be ignored" is the contradiction that
+      // makes a gate read as a bug — and the cross-package sentence is exactly
+      // what earns `flow-trigger-unknown-object` its warning.
+      for (const [rule, severity, stack] of provoke) {
+        for (const f of validateFlowTriggerReadiness(stack).filter((x) => x.rule === rule)) {
+          if (severity === 'warning' && rule === FLOW_TRIGGER_UNKNOWN_OBJECT) {
+            expect(f.hint, rule).toMatch(/another installed package/);
+          }
+          if (severity === 'error') {
+            expect(f.hint, rule).not.toMatch(/can be ignored/i);
+            expect(f.hint, rule).not.toMatch(/another installed package/);
+          }
+        }
+      }
+    });
+
+    it('a clean stack produces no finding of any severity', () => {
+      // The floor the promotion must not move: promoting a rule must not make a
+      // correct flow fail. Without this, "everything is an error" would pass
+      // every assertion above.
+      expect(
+        validateFlowTriggerReadiness({
+          objects: [candidateObject, { name: 'task', label: 'Task', fields: {} }],
+          flows: [
+            recordFlow({ status: 'active' }),
+            {
+              name: 'renewal',
+              type: 'schedule',
+              status: 'active',
+              nodes: [
+                {
+                  id: 'start',
+                  type: 'start',
+                  config: { timeRelative: { object: 'task', dateField: 'due_at', withinDays: 30 } },
+                },
+              ],
+            },
+          ],
+        }),
+      ).toEqual([]);
+    });
   });
 
   it('handles map-keyed flows/objects and stacks with no flows', () => {

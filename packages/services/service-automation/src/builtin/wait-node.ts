@@ -4,6 +4,7 @@ import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { IJobService } from '@objectstack/spec/contracts';
 import type { AutomationEngine, SuspendedRunStore } from '../engine.js';
+import { describeThrownForLog, type ThrownCauseMeta } from '../thrown-cause-diagnostics.js';
 
 /**
  * The one-shot wake-up job's name for a timer `wait` pause — and, by
@@ -21,6 +22,14 @@ function waitTimerJobName(runId: string, nodeId: string): string {
  * the wake-up fires and the pause survives it (#5529) — and the same level
  * {@link RearmLogger} requires for the re-arm path's degradations (#4632),
  * which is why that one extends this.
+ *
+ * The variadic tail is the `Logger` contract's own
+ * (`packages/spec/src/contracts/logger.ts`): `error(message, error?, meta?)`.
+ * A foreign cause therefore belongs in argument **three**, never two — the
+ * second slot is the `Error` slot, and putting a raw error there ships its whole
+ * stack on every record (#5575). #5737 moved all five of this file's causes out
+ * of the message into that third slot; the spy cases in
+ * `wait-node-log-cause.test.ts` are what hold the positions.
  */
 interface WaitTimerLogger {
   error(msg: string, ...args: unknown[]): void;
@@ -89,13 +98,30 @@ function makeWaitTimerJobHandler(
       const result = await engine.resume(runId);
       if (result?.code === 'STORE_UNAVAILABLE') {
         keepArmed = true;
+        // #5737 — the cause goes to `meta`, never into the message. This one is
+        // NOT a thrown value and so does NOT go through `describeThrownForLog`:
+        // `AutomationResult.error` is a STRING the engine already composed
+        // (`spec/contracts/automation-service.ts`), and the helper duck-types
+        // `.issues` / `.message` off a thrown object — on a string it has nothing
+        // to read, and on `undefined` it would render the literal `"undefined"`
+        // in place of the default below. The FIELD NAME is the helper's own
+        // (`ThrownCauseMeta.error`), so every seam in this package still reports
+        // a non-validation cause under exactly one key.
+        //
+        // Reachable as multi-line today: the engine builds this envelope by
+        // interpolating the driver's own `message` into it (engine.ts, the
+        // `STORE_UNAVAILABLE` return of `resumeInternal`).
+        const cause: ThrownCauseMeta = { error: result.error ?? 'store unavailable' };
         logger.error(
           `[wait] timer wake-up '${jobName}' fired but could NOT resume run '${runId}': the durable suspended-run store was ` +
             `unreachable, so the pause was never consumed — the run is STILL parked at its wait node, now past its deadline, ` +
             `and this one-shot has already had its single shot, so nothing will wake it on its own. The job is left ARMED on ` +
             `purpose (its 'sys_job' row stays active) so the stuck run stays visible and the wake-up re-firable: once the ` +
             `store is reachable, re-fire it with the job service's trigger('${jobName}'), or resume the run directly via ` +
-            `resume('${runId}') — a process restart also picks it up as overdue. Cause: ${result.error ?? 'store unavailable'}`,
+            `resume('${runId}') — a process restart also picks it up as overdue. The resume envelope's own reason is in ` +
+            `this record's meta.`,
+          undefined,
+          cause,
         );
       }
     } finally {
@@ -212,9 +238,16 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
             );
             return { success: true, suspend: true, correlation: jobName, output };
           } catch (err) {
+            // #5737 — `warn(message, meta?)`: the `Logger` contract has no
+            // `Error` slot below `error`, so the job service's own failure goes
+            // in argument TWO. Unlike the three `error` seams below this one is
+            // not a durability degradation (the run still suspends; only
+            // auto-resume is lost), which is why it stays `warn` — see the
+            // #4632 note on the `no job service` branch in the re-arm pass.
             ctx.logger.warn(
-              `[wait] node '${node.id}': failed to schedule timer resume (${(err as Error)?.message ?? err}); ` +
-                `suspending without auto-resume (resume it via resume(runId))`,
+              `[wait] node '${node.id}': failed to schedule timer resume — suspending without auto-resume ` +
+                `(resume it via resume(runId)). The job service's own failure is in this record's meta.`,
+              describeThrownForLog(err),
             );
           }
         } else if (!job) {
@@ -316,11 +349,18 @@ export async function rearmSuspendedWaitTimers(
     // re-arms NOTHING, so every run persisted before this restart stays paused
     // forever while the process reports a clean boot. The rows survived; the
     // promise that they would resume did not.
+    // #5737 — third argument, per `error(message, error?, meta?)`. NOT the
+    // second: a raw `Error` there ships its stack on the record (#5575). This is
+    // the seam #5737 measured — a database driver's multi-line failure spliced
+    // into this message split the loudest durability alarm in this file into
+    // three physical lines, of which only the first carried `<ts> ERROR`.
     logger.error(
       `[wait] suspended wait-timer re-arm ABORTED — the suspended-run store could not be listed, so NO timer was re-armed: ` +
         `every wait/approval paused before this restart will hang indefinitely instead of resuming. The runs themselves are ` +
-        `still persisted. Fix the store/datasource error and restart to re-attempt the re-arm, or resume them via ` +
-        `resume(runId). Cause: ${(err as Error)?.message ?? err}`,
+        `still persisted. Fix the store/datasource failure in this record's meta and restart to re-attempt the re-arm, or ` +
+        `resume them via resume(runId).`,
+      undefined,
+      describeThrownForLog(err),
     );
     return 0;
   }
@@ -340,10 +380,15 @@ export async function rearmSuspendedWaitTimers(
       } catch (err) {
         // #4632 — this run's deadline already passed, so nothing else will ever
         // wake it: it is persisted, overdue, and now unreachable.
+        // #5737 — cause to `meta`'s slot (third), message stays one line. The
+        // text said "the cause below", which was only ever true of the spliced
+        // rendering; it now names where the cause actually is.
         logger.error(
           `[wait] suspended run '${run.runId}' is OVERDUE and could not be resumed — it stays persisted but nothing will ` +
-            `wake it again (its deadline has already passed, so no timer will be re-armed for it). Fix the cause below and ` +
-            `restart, or resume it directly via resume('${run.runId}'). Cause: ${(err as Error)?.message ?? err}`,
+            `wake it again (its deadline has already passed, so no timer will be re-armed for it). Fix the cause in this ` +
+            `record's meta and restart, or resume it directly via resume('${run.runId}').`,
+          undefined,
+          describeThrownForLog(err),
         );
       }
       continue;
@@ -380,11 +425,16 @@ export async function rearmSuspendedWaitTimers(
       // #4632 — the run is persisted and waiting, but its wake-up job was never
       // scheduled: it will sit at its wait node past its deadline with nothing
       // to resume it.
+      // #5737 — same as the two `error` seams above: third slot, one-line
+      // message. `${wakeAt}` stays in the message on purpose — it is a deadline
+      // THIS file persisted and re-read (`typeof === 'string'` + a non-NaN
+      // `Date.parse` two branches up), not foreign text.
       logger.error(
         `[wait] suspended run '${run.runId}' could NOT be re-scheduled — it stays persisted with a deadline of ${wakeAt}, ` +
           `but no job was armed to wake it, so it will hang past that deadline instead of resuming. Fix the job-service ` +
-          `error below and restart to re-attempt the re-arm, or resume it via resume('${run.runId}'). ` +
-          `Cause: ${(err as Error)?.message ?? err}`,
+          `failure in this record's meta and restart to re-attempt the re-arm, or resume it via resume('${run.runId}').`,
+        undefined,
+        describeThrownForLog(err),
       );
     }
   }

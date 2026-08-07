@@ -139,16 +139,47 @@ describe('[#5146] matchesFilterCondition — $not over records with no value', (
     });
   });
 
-  // ── Where this evaluator and `driver-memory` disagree — pinned, not fixed ──
+  // ── `$exists` — RULED on #5298, and this evaluator is the side that moved ──
 
-  describe('known disagreement with driver-memory (NOT ruled on by #5146)', () => {
-    it('$exists reads "the key is present", so a null value EXISTS', () => {
-      // `driver-memory` reads `$exists` as "has a value", so it answers the
-      // opposite for a present-but-null field. `driver-sql` cannot tell the two
-      // apart at all (a NULL column is a NULL column) and keeps its existing
-      // `IS NOT NULL` compilation.
-      expect(ids(NULLED, { $not: { stage: { $exists: true } } })).toEqual([]);
-      expect(ids(MISSING, { $not: { stage: { $exists: true } } })).toEqual(['3', '4']);
+  describe('[#5298/#5369] $exists means "has a value", the strict mirror of $null', () => {
+    /**
+     * FLIPPED PIN. This block used to sit under "known disagreement with
+     * driver-memory (NOT ruled on by #5146)" and pinned the OPPOSITE answer for
+     * `NULLED`: `$exists` read "the key is present", so a present-but-null
+     * `stage` EXISTED and the negation matched nothing.
+     *
+     * The 2026-08-06 ruling on #5298 took "has a value". The deciding argument
+     * is that the other reading is unimplementable where it matters: a SQL
+     * column IS the schema, so a row cannot have an absent key, and `driver-sql`
+     * has always compiled `$exists` to `IS NOT NULL`. Field existence is a
+     * property of the schema, not of the record — a spec that declared
+     * otherwise would be promising a semantics two of its backends can never
+     * deliver. `driver-sql`'s emitter is therefore unchanged; THIS evaluator is
+     * the one that moved.
+     */
+    it('a present-but-null field does NOT exist', () => {
+      expect(ids(NULLED, { stage: { $exists: true } })).toEqual(['1', '2']);
+      expect(ids(NULLED, { $not: { stage: { $exists: true } } })).toEqual(['3', '4']);
+    });
+
+    it('a missing key answers exactly as a present-but-null one does', () => {
+      // The two fixtures differ only in whether row 3/4 carry the key at all.
+      // Under "has a value" they are the same fact, so the answers must match —
+      // which is the property the old `!== undefined` reading broke.
+      for (const filter of [
+        { stage: { $exists: true } },
+        { stage: { $exists: false } },
+        { $not: { stage: { $exists: true } } },
+      ] as const) {
+        expect(ids(NULLED, filter), JSON.stringify(filter)).toEqual(ids(MISSING, filter));
+      }
+    });
+
+    it('$exists is the strict complement of $null, comparand for comparand', () => {
+      for (const fixture of [NULLED, MISSING]) {
+        expect(ids(fixture, { stage: { $exists: true } })).toEqual(ids(fixture, { stage: { $null: false } }));
+        expect(ids(fixture, { stage: { $exists: false } })).toEqual(ids(fixture, { stage: { $null: true } }));
+      }
     });
   });
 });

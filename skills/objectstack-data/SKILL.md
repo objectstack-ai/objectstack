@@ -15,10 +15,10 @@ description: >
   formulas / validations / sharing rules / dynamic seed values: load
   objectstack-formula alongside.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "4.3"
+  version: "4.4"
   domain: data
   tags: object, field, validation, index, relationship, hook, schema, permission, rls, security, seed, fixture
 ---

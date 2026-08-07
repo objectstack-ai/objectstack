@@ -433,7 +433,7 @@ const TEST_DEBT = {
   },
   '@objectstack/platform-objects': { tests: 9, errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
   '@objectstack/plugin-sharing': { tests: 13, errors: 3, note: 'TS6133 x2, TS18048 x1. Re-measured 3 at 5ab08428, exact.' },
-  '@objectstack/service-sms': { tests: 3, errors: 1, note: 'TS2493 x1. Re-measured 1 at 5ab08428, exact.' },
+  '@objectstack/service-sms': { tests: 4, errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured 1 at 5ab08428, exact; #5773 then added sms-manifest-providers.contract.test.ts (3 -> 4 files) and the file count moved while the error count did not -- the new file is type-clean with the exclusion lifted.' },
   '@objectstack/connector-rest': { tests: 3, errors: 1, note: 'TS6133 x1. Re-measured 1 at 5ab08428, exact.' },
 };
 

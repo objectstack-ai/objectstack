@@ -9,10 +9,10 @@ description: >
   them via skills and tools, not by authoring `*.agent.ts`. Do not use for
   general LLM prompting questions unrelated to ObjectStack metadata.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "1.2"
+  version: "1.3"
   domain: ai
   tags: agent, tool, skill, conversation, llm, embedding, mcp
 ---

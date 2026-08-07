@@ -90,10 +90,32 @@
  * cheapest way to go quiet. That is the #4420 shape itself, and it is why
  * `check-init-service-contract.mjs` walks a call graph too.
  *
+ * ## TWO rules live in this file — this one, and the READ-SEAM rule (#5186)
+ *
+ * Everything above judges ONE axis: **how loud is the catch?** That axis is the
+ * right one for a WRITE/DDL seam, and it is structurally blind to the other
+ * half of the family. A read seam does not fail by logging too quietly; it
+ * fails by `catch { return []; }` — no log at all to grade, and an answer
+ * INVENTED for a read that never happened. Both halves of the vocabulary model
+ * come apart there: `DURABILITY_CRITICAL_CALLEES` matches callee NAMES, and a
+ * read's callee is `find`/`findOne`/`count`, names too generic to declare
+ * repo-wide.
+ *
+ * The same shape has now recurred three times in one package (#4728 → #4825 →
+ * #5108), every one of them caught by a human reading code and none of them by
+ * this gate. So the second rule below judges a different question —
+ * **"was an answer invented for a read that failed?"** — over a deliberately
+ * narrowed scan scope. See "READ-SEAM INVENTION RULE (#5186)" further down for
+ * its vocabulary, its scope, and why each of them is drawn where it is.
+ *
+ * The two rules share this file (and therefore one CI step and one AST pass per
+ * file) but share no vocabulary, no baseline and no verdict: a seam red under
+ * one is untouched by the other.
+ *
  * ## Usage
  *
- *     node scripts/check-durability-degradation-log-level.mjs             # audit
- *     node scripts/check-durability-degradation-log-level.mjs --list      # every guarded seam found
+ *     node scripts/check-durability-degradation-log-level.mjs             # audit (both rules)
+ *     node scripts/check-durability-degradation-log-level.mjs --list      # every seam found, both rules
  *     node scripts/check-durability-degradation-log-level.mjs --self-test # verify the checker
  */
 
@@ -104,6 +126,11 @@ import ts from 'typescript';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BASELINE_PATH = join(ROOT, 'scripts', 'durability-degradation.baseline.json');
+const READ_INVENTION_BASELINE_PATH = join(
+    ROOT,
+    'scripts',
+    'durability-read-invention.baseline.json',
+);
 
 /**
  * Operations whose failure means "the bytes did not land".
@@ -288,6 +315,179 @@ const FAILURE_PROPAGATION_SITES = new Map([
                 + 'to the caller. The copy reports, per item, that the write did not land (#5241, entered the '
                 + 'baseline in #4754).',
         },
+    ],
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// READ-SEAM INVENTION RULE (#5186)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ## The blind spot, stated as the three recurrences that proved it
+//
+// #4728 (`ensureSchema` swallowed every DDL failure behind a comment naming one
+// benign reason), #4825 (`nextEventSeq`'s `catch { return 1 }` — the costliest
+// half: an `event_seq` that COLLIDES with existing rows, and no retry or
+// restart repairs a number written wrong) and #5108 (`DatabaseLoader`'s five
+// read methods, `catch {}` → `null` / `[]` / `false`). Three instances, one
+// package, one shape — and the rule above could not see any of them, for two
+// independent reasons:
+//
+//   1. Its vocabulary matches callee NAMES, and a read's callee is `find` /
+//      `findOne` / `count`. Declaring those repo-wide would drag every data
+//      read in the monorepo into a durability gate — unusable.
+//   2. More fundamentally, it grades a LOG LEVEL, and these catches have no log
+//      to grade. The dimension it inspects is empty at a read seam.
+//
+// ## What this rule judges instead
+//
+// Not "what did you call?" and not "how loudly did you complain?", but:
+//
+//   > The read did not happen. Did you make an answer up anyway, and tell
+//   > nobody?
+//
+// Red requires ALL of:
+//
+//   - the `try` block performs a READ (a driver/engine `find`/`findOne`/`count`,
+//     or a same-file wrapper over one — see `MAX_READ_WRAPPER_DEPTH`);
+//   - the `catch` contains NO log call at any level, helpers followed;
+//   - some path out of the `catch` `return`s an EMPTY/ZERO value for that
+//     method (`[]`, `false`, `null`, `undefined`, `{}`, `''`, `0`, `1`);
+//   - and that path was NOT reached by discriminating the error's TYPE.
+//
+// The last clause is the exemption, and it is the shape #4825 and #5108 left
+// behind once fixed: `isMissingTableError()` (packages/metadata/src/errors.ts —
+// a module that exists specifically to export it across packages). A `catch`
+// that asks by error type and returns the empty value ONLY on the benign branch
+// is answering truthfully — there really are no rows — and passes.
+//
+// ## Why "no log at all", and not "no LOUD log"
+//
+// Deliberately narrow, and the narrowness is the point: this rule adds a NEW
+// axis, it does not silently re-grade the existing one. A read seam that logs
+// `warn` and returns `[]` is a log-level question, which is the rule above's
+// job and needs a vocabulary entry there. Widening this rule to swallow that
+// case would make one gate answer two questions with one verdict, and would
+// re-open a seam the repo has explicitly deferred with reasons on the record
+// (`protocol.ts`'s `restoreMetadataFromDb`, #5841 fact 2).
+//
+// ## Why a narrowed scan scope
+//
+// The maintainer's ruling (2026-08-06) is "收窄先行": prove the false-positive
+// surface on the metadata/persistence layer first, then evaluate widening as
+// its own issue. That is also the only honest way to afford `find`/`findOne`/
+// `count` as a vocabulary at all — the names are generic, so the SCOPE is what
+// makes them mean "a storage seam" instead of "any data read anywhere".
+//
+// ## Honest limitations, stated up front rather than discovered later
+//
+//   1. **An empty answer wrapped in an ENVELOPE is not matched.** The rule reads
+//      the returned expression, so `return []` is judged and
+//      `return { data: null, loadTime: Date.now() - startTime }` is not — even
+//      though the second is `DatabaseLoader.load()`, one of the five seams #5108
+//      fixed. Measured directly: reverting all five #5108 fixes plus #4825 turns
+//      this rule red on FIVE of the six, and `load()` is the one it cannot see.
+//      Widening to "an object literal with an empty-valued property" would judge
+//      every result envelope in three packages on the strength of one property,
+//      which is the false-positive rate that gets a gate disabled — and a
+//      disabled gate is worth less than none, because it also reports success.
+//      An envelope-shaped answer needs a different criterion (the declared
+//      result type), not a looser version of this one.
+//   2. **It cannot DISCOVER a seam whose read runs outside the try block**, or
+//      more than `MAX_READ_WRAPPER_DEPTH` hops away. A ratchet, not a proof —
+//      the same honest bound the log-level rule states about its vocabulary.
+//   3. **Exemption is by DECLARED predicate only.** A seam that discriminates
+//      correctly but through its own hand-rolled test is flagged, and that is
+//      deliberate (see `READ_FAILURE_DISCRIMINATORS`), not a false positive.
+
+/**
+ * Where the read-seam rule looks. Narrowed on purpose — see above.
+ *
+ * These three packages ARE the metadata/persistence layer: the loaders that
+ * read `sys_metadata` (`@objectstack/metadata`), the protocol that reads it
+ * transactionally (`@objectstack/metadata-protocol`), and the query engine the
+ * other two read through (`@objectstack/objectql`). Every instance of the
+ * family so far (#4728 / #4825 / #5108) landed inside them.
+ */
+const READ_SEAM_SCAN_ROOTS = [
+    'packages/metadata/src',
+    'packages/metadata-protocol/src',
+    'packages/objectql/src',
+];
+
+/**
+ * The READ vocabulary — anchored to a contract, not guessed from spelling.
+ *
+ * These are exactly the read methods of `IDataDriver`
+ * (`packages/spec/src/contracts/data-driver.ts`): `find`, `findOne`, `count`.
+ * Nothing else on that interface returns stored rows. Anchoring here rather
+ * than to a `/find|query|fetch/`-style pattern is the same choice
+ * `DURABILITY_CRITICAL_CALLEES` makes on the other rule — a spelling heuristic
+ * would let a real swallow buy its way out by renaming, and would drag in every
+ * `getX` in three packages.
+ *
+ * `execute()` (the raw escape hatch) is deliberately absent: it is as often a
+ * write as a read, and judging a write by this rule's "you invented an answer"
+ * consequence would be wrong. `explain()` is absent because its result is
+ * diagnostic — an invented empty plan misleads nobody's data.
+ */
+const DRIVER_READ_CALLEES = new Map([
+    ['find', 'a multi-row read (IDataDriver.find)'],
+    ['findOne', 'a single-row read (IDataDriver.findOne)'],
+    ['count', 'a row-count read (IDataDriver.count)'],
+]);
+
+/**
+ * How far to follow a same-file wrapper when deciding "is this call a read?".
+ *
+ * `DatabaseLoader` does not call `driver.find` from its try blocks; it calls
+ * its own `_find()`, whose whole body is `this.engine ? engine.find(...) :
+ * driver.find(...)`. Requiring the vocabulary to name every such wrapper would
+ * be unenforceable (the next one gets a different name) and would make "put the
+ * read behind one indirection" the cheapest way out of the gate — the exact
+ * escape the CATCH side of the other rule already walks a call graph to close.
+ *
+ * Two hops is what the real chain needs (`_find` → `engine.find`) plus one.
+ * Measured on the scan scope: following wrappers grew the SEAM census from 45
+ * to 66 and the VIOLATION set not at all — it buys robustness at zero
+ * false-positive cost today.
+ */
+const MAX_READ_WRAPPER_DEPTH = 2;
+
+/**
+ * How far to follow a rethrowing GUARD on the catch side (see
+ * `establishesBenign`). Separate constant from the read-wrapper depth above:
+ * they answer different questions and would be tuned for different reasons.
+ */
+const MAX_GUARD_DEPTH = 2;
+
+/**
+ * Declared discriminators of a benign read failure (the exemption vocabulary).
+ *
+ * One entry, because there is exactly one such predicate and it is already the
+ * platform's single source of truth for the question: `isMissingTableError`,
+ * exported from `@objectstack/metadata/errors` precisely so the answer is not
+ * hand-copied per package (see that module's own header — a second hand-rolled
+ * vocabulary of "which driver errors are benign" is the debt it exists to
+ * retire, and #5841 retired one such copy).
+ *
+ * Declared, never inferred, for the same reason as everything else in this
+ * file. And nothing is declared here "for completeness":
+ * `isSchemaAlreadyExistsError` is its sibling but classifies DDL, not reads —
+ * an entry no seam consumes is the declared-≠-enforced shape this repo keeps
+ * paying to remove.
+ *
+ * NOTE what is therefore NOT an exemption: a hand-rolled `if (e.code ===
+ * '42P01')` or `if (/no such table/.test(e.message))` inside the catch. That is
+ * flagged, and flagging it is the point — it is the second-vocabulary defect
+ * #5841 fixed in `loadMetaFromDb`, where the hand-copied regex read a benign
+ * Postgres first boot as an anomaly AND any driver that says "no such table"
+ * for something else as benign. The fix is to ask the shared predicate.
+ */
+const READ_FAILURE_DISCRIMINATORS = new Map([
+    [
+        'isMissingTableError',
+        'the ONE benign reason a storage read can fail — the table has not been provisioned, so there '
+            + 'are genuinely no rows and the empty answer IS the truth (packages/metadata/src/errors.ts, #4825).',
     ],
 ]);
 
@@ -599,6 +799,397 @@ function indexFunctionBodies(sf) {
     return byName;
 }
 
+/**
+ * Every log level a `catch` reaches, following same-file helper calls
+ * transitively (depth-capped, cycle-safe).
+ *
+ * Shared by BOTH rules on purpose. The log-level rule asks "which levels?" and
+ * the read-seam rule asks "any level at all?", but they must agree on what
+ * counts as a log and on how far a helper is followed — two copies would be two
+ * de-facto vocabularies of "this catch said something", drifting apart exactly
+ * like the hand-copied driver-error predicates `@objectstack/metadata/errors`
+ * exists to prevent.
+ *
+ * @param lineOf Resolves a node to its 1-based line, for the report.
+ * @returns `{ level, line, viaHelper? }[]` — `viaHelper` names the same-file
+ *          function the log was found inside, when it was not inline.
+ */
+function collectLoggedLevels(block, functionBodies, lineOf, seen = new Set(), depth = 0) {
+    const levels = [];
+    walkSameTickInclusive(block, (child) => {
+        const level = loggerLevel(child);
+        if (level) {
+            levels.push({ level, line: lineOf(child) });
+            return;
+        }
+        if (depth >= 3) return;
+        const name = calleeName(child);
+        if (!name || seen.has(name)) return;
+        const body = functionBodies.get(name);
+        if (!body) return;
+        seen.add(name);
+        for (const l of collectLoggedLevels(body, functionBodies, lineOf, seen, depth + 1)) {
+            levels.push({ ...l, viaHelper: name });
+        }
+    });
+    return levels;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// READ-SEAM INVENTION RULE (#5186) — analysis
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Is this `return`ed expression an EMPTY/ZERO answer — one the method could
+ * equally have produced from a successful read that found nothing?
+ *
+ * That equivalence is the whole harm: after `catch { return [] }` the caller
+ * cannot tell "the store says none" from "the store could not be reached", and
+ * every consumer that gates on a declared set — permissions, sharing rules,
+ * policies, endpoint declarations — reads the second as the first (ADR-0110 D3;
+ * #5108's own header spells out that some then fail open and some fail closed,
+ * and both look healthy from outside).
+ *
+ * The set is the maintainer's ruling (`[]` / `false` / `null` / `0` / `1`) plus
+ * three spellings of the same fact that would otherwise be a free escape:
+ * `undefined` (identical to `null` here), `{}` and `''`. Measured over the scan
+ * scope, the three additions flag nothing extra today — they cost nothing and
+ * close the rename-your-way-out hole.
+ *
+ * `1` is in the set because of #4825 specifically: `nextEventSeq` invented
+ * `return 1`, which is not "nothing" but "the first" — the zero-value of a
+ * 1-based sequence, and the costliest invention in the family.
+ *
+ * DELIBERATELY EXCLUDED: a bare `return;`. In a `Promise<void>` method that is
+ * not an invented answer at all (it is how `rethrowUnlessTableUnprovisioned`
+ * spells "benign, carry on"), and this checker does not type-check, so it
+ * cannot tell that case from a `Promise<T | undefined>` one. Judging it would
+ * fire on the exemption's own idiom. Measured: no seam in scope uses a bare
+ * `return;` to answer a failed read.
+ *
+ * @returns The value's source text as a label, or `undefined` if this is a real
+ *          answer rather than an invented empty one.
+ */
+function inventedEmptyValue(expr) {
+    if (!expr) return undefined;
+    if (ts.isParenthesizedExpression(expr)) return inventedEmptyValue(expr.expression);
+    if (ts.isAsExpression(expr) || ts.isSatisfiesExpression(expr)) {
+        return inventedEmptyValue(expr.expression);
+    }
+    if (ts.isArrayLiteralExpression(expr) && expr.elements.length === 0) return '[]';
+    if (ts.isObjectLiteralExpression(expr) && expr.properties.length === 0) return '{}';
+    if (expr.kind === ts.SyntaxKind.NullKeyword) return 'null';
+    if (expr.kind === ts.SyntaxKind.FalseKeyword) return 'false';
+    if (ts.isIdentifier(expr) && expr.text === 'undefined') return 'undefined';
+    if (ts.isNumericLiteral(expr) && (expr.text === '0' || expr.text === '1')) return expr.text;
+    if (ts.isStringLiteral(expr) && expr.text === '') return "''";
+    return undefined;
+}
+
+/** Strip `await` / parentheses / `as T` so the underlying call is visible. */
+function unwrapExpression(expr) {
+    let e = expr;
+    for (;;) {
+        if (ts.isAwaitExpression(e) || ts.isParenthesizedExpression(e)) e = e.expression;
+        else if (ts.isAsExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
+        else if (ts.isNonNullExpression(e)) e = e.expression;
+        else return e;
+    }
+}
+
+/**
+ * Does this call perform a storage READ — directly, or through a same-file
+ * wrapper? See `MAX_READ_WRAPPER_DEPTH` for why wrappers are followed.
+ */
+function isReadCall(node, functionBodies, seen = new Set(), depth = 0) {
+    const name = calleeName(node);
+    if (!name) return false;
+    if (DRIVER_READ_CALLEES.has(name)) return true;
+    if (depth >= MAX_READ_WRAPPER_DEPTH || seen.has(name)) return false;
+    const body = functionBodies.get(name);
+    if (!body) return false;
+    seen.add(name);
+    let found = false;
+    walkSameTickInclusive(body, (child) => {
+        if (!found && ts.isCallExpression(child) && isReadCall(child, functionBodies, seen, depth + 1)) {
+            found = true;
+        }
+    });
+    return found;
+}
+
+/**
+ * Read `test` as a benign/not-benign discrimination, with polarity.
+ *
+ * Polarity is load-bearing, because the repo spells the same discrimination
+ * both ways and they mean opposite things about which branch is benign:
+ *
+ *   if (isMissingTableError(e)) return [];  throw e;   // then-branch is benign
+ *   if (!isMissingTableError(e)) throw e;   return []; // fall-through is benign
+ *
+ * `&&` / `||` compounds return `found: false` on purpose: their polarity is not
+ * decidable by inspection, and "cannot prove" must read as "not exempt" — the
+ * safe direction for a gate, matching `catchDeliversFailure()` above.
+ */
+function discriminatorTest(test, discriminators) {
+    let expr = test;
+    let negated = false;
+    for (;;) {
+        if (ts.isParenthesizedExpression(expr)) {
+            expr = expr.expression;
+            continue;
+        }
+        if (ts.isPrefixUnaryExpression(expr) && expr.operator === ts.SyntaxKind.ExclamationToken) {
+            negated = !negated;
+            expr = expr.operand;
+            continue;
+        }
+        break;
+    }
+    if (!ts.isCallExpression(expr)) return { found: false, negated: false };
+    const name = calleeName(expr);
+    if (!name || !discriminators.has(name)) return { found: false, negated: false };
+    return { found: true, negated, name };
+}
+
+/**
+ * Walk a `catch` (or a helper body) and record, for every path that completes
+ * NORMALLY, whether it got there by discriminating the error's type.
+ *
+ * `benign` = control reached here only because a declared discriminator said
+ * the failure was the benign one. It starts `false` and is only ever set by an
+ * explicit discrimination — never inferred, never defaulted.
+ *
+ * Modelled over the shapes the repo actually uses (sequence, block, `if`/`else`,
+ * `throw`, `return`, and an expression statement that delegates to a rethrowing
+ * guard). Everything else falls to a conservative branch that can carry a
+ * `benign` state forward but can never establish one, so an unmodelled shape is
+ * judged rather than excused.
+ *
+ * @param exits Accumulator: one entry per normal completion, `{ benign, expr }`.
+ *              `expr` is `undefined` for a fall-off-the-end exit.
+ */
+function walkBenignPaths(block, benignIn, ctx, exits) {
+    const analyzeList = (statements, benign) => {
+        for (const stmt of statements) {
+            const r = analyzeStmt(stmt, benign);
+            benign = r.benign;
+            if (r.terminates) return { benign, terminates: true };
+        }
+        return { benign, terminates: false };
+    };
+
+    const analyzeStmt = (stmt, benign) => {
+        if (ts.isThrowStatement(stmt)) return { benign, terminates: true };
+        if (ts.isReturnStatement(stmt)) {
+            exits.push({ benign, expr: stmt.expression, node: stmt });
+            return { benign, terminates: true };
+        }
+        if (ts.isBlock(stmt)) return analyzeList(stmt.statements, benign);
+        if (ts.isExpressionStatement(stmt)) {
+            if (!benign && establishesBenign(stmt.expression, ctx)) {
+                return { benign: true, terminates: false };
+            }
+            return { benign, terminates: false };
+        }
+        if (ts.isIfStatement(stmt)) {
+            const test = discriminatorTest(stmt.expression, ctx.discriminators);
+            if (test.found) ctx.usedDiscriminators.add(test.name);
+            const thenBenign = test.found ? (test.negated ? benign : true) : benign;
+            const elseBenign = test.found ? (test.negated ? true : benign) : benign;
+            const t = analyzeStmt(stmt.thenStatement, thenBenign);
+            const e = stmt.elseStatement
+                ? analyzeStmt(stmt.elseStatement, elseBenign)
+                : { benign: elseBenign, terminates: false };
+            const terminates = t.terminates && e.terminates;
+            const after =
+                terminates ? benign
+                : t.terminates ? e.benign
+                : e.terminates ? t.benign
+                : t.benign && e.benign;
+            return { benign: after, terminates };
+        }
+        // Conservative fallback (loops, `switch`, nested `try`, labelled
+        // statements): carry `benign` forward, never establish it, and record
+        // every `return` inside as an exit at the CURRENT state.
+        walkSameTick(stmt, (child) => {
+            if (ts.isReturnStatement(child)) exits.push({ benign, expr: child.expression, node: child });
+        });
+        return { benign, terminates: false };
+    };
+
+    const r = analyzeList(block.statements, benignIn);
+    if (!r.terminates) exits.push({ benign: r.benign, expr: undefined, node: block });
+    return r;
+}
+
+/**
+ * Does calling this expression leave the caller on a proven-benign path?
+ *
+ * True for a same-file guard whose body, analysed from `benign = false`, has NO
+ * normal completion that is not benign — i.e. it rethrows everything the
+ * discriminator did not clear. That is exactly the two guards the repo already
+ * wrote after #5108 and #5532:
+ *
+ *     private rethrowUnlessTableUnprovisioned(error: unknown): void {
+ *         if (isMissingTableError(error)) return;
+ *         throw error;
+ *     }
+ *
+ * Following it is not a convenience: extracting that guard is the correct
+ * refactor (five call sites in `DatabaseLoader` share one), and a checker that
+ * could not see through it would punish the fixed shape while passing the
+ * broken one.
+ */
+function establishesBenign(expr, ctx) {
+    const call = unwrapExpression(expr);
+    if (!ts.isCallExpression(call)) return false;
+    const name = calleeName(call);
+    if (!name) return false;
+    // Cycle/depth state rides on `ctx` rather than on default parameters,
+    // because the recursion goes back THROUGH `walkBenignPaths` — a pair of
+    // mutually-delegating guards would otherwise restart the counters on every
+    // hop and never terminate.
+    const seen = ctx.guardSeen ?? new Set();
+    const depth = ctx.guardDepth ?? 0;
+    if (seen.has(name) || depth >= MAX_GUARD_DEPTH) return false;
+    const body = ctx.functionBodies.get(name);
+    if (!body || !ts.isBlock(body)) return false;
+    const exits = [];
+    const consulted = new Set();
+    walkBenignPaths(
+        body,
+        false,
+        {
+            ...ctx,
+            usedDiscriminators: consulted,
+            guardSeen: new Set([...seen, name]),
+            guardDepth: depth + 1,
+        },
+        exits,
+    );
+    for (const d of consulted) ctx.usedDiscriminators.add(d);
+    // TWO conditions, and the first is not redundant. Without it, any same-file
+    // function that happens never to complete normally would license the code
+    // after the call — and `indexFunctionBodies` keys by BARE NAME, so an
+    // unrelated `close()` in another class in the same file could supply that
+    // licence. The exemption this rule grants is "you asked the error's TYPE";
+    // a guard that never asks has not earned it, whatever its control flow.
+    return consulted.size > 0 && exits.length > 0 && exits.every((e) => e.benign);
+}
+
+/**
+ * The read seams in one file, and which of them invent an answer (#5186).
+ *
+ * Reuses the other rule's shadowing discipline: a read wrapped in a nested
+ * `try` whose own `catch` RECOVERS never reaches the outer catch, so attributing
+ * it to both would report one seam once per nesting level and pressure an author
+ * to baseline correct code (#4754's precision lesson, which this rule inherits
+ * rather than re-learns).
+ */
+function analyzeReadSeams(sf, relPath, findings, seams, options = {}) {
+    const discriminators = options.discriminators ?? READ_FAILURE_DISCRIMINATORS;
+    const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+    const functionBodies = indexFunctionBodies(sf);
+    const ctx = { functionBodies, discriminators, usedDiscriminators: new Set() };
+
+    /** Does this catch RECOVER (rather than propagate on every path)? */
+    const catchRecovers = (block) => {
+        let sawReturn = false;
+        walkSameTick(block, (child) => {
+            if (ts.isReturnStatement(child)) sawReturn = true;
+        });
+        const alwaysThrows = (stmt) => {
+            if (ts.isThrowStatement(stmt)) return true;
+            if (ts.isBlock(stmt)) return stmt.statements.some(alwaysThrows);
+            if (ts.isIfStatement(stmt)) {
+                return (
+                    !!stmt.elseStatement &&
+                    alwaysThrows(stmt.thenStatement) &&
+                    alwaysThrows(stmt.elseStatement)
+                );
+            }
+            return false;
+        };
+        return sawReturn || !block.statements.some(alwaysThrows);
+    };
+
+    const collectReads = (tryBlock) => {
+        const reads = [];
+        const inspect = (child) => {
+            if (!ts.isCallExpression(child)) return;
+            if (!isReadCall(child, functionBodies)) return;
+            reads.push({ callee: calleeName(child), line: lineOf(child) });
+        };
+        const walk = (n) => {
+            n.forEachChild((child) => {
+                if (runsLater(child)) return;
+                if (
+                    ts.isTryStatement(child) &&
+                    child.catchClause &&
+                    catchRecovers(child.catchClause.block)
+                ) {
+                    for (const b of [child.catchClause.block, child.finallyBlock]) {
+                        if (!b) continue;
+                        inspect(b);
+                        walk(b);
+                    }
+                    return;
+                }
+                inspect(child);
+                walk(child);
+            });
+        };
+        inspect(tryBlock);
+        walk(tryBlock);
+        return reads;
+    };
+
+    walkAll(sf, (node) => {
+        if (!ts.isTryStatement(node) || !node.catchClause) return;
+
+        // 1. Does the guarded block READ?
+        const reads = collectReads(node.tryBlock);
+        if (reads.length === 0) return;
+
+        const catchBlock = node.catchClause.block;
+        const logs = collectLoggedLevels(catchBlock, functionBodies, lineOf);
+
+        // 2. On which paths does it invent an empty answer?
+        const exits = [];
+        walkBenignPaths(catchBlock, false, ctx, exits);
+        const invented = exits
+            .map((e) => ({ ...e, value: inventedEmptyValue(e.expr) }))
+            .filter((e) => e.value !== undefined);
+        const unguarded = invented.filter((e) => !e.benign);
+
+        const seam = {
+            file: relPath,
+            callee: reads[0].callee,
+            calleeLine: reads[0].line,
+            catchLine: lineOf(node.catchClause),
+            fn: enclosingFunctionName(node),
+            logs: logs.map((l) => `${l.level}@${l.line}${l.viaHelper ? ` via ${l.viaHelper}()` : ''}`),
+            invents: invented.map((e) => `${e.value}@${lineOf(e.node)}${e.benign ? ' (type-discriminated)' : ''}`),
+        };
+        seams.push(seam);
+
+        // 3. A catch that says ANYTHING is the OTHER rule's question — see the
+        //    "Why 'no log at all'" note above. Not re-graded here.
+        if (logs.length > 0) return;
+        if (unguarded.length === 0) return;
+
+        findings.push({
+            ...seam,
+            unguarded: unguarded.map((e) => ({ value: e.value, line: lineOf(e.node) })),
+        });
+    });
+
+    if (options.usedDiscriminators) {
+        for (const d of ctx.usedDiscriminators) options.usedDiscriminators.add(d);
+    }
+}
+
 function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
     const propagationSites = options.propagationSites ?? FAILURE_PROPAGATION_SITES;
     const usedPropagationSites = options.usedPropagationSites;
@@ -626,31 +1217,19 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
     };
 
     /**
-     * Collect the log levels a catch reaches, following same-file helper calls
-     * transitively (depth-capped, cycle-safe).
+     * Collect the log levels a catch reaches (shared with the read-seam rule —
+     * see `collectLoggedLevels`), plus whether the catch itself rethrows.
+     *
+     * `rethrows` is read from the catch's OWN same-tick subtree only: a helper
+     * that rethrows does not make the CATCH rethrow, it only does if the catch
+     * itself propagates. Deliberately not inherited.
      */
-    const collectResponse = (block, seen = new Set(), depth = 0) => {
-        const levels = [];
+    const collectResponse = (block) => {
         let rethrows = false;
         walkSameTickInclusive(block, (child) => {
             if (ts.isThrowStatement(child)) rethrows = true;
-            const level = loggerLevel(child);
-            if (level) {
-                levels.push({ level, line: lineOf(child) });
-                return;
-            }
-            if (depth >= 3) return;
-            const name = calleeName(child);
-            if (!name || seen.has(name)) return;
-            const body = functionBodies.get(name);
-            if (!body) return;
-            seen.add(name);
-            const nested = collectResponse(body, seen, depth + 1);
-            for (const l of nested.levels) levels.push({ ...l, viaHelper: name });
-            // A helper that rethrows does NOT make the CATCH rethrow — it only
-            // does if the catch itself propagates. Deliberately not inherited.
         });
-        return { levels, rethrows };
+        return { levels: collectLoggedLevels(block, functionBodies, lineOf), rethrows };
     };
 
     /**
@@ -810,6 +1389,154 @@ function baselineKey(f) {
     return `${f.file}::${f.callee}`;
 }
 
+/**
+ * The read-seam rule's own ledger — a SEPARATE file from the log-level one on
+ * purpose. Two rules, two verdicts, two ledgers: a shared file would make
+ * "which rule licensed this?" unanswerable without reading the script, and a
+ * seam fixed for one reason would go stale against the other.
+ */
+function loadReadInventionBaseline() {
+    if (!existsSync(READ_INVENTION_BASELINE_PATH)) return { entries: [] };
+    return JSON.parse(readFileSync(READ_INVENTION_BASELINE_PATH, 'utf8'));
+}
+
+/**
+ * Key granularity is `<file>::<enclosing function>`, NOT `<file>::<callee>`.
+ *
+ * The callee here is `find`/`findOne`/`count` and the files are enormous
+ * (`protocol.ts` is nine thousand lines, `engine.ts` five), so a file+callee key
+ * would license every read in the file — a blind spot big enough to hide the
+ * next #5108. Function scope is the same granularity, chosen for the same
+ * reason, as `FAILURE_PROPAGATION_SITES`. Not a LINE: line numbers churn on
+ * every unrelated edit.
+ */
+function readInventionKey(f) {
+    return `${f.file}::${f.fn ?? '<anonymous>'}`;
+}
+
+/** Run the read-seam invention rule (#5186) over its narrowed scan scope. */
+function runReadSeamRule({ list = false } = {}) {
+    const findings = [];
+    const seams = [];
+    const usedDiscriminators = new Set();
+
+    for (const root of READ_SEAM_SCAN_ROOTS) {
+        for (const file of collectSourceFiles(join(ROOT, root))) {
+            const text = readFileSync(file, 'utf8');
+            if (!text.includes('catch')) continue;
+            const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+            analyzeReadSeams(sf, relative(ROOT, file).split(sep).join('/'), findings, seams, {
+                usedDiscriminators,
+            });
+        }
+    }
+
+    if (list) {
+        console.log(
+            `\nRead seams found (#5186 scope: ${READ_SEAM_SCAN_ROOTS.join(', ')}): ${seams.length}\n`,
+        );
+        for (const s of seams) {
+            const verdict =
+                s.invents.length === 0
+                    ? 'no invented answer'
+                    : s.logs.length > 0
+                      ? `invents ${s.invents.join(', ')} but reports (${s.logs.join(', ')}) — log-level rule's question`
+                      : s.invents.every((i) => i.includes('type-discriminated'))
+                        ? `invents ${s.invents.join(', ')} — benign branch only`
+                        : `INVENTS ${s.invents.join(', ')} with no log`;
+            console.log(
+                `  ${s.file}:${s.catchLine}  guards ${s.callee}()@${s.calleeLine} in ${s.fn ?? '<anonymous>'}()  → ${verdict}`,
+            );
+        }
+        console.log('');
+    }
+
+    const baseline = loadReadInventionBaseline();
+    const allowed = new Map((baseline.entries ?? []).map((e) => [`${e.file}::${e.fn}`, e]));
+    const violations = [];
+    const usedKeys = new Set();
+
+    for (const f of findings) {
+        const key = readInventionKey(f);
+        if (allowed.has(key)) {
+            usedKeys.add(key);
+            continue;
+        }
+        violations.push(f);
+    }
+    const stale = [...allowed.keys()].filter((k) => !usedKeys.has(k));
+
+    let failed = false;
+
+    if (violations.length > 0) {
+        failed = true;
+        console.error(
+            `\n✗ ${violations.length} read seam(s) invent an empty answer for a read that failed, and tell nobody (AGENTS.md → "Absence must be loud", #5186; family: #4728 / #4825 / #5108):\n`,
+        );
+        for (const v of violations) {
+            console.error(`  ${v.file}:${v.catchLine}  (in ${v.fn ?? '<anonymous>'}())`);
+            console.error(`    guards  : ${v.callee}() at line ${v.calleeLine} — ${DRIVER_READ_CALLEES.get(v.callee) ?? 'a storage read'}`);
+            console.error(
+                `    found   : catch logs nothing at all and returns ${v.unguarded.map((u) => `\`${u.value}\` at line ${u.line}`).join(', ')}`,
+            );
+            console.error(
+                '    consequence: the read did not happen, yet the caller is handed an answer it cannot tell\n' +
+                '                 apart from "the store genuinely holds none". Every consumer that gates on a\n' +
+                '                 DECLARED SET — permissions, sharing rules, policies, endpoint declarations —\n' +
+                '                 reads the outage as "the author declared none"; some then fail open and some\n' +
+                '                 fail closed, and both look healthy from outside (ADR-0110 D3).',
+            );
+            console.error(
+                '    fix     : discriminate by error TYPE, and return the empty value ONLY on the benign branch:\n' +
+                "                 import { isMissingTableError } from '@objectstack/metadata/errors';\n" +
+                '                 catch (error) { if (isMissingTableError(error)) return []; throw error; }\n' +
+                '              or delegate to a rethrowing guard (DatabaseLoader.rethrowUnlessTableUnprovisioned,\n' +
+                '              MetadataProtocol.rethrowUnlessMetadataStoreUnprovisioned) — this checker follows both.\n' +
+                '    OR      : if the seam is a REVIEWED, legitimate degradation, add an entry naming why to\n' +
+                '              scripts/durability-read-invention.baseline.json (shrink-only, hand-edited).\n',
+            );
+        }
+    }
+
+    if (stale.length > 0) {
+        failed = true;
+        console.error(
+            `\n✗ ${stale.length} stale entr(ies) in scripts/durability-read-invention.baseline.json — the seam no longer invents an unreported answer, so delete the entry (the baseline is shrink-only):\n`,
+        );
+        for (const k of stale) console.error(`  ${k}`);
+        console.error('');
+    }
+
+    // A discriminator nothing consults is a licence waiting for the next catch
+    // that spells its name — the same staleness discipline as
+    // FAILURE_PROPAGATION_SITES, pointed at this rule's own vocabulary.
+    const staleDiscriminators = [...READ_FAILURE_DISCRIMINATORS.keys()].filter(
+        (k) => !usedDiscriminators.has(k),
+    );
+    if (staleDiscriminators.length > 0) {
+        failed = true;
+        console.error(
+            `\n✗ ${staleDiscriminators.length} entr(ies) in READ_FAILURE_DISCRIMINATORS exempt nothing in scope — delete, or narrow the scan scope deliberately:\n`,
+        );
+        for (const k of staleDiscriminators) console.error(`  ${k}`);
+        console.error('');
+    }
+
+    if (!failed) {
+        const discriminated = seams.filter(
+            (s) => s.invents.length > 0 && s.invents.every((i) => i.includes('type-discriminated')),
+        ).length;
+        console.log(
+            `✓ read-seam invention (#5186, ${READ_SEAM_SCAN_ROOTS.length} package roots): ${seams.length} read seam(s), none invents an unreported empty answer` +
+                (discriminated > 0 ? ` (${discriminated} return an empty value on a type-discriminated benign branch)` : '') +
+                (allowed.size > 0 ? ` (${allowed.size} baselined)` : '') +
+                '.',
+        );
+    }
+
+    return failed ? 1 : 0;
+}
+
 function run({ list = false } = {}) {
     const packagesDir = join(ROOT, 'packages');
     const files = collectSourceFiles(packagesDir);
@@ -926,7 +1653,12 @@ function run({ list = false } = {}) {
         );
     }
 
-    return failed ? 1 : 0;
+    // The second rule always runs, even when the first already failed: two
+    // independent verdicts, and hiding one behind the other would make a fix for
+    // the first look like it introduced the second.
+    const readSeamStatus = runReadSeamRule({ list });
+
+    return failed || readSeamStatus !== 0 ? 1 : 0;
 }
 
 // ── Self-test ────────────────────────────────────────────────────────────────
@@ -1441,16 +2173,459 @@ function selfTest() {
         }
     }
     if (failures > 0) {
-        console.error(`\n✗ self-test: ${failures} case(s) failed\n`);
+        console.error(`\n✗ self-test (log-level rule): ${failures} case(s) failed\n`);
         return 1;
     }
-    console.log(`\n✓ self-test: ${cases.length} case(s) passed\n`);
+    console.log(`\n✓ self-test (log-level rule): ${cases.length} case(s) passed\n`);
+    return 0;
+}
+
+// ── Self-test: READ-SEAM INVENTION RULE (#5186) ──────────────────────────────
+//
+// Fixtures come from the repo, not from imagination. The PASSING ones are the
+// code #4825 and #5108 LEFT BEHIND (`nextEventSeq`'s discriminated `return 1`,
+// `DatabaseLoader`'s five reads delegating to `rethrowUnlessTableUnprovisioned`);
+// the FLAGGING ones are those same seams as they read BEFORE those fixes. A
+// gate for a family that has recurred three times must be pinned against the
+// three instances, in both directions, or the fourth recurrence lands green.
+function selfTestReadSeams() {
+    // The guard `DatabaseLoader` and `MetadataProtocol` both wrote after the
+    // fixes, reproduced verbatim so the fixtures exercise the real shape.
+    const GUARD = `
+        private rethrowUnlessTableUnprovisioned(error: unknown): void {
+            if (isMissingTableError(error)) return;
+            throw error;
+        }`;
+
+    const cases = [
+        // ── The three recurrences, BEFORE their fixes: all must flag ─────────
+        {
+            // #4825 verbatim. The costliest member of the family: `1` is not
+            // "nothing", it is "the first" — written against a table that may
+            // hold N rows, so the new history row COLLIDES and `event_seq`, the
+            // ordering key rollback targeting stands on, is silently wrong.
+            name: 'flags: #4825 pre-fix — catch around a read returns an invented `1`',
+            code: `
+                class L {
+                    private async _find(t: string, q: any) { return this.driver.find(t, q); }
+                    private async nextEventSeq(): Promise< number > {
+                        try {
+                            const rows = await this._find(this.historyTableName, { where: {} });
+                            return rows.length + 1;
+                        } catch { return 1; }
+                    }
+                }`,
+            expectViolation: true,
+            expectCount: 1,
+        },
+        {
+            // #5108, `loadMany` as it read before the fix.
+            name: 'flags: #5108 pre-fix — catch around a read returns `[]`',
+            code: `
+                class L {
+                    private async _find(t: string, q: any) { return this.driver.find(t, q); }
+                    async loadMany(type: string) {
+                        try { return await this._find(this.tableName, { where: { type } }); }
+                        catch { return []; }
+                    }
+                }`,
+            expectViolation: true,
+        },
+        {
+            name: 'flags: #5108 pre-fix — `exists()` answers `false` for an unreadable store',
+            code: `
+                class L {
+                    async exists(type: string, name: string) {
+                        try {
+                            const n = await this.driver.count(this.tableName, { where: { type, name } });
+                            return n > 0;
+                        } catch { return false; }
+                    }
+                }`,
+            expectViolation: true,
+        },
+        {
+            name: 'flags: #5108 pre-fix — `stat()` answers `null` for an unreadable store',
+            code: `
+                class L {
+                    async stat(type: string, name: string) {
+                        try {
+                            const row = await this.driver.findOne(this.tableName, { where: { type, name } });
+                            return row ? { size: 1 } : null;
+                        } catch { return null; }
+                    }
+                }`,
+            expectViolation: true,
+        },
+        {
+            // The live `seedAutonumber` shape (baselined, tracked separately):
+            // seeding a counter from `0` after a failed MAX() read issues
+            // autonumbers that collide with the rows already there.
+            name: 'flags: a counter seeded from an invented `0` after a failed read',
+            code: `
+                class E {
+                    private async seedAutonumber(object: string, field: string) {
+                        try {
+                            const rows = await this.find(object, { fields: ['id', field] });
+                            return rows.length;
+                        } catch { return 0; }
+                    }
+                }`,
+            expectViolation: true,
+        },
+
+        // ── The same three, AFTER their fixes: all must pass ─────────────────
+        {
+            name: 'passes: #4825 post-fix — `isMissingTableError` gates the invented value, everything else rethrows',
+            code: `
+                class L {
+                    private async _find(t: string, q: any) { return this.driver.find(t, q); }
+                    private async nextEventSeq(): Promise< number > {
+                        try {
+                            const rows = await this._find(this.historyTableName, { where: {} });
+                            return rows.length + 1;
+                        } catch (error) {
+                            if (isMissingTableError(error)) return 1;
+                            throw error;
+                        }
+                    }
+                }`,
+            expectViolation: false,
+            expectDiscriminatorsUsed: ['isMissingTableError'],
+        },
+        {
+            name: 'passes: #5108 post-fix — the catch delegates to a rethrowing type-discriminating guard',
+            code: `
+                class L {
+                    ${GUARD}
+                    private async _find(t: string, q: any) { return this.driver.find(t, q); }
+                    async loadMany(type: string) {
+                        try { return await this._find(this.tableName, { where: { type } }); }
+                        catch (error) {
+                            this.rethrowUnlessTableUnprovisioned(error);
+                            return [];
+                        }
+                    }
+                }`,
+            expectViolation: false,
+            expectDiscriminatorsUsed: ['isMissingTableError'],
+        },
+        {
+            name: 'passes: the same guard in front of `false` (exists) and `null` (stat)',
+            code: `
+                class L {
+                    ${GUARD}
+                    async exists(t: string, n: string) {
+                        try { return (await this.driver.count('m', { where: { t, n } })) > 0; }
+                        catch (error) { this.rethrowUnlessTableUnprovisioned(error); return false; }
+                    }
+                    async stat(t: string, n: string) {
+                        try { return await this.driver.findOne('m', { where: { t, n } }); }
+                        catch (error) { this.rethrowUnlessTableUnprovisioned(error); return null; }
+                    }
+                }`,
+            expectViolation: false,
+        },
+        {
+            // Polarity: the repo spells the discrimination both ways and they
+            // mean OPPOSITE things about which branch is benign. Getting this
+            // backwards would fail the fixed code and pass the broken code.
+            name: 'passes: the NEGATED spelling — `if (!isMissingTableError(e)) throw e;` then the empty value',
+            code: `
+                class L {
+                    async list(type: string) {
+                        try { return await this.driver.find('m', { where: { type } }); }
+                        catch (e) { if (!isMissingTableError(e)) throw e; return []; }
+                    }
+                }`,
+            expectViolation: false,
+        },
+
+        // ── The exemption must be EARNED — declared, and structurally proved ─
+        {
+            // The second-vocabulary defect #5841 removed from `loadMetaFromDb`:
+            // a hand-copied `no such table` test read a benign Postgres first
+            // boot (`relation "x" does not exist`) as an anomaly, and any driver
+            // that says "no such table" for something else as benign. Flagging
+            // it is the point: the fix is to ask the shared predicate.
+            name: 'flags: a HAND-ROLLED error test is not the declared discriminator',
+            code: `
+                class L {
+                    async list(type: string) {
+                        try { return await this.driver.find('m', { where: { type } }); }
+                        catch (e: any) { if (/no such table/i.test(e?.message)) return []; throw e; }
+                    }
+                }`,
+            expectViolation: true,
+        },
+        {
+            name: 'flags: a driver code compared by hand is not the declared discriminator either',
+            code: `
+                class L {
+                    async list(type: string) {
+                        try { return await this.driver.find('m', { where: { type } }); }
+                        catch (e: any) { if (e?.code === '42P01') return []; throw e; }
+                    }
+                }`,
+            expectViolation: true,
+        },
+        {
+            // Declared AND proved: the discrimination happened, but the empty
+            // value is returned on BOTH branches, so a connection drop still
+            // answers "there are none". A presence check ("does the catch
+            // mention isMissingTableError?") would wave this straight through.
+            name: 'flags: discriminated, but the empty value is returned on the NON-benign branch too',
+            code: `
+                class L {
+                    async list(type: string) {
+                        try { return await this.driver.find('m', { where: { type } }); }
+                        catch (e) { if (isMissingTableError(e)) { this.markFirstBoot(); } return []; }
+                    }
+                }`,
+            expectViolation: true,
+        },
+        {
+            name: 'flags: a guard that discriminates but does NOT rethrow licenses nothing',
+            code: `
+                class L {
+                    private noteUnprovisioned(error: unknown): void {
+                        if (isMissingTableError(error)) return;
+                        return;
+                    }
+                    async list(type: string) {
+                        try { return await this.driver.find('m', { where: { type } }); }
+                        catch (error) { this.noteUnprovisioned(error); return []; }
+                    }
+                }`,
+            expectViolation: true,
+        },
+        {
+            name: 'flags: a same-file helper that never asks the error TYPE is not a guard, however it ends',
+            code: `
+                class L {
+                    private bail(error: unknown): never { throw error; }
+                    async list(type: string) {
+                        try { return await this.driver.find('m', { where: { type } }); }
+                        catch (error) { this.bail(error); return []; }
+                    }
+                }`,
+            expectViolation: true,
+        },
+        {
+            name: 'flags: guarded on one branch, unguarded on a second return',
+            code: `
+                class L {
+                    async list(type: string, fallback: boolean) {
+                        try { return await this.driver.find('m', { where: { type } }); }
+                        catch (e) {
+                            if (isMissingTableError(e)) return [];
+                            if (fallback) return [];
+                            throw e;
+                        }
+                    }
+                }`,
+            expectViolation: true,
+        },
+        {
+            // Conservative fallback: a shape the analysis does not model can
+            // carry a benign state FORWARD but never establish one, so "cannot
+            // prove" reads as "not exempt" — the safe direction for a gate.
+            name: 'flags: a return inside an unmodelled construct (loop) is judged, not excused',
+            code: `
+                class L {
+                    async list(types: string[]) {
+                        try { return await this.driver.find('m', { where: {} }); }
+                        catch (e) { for (const t of types) { return []; } throw e; }
+                    }
+                }`,
+            expectViolation: true,
+        },
+
+        // ── Scope of the rule: what it deliberately does NOT judge ───────────
+        {
+            // The rule adds an axis, it does not re-grade the existing one. A
+            // read seam that SAYS something is a log-level question, and
+            // answering it here would re-open a seam the repo deferred on the
+            // record (`restoreMetadataFromDb`, #5841 fact 2).
+            name: 'passes (not this rule): a read seam that logs is the log-level rule\'s question',
+            code: `
+                class L {
+                    async list(type: string) {
+                        try { return await this.driver.find('m', { where: { type } }); }
+                        catch (e) { console.warn('hydration skipped', e); return []; }
+                    }
+                }`,
+            expectViolation: false,
+            expectSeams: 1,
+        },
+        {
+            name: 'passes: no read in the try block — out of this rule\'s vocabulary entirely',
+            code: `
+                class L {
+                    async list(type: string) {
+                        try { return await this.cache.lookup(type); }
+                        catch { return []; }
+                    }
+                }`,
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'passes: the catch returns a REAL answer, not an invented empty one',
+            code: `
+                class L {
+                    async list(type: string, cached: string[]) {
+                        try { return await this.driver.find('m', { where: { type } }); }
+                        catch { return cached; }
+                    }
+                }`,
+            expectViolation: false,
+        },
+        {
+            // Documented exclusion: in a `Promise< void >` method a bare
+            // `return;` is not an invented answer — it is how the exemption's
+            // own guard spells "benign, carry on". This checker does not
+            // type-check, so judging it would fire on the fixed shape.
+            name: 'passes: a bare `return;` is not an invented answer (documented exclusion)',
+            code: `
+                class L {
+                    async warm(type: string): Promise< void > {
+                        try { await this.driver.find('m', { where: { type } }); }
+                        catch { return; }
+                    }
+                }`,
+            expectViolation: false,
+        },
+        {
+            name: 'passes: the read runs in a LATER callback, so this catch does not guard it',
+            code: `
+                class L {
+                    async list(type: string) {
+                        try { this.queue.push(async () => this.driver.find('m', { where: { type } })); }
+                        catch { return []; }
+                    }
+                }`,
+            expectViolation: false,
+            expectSeams: 0,
+        },
+        {
+            name: 'passes: the catch rethrows on every path',
+            code: `
+                class L {
+                    async list(type: string) {
+                        try { return await this.driver.find('m', { where: { type } }); }
+                        catch (e) { throw e; }
+                    }
+                }`,
+            expectViolation: false,
+        },
+
+        // ── Wrapper following, and the spellings of "empty" ──────────────────
+        {
+            // `DatabaseLoader` never calls `driver.find` from a try block; it
+            // calls its own `_find`. A rule that could not see through one hop
+            // would have missed all five of #5108's seams.
+            name: 'flags: the read reached through a same-file wrapper is still a read',
+            code: `
+                class L {
+                    private async readAll(t: string) { return this.driver.find(t, {}); }
+                    async list(type: string) {
+                        try { return await this.readAll(type); }
+                        catch { return []; }
+                    }
+                }`,
+            expectViolation: true,
+        },
+        {
+            name: 'flags: `undefined` / `{}` / empty string are the same invention under other spellings',
+            code: `
+                class L {
+                    async a(t: string) { try { return await this.driver.findOne('m', {}); } catch { return undefined; } }
+                    async b(t: string) { try { return await this.driver.findOne('m', {}); } catch { return {}; } }
+                    async c(t: string) { try { return await this.driver.findOne('m', {}); } catch { return ''; } }
+                }`,
+            expectViolation: true,
+            expectCount: 3,
+        },
+
+        // ── Nesting: inherited from #4754's precision lesson ─────────────────
+        {
+            name: 'passes: the enclosing catch is not accused when an inner RECOVERING catch consumed the read',
+            code: `
+                class L {
+                    async list(type: string) {
+                        try {
+                            try { return await this.driver.find('m', { where: { type } }); }
+                            catch (e) { if (isMissingTableError(e)) return []; throw e; }
+                        } catch (outer) { return []; }
+                    }
+                }`,
+            expectViolation: false,
+            expectCount: 0,
+        },
+        {
+            name: 'flags: the inner catch itself is still judged (no coverage lost to shadowing)',
+            code: `
+                class L {
+                    async list(type: string) {
+                        try {
+                            try { return await this.driver.find('m', { where: { type } }); }
+                            catch { return []; }
+                        } catch (outer) { return []; }
+                    }
+                }`,
+            expectViolation: true,
+            expectCount: 1,
+        },
+    ];
+
+    let failures = 0;
+    for (const c of cases) {
+        const sf = ts.createSourceFile('t.ts', c.code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+        const findings = [];
+        const seams = [];
+        const usedDiscriminators = new Set();
+        analyzeReadSeams(sf, 't.ts', findings, seams, { usedDiscriminators });
+        const got = findings.length > 0;
+        const countMismatch = c.expectCount !== undefined && findings.length !== c.expectCount;
+        const seamMismatch = c.expectSeams !== undefined && seams.length !== c.expectSeams;
+        // Pins the bookkeeping the vocabulary-staleness check runs on: an
+        // exemption entry that exempts nothing must be reported and deleted, so
+        // "was this entry load-bearing?" has to be recorded accurately.
+        const usedList = [...usedDiscriminators].sort();
+        const discriminatorMismatch =
+            c.expectDiscriminatorsUsed !== undefined &&
+            JSON.stringify(usedList) !== JSON.stringify([...c.expectDiscriminatorsUsed].sort());
+        if (got !== c.expectViolation || countMismatch || seamMismatch || discriminatorMismatch) {
+            failures++;
+            console.error(
+                `  ✗ ${c.name}: expected violation=${c.expectViolation}` +
+                    (c.expectCount !== undefined ? ` count=${c.expectCount}` : '') +
+                    (c.expectSeams !== undefined ? ` seams=${c.expectSeams}` : '') +
+                    (c.expectDiscriminatorsUsed !== undefined
+                        ? ` used=${JSON.stringify(c.expectDiscriminatorsUsed)}`
+                        : '') +
+                    `, got violation=${got} count=${findings.length} seams=${seams.length}` +
+                    (c.expectDiscriminatorsUsed !== undefined ? ` used=${JSON.stringify(usedList)}` : ''),
+            );
+        } else {
+            console.log(`  ✓ ${c.name}`);
+        }
+    }
+    if (failures > 0) {
+        console.error(`\n✗ self-test (read-seam invention rule): ${failures} case(s) failed\n`);
+        return 1;
+    }
+    console.log(`\n✓ self-test (read-seam invention rule): ${cases.length} case(s) passed\n`);
     return 0;
 }
 
 const args = process.argv.slice(2);
 if (args.includes('--self-test')) {
-    process.exit(selfTest());
+    // Both rules' fixtures always run — a red one must not hide the other.
+    const logLevelStatus = selfTest();
+    const readSeamStatus = selfTestReadSeams();
+    process.exit(logLevelStatus || readSeamStatus ? 1 : 0);
 } else {
     process.exit(run({ list: args.includes('--list') }));
 }

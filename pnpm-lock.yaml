@@ -776,6 +776,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../metadata-core
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
@@ -2208,6 +2211,9 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
@@ -2342,10 +2348,16 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/plugin-auth':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-auth
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../service-settings
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

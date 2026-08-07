@@ -39,6 +39,8 @@ const result = ConflictResolutionStrategy.parse(data);
 
 ## HttpMethod
 
+HTTP method — the full routing vocabulary (`api/*` endpoints, router and REST-server routes). The narrower `HttpMethodSubset` is what view data sources may request.
+
 ### Allowed Values
 
 * `GET`
@@ -72,7 +74,7 @@ const result = ConflictResolutionStrategy.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ |  |
+| **method** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>` | ✅ | HTTP method — the full routing vocabulary (`api/*` endpoints, router and REST-server routes). The narrower `HttpMethodSubset` is what view data sources may request. |
 | **path** | `string` | ✅ | URL Path pattern |
 | **category** | `Enum<'system' \| 'api' \| 'auth' \| 'static' \| 'webhook' \| 'plugin'>` | ✅ |  |
 | **handler** | `string` | ✅ | Unique handler identifier |

@@ -32,14 +32,40 @@
  * genuinely does not have.
  */
 
-import { FIELD_GROUP_SYSTEM_FIELDS } from '@objectstack/spec/data';
+import { FIELD_GROUP_SYSTEM_FIELDS, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 
 /**
  * Registry-injected columns addressable at runtime without being authored in
  * `fields` — the union of the spec's two system-field declarations.
+ *
+ * OBJECT-INDEPENDENT by construction: it answers "could this name be a system
+ * column anywhere", which is the right question for a rule that only ever needs
+ * to NOT flag the name. A rule that must decide whether the column exists **on
+ * one particular object** — because it resolves a reference, rather than
+ * skipping one — wants {@link injectedColumnsFor} instead.
  */
 export const SYSTEM_FIELDS: ReadonlySet<string> = new Set<string>([
   ...FIELD_GROUP_SYSTEM_FIELDS,
   ...Object.values(SystemFieldName),
 ]);
+
+/**
+ * The system columns addressable on ONE object without being authored (#5378).
+ *
+ * Delegates to the spec's `resolveInjectedSystemColumns` — the same derivation
+ * the registry's `applySystemFields` consumes to decide what it injects — so an
+ * author-time verdict about a column's existence cannot disagree with the
+ * runtime that provisions it. ⛔ Never hand-copy the conditions here: a second
+ * copy of "does `ownership: 'none'` get `owner_id`?" is the drift this indirection
+ * exists to prevent, and it drifts silently (the wrong answer is a FALSE
+ * diagnostic on valid metadata, or silence on a genuinely missing column).
+ *
+ * Use this — not {@link SYSTEM_FIELDS} — wherever the rule RESOLVES a field
+ * reference. The two differ exactly where it matters: on `ownership: 'none'`
+ * the platform injects no `owner_id`, so `record.owner_id` there is a real
+ * defect that must still be reported.
+ */
+export function injectedColumnsFor(objectDef: unknown): ReadonlySet<string> {
+  return resolveInjectedSystemColumns(objectDef).names;
+}

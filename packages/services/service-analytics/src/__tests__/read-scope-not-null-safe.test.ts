@@ -355,22 +355,42 @@ describe('[#5297] read-scope `$not` — boolean identities and NULL safety', () 
 
   // ── Nothing outside `$not` moves, and nothing stopped failing closed ───────
 
-  describe('only the `$not` path is rewritten', () => {
-    it('a plain comparison compiles to exactly the SQL it always did', () => {
+  describe('POSITIVE comparisons are still compiled exactly as before', () => {
+    it('a positive comparison compiles to exactly the SQL it always did', () => {
       expect(compileScopedFilterToSql({ stage: 'won' } as FilterCondition, ALIAS).sql)
         .toBe('"t"."stage" = ?');
-      expect(compileScopedFilterToSql({ stage: { $ne: 'won' } } as FilterCondition, ALIAS).sql)
-        .toBe('"t"."stage" <> ?');
       expect(compileScopedFilterToSql({ amount: { $gt: 15 } } as FilterCondition, ALIAS).sql)
         .toBe('"t"."amount" > ?');
     });
 
-    it('a plain comparison returns the rows it always did', () => {
-      expect(ids({ stage: 'won' })).toEqual(['1']);
-      // Still three-valued OUTSIDE a negation: `<> 'won'` drops the NULL rows.
-      // That divergence from the JS backends is real and out of #5146's scope.
-      expect(ids({ stage: { $ne: 'won' } })).toEqual(['2']);
+    /**
+     * FLIPPED PIN (#5298). These two assertions used to pin the OPPOSITE
+     * answer — `"t"."stage" <> ?` and the single row `['2']` — deliberately:
+     * the non-negated `$ne` was explicitly outside #5146's scope, and pinning
+     * the old behaviour is what would have caught a rewrite leaking past the
+     * `$not` it was scoped to. The 2026-08-06 ruling on #5298 took the other
+     * direction, so the pin flips with the ruling. The reverse-verification
+     * anchor did its job; it is not a regression.
+     *
+     * This compiler moving in the SAME PR as `driver-sql` is the point rather
+     * than a convenience: one RLS rule is lowered here for the read path and
+     * evaluated by `formula` for the write-side `check`, so a batch that
+     * aligned only one of them would leave a permission rule admitting two
+     * different row sets — the defect, not a smaller version of the fix.
+     */
+    it('$ne / $nin / $notContains are NULL-safe outside a $not too (#5298)', () => {
+      expect(compileScopedFilterToSql({ stage: { $ne: 'won' } } as FilterCondition, ALIAS).sql)
+        .toBe('("t"."stage" IS NULL OR "t"."stage" <> ?)');
+      expect(ids({ stage: { $ne: 'won' } })).toEqual(['2', '3', '4']);
+      expect(ids({ stage: { $nin: ['won'] } })).toEqual(['2', '3', '4']);
+      expect(ids({ stage: { $notContains: 'wo' } })).toEqual(['2', '3', '4']);
       expect(ids({})).toEqual(ALL);
+    });
+
+    it('a positive comparison returns the rows it always did', () => {
+      expect(ids({ stage: 'won' })).toEqual(['1']);
+      // `$ne: null` is a null PREDICATE, not a comparison — unchanged by #5298.
+      expect(ids({ stage: { $ne: null } })).toEqual(['1', '2']);
     });
   });
 

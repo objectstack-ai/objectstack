@@ -47,16 +47,30 @@ export interface UseMetadataResult<T = any> {
 }
 
 /**
- * Hook for fetching object schema/metadata
- * 
+ * Hook for fetching object schema/metadata.
+ *
+ * `data` is the `GET /meta/:type/:name` response envelope
+ * (`GetMetaItemResponseSchema`): `{ type, name, item, … }`, with the object
+ * schema document under `item`. It is NOT the bare schema.
+ *
+ * [#5563] It used to be either one, decided by the server's `enableCache`
+ * setting: the cached read path (the default) answered the bare document while
+ * the uncached path answered the envelope, and this hook fed both into the same
+ * state. The route answers one shape now, so the hook can too — and it is the
+ * declared one, which keeps the hook isomorphic to the endpoint instead of
+ * inventing a second dialect at the SDK boundary. Reading a document field
+ * straight off `data` (`data.fields`) was the old spelling; it is `data.item.fields`
+ * now. See {@link useFields} for the pre-flattened field list.
+ *
  * @example
  * ```tsx
  * function ObjectSchemaViewer({ objectName }: { objectName: string }) {
- *   const { data: schema, isLoading, error } = useObject(objectName);
- * 
+ *   const { data, isLoading, error } = useObject(objectName);
+ *
  *   if (isLoading) return <div>Loading schema...</div>;
  *   if (error) return <div>Error: {error.message}</div>;
- * 
+ *
+ *   const schema = data.item;
  *   return (
  *     <div>
  *       <h2>{schema.label}</h2>
@@ -115,7 +129,12 @@ export function useObject(
       setFromCache(false);
 
       if (useCache) {
-        // Use cached metadata endpoint
+        // Both branches address the SAME route (`meta.getCached` is
+        // `GET {metadata}/object/:name` with conditional-request headers), so
+        // both now put the same `{ type, name, item, … }` envelope into `data`
+        // — `result.data` here, the unwrapped response there. [#5563] Before the
+        // convergence these two lines disagreed with each other, and which one a
+        // deployment hit was decided by its `enableCache` setting.
         const result = await client.meta.getCached(objectName, {
           ifNoneMatch: ifNoneMatch || etagRef.current,
           ifModifiedSince
@@ -262,8 +281,11 @@ export function useFields(
 ): UseMetadataResult<any[]> {
   const objectResult = useObject(objectName, options);
 
-  const fields = objectResult.data?.fields
-    ? Object.entries(objectResult.data.fields).map(([name, field]: [string, any]) => ({
+  // [#5563] `useObject().data` is the `{ type, name, item }` envelope; the
+  // schema document — and therefore `fields` — is under `item`.
+  const schema = objectResult.data?.item;
+  const fields = schema?.fields
+    ? Object.entries(schema.fields).map(([name, field]: [string, any]) => ({
         name,
         ...field
       }))
