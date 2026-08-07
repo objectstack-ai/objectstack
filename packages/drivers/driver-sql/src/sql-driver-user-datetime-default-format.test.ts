@@ -102,7 +102,7 @@ describe('User NOW()-default temporal fields — canonical format (SQLite)', () 
     expect(typeof rawRow.starts_at).toBe('string');
     expect(rawRow.starts_at).toBe('2026-03-20T12:34:56.789Z');
 
-    const row: any = await driver.findOne('event', { object: 'event', where: { id: 'e3' } }, { bypassTenantAudit: true });
+    const row: any = await driver.findOne('event', { where: { id: 'e3' } }, { bypassTenantAudit: true });
     expect(row.starts_at).toBe(rawRow.starts_at);
   });
 
@@ -123,7 +123,7 @@ describe('User NOW()-default temporal fields — canonical format (SQLite)', () 
     expect(sorted.map((r: any) => r.id)).toEqual(['explicit', 'defaulted']);
 
     for (const id of ['explicit', 'defaulted']) {
-      const row: any = await driver.findOne('event', { object: 'event', where: { id } }, { bypassTenantAudit: true });
+      const row: any = await driver.findOne('event', { where: { id } }, { bypassTenantAudit: true });
       expect(row.starts_at).toMatch(ISO_Z);
       expect(Number.isNaN(new Date(row.starts_at).getTime())).toBe(false);
     }
@@ -137,14 +137,14 @@ describe('User NOW()-default temporal fields — canonical format (SQLite)', () 
     const rawRow = await raw('event').where('id', 'legacy').first();
     expect(typeof rawRow.starts_at).toBe('number');
 
-    const row: any = await driver.findOne('event', { object: 'event', where: { id: 'legacy' } }, { bypassTenantAudit: true });
+    const row: any = await driver.findOne('event', { where: { id: 'legacy' } }, { bypassTenantAudit: true });
     expect(row.starts_at).toBe('2026-03-20T12:34:56.789Z');
   });
 
   it('an explicit ISO-8601-Z string is preserved (idempotent) on read', async () => {
     const iso = '2026-05-25T08:00:00.000Z';
     await driver.create('event', { id: 'e4', label: 'D', starts_at: iso }, { bypassTenantAudit: true });
-    const row: any = await driver.findOne('event', { object: 'event', where: { id: 'e4' } }, { bypassTenantAudit: true });
+    const row: any = await driver.findOne('event', { where: { id: 'e4' } }, { bypassTenantAudit: true });
     expect(row.starts_at).toBe(iso);
   });
 
@@ -154,21 +154,21 @@ describe('User NOW()-default temporal fields — canonical format (SQLite)', () 
     // A row written before this fix (or by a raw insert that took the OLD naive
     // `CURRENT_TIMESTAMP` default), bypassing the driver write path entirely.
     await raw('event').insert({ id: 'legacy', label: 'L', starts_at: '2026-01-15 08:30:00' });
-    const row: any = await driver.findOne('event', { object: 'event', where: { id: 'legacy' } }, { bypassTenantAudit: true });
+    const row: any = await driver.findOne('event', { where: { id: 'legacy' } }, { bypassTenantAudit: true });
     expect(row.starts_at).toBe('2026-01-15T08:30:00.000Z');
   });
 
   it('REGRESSION (host-timezone independence): the repaired instant equals the UTC wall-clock', async () => {
     // The zone-naive `2026-01-15 08:30:00` must mean 08:30 UTC, NOT 08:30 local.
     await raw('event').insert({ id: 'tz', label: 'T', starts_at: '2026-01-15 08:30:00' });
-    const row: any = await driver.findOne('event', { object: 'event', where: { id: 'tz' } }, { bypassTenantAudit: true });
+    const row: any = await driver.findOne('event', { where: { id: 'tz' } }, { bypassTenantAudit: true });
     expect(new Date(row.starts_at).getTime()).toBe(Date.parse('2026-01-15T08:30:00.000Z'));
   });
 
   it('find() (list path) normalizes datetime identically to findOne(), across mixed storage', async () => {
     await raw('event').insert({ id: 'list1', label: 'L1', starts_at: '2026-02-02 02:02:02.200' });
     await driver.create('event', { id: 'list2', label: 'L2', starts_at: new Date('2026-02-02T02:02:02.200Z') }, { bypassTenantAudit: true });
-    const rows = await driver.find('event', { object: 'event', orderBy: [{ field: 'id', order: 'asc' }] });
+    const rows = await driver.find('event', { orderBy: [{ field: 'id', order: 'asc' }] });
     const byId = Object.fromEntries(rows.map((r: any) => [r.id, r]));
     expect(byId.list1.starts_at).toBe('2026-02-02T02:02:02.200Z');
     expect(byId.list2.starts_at).toBe('2026-02-02T02:02:02.200Z');
@@ -179,7 +179,7 @@ describe('User NOW()-default temporal fields — canonical format (SQLite)', () 
     try {
       await d2.initObjects([{ name: 'evt2', fields: { dt: { type: 'datetime' }, label: { type: 'string' } } }]);
       await d2.create('evt2', { id: 'n1', label: 'N', dt: null }, { bypassTenantAudit: true });
-      const row: any = await d2.findOne('evt2', { object: 'evt2', where: { id: 'n1' } }, { bypassTenantAudit: true });
+      const row: any = await d2.findOne('evt2', { where: { id: 'n1' } }, { bypassTenantAudit: true });
       expect(row.dt).toBeNull();
     } finally {
       await d2.disconnect();

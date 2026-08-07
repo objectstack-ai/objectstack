@@ -152,7 +152,7 @@ describe('objectstack verify LIFECYCLE (ADR-0057): declared policies bound growt
       });
     }
 
-    const before = await driver.count('growth_probe_event', { object: 'growth_probe_event' });
+    const before = await driver.count('growth_probe_event', {});
     expect(before).toBe(40);
 
     const report = await lifecycle.sweep();
@@ -167,11 +167,11 @@ describe('objectstack verify LIFECYCLE (ADR-0057): declared policies bound growt
 
     // The telemetry table is now bounded by its declared 30d window:
     // rows at 5,10,15,20,25d survive (5 rows), everything older is gone.
-    const after = await driver.count('growth_probe_event', { object: 'growth_probe_event' });
+    const after = await driver.count('growth_probe_event', {});
     expect(after, 'telemetry rows past retention.maxAge must be reaped').toBe(5);
 
     // Record-class/business data is sacrosanct — same age, still alive.
-    const records = await driver.count('growth_probe_record', { object: 'growth_probe_record' });
+    const records = await driver.count('growth_probe_record', {});
     expect(records, 'record-class rows must NEVER be reaped').toBe(5);
 
     // The sweep reported the reap and reclaimed the datasource.
@@ -209,12 +209,12 @@ describe('objectstack verify LIFECYCLE (ADR-0057): declared policies bound growt
     // sweep applies the 'rotation' policy without touching the rows inside
     // the window.
     await streamDriver.create('growth_probe_stream', { payload: 'tick' });
-    expect(await streamDriver.count('growth_probe_stream', { object: 'growth_probe_stream' })).toBe(1);
+    expect(await streamDriver.count('growth_probe_stream', {})).toBe(1);
 
     const report = await lifecycle.sweep();
     const entry = report.swept.find((e) => e.object === 'growth_probe_stream');
     expect(entry?.policy).toBe('rotation');
-    expect(await streamDriver.count('growth_probe_stream', { object: 'growth_probe_stream' })).toBe(1);
+    expect(await streamDriver.count('growth_probe_stream', {})).toBe(1);
   });
 
   it('ARCHIVE SAFETY: an audit ledger with a declared archive is never hot-deleted unarchived', async () => {
@@ -230,7 +230,7 @@ describe('objectstack verify LIFECYCLE (ADR-0057): declared policies bound growt
     // No archive datasource named 'archive_missing' exists ⇒ the rows are
     // RETAINED (today's behavior), not dropped. Compliance data cannot be
     // destroyed by declaring a lifecycle.
-    const ledger = await driver.count('growth_probe_ledger', { object: 'growth_probe_ledger' });
+    const ledger = await driver.count('growth_probe_ledger', {});
     expect(ledger, 'archive-declared audit rows must be retained until archived').toBe(3);
     expect(report.skipped).toContainEqual({ object: 'growth_probe_ledger', reason: 'archive-pending' });
   });
@@ -255,9 +255,9 @@ describe('objectstack verify LIFECYCLE (ADR-0057): declared policies bound growt
     expect((entry as { archived?: number })?.archived).toBe(3);
 
     // Hot store drained, cold store holds the ledger.
-    const hot = await driver.count('growth_probe_ledger', { object: 'growth_probe_ledger' });
+    const hot = await driver.count('growth_probe_ledger', {});
     expect(hot, 'archived rows must leave the hot store').toBe(0);
-    const coldRows = await cold.count('growth_probe_ledger', { object: 'growth_probe_ledger' });
+    const coldRows = await cold.count('growth_probe_ledger', {});
     expect(coldRows, 'archived rows must land in the cold store').toBe(3);
     await cold.disconnect();
   });

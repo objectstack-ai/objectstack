@@ -131,7 +131,7 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
       users: ['u1', 'u2'],
     });
 
-    const results = await driver.find('multi_test', { object: 'multi_test' });
+    const results = await driver.find('multi_test', {});
     const row = results[0];
 
     expect(row.tags).toEqual(['a', 'b']);
@@ -154,7 +154,7 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     expect(columns).toHaveProperty('completion');
 
     await driver.create('percent_test', { completion: 0.85 });
-    const res = await driver.find('percent_test', { object: 'percent_test' });
+    const res = await driver.find('percent_test', {});
     expect(res[0].completion).toBe(0.85);
   });
 
@@ -183,7 +183,7 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
       owner: 'u-1',
       watchers: ['u-2', 'u-3'],
     });
-    const res = await driver.find('ticket_user_test', { object: 'ticket_user_test' });
+    const res = await driver.find('ticket_user_test', {});
     expect(res[0].owner).toBe('u-1');
     expect(res[0].watchers).toEqual(['u-2', 'u-3']);
   });
@@ -276,7 +276,7 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
       work_hours: '09:00:00',
     });
 
-    const res = await driver.find('new_types_test', { object: 'new_types_test' });
+    const res = await driver.find('new_types_test', {});
     const row = res[0];
 
     expect(row.email).toBe('test@example.com');
@@ -382,7 +382,7 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     ).rejects.toThrow(/UNIQUE constraint failed|duplicate key value/);
     // Differing channel → allowed.
     await driver.create('idx_multi_obj', { notification_id: 'n1', recipient_id: 'r1', channel: 'email' });
-    const rows = await driver.find('idx_multi_obj', { object: 'idx_multi_obj' });
+    const rows = await driver.find('idx_multi_obj', {});
     expect(rows.length).toBe(2);
   });
 
@@ -402,7 +402,7 @@ describe('SqlDriver Schema Sync (SQLite)', () => {
     // Two rows with no dedup_key (NULL) must both be insertable.
     await driver.create('idx_null_obj', {});
     await driver.create('idx_null_obj', {});
-    const rows = await driver.find('idx_null_obj', { object: 'idx_null_obj' });
+    const rows = await driver.find('idx_null_obj', {});
     expect(rows.length).toBe(2);
   });
 

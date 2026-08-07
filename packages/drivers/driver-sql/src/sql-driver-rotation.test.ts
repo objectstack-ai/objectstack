@@ -71,8 +71,8 @@ describe('SqlDriver rotation (ADR-0057 P2)', () => {
     // The row is physically in the shard and visible through the view.
     const inShard = (await driver.execute(`SELECT id FROM "${currentShard}"`)) as any[];
     expect(inShard.map((r) => r.id)).toEqual(['a']);
-    expect(await driver.count('rot_event', { object: 'rot_event' })).toBe(1);
-    const found = await driver.findOne('rot_event', { object: 'rot_event', where: { id: 'a' } });
+    expect(await driver.count('rot_event', {})).toBe(1);
+    const found = await driver.findOne('rot_event', { where: { id: 'a' } });
     expect(found?.payload).toBe('x');
   });
 
@@ -86,7 +86,7 @@ describe('SqlDriver rotation (ADR-0057 P2)', () => {
     expect(day1.current).toBe('rot_event__r20360802');
     expect(day1.dropped).toEqual([]);
     await driver.create('rot_event', { id: 'd1', payload: 'day1', created_at: new Date(T0 + DAY_MS) }, { bypassTenantAudit: true });
-    expect(await driver.count('rot_event', { object: 'rot_event' })).toBe(2);
+    expect(await driver.count('rot_event', {})).toBe(2);
 
     // Day 3 (shards=3, window = [day1 .. day3]): the day-0 shard falls out —
     // one O(1) DROP, its rows gone from the view, newer rows intact.
@@ -96,7 +96,7 @@ describe('SqlDriver rotation (ADR-0057 P2)', () => {
 
     const names = await tableNames(driver);
     expect(names['rot_event__r20360801']).toBeUndefined();
-    const remaining = await driver.find('rot_event', { object: 'rot_event' });
+    const remaining = await driver.find('rot_event', {});
     expect(remaining.map((r: any) => r.id).sort()).toEqual(['d1']);
   });
 
@@ -112,7 +112,7 @@ describe('SqlDriver rotation (ADR-0057 P2)', () => {
 
     const names = await tableNames(driver);
     expect(names['rot_event']).toBe('view');
-    const rows = await driver.find('rot_event', { object: 'rot_event' });
+    const rows = await driver.find('rot_event', {});
     expect(rows.map((r: any) => r.id)).toEqual(['legacy']);
   });
 
@@ -136,11 +136,11 @@ describe('SqlDriver rotation (ADR-0057 P2)', () => {
     await driver.create('rot_event', { id: 'old2', payload: 'p2', created_at: new Date(T0 - 10 * DAY_MS) }, { bypassTenantAudit: true });
     const deleted = await driver.deleteMany(
       'rot_event',
-      { object: 'rot_event', where: { created_at: { $lt: new Date(T0).toISOString() } } },
+      { where: { created_at: { $lt: new Date(T0).toISOString() } } },
       { bypassTenantAudit: true },
     );
     expect(deleted).toBe(1);
-    const rest = await driver.find('rot_event', { object: 'rot_event' });
+    const rest = await driver.find('rot_event', {});
     expect(rest.map((r: any) => r.id)).toEqual(['new']);
   });
 
@@ -151,6 +151,6 @@ describe('SqlDriver rotation (ADR-0057 P2)', () => {
     const second = await driver.rotateShards(ROTATED_OBJECT, T0 + 3_600_000); // +1h, same day
     expect(second.current).toBe(first.current);
     expect(second.dropped).toEqual([]);
-    expect(await driver.count('rot_event', { object: 'rot_event' })).toBe(1);
+    expect(await driver.count('rot_event', {})).toBe(1);
   });
 });

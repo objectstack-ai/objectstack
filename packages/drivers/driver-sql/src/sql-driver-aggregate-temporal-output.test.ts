@@ -74,7 +74,7 @@ describe('temporal values leaving aggregate()/distinct() (#3797)', () => {
     // `orderBy: [['id', 'asc']]` until #4311. The driver reads `item.field`,
     // which a tuple does not have, so the sort was silently dropped — this
     // helper had been reading whatever order the rows came back in.
-    const rows = await driver.find(TABLE, { object: TABLE, orderBy: [{ field: 'id', order: 'asc' }] });
+    const rows = await driver.find(TABLE, { orderBy: [{ field: 'id', order: 'asc' }] });
     return rows.map((r: any) => r[field]);
   };
 

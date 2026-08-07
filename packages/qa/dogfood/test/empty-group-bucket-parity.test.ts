@@ -89,7 +89,7 @@ describe.each(DRIVERS)('empty group bucket parity: $name', ({ make }) => {
     const pushedDown = await driver.aggregate(TABLE, ast);
     // The rows the in-memory path would see — the driver's own read output, which
     // is exactly what `engine.aggregate` feeds the fallback.
-    const inMemory = applyInMemoryAggregation(await driver.find(TABLE, { object: TABLE }), ast as never);
+    const inMemory = applyInMemoryAggregation(await driver.find(TABLE, {}), ast as never);
 
     expect(shape(pushedDown, field)).toEqual(shape(inMemory, field));
     // …and both agree on real `null`, not on a sentinel they happen to share.

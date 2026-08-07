@@ -52,7 +52,7 @@ describe('InMemoryDriver filter vocabulary ↔ VALID_AST_OPERATORS', () => {
   // contract forbids, fed in to prove the driver throws instead of silently
   // dropping the condition. `unknown` is the honest parameter type.
   const find = (where: unknown) =>
-    driver.find(TABLE, { object: TABLE, fields: ['id'], where: where as FilterCondition });
+    driver.find(TABLE, { fields: ['id'], where: where as FilterCondition });
 
   /**
    * The authored `FilterArray`, travelling the one route that exists (#5158):

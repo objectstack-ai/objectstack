@@ -1347,11 +1347,10 @@ export type ComposeStacksOptions = z.input<typeof ComposeStacksOptionsSchema>;
  *                   through, differing ones are a composition ERROR.
  * - `'manifest'`  — chosen by the `manifest` option.
  * - `'objects'`   — merged by the `objectConflict` strategy.
- * - `'i18n'`      — last-wins (pre-existing; see the table note below).
  * - `'functions'` — named-handler collection; merged by name.
  * @internal
  */
-type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'i18n' | 'functions';
+type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'functions';
 
 /**
  * The composition rule for EVERY top-level key of `ObjectStackDefinition`
@@ -1380,13 +1379,19 @@ type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'i18n' 
  * reaches composition without a rule — via `strict: false`, or a raw object —
  * still reports itself.
  *
- * ## Note on `i18n`
+ * ## Note on `i18n` (#5051)
  *
- * `i18n` keeps its pre-existing last-wins. It is the one key here that already
- * had a deliberate, working strategy, so #5005 (whose subject is keys that were
- * *dropped*) deliberately leaves it alone rather than breaking compositions
- * that rely on it. It is nonetheless the same silent-override shape the
- * maintainer rejected for `api`/`server` — tracked separately.
+ * `i18n` carried a last-wins of its own through #5005 — the one key here that
+ * already had a deliberate, working strategy, and #5005's subject was keys that
+ * got *dropped*. That left it as the only top-level key still resolving a
+ * disagreement by silent override: the very shape the maintainer rejected for
+ * `api`/`server` — an earlier stack's declaration overwritten without a word by
+ * whoever composes after it. #5051 closed the inconsistency — `i18n` is
+ * `'single'` like every other non-array configuration key. Which locales an
+ * application supports is not a detail a composer may pick for the author: the
+ * `translations` bundles each stack ships are written against its own
+ * `supportedLocales`, so overriding one stack's declaration leaves the other
+ * stack's bundles addressing locales the composed app no longer admits.
  *
  * @internal
  */
@@ -1394,7 +1399,6 @@ const COMPOSE_KEY_DISPOSITIONS: Record<keyof ObjectStackDefinition, ComposeDispo
   // ── Bespoke strategies (unchanged by #5005) ──
   manifest: 'manifest',
   objects: 'objects',
-  i18n: 'i18n',
   functions: 'functions',
 
   // ── Array collections — concatenated in stack order ──
@@ -1438,6 +1442,8 @@ const COMPOSE_KEY_DISPOSITIONS: Record<keyof ObjectStackDefinition, ComposeDispo
   api: 'single',
   server: 'single',
   runtimeModule: 'single',
+  // #5051: the last key still on last-wins; aligned here, see the note above.
+  i18n: 'single',
 };
 
 /**
@@ -1463,14 +1469,17 @@ function stackLabel(stack: ObjectStackDefinition, index: number): string {
 }
 
 /**
- * Compose a single-valued (non-array) top-level key across stacks (#5005).
+ * Compose a single-valued (non-array) top-level key across stacks (#5005,
+ * #5051).
  *
  * Same value everywhere ⇒ that value. Any disagreement ⇒ throw, naming the key,
  * both source stacks and the two ways out. NOT last-wins: silently preferring
  * the later stack is a security downgrade — it is precisely how an earlier
  * stack's `enforceProjectMembership` 403 gate or a tighter rate-limit budget
- * would be switched off by an add-on package. NOT a deep merge either: that
- * invents a third value neither author wrote.
+ * would be switched off by an add-on package, and (since #5051) how an `i18n`
+ * locale set would be swapped out from under the `translations` bundles written
+ * against it. NOT a deep merge either: that invents a third value neither
+ * author wrote.
  * @internal
  */
 function composeSingleValue(
@@ -1493,9 +1502,10 @@ function composeSingleValue(
       `composeStacks conflict: top-level key '${key}' is declared with different values by ` +
         `${stackLabel(stacks[holder], holder)} and ${stackLabel(stacks[i], i)}.\n` +
         `composeStacks does not pick a winner for single-valued top-level configuration: ` +
-        `overriding would silently disable whichever stack declared the stricter setting ` +
+        `overriding would silently drop whichever declaration lost — a stricter setting ` +
         `(an 'api.enforceProjectMembership' 403 gate, a 'server.security.rateLimit' budget), ` +
-        `and deep-merging would produce a value neither stack declared.\n` +
+        `or an 'i18n' locale set the losing stack's own 'translations' bundles are written ` +
+        `against — and deep-merging would produce a value neither stack declared.\n` +
         `Fix: make the two '${key}' declarations identical, or remove it from every stack ` +
         `except the one that should own it.`,
     );
@@ -1714,6 +1724,10 @@ function selectManifest(
  * **Array fields** (apps, views, dashboards, etc.) are concatenated in order.
  * **Objects** are merged according to the `objectConflict` strategy.
  * **Manifest** is selected based on the `manifest` option.
+ * **Single-valued configuration** (`i18n`, `api`, `server`, `runtimeModule`) is
+ * neither overridden nor merged: identical declarations pass through, and two
+ * stacks declaring *different* values throw an error naming both stacks
+ * (#5005; `i18n` joined them in #5051).
  *
  * @param stacks  - Stack definitions to compose (order matters for conflict resolution)
  * @param options - Composition options (conflict strategy, manifest selection, etc.)
@@ -1750,22 +1764,13 @@ export function composeStacks(
   // 1. Manifest — pick based on strategy
   composed.manifest = selectManifest(stacks, opts.manifest);
 
-  // 2. i18n — last-wins (single object, not array). Pre-existing strategy,
-  //    deliberately untouched by #5005; see COMPOSE_KEY_DISPOSITIONS.
-  for (let i = stacks.length - 1; i >= 0; i--) {
-    if (stacks[i].i18n) {
-      composed.i18n = stacks[i].i18n;
-      break;
-    }
-  }
-
-  // 3. Objects — use conflict strategy
+  // 2. Objects — use conflict strategy
   const objects = mergeObjects(stacks, opts.objectConflict);
   if (objects) {
     composed.objects = objects;
   }
 
-  // 4. Array collections — simple concatenation, in stack order.
+  // 3. Array collections — simple concatenation, in stack order.
   for (const field of CONCAT_ARRAY_FIELDS) {
     const declared = stacks
       .map((s) => (s as Record<string, unknown>)[field])
@@ -1783,13 +1788,14 @@ export function composeStacks(
     }
   }
 
-  // 5. Named handler functions — merged by name (#5005).
+  // 4. Named handler functions — merged by name (#5005).
   const functions = composeFunctions(stacks);
   if (functions.declared) {
     composed.functions = functions.value;
   }
 
-  // 6. Every remaining top-level key (#5005).
+  // 5. Every remaining top-level key (#5005) — `api`, `server`,
+  //    `runtimeModule` and, since #5051, `i18n`.
   //
   //    This loop is the reason composition can no longer eat a key. It walks
   //    what the STACKS actually carry rather than a whitelist, so a key with a

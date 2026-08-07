@@ -70,7 +70,7 @@ describe('[#5240] InMemoryDriver (live mingo path) refuses a zero-operator field
   });
 
   const ids = async (where: unknown): Promise<string[]> => {
-    const rows = await driver.find('deal', { object: 'deal', fields: ['id'], where: where as FilterCondition });
+    const rows = await driver.find('deal', { fields: ['id'], where: where as FilterCondition });
     return rows.map((r: any) => String(r.id)).sort();
   };
 
