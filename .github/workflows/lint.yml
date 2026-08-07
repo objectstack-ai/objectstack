@@ -211,6 +211,20 @@ jobs:
       - name: Wildcard fall-through guard
         run: pnpm check:wildcard-fallthrough
 
+      # Raw `:type` route-param comparison guard (#6241). The `/meta/:type`
+      # routes serve BOTH spellings and Prime Directive #3 makes the PLURAL one
+      # canonical, so a gate comparing the raw param is a gate the canonical
+      # spelling skips. That is one authorization bypass fixed three times in
+      # one file: #3984 (every per-type gate), #5881 (the dashboard exclusion),
+      # #6241 (the doc/book cache exclusion, still literal eight days after
+      # #3984's structural fix). Each was found by hand; per-defect tests pin
+      # the gates that exist today and nothing refused the NEXT raw comparison.
+      # AST-based on purpose — the file documents the bad pattern in prose, and
+      # a textual scan would flag its own post-mortems. Zero exemptions today.
+      # Runs its own --self-test first.
+      - name: Normalized metadata-type guard
+        run: pnpm check:meta-type-normalized
+
       # Init-service declaration guard (#4471, ADR-0116). The kernel's ordering
       # contract (dependencies / optionalDependencies / requiresServices /
       # providesServices) was complete but VOLUNTARY: a plugin that resolves
