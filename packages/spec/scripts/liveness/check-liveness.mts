@@ -670,10 +670,16 @@ if (asJson) {
     );
   }
   // ── re-verification clock ──
-  const v = report.verification!;
+  // Annotated at the boundary: `report` is deliberately `any` (see its
+  // declaration), so without this every `v.*` below is `any` too — which is how
+  // the `stale` worklist ended up iterated with an implicitly-any element while
+  // its neighbours carried hand-written `: string` annotations (#5475). Naming
+  // the producer's own type once types all four reads, and a shape change in
+  // verification.mts now lands here instead of passing through.
+  const v: VerificationReport = report.verification!;
   if (v.errors.length) {
     console.log(`\n✗ ${v.errors.length} malformed \`verifiedAt\` value(s) — a bad date silently disables the staleness check:`);
-    v.errors.forEach((s: string) => console.log(`    ${s}`));
+    v.errors.forEach((s) => console.log(`    ${s}`));
   }
   const dated = v.fresh + v.stale.length;
   console.log(
@@ -687,7 +693,7 @@ if (asJson) {
     }
     if (v.unverified.length) {
       console.log(`\n  never dated (${v.unverified.length}) — predate the field; date them as you re-verify:`);
-      v.unverified.forEach((k: string) => console.log(`    ${k}`));
+      v.unverified.forEach((k) => console.log(`    ${k}`));
     }
   } else if (v.stale.length || v.unverified.length) {
     console.log('  run with --stale-verification[=days] for the worklist.');

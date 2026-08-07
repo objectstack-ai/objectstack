@@ -240,7 +240,6 @@ import type * as M164 from './ui/report.zod.js';
 import type * as M165 from './ui/responsive.zod.js';
 import type * as M166 from './ui/theme.zod.js';
 import type * as M167 from './ui/view.zod.js';
-import type * as M168 from './ui/widget.zod.js';
 // Appended out of alphabetical order deliberately: the M-indices are positional
 // identifiers the pin lines below reference by number, so a new module takes the
 // next free index rather than renumbering 169 imports and every pin that names
@@ -1275,11 +1274,8 @@ export type Iso683 = Assert<Eq< z.input< typeof M160.DerivedMeasureOp >, z.infer
 export type Iso684 = Assert<Eq< z.input< typeof M160.DatasetSchema >, z.infer< typeof M160.DatasetSchema > >>;
 
 // ui/i18n.zod.ts
-export type Iso685 = Assert<Eq< z.input< typeof M161.I18nObjectSchema >, z.infer< typeof M161.I18nObjectSchema > >>;
 export type Iso686 = Assert<Eq< z.input< typeof M161.I18nLabelSchema >, z.infer< typeof M161.I18nLabelSchema > >>;
 export type Iso687 = Assert<Eq< z.input< typeof M161.AriaPropsSchema >, z.infer< typeof M161.AriaPropsSchema > >>;
-export type Iso688 = Assert<Eq< z.input< typeof M161.PluralRuleSchema >, z.infer< typeof M161.PluralRuleSchema > >>;
-export type Iso689 = Assert<Eq< z.input< typeof M161.DateFormatSchema >, z.infer< typeof M161.DateFormatSchema > >>;
 
 // ui/notification.zod.ts
 export type Iso690 = Assert<Eq< z.input< typeof M162.NotificationTypeSchema >, z.infer< typeof M162.NotificationTypeSchema > >>;
@@ -1318,9 +1314,6 @@ export type Iso712 = Assert<Eq< z.input< typeof M167.RowHeightSchema >, z.infer<
 export type Iso713 = Assert<Eq< z.input< typeof M167.RowColorConfigSchema >, z.infer< typeof M167.RowColorConfigSchema > >>;
 export type Iso714 = Assert<Eq< z.input< typeof M167.VisualizationTypeSchema >, z.infer< typeof M167.VisualizationTypeSchema > >>;
 export type Iso715 = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.infer< typeof M167.UserFilterFieldSchema > >>;
-
-// ui/widget.zod.ts
-export type Iso716 = Assert<Eq< z.input< typeof M168.WidgetLifecycleSchema >, z.infer< typeof M168.WidgetLifecycleSchema > >>;
 
 // ui/component.zod.ts
 // #5775 — the shared `children` contract for `page:section`/`page:footer`/
@@ -1402,9 +1395,25 @@ describe('ADR-0122 type-alias convention', () => {
     // sends it here rather than to an `XParsed` (718 -> 719 was
     // `ConnectorActionEffectSchema`, #4395 — a bare `z.enum`, like the
     // `ConnectorType` / `ConnectorStatus` pins beside it).
+    //
+    // And it drops by MORE than one when schemas are RETIRED, which is the third
+    // way and the one to read carefully, because from the count alone it looks
+    // exactly like the edit this case exists to stop: #5055 removed
+    // `I18nObjectSchema`, `PluralRuleSchema`, `DateFormatSchema` and
+    // `WidgetLifecycleSchema` under ADR-0049, i.e. -4. What separates it from a
+    // bare deletion is that the SCHEMAS went with the pins —
+    // `check:spec-parsed-alias` has nothing left to exempt, and
+    // `ui/widget-i18n-retirement.test.ts` asserts their absence on every public
+    // entry. A pin deleted while its schema still exports is still the failure
+    // this counts.
+    //
+    // 720 -> 716 is that retirement landing on top of #5775's addition
+    // (`PageContainerProps`, the +1 that had taken the count to 720). Both moves
+    // are in this number at once, which is exactly why it is recomputed from the
+    // source rather than reasoned about: -4 retired, +0 of my own.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(720);
+    expect(pins).toHaveLength(716);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {

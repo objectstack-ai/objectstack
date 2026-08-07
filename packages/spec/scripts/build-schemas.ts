@@ -27,9 +27,7 @@ import {
   clearOwnedOutputs,
 } from './lib/json-schema-out-dir';
 import {
-  AUTHORABLE_SURFACE_DESCRIPTION,
   AUTHORABLE_SURFACE_DIR_NAME,
-  SCHEMA_MANIFEST_DESCRIPTION,
   SCHEMA_MANIFEST_DIR_NAME,
   aggregateCategoryShards,
   authorableSurfaceShardTexts,
@@ -38,6 +36,7 @@ import {
   serializeShard,
   writeShards,
   type GitRun,
+  type ShardArrayField,
 } from './lib/sharded-artifacts';
 // The #4666 default-value ratchet: what an author gets when they OMIT a key.
 // Its own module because the fingerprint's normalisation rules — and the
@@ -483,15 +482,11 @@ if (defKeyCollisions.length > 0) {
 // run means a code change unpublished a schema — fail loudly instead of
 // letting gen:docs quietly delete its reference docs (#2978). Deliberate
 // removals must delete the key from the manifest in the same PR.
-/**
- * The manifest's description — the procedure a reader who opens a shard to
- * delete a line follows. Until #4725 it ended "remove a key ONLY for a
- * deliberate retirement", which was the entire requirement and was checked by
- * nothing; it now names the gate and the table that answer for a removal. It
- * lives in scripts/lib/sharded-artifacts.ts with the writer that stamps it into
- * every shard (#5837).
- */
-const MANIFEST_DESCRIPTION = SCHEMA_MANIFEST_DESCRIPTION;
+// The manifest's and the authorable surface's shard descriptions used to be
+// re-exported through here. #5837 moved both to scripts/lib/sharded-artifacts.ts,
+// beside the writer that stamps them into every shard, and nothing in this file
+// has read them since — the import and the `MANIFEST_DESCRIPTION` alias were
+// residue no checker could see (#5475).
 
 /**
  * Every def key recorded across `json-schema.manifest/`, or null when the whole
@@ -1094,7 +1089,13 @@ function readSurfaceKeysAtRev(
   git: GitRun,
   rev: string,
   dirName: string,
-  field: 'keys' | 'schemas',
+  // `ShardArrayField`, not a re-spelled copy of it. This parameter used to read
+  // `'keys' | 'schemas'` — a hand-written narrowing of the exported union that
+  // `readShardedKeysAtRev` below actually takes. When #4666 added `'defaults'`
+  // to `ShardArrayField` and a call site passing it, the copy here was left
+  // behind and no type checker existed to say so (#5475). Harmless at runtime,
+  // since the value is only forwarded, but it is the drift this program is for.
+  field: ShardArrayField,
   context: string,
 ): { entries: string[] } | null {
   const read = readShardedKeysAtRev(git, rev, dirName, field);
@@ -1453,12 +1454,33 @@ function assertAnchorMovesForward(git: GitRun, committedRev: string, resolvedRev
 }
 
 /**
- * Set when THIS run resolved the baseline from git. It is the ONLY input
- * `--update-base` may write the in-tree anchor from: an offline build must never
- * be able to advance the anchor to its own state (#5235). The second half of that
- * discipline is #5358 — no build writes it at all, only the explicit mode.
+ * What `resolveSurfaceBase()` resolved: the baseline itself, plus — only when
+ * the GIT path produced it — the anchor that path is allowed to write.
+ *
+ * `gitAnchor` is a returned field rather than the module-level assignment it
+ * used to be, and that is a type-checking fix, not a style one (#5475). The old
+ * shape declared `let gitResolvedAnchor: {...} | null = null` here and assigned
+ * it from INSIDE this function. TypeScript's control-flow analysis does not
+ * follow an assignment made in a function body, so at every top-level read below
+ * the variable was still narrowed to `null` — which made `if (gitResolvedAnchor)`
+ * a block whose body is typed `never`, i.e. the entire in-tree anchor writer
+ * (#5235/#5358/#5370/#5847, ~100 lines) was invisible to tsc while reading as
+ * ordinary checked code. Returning the value puts the assignment in the caller's
+ * own flow, where CFA can see it. Runtime behaviour is unchanged: the git path
+ * sets it, the in-tree path leaves it null, exactly as before.
  */
-let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
+type SurfaceBaseResolution = {
+  rev: string;
+  doc: AuthorableSurface;
+  /**
+   * Set when THIS run resolved the baseline from git. It is the ONLY input
+   * `--update-base` may write the in-tree anchor from: an offline build must
+   * never be able to advance the anchor to its own state (#5235). The second
+   * half of that discipline is #5358 — no build writes it at all, only the
+   * explicit mode.
+   */
+  gitAnchor: { rev: string; keys: string[] } | null;
+};
 
 /**
  * The committed authorable surface this PR started from: its content at
@@ -1483,7 +1505,7 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
  * What is NOT offered is an env-var skip: that is precisely the bypass #4650
  * closes. With no anchor of either kind this still exits 1.
  */
-function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
+function resolveSurfaceBase(): SurfaceBaseResolution | null {
   const git = gitInPackage;
   const committed = readCommittedSurfaceBase();
 
@@ -1520,10 +1542,10 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
       return null;
     }
     const doc: AuthorableSurface = { keys: baseline.entries };
-    gitResolvedAnchor = { rev, keys: doc.keys };
+    const gitAnchor = { rev, keys: doc.keys };
     // The environment that CAN police the in-tree anchor is the one that must.
-    if (committed) verifyCommittedSurfaceBase(git, tip, gitResolvedAnchor, committed.doc);
-    return { rev, doc };
+    if (committed) verifyCommittedSurfaceBase(git, tip, gitAnchor, committed.doc);
+    return { rev, doc, gitAnchor };
   }
 
   if (committed) {
@@ -1535,6 +1557,9 @@ function resolveSurfaceBase(): { rev: string; doc: AuthorableSurface } | null {
     return {
       rev: committed.doc.baseRev,
       doc: { keys: committed.doc.keys },
+      // Offline: this run did not resolve an anchor from git, so it has nothing
+      // it is entitled to write one from (#5235).
+      gitAnchor: null,
     };
   }
 
@@ -1722,11 +1747,20 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
  * is one resolution, shared — a second `resolveSurfaceBase()` call would ask git
  * the same question twice and could answer it differently.
  */
-let resolvedSurfaceBase: { rev: string; doc: AuthorableSurface } | null = null;
+let resolvedSurfaceBase: SurfaceBaseResolution | null = null;
+
+/**
+ * The git-resolved anchor of this run, hoisted out of the block below because
+ * the in-tree anchor writer further down is a separate top-level block.
+ * Assigned HERE, in the module's own control flow, which is what keeps it typed
+ * as the union it is declared as — see `SurfaceBaseResolution.gitAnchor`.
+ */
+let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
 
 {
   const base = resolveSurfaceBase();
   resolvedSurfaceBase = base;
+  gitResolvedAnchor = base?.gitAnchor ?? null;
   // Whole defs first: check (c) below waives every baseline line under a def this
   // build stopped emitting, on the grounds that this gate adjudicates it. Running
   // it first is what makes that deferral true rather than circular.
@@ -1748,9 +1782,10 @@ let resolvedSurfaceBase: { rev: string; doc: AuthorableSurface } | null = null;
       const violations: string[] = [];
       const goneDefs = new Map<string, number>(); // def no longer emitted -> deleted key count
       for (const key of deletedKeys) {
-        const sep = key.indexOf(':');
-        const defKey = key.slice(0, sep);
-        const prop = key.slice(sep + 1);
+        // Only the def half is read now. The leaf half fed the leaf-NAME match
+        // #5898 removed from route 3 (see the RETIRED_KEYS_BY_MAJOR message
+        // below); slicing it out survived the rewrite as a dead local (#5475).
+        const defKey = key.slice(0, key.indexOf(':'));
         if (!generatedSchemas.has(defKey)) {
           goneDefs.set(defKey, (goneDefs.get(defKey) ?? 0) + 1);
           continue;

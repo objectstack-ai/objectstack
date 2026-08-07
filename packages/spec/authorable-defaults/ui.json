@@ -61,13 +61,11 @@
     "ui/JoinedReportBlock:type = \"tabular\"",
     "ui/ListChartConfig:chartType = \"bar\"",
     "ui/ListView:type = \"grid\"",
-    "ui/LocaleConfig:direction = \"ltr\"",
     "ui/NavigationConfig:mode = \"page\"",
     "ui/NavigationConfig:openNewTab = false",
     "ui/NavigationConfig:preventNavigation = false",
     "ui/NavigationConfig:size = \"auto\"",
     "ui/NavigationContribution:priority = 200",
-    "ui/NumberFormat:style = \"decimal\"",
     "ui/ObjectListView:type = \"grid\"",
     "ui/ObjectUserFilters:element = \"dropdown\"",
     "ui/Page:isDefault = false",
@@ -123,10 +121,6 @@
     "ui/ViewSharing:type = \"collaborative\"",
     "ui/ViewTab:isDefault = false",
     "ui/ViewTab:pinned = false",
-    "ui/ViewTab:visible = true",
-    "ui/WidgetEvent:bubbles = false",
-    "ui/WidgetEvent:cancelable = false",
-    "ui/WidgetManifest:category = \"custom\"",
-    "ui/WidgetProperty:required = false"
+    "ui/ViewTab:visible = true"
   ]
 }

@@ -87,10 +87,15 @@ describe('collectAuthorableDefaults — what the fingerprint reads', () => {
     // loudly, so it is a different and self-announcing class. If this ever
     // fails, someone has widened the ratchet into direction A — which was
     // considered and declined, not overlooked.
-    const loose = [
+    // Typed as the collector's own parameter, not `as const`: a `readonly`
+    // tuple is not an `Iterable<[string, unknown]>`, so these two fixtures did
+    // not type-check at all — invisible until #5475 put `scripts/` in a tsc
+    // program. Naming the producer's type also keeps the fixture honest if that
+    // signature ever changes.
+    const loose: Array<[string, unknown]> = [
       ['system/Job', { properties: { maxRetries: { type: 'integer', minimum: 0, default: 0 } } }],
-    ] as const;
-    const tightened = [
+    ];
+    const tightened: Array<[string, unknown]> = [
       [
         'system/Job',
         {
@@ -105,7 +110,7 @@ describe('collectAuthorableDefaults — what the fingerprint reads', () => {
           },
         },
       ],
-    ] as const;
+    ];
     expect([...collectAuthorableDefaults(tightened)]).toEqual([...collectAuthorableDefaults(loose)]);
   });
 

@@ -1054,6 +1054,30 @@ const step17: MigrationStep = {
     + 'string enum applied row by row by the REST import path and live in the liveness '
     + 'ledger — including its own `javascript` value, which that path rejects with a 400 '
     + 'rather than pretending to run.\n\n'
+    + 'The last of the #4001 enforce-or-remove batch lands on two more `ui/` files (#5055, '
+    + 'ADR-0049 — read it next to #4988 above, it is the same shape one batch later). '
+    + '`ui/widget.zod.ts` published a whole widget-REGISTRATION vocabulary — `WidgetManifest` '
+    + 'with `WidgetLifecycle` hooks, `WidgetEvent`s, `WidgetProperty` knobs and a '
+    + '`WidgetSource` npm/remote/inline implementation union — and `ui/i18n.zod.ts` published '
+    + '`I18nObject`, `PluralRule`, `NumberFormat`, `DateFormat` and `LocaleConfig`. Ten defs, '
+    + 'twenty exported names, and not one carrier key between them: nothing under '
+    + '`packages/spec/src` imported `widget.zod` at all, the only live imports of `i18n.zod` '
+    + 'name `I18nLabelSchema` / `AriaPropsSchema`, the BFS from all 24 metadata-type roots '
+    + 'plus `defineStack` reached none of them, and no repo ever parsed one. So again nothing '
+    + 'is applied for you and nothing needs to be — the change is TS2305 on an import, and a '
+    + '`field.widget: "my_picker"` string is untouched, because that key names a component the '
+    + 'RENDERER registered and never referenced `WidgetManifest`. ⚠️ Read this scope precisely '
+    + 'too, because BOTH files split. `ui/i18n.zod.ts` keeps `I18nLabelSchema` (the label '
+    + 'primitive the whole `ui/` tree imports) and `AriaPropsSchema` — a REAL door, carried as '
+    + '`aria:` on ~30 live shapes and closed by 批 16, untouched here. And `ui/widget.zod.ts` '
+    + 'keeps `FieldWidgetPropsSchema`, the one site of the nine whose evidence differs: it is '
+    + 'a React props contract rather than authorable metadata (it never appeared in the '
+    + 'authorable surface or the schema manifest — `onChange` is a `z.function()`), so having '
+    + 'no parse is its design; and objectui PR #3289 (2026-08-03) made it a live compile-time '
+    + 'consumer, renaming `@object-ui/fields`\' validation slot onto this contract\'s `error` '
+    + 'with no alias and pinning it as a deliberate tripwire. Retiring it would have broken '
+    + 'the one consumer the batch had, one day after it appeared. The measurement that decides '
+    + 'a site is the CURRENT one, not the one in the issue body.\n\n'
     + 'Last, it reconciles the SDUI component-props surface with the renderers that serve it '
     + '(#5775). #5068 wired the first parse `ComponentPropsMap` ever had, and the corpus it '
     + 'landed on diverged in BOTH directions: keys objectui honours that the schema never '
@@ -1802,6 +1826,93 @@ const step17: MigrationStep = {
         + 'a session-only endpoint returns 401 rather than data.',
     },
     {
+      id: 'ui-widget-i18n-family-retired',
+      surface:
+        'ui.widgetManifest / ui.widgetLifecycle / ui.widgetEvent / ui.widgetProperty '
+        + '/ ui.widgetSource / ui.i18nObject / ui.pluralRule / ui.numberFormat / ui.dateFormat '
+        + '/ ui.localeConfig (the widget-registration vocabulary of ui/widget.zod.ts, and the '
+        + 'five doorless shapes of ui/i18n.zod.ts — 10 defs, 26 exported names)',
+      replacement:
+        '(removed — there is no replacement key, because there was never a key. A custom field '
+        + 'widget is still named the same way it always was: `field.widget` is a plain string '
+        + 'naming a component the RENDERER has registered, and objectui\'s registry has always '
+        + 'carried its own runtime manifest for that (`RuntimeWidgetManifest` / '
+        + '`RuntimeWidgetSource` in `@object-ui/types`, objectui#3161 / #4115), which models '
+        + 'different keys and never derived from these. For localisation: write the '
+        + 'default-language string on `label` / `description` — the framework generates the '
+        + 'translation key at registration time from the naming convention — and put '
+        + 'translations in translation files, which is the LIVE `system/translation.zod.ts` '
+        + 'surface. Widget registration and locale formatting as authorable protocol metadata '
+        + 'return via the ENFORCE route of ADR-0049 through a new ADR — the registry / loader / '
+        + 'formatter first, the vocabulary second)',
+      reason:
+        '`ui/widget.zod.ts` published a complete widget-registration vocabulary — a manifest '
+        + 'with lifecycle hooks, custom events, configurable properties and an '
+        + 'npm/remote/inline implementation-source union — and `ui/i18n.zod.ts` published a '
+        + 'structured-label, plural-rule and locale-formatting vocabulary. NOTHING in the '
+        + 'protocol carried either. Three independent measurements, re-run on `origin/main` '
+        + 'immediately before the removal with their controls passing in the SAME run: (1) no '
+        + 'module under `packages/spec/src` imported `widget.zod` at all, and the only imports '
+        + 'of `i18n.zod` anywhere name `I18nLabelSchema` / `AriaPropsSchema` (both KEPT), so no '
+        + 'schema declared a carrier key — `field.widget` is a `z.string()` naming a registered '
+        + 'component and has never referenced `WidgetManifest`; (2) a BFS over the in-memory '
+        + 'Zod graph from all 24 metadata-type roots plus `defineStack`\'s `ObjectStackSchema` '
+        + 'reached none of them, while `PageSchema` / `ObjectListViewSchema` resolved `direct` '
+        + 'in the same run and a synthetic carrier flipped every one of them; (3) zero '
+        + '`.parse()` / `.safeParse()` in objectstack, objectui or cloud outside these files\' '
+        + 'own unit tests. `NumberFormat` / `DateFormat` DID have a carrier key '
+        + '(`LocaleConfig.numberFormat` / `.dateFormat`) but the carrier was itself doorless, '
+        + 'so the subtree was `no door` rather than `no gate` and goes whole — leaving the two '
+        + 'leaves behind would strand exported schemas with no consumer (#3950). '
+        + '`I18nObjectSchema` was additionally superseded by its own file-neighbour: '
+        + '`I18nLabelSchema`\'s documentation already says translation keys are generated at '
+        + 'registration time and translations live in translation files, and the live '
+        + 'translation surface is `system/translation.zod.ts`, which uses none of these shapes. '
+        + 'The 2026-08-06 ruling weighed giving them a carrier (option B) and rejected it: that '
+        + 'is a feature with a registry and a renderer behind it, not ledger clean-up. '
+        + 'Tightening them to `strictObject` was rejected earlier and explicitly (#4001 批 16) '
+        + '— strictness is a property of a PARSE and there is no parse, so it would spend a '
+        + 'breaking change to leave "a precisely validated dead slot, the more convincing lie" '
+        + '(#4583). With no carrier key there is nothing to tombstone and no `sys_metadata` row '
+        + 'or source file for a D2 conversion to rewrite: this entry is the D3 record, route 3, '
+        + 'the same shape as #4988 (the ui/ interaction config family), #4834 (kernel '
+        + 'plugin-runtime family) and #4938 (`HttpServerConfig`). '
+        + '⚠️ `WidgetManifest.performance`\'s own `retiredKey()` tombstone (#3896 close-out) is '
+        + 'SUBSUMED here, the #4657/#4834 way: it goes with the shape that carried it, which is '
+        + 'strictly stronger than the tombstone, because there is no longer a manifest to '
+        + 'author the key INTO. '
+        + '⚠️ One of the nine widget sites is deliberately NOT retired. '
+        + '`FieldWidgetPropsSchema` survives: it is a REACT PROPS CONTRACT rather than '
+        + 'authorable metadata (it never appeared in `authorable-surface/` or '
+        + '`json-schema.manifest/` — its `onChange` is a `z.function()`), so "zero parse" is its '
+        + 'design and not its defect, and it acquired a live cross-repo compile-time consumer '
+        + 'one day before 批 16 measured: objectui PR #3289 (2026-08-03) renamed '
+        + '`@object-ui/fields`\' validation slot onto the spec\'s `error` with no alias, the '
+        + 'form renderer began producing it, and '
+        + '`packages/fields/src/__tests__/spec-symbol-batch7.test.ts` pins the shape against '
+        + '`import type { FieldWidgetProps } from \'@objectstack/spec/ui\'` as an intentional '
+        + 'tripwire. Re-verified on objectui `origin/main` 2026-08-07. ADR-0049, #5055.',
+      acceptanceCriteria:
+        'No code imports `WidgetManifest(Schema|Parsed)`, `WidgetLifecycle(Schema)`, '
+        + '`WidgetEvent(Schema|Parsed)`, `WidgetProperty(Schema|Parsed)`, '
+        + '`WidgetSource(Schema|Parsed)`, `I18nObject(Schema)`, `PluralRule(Schema)`, '
+        + '`NumberFormat(Schema|Parsed)`, `DateFormat(Schema)` or '
+        + '`LocaleConfig(Schema|Parsed)` from `@objectstack/spec` or `@objectstack/spec/ui` — '
+        + 'every one is TS2305 after upgrade, on every public entry (pinned by resolved symbol '
+        + 'identity in `ui/widget-i18n-retirement.test.ts`). No metadata document needs '
+        + 'editing, because none could ever carry one of these shapes: a stack that parsed '
+        + 'before parses byte-for-byte the same after, and a `field.widget: "my_picker"` string '
+        + 'is untouched. `FieldWidgetProps` / `FieldWidgetPropsSchema` / '
+        + '`FieldWidgetPropsParsed`, `I18nLabel(Schema)` and `AriaProps(Schema)` all still '
+        + 'resolve on `@objectstack/spec/ui` and are asserted to. ⚠️ objectui needs a companion '
+        + 'PR in the same window: `packages/types/src/__tests__/page-nav-misc-spec-parity.test.ts` '
+        + 'asserts the spec STILL owns `WidgetManifest` / `WidgetSource` (it is the '
+        + '"a workaround should not outlive its reason" half of the objectui#3169 tripwire, '
+        + 'designed to go red exactly here), and `packages/types/src/widget.ts`\'s '
+        + '"Renamed off the spec\'s `WidgetManifest` name" comments now point at names that no '
+        + 'longer exist. Both are prescribed responses to this removal, not collateral damage.',
+    },
+    {
       id: 'ui-interaction-config-family-retired',
       surface:
         'ui.touchInteraction / ui.gestureConfig / ui.dndConfig / ui.keyboardNavigationConfig '
@@ -2356,5 +2467,33 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
   // value schema had no other consumer, so it goes with the key rather than
   // surviving as an exported union nothing references — an exported schema with
   // no consumer reads as a capability to whoever finds it (#3950).
-  17: ['shared/FieldMappingTransform'],
+  //
+  // The ten that follow are #5055 (ADR-0049 enforce-or-remove, maintainer ruling
+  // 2026-08-06, window moved to protocol 17 on 2026-08-07): `ui/widget.zod.ts`'s
+  // widget-registration vocabulary and the five doorless shapes of
+  // `ui/i18n.zod.ts`. None had a carrier key, none was reachable from the
+  // metadata-type roots, and none was ever parsed in objectstack / objectui /
+  // cloud — so there is no tombstone and no D2 conversion (route 3 of the
+  // retirement playbook), and this table plus the D3 `SemanticMigration`
+  // `ui-widget-i18n-family-retired` IS the declaration. Same shape as #4988.
+  //
+  // ⚠️ `ui/FieldWidgetProps` is deliberately NOT here — it was never in the
+  // manifest to begin with (its `onChange` is a `z.function()`, so no JSON
+  // Schema is emitted) and it survives the retirement: it is a React props
+  // contract, not authorable metadata, and it has a live compile-time consumer
+  // in objectui (`packages/fields/src/__tests__/spec-symbol-batch7.test.ts`,
+  // landed by objectui PR #3289).
+  17: [
+    'shared/FieldMappingTransform',
+    'ui/WidgetManifest',
+    'ui/WidgetLifecycle',
+    'ui/WidgetEvent',
+    'ui/WidgetProperty',
+    'ui/WidgetSource',
+    'ui/I18nObject',
+    'ui/PluralRule',
+    'ui/NumberFormat',
+    'ui/DateFormat',
+    'ui/LocaleConfig',
+  ],
 };

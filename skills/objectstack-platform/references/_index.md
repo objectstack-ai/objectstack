@@ -43,7 +43,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/system/tenant.zod.ts` — Tenant Schema (Multi-Tenant Architecture)
 - `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Action Parameter Schema
 - `node_modules/@objectstack/spec/src/ui/app.zod.ts` — Base Navigation Item Schema
-- `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — I18n Object Schema
+- `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — I18n Label Schema
 
 ## How to read these
 

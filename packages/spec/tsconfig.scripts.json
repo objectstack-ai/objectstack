@@ -1,0 +1,65 @@
+// The SCRIPTS-layer type-check program (#5475). Third and last of the shapes
+// this package's tsc coverage could be missing: #4311 was "the package has no
+// typecheck task at all", #5286 was "the test layer is EXCLUDED from the one it
+// has", and this is "the directory was never INCLUDED by anything". Not the
+// same defect twice — an exclusion is at least visible in a config, while
+// `scripts/` simply appeared in no `include` in the package, so
+// `check:type-check-coverage` could not even count it (that gate tallies test
+// files under the PRIMARY config's include roots, and `src` is where those stop).
+//
+// What is in here, and why it is not dead weight:
+//   - 29 `scripts/**/*.test.ts` files that `vitest.config.ts` genuinely runs on
+//     every `pnpm test`;
+//   - ~48 more files that ARE the gates: `build-schemas.ts` (`gen:schema`, the
+//     producer of every JSON Schema this package publishes, and of the #4650
+//     authorable-surface deletion gate's verdict), `build-openapi.ts`,
+//     `liveness/check-liveness.mts`, `check-strictness-ledger.mts`, and the
+//     twenty-odd others `package.json` wires to a `check:*` script.
+// These decide the package's generated artifacts and several gates' red/green,
+// and until this file existed no type checker had read one line of them. tsx,
+// which runs them, only transpiles.
+//
+// Why a SIBLING of `tsconfig.test.json` rather than a wider `include` on it:
+//   - `allowImportingTsExtensions` is needed here and ONLY here. The `.mts`
+//     modules under `scripts/liveness/` import each other by TS extension
+//     (`./evidence.mts`), which tsx resolves and tsc rejects without the flag.
+//     Turning it on for the test program would additionally permit
+//     `import './x.ts'` inside `src/**/*.test.ts`, where the BUILD config —
+//     which emits — still rejects it. A flag that buys nothing for `src` and
+//     opens a new divergence there belongs on the program that needs it.
+//   - `test-typecheck-debt.json` is ONE exact ledger per package, keyed by file.
+//     Its 79 entries are `src/**/*.test.ts` fixtures, and the ledger is
+//     shrink-only in both directions. `scripts/**` enters with ZERO entries —
+//     every error the merge surfaced is FIXED in the change that added this
+//     file, not recorded — so a plain `tsc --noEmit` is the stricter gate: the
+//     ledger permits growth by adding a line, this permits none.
+//
+// STRICTNESS IS UNTOUCHED, the same commitment `tsconfig.test.json` makes and
+// for the same reason: `strict`, `noUnusedLocals`, `noUnusedParameters`,
+// `noImplicitReturns` and the rest are inherited from the root config. Only
+// module semantics and the program's root move. If a script does not compile,
+// that is the finding — it is how this change learned that ~100 lines of
+// `build-schemas.ts` were being checked as `never` (see that file's
+// `gitResolvedAnchor` note).
+//
+// `module`/`moduleResolution` match `tsconfig.test.json`'s reasoning applied to
+// the other runner: these files execute under tsx, which resolves extensionless
+// relative imports and TS extensions alike. The build config's NodeNext would
+// report that spelling as an error about the CHECK rather than about the code.
+//
+// `rootDir` widens to the package root because `scripts/` sits outside `src/`.
+// It is a program-shape statement only — `noEmit` is on, nothing is written.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

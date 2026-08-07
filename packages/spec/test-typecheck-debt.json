@@ -79,6 +79,6 @@
     "src/ui/report.test.ts": 3,
     "src/ui/theme.test.ts": 6,
     "src/ui/view.test.ts": 79,
-    "src/ui/widget.test.ts": 4
+    "src/ui/widget.test.ts": 3
   }
 }

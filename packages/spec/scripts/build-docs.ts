@@ -300,7 +300,11 @@ function sourcePathToDocsRoute(target: string): string | null {
 // because a helper happened to sit at the top of the file, and `check:docs`
 // could not see it (the artifact reproduced the wrong block faithfully).
 
-function generateMarkdown(schemaName: string, schema: any, category: string, zodFile: string) {
+// `_zodFile` is passed by the caller and deliberately unread here: the file slug
+// is a page-level fact, and every use of it (title, source link, card) lives in
+// `generateZodFileMarkdown` around this call. Underscored rather than dropped so
+// this touches one line of a renderer PR #6377 is editing (#5475).
+function generateMarkdown(schemaName: string, schema: any, category: string, _zodFile: string) {
   const defs = schema.definitions || schema.$defs || {};
   let mainDef = defs[schemaName];
 
@@ -720,8 +724,6 @@ Object.keys(CATEGORIES).forEach(category => {
   manageDir(dir);
   managedCount++;
 });
-
-const generatedFiles: string[] = [];
 
 // 2. Generate Files
 // Clear DOCS_ROOT first to remove old flattened files

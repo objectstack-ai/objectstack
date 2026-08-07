@@ -49,7 +49,6 @@
     "ui/Dataset",
     "ui/DatasetDimension",
     "ui/DatasetMeasure",
-    "ui/DateFormat",
     "ui/DerivedMeasureOp",
     "ui/ElementButtonProps",
     "ui/ElementDataSource",
@@ -76,7 +75,6 @@
     "ui/HttpMethodSubset",
     "ui/HttpRequest",
     "ui/I18nLabel",
-    "ui/I18nObject",
     "ui/InlineAction",
     "ui/InterfacePageConfig",
     "ui/JoinedReportBlock",
@@ -84,7 +82,6 @@
     "ui/ListChartConfig",
     "ui/ListColumn",
     "ui/ListView",
-    "ui/LocaleConfig",
     "ui/NavigationArea",
     "ui/NavigationConfig",
     "ui/NavigationContribution",
@@ -93,7 +90,6 @@
     "ui/NotificationPosition",
     "ui/NotificationSeverity",
     "ui/NotificationType",
-    "ui/NumberFormat",
     "ui/ObjectListView",
     "ui/ObjectNavItem",
     "ui/ObjectUserFilters",
@@ -110,7 +106,6 @@
     "ui/PageType",
     "ui/PageVariable",
     "ui/PaginationConfig",
-    "ui/PluralRule",
     "ui/RecordActivityProps",
     "ui/RecordChatterProps",
     "ui/RecordDetailsProps",
@@ -152,11 +147,6 @@
     "ui/ViewTab",
     "ui/VisualizationType",
     "ui/WidgetActionType",
-    "ui/WidgetColorVariant",
-    "ui/WidgetEvent",
-    "ui/WidgetLifecycle",
-    "ui/WidgetManifest",
-    "ui/WidgetProperty",
-    "ui/WidgetSource"
+    "ui/WidgetColorVariant"
   ]
 }

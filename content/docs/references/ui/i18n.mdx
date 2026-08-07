@@ -5,18 +5,6 @@ description: I18n protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-I18n Object Schema
-Structured internationalization label with translation key and parameters.
-
-@example
-```typescript
-const label: I18nObject = {
-  key: 'views.task_list.label',
-  defaultValue: 'Task List',
-  params: { count: 5 },
-};
-```
-
 <Callout type="info">
 **Source:** `packages/spec/src/ui/i18n.zod.ts`
 </Callout>
@@ -24,8 +12,8 @@ const label: I18nObject = {
 ## TypeScript Usage
 
 ```typescript
-import { AriaPropsSchema, DateFormatSchema, I18nLabelSchema, I18nObjectSchema, LocaleConfigSchema, NumberFormatSchema, PluralRuleSchema } from '@objectstack/spec/ui';
-import type { AriaProps, DateFormat, I18nLabel, I18nObject, LocaleConfig, NumberFormat, PluralRule } from '@objectstack/spec/ui';
+import { AriaPropsSchema, I18nLabelSchema } from '@objectstack/spec/ui';
+import type { AriaProps, I18nLabel } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AriaPropsSchema.parse(data);
@@ -47,89 +35,6 @@ ARIA accessibility attributes
 
 
 ---
-
-## DateFormat
-
-Date/time formatting rules
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **dateStyle** | `Enum<'full' \| 'long' \| 'medium' \| 'short'>` | optional | Date display style |
-| **timeStyle** | `Enum<'full' \| 'long' \| 'medium' \| 'short'>` | optional | Time display style |
-| **timeZone** | `string` | optional | IANA time zone (e.g., "America/New_York") |
-| **hour12** | `boolean` | optional | Use 12-hour format |
-
-
----
-
-
----
-
-## I18nObject
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Translation key (e.g., "views.task_list.label") |
-| **defaultValue** | `string` | optional | Fallback value when translation key is not found |
-| **params** | `Record<string, string \| number \| boolean>` | optional | Interpolation parameters (e.g., `{ count: 5 }`) |
-
-
----
-
-## LocaleConfig
-
-Locale configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **code** | `string` | ✅ | BCP 47 language code (e.g., "en-US", "zh-CN") |
-| **fallbackChain** | `string[]` | optional | Fallback language codes in priority order (e.g., ["zh-TW", "en"]) |
-| **direction** | `Enum<'ltr' \| 'rtl'>` | ✅ | Text direction: left-to-right or right-to-left |
-| **numberFormat** | `{ style: Enum<'decimal' \| 'currency' \| 'percent' \| 'unit'>; currency?: string; unit?: string; minimumFractionDigits?: number; … }` | optional | Default number formatting rules |
-| **dateFormat** | `{ dateStyle?: Enum<'full' \| 'long' \| 'medium' \| 'short'>; timeStyle?: Enum<'full' \| 'long' \| 'medium' \| 'short'>; timeZone?: string; hour12?: boolean }` | optional | Default date/time formatting rules |
-
-
----
-
-## NumberFormat
-
-Number formatting rules
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **style** | `Enum<'decimal' \| 'currency' \| 'percent' \| 'unit'>` | ✅ | Number formatting style |
-| **currency** | `string` | optional | ISO 4217 currency code (e.g., "USD", "EUR") |
-| **unit** | `string` | optional | Unit for unit formatting (e.g., "kilometer", "liter") |
-| **minimumFractionDigits** | `number` | optional | Minimum number of fraction digits |
-| **maximumFractionDigits** | `number` | optional | Maximum number of fraction digits |
-| **useGrouping** | `boolean` | optional | Whether to use grouping separators (e.g., 1,000) |
-
-
----
-
-## PluralRule
-
-ICU plural rules for a translation key
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Translation key |
-| **zero** | `string` | optional | Zero form (e.g., "No items") |
-| **one** | `string` | optional | Singular form (e.g., "`{count}` item") |
-| **two** | `string` | optional | Dual form (e.g., "`{count}` items" for exactly 2) |
-| **few** | `string` | optional | Few form (e.g., for 2-4 in some languages) |
-| **many** | `string` | optional | Many form (e.g., for 5+ in some languages) |
-| **other** | `string` | ✅ | Default plural form (e.g., "`{count}` items") |
 
 
 ---

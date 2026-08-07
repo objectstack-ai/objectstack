@@ -173,6 +173,17 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
     check: 'check:dual-source-exports',
     why: 'audits the built .d.ts for same-name exports resolving to DIFFERENT declarations across entry points — baseline is hand-ratcheted, not generated (needs a fresh `pnpm build`)',
   },
+  // Deliberately NOT beside `check:test-typecheck` in GATED above, and the
+  // difference is the whole design of #5475: that gate compares a checked-in
+  // artifact (test-typecheck-debt.json) against a fresh tsc run, so it has a
+  // generator and a directional ratchet. This one has NEITHER — `scripts/**`
+  // entered its program with zero ledger entries and is meant to stay there, so
+  // there is no file to regenerate and no `--fix` that could make it green. A
+  // failure here is always a code change.
+  {
+    check: 'check:scripts-typecheck',
+    why: 'type-checks packages/spec/scripts/** (the generators and gate scripts themselves) under tsconfig.scripts.json — no artifact, and no debt ledger by design (#5475)',
+  },
 ];
 
 /**
