@@ -31,7 +31,7 @@
 // the case is pinned here next to the fix so the two verdicts are read together.
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import type { EngineQueryOptions } from '@objectstack/spec/data';
+import type { EngineQueryOptionsParsed } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 function makeDriver() {
@@ -132,7 +132,7 @@ describe('update strip acts on CALLER-submitted values (#5591)', () => {
       if (!ctx.previous && ctx.input?.id) {
         // Typed, not `as any`: the #4918 ratchet counts an erased engine
         // query-options bag even in test code.
-        const priorQuery: EngineQueryOptions = { where: { id: ctx.input.id }, limit: 1 };
+        const priorQuery: EngineQueryOptionsParsed = { where: { id: ctx.input.id }, limit: 1 };
         ctx.previous = await engine.findOne(ctx.object, priorQuery);
       }
     }, { priority: 5 });

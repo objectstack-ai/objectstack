@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { HotReloadManager } from './hot-reload.js';
 import type { ObjectLogger } from './logger.js';
 import type { Plugin } from './types.js';
-import type { HotReloadConfig } from '@objectstack/spec/kernel';
+import type { HotReloadConfigParsed } from '@objectstack/spec/kernel';
 
 /** Records `error` reports; every other level is dropped. `child()` is self. */
 function createRecordingLogger(errors: { message: string; error?: unknown }[]): ObjectLogger {
@@ -44,7 +44,7 @@ describe('HotReloadManager', () => {
   // satisfy while still leaving the loop pinned.
   describe('Shutdown timeout guard does not outlive the race (#4952)', () => {
     /** A guard long enough that a single orphan is unmistakable. */
-    const guardedConfig = (overrides: Partial<HotReloadConfig> = {}): HotReloadConfig =>
+    const guardedConfig = (overrides: Partial<HotReloadConfigParsed> = {}): HotReloadConfigParsed =>
       ({
         enabled: true,
         debounceDelay: 1000,
@@ -52,7 +52,7 @@ describe('HotReloadManager', () => {
         stateStrategy: 'none',
         shutdownTimeout: 120_000,
         ...overrides,
-      }) as HotReloadConfig;
+      }) as HotReloadConfigParsed;
 
     const noState = () => ({});
     const noRestore = () => {};
