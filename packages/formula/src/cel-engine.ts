@@ -13,7 +13,7 @@
  *    third-party plugins can't ship runaway predicates.
  */
 
-import { Environment, serialize } from '@marcbachmann/cel-js';
+import { Environment, ParseError, serialize } from '@marcbachmann/cel-js';
 import type { ASTNode } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
@@ -800,12 +800,63 @@ function hydrateOverloadStrings(value: unknown): unknown {
   return value;
 }
 
+/**
+ * cel-js's code for a bounds violation. Raised **only** from the parser
+ * (`Parser#limitExceeded`, one call site per limit key), so it always arrives as
+ * a {@link ParseError} and must be read before the ParseError → `parse` rule
+ * below — otherwise every `maxAstNodes` / `maxDepth` overrun would be reported
+ * as a syntax fault.
+ */
+const CEL_LIMIT_EXCEEDED_CODE = 'limit_exceeded';
+
+/**
+ * Grade a cel-js fault off the error **class** the parser threw, not off its
+ * prose. Returns `undefined` for anything that is not a cel-js error, so the
+ * caller can fall back to the legacy keyword table.
+ *
+ * Why the class and not the message (#6133): `classifyError` used to decide
+ * between `parse` / `type` / `runtime` by regex-matching the error text, and
+ * cel-js has ~19 distinct parse-time wordings of which only three contain
+ * `parse` / `unexpected` / `syntax`. Everything else — `Expected RPAREN, got
+ * EOF` (unbalanced parens), `Expected RBRACKET, got EOF`, `Unterminated
+ * string`, `Reserved identifier: package`, the seven escape-sequence faults —
+ * fell through to the default `runtime`, and `kind` is not an internal field:
+ * it is interpolated verbatim into the author-facing rejection text
+ * (`objectql`'s `rule-validator` / `cel-fault`) and into the REST `reason`.
+ * An author who forgot a closing paren was told their *data* was at fault.
+ *
+ * Topping the keyword list up cannot fix this, because cel-js embeds the
+ * **author's own source line** in `message` (see `formatErrorWithHighlight` in
+ * `lib/errors.js`), so the author controls the text being matched. Measured on
+ * cel-js 8.0.0: `((record.type_id)` — a plain unbalanced paren — classified as
+ * `type`, purely because the echoed source contains the substring "type".
+ * Classifying on prose is not a table with holes in it; it is the hole.
+ *
+ * Scope note, deliberate: only the ParseError arm is structural here. cel-js's
+ * `TypeChecker` picks its error class **by phase**, not by fault
+ * (`this.createError = isEvaluating ? evaluationError : typeError`), so the same
+ * `unknown_variable` fault is a `TypeError` at check time and an
+ * `EvaluationError` at evaluate time. Routing `EvaluationError` → `runtime`
+ * wholesale would therefore silently re-grade faults the keyword table gets
+ * right today (`Unknown variable: x` → `type`). Those arms stay on the keyword
+ * table until that mapping is measured per code — see #6133 for the audit.
+ */
+function classifyCelParseFault(err: unknown): 'parse' | 'bounds' | undefined {
+  if (!(err instanceof ParseError)) return undefined;
+  return err.code === CEL_LIMIT_EXCEEDED_CODE ? 'bounds' : 'parse';
+}
+
 function classifyError(err: unknown): EvalResult<never> {
   const message = err instanceof Error ? err.message : String(err);
-  let kind: 'parse' | 'type' | 'runtime' | 'bounds' = 'runtime';
-  if (/Exceeded max/i.test(message)) kind = 'bounds';
-  else if (/parse|unexpected|syntax/i.test(message)) kind = 'parse';
-  else if (/type|unknown variable|undeclared/i.test(message)) kind = 'type';
+  let kind: 'parse' | 'type' | 'runtime' | 'bounds' | undefined = classifyCelParseFault(err);
+  if (kind === undefined) {
+    // Legacy keyword table — the residual path for faults that carry no
+    // structured contract at all (our own stdlib, a native JS throw).
+    kind = 'runtime';
+    if (/Exceeded max/i.test(message)) kind = 'bounds';
+    else if (/parse|unexpected|syntax/i.test(message)) kind = 'parse';
+    else if (/type|unknown variable|undeclared/i.test(message)) kind = 'type';
+  }
   return { ok: false, error: { kind, message } };
 }
 

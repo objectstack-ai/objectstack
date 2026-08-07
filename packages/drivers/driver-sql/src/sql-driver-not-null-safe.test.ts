@@ -94,7 +94,6 @@ describe('[#5146] SqlDriver compiles $not NULL-safely', () => {
 
   const ids = async (where: unknown): Promise<string[]> => {
     const rows = await driver.find('deal', {
-      object: 'deal',
       fields: ['id'],
       where: where as FilterCondition,
     });

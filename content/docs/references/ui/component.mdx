@@ -277,7 +277,7 @@ const result = AIChatWindowProps.parse(data);
 | **width** | `string \| number` | optional | Panel width (e.g., "350px", "30%") |
 | **collapsible** | `boolean` | ✅ | Whether the panel can be collapsed |
 | **defaultCollapsed** | `boolean` | ✅ | Whether the panel starts collapsed |
-| **feed** | `{ types?: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| 'file' \| 'record_create' \| 'record_delete' \| 'approval' \| 'sharing' \| 'system'>[]; filterMode: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle: boolean; limit: integer; … }` | optional | Embedded activity feed configuration |
+| **feed** | `{ types?: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| … +6 more>[]; filterMode: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle: boolean; limit: integer; … }` | optional | Embedded activity feed configuration |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -368,7 +368,7 @@ Type: `string`
 | **columns** | `string[]` | optional | Fields to display in the related list. Optional: when omitted, columns derive from the related object's highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns → this inline list. |
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order for related records |
 | **limit** | `integer` | ✅ | Number of records to display initially |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| 'less_than_or_equal' \| 'in' \| 'not_in' \| 'is_empty' \| 'is_not_empty' \| 'is_null' \| 'is_not_null' \| 'before' \| 'after' \| 'between'>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria for related records |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria for related records |
 | **title** | `string` | optional | Custom title for the related list |
 | **showViewAll** | `boolean` | ✅ | Show "View All" link to see all related records |
 | **actions** | `string[]` | optional | Action IDs available for related records |

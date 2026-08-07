@@ -105,7 +105,7 @@ function declareFilterLogicSweep(cell: DialectCell): void {
     describe('shared conformance cases', () => {
       for (const c of FILTER_LOGIC_CASES) {
         it(c.name, async () => {
-          const rows = await driver.find(FILTER_TABLE, { object: FILTER_TABLE, where: c.filter });
+          const rows = await driver.find(FILTER_TABLE, { where: c.filter });
           const got = rows
             .map((r: any) => String(r.id))
             .sort((x: string, y: string) => x.localeCompare(y));
@@ -147,7 +147,6 @@ function declareFilterLogicSweep(cell: DialectCell): void {
 
       it('matches only the rows inside the abutting windows', async () => {
         const rows = await driver.find(DATE_WINDOW_TABLE, {
-          object: DATE_WINDOW_TABLE,
           where: {
             $or: [
               { end_date: { $gte: '2026-08-07', $lt: '2026-08-08' } },
@@ -160,7 +159,6 @@ function declareFilterLogicSweep(cell: DialectCell): void {
 
       it('keeps a window AND-ed with a sibling key in the same branch', async () => {
         const rows = await driver.find(DATE_WINDOW_TABLE, {
-          object: DATE_WINDOW_TABLE,
           where: {
             $or: [
               { id: 'nope' },

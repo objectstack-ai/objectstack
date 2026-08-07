@@ -48,7 +48,7 @@ describe('[#4436] InMemoryDriver filter refusals carry INVALID_FILTER and leak n
   });
 
   const find = (where: unknown) =>
-    driver.find('deal', { object: 'deal', fields: ['id'], where: where as FilterCondition });
+    driver.find('deal', { fields: ['id'], where: where as FilterCondition });
 
   const cases: Array<[string, unknown, string]> = [
     ['unsupported operator in a condition array', [['stage', 'sounds_like', 'won']], 'sounds_like'],

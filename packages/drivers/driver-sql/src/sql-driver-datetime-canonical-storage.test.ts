@@ -100,7 +100,7 @@ describe('Field.datetime writes land in ONE canonical form (#3912)', () => {
       );
     }
 
-    const rows = await driver.find('evt', { object: 'evt', orderBy: [{ field: 'at', order: 'asc' }] });
+    const rows = await driver.find('evt', { orderBy: [{ field: 'at', order: 'asc' }] });
     expect(rows.map((r: any) => r.id)).toEqual(instants.map(([id]) => id));
 
     // …and the raw column sorts identically, i.e. the DB did the ordering.
@@ -188,12 +188,12 @@ describe('backfillCanonicalDatetimes converges a legacy database (#3912)', () =>
     // it fast. Both must agree, or the migration would be observable as a change
     // in results — which is exactly what it must never be.
     const window = { at: { $gte: '2026-03-20T00:00:00.000Z', $lte: '2026-03-21T00:00:00.000Z' } };
-    const before = (await driver.find('evt', { object: 'evt', where: window })).map((r: any) => r.id).sort();
+    const before = (await driver.find('evt', { where: window })).map((r: any) => r.id).sort();
     expect(before).toEqual(['canon', 'epoch', 'naive', 'offset']);
 
     await (driver as any).backfillCanonicalDatetimes('evt', true);
 
-    const after = (await driver.find('evt', { object: 'evt', where: window })).map((r: any) => r.id).sort();
+    const after = (await driver.find('evt', { where: window })).map((r: any) => r.id).sort();
     expect(after).toEqual(before);
   });
 

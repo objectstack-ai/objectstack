@@ -83,7 +83,7 @@ describe('[#5324/#5328] a filter this driver cannot evaluate is refused, not ans
   });
 
   const ids = async (where: unknown): Promise<string[]> => {
-    const rows = await driver.find('deal', { object: 'deal', fields: ['id'], where: where as FilterCondition });
+    const rows = await driver.find('deal', { fields: ['id'], where: where as FilterCondition });
     return (rows as Array<Record<string, unknown>>).map((r) => String(r.id)).sort();
   };
 

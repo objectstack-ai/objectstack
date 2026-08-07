@@ -287,7 +287,7 @@ describe('#5005 control — array keys still concatenate', () => {
 
 // ─── Control — the pre-existing bespoke strategies are untouched ────
 
-describe('#5005 control — manifest / objects / i18n strategies unchanged', () => {
+describe('#5005 control — manifest / objects strategies unchanged', () => {
   it('manifest still follows the `manifest` option', () => {
     const a = raw({ manifest: manifestA });
     const b = raw({ manifest: manifestB });
@@ -304,12 +304,10 @@ describe('#5005 control — manifest / objects / i18n strategies unchanged', () 
     expect(composeStacks([a, b], { objectConflict: 'override' }).objects).toHaveLength(1);
   });
 
-  it('i18n keeps its pre-existing last-wins (deliberately out of scope for #5005)', () => {
-    const a = raw({ manifest: manifestA, i18n: { defaultLocale: 'en' } });
-    const b = raw({ manifest: manifestB, i18n: { defaultLocale: 'zh-CN' } });
-
-    expect(composeStacks([a, b]).i18n).toEqual({ defaultLocale: 'zh-CN' });
-  });
+  // `i18n` used to be pinned here as the one bespoke strategy #5005 left alone
+  // (last-wins). #5051 retired that strategy — the key is now `'single'` like
+  // `api` / `server`, and its coverage lives in
+  // `compose-stacks-i18n-merge.test.ts`.
 });
 
 // ─── Structural pin — every declared key has a rule ─────────────────

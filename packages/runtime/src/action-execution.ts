@@ -347,11 +347,28 @@ export async function callData(deps: ActionExecutionDeps,
         throw { statusCode: 503, message: 'Data service not available' };
     }
 
-    if (action === 'batch') {
-        // Batch operations — not yet supported via direct service dispatch
-        return { object: params.object, results: [] };
-    }
-
+    // [#5856] `batch` deliberately has NO arm here. It used to answer
+    // `{ object, results: [] }` — an HTTP 200 whose body a consumer cannot
+    // tell apart from "the batch ran and matched nothing" — on a path that
+    // opened no transaction and wrote nothing. Its safety was never its own:
+    // no caller of `callData` can spell `batch` (`domains/data.ts` compares
+    // `parts[1]` against the literal `'query'`; `domains/mcp.ts`,
+    // `domains/actions.ts` and `invokeBusinessAction` pass literals; the
+    // declarative endpoint executor is bounded by
+    // `ApiEndpointSchema.objectParams.operation`, a closed enum of
+    // find/get/create/update/delete; and `callData` is not part of this
+    // package's export surface), so the arm's only live effect was to
+    // pre-decide — wrongly — what the FIRST caller to arrive would get:
+    // a silent success where every other unhandled action gets a loud
+    // refusal. Removed under ADR-0049 enforce-or-remove, so `batch` falls to
+    // the same 400 as any other unknown action. Batching itself is untouched
+    // and keeps its ONE owner (route-ownership rule 1): both the atomic
+    // cross-object `POST /batch` and the per-object `POST /data/:object/batch`
+    // are mounted by `@objectstack/rest`'s `registerBatchEndpoints`
+    // (ADR-0119) — which is exactly why this dispatcher answers
+    // `capabilities.transactionalBatch: false` (#5672,
+    // `http-dispatcher.ts`). Pinned by
+    // `action-execution-calldata-batch-retired.test.ts`.
     throw { statusCode: 400, message: `Unknown data action: ${action}` };
 }
 

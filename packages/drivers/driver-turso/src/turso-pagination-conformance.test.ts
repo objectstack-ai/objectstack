@@ -79,7 +79,7 @@ describe('TursoDriver — paged reads are a partition of the result set (local m
   it('the fixture really is all twelve rows', async () => {
     const rows: Array<Record<string, unknown>> = await driver.find(
       'ticket',
-      { object: 'ticket' },
+      {},
       { bypassTenantAudit: true },
     );
     expect(rows.map((r) => String(r.id)).sort()).toEqual([...PAGINATION_ALL_IDS].sort());

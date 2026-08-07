@@ -127,7 +127,7 @@ describe('SqliteWasmDriver Schema Sync (SQLite)', () => {
       users: ['u1', 'u2'],
     });
 
-    const results = await driver.find('multi_test', { object: 'multi_test' });
+    const results = await driver.find('multi_test', {});
     const row = results[0];
 
     expect(row.tags).toEqual(['a', 'b']);
@@ -150,7 +150,7 @@ describe('SqliteWasmDriver Schema Sync (SQLite)', () => {
     expect(columns).toHaveProperty('completion');
 
     await driver.create('percent_test', { completion: 0.85 });
-    const res = await driver.find('percent_test', { object: 'percent_test' });
+    const res = await driver.find('percent_test', {});
     expect(res[0].completion).toBe(0.85);
   });
 
@@ -244,7 +244,7 @@ describe('SqliteWasmDriver Schema Sync (SQLite)', () => {
       work_hours: '09:00:00',
     });
 
-    const res = await driver.find('new_types_test', { object: 'new_types_test' });
+    const res = await driver.find('new_types_test', {});
     const row = res[0];
 
     expect(row.email).toBe('test@example.com');

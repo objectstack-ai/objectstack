@@ -176,7 +176,7 @@ Complete plugin loading configuration
 | **hotReload** | `{ enabled: boolean; environment: Enum<'development' \| 'staging' \| 'production'>; strategy: Enum<'full' \| 'partial' \| 'state-preserve'>; watchPatterns?: string[]; … }` | optional | Plugin hot reload configuration |
 | **caching** | `{ enabled: boolean; storage: Enum<'memory' \| 'disk' \| 'indexeddb' \| 'hybrid'>; keyStrategy: Enum<'version' \| 'hash' \| 'timestamp'>; ttl?: integer; … }` | optional | Plugin caching configuration |
 | **sandboxing** | `{ enabled: boolean; scope: Enum<'automation-only' \| 'untrusted-only' \| 'all-plugins'>; isolationLevel: Enum<'none' \| 'process' \| 'vm' \| 'iframe' \| 'web-worker'>; allowedCapabilities?: string[]; … }` | optional | Plugin sandboxing configuration |
-| **monitoring** | `{ enabled: boolean; metrics?: Enum<'load-time' \| 'init-time' \| 'memory-usage' \| 'cpu-usage' \| 'api-calls' \| 'error-rate' \| 'cache-hit-rate'>[]; samplingRate: number; reportingInterval: integer; … }` | optional | Plugin performance monitoring configuration |
+| **monitoring** | `{ enabled: boolean; metrics?: Enum<'load-time' \| 'init-time' \| 'memory-usage' \| 'cpu-usage' \| 'api-calls' \| … +2 more>[]; samplingRate: number; reportingInterval: integer; … }` | optional | Plugin performance monitoring configuration |
 
 
 ---
