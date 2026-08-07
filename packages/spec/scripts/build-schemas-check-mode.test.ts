@@ -1517,7 +1517,9 @@ describe('build-schemas.ts — the drift notice names the direction it measured 
       // Truncation moves TWO things here, and the second was a surprise worth
       // writing down: `merge-base HEAD origin/main` itself fails once the walk is
       // cut, so `resolveSurfaceBase` falls back to origin/main's TIP as the
-      // baseline (it says so — "using origin/main tip … as the baseline anchor").
+      // baseline (it says so — "no merge base is walkable here, so this run
+      // anchors on the origin/main TIP …", the line #6359 reworded to name what
+      // that anchor then MISJUDGES).
       // The pair being compared is therefore anchor-at-`tip` vs baseline-at-
       // `mainTip`, not the fork point at all. And the ancestry between them is
       // exactly what a grafted history cannot answer: `mainTip` is its own shallow

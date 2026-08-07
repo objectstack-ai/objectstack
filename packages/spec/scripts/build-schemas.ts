@@ -1509,8 +1509,17 @@ function resolveSurfaceBase(): SurfaceBaseResolution | null {
   const git = gitInPackage;
   const committed = readCommittedSurfaceBase();
 
-  // CI's typecheck job checks out shallow with no branch refs, so fetch the
-  // one ref this check needs (depth 1 — a single snapshot) before giving up.
+  // A checkout with no branch refs (any `fetch-depth: 1` job) cannot name
+  // origin/main at all, so fetch the one ref this check needs before giving up.
+  //
+  // This fetch is GUARDED by the probe above and that is load-bearing (#6359):
+  // where the ref already resolves — every full clone, and every CI job that
+  // checks out `fetch-depth: 0` — it does not run, so it cannot undo the depth
+  // its job asked for. Where it does run, it is `--depth=1` because the only
+  // thing it is trying to buy is the ability to NAME origin/main; deepening it
+  // here would silently make every shallow build pay for a full history it was
+  // configured not to want. The job that needs walkable ancestry declares that
+  // in its checkout step, which is where the cost is visible.
   let tipProbe = git('rev-parse', '--verify', '--quiet', 'origin/main^{commit}');
   if (tipProbe.status !== 0) {
     git('fetch', '--quiet', '--depth=1', 'origin', '+refs/heads/main:refs/remotes/origin/main');
@@ -1526,7 +1535,29 @@ function resolveSurfaceBase(): SurfaceBaseResolution | null {
     const mergeBase = git('merge-base', 'HEAD', tip);
     const rev = mergeBase.status === 0 ? mergeBase.stdout.trim() : tip;
     if (mergeBase.status !== 0) {
-      console.log(`   (shallow history — using origin/main tip ${tip.slice(0, 12)} as the baseline anchor)`);
+      // That "…is the merge base anyway" holds only while the merge ref is
+      // fresh. It is generated when the PR opens or updates and goes STALE as
+      // main advances, so on a branch that forked earlier the tip anchor
+      // carries keys the fork point never had — and this gate reads every one
+      // of them as a line THIS commit deleted. The direction is worth spelling
+      // out because the verdict it produces ("deleted without proof") reads
+      // like a severe spec violation and costs far more to diagnose than to
+      // fix: #6359 was one CI job missing `fetch-depth: 0`, and the PR it
+      // reddened (#6356) had not touched packages/spec at all.
+      //
+      // Diagnostic only — the verdict below is unchanged. Making this route
+      // stop MISJUDGING rather than merely announcing itself is a separate
+      // decision with a much wider blast radius: this block is top-level, so
+      // every `gen:schema` runs it, which means every shallow job that builds
+      // @objectstack/spec (ci.yml `build-core`, docker-publish, release, …)
+      // takes this path whenever that build is a cache miss. Tracked in #6452.
+      console.log(
+        `   (shallow history — no merge base is walkable here, so this run anchors on the\n` +
+          `    origin/main TIP ${tip.slice(0, 12)} instead. ⚠️  Under a tip anchor a key that main ADDED\n` +
+          `    after this branch forked is indistinguishable from a key this branch DELETED. If a\n` +
+          `    deletion is reported below for a file you did not touch, check that first — and if\n` +
+          `    this is CI, the job's checkout step needs \`fetch-depth: 0\` (#6359).)`,
+      );
     }
     const baseline = readSurfaceKeysAtRev(
       git,
