@@ -1278,6 +1278,100 @@ function compareAnchorKeys(
 }
 
 /**
+ * `merge-base --is-ancestor`, read as the THREE answers it gives (#5370).
+ *
+ * Extracted so the two places that need this direction — the re-anchor guard
+ * below and the drift notice further down (#5847) — decide it ONCE, with one
+ * reading of the exit codes. Two independent determinations of one direction is
+ * how the two answers drift apart later, and this file already paid for the
+ * drift: the notice used to infer direction from a key subtraction and printed
+ * the opposite of what the guard said about the very same pair of revs.
+ *
+ * 0 is "ancestor", 1 is "not an ancestor", and anything else (128 with a
+ * `fatal:`, or `null` from the timeout) is git declining to answer. Folded into
+ * a `&&`/`||` chain the third collapses into the second and an ERROR becomes a
+ * verdict — the trap cloud#1116 paid for.
+ *
+ * Shallow history makes a FOURTH reading necessary, and it is asymmetric. A
+ * truncated walk can only ever LOSE reachability, never invent it, so exit 0 is
+ * proof wherever it appears — while exit 1 in a shallow checkout means nothing at
+ * all (#5358's own first CI run was failed by exactly that answer, about a commit
+ * that plainly was an ancestor; the same false 1 is reproducible today in any
+ * agent container, where the anchor's `baseRev` sits in `.git/shallow` as its own
+ * grafted root). So shallowness is consulted only to decide whether a NEGATIVE
+ * counts — never to discard a positive, which would refuse re-anchors that are
+ * demonstrably fine.
+ *
+ * What each caller DOES with `unknown` is the caller's own disposition, and the
+ * two differ on purpose: the guard fails closed (refuses the write), the notice
+ * simply declines to name a direction. Neither may turn it into a verdict.
+ */
+type Ancestry =
+  | { answer: 'yes' }
+  | { answer: 'no' }
+  | { answer: 'unknown'; reason: 'git-declined'; status: number | null; stderr: string }
+  | { answer: 'unknown'; reason: 'shallow' };
+
+function probeAncestry(git: GitRun, ancestor: string, descendant: string): Ancestry {
+  const probe = git('merge-base', '--is-ancestor', ancestor, descendant);
+  // Reachability was demonstrated. Truncation cannot fake that, so this is the
+  // one answer that stands in every checkout, shallow included.
+  if (probe.status === 0) return { answer: 'yes' };
+  if (probe.status !== 1) {
+    return {
+      answer: 'unknown',
+      reason: 'git-declined',
+      status: probe.status,
+      stderr: (probe.stderr || '').trim().split('\n')[0] || '(no output)',
+    };
+  }
+  // A negative, on the other hand, is only meaningful where history is WALKABLE —
+  // the same truncation `verifyCommittedSurfaceBase` accounts for. There it SKIPS
+  // a verification, which is safe; for the guard below it would BLESS a write,
+  // which is not, and for the notice it would print a direction backwards.
+  if (git('rev-parse', '--is-shallow-repository').stdout.trim() === 'true') {
+    return { answer: 'unknown', reason: 'shallow' };
+  }
+  return { answer: 'no' };
+}
+
+/**
+ * Where the committed anchor sits relative to the baseline THIS build resolved
+ * (#5847) — the question the drift notice has to answer before it can word
+ * itself, decided on `probeAncestry` above rather than on a key subtraction.
+ *
+ * `unordered` is not a failure and not a fallback: it is the honest answer in a
+ * shallow checkout (CI's own typecheck job is one), when git declines, and in
+ * the genuinely unordered case where two authentic origin/main ancestors sit on
+ * different branches of a merge. Naming a direction there would be exactly the
+ * defect this exists to remove, one state over.
+ */
+type AnchorRelation = { kind: 'behind' } | { kind: 'ahead' } | { kind: 'unordered'; why: string };
+
+function relateAnchorToBaseline(git: GitRun, committedRev: string, resolvedRev: string): AnchorRelation {
+  const forward = probeAncestry(git, committedRev, resolvedRev);
+  if (forward.answer === 'yes') return { kind: 'behind' };
+  const backward = probeAncestry(git, resolvedRev, committedRev);
+  if (backward.answer === 'yes') return { kind: 'ahead' };
+  // Only a definitive negative BOTH ways is a real fork; anything else is an
+  // answer nobody has, and the two are told apart because their remedies differ.
+  const unusable = forward.answer === 'unknown' ? forward : backward.answer === 'unknown' ? backward : null;
+  if (!unusable) {
+    return {
+      kind: 'unordered',
+      why: 'neither commit is an ancestor of the other — they sit on different branches of a merge',
+    };
+  }
+  return {
+    kind: 'unordered',
+    why:
+      unusable.reason === 'shallow'
+        ? 'shallow checkout — a "not an ancestor" answer is not usable about a truncated history'
+        : `\`git merge-base --is-ancestor\` did not answer (exit ${unusable.status}): ${unusable.stderr}`,
+  };
+}
+
+/**
  * The anchor moves FORWARD, or it does not move (#5370).
  *
  * Called immediately before the only write, so a re-anchor may replace `baseRev`
@@ -1291,22 +1385,11 @@ function compareAnchorKeys(
  * comes back, the deletion gate stops seeing it, and the offline consumers of
  * #5235 get a baseline older than the published one.
  *
- * Three exit codes from `merge-base --is-ancestor`, and they must be read as
- * three answers, not two: 0 is "ancestor", 1 is "not an ancestor", and anything
- * else (128 with a `fatal:`, or `null` from the timeout) is git declining to
- * answer. Folded into a `&&`/`||` chain the third collapses into the second and
- * an ERROR becomes a verdict — the trap cloud#1116 paid for. Here it fails
- * CLOSED: an ancestry nobody could establish refuses the write.
- *
- * Shallow history makes a FOURTH reading necessary, and it is asymmetric. A
- * truncated walk can only ever LOSE reachability, never invent it, so exit 0 is
- * proof wherever it appears — while exit 1 in a shallow checkout means nothing at
- * all (#5358's own first CI run was failed by exactly that answer, about a commit
- * that plainly was an ancestor; the same false 1 is reproducible today in any
- * agent container, where the anchor's `baseRev` sits in `.git/shallow` as its own
- * grafted root). So shallowness is consulted only to decide whether a NEGATIVE
- * counts — never to discard a positive, which would refuse re-anchors that are
- * demonstrably fine.
+ * The three-plus-one readings of `merge-base --is-ancestor` live in
+ * `probeAncestry` above, shared with the drift notice (#5847). What is decided
+ * HERE is the disposition on `unknown`, and it is to fail CLOSED: an ancestry
+ * nobody could establish refuses the write rather than defaulting to one of the
+ * two answers.
  */
 function assertAnchorMovesForward(git: GitRun, committedRev: string, resolvedRev: string): void {
   if (committedRev === resolvedRev) return;
@@ -1326,24 +1409,16 @@ function assertAnchorMovesForward(git: GitRun, committedRev: string, resolvedRev
     process.exit(1);
   };
 
-  const probe = git('merge-base', '--is-ancestor', committedRev, resolvedRev);
-  // Reachability was demonstrated. Truncation cannot fake that, so this is the
-  // one answer that stands in every checkout, shallow included.
-  if (probe.status === 0) return;
-  if (probe.status !== 1) {
+  const probe = probeAncestry(git, committedRev, resolvedRev);
+  if (probe.answer === 'yes') return;
+  if (probe.answer === 'unknown') {
     return refuseIndeterminate(
-      `\`git merge-base --is-ancestor ${from} ${to}\` did not answer (exit ${probe.status}):\n` +
-        `   ${(probe.stderr || '').trim().split('\n')[0] || '(no output)'}`,
-    );
-  }
-  // A negative, on the other hand, is only meaningful where history is WALKABLE —
-  // the same truncation `verifyCommittedSurfaceBase` accounts for. There it SKIPS
-  // a verification, which is safe; here it would BLESS a write, which is not.
-  if (git('rev-parse', '--is-shallow-repository').stdout.trim() === 'true') {
-    return refuseIndeterminate(
-      'This is a shallow checkout: history is truncated, so `merge-base --is-ancestor` reports\n' +
-        `   "not an ancestor" about commits that plainly are one — ${from} is very likely one of\n` +
-        '   them (a `--depth=1` fetch grafts it in as its own root, unreachable from origin/main).',
+      probe.reason === 'git-declined'
+        ? `\`git merge-base --is-ancestor ${from} ${to}\` did not answer (exit ${probe.status}):\n` +
+            `   ${probe.stderr}`
+        : 'This is a shallow checkout: history is truncated, so `merge-base --is-ancestor` reports\n' +
+            `   "not an ancestor" about commits that plainly are one — ${from} is very likely one of\n` +
+            '   them (a `--depth=1` fetch grafts it in as its own root, unreachable from origin/main).',
     );
   }
   console.error(
@@ -1818,14 +1893,67 @@ function checkManifestRemovals(git: GitRun, baseRev: string | null): void {
     } else if (drifted) {
       // Reported, never fatal, and never repaired here: see the notes above on
       // `main`'s own merge base and on #5358.
+      //
+      // The DIRECTION is asked, not assumed (#5847). This used to print one fixed
+      // sentence — "trails the baseline at <rev> by <n> key(s)" — with `n` counted
+      // as `resolved keys ∖ anchor keys`. In the state where the committed anchor
+      // is NEWER than the baseline this build resolved, the resolved keys are a
+      // subset of the anchor's, so that count is 0 and the line degrades to
+      // "trails the baseline at <rev> by 0 key(s)": the direction backwards, and
+      // the one number that could have contradicted it zeroed out. That state is
+      // ordinary, not a corner — a build during an uncommitted merge, or a branch
+      // that forked before the anchor advanced and then took a newer anchor
+      // (#5370 catalogues both) — and since #5370 `--update-base` REFUSES there
+      // and explains the direction correctly, so the two were describing one
+      // situation in contradictory language.
+      //
+      // Both key deltas are reported now, because either can be the empty one and
+      // the pair is what makes the sentence say something. Only the wording and
+      // the counts change here: this arm still writes nothing, exits nothing, and
+      // decides nothing.
       const recorded = new Set(committed.doc.keys);
-      const behind = anchor.keys.filter((k) => !recorded.has(k)).length;
-      console.log(
-        `ℹ️  ${SURFACE_BASE_FILE_NAME} trails the baseline at ${anchor.rev.slice(0, 12)} by ${behind} key(s)\n` +
-          `   — expected, and not an error: the anchor is a snapshot of an upstream commit, proved\n` +
-          `   AUTHENTIC rather than current. Re-anchoring is a deliberate act with its own reviewed\n` +
-          `   diff — \`${REANCHOR_COMMAND}\` — never a side effect of this build (#5358).`,
-      );
+      const resolvedKeys = new Set(anchor.keys);
+      const onlyBaseline = anchor.keys.filter((k) => !recorded.has(k)).length;
+      const onlyAnchor = committed.doc.keys.filter((k) => !resolvedKeys.has(k)).length;
+      const anchorShort = committed.doc.baseRev.slice(0, 12);
+      const baseShort = anchor.rev.slice(0, 12);
+      const delta =
+        onlyBaseline > 0 && onlyAnchor > 0
+          ? `${onlyBaseline} key(s) only that baseline has, ${onlyAnchor} only the anchor has`
+          : onlyBaseline > 0
+            ? `${onlyBaseline} key(s) only that baseline has`
+            : onlyAnchor > 0
+              ? `${onlyAnchor} key(s) only the anchor has`
+              : 'the same keys in a different order';
+      const reanchor =
+        `   Re-anchoring is a deliberate act with its own reviewed diff — \`${REANCHOR_COMMAND}\`\n` +
+        `   — never a side effect of this build (#5358).`;
+      const relation = relateAnchorToBaseline(gitInPackage, committed.doc.baseRev, anchor.rev);
+      if (relation.kind === 'behind') {
+        console.log(
+          `ℹ️  ${SURFACE_BASE_FILE_NAME} trails the baseline at ${baseShort}: it mirrors the older\n` +
+            `   ${anchorShort}, and they differ by ${delta}\n` +
+            `   — expected, and not an error: the anchor is a snapshot of an upstream commit, proved\n` +
+            `   AUTHENTIC rather than current.\n${reanchor}`,
+        );
+      } else if (relation.kind === 'ahead') {
+        console.log(
+          `ℹ️  ${SURFACE_BASE_FILE_NAME} is AHEAD of the baseline this build resolved: it mirrors\n` +
+            `   ${anchorShort}, a DESCENDANT of the merge base ${baseShort} that HEAD resolves to, and\n` +
+            `   they differ by ${delta}\n` +
+            `   — not an error, and not something to re-anchor: the anchor only ever moves forward, so\n` +
+            `   what closes this gap is bringing HEAD up to date with origin/main (and committing it),\n` +
+            `   never a re-anchor onto the older baseline.\n${reanchor}`,
+        );
+      } else {
+        console.log(
+          `ℹ️  ${SURFACE_BASE_FILE_NAME} differs from the baseline this build resolved: it mirrors\n` +
+            `   ${anchorShort}, that baseline is at ${baseShort}, and they differ by ${delta}\n` +
+            `   — which of the two is newer could not be established here, so this run names no\n` +
+            `   direction: ${relation.why}.\n` +
+            `   Not an error either way.\n${reanchor}`,
+        );
+      }
     }
   }
 }

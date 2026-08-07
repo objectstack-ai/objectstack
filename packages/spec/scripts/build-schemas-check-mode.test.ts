@@ -1327,6 +1327,257 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// #5847 — the drift notice names the direction it MEASURED.
+//
+// The anchor and the baseline a build resolves disagree constantly, and the
+// notice that reports it used to have one sentence for both directions:
+// "trails the baseline at <rev> by <n> key(s)", with `n` counted as
+// `resolved keys ∖ anchor keys`. That count is only the size of the gap when the
+// anchor is the OLDER of the two. When the committed anchor is newer — the
+// resolved baseline's keys are then a subset of the anchor's — `n` is 0 and the
+// line reads "trails the baseline at 9ce056a879ef by 0 key(s)": the direction
+// backwards, and the one number that could have contradicted it zeroed out.
+//
+// Both states are ordinary. #5370 catalogues the two ways in (a build during an
+// uncommitted merge, and a branch that forked before the anchor advanced), and
+// since #5370 `--update-base` REFUSES in exactly this state and explains the
+// direction correctly — so one situation was being described by two of our own
+// messages in contradictory language. Nothing about the gate changes here: same
+// exit code, same (absent) writes, same verdicts. Only the sentence.
+//
+// The direction is decided by the SAME `merge-base --is-ancestor` reading the
+// re-anchor guard decides on (`probeAncestry`), never by a second key
+// subtraction — a subtraction is what said the wrong thing in the first place,
+// and two independent determinations of one direction is how the two answers
+// drift apart again.
+describe('build-schemas.ts — the drift notice names the direction it measured (#5847)', () => {
+  /** In `tip` and `mainTip`, absent from `older`: the key the anchor holds and the resolved baseline does not. */
+  const AHEAD_KEY = 'data/Object:label';
+  /** Only in `mainTip`: what origin/main added after the anchor. */
+  const LANDED_KEY = 'data/Object:description';
+  /** A key in a DIFFERENT shard, so the unordered fixture's two sides merge without conflict. */
+  const UI_KEY = 'ui/View:form';
+
+  /** The branch's fork point: upstream, and behind the committed anchor. */
+  let older: string;
+  /** Ahead of `older`, on origin/main — what the AHEAD fixture's anchor mirrors. */
+  let tip: string;
+  /** origin/main, ahead of both. */
+  let mainTip: string;
+
+  /** `git()` throws on a non-zero exit, which is exactly what a NEGATIVE ancestry
+   *  probe returns — so fixture validation needs its own non-throwing runner. */
+  const isAncestor = (a: string, b: string): boolean =>
+    spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: sandbox }).status === 0;
+
+  const shallowFile = (): string => path.join(sandbox, '.git', 'shallow');
+
+  beforeAll(() => {
+    for (const k of [AHEAD_KEY, LANDED_KEY, UI_KEY]) {
+      expect(pristineSurface, `${k} is no longer in the baseline — pick another live key`).toContain(k);
+    }
+  });
+
+  beforeEach(() => {
+    seedManifest((s) => s);
+    // Three upstream commits, linear, each one key richer than the last — the
+    // same ladder #5370 uses, because these are the same two states it named.
+    older = seedBase((s) => s.filter((k) => k !== AHEAD_KEY && k !== LANDED_KEY));
+    tip = seedBase((s) => s.filter((k) => k !== LANDED_KEY));
+    mainTip = seedBase((s) => s);
+    seedSurface((s) => s);
+  });
+
+  afterEach(() => {
+    fs.rmSync(shallowFile(), { force: true });
+    git('checkout', '-q', '-f', 'main');
+    // Hand `main` back current and CLEAN: an anchor that mirrors main's own tip,
+    // so the describes after this one start from a tree with no drift of ours in it.
+    seedSurface((s) => s);
+    seedSurfaceBase(git('rev-parse', 'HEAD'), (k) => k);
+    git('add', AUTHORABLE_SURFACE_DIR_NAME, 'authorable-surface.base.json');
+    git('commit', '-q', '--allow-empty', '-m', 'fixture: restore a current anchor on main');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  });
+
+  /** Commit the anchor — and the surface the fork restored alongside it, since a
+   *  `checkout` to an older commit takes the shards back with it — so that
+   *  `git status` staying empty across a run can mean "this run wrote nothing". */
+  function commitAnchor(baseRev: string, mutate: (keys: string[]) => string[]): string {
+    const bytes = seedSurfaceBase(baseRev, mutate);
+    git('add', AUTHORABLE_SURFACE_DIR_NAME, 'authorable-surface.base.json');
+    git('commit', '-q', '-m', `fixture: anchor at ${baseRev.slice(0, 12)}`);
+    expect(git('status', '--porcelain', '-uno')).toBe('');
+    return bytes;
+  }
+
+  it(
+    'says the anchor TRAILS when it is the older of the two, and names both revs and both deltas',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The ordinary lag: HEAD is on main, the anchor mirrors an older upstream
+      // commit. This direction was never wrong — what it lacked was the anchor's
+      // own rev (so the reader could see WHICH two commits disagree) and the
+      // reverse delta.
+      const anchorAtOlder = commitAnchor(older, (k) =>
+        k.filter((x) => x !== AHEAD_KEY && x !== LANDED_KEY),
+      );
+      expect(isAncestor(older, mainTip)).toBe(true);
+
+      const { status, output } = run([]);
+
+      expect(status).toBe(0);
+      expect(readSurfaceBase()).toBe(anchorAtOlder);
+      expect(git('status', '--porcelain', '-uno')).toBe('');
+      expect(output).toContain(`trails the baseline at ${mainTip.slice(0, 12)}: it mirrors the older`);
+      expect(output).toContain(`${older.slice(0, 12)}, and they differ by 2 key(s) only that baseline has`);
+      expect(output).toContain('not an error');
+      expect(output).toContain('gen:authorable-surface-base');
+      expect(output).not.toContain('AHEAD of');
+      expect(output).not.toMatch(/by 0 key\(s\)/);
+      expect(output).not.toContain('⚓');
+    },
+  );
+
+  it(
+    'says the anchor is AHEAD when it is the newer of the two — never "trails … by 0 key(s)"',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // THE regression. The anchor mirrors `tip`; HEAD forked at `older`, so the
+      // baseline this build resolves is `older` and its keys are a strict SUBSET
+      // of the anchor's. The old subtraction therefore counted 0 and the line
+      // claimed the file trailed a baseline it is a descendant of.
+      git('checkout', '-q', '-B', 'issue-5847-ahead', older);
+      seedSurface((s) => s);
+      const anchorAtTip = commitAnchor(tip, (k) => k.filter((x) => x !== LANDED_KEY));
+      expect(git('merge-base', 'HEAD', mainTip)).toBe(older);
+      expect(isAncestor(older, tip)).toBe(true);
+      expect(isAncestor(tip, older)).toBe(false);
+
+      const { status, output } = run([]);
+
+      // Exit code and files are the half that must NOT move: this is a sentence
+      // fix, and a diagnostic that starts deciding things is a different change.
+      expect(status).toBe(0);
+      expect(readSurfaceBase()).toBe(anchorAtTip);
+      expect(git('status', '--porcelain', '-uno')).toBe('');
+      expect(output).toContain('is AHEAD of the baseline this build resolved');
+      expect(output).toContain(
+        `${tip.slice(0, 12)}, a DESCENDANT of the merge base ${older.slice(0, 12)} that HEAD resolves to`,
+      );
+      expect(output).toContain('they differ by 1 key(s) only the anchor has');
+      // The two halves of the defect, pinned as negatives so a future edit cannot
+      // reintroduce either one without this going red.
+      expect(output).not.toContain('trails the baseline');
+      expect(output).not.toMatch(/by 0 key\(s\)/);
+      expect(output).not.toContain('⚓');
+    },
+  );
+
+  it(
+    'claims NO direction in a shallow checkout, and names truncation as the reason',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // CI's own typecheck job is a shallow checkout, and so is every agent
+      // container — so this is the common environment, not an exotic one.
+      //
+      // Truncation moves TWO things here, and the second was a surprise worth
+      // writing down: `merge-base HEAD origin/main` itself fails once the walk is
+      // cut, so `resolveSurfaceBase` falls back to origin/main's TIP as the
+      // baseline (it says so — "using origin/main tip … as the baseline anchor").
+      // The pair being compared is therefore anchor-at-`tip` vs baseline-at-
+      // `mainTip`, not the fork point at all. And the ancestry between them is
+      // exactly what a grafted history cannot answer: `mainTip` is its own shallow
+      // root, so walking down from it to reach `tip` is the walk that was cut, and
+      // the reverse is a plain negative. Neither probe yields a usable answer.
+      //
+      // The old line printed "trails the baseline at <mainTip> by 1 key(s)" here,
+      // which happens to be TRUE of the untruncated history — and that is the
+      // point: it was never measured, it was assumed, and one fixture over the
+      // same assumption printed the exact opposite of the truth. Declining is the
+      // same disposition #5370 already took for the write.
+      git('checkout', '-q', '-B', 'issue-5847-shallow', older);
+      seedSurface((s) => s);
+      const anchorAtTip = commitAnchor(tip, (k) => k.filter((x) => x !== LANDED_KEY));
+      fs.writeFileSync(shallowFile(), `${mainTip}\n`);
+      expect(git('rev-parse', '--is-shallow-repository')).toBe('true');
+
+      const { status, output } = run([]);
+
+      expect(status).toBe(0);
+      expect(readSurfaceBase()).toBe(anchorAtTip);
+      expect(git('status', '--porcelain', '-uno')).toBe('');
+      expect(output).toContain('differs from the baseline this build resolved');
+      expect(output).toContain(
+        `${tip.slice(0, 12)}, that baseline is at ${mainTip.slice(0, 12)}, and they differ by ` +
+          `1 key(s) only that baseline has`,
+      );
+      expect(output).toContain(
+        'shallow checkout — a "not an ancestor" answer is not usable about a truncated history',
+      );
+      // A direction nobody could establish is never asserted — in EITHER wording.
+      expect(output).not.toContain('trails the baseline');
+      expect(output).not.toContain('AHEAD of');
+      expect(output).not.toMatch(/by 0 key\(s\)/);
+    },
+  );
+
+  it(
+    'claims NO direction when the two revs are genuinely unordered',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Two authentic origin/main ancestors that sit on opposite sides of a merge:
+      // each passes every check the gate makes about a single rev, and neither is
+      // an ancestor of the other. There is no direction to report, so the notice
+      // reports the delta and says so — the disposition `probeAncestry`'s
+      // `unknown` gets here, as against the re-anchor guard's fail-closed refusal.
+      const base = seedBase((s) => s);
+
+      git('checkout', '-q', '-B', 'issue-5847-side-a', base);
+      seedSurface((s) => s.filter((k) => k !== AHEAD_KEY));
+      git('add', AUTHORABLE_SURFACE_DIR_NAME);
+      git('commit', '-q', '-m', 'fixture: one side of the merge (data shard)');
+      const sideA = git('rev-parse', 'HEAD');
+
+      git('checkout', '-q', '-B', 'issue-5847-side-b', base);
+      seedSurface((s) => s.filter((k) => k !== UI_KEY));
+      git('add', AUTHORABLE_SURFACE_DIR_NAME);
+      git('commit', '-q', '-m', 'fixture: other side of the merge (ui shard)');
+      const sideB = git('rev-parse', 'HEAD');
+
+      // Conflict-free by construction: the two sides touch different shards.
+      git('merge', '--no-ff', '-q', '-m', 'fixture: merge the two sides', sideA);
+      const merged = git('rev-parse', 'HEAD');
+      git('update-ref', 'refs/remotes/origin/main', merged);
+      expect(isAncestor(sideA, merged)).toBe(true);
+      expect(isAncestor(sideA, sideB)).toBe(false);
+      expect(isAncestor(sideB, sideA)).toBe(false);
+
+      // HEAD forks on side B; the anchor authentically mirrors side A.
+      git('checkout', '-q', '-B', 'issue-5847-unordered', sideB);
+      seedSurface((s) => s);
+      const anchorAtSideA = commitAnchor(sideA, (k) => k.filter((x) => x !== AHEAD_KEY));
+      expect(git('merge-base', 'HEAD', merged)).toBe(sideB);
+
+      const { status, output } = run([]);
+
+      expect(status).toBe(0);
+      expect(readSurfaceBase()).toBe(anchorAtSideA);
+      expect(git('status', '--porcelain', '-uno')).toBe('');
+      expect(output).toContain('differs from the baseline this build resolved');
+      expect(output).toContain(
+        `${sideA.slice(0, 12)}, that baseline is at ${sideB.slice(0, 12)}, and they differ by ` +
+          `1 key(s) only that baseline has, 1 only the anchor has`,
+      );
+      expect(output).toContain('neither commit is an ancestor of the other');
+      expect(output).not.toContain('trails the baseline');
+      expect(output).not.toContain('AHEAD of');
+      expect(output).not.toMatch(/by 0 key\(s\)/);
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // #5371 — the output clean is scoped to THIS generator's artifacts.
 //
 // `packages/spec/json-schema/` has two writers: this script emits
