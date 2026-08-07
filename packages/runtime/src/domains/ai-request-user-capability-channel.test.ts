@@ -126,7 +126,12 @@ describe('#4705 — /ai/* req.user carries the capability channel', () => {
         // Verbatim — the set-name channel is untouched by the addition, and
         // `ai_seat` (synthesized by resolveExecutionContext) still rides it.
         expect(user.permissions).toEqual(['admin_full_access', 'ai_seat']);
-        expect(user.roles).toEqual(['platform_admin']);
+        // The position channel, under its one canonical spelling — the `roles`
+        // alias this line used to read was retired in #6011. Substance kept:
+        // positions are still a THIRD channel, unmerged with either permission
+        // list, which is what this case exists to prove.
+        expect(user.positions).toEqual(['platform_admin']);
+        expect('roles' in user).toBe(false);
         // …and neither list has absorbed the other. A capability must NOT be
         // readable off `permissions`, nor a set name off `systemPermissions`:
         // that conflation is the failure mode this issue exists to prevent.
@@ -247,7 +252,7 @@ describe('#4705 — the concrete-mount producer agrees on the shape', () => {
         expect(seen.user.displayName).toBe('Admin');
         expect(Object.keys(seen.user).sort()).toEqual([
             'displayName', 'email', 'id', 'isPlatformAdmin', 'name', 'organizationId',
-            'permissions', 'positions', 'roles', 'systemPermissions', 'userId',
+            'permissions', 'positions', 'systemPermissions', 'userId',
         ]);
     });
 

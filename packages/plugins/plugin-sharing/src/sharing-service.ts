@@ -8,6 +8,11 @@ import type {
   SharingExecutionContext,
   ShareAccessLevel,
 } from '@objectstack/spec/contracts';
+import {
+  normalizeTenancyPosture,
+  postureEnforcesWall,
+  type TenancyPosture,
+} from '@objectstack/spec/security';
 import { WRITE_ACCESS_LEVELS, normalizeAccessLevel } from './access-level.js';
 import {
   deleteRowsForDeletedRecords,
@@ -92,6 +97,39 @@ export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public
   return 'private';
 }
 
+/**
+ * [#5859 / #5852] The caller's ACTIVE ORGANIZATION as carried by an execution
+ * context — the value `HierarchyScopeContext.organizationId` (the authoritative
+ * tenancy field since #5858 / PR #5973) must be filled with.
+ *
+ * Every transport puts it on `tenantId`: both HTTP entry points build their
+ * context from the ONE shared authorization resolver
+ * (`resolveAuthzContext`, `@objectstack/core`), which resolves
+ * `tenantId = session.activeOrganizationId` on the session path and
+ * `sys_api_key.organization_id` on the API-key path, and `ExecutionContext`
+ * documents the field as exactly that ("Current organization/tenant ID
+ * (resolved from `session.activeOrganizationId`)"). NOTHING sets
+ * `organizationId` on an execution context — which is why reading that key
+ * here produced a structural `null` on every real request, and every
+ * hierarchy resolver ran with no organization to scope by (#5852: an ordinary
+ * member `POST`ing a share on a SIBLING organization's record got 201).
+ *
+ * This is the PRODUCER speaking the contract's authoritative name — not a
+ * consumer-side `?? tenantId` tolerance, which #5858 explicitly rules out for
+ * resolvers. The identical mapping already backs the Layer-0 tenant wall in
+ * `@objectstack/plugin-security` (`computeTenantLayer0Filter({ organizationId:
+ * context?.tenantId })`), so the two enforcement layers now scope by the same
+ * value from the same field.
+ *
+ * Returns `null` — never `undefined`, and never a blank string — for "no active
+ * organization": the contract types the field as `string | null`, and `null` is
+ * the value a resolver's fail-closed obligation is written against.
+ */
+function activeOrganizationId(context: SharingExecutionContext): string | null {
+  const org = (context as any)?.tenantId;
+  return typeof org === 'string' && org.trim() !== '' ? org : null;
+}
+
 function hasOwnerField(schema: any): boolean {
   return Boolean(schema?.fields && OWNER_FIELD in schema.fields);
 }
@@ -123,6 +161,20 @@ const RECORD_SHARE_SWEEP_SUBJECT = {
   issue: '#5103',
 } as const;
 
+/**
+ * [ADR-0105 D1 / #5859] The narrow slice of the `tenancy` service the
+ * organization gate needs — the deployment's posture, i.e. whether an
+ * organization wall is enforced at all. Kept structural (and identical in shape
+ * to what `SecurityPlugin` reads) so a stack without `@objectstack/plugin-auth`
+ * needs no adapter, and so a unit test can state a posture without a kernel.
+ */
+export interface SharingTenancyProbe {
+  /** `single` | `group` | `isolated` (the legacy `multi` spelling normalizes). */
+  readonly posture?: TenancyPosture | string;
+  /** Pre-ADR-0105 shape: "is the hard organization wall on?" */
+  readonly isolationActive?: boolean;
+}
+
 export interface SharingServiceOptions {
   engine: SharingEngine;
   /** Object names that bypass sharing — typically platform internals. */
@@ -139,6 +191,16 @@ export interface SharingServiceOptions {
    * null → management authority fails CLOSED to owner-only.
    */
   securityService?: () => SharingSecurityProbe | null | undefined;
+  /**
+   * [ADR-0105 D1 / #5859] Late-bound lookup for the `tenancy` service — the
+   * single source of truth for which posture is IN FORCE. Read ONLY to decide
+   * whether a missing authoritative organization must refuse a hierarchy scope
+   * (see {@link SharingService.organizationScopeRequired}).
+   *
+   * Absent / throwing / posture-less → the gate assumes a WALLED deployment and
+   * refuses: an unresolvable posture must not be read as "no wall, carry on".
+   */
+  tenancy?: () => SharingTenancyProbe | null | undefined;
   /** [#5103] Optional logger for the record-delete cascade / orphan sweep. */
   logger?: { info?: Function; warn?: Function; error?: Function; debug?: Function };
 }
@@ -156,12 +218,14 @@ export class SharingService implements ISharingService {
   private readonly bypassObjects: Set<string>;
   private readonly hierarchyResolver?: () => IHierarchyScopeResolver | null | undefined;
   private readonly securityService?: () => SharingSecurityProbe | null | undefined;
+  private readonly tenancy?: () => SharingTenancyProbe | null | undefined;
   private readonly logger?: SharingServiceOptions['logger'];
 
   constructor(options: SharingServiceOptions) {
     this.engine = options.engine;
     this.hierarchyResolver = options.hierarchyResolver;
     this.securityService = options.securityService;
+    this.tenancy = options.tenancy;
     this.logger = options.logger;
     this.bypassObjects = new Set([
       'sys_record_share',
@@ -862,6 +926,27 @@ export class SharingService implements ISharingService {
    * only by `@objectstack/security-enterprise`). The open edition has none, so
    * this fails CLOSED to owner-only — a hierarchy scope NEVER widens without the
    * enterprise resolver (the spec gate also refuses to compile such a grant).
+   *
+   * [#5859 / #5852] The PRODUCER side of {@link HierarchyScopeContext}: the
+   * authoritative `organizationId` is filled from the execution context's
+   * active organization ({@link activeOrganizationId}). The read this replaced
+   * (`(context as any).organizationId`) named a key NO transport ever sets, so
+   * the field was structurally `null` on every real request and every resolver
+   * ran with no organization to scope by.
+   *
+   * `null` is passed through HONESTLY when the caller has no active
+   * organization — never papered over with the deprecated `tenantId` alias, and
+   * never turned into a blank-string org that would match nothing. What a
+   * resolver must then do is ITS contract:
+   * `IHierarchyScopeResolver.resolveOwnerIds` — "**Fail CLOSED on a missing
+   * organization** … 'no org' is not 'every org'. Return owner-only (or throw,
+   * which the sharing layer treats the same way); never widen."
+   *
+   * On top of that, a WALLED deployment refuses outright: when an organization
+   * wall is in force and the authoritative org is missing, the resolver is not
+   * consulted at all and the caller falls back to owner-only, loudly — see
+   * {@link SharingService.organizationScopeRequired} for why the refusal is
+   * posture-scoped rather than unconditional.
    */
   private async resolveOwnerScopeIds(
     context: SharingExecutionContext,
@@ -871,19 +956,86 @@ export class SharingService implements ISharingService {
     if (!scope || scope === 'own' || scope === 'org') return [me];
     const resolver = this.hierarchyResolver?.();
     if (!resolver) return [me];
+
+    const organizationId = activeOrganizationId(context);
+    if (organizationId === null && this.organizationScopeRequired()) {
+      this.logger?.warn?.(
+        '[sharing] hierarchy scope NOT widened: an organization wall is in force but the caller ' +
+          'context carries no active organization — failing closed to owner-only. ' +
+          '"No org" is not "every org" (IHierarchyScopeResolver.resolveOwnerIds, #5973); ' +
+          'the same rule walls Layer 0 (ADR-0095 D1 / ADR-0105 D1).',
+        { userId: me, scope },
+      );
+      return [me];
+    }
+
     try {
       const ids = await resolver.resolveOwnerIds(
         {
           userId: me,
-          organizationId: (context as any).organizationId ?? null,
+          // AUTHORITATIVE (#5858 / PR #5973). Never `(context as any).organizationId`:
+          // no execution context in this repo carries that key.
+          organizationId,
+          // The @deprecated compatibility alias, carried through unchanged for
+          // resolvers that still read it. It is NOT the authority — a resolver
+          // reading it alone is the shape #5858 ruled out.
           tenantId: (context as any).tenantId ?? null,
         },
         scope,
       );
       return Array.isArray(ids) && ids.length > 0 ? ids : [me];
-    } catch {
+    } catch (err: any) {
+      // A throwing resolver is treated exactly like an empty answer (the
+      // contract says so) — but say it out loud: a silently-swallowed resolver
+      // failure is indistinguishable from "the hierarchy legitimately covers
+      // nobody else", which is how #5852 stayed invisible for so long.
+      this.logger?.warn?.(
+        '[sharing] hierarchy scope resolver failed — falling back to owner-only (fail closed)',
+        { userId: me, scope, organizationId, error: err?.message },
+      );
       return [me];
     }
+  }
+
+  /**
+   * [ADR-0105 D1 / #5859] Must a hierarchy scope be refused when the caller
+   * carries no authoritative organization?
+   *
+   * The answer is the deployment's TENANCY POSTURE, not a constant — which is
+   * the same answer Layer 0 already gives to the same question
+   * (`computeTenantLayer0Filter`, ADR-0095 D1 / ADR-0105 D1):
+   *
+   *  - `single` → **no**. There is no organization dimension at all; "no org"
+   *    there means "the one implicit tenant", not "every org", and hierarchy
+   *    DEPTH is pinned working in exactly that shape (the ADR-0057 D1 proofs
+   *    boot a pure single-tenant stack on purpose — `@objectstack/verify`'s
+   *    harness sets `autoDefaultOrganization: false` to model it). Refusing
+   *    here would retire DEPTH for every org-less deployment.
+   *  - `group` / `isolated` → **yes**. A wall is in force, so a caller with no
+   *    active organization has no tenancy constraint to scope an owner set by,
+   *    and widening one would hand out exactly the cross-organization reach
+   *    #5852 measured. Layer 0 denies in the same situation; this is that rule,
+   *    applied one layer up where the sharing gates read.
+   *
+   * Fails CLOSED on an unresolvable posture (no `tenancy` probe wired, a
+   * throwing probe, or a value outside the vocabulary): an unknown posture is
+   * NOT evidence of `single`, and reading it as such would restore the widening
+   * on precisely the deployments whose configuration is already suspect.
+   */
+  private organizationScopeRequired(): boolean {
+    let probe: SharingTenancyProbe | null | undefined;
+    try {
+      probe = this.tenancy?.();
+    } catch {
+      return true; // unresolvable → assume walled
+    }
+    if (!probe) return true;
+    const posture = normalizeTenancyPosture(probe.posture);
+    if (posture) return postureEnforcesWall(posture);
+    // Pre-ADR-0105 shape: only `isolationActive === false` is a positive
+    // statement that no wall is enforced. `undefined` stays unresolved.
+    if (probe.isolationActive === false) return false;
+    return true;
   }
 
   private shouldBypass(object: string, context: SharingExecutionContext): boolean {

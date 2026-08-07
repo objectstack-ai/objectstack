@@ -4,8 +4,8 @@
  * [cloud ADR-0024 D5.2] Break-glass — a write may never leave this environment
  * with ZERO administrators able to sign in.
  *
- * TWO writes can take the last administrator away, and this guard holds on
- * both — they are one invariant, not two policies:
+ * THREE write shapes can take the last administrator away, and this guard
+ * holds on all of them — they are one invariant, not three policies:
  *
  *  1. **`sys_user.banned = true`** (#5892) — how every *disable* lands: the
  *     better-auth admin plugin's ban endpoint writes it, and
@@ -14,6 +14,18 @@
  *  2. **deleting the `sys_user` row** (#5941) — how every *remove* lands: SCIM
  *     `DELETE /Users/{id}`, better-auth's `/admin/remove-user` and
  *     `/delete-user`, an import, a script.
+ *  3. **revoking the STANDING, leaving the user row untouched** (#5978) — the
+ *     shape neither of the first two can see, because "who is an
+ *     administrator" is not a fact stored on `sys_user` at all. It lives in the
+ *     two tables `resolveAdminUserIds` enumerates, so it is taken away by
+ *     writing THEM: downgrading (or deleting) the `sys_member` row that carries
+ *     the `owner`/`admin` grade — better-auth's `updateMemberRole`, a SCIM
+ *     group-mapping change — or deleting the `admin_full_access`
+ *     `sys_user_permission_set` grant, or editing it until it no longer counts
+ *     (re-pointed at another set, scoped to an organization, moved outside its
+ *     ADR-0091 validity window). The end state is identical to (2): everyone is
+ *     still there, nobody can administer anything, and there is no recovery
+ *     path from inside the product.
  *
  * In the case that matters both are driven by an EXTERNAL system: nobody reads
  * the payload before it commits, so one mis-scoped IdP group or one over-broad
@@ -21,11 +33,42 @@
  * administrator and lock itself out of its environment permanently. There is no
  * recovery path from inside the product once that happens.
  *
- * So the invariant is enforced at the WRITE, on the two chokepoints every path
- * goes through — `beforeUpdate` and `beforeDelete` on `sys_user` — rather than
- * at any individual endpoint. HTTP-level guards protect only the endpoints they
- * are attached to; these hold for the admin ban / remove endpoints, the SCIM
- * adapter writes, an import, a script, and anything added later.
+ * So the invariant is enforced at the WRITE, on the chokepoints every path goes
+ * through — `beforeUpdate` and `beforeDelete` on `sys_user`, `sys_member` and
+ * `sys_user_permission_set` — rather than at any individual endpoint.
+ * HTTP-level guards protect only the endpoints they are attached to; these hold
+ * for the admin ban / remove endpoints, `updateMemberRole`, the SCIM adapter
+ * writes, an import, a script, and anything added later.
+ *
+ * ## How the standing halves decide (#5978)
+ *
+ * The row halves can answer by set arithmetic — "is every unbanned
+ * administrator inside the doomed set of `sys_user` ids?". The standing halves
+ * cannot: the write does not name users at all, it edits the evidence the
+ * administrator set is DERIVED from. So they answer the way the issue framed
+ * it — **enumerate, simulate, enumerate again**:
+ *
+ *  1. enumerate the administrators as the tables read now;
+ *  2. replay the SAME enumeration over the rows as this write would leave them
+ *     (`applyPending`: addressed rows are dropped for a delete, or `{...row,
+ *     ...payload}` for an update);
+ *  3. refuse when step 2 leaves nobody who can sign in and step 1 did not.
+ *
+ * One enumeration function serves both readings, so the before-answer and the
+ * after-answer are the same code and cannot drift. The simulation is
+ * deliberately one-directional — it can only take standing away, never grant
+ * it (`applyPending`'s comment says why) — which keeps every rounding error
+ * pointing at "refuse", not at "allow".
+ *
+ * A predicate write (`multi`, one `where` matching many memberships or grants)
+ * is resolved to its matching row ids first and then simulated over that whole
+ * set, so bulk writes get a real answer rather than a blanket refusal; when the
+ * match set itself cannot be resolved — the read throws, or it overflows
+ * `maxScan` — the write is refused loudly instead of guessed at.
+ *
+ * The standing halves judge EVERY membership downgrade, not only a caller
+ * downgrading themselves. Narrowing to self-downgrade would miss the case that
+ * actually happens: an IdP group mapping that rewrites other people's roles.
  *
  * ## What counts as an administrator
  *
@@ -111,12 +154,12 @@
  * policy with its own product decisions (what happens to an org whose only
  * owner leaves the company); it is deliberately not invented here.
  *
- * Scope in the other direction: this guard watches the two writes that take the
- * administrator away WITH THEIR ROW. Revoking the standing that MAKES someone
- * an administrator — deleting their `sys_member` row, downgrading its role,
- * removing the `admin_full_access` grant — leaves the user in place and writes
- * a different table, so neither hook here sees it. Same end state, third write
- * shape; filed as #5978 rather than half-guarded from this file.
+ * Scope in the other direction: this guard watches writes to the three tables
+ * the administrator population is derived from. It does NOT watch
+ * `sys_permission_set` itself — deleting or renaming the row named
+ * `admin_full_access` would un-make every platform admin at once, which is a
+ * fourth write shape on a fourth table; filed as #6084 rather than
+ * half-guarded from here.
  *
  * ## Relationship to the ADR-0092 identity write guard
  *
@@ -191,16 +234,86 @@ const DEFAULT_MAX_SCAN = 1000;
 const SYSTEM_READ: BaseEngineOptions = { context: { isSystem: true } };
 
 /**
- * The two writes this guard judges. Carried into every message so a refusal
+ * The six writes this guard judges. Carried into every message so a refusal
  * describes the operation the caller actually attempted — an operator reading
  * "refusing this ban" after a SCIM `DELETE /Users/{id}` would go looking in the
- * wrong place.
+ * wrong place, and one reading it after an `updateMemberRole` would go looking
+ * on the wrong TABLE.
+ *
+ * The first two take the administrator away with their `sys_user` row; the four
+ * `standing` ops (#5978) leave the row untouched and take away what MAKES them
+ * an administrator.
  */
-type GuardedOp = 'ban' | 'delete';
+type GuardedOp =
+  | 'ban'
+  | 'delete'
+  | 'member-update'
+  | 'member-delete'
+  | 'grant-update'
+  | 'grant-delete';
 
-const OP_WORDS: Record<GuardedOp, { noun: string; verb: string; gerund: string; Verb: string }> = {
-  ban: { noun: 'ban', verb: 'ban', gerund: 'banning', Verb: 'Ban' },
-  delete: { noun: 'delete', verb: 'delete', gerund: 'deleting', Verb: 'Delete' },
+interface OpWords {
+  /** Reads after "Refusing this …". */
+  noun: string;
+  verb: string;
+  gerund: string;
+  /** Sentence-initial imperative, for the "…a narrower set of X" advice. */
+  Verb: string;
+  /** What a narrower set would be a set OF. */
+  subject: string;
+  /** The table this op writes — what a refusal reports as `err.object`. */
+  table: string;
+}
+
+const OP_WORDS: Record<GuardedOp, OpWords> = {
+  ban: {
+    noun: 'ban',
+    verb: 'ban',
+    gerund: 'banning',
+    Verb: 'Ban',
+    subject: 'users',
+    table: SystemObjectName.USER,
+  },
+  delete: {
+    noun: 'delete',
+    verb: 'delete',
+    gerund: 'deleting',
+    Verb: 'Delete',
+    subject: 'users',
+    table: SystemObjectName.USER,
+  },
+  'member-update': {
+    noun: 'membership change',
+    verb: 'change',
+    gerund: 'changing',
+    Verb: 'Change',
+    subject: 'memberships',
+    table: SystemObjectName.MEMBER,
+  },
+  'member-delete': {
+    noun: 'membership removal',
+    verb: 'remove',
+    gerund: 'removing',
+    Verb: 'Remove',
+    subject: 'memberships',
+    table: SystemObjectName.MEMBER,
+  },
+  'grant-update': {
+    noun: 'grant change',
+    verb: 'change',
+    gerund: 'changing',
+    Verb: 'Change',
+    subject: 'permission-set grants',
+    table: USER_PERMISSION_SET,
+  },
+  'grant-delete': {
+    noun: 'grant removal',
+    verb: 'revoke',
+    gerund: 'revoking',
+    Verb: 'Revoke',
+    subject: 'permission-set grants',
+    table: USER_PERMISSION_SET,
+  },
 };
 
 /**
@@ -214,8 +327,14 @@ function isTrueFlag(value: unknown): boolean {
   return value === true || value === 1 || value === '1' || value === 'true';
 }
 
-/** The refusal. `PERMISSION_DENIED` + 403 is what `mapDataError` already maps. */
-function refuse(message: string): Error {
+/**
+ * The refusal. `PERMISSION_DENIED` + 403 is what `mapDataError` already maps.
+ * `object` names the table the CALLER was writing — `sys_user` for the two
+ * halves that take the row away, `sys_member` / `sys_user_permission_set` for
+ * the standing halves (#5978) — so the error points at the write that was
+ * refused rather than at the table the invariant is about.
+ */
+function refuse(message: string, object: string = SystemObjectName.USER): Error {
   const err = new Error(`PERMISSION_DENIED: ${message}`) as Error & {
     code?: string;
     status?: number;
@@ -223,7 +342,7 @@ function refuse(message: string): Error {
   };
   err.code = 'PERMISSION_DENIED';
   err.status = 403;
-  err.object = SystemObjectName.USER;
+  err.object = object;
   return err;
 }
 
@@ -240,6 +359,82 @@ function toId(value: unknown): string | undefined {
   if (typeof value === 'string' && value.length > 0) return value;
   if (typeof value === 'number') return String(value);
   return undefined;
+}
+
+/**
+ * [#5978] The write the standing halves have to judge, described the way the
+ * enumeration can consume it: WHICH rows of the standing table this write
+ * addresses, and what it does to them.
+ *
+ * `patch: undefined` means the rows are being deleted; otherwise the rows are
+ * updated and `patch` is the caller's payload, applied over each row.
+ */
+interface PendingStandingWrite {
+  /** `sys_member` or `sys_user_permission_set`. */
+  table: string;
+  /** Ids of the rows this one write addresses (by-id, or the predicate's matches). */
+  ids: Set<string>;
+  /** The update payload, or `undefined` for a delete. */
+  patch?: Record<string, unknown>;
+}
+
+/**
+ * The row as it would read AFTER `pending` lands — `undefined` when the row
+ * would no longer exist. Rows this write does not address come back unchanged.
+ *
+ * Deliberately one-directional: a pending write can only take standing AWAY in
+ * this simulation, never add it. A payload that would *promote* someone (role
+ * `member` → `admin`, a grant re-pointed AT `admin_full_access`) writes a row
+ * the enumeration's narrowing `where` never selected, so the simulation does
+ * not see the new administrator and under-counts the survivors. That is the
+ * fail-closed direction: the guard may refuse a write that would in fact have
+ * left an administrator behind, and can never wave through one that leaves
+ * none.
+ */
+function applyPending(
+  row: Record<string, unknown>,
+  pending: PendingStandingWrite | undefined,
+  table: string,
+): Record<string, unknown> | undefined {
+  if (!pending || pending.table !== table) return row;
+  const id = toId(row.id);
+  if (!id || !pending.ids.has(id)) return row;
+  if (!pending.patch) return undefined; // deleted
+  return { ...row, ...pending.patch };
+}
+
+/**
+ * Which keys of a `sys_member` payload can move the administrator enumeration.
+ * The `sys_member` half of `resolveAdminUserIds` reads exactly two columns —
+ * the graded `role` and the `user_id` the standing belongs to — so a payload
+ * touching neither provably produces the same enumeration and is skipped
+ * without any reads. (`organization_id` is NOT one of them: the invariant is
+ * scoped to the ENVIRONMENT, so which org a membership sits in never changes
+ * who administers this deployment.)
+ */
+const MEMBER_STANDING_KEYS = ['role', 'user_id', 'userId'] as const;
+
+/**
+ * Same, for `sys_user_permission_set`: which permission set the grant points
+ * at, whose it is, whether it is org-scoped, and its ADR-0091 validity window
+ * — every column the grant half of the enumeration consumes, in both the
+ * snake_case and camelCase spellings the readers already tolerate.
+ */
+const GRANT_STANDING_KEYS = [
+  'permission_set_id',
+  'permissionSetId',
+  'user_id',
+  'userId',
+  'organization_id',
+  'organizationId',
+  'valid_from',
+  'validFrom',
+  'valid_until',
+  'validUntil',
+] as const;
+
+function touchesAny(data: Record<string, unknown>, keys: readonly string[]): boolean {
+  return keys.some((k) => k in data);
 }
 
 /**
@@ -271,15 +466,26 @@ export function registerLastAdminGuard(
       throw refuse(
         `Refusing this ${words.noun}: '${object}' returned more than ${maxScan} rows, so the ` +
           `remaining administrators could not be verified (${BREAK_GLASS_CITATION}). ` +
-          `${words.Verb} a narrower set of users, or raise the guard's maxScan if this ` +
-          'environment really is that large.',
+          `${words.Verb} a narrower set of ${words.subject}, or raise the guard's maxScan if ` +
+          'this environment really is that large.',
+        words.table,
       );
     }
     return list;
   };
 
-  /** Every user this environment currently recognises as an administrator. */
-  const resolveAdminUserIds = async (op: GuardedOp): Promise<Set<string>> => {
+  /**
+   * Every user this environment recognises as an administrator.
+   *
+   * With `pending` (#5978) the SAME enumeration is replayed over the rows as
+   * they would read once that write lands — one code path answers both "who
+   * administers this environment now" and "who would administer it after", so
+   * the two answers can never drift apart the way two separate readers would.
+   */
+  const resolveAdminUserIds = async (
+    op: GuardedOp,
+    pending?: PendingStandingWrite,
+  ): Promise<Set<string>> => {
     const ids = new Set<string>();
     const now = Date.now();
 
@@ -293,11 +499,26 @@ export function registerLastAdminGuard(
       const links = await scan(op, USER_PERMISSION_SET, {
         where: { permission_set_id: { $in: adminSetIds } },
       });
-      for (const link of links) {
+      for (const raw of links) {
+        const link = applyPending(raw, pending, USER_PERMISSION_SET);
+        // Revoked outright by the pending write.
+        if (!link) continue;
+        // Re-pointed away from `admin_full_access` — the row survives, the
+        // standing does not. Re-tested rather than assumed, because the scan's
+        // own `where` only proved where the grant pointed BEFORE the write.
+        const setId = toId(link.permission_set_id ?? link.permissionSetId);
+        if (setId !== undefined && !adminSetIds.includes(setId)) continue;
         // An org-SCOPED grant makes a tenant admin, not the environment's
         // break-glass admin — the same distinction `resolveAuthzContext` draws
-        // when it derives `platform_admin` from the unscoped grant only.
+        // when it derives `platform_admin` from the unscoped grant only. This
+        // is also the "scope it to an org" revocation shape: a pending write
+        // that fills `organization_id` in lands here.
         if (link.organization_id ?? link.organizationId) continue;
+        // ADR-0091's ONE validity predicate, consumed exactly as it already was
+        // — the guard invents no expiry semantics of its own (#5893 owns that
+        // question, and is blocked on #5702). A pending write that moves
+        // `valid_until` into the past is judged by the same predicate that
+        // judges a stored one.
         if (!isGrantActive(link, now)) continue;
         const uid = toId(link.user_id ?? link.userId);
         if (uid) ids.add(uid);
@@ -314,7 +535,9 @@ export function registerLastAdminGuard(
     const members = await scan(op, SystemObjectName.MEMBER, {
       where: { role: { $ne: MEMBERSHIP_ROLE_MEMBER } },
     });
-    for (const m of members) {
+    for (const raw of members) {
+      const m = applyPending(raw, pending, SystemObjectName.MEMBER);
+      if (!m) continue;
       if (!isOrgAdminGrade(m.role)) continue;
       const uid = toId(m.user_id ?? m.userId);
       if (uid) ids.add(uid);
@@ -346,16 +569,24 @@ export function registerLastAdminGuard(
   };
 
   /**
-   * Which `sys_user` rows this one write addresses — the same answer for both
-   * halves. A scalar id when the engine dispatched by id (an update payload
+   * Which rows of `object` this one write addresses — the same answer for all
+   * six halves. A scalar id when the engine dispatched by id (an update payload
    * also carries it in `data.id`; a delete's `input` has no `data` at all),
    * and otherwise the caller's predicate, still on `input.options.where` while
    * `before*` runs (see the header: the composed `ast` is the part hooks
    * cannot read, and middleware may only narrow it — so this set is an
    * over-approximation, the safe direction).
+   *
+   * [#5978] A predicate write on a standing table is resolved to its matching
+   * row ids the same way — this is what lets the simulation be exact for a
+   * `where` that sweeps many memberships or grants at once, rather than the
+   * guard having to refuse every bulk write on principle. When the resolution
+   * itself cannot be completed (the read throws, or the match set overflows
+   * `maxScan`) `scan` refuses loudly instead of guessing.
    */
   const resolveTargetIds = async (
     op: GuardedOp,
+    object: string,
     id: unknown,
     options: { where?: unknown } | undefined,
     data?: Record<string, unknown>,
@@ -363,7 +594,7 @@ export function registerLastAdminGuard(
     const single = toId(id) ?? toId(data?.id);
     if (single) return new Set([single]);
     const where = options?.where as EngineQueryOptions['where'];
-    const rows = await scan(op, SystemObjectName.USER, {
+    const rows = await scan(op, object, {
       ...(where !== undefined ? { where } : {}),
       fields: ['id'],
     });
@@ -376,9 +607,39 @@ export function registerLastAdminGuard(
   };
 
   /**
-   * The verdict, shared by both halves: refuse when this write takes away every
-   * administrator who can still sign in. Fail-closed — any lookup that throws
-   * becomes a refusal naming the reason.
+   * The fail-CLOSED envelope every half runs inside. A lookup that throws is
+   * not "probably fine": the guard could not prove another administrator
+   * survives, and the cost of guessing wrong is a permanently locked-out
+   * environment. A deliberate refusal from inside passes through unchanged.
+   */
+  const failClosed = async (op: GuardedOp, judge: () => Promise<void>): Promise<void> => {
+    const words = OP_WORDS[op];
+    try {
+      await judge();
+    } catch (err) {
+      if (isRefusal(err)) throw err;
+      const reason = (err as Error)?.message ?? String(err);
+      logger?.warn(
+        `[LastAdminGuard] administrator lookup failed — ${words.noun} refused: ${reason}`,
+      );
+      throw refuse(
+        `Refusing this ${words.noun}: the remaining administrators could not be verified ` +
+          `(${reason}). This guard fails closed — a ${words.noun} is only permitted when at ` +
+          `least one other unbanned administrator is provably left (${BREAK_GLASS_CITATION}). ` +
+          'Retry once the identity tables are readable again.',
+        words.table,
+      );
+    }
+  };
+
+  /** The one sentence every refusal ends with: how to make the write legal. */
+  const REMEDY =
+    `Grant another user the '${ADMIN_FULL_ACCESS}' permission set or an organization ` +
+    `'${MEMBERSHIP_ROLE_OWNER}'/'${MEMBERSHIP_ROLE_ADMIN}' membership first, then retry.`;
+
+  /**
+   * The verdict for the two `sys_user` halves: refuse when this write takes
+   * away every administrator who can still sign in.
    */
   const enforce = async (
     op: GuardedOp,
@@ -387,7 +648,7 @@ export function registerLastAdminGuard(
       | undefined,
   ): Promise<void> => {
     const words = OP_WORDS[op];
-    try {
+    await failClosed(op, async () => {
       const admins = await resolveAdminUserIds(op);
       // Nothing recognised as an administrator: there is no break-glass account
       // to protect and refusing every write would be a guard inventing a policy
@@ -396,7 +657,13 @@ export function registerLastAdminGuard(
       if (admins.size === 0) return;
 
       const unbanned = await resolveUnbannedAdmins(op, admins);
-      const targets = await resolveTargetIds(op, input?.id, input?.options, input?.data);
+      const targets = await resolveTargetIds(
+        op,
+        SystemObjectName.USER,
+        input?.id,
+        input?.options,
+        input?.data,
+      );
 
       const losing = [...unbanned].filter((id) => targets.has(id));
       // No administrator that could still sign in is affected → not our case.
@@ -417,27 +684,87 @@ export function registerLastAdminGuard(
           `${many ? 'those are the last administrators' : 'that is the last administrator'} this ` +
           `environment has that ${many ? 'are' : 'is'} not already banned, and ${words.gerund} ` +
           `${many ? 'them' : 'that account'} would leave nobody able to administer the ` +
-          `environment or restore anyone's access (${BREAK_GLASS_CITATION}). Grant another user ` +
-          `the '${ADMIN_FULL_ACCESS}' permission set or an organization ` +
-          `'${MEMBERSHIP_ROLE_OWNER}'/'${MEMBERSHIP_ROLE_ADMIN}' membership first, then retry. ` +
+          `environment or restore anyone's access (${BREAK_GLASS_CITATION}). ${REMEDY} ` +
           `If the ${words.noun} came from an identity provider, the SCIM deprovision is too ` +
           'broad — fix the IdP group, not this guard.',
+        words.table,
       );
-    } catch (err) {
-      if (isRefusal(err)) throw err;
-      // Fail CLOSED: the guard could not prove another administrator survives,
-      // and the cost of guessing wrong is a permanently locked-out environment.
-      const reason = (err as Error)?.message ?? String(err);
+    });
+  };
+
+  /**
+   * [#5978] The verdict for the four STANDING halves — the third write shape,
+   * where the `sys_user` row is never touched and what is taken away is the
+   * thing that MADE the user an administrator.
+   *
+   * The criterion is the issue's, verbatim: enumerate the administrators, then
+   * enumerate them AGAIN over the rows as this write would leave them, and
+   * refuse if the second enumeration is empty while the first was not. Both
+   * enumerations are the same function, so "who administers this environment"
+   * has one implementation and cannot answer the before-question and the
+   * after-question differently.
+   */
+  const enforceStanding = async (
+    op: GuardedOp,
+    table: string,
+    input:
+      | { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown } }
+      | undefined,
+    patch?: Record<string, unknown>,
+  ): Promise<void> => {
+    const words = OP_WORDS[op];
+    await failClosed(op, async () => {
+      const before = await resolveAdminUserIds(op);
+      // Same bootstrap exemption the row halves make: with nobody recognised as
+      // an administrator there is no break-glass account to protect.
+      if (before.size === 0) return;
+
+      const unbannedBefore = await resolveUnbannedAdmins(op, before);
+      // Every administrator is already banned — this write cannot take away an
+      // ability to sign in that nobody currently has.
+      if (unbannedBefore.size === 0) return;
+
+      // Which rows of the standing table this write addresses. For a predicate
+      // write this resolves the whole matched set, so the simulation below is
+      // exact for bulk writes rather than being refused wholesale.
+      const ids = await resolveTargetIds(op, table, input?.id, input?.options, input?.data);
+      if (ids.size === 0) return;
+
+      const after = await resolveAdminUserIds(op, { table, ids, ...(patch ? { patch } : {}) });
+      // A patch that re-homes standing onto a DIFFERENT user (a `user_id`
+      // rewrite) can put someone in `after` who was not in `before`, so the
+      // survivors' ban state is re-read rather than intersected with the
+      // before-set.
+      const unbannedAfter: Set<string> =
+        after.size > 0 ? await resolveUnbannedAdmins(op, after) : new Set<string>();
+
+      const losing = [...unbannedBefore].filter((id) => !unbannedAfter.has(id));
+      // The write leaves every administrator's standing intact → not our case.
+      // This is the common path for the vast majority of membership and grant
+      // writes, and it costs no refusal and no surprise.
+      if (losing.length === 0) return;
+      // Somebody can still administer the environment afterwards.
+      if (unbannedAfter.size > 0) return;
+
       logger?.warn(
-        `[LastAdminGuard] administrator lookup failed — ${words.noun} refused: ${reason}`,
+        `[LastAdminGuard] refused a ${words.noun} on '${table}' that would have left this ` +
+          `environment with no unbanned administrator (losing: ${losing.join(', ')})`,
       );
+      const many = losing.length > 1;
       throw refuse(
-        `Refusing this ${words.noun}: the remaining administrators could not be verified ` +
-          `(${reason}). This guard fails closed — a ${words.noun} is only permitted when at ` +
-          `least one other unbanned administrator is provably left (${BREAK_GLASS_CITATION}). ` +
-          'Retry once the identity tables are readable again.',
+        `Refusing this ${words.noun}: it would revoke the administrator standing of ` +
+          `${losing.map((id) => `'${id}'`).join(', ')}, ` +
+          `${many ? 'who are the last administrators' : 'who is the last administrator'} this ` +
+          `environment has that ${many ? 'are' : 'is'} not already banned. The ` +
+          `'${table}' row is what MAKES ${many ? 'those accounts' : 'that account'} an ` +
+          `administrator, so ${words.gerund} it has the same end state as ${words.gerund} ` +
+          `${many ? 'the users themselves' : 'the user themselves'}: nobody would be able to ` +
+          `administer the environment or restore anyone's access (${BREAK_GLASS_CITATION}). ` +
+          `${REMEDY} If the ${words.noun} came from an identity provider, the SCIM group ` +
+          'mapping is too broad — fix the IdP group, not this guard.',
+        words.table,
       );
-    }
+    });
   };
 
   const guardBan = async (rawCtx: unknown): Promise<void> => {
@@ -470,8 +797,65 @@ export function registerLastAdminGuard(
     await enforce('delete', ctx.input);
   };
 
+  /**
+   * [#5978] Standing halves. `ctxOf` is the same unwrap the two row halves do;
+   * `object` is re-checked here as well as in the registration filter, so a
+   * handler can never judge a table it was not written for.
+   */
+  const ctxOf = (rawCtx: unknown) =>
+    (rawCtx ?? {}) as {
+      object?: string;
+      input?: { id?: unknown; data?: Record<string, unknown>; options?: { where?: unknown } };
+    };
+
+  const guardMemberUpdate = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== SystemObjectName.MEMBER) return;
+    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
+    // The whole downgrade family lands here: better-auth's `updateMemberRole`,
+    // a SCIM group-mapping change, an import, a script. It is NOT narrowed to
+    // "the caller downgrading themselves" — an IdP writes these on everyone's
+    // behalf, which is exactly the case ADR-0024 D5.2 exists for.
+    //
+    // A payload touching neither `role` nor `user_id` provably cannot move the
+    // enumeration (see MEMBER_STANDING_KEYS), so it costs no reads at all.
+    if (!touchesAny(data, MEMBER_STANDING_KEYS)) return;
+    await enforceStanding('member-update', SystemObjectName.MEMBER, ctx.input, data);
+  };
+
+  const guardMemberDelete = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== SystemObjectName.MEMBER) return;
+    // No payload to pre-filter on: removing a membership removes whatever
+    // administrative standing it carried, so every one of them is judged.
+    await enforceStanding('member-delete', SystemObjectName.MEMBER, ctx.input);
+  };
+
+  const guardGrantUpdate = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== USER_PERMISSION_SET) return;
+    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
+    // The three ways a grant stops counting without being deleted: re-pointed
+    // at another permission set, scoped to an organization, or moved outside
+    // its ADR-0091 validity window. All three are just columns, so the
+    // simulation reads them back through the same predicates the enumeration
+    // already uses rather than special-casing any of them here.
+    if (!touchesAny(data, GRANT_STANDING_KEYS)) return;
+    await enforceStanding('grant-update', USER_PERMISSION_SET, ctx.input, data);
+  };
+
+  const guardGrantDelete = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== USER_PERMISSION_SET) return;
+    await enforceStanding('grant-delete', USER_PERMISSION_SET, ctx.input);
+  };
+
   // Priority 20: AFTER the ADR-0092 identity write guard's checks (10), before
-  // default-priority hooks (100) spend work on a write this may refuse.
+  // default-priority hooks (100) spend work on a write this may refuse. The
+  // four standing hooks (#5978) are registered in exactly the shape the two
+  // `sys_user` hooks established — same event names, same priority, same
+  // `packageId`, only the `object` filter differs — so the whole invariant
+  // binds and unbinds as one package.
   engine.registerHook('beforeUpdate', guardBan, {
     object: SystemObjectName.USER,
     priority: 20,
@@ -482,6 +866,29 @@ export function registerLastAdminGuard(
     priority: 20,
     packageId,
   });
+  engine.registerHook('beforeUpdate', guardMemberUpdate, {
+    object: SystemObjectName.MEMBER,
+    priority: 20,
+    packageId,
+  });
+  engine.registerHook('beforeDelete', guardMemberDelete, {
+    object: SystemObjectName.MEMBER,
+    priority: 20,
+    packageId,
+  });
+  engine.registerHook('beforeUpdate', guardGrantUpdate, {
+    object: USER_PERMISSION_SET,
+    priority: 20,
+    packageId,
+  });
+  engine.registerHook('beforeDelete', guardGrantDelete, {
+    object: USER_PERMISSION_SET,
+    priority: 20,
+    packageId,
+  });
 
-  logger?.info('[LastAdminGuard] last-administrator ban + delete guard registered (ADR-0024 D5.2)');
+  logger?.info(
+    '[LastAdminGuard] last-administrator guard registered on sys_user (ban + delete), ' +
+      'sys_member and sys_user_permission_set (standing revocation) — ADR-0024 D5.2',
+  );
 }

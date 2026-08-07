@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { TimeRelativeTriggerSchema, LoopConfigSchema, FlowSchema } from '@objectstack/spec/automation';
+import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, FlowSchema } from '@objectstack/spec/automation';
 import { AUTHORING_RULES } from './authoring-rules.js';
 import {
   lintFlowPatterns,
@@ -50,6 +50,35 @@ const flow = (condition: unknown, triggerType = 'record-after-update') => ({
     edges: [],
   }],
 });
+
+/**
+ * The keys a container schema REFUSED on a fixture — `[]` when the shape spells
+ * only declared keys, whatever the schema thinks of their VALUES (#5700).
+ *
+ * The criterion is deliberately key-level, and the same one
+ * `validate-security-posture.test.ts` writes down for its reachability guard: a
+ * rejected KEY and a rejected VALUE are different facts. A key the schema does
+ * not declare is not an authoring surface at all — a fixture spelling one
+ * describes a container no author can save, which is exactly the defect #5700
+ * catalogued. A rejected value is a fixture choice these rules are often
+ * entitled to make.
+ *
+ * So the container audits below use this, NOT flat `safeParse` success: most of
+ * this file's fixtures are hand-written raw literals that omit the `label`
+ * `FlowNodeSchema` requires on every node, and demanding full-parse green would
+ * either delete that coverage or drag in a file-wide re-write #5700 explicitly
+ * defers. Where a fixture IS fully authorable, it is pinned with full green
+ * instead (see the `LoopConfigSchema` pins).
+ */
+function refusedKeys(result: {
+  success: boolean;
+  error?: { issues: readonly { code: string; path: readonly PropertyKey[]; message: string }[] };
+}): string[] {
+  if (result.success) return [];
+  return (result.error?.issues ?? [])
+    .filter((i) => i.code === 'unrecognized_keys')
+    .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`);
+}
 
 describe('lintFlowPatterns — time-relative anti-pattern (#1874)', () => {
   it('flags record-change date-EQUALITY against a time function', () => {
@@ -620,21 +649,24 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
     // container's config physically contains its body, and the walk visits the
     // body in its own right, so a rule that pushed per hit would double-report.
     it('reports ONCE for a flow whose regions hold several data nodes', () => {
+      const fanConfig = {
+        branches: [
+          { name: 'writes', nodes: [{ id: 'w1', type: 'update_record', label: 'Write', config: { objectName: 'a' } }], edges: [] },
+          { name: 'deletes', nodes: [{ id: 'w2', type: 'delete_record', label: 'Delete', config: { objectName: 'b' } }], edges: [] },
+        ],
+      };
+      // #5700 container audit — the `parallel` twin of the `loop` pin above. This
+      // block already declares `name`/`nodes`/`edges` and labels its branch nodes,
+      // so it clears the strongest bar available: full `safeParse` green.
+      expect(ParallelConfigSchema.safeParse(fanConfig).success).toBe(true);
+
       const fnds = lintFlowPatterns({
         flows: [{
           name: 'nightly_sweep',
           type: 'schedule',
           nodes: [
             { id: 'start', type: 'start', config: { triggerType: 'schedule', cron: '0 8 * * *' } },
-            {
-              id: 'fan', type: 'parallel',
-              config: {
-                branches: [
-                  { name: 'writes', nodes: [{ id: 'w1', type: 'update_record', label: 'Write', config: { objectName: 'a' } }], edges: [] },
-                  { name: 'deletes', nodes: [{ id: 'w2', type: 'delete_record', label: 'Delete', config: { objectName: 'b' } }], edges: [] },
-                ],
-              },
-            },
+            { id: 'fan', type: 'parallel', config: fanConfig },
           ],
           edges: [{ id: 'e1', source: 'start', target: 'fan' }],
         }],
@@ -1090,6 +1122,17 @@ describe('flow-inert-node-condition (#4414)', () => {
  * future flattening of the walk fails here instead of going quiet again.
  */
 
+/**
+ * The `loop` container `loopBodyFlow` builds, factored out (#5700) so the pin
+ * below reads the REAL config object every case in this family descends into,
+ * rather than a retyped copy that can drift away from it silently.
+ */
+const loopLeadsConfig = (body: { nodes: unknown[]; edges: unknown[] }) => ({
+  collection: '{vars.leads}',
+  iteratorVariable: 'lead',
+  body,
+});
+
 /** A scheduled sweep: `loop` over leads, with `body` holding the per-item graph. */
 function loopBodyFlow(body: { nodes: unknown[]; edges: unknown[] }) {
   return {
@@ -1100,7 +1143,7 @@ function loopBodyFlow(body: { nodes: unknown[]; edges: unknown[] }) {
         { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
         {
           id: 'loop_leads', type: 'loop', label: 'Loop Leads',
-          config: { collection: '{vars.leads}', itemVar: 'lead', body },
+          config: loopLeadsConfig(body),
         },
         { id: 'end', type: 'end' },
       ],
@@ -1111,6 +1154,71 @@ function loopBodyFlow(body: { nodes: unknown[]; edges: unknown[] }) {
     }],
   };
 }
+
+/**
+ * #5700 — the container every case below nests its per-item graph inside must be
+ * a shape the schema ACCEPTS, or those cases prove their rule against metadata
+ * no author can write. That is the #4966 trap (the `TimeRelativeTriggerSchema`
+ * pin near the top of this file) one container down, and it was not hypothetical
+ * here: this helper bound the item with `itemVar` until #5700. `LoopConfigSchema`
+ * is a `strictObject` whose declared key is `iteratorVariable`, so `itemVar` is
+ * reported as an `unrecognized_key` rather than dropped (#4001) — while region
+ * collection reads only `config.body`, so every assertion downstream kept passing
+ * and nothing went red.
+ *
+ * The near-miss direction is already pinned once, in the #5633 block above
+ * (`itemVar` really is refused, so this family's pins have teeth); it is not
+ * repeated here.
+ *
+ * Full `safeParse` green rather than the key-level `refusedKeys` bar, because
+ * what the rules built on this helper judge is a VALUE verdict about a node that
+ * must really be REACHABLE inside a really-authorable container — so the body
+ * has to parse too, `label` and all.
+ *
+ * What is pinned is the container SHELL plus one representative body: the body
+ * is this helper's parameter, and the bodies the call sites pass are raw
+ * literals that omit the node `label` `FlowNodeSchema` requires. Bringing this
+ * whole file to full-flow-parse green is the separate, much broader change
+ * #5700 defers by name.
+ */
+describe('#5700 — the shared loop container is a shape an author can actually write', () => {
+  it('pins loopBodyFlow’s `loop` config against LoopConfigSchema', () => {
+    const parsed = LoopConfigSchema.safeParse(loopLeadsConfig({
+      nodes: [{ id: 'enroll', type: 'create_record', label: 'Enroll', config: { objectName: 'campaign_member' } }],
+      edges: [],
+    }));
+    expect(parsed.success).toBe(true);
+  });
+
+  /**
+   * Why the two nested cases below carry their OWN pins instead of leaning on
+   * this one. `FlowRegionSchema.nodes` is an array of `FlowNodeSchema`, whose
+   * `config` is declared `z.record(z.string(), z.unknown())` — an OPEN record.
+   * So a nested container's config is accepted wholesale by the enclosing parse:
+   * this shell pin stays GREEN while an inner `loop` spells `itemVar`. Measured,
+   * not assumed — the assertion below is that blindness, stated as a fact, so a
+   * future reader does not mistake one pin at the top for coverage of the tree.
+   */
+  it('does NOT see into a nested container’s config — the inner pins are load-bearing', () => {
+    const shellWithBadInnerLoop = LoopConfigSchema.safeParse(loopLeadsConfig({
+      nodes: [{
+        id: 'loop_touchpoints', type: 'loop', label: 'Loop Touchpoints',
+        config: {
+          collection: '{lead.touchpoints}', itemVar: 'tp',
+          body: { nodes: [{ id: 'reset', type: 'update_record', label: 'Reset', config: {} }], edges: [] },
+        },
+      }],
+      edges: [],
+    }));
+    expect(shellWithBadInnerLoop.success).toBe(true);
+
+    // …whereas the very same inner config, parsed as the container it is, is refused.
+    expect(refusedKeys(LoopConfigSchema.safeParse({
+      collection: '{lead.touchpoints}', itemVar: 'tp',
+      body: { nodes: [{ id: 'reset', type: 'update_record', label: 'Reset', config: {} }], edges: [] },
+    })).join(' ')).toMatch(/Unrecognized key\(s\) on this loop container config: `itemVar`/);
+  });
+});
 
 describe('#5383 — flow-inert-node-condition descends into a loop body', () => {
   // The shipped shape, reduced: a per-item gate inside a sweep, whose predicate
@@ -1155,18 +1263,29 @@ describe('#5383 — flow-inert-node-condition descends into a loop body', () => 
     expect(fnds[0].where).not.toContain('loop');
   });
 
+  /**
+   * The INNER container, named so the pin below reads the object the fixture
+   * really descends into. The planted defect is the decision's inert
+   * `config.condition` — everything else about this shape is authorable, and
+   * has to be, or the case proves the descent against a `loop` the schema
+   * refuses (#5700; the enclosing shell pin cannot see in here — `FlowNodeSchema`
+   * declares `config` as an open record).
+   */
+  const nestedTouchpointsLoop = {
+    collection: '{lead.touchpoints}', iteratorVariable: 'tp',
+    body: {
+      nodes: [{ id: 'check_recent', type: 'decision', label: 'Check Recent', config: { condition: 'tp.age_days < 7' } }],
+      edges: [],
+    },
+  };
+
+  it('pins that inner loop container against LoopConfigSchema (#5700)', () => {
+    expect(LoopConfigSchema.safeParse(nestedTouchpointsLoop).success).toBe(true);
+  });
+
   it('descends a loop nested inside a loop — same depth semantics as the engine', () => {
     const fnds = lintFlowPatterns(loopBodyFlow({
-      nodes: [{
-        id: 'loop_touchpoints', type: 'loop',
-        config: {
-          collection: '{lead.touchpoints}', itemVar: 'tp',
-          body: {
-            nodes: [{ id: 'check_recent', type: 'decision', config: { condition: 'tp.age_days < 7' } }],
-            edges: [],
-          },
-        },
-      }],
+      nodes: [{ id: 'loop_touchpoints', type: 'loop', label: 'Loop Touchpoints', config: nestedTouchpointsLoop }],
       edges: [],
     })).filter((f) => f.rule === FLOW_INERT_NODE_CONDITION);
     expect(fnds).toHaveLength(1);
@@ -1177,21 +1296,25 @@ describe('#5383 — flow-inert-node-condition descends into a loop body', () => 
   });
 
   it('descends a parallel branch too — the scope names the branch index', () => {
+    const fanConfig = {
+      branches: [
+        { name: 'owner', nodes: [{ id: 'gate', type: 'decision', config: { condition: 'a == b' } }], edges: [] },
+        { name: 'watchers', nodes: [{ id: 'ping', type: 'notify', config: { title: 'Hi {record.name}' } }], edges: [] },
+      ],
+    };
+    // #5700 container audit, key-level bar (see `refusedKeys`): every key here is
+    // one `ParallelConfigSchema` declares. The branch nodes omit the `label`
+    // `FlowNodeSchema` requires, which is the file-wide convention #5700 defers —
+    // a rejected VALUE, not a key that is no authoring surface at all.
+    expect(refusedKeys(ParallelConfigSchema.safeParse(fanConfig))).toEqual([]);
+
     const fnds = lintFlowPatterns({
       flows: [{
         name: 'fan_out',
         runAs: 'system',
         nodes: [
           { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
-          {
-            id: 'fan', type: 'parallel',
-            config: {
-              branches: [
-                { name: 'owner', nodes: [{ id: 'gate', type: 'decision', config: { condition: 'a == b' } }], edges: [] },
-                { name: 'watchers', nodes: [{ id: 'ping', type: 'notify', config: { title: 'Hi {record.name}' } }], edges: [] },
-              ],
-            },
-          },
+          { id: 'fan', type: 'parallel', config: fanConfig },
         ],
         edges: [{ id: 'e1', source: 'start', target: 'fan' }],
       }],
@@ -1281,21 +1404,25 @@ describe('#5383 — the branch-routing family reads the region’s own edges', (
         { id: 'g2', source: 'gate', target: 'y', isDefault: true },
       ],
     });
+    const fanConfig = {
+      branches: [
+        { name: 'a', ...branch('lead.score > 50') },
+        { name: 'b', ...branch('lead.score > 90') },
+      ],
+    };
+    // #5700 container audit, key-level bar (see `refusedKeys`). Covers the branch
+    // EDGES too: `condition` and `isDefault` are the keys this case turns on, and
+    // both are declared — so what it pins is real edge vocabulary, not a shape
+    // the schema would refuse.
+    expect(refusedKeys(ParallelConfigSchema.safeParse(fanConfig))).toEqual([]);
+
     const fnds = lintFlowPatterns({
       flows: [{
         name: 'twin_regions',
         runAs: 'system',
         nodes: [
           { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
-          {
-            id: 'fan', type: 'parallel',
-            config: {
-              branches: [
-                { name: 'a', ...branch('lead.score > 50') },
-                { name: 'b', ...branch('lead.score > 90') },
-              ],
-            },
-          },
+          { id: 'fan', type: 'parallel', config: fanConfig },
         ],
         edges: [{ id: 'e1', source: 'start', target: 'fan' }],
       }],
@@ -1510,18 +1637,32 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
       expect(fnds[0].message).toContain("every row of 'campaign_member' is deleted");
     });
 
+    /**
+     * The INNER container for the two-regions-deep case, named so the pin below
+     * reads the object the fixture descends into (#5700). The planted defect is
+     * the body node's unfiltered `multi: true`; the container around it has to
+     * be authorable or the case proves this rule against a `loop` the schema
+     * refuses — and the enclosing shell pin cannot see in here, because
+     * `FlowNodeSchema` declares `config` as an open record.
+     */
+    const nestedTouchpointsResetLoop = {
+      collection: '{lead.touchpoints}', iteratorVariable: 'tp',
+      body: {
+        nodes: [{
+          id: 'reset', type: 'update_record', label: 'Reset Touchpoints',
+          config: { objectName: 'touchpoint', fields: { done: false }, multi: true },
+        }],
+        edges: [],
+      },
+    };
+
+    it('pins that inner loop container against LoopConfigSchema (#5700)', () => {
+      expect(LoopConfigSchema.safeParse(nestedTouchpointsResetLoop).success).toBe(true);
+    });
+
     it('flags an update_record two regions deep', () => {
       const fnds = lintFlowPatterns(loopBodyFlow({
-        nodes: [{
-          id: 'loop_touchpoints', type: 'loop', label: 'Loop Touchpoints',
-          config: {
-            collection: '{lead.touchpoints}', itemVar: 'tp',
-            body: {
-              nodes: [{ id: 'reset', type: 'update_record', config: { objectName: 'touchpoint', fields: { done: false }, multi: true } }],
-              edges: [],
-            },
-          },
-        }],
+        nodes: [{ id: 'loop_touchpoints', type: 'loop', label: 'Loop Touchpoints', config: nestedTouchpointsResetLoop }],
         edges: [],
       }));
       expect(fnds).toHaveLength(1);
