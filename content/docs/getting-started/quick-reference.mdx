@@ -76,13 +76,12 @@ Plugin architecture, manifests, and kernel runtime.
 | **[Metadata Loader](/docs/references/kernel/metadata-loader)** | `metadata-loader.zod.ts` | MetadataLoaderContract | Metadata loading |
 | **[Package Registry](/docs/references/kernel/package-registry)** | `package-registry.zod.ts` | InstalledPackage, InstallPackageRequest | Package resolution |
 
-## System Protocol (19 schemas)
+## System Protocol (18 schemas)
 
 Runtime environment, logging, jobs, caching, and observability.
 
 | Protocol | Source File | Key Schemas | Purpose |
 |:---------|:-----------|:------------|:--------|
-| **[Audit](/docs/references/system/audit)** | `audit.zod.ts` | AuditEvent, AuditConfig | Audit trail logging |
 | **[Auth Config](/docs/references/system/auth-config)** | `auth-config.zod.ts` | AuthConfig | Authentication configuration |
 | **[Cache](/docs/references/system/cache)** | `cache.zod.ts` | CacheConfig | Caching layer |
 | **[Change Management](/docs/references/system/change-management)** | `change-management.zod.ts` | ChangeRequest, RollbackPlan | Change tracking |
@@ -120,7 +119,7 @@ AI/ML capabilities - agents, skills, tools, MCP exposure, RAG, and cost tracking
 | **[Usage](/docs/references/ai/usage)** | `usage.zod.ts` | AIUsageRecord, TokenUsage | AI usage and cost tracking |
 | **[Solution Blueprint](/docs/references/ai/solution-blueprint)** | `solution-blueprint.zod.ts` | BlueprintObject, BlueprintApp | Blueprint format for AI app generation |
 
-## API Protocol (19 schemas)
+## API Protocol (17 schemas)
 
 REST/GraphQL endpoints, real-time subscriptions, and discovery.
 
@@ -130,7 +129,6 @@ REST/GraphQL endpoints, real-time subscriptions, and discovery.
 | **[Endpoint](/docs/references/api/endpoint)** | `endpoint.zod.ts` | ApiEndpoint, ApiMapping | REST endpoint configuration |
 | **[Router](/docs/references/api/router)** | `router.zod.ts` | Router, Route | API routing rules |
 | **[OData](/docs/references/api/odata)** | `odata.zod.ts` | ODataQuery | OData protocol support |
-| **[GraphQL](/docs/references/api/graphql)** | `graphql.zod.ts` | GraphQLConfig, FederationEntity | GraphQL API config |
 | **[Realtime](/docs/references/api/realtime)** | `realtime.zod.ts` | Subscription, RealtimeEvent | WebSocket subscriptions |
 | **[WebSocket](/docs/references/api/websocket)** | `websocket.zod.ts` | WebSocketConfig | WebSocket protocol |
 | **[Discovery](/docs/references/api/discovery)** | `discovery.zod.ts` | Discovery, ServiceInfo | API discovery and metadata |
@@ -143,7 +141,6 @@ REST/GraphQL endpoints, real-time subscriptions, and discovery.
 | **[Analytics](/docs/references/api/analytics)** | `analytics.zod.ts` | Analytics | API usage analytics |
 | **[Documentation](/docs/references/api/documentation)** | `documentation.zod.ts` | Documentation | API docs generation |
 | **[Metadata](/docs/references/api/metadata)** | `metadata.zod.ts` | Metadata | API metadata endpoints |
-| **[Registry](/docs/references/api/registry)** | `registry.zod.ts` | Registry | API registry |
 | **[Storage](/docs/references/api/storage)** | `storage.zod.ts` | Storage | API storage operations |
 
 ## Automation Protocol (5 schemas)
@@ -188,7 +185,7 @@ Environments, marketplace, licensing, and multi-tenancy.
 | **[Environment](/docs/references/cloud/environment)** | `environment.zod.ts` | Environment, EnvironmentType | Deployment environments |
 | **[Marketplace](/docs/references/cloud/marketplace)** | `marketplace.zod.ts` | MarketplaceListing, PackageSubmission | Plugin marketplace |
 | **[Plugin Registry](/docs/references/kernel/plugin-registry)** | `plugin-registry.zod.ts` | PluginRegistryEntry, PluginVendor | Plugin registry entries and quality metrics |
-| **[Plugin Security](/docs/references/cloud/plugin-security)** | `plugin-security.zod.ts` | PluginSecurityProtocol, SBOM | Plugin security policies |
+| **[Plugin Security](/docs/references/kernel/plugin-security)** | `plugin-security.zod.ts` | PluginSecurityProtocol, SBOM | Plugin security policies |
 | **[Tenant](/docs/references/cloud/tenant)** | `tenant.zod.ts` | Tenant | Multi-tenancy isolation |
 
 ## Integration Protocol (1 schema)
@@ -214,7 +211,7 @@ Common utilities used across all protocols.
 | **[HTTP](/docs/references/shared/http)** | `http.zod.ts` | HttpRequest, HttpMethod, CorsConfig | HTTP utilities |
 | **[Identifiers](/docs/references/shared/identifiers)** | `identifiers.zod.ts` | SystemIdentifier, SnakeCaseIdentifier | Standard ID patterns |
 | **[Mapping](/docs/references/shared/mapping)** | `mapping.zod.ts` | FieldMapping | Field mapping utilities |
-| **[Connector Auth](/docs/references/shared/connector-auth)** | `connector-auth.zod.ts` | ConnectorAuthConfig | Connector auth patterns |
+| **Connector Auth** | `connector-auth.zod.ts` | ConnectorAuthConfig | Connector auth patterns |
 
 ## QA Protocol (1 schema)
 

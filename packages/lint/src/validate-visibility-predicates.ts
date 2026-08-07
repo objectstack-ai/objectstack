@@ -7,10 +7,26 @@
  * canonical key **`visibleWhen`** across data fields, view form sections/fields,
  * and page components. The deprecated spellings — `visibleOn` (view form) and
  * `visibility` (page component) — stay accepted and are folded into `visibleWhen`
- * at the schema boundary (a zod `.transform()`). Because that fold happens during
- * `parse()`, the aliases are gone from the *parsed* stack — so this rule runs on
- * the **pre-parse** (normalized) stack, exactly like `validate-list-view-mode`,
- * to see what the author actually wrote.
+ * at the schema boundary (a zod `.transform()`).
+ *
+ * **The fold does NOT happen during `parse()` (measured, #6073).** This header
+ * used to say it did, and that running on the pre-parse (normalized) stack was
+ * therefore enough to see what the author wrote. It is not: the ADR-0087 D2
+ * conversions `view-visibleOn-to-visibleWhen` and
+ * `page-component-visibility-to-visibleWhen` rename the key INSIDE
+ * `normalizeStackInput` — whose output *is* the normalized tier. On all three
+ * spec-valid alias sites (`views[].form.*`, `views[].formViews.*`,
+ * `pages[].regions[].components[]`) `visibility-alias-deprecated` therefore
+ * reports ZERO through every CLI door, `os lint` on a raw config included. The
+ * only shape on which it still fires is `views[].sections[]` — the shape the
+ * unit tests below use, and the one strict `ViewSchema` refuses. The author is
+ * not left silent (the D2 conversion emits its own, better-worded notice naming
+ * the protocol-16 retirement), so nothing is broken for a user today; #6318
+ * carries the per-site table and the retire-or-rewire question.
+ *
+ * The other two rules in this file judge the predicate's **value**, which the
+ * fold carries into `visibleWhen` intact — both still report normally on the
+ * normalized tier, and neither is affected by the above.
  *
  * Two advisory rules (both `warning` — nothing is broken, the alias still works
  * and a mis-rooted predicate just never matches) plus one **gating** rule

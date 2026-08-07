@@ -43,6 +43,18 @@ import { lazySchema } from '../shared/lazy-schema';
  * as a dedicated column. It remains in the protocol as a typed advisory used
  * by Studio badges, provisioning policies and SDK helpers; deployments that
  * need to persist it should write it into `metadata.env_type`.
+ *
+ * ⚠️ **This is NOT the enum a discovery response advertises.**
+ * `DiscoverySchema.environment` (`api/discovery.zod.ts`) is a deliberately
+ * coarser THREE-member enum — `production` / `sandbox` / `development` — that
+ * answers "am I talking to production?", not "which environment is this". The
+ * three are a strict subset of the seven here, and `resolveDiscoveryEnvironment`
+ * folds the other four onto them (`staging` → `sandbox`, `test` → `development`,
+ * #4828). So a `staging` value that is first-class on this taxonomy is REJECTED
+ * by `DiscoveryEnvironmentSchema`; do not carry a value from here onto a
+ * discovery response without going through that resolver. The subset relation is
+ * pinned in `api/discovery-environment-subset.pin.test.ts` so neither enum can
+ * drift out of it silently (#5676).
  */
 export const EnvironmentTypeSchema = lazySchema(() => z
   .enum(['production', 'sandbox', 'development', 'test', 'staging', 'preview', 'trial'])

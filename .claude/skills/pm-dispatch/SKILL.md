@@ -818,6 +818,24 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
   范围 —— 已排队父单的 sub-issue 会自动成为派发候选(step 1),把仅有依赖
   关系的发现挂进去等于让未分诊的东西静默入池;那种情况独立立单 +
   `Blocked-by:`(cloud#1045/#1046 之于 cloud#1050 即此形)。
+- **sweep 打包晋级**(试点 #6243 / PR #6288 一轮跑顺后定稿,维护者
+  2026-08-07 批准):晋级一批**同类**发现时,可以打包成**一张 sweep 卡**
+  代替逐张入队 —— 一次认领、一个 PR、N 条 `Fixes`、逐项清单评审,把每单的
+  认领/PR/CI/验收固定开销摊薄到 1/N。这是「顺手修」的制度化替身:省同一笔
+  固定开销,但评审完整性不打折。打包判据与纪律,五条都是试点实测过的:
+  1. **同类才打包**:全部命中同一判据(试点即「description 面在说谎或漂移」,
+     全部校验不变量卡);不同性质的卡打包=一张 PR 里混多个评审面,禁止;
+  2. **逐项清单是 PR 正文的必备件**:每项一行 落点 | before | after,评审
+     按行核,不按 diff 顺序读;
+  3. **N 项之外零改动**,且 PR 自证(`git diff --stat` 文件数与清单一一
+     对应)—— 这是 sweep 与 rider 的分界线;
+  4. **范围外发现照旧单开**(PD #10 不因打包而豁免;#6287 之于 #6288 即
+     此形);
+  5. **卡片本身是认领对象**:sweep 卡入队、被认领,成员单保持 `pm:queue`
+     标签但**不再是可派发候选**(选择期按 sweep 卡的成员清单排除,防双派;
+     PR 合并时 N 条 `Fixes` 齐关)。
+  适用面注记:`domain:spec-surface` 车道的默认运行模式即 sweep-first
+  (见「`spec` 一分为二」);其它车道按发现批次的同类度自行判断。
 
 #### 发版板(`target:<major>` —— 发版视角的常设轴,维护者 2026-08-06 拍板)
 
@@ -1357,15 +1375,31 @@ to `mode:subagent`).
    处停摆,而 PM 只能靠 poke 唤醒。条款原文形:⛔ 不为提问/中期汇报结束回合;
    开放选择按裁决与三轴自裁记入终报 open_questions;合法回合终点只有
    (a) 推送完成 + 终报 JSON 作为最后一条消息,或 (b) 硬阻塞详报。
-3. **交付通道写明降级路径。** 云会话通常没有 GitHub API 工具(连接器不随
-   create_session/trigger 传递),派发词写明:开 PR / 发评论失败 ⛔ 不视为
-   阻塞 —— 推送 outcome branch + 终报作最后一条会话消息,**PM 代开 draft
-   PR、代转录报告**到 issue(权限面不因此放大)。
+3. **交付通道:自开 PR + 订阅唤醒是正道,降级通道只属于 trigger 流。**
+   初版条款以为云会话一律没有 GitHub API 工具 —— 对 `create_session` 卡是
+   **过度保守的误判**(2026-08-07 下午三例实测推翻:#5599 会话自发 issue
+   评论、#5775 会话自立两张 issue、#6243 会话自开 PR #6288),没有工具的只是
+   **trigger 拉起**的会话(与第 1 课的 403 同源)。据此分流:
+   - **create_session 卡(常态)**:派发词要求 dev **自开 draft PR**
+     (`Fixes #<n>`,正文含验证记录)并把终报以 **issue 评论**
+     (`<!-- os-dev-report -->`)交付;PM 在派发后立即对该 PR(或预期分支的
+     PR)挂 `subscribe_pr_activity` —— dev 的完成动作即 webhook,通知延迟从
+     「≤巡检间隔」降到秒级。**例外仍归 PM 代办**:会话未 attach 的姊妹仓
+     (源仓之外)依旧够不着 —— 跨仓跟进卡由 PM 代立(#5775 的 objectui
+     跟进卡即此形)。
+   - **trigger 拉起的会话(定时/重复型)**:维持降级通道 —— 推送 outcome
+     branch + 终报走报告 ref(空提交信息)或最后一条会话消息,PM 代开
+     draft PR、代转录(权限面不因此放大)。附一条实测:报告 ref 用完后
+     PM 侧 `push --delete` 会被 git 代理 403(推送授权不含删 ref),清理
+     要走有权限的通道或留给维护者。
 
-**监控与转向**:`get_session` 读实时状态(status / model / token 用量;
-IDLE + 分支未推送 = 停摆待 poke);投递消息用**绑定会话的 poke 触发器**
-(`create_trigger` 带 `persistent_session_id` + `fire_trigger` + 用后即
-`delete_trigger`)。收报:巡检主动读会话终报与分支推送,⛔ 不等推送通知。
+**监控与转向**:事件面交给 PR 订阅(上条),`get_session` 读实时状态
+(status / model / `post_turn_summary`;IDLE + 分支未推送 = 停摆待 poke);
+投递消息用**绑定会话的 poke 触发器**(`create_trigger` 带
+`persistent_session_id` + `fire_trigger` + 用后即 `delete_trigger`)。巡检
+从主通知通道退为**兜底心跳**:webhook 不保证送达(CI success/新推送/踢队
+可能缺席),定时器仍要挂,但频率可放宽,且每轮先核订阅已覆盖哪些面、只补
+盲区(会话停摆、未开 PR 的分支、姊妹仓动静)。
 
 #### 座位 Routine 化(PM 侧的运行形态,#5472 第 5 点)
 

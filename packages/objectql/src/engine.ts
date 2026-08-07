@@ -30,6 +30,10 @@ import {
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
+// Imported from spec directly rather than through `@objectstack/core`'s
+// re-export block: that block is labelled backward-compatibility, and this
+// contract is new (#5945).
+import type { IScopedContext, IScopedObjectRepository } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
@@ -5690,13 +5694,28 @@ export class ObjectQL implements IObjectQLEngine {
        opCtx.ast = { object, ...(options?.where !== undefined ? { where: options.where } : {}) } as QueryAST;
      }
 
-     // [#2948] Snapshot the keys the CALLER supplied, BEFORE any middleware /
+     // [#2948] Snapshot what the CALLER supplied, BEFORE any middleware /
      // beforeUpdate hook stamps server-managed columns (owner/tenant stamp,
      // `updated_by`/`updated_at`). The static-`readonly` strip below drops only
      // caller-supplied read-only writes, so hook/middleware stamps survive.
-     const suppliedKeys: ReadonlySet<string> = new Set(
-       Object.keys((opCtx.data ?? {}) as Record<string, unknown>),
-     );
+     //
+     // [#5591] KEYS ARE NOT ENOUGH — this snapshot carries the VALUES too, and
+     // it must be a COPY. Hooks mutate `opCtx.data` IN PLACE
+     // (`ctx.input.data.x = …` — `hookContext.input.data` starts as this very
+     // reference), so a snapshot that aliased it would track those mutations
+     // and answer every question about "what the caller sent" with the
+     // post-hook payload. A key-only snapshot was already immune to that; a
+     // value snapshot only stays immune because of the spread.
+     //
+     // Why values: the strip runs AFTER the hooks (below), so "this key is
+     // caller-supplied" and "this key still holds the caller's value" are
+     // different facts, and only the second one licenses a delete. Reading the
+     // first as the second deleted hook-written timestamps whenever the caller
+     // had echoed the key back — see `stripReadonlyFields` for the measured
+     // downstream row (`status = published`, `published_at = null`).
+     const suppliedValues: Readonly<Record<string, unknown>> = {
+       ...((opCtx.data ?? {}) as Record<string, unknown>),
+     };
 
      // [#3407] Structured strip observability. The readonly/readonlyWhen strips
      // below are LEGAL semantics (the write still succeeds without the locked
@@ -5921,11 +5940,13 @@ export class ObjectQL implements IObjectQLEngine {
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
                // columns and are exempt). Runs AFTER hooks/middleware stamped
-               // their columns; `suppliedKeys` ensures only caller-forged
-               // read-only writes are dropped, never the server stamps.
+               // their columns; `suppliedValues` ensures only caller-forged
+               // read-only writes are dropped, never the server stamps — and
+               // (#5591) never a stamp a hook wrote OVER a key the caller
+               // happened to echo back.
                if (!opCtx.context?.isSystem) {
                    const preRo = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedKeys, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Both strip passes are done; refuse now if the caller
@@ -6017,7 +6038,7 @@ export class ObjectQL implements IObjectQLEngine {
                // rejected upstream by the tenant write wall, #2946).
                if (!opCtx.context?.isSystem) {
                    const preRoMulti = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedKeys, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Same refusal on the predicate path. A bulk strip is
@@ -7320,7 +7341,21 @@ export class ObjectQL implements IObjectQLEngine {
  * and convenience aliases (create, updateById, deleteById) matching
  * the @objectql/core ObjectRepository API.
  */
-export class ObjectRepository {
+/**
+ * A repository bound to one object and one execution context — what
+ * `ScopedContext.object(name)` returns, and what a hook reaches as
+ * `ctx.api.object(name)`.
+ *
+ * `implements IScopedObjectRepository` (#5945): the six members that contract
+ * declares are the ones the documentation corpus is measured to CALL, and the
+ * `implements` clause is what keeps the two from drifting — before it, the
+ * only descriptions of this face were the private slices each consumer
+ * hand-rolled (`type CrossObjectApi = …`), which nothing checked. The class
+ * stays WIDER than the contract on purpose (`create`, `delete`, `deleteById`,
+ * `aggregate`, `execute`); `implements` allows that, and those members join the
+ * contract when a call site turns up to justify them.
+ */
+export class ObjectRepository implements IScopedObjectRepository {
   constructor(
     private objectName: string,
     private context: ExecutionContextInput,
@@ -7413,12 +7448,18 @@ export class ObjectRepository {
 
 /**
  * Scoped execution context with object() accessor.
- * 
+ *
  * Provides identity (userId, tenantId/spaceId, roles),
  * repository access via object(), privilege escalation via sudo(),
  * and transactional execution via transaction().
+ *
+ * `implements IScopedContext` (#5945) — this class IS `HookContext.api`, built
+ * per dispatch by {@link ObjectQL.buildHookApi}. The contract declares the two
+ * members hooks reach (`object`, `transaction`); `sudo()`, the discrete
+ * begin/commit/rollback trio and the identity getters stay off it, so this
+ * class is deliberately wider than what it implements.
  */
-export class ScopedContext {
+export class ScopedContext implements IScopedContext {
   constructor(
     private executionContext: ExecutionContextInput,
     private engine: IDataEngine

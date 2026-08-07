@@ -447,6 +447,44 @@ jobs:
           node scripts/check-empty-changeset.mjs --self-test
           node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"
 
+      # #6148: a declared-breaking changeset must say IN WRITING what it did about
+      # the ADR-0087 migration ledger. The two existing ledger gates
+      # (`check:spec-changes`, `check:upgrade-guide`) both pin ledger <-> ARTIFACT
+      # SYNCHRONY; neither pins that a retirement which actually happened has an
+      # entry at all. The artifacts are a pure projection of the registry, so an
+      # entry that was NEVER written leaves the two perfectly consistent and every
+      # gate green, repo-wide. PR #6048 removed `ctx.user.roles` exactly that way;
+      # a human triage seat caught it by eye (#6011), and a separate dispatch round
+      # backfilled it (PR #6138).
+      #
+      # This step lives HERE, beside check-empty-changeset, rather than in ci.yml's
+      # lint family, for one reason: its verdict is a function of the PR's DIFF, so
+      # it needs the same `$MERGE_BASE` the steps above derive. A lint-job copy
+      # would have no branch point to judge against and would fall back to reading
+      # stock -- which is precisely the "judge the author for what main gained while
+      # their PR was open" defect (#6129) the merge base exists to prevent.
+      #
+      # It does NOT detect retirements. Cross-package retirement detection is
+      # undecidable in the case that actually happened (the removal was in
+      # `packages/runtime`, the ledger is in `packages/spec`), and the maintainer's
+      # ruling on #6148 routes around it: the AUTHOR has already declared "breaking"
+      # in the changeset, so the gate only has to notice that a declared-breaking
+      # change said nothing. Measured, ~1 declared-breaking change in 7 needs a
+      # ledger entry, so `not-required (...)` is the ordinary answer and costs one
+      # line -- but it is a line someone wrote and a reviewer can see.
+      #
+      # `--self-test` runs AHEAD of the real check, the repo convention for
+      # `check-*.mjs` gates: its fixtures are the only place the red directions are
+      # pinned, and each of them was verified to flip green when the corresponding
+      # check is ablated. Real temp git repositories, well under a second.
+      - name: Require an ADR-0087 disposition on a declared-breaking changeset
+        if: steps.labels.outputs.skip != 'true'
+        env:
+          MERGE_BASE: ${{ steps.diffbase.outputs.merge_base }}
+        run: |
+          node scripts/check-adr-0087-registration.mjs --self-test
+          node scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE"
+
       - name: Guard against accidental major bumps (launch window)
         # Every publishable package is in one Changesets "fixed" (lockstep) group,
         # so a single `major` bump promotes the ENTIRE monorepo to a new major
