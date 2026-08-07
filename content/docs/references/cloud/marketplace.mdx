@@ -8,57 +8,35 @@ description: Marketplace protocol schemas
 # Marketplace Protocol
 
 Defines the core schemas for the plugin marketplace ecosystem, covering:
-
 - **Developer Side**: Package publishing, submission, and version releases
-
 - **Platform Side**: Marketplace listing, review, approval, and discovery
 
 This protocol defines the contract between plugin developers, the marketplace
-
 platform, and customers who install plugins.
 
 ## Architecture Alignment
-
 - **Salesforce AppExchange**: Security review, managed packages, listing profiles
-
 - **VS Code Marketplace**: Extension publishing, ratings, verified publishers
-
 - **npm Registry**: Package publishing, versioning, scoped packages
-
 - **Shopify App Store**: App review process, billing integration, merchant installs
 
 ## Developer Publishing Flow
-
 ```
-
 1. Develop   → Build the project locally using ObjectStack CLI
-
 2. Validate  → Run `os validate` (schema + security checks)
-
 3. Build     → Run `os build` (compile to dist/objectstack.json)
-
 4. Submit    → Run `os projects bind <id> --artifact dist/objectstack.json`
-
 5. Review    → Platform conducts automated + manual review
-
 6. Publish   → Approved listing goes live on marketplace
-
 ```
 
 ## Platform Management Flow
-
 ```
-
 1. Receive   → Accept submissions from verified publishers
-
 2. Scan      → Automated security scan and compatibility check
-
 3. Review    → Human review for quality and policy compliance
-
 4. Catalog   → Index in marketplace search catalog
-
 5. Monitor   → Track installs, ratings, issues, and enforce SLAs
-
 ```
 
 <Callout type="info">

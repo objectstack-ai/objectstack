@@ -10,15 +10,10 @@ description: Object Designer protocol schemas
 Object Designer Protocol — Visual Field Editor, Relationship Mapper & ER Diagram
 
 Defines the specification for the Object Designer experience within ObjectStack Studio,
-
 including:
-
 - **Field Editor**: Visual field creation/editing with type-aware property panels
-
 - **Relationship Mapper**: Visual lookup/master-detail relationship configuration
-
 - **ER Diagram**: Entity-Relationship diagram rendering and interaction
-
 - **Object Manager**: Unified object list with search, filtering, and bulk operations
 
 ## Architecture
@@ -26,81 +21,45 @@ including:
 The Object Designer is composed of four interconnected panels:
 
 ```
-
 ┌─────────────────────────────────────────────────────────────────┐
-
 │                     Object Manager (list / search)             │
-
 ├──────────────┬──────────────────────────┬──────────────────────┤
-
 │  Object List │  Field Editor            │  Property Panel      │
-
 │  (sidebar)   │  (table + inline edit)   │  (type-specific)     │
-
 │              │                          │                      │
-
 │  ─ search    │  ─ drag-to-reorder       │  ─ constraints       │
-
 │  ─ filter    │  ─ inline type picker    │  ─ validation        │
-
 │  ─ group     │  ─ batch add/remove      │  ─ security          │
-
 │  ─ create    │  ─ field groups           │  ─ relationships     │
-
 ├──────────────┴──────────────────────────┴──────────────────────┤
-
 │                     ER Diagram (toggle panel)                  │
-
 │  ─ auto-layout (force / hierarchy / grid)                     │
-
 │  ─ interactive: click node → navigate to object               │
-
 │  ─ hover: highlight connected relationships                   │
-
 │  ─ zoom/pan/minimap                                           │
-
 └─────────────────────────────────────────────────────────────────┘
-
 ```
 
 @example
-
 ```typescript
+import {
+  ObjectDesignerConfigSchema,
+  ERDiagramConfigSchema,
+} from '@objectstack/spec/studio';
 
-import \{
-
-ObjectDesignerConfigSchema,
-
-ERDiagramConfigSchema,
-
-\} from '@objectstack/spec/studio';
-
-const config = ObjectDesignerConfigSchema.parse(\{
-
-defaultView: 'field-editor',
-
-fieldEditor: \{
-
-inlineEditing: true,
-
-dragReorder: true,
-
-showFieldGroups: true,
-
-\},
-
-erDiagram: \{
-
-enabled: true,
-
-layout: 'force',
-
-showFieldDetails: true,
-
-\},
-
-\});
-
+const config = ObjectDesignerConfigSchema.parse({
+  defaultView: 'field-editor',
+  fieldEditor: {
+    inlineEditing: true,
+    dragReorder: true,
+    showFieldGroups: true,
+  },
+  erDiagram: {
+    enabled: true,
+    layout: 'force',
+    showFieldDetails: true,
+  },
+});
 ```
 
 <Callout type="info">

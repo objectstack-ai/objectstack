@@ -10760,9 +10760,23 @@ export class ObjectStackProtocolImplementation implements
                         // the very next write with `not_overridable`. An app the user
                         // had just built became un-editable at the first kernel
                         // rebuild (cloud#970).
+                        //
+                        // The ownership key is the row's REAL package binding
+                        // (#4636 PR2). These rows come off `engine.find`, so
+                        // their columns are snake_case — `package_id`, never
+                        // `packageId`, exactly as `getMetaItems` and the
+                        // sibling branch below already read them. Reading the
+                        // camelCase key made the expression `undefined ||
+                        // 'sys_metadata'`, so every boot registered even a
+                        // package-bound object under the sentinel and the
+                        // sidebar's `getAllObjects(packageId)` filter lost it
+                        // across a restart. `||` and not `??`, symmetric with
+                        // the write path's `request.packageId || 'sys_metadata'`:
+                        // an empty binding is "no package", and the sentinel
+                        // marks exactly that one thing.
                         this.engine.registry.registerObject(
                             { ...(data as Record<string, unknown>), _provenance: 'org' } as any,
-                            record.packageId || 'sys_metadata',
+                            (record as { package_id?: string | null }).package_id || 'sys_metadata',
                         );
                     } else {
                         // Same rule as the getMetaItems read-side hydration and

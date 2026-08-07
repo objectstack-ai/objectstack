@@ -6,41 +6,27 @@ description: Action Params protocol schemas
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 The action DISPATCH contract: what the platform validates on the way in, and
-
 what it hands the handler on the way out.
 
 Two halves, one surface. **Inbound** — action-param VALUE validation
-
 (ADR-0104 D2), below. **Outbound** — the runtime context an action body /
-
 handler receives: `ActionSessionSchema` (the `ctx.session` contract,
-
 #5697), `ActionEngineFacade`, `ActionHandlerContext` and
-
 `ActionHandler`.
 
 ## Inbound — action-param VALUE validation (ADR-0104 D2)
 
 An action's declared `params[]` is a complete value contract — `type`,
-
 `required`, `multiple`, `options`, `reference` — but before this it only
-
 informed the client dialog: the server passed `reqBody.params` straight to
-
 the handler, unvalidated (`http-dispatcher.ts`). This module is the pure
-
 contract that lets the REST and MCP dispatch paths enforce that declaration
-
 BEFORE the handler runs, reusing the D1 field value-shape contract
-
 (`valueSchemaFor`).
 
 Purity: schema derivation only (Prime Directive #2). Field-backed params are
-
 resolved to their effective value-shape inputs by the CALLER (the runtime,
-
 which holds the object metadata registry); this module validates the already
-
 resolved descriptors.
 
 <Callout type="info">

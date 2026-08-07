@@ -8,23 +8,15 @@ description: Migration protocol schemas
 Migration protocol — the two kinds of migration, kept apart on purpose.
 
 A **schema migration** (`ChangeSet` + its atomic operations) reshapes the
-
 physical database to match metadata: add a field, change a type, create an
-
 object, run SQL. It is derivable from the metadata and applied by
-
 `os migrate plan` / `os migrate apply`.
 
 A **data migration** rewrites the rows themselves, and whether it is done is
-
 a property of ONE DEPLOYMENT's database rather than of the installed code
-
 version — so it cannot be expressed as a ChangeSet, and its completion cannot
-
 be inferred from a release. `DataMigrationFlag` is the per-deployment record
-
 that one ran here and its self-check passed; consumers that would act
-
 irreversibly on migrated data gate on the flag instead of the version.
 
 <Callout type="info">

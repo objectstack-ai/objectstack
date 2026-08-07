@@ -8,19 +8,13 @@ description: Bulk Action protocol schemas
 Bulk Action Schemas
 
 The vocabulary of a list view's `bulkActionDefs` — one entry per button in
-
 the multi-select toolbar. Use a def for a mass data-plane mutation that no
-
 action expresses (`operation: 'update'` with a patch, or `'delete'`), or for
-
 an `operation: 'custom'` + `execution: 'aggregate'` entry that dispatches the
-
 action it NAMES once for the whole selection.
 
 For the per-record dispatch, name the action in the view's
-
 `bulkActions: ['<name>']` instead — the bare-string form, promoted with the
-
 action's own label, params and `visible`.
 
 <Callout type="info">

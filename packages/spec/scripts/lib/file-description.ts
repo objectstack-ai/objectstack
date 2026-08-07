@@ -58,6 +58,46 @@
  * that cannot pick a symbol's comment in the first place makes the whole class
  * impossible. Its enforcement is `file-description.test.ts`, which pins the
  * selection on the real shapes instead of on the emitted `.mdx`.
+ *
+ * ## Rendering the selected block (#5553, #6136)
+ *
+ * Selection says WHICH block; the rest of this file says how it becomes MDX.
+ * Two defects lived here, both from transforms applied at the wrong GRANULARITY:
+ *
+ * - **Per line instead of per block (#5553).** The renderer dropped every blank
+ *   line and joined the surviving lines with `\n\n`, i.e. it declared each
+ *   SOURCE LINE its own paragraph. Markdown constructs that legitimately wrap
+ *   across lines were then cut in half by a paragraph boundary: an inline code
+ *   span cannot cross a blank line, so both of its backticks rendered as
+ *   literal text (`explain(principal, object,` / `operation)` on
+ *   `security/explain`). It also flattened every list, heading, table and code
+ *   block the sources had written, because their structure IS their line layout.
+ *   The fix is to stop rewriting that layout: strip the ` * ` gutter and keep
+ *   the lines as authored. Markdown's own rules then do what the issue asked
+ *   for — consecutive lines are one paragraph, a blank line opens the next —
+ *   while lists and fences keep working, which a literal space-join would have
+ *   broken on 85 of the 185 sources that have a description.
+ *
+ * - **Everywhere instead of only in prose (#5553, #6136).** Brace escaping ran
+ *   over the whole string, so `{` inside an inline code span became a visible
+ *   `\{` — the backslash is not an escape character there, it is content. The
+ *   bare-source-path rewriter had the same shape of bug one level up: it ran
+ *   over text that already contained the markdown links the `{@link}` step had
+ *   just produced, matched the path inside a link's TEXT, and wrapped it again
+ *   into a link nested in a link (`automation/etl:54`, `integration/connector:102`).
+ *
+ * So every transform below is scoped to the runs it is actually about: code
+ * lines (fenced or indented) are copied verbatim, and within prose the
+ * tokenizer keeps inline code spans and already-formed links out of reach.
+ * Widening the rewriter's lookaround instead would not have worked — lookaround
+ * cannot express "not nested inside a link".
+ *
+ * The one place the output is NOT the source's own layout is an indented
+ * (4-space) code block, which is re-emitted as a fenced one. MDX dropped
+ * CommonMark's indented code blocks so that indentation could lay out JSX, so
+ * keeping them would hand `{ $gte: '{last_quarter_start}' }` to MDX as an
+ * expression and fail the docs build — the target dialect has one spelling for
+ * a code block and this is it.
  */
 
 /**
@@ -160,6 +200,196 @@ export function findModuleDocBlock(source: string): string | null {
 }
 
 /**
+ * The doc block's lines with the ` * ` gutter removed and nothing else changed.
+ *
+ * Indentation AFTER the gutter is content, not decoration — it is what makes a
+ * nested list nested and an indented code block code — so only the gutter and
+ * trailing whitespace come off. The first and last lines of a block carry no
+ * gutter (they are the fragments beside the opening and closing delimiters),
+ * so they are trimmed outright.
+ */
+function stripDocGutter(block: string): string[] {
+  return block.split('\n').map(line => {
+    const gutter = /^\s*\*\s?/.exec(line);
+    return gutter ? line.slice(gutter[0].length).trimEnd() : line.trim();
+  });
+}
+
+/** What a line is, which decides which transforms may touch it. */
+type LineKind = 'prose' | 'fenced' | 'indented';
+
+/**
+ * Classify every line as prose, fenced code, or an indented (4-space) code
+ * block. Code of either kind is content the reader is meant to read literally,
+ * so link resolution and brace escaping would be printing their own syntax into
+ * it.
+ *
+ * Indented blocks have to be recognised separately rather than folded in with
+ * fenced ones, because MDX does not have them: it dropped CommonMark's indented
+ * code blocks precisely so indentation could be used to lay out JSX. Two sources
+ * write their placeholder examples that way (`data/date-macros`,
+ * `data/context-tokens`) and both are almost entirely braces, so leaving them
+ * indented would hand `{ $gte: '{last_quarter_start}' }` to MDX as an expression
+ * and fail the docs build. They are re-emitted as fenced blocks instead.
+ */
+function classifyLines(lines: readonly string[]): LineKind[] {
+  const kind: LineKind[] = lines.map(() => 'prose');
+  let fence: string | null = null;
+  let indented = false;
+  let prevBlank = true; // the start of the block is a block boundary
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const blank = line.trim() === '';
+
+    if (fence !== null) {
+      kind[i] = 'fenced';
+      if (line.trimStart().startsWith(fence)) fence = null;
+      prevBlank = false;
+      continue;
+    }
+    if (indented) {
+      if (blank) { prevBlank = true; continue; } // a blank line does not close it
+      if (/^ {4,}\S/.test(line)) { kind[i] = 'indented'; prevBlank = false; continue; }
+      indented = false; // dedented — this line is prose again
+    }
+    const opener = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (opener) { kind[i] = 'fenced'; fence = opener[1]; prevBlank = false; continue; }
+    if (prevBlank && /^ {4,}\S/.test(line)) { kind[i] = 'indented'; indented = true; prevBlank = false; continue; }
+
+    prevBlank = blank;
+  }
+
+  // A blank line BETWEEN two indented lines belongs to the block; one after the
+  // last belongs to the prose that follows.
+  for (let i = 0; i < kind.length; i++) {
+    if (kind[i] !== 'indented') continue;
+    let j = i + 1;
+    while (j < kind.length && lines[j].trim() === '') j++;
+    if (j < kind.length && kind[j] === 'indented') for (let k = i + 1; k < j; k++) kind[k] = 'indented';
+    i = j - 1;
+  }
+  return kind;
+}
+
+/**
+ * A blank line before every JSDoc block tag that does not already have one.
+ *
+ * Keeping the source's own blank lines is not sufficient on its own, because
+ * the sources write RUNS of tags with no blank line between them —
+ * `automation/etl` ends on three consecutive `@see` links. Those are three
+ * blocks in JSDoc, so they must stay three blocks in markdown; joined into one
+ * paragraph they would read as a single run-on sentence.
+ */
+function withTagBlocksSeparated(lines: readonly string[]): string[] {
+  const kind = classifyLines(lines);
+  const out: string[] = [];
+  lines.forEach((line, i) => {
+    if (kind[i] === 'prose' && /^@\w+/.test(line) && out.length > 0 && out[out.length - 1].trim() !== '') out.push('');
+    out.push(line);
+  });
+  return out;
+}
+
+/** A run of prose the transforms may rewrite, or one they must leave alone. */
+interface ProseRun {
+  kind: 'text' | 'code' | 'link';
+  text: string;
+}
+
+/**
+ * Split prose into rewritable text, inline code spans, and markdown links.
+ *
+ * The two protected kinds are protected for different reasons. A code span is
+ * content the reader sees literally, so escaping inside it leaks the escape
+ * character onto the page. A link is a construct a previous transform BUILT,
+ * and re-running a rewriter over its text is how a link ends up inside a link
+ * (#6136) — the reason this is a tokenizer and not a longer lookaround.
+ */
+function tokenizeProse(text: string): ProseRun[] {
+  const runs: ProseRun[] = [];
+  let buffer = '';
+  const flush = () => { if (buffer) { runs.push({ kind: 'text', text: buffer }); buffer = ''; } };
+
+  for (let i = 0; i < text.length;) {
+    if (text[i] === '`') {
+      let open = i;
+      while (open < text.length && text[open] === '`') open++;
+      const width = open - i;
+      // CommonMark: the closing run has to be exactly as wide as the opener.
+      let end = -1;
+      for (let j = open; j < text.length;) {
+        if (text[j] !== '`') { j++; continue; }
+        let k = j;
+        while (k < text.length && text[k] === '`') k++;
+        if (k - j === width) { end = j; break; }
+        j = k;
+      }
+      if (end !== -1) {
+        flush();
+        runs.push({ kind: 'code', text: text.slice(i, end + width) });
+        i = end + width;
+        continue;
+      }
+      buffer += text.slice(i, open); // unmatched backticks are ordinary text
+      i = open;
+      continue;
+    }
+    if (text[i] === '[') {
+      const link = /^\[[^\]]*\]\([^)\s]*\)/.exec(text.slice(i));
+      if (link) {
+        flush();
+        runs.push({ kind: 'link', text: link[0] });
+        i += link[0].length;
+        continue;
+      }
+    }
+    buffer += text[i];
+    i++;
+  }
+  flush();
+  return runs;
+}
+
+/** Apply `fn` to prose outside inline code spans, and outside links when asked. */
+function mapProse(text: string, kinds: ProseRun['kind'][], fn: (plain: string) => string): string {
+  return tokenizeProse(text).map(run => (kinds.includes(run.kind) ? fn(run.text) : run.text)).join('');
+}
+
+/** One run of consecutive prose lines, rendered to MDX. */
+function renderProse(text: string, ctx: FileDescriptionContext): string {
+  const { sourcePathToDocsRoute } = ctx;
+
+  // A bare `@see <path>` tag renders as noise — turn it into prose.
+  let out = text.replace(/^@see[ \t]+/gm, 'See also: ');
+
+  // `{@link}` first, because this is the step that PRODUCES markdown links.
+  out = mapProse(out, ['text'], s => s
+    .replace(/\{@link\s+([^|]+?)\s*\|\s*([^}]+?)\s*\}/g, (_m, target: string, label: string) =>
+      `[${label.trim()}](${sourcePathToDocsRoute(target.trim()) ?? target.trim()})`)
+    .replace(/\{@link\s+([^}]+?)\s*\}/g, (_m, target: string) => {
+      const route = sourcePathToDocsRoute(target.trim());
+      return route ? `[${target.trim()}](${route})` : `\`${target.trim()}\``;
+    }));
+
+  // …and only then paths left BARE in prose. Re-tokenizing between the two is
+  // the whole of #6136's fix: the untitled `{@link}` branch above emits
+  // `[<path>](<route>)`, whose link text is the path itself, so a rewriter run
+  // over the raw string matched it a second time and nested a link in a link.
+  out = mapProse(out, ['text'], s =>
+    s.replace(/(?<!\()\b((?:\.\.\/)?[\w-]+\/[\w.-]+\.zod\.ts)\b(?!\))/g, (_m, p: string) => {
+      const route = sourcePathToDocsRoute(p);
+      return route ? `[${p}](${route})` : `\`${p}\``;
+    }));
+
+  out = out.replace(/file:\/\//g, ''); // Remove file:// protocol
+
+  // Escape `{ }` for MDX, but only where MDX would read them as an expression.
+  // Inside a code span they are already literal, so escaping there printed the
+  // backslash itself onto five published pages (#5553).
+  return mapProse(out, ['text', 'link'], s => s.replace(/\{/g, '\\{').replace(/\}/g, '\\}'));
+}
+
+/**
  * The module's doc block, rendered as the MDX fragment a reference page opens
  * with. Empty string when the module has no description — callers print nothing
  * rather than a placeholder.
@@ -167,25 +397,29 @@ export function findModuleDocBlock(source: string): string | null {
 export function renderFileDescription(source: string, ctx: FileDescriptionContext): string {
   const block = findModuleDocBlock(source);
   if (block === null) return '';
-  const { sourcePathToDocsRoute } = ctx;
-  return block
-    .split('\n')
-    .map(line => line.replace(/^\s*\*\s?/, '').trim())
-    .filter(line => line)
-    // A bare `@see <path>` tag renders as noise — turn it into prose.
-    .map(line => line.replace(/^@see\s+/, 'See also: '))
-    .join('\n\n')
-    .replace(/\{@link\s+([^|]+?)\s*\|\s*([^}]+?)\s*\}/g, (_m, target: string, text: string) =>
-      `[${text.trim()}](${sourcePathToDocsRoute(target.trim()) ?? target.trim()})`)
-    .replace(/\{@link\s+([^}]+?)\s*\}/g, (_m, target: string) => {
-      const route = sourcePathToDocsRoute(target.trim());
-      return route ? `[${target.trim()}](${route})` : `\`${target.trim()}\``;
-    })
-    // Same for a bare source path left in prose by `See also:` above.
-    .replace(/(?<!\()\b((?:\.\.\/)?[\w-]+\/[\w.-]+\.zod\.ts)\b(?!\))/g, (_m0, p: string) => {
-      const route = sourcePathToDocsRoute(p);
-      return route ? `[${p}](${route})` : `\`${p}\``;
-    })
-    .replace(/file:\/\//g, '') // Remove file:// protocol
-    .replace(/\{/g, '\\{').replace(/\}/g, '\\}'); // Escape { } for MDX
+
+  const lines = withTagBlocksSeparated(stripDocGutter(block));
+  const kind = classifyLines(lines);
+
+  // Prose is rendered a RUN of lines at a time, never line by line: a sentence,
+  // an inline code span and a `{@link}` tag may each wrap across source lines,
+  // and a transform applied per line cuts them in half (#5553).
+  const out: string[] = [];
+  for (let i = 0; i < lines.length;) {
+    if (kind[i] === 'fenced') { out.push(lines[i]); i++; continue; }
+
+    if (kind[i] === 'indented') {
+      const start = i;
+      while (i < lines.length && kind[i] === 'indented') i++;
+      // Re-emitted as a fence: MDX has no indented code blocks, so left as it
+      // was authored this would be parsed as prose containing JSX expressions.
+      out.push('```', ...lines.slice(start, i).map(line => line.replace(/^ {4}/, '')), '```');
+      continue;
+    }
+
+    const start = i;
+    while (i < lines.length && kind[i] === 'prose') i++;
+    out.push(renderProse(lines.slice(start, i).join('\n'), ctx));
+  }
+  return out.join('\n').trim();
 }
