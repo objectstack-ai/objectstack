@@ -29,6 +29,23 @@ interface Recorded {
   args: unknown[];
 }
 
+/**
+ * The error a call rejected with, typed as `E`.
+ *
+ * `promise.catch((e) => e as E)` types the result as `E | <resolved type>`, so
+ * every property read on it is a type error. This narrows to the rejection and
+ * fails loudly if the call did NOT reject — which a bare `.catch()` would
+ * silently let through as a passing test.
+ */
+async function rejection<E>(p: Promise<unknown>): Promise<E> {
+  try {
+    await p;
+  } catch (e) {
+    return e as E;
+  }
+  throw new Error('expected the call to reject, but it resolved');
+}
+
 function recordingLogger() {
   const records: Recorded[] = [];
   const push = (level: Recorded['level']) => (message: string, ...args: unknown[]) =>
@@ -107,7 +124,7 @@ async function engineWith(opts: { transactional: boolean }) {
   const driver = makeDriver('primary', { transactional: opts.transactional });
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+  engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, '__test__');
   return { rec, engine, driver };
 }
 
@@ -132,9 +149,9 @@ describe('transaction({ require: true }) refuses a driver that cannot roll back 
   it('carries the boundary-crossing code, the datasource, and the fix', async () => {
     const { engine } = await engineWith({ transactional: false });
 
-    const err = await engine
-      .transaction(async () => 'unreachable', undefined, { require: true })
-      .catch((e: unknown) => e as TransactionUnsupportedError);
+    const err = await rejection<TransactionUnsupportedError>(
+      engine.transaction(async () => 'unreachable', undefined, { require: true }),
+    );
 
     expect(err.code).toBe('ERR_TRANSACTION_UNSUPPORTED');
     expect(err.datasource).toBe('primary');
