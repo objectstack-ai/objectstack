@@ -808,8 +808,12 @@ describe('RestServer', () => {
 
     it('item: anonymous GET of an org-only doc is 401; of a public-claimed doc succeeds', async () => {
       protocol.getMetaItems = metaByType();
-      protocol.getMetaItem = vi.fn().mockImplementation(async ({ name }: any) =>
-        DOCS.find((d) => d.name === name));
+      // `getMetaItem` answers the `{ type, name, item }` envelope (#5563) — the
+      // audience gate reads the document's `audience`, so it must reach through
+      // `item`, and the served body keeps the envelope around it.
+      protocol.getMetaItem = vi.fn().mockImplementation(async ({ type, name }: any) => ({
+        type, name, item: DOCS.find((d) => d.name === name),
+      }));
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
   rest.registerRoutes();
       const route = getMetaRoute(rest, 'GET', '/api/v1/meta/:type/:name');
@@ -819,13 +823,17 @@ describe('RestServer', () => {
       const resOk = mockRes();
       await route!.handler({ params: { type: 'doc', name: 'pub_intro' }, query: {}, headers: {} }, resOk);
       expect(resOk.status).not.toHaveBeenCalledWith(401);
-      expect(resOk.json.mock.calls.at(-1)![0]).toMatchObject({ name: 'pub_intro' });
+      const okBody = resOk.json.mock.calls.at(-1)![0];
+      expect(okBody).toMatchObject({ type: 'doc', name: 'pub_intro' });
+      expect(okBody.item).toMatchObject({ name: 'pub_intro' });
     });
 
     it('item: gated book GET bypasses the shared cache and 403s a non-holder', async () => {
       protocol.getMetaItemCached = vi.fn();
       protocol.getMetaItems = metaByType();
-      protocol.getMetaItem = vi.fn().mockResolvedValue(BOOKS[2]);
+      protocol.getMetaItem = vi.fn().mockResolvedValue({
+        type: 'book', name: 'gated_book', item: BOOKS[2],
+      });
       const rest = new RestServer(server as any, protocol as any, ANON_API as any);
       (rest as any).resolveExecCtx = vi.fn().mockResolvedValue({ userId: 'u1' });
   rest.registerRoutes();
@@ -2770,6 +2778,13 @@ describe('discovery — capabilities.transactionalBatch (#3298)', () => {
 // level instead of the inner doc left every nav label in English. The
 // single-item app route bypasses the HTTP cache (for per-user RBAC
 // filtering), so it only ever sees the envelope shape.
+//
+// [#5563] Which helper does the unwrapping changed: `translateMetaItem` now
+// takes the DOCUMENT and `translateMetaEnvelope` is the envelope-aware entry
+// the single-item routes call, instead of one helper sniffing at runtime which
+// of two shapes the route happened to receive. The guarded behaviour is
+// unchanged and still asserted below — the inner doc's labels, never the
+// envelope's top level.
 // ──────────────────────────────────────────────────────────────────────────
 describe('RestServer metadata translation — envelope unwrap', () => {
   // Minimal i18n service exposing one zh-CN bundle for the `setup` app.
@@ -2809,7 +2824,9 @@ describe('RestServer metadata translation — envelope unwrap', () => {
   it('translates the inner document of a getMetaItem envelope', async () => {
     const rest = new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
     const envelope = { type: 'app', name: 'setup', item: makeDoc(), lock: null };
-    const out = await (rest as any).translateMetaItem(zhReq, 'app', undefined, envelope, fakeI18n);
+    const out = await (rest as any).translateMetaEnvelope(
+      zhReq, 'app', undefined, envelope, envelope.item, fakeI18n,
+    );
     // Envelope shape preserved …
     expect(out.type).toBe('app');
     expect(out.name).toBe('setup');
@@ -2820,7 +2837,7 @@ describe('RestServer metadata translation — envelope unwrap', () => {
     expect(out.item.navigation[0].children[0].label).toBe('文件存储');
   });
 
-  it('still translates a bare (already-unwrapped) document', async () => {
+  it('translates the document handed to it directly', async () => {
     const rest = new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
     const out = await (rest as any).translateMetaItem(zhReq, 'app', undefined, makeDoc(), fakeI18n);
     expect(out.label).toBe('系统设置');
@@ -2831,10 +2848,16 @@ describe('RestServer metadata translation — envelope unwrap', () => {
     const rest = new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
     // translateMetaItems resolves the i18n service itself; stub the lookup.
     (rest as any).resolveI18nService = async () => fakeI18n;
-    const listEnvelope = { items: [{ type: 'app', name: 'setup', item: makeDoc() }] };
+    // The list envelope is the OUTER `{ type, items }`; its ELEMENTS are
+    // metadata documents (`getMetaItems` decorates documents, it does not wrap
+    // each one in a per-item envelope). The fixture used to spell the elements
+    // as `{ type, name, item }` — a shape the producer never emits — which is
+    // why the per-element sniff looked necessary.
+    const listEnvelope = { type: 'app', items: [makeDoc()] };
     const out = await (rest as any).translateMetaItems(zhReq, 'app', undefined, listEnvelope);
     expect(Array.isArray(out.items)).toBe(true);
-    expect(out.items[0].item.navigation[0].children[0].label).toBe('文件存储');
+    expect(out.items[0].label).toBe('系统设置');
+    expect(out.items[0].navigation[0].children[0].label).toBe('文件存储');
   });
 
   it('translates a bare array of unwrapped documents', async () => {
@@ -2889,7 +2912,9 @@ describe('RestServer metadata translation — page documents', () => {
   it('translates the page:header copy inside a getMetaItem envelope', async () => {
     const rest = new RestServer(createMockServer() as any, createMockProtocol() as any, ANON_API as any);
     const envelope = { type: 'page', name: 'connect_agent', item: makePage(), lock: null };
-    const out = await (rest as any).translateMetaItem(zhReq, 'page', undefined, envelope, fakeI18n);
+    const out = await (rest as any).translateMetaEnvelope(
+      zhReq, 'page', undefined, envelope, envelope.item, fakeI18n,
+    );
     expect(out.name).toBe('connect_agent');
     expect(out.item.label).toBe('连接智能体');
     expect(out.item.regions[0].components[0].properties.title).toBe('连接智能体');
@@ -3267,18 +3292,35 @@ describe('filterAppForUser — ADR-0057 D10 requiresService gate', () => {
     expect(gated.areas[0].navigation.map((e: any) => e.id)).toEqual(['nav_organizations']);
   });
 
-  it('unwraps the getMetaItem envelope and gates the inner app (regression)', () => {
-    const rest: any = make();
-    const envelope = {
+  it('the single-item route gates the inner app and answers the envelope', async () => {
+    // [#5563] This pinned `filterAppForUser` unwrapping the envelope itself.
+    // Unwrapping moved to the route — the helper takes the document now — so
+    // the guarded behaviour is pinned where it actually happens. What must not
+    // regress is unchanged and is what fails here if it does: gating the
+    // envelope's top level is a silent no-op (no `.navigation` there), which
+    // would ship `nav_organizations` to a caller whose gate rejects it.
+    const protocol: any = createMockProtocol();
+    protocol.getMetaItemCached = vi.fn();
+    protocol.getMetaItem = vi.fn().mockResolvedValue({
       type: 'app', name: 'setup', lock: 'none',
       item: { name: 'setup', navigation: [
         { id: 'nav_users', type: 'object' },
         { id: 'nav_organizations', type: 'object', requiresService: 'org-scoping' },
       ] },
-    };
-    const out = rest.filterAppForUser(envelope, new Set<string>(), (n: string) => n !== 'org-scoping');
-    expect(out.type).toBe('app');
-    expect((out.item.navigation as any[]).map((e: any) => e.id)).toEqual(['nav_users']);
+    });
+    const rest: any = new RestServer(createMockServer() as any, protocol, ANON_API as any);
+    rest.resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
+    rest.serviceExistsProvider = (n: string) => n !== 'org-scoping';
+    rest.registerRoutes();
+    const route = rest.getRoutes().find(
+      (r: any) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:name',
+    );
+    const res = { json: vi.fn(), status: vi.fn().mockReturnThis(), header: vi.fn(), send: vi.fn() };
+    await route.handler({ params: { type: 'app', name: 'setup' }, query: {}, headers: {} }, res);
+
+    const body = res.json.mock.calls.at(-1)![0];
+    expect(body).toMatchObject({ type: 'app', name: 'setup', lock: 'none' });
+    expect((body.item.navigation as any[]).map((e: any) => e.id)).toEqual(['nav_users']);
   });
 });
 
@@ -3322,12 +3364,35 @@ describe('filterDashboardForUser — ADR-0057 D10 widget requiresService gate', 
     expect(ids(out)).not.toContain('widget_organizations');
   });
 
-  it('unwraps the getMetaItem envelope and gates the inner dashboard', () => {
-    const rest: any = make();
-    const envelope = { type: 'dashboard', name: 'system_overview', item: dash() };
-    const out = rest.filterDashboardForUser(envelope, (n: string) => n !== 'org-scoping');
-    expect(out.type).toBe('dashboard');
-    expect(ids(out.item)).not.toContain('widget_organizations');
+  it('the single-item route gates the inner dashboard and answers the envelope', async () => {
+    // [#5563] Same move as the app gate above: the helper takes the document,
+    // the route owns the envelope. Gating an envelope's top level would find no
+    // `widgets` and ship every one of them.
+    const protocol: any = createMockProtocol();
+    protocol.getMetaItem = vi.fn().mockResolvedValue({
+      type: 'dashboard', name: 'system_overview', item: dash(),
+    });
+    const rest: any = new RestServer(
+      createMockServer() as any,
+      protocol,
+      // The widget gate lives on the uncached read; the cached branch — which
+      // is the DEFAULT — does not run it at all (pre-existing and unrelated to
+      // #5563, filed as #5881), so this pins the gate where it exists.
+      { api: { requireAuth: false }, metadata: { enableCache: false } } as any,
+    );
+    rest.resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: [] });
+    rest.serviceExistsProvider = (n: string) => n !== 'org-scoping';
+    rest.registerRoutes();
+    const route = rest.getRoutes().find(
+      (r: any) => r.method === 'GET' && r.path === '/api/v1/meta/:type/:name',
+    );
+    const res = { json: vi.fn(), status: vi.fn().mockReturnThis(), header: vi.fn(), send: vi.fn() };
+    await route.handler({ params: { type: 'dashboard', name: 'system_overview' }, query: {}, headers: {} }, res);
+
+    const body = res.json.mock.calls.at(-1)![0];
+    expect(body).toMatchObject({ type: 'dashboard', name: 'system_overview' });
+    expect(ids(body.item)).not.toContain('widget_organizations');
+    expect(ids(body.item)).toContain('widget_total_users');
   });
 
   it('resolveRegisteredServices discovers requiresService declared on widgets', async () => {

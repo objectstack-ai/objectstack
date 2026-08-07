@@ -1,6 +1,6 @@
 # ADR-0067: Commit history and rollback for AI authoring — turns become atomic, revertible commits
 
-**Status**: Accepted (2026-06-24; completed 2026-07-16) — fully implemented: commit grouping (`sys_metadata_commit`), `revertCommit`/`rollbackToPackageCommit`/`listCommits`, REST routes; **Decision-2 landed via #3066**: `publishPackageDrafts` runs every promotion + the commit record inside ONE `engine.transaction()` (two-phase — side effects post-commit), so a commit cannot half-land; `engine.transaction()` joins ambient transactions to make nested repository writes participate. Locked by `protocol-publish-package-drafts.test.ts` (all-or-nothing + rollback tracking) and `engine-ambient-transaction.test.ts`.
+**Status**: Accepted (2026-06-24; completed 2026-07-16) · **Amended** (2026-08-06, #5351/#5696 — the D2 join is now distinguishable (`owned`), and Decision-2's atomicity is enforced as a ONE-datasource promise, with audit rows carved out and possibly orphaned; see the Amendment at the end) — fully implemented: commit grouping (`sys_metadata_commit`), `revertCommit`/`rollbackToPackageCommit`/`listCommits`, REST routes; **Decision-2 landed via #3066**: `publishPackageDrafts` runs every promotion + the commit record inside ONE `engine.transaction()` (two-phase — side effects post-commit), so a commit cannot half-land; `engine.transaction()` joins ambient transactions to make nested repository writes participate. Locked by `protocol-publish-package-drafts.test.ts` (all-or-nothing + rollback tracking) and `engine-ambient-transaction.test.ts`.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on / amends**: [ADR-0045](./0045-additive-materialization-and-visibility-gate.md) (**amended**: ADR-0045 keeps a *draft + human-confirm* gate on mutations as the safety mechanism; this ADR replaces *confirm-before* with *revert-after* for everything except irreversible data loss, and unifies the two authoring regimes under one primitive — the commit), [ADR-0027](./0027-metadata-authoring-lifecycle.md) (draft workspace — retained as a *review affordance*, demoted from *safety mechanism*), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) ("AI never publishes — it drafts" → **AI commits; commits are revertible**), [ADR-0034](./0034-transactional-writes-and-ambient-transaction.md) (per-write transaction — **extended to span a whole turn**), [ADR-0038](./0038-build-verification-loop.md) (machine gate — runs per commit, before it lands)
 **Consumers**: `@objectstack/objectql` (commit grouping, atomic turn-apply, `revertCommit`, history query — built on the existing `sys_metadata_history` + `restoreVersion`), `@objectstack/runtime` + `@objectstack/rest` (commit/revert routes), `../cloud/service-ai-studio` (turn = commit; auto-commit policy; data-loss confirmation), `../objectui` (commit timeline + "revert to here")
@@ -160,3 +160,65 @@ Acceptance, browser-level: *build an app (commit 1) → ask the AI to change it 
 2. **Reverting an additive commit that holds real user data** → **allowed, tiered** (§Decision-5): silent when only sample data; typed-confirmation + auto-snapshot escape hatch when user-entered rows exist. Reversibility-by-recovery, not safety-by-prohibition — hard-blocking ("export first") is paternalistic and contradicts the friction-removal goal.
 3. **Per-turn full-bundle snapshot** → **rejected** (Option B); `sys_metadata_history` is the commit substrate, `sys_package_version` is reserved for named restore points, cut in v1.1, not per turn.
 4. **Does the draft workspace go away?** → **No, but it is demoted.** ADR-0027's draft + `?preview=draft` diff review stays as a *review affordance* (governed orgs, optional preview); it is no longer the *safety mechanism* for the default path. Revertibility is.
+
+---
+
+## Amendment (2026-08-06, #5351 / #5696) — the D2 join is now distinguishable, and "a commit cannot half-land" is scoped to one datasource
+
+Decision-2 ("commits are atomic") and its join rule — `engine.transaction()`
+JOINS an already-open ambient transaction so the outermost caller owns the one
+and only commit/rollback — are both **unchanged and reaffirmed**. A nested
+`begin` would take a second connection (a deadlock on the single-connection
+SQLite pool) and would not be covered by the outer rollback, which is the exact
+half-landing the join prevents. Two things around it are amended.
+
+### The join is now distinguishable by the callback (#5696 point 3)
+
+The join was correct but **silent**: a nested caller could not tell whether it
+owned the transaction it was running in, and a helper whose own contract reads
+"this all rolls back together" was making a promise it might not control. The
+callback's second argument now carries `{ owned: boolean }` — `true` when this
+call opened the transaction, `false` when it joined an outer one or ran on the
+no-transaction degrade path. Nothing about who commits changed; only whether the
+callback can find out.
+
+### "A commit cannot half-land" is a promise about ONE datasource
+
+Decision-2's atomicity was always scoped to the driver the transaction was
+opened on — ADR-0119 D1 says so — but the engine did not enforce that scope, and
+the gap was worse than the wording suggested: a write routed to another
+datasource was handed the FIRST driver's transaction handle and executed on the
+wrong connection entirely (measured in #5351; see ADR-0119's 2026-08-06
+amendment for the full mechanism and evidence). Since that amendment:
+
+- the handle never reaches a driver that does not own it;
+- a **business** write that would cross drivers inside a transaction is
+  **refused** by name, so a metadata commit spanning two datasources fails
+  loudly at the first crossing instead of half-landing invisibly — which is
+  Decision-2's own goal, now actually enforced rather than assumed;
+- **append-only system ledgers** (`lifecycle.class` audit / telemetry / event,
+  routed away by ADR-0057 §3.6) are **carved out**: executed outside the
+  transaction, and therefore surviving its rollback.
+
+### Orphan rows are a deliberate consequence of the carve-out
+
+A reverted commit — `revertCommit` / `rollbackToPackageCommit` — restores the
+metadata, but the **audit rows written during the reverted work remain**. They
+are not undone, and this record now says so rather than leaving it to be
+discovered.
+
+That is the correct direction of error here, and it fits this ADR's own design
+center. History is append-only by construction — Decision-3 makes a revert a
+*new forward commit* precisely so the record of what happened is never rewritten
+— so an audit row describing work that was later undone is consistent with how
+this ADR already treats history, not an exception to it. The alternative was
+refusing the audit write, which an audit hook's `try/catch` turns straight back
+into a dropped row; a spurious row is reconcilable against the commit history,
+a missing row for a write that DID commit is not recoverable at all.
+
+**Decided by**: the maintainer, 2026-08-06, on #5351 (plan A) and #5696.
+**Mechanism, limits and evidence**: ADR-0119's amendment of the same date —
+including the one path the same-origin gate declines to judge (handles the
+engine never opened and cannot attribute). **Implemented in**
+`packages/objectql/src/engine.ts`; pinned by
+`engine-transaction-same-origin.test.ts`.

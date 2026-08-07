@@ -120,6 +120,8 @@ export const TenantUsageSchema = lazySchema(() => z.object({
 }).describe('Current tenant resource usage'));
 
 export type TenantUsage = z.infer<typeof TenantUsageSchema>;
+/** Post-parse shape of {@link TenantUsage} — defaults applied, transforms run (ADR-0122). */
+export type TenantUsageParsed = z.infer<typeof TenantUsageSchema>;
 
 /**
  * Quota Enforcement Result
@@ -326,6 +328,8 @@ export const RowLevelIsolationStrategySchema = lazySchema(() => z.object({
 }));
 
 export type RowLevelIsolationStrategy = z.infer<typeof RowLevelIsolationStrategySchema>;
+/** Post-parse shape of {@link RowLevelIsolationStrategy} — defaults applied, transforms run (ADR-0122). */
+export type RowLevelIsolationStrategyParsed = z.infer<typeof RowLevelIsolationStrategySchema>;
 export type RowLevelIsolationStrategyInput = z.input<typeof RowLevelIsolationStrategySchema>;
 
 /**
@@ -444,6 +448,8 @@ export const SchemaLevelIsolationStrategySchema = lazySchema(() => z.object({
 }));
 
 export type SchemaLevelIsolationStrategy = z.infer<typeof SchemaLevelIsolationStrategySchema>;
+/** Post-parse shape of {@link SchemaLevelIsolationStrategy} — defaults applied, transforms run (ADR-0122). */
+export type SchemaLevelIsolationStrategyParsed = z.infer<typeof SchemaLevelIsolationStrategySchema>;
 export type SchemaLevelIsolationStrategyInput = z.input<typeof SchemaLevelIsolationStrategySchema>;
 
 /**
@@ -599,6 +605,8 @@ export const DatabaseLevelIsolationStrategySchema = lazySchema(() => z.object({
 }));
 
 export type DatabaseLevelIsolationStrategy = z.infer<typeof DatabaseLevelIsolationStrategySchema>;
+/** Post-parse shape of {@link DatabaseLevelIsolationStrategy} — defaults applied, transforms run (ADR-0122). */
+export type DatabaseLevelIsolationStrategyParsed = z.infer<typeof DatabaseLevelIsolationStrategySchema>;
 export type DatabaseLevelIsolationStrategyInput = z.input<typeof DatabaseLevelIsolationStrategySchema>;
 
 /**
@@ -614,6 +622,8 @@ export const TenantIsolationConfigSchema = lazySchema(() => z.discriminatedUnion
 ]));
 
 export type TenantIsolationConfig = z.infer<typeof TenantIsolationConfigSchema>;
+/** Post-parse shape of {@link TenantIsolationConfig} — defaults applied, transforms run (ADR-0122). */
+export type TenantIsolationConfigParsed = z.infer<typeof TenantIsolationConfigSchema>;
 
 /**
  * Tenant Security Policy Schema
@@ -709,4 +719,6 @@ export const TenantSecurityPolicySchema = lazySchema(() => z.object({
 }));
 
 export type TenantSecurityPolicy = z.infer<typeof TenantSecurityPolicySchema>;
+/** Post-parse shape of {@link TenantSecurityPolicy} — defaults applied, transforms run (ADR-0122). */
+export type TenantSecurityPolicyParsed = z.infer<typeof TenantSecurityPolicySchema>;
 export type TenantSecurityPolicyInput = z.input<typeof TenantSecurityPolicySchema>;

@@ -151,6 +151,8 @@ export const ExplainRecordAttributionSchema = lazySchema(() => z.object({
     .describe('Human-readable, record-specific explanation of this layer\'s outcome.'),
 }));
 export type ExplainRecordAttribution = z.infer<typeof ExplainRecordAttributionSchema>;
+/** Post-parse shape of {@link ExplainRecordAttribution} — defaults applied, transforms run (ADR-0122). */
+export type ExplainRecordAttributionParsed = z.infer<typeof ExplainRecordAttributionSchema>;
 
 /** One evaluation-pipeline layer's contribution to the decision. */
 export const ExplainLayerSchema = lazySchema(() => z.object({
@@ -212,6 +214,8 @@ export const ExplainLayerSchema = lazySchema(() => z.object({
     .describe('Row-level determination for the specific record under explanation; set only for record-grained requests.'),
 }));
 export type ExplainLayer = z.infer<typeof ExplainLayerSchema>;
+/** Post-parse shape of {@link ExplainLayer} — defaults applied, transforms run (ADR-0122). */
+export type ExplainLayerParsed = z.infer<typeof ExplainLayerSchema>;
 
 /** Request shape for the explain API. */
 export const ExplainRequestSchema = lazySchema(() => z.object({
@@ -301,6 +305,8 @@ export const ExplainDecisionSchema = lazySchema(() => z.object({
   })).optional().describe('Row-level verdict for the specific record; set only for record-grained requests.'),
 }));
 export type ExplainDecision = z.infer<typeof ExplainDecisionSchema>;
+/** Post-parse shape of {@link ExplainDecision} — defaults applied, transforms run (ADR-0122). */
+export type ExplainDecisionParsed = z.infer<typeof ExplainDecisionSchema>;
 
 /**
  * [ADR-0090 D6] Access-matrix snapshot — the authoring-time companion to the
@@ -334,3 +340,5 @@ export const AccessMatrixSchema = lazySchema(() => z.object({
   entries: z.array(AccessMatrixEntrySchema).default([]),
 }));
 export type AccessMatrix = z.infer<typeof AccessMatrixSchema>;
+/** Post-parse shape of {@link AccessMatrix} — defaults applied, transforms run (ADR-0122). */
+export type AccessMatrixParsed = z.infer<typeof AccessMatrixSchema>;

@@ -374,9 +374,11 @@ querying the related object directly.
 
 <Callout type="warn">
 `count_distinct` / `array_agg` / `string_agg` are only fully supported on the MongoDB driver.
-The SQL driver's aggregate function mapper throws `Unsupported aggregate function` for all
-three (only `count`/`sum`/`avg`/`min`/`max` are mapped), and the in-memory driver's aggregator
-silently returns `null` for them. Avoid these three on SQL- or memory-backed objects.
+The SQL drivers map only `count`/`sum`/`avg`/`min`/`max` and refuse all three as a
+**capability gap** — `501 NOT_IMPLEMENTED`, "declared but not implemented by this backend"
+— rather than as a caller mistake, because the query is spelled correctly and the gap is
+the backend's (#5907). The in-memory driver's aggregator silently returns `null` for them.
+Avoid these three on SQL- or memory-backed objects.
 </Callout>
 
 <Callout type="info">

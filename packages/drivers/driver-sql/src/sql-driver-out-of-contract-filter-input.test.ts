@@ -221,13 +221,68 @@ describe('[#5347/#5348] SqlDriver refuses out-of-contract filter input', () => {
       expect(await ids({ $not: { stage: 'won' } })).toEqual(['2']);
     });
 
-    it('$exists is deliberately NOT tightened here', async () => {
-      // #5347 ruled on `$null`. `$exists` carries the identical `=== false`
-      // identity read and diverges too, but on its own axis — what "exists"
-      // means for a null-valued key is #5299's open question — so it keeps
-      // today's behaviour rather than being settled as a rider on this fix.
-      expect(await ids({ stage: { $exists: 'yes' } })).toEqual(['1']);
-      expect(await ids({ stage: { $exists: 0 } })).toEqual(['1']);
+  });
+
+  describe('[#5369] $exists with a non-boolean comparand', () => {
+    /**
+     * FLIPPED CARVE-OUT. This block used to be titled "$exists is deliberately
+     * NOT tightened here" and pinned the answers `['1']` for `$exists: 'yes'`
+     * and `$exists: 0` — #5347 ruled on `$null` alone, and what "exists" means
+     * for a null-valued key was still #5299's open question, so tightening it
+     * as a rider would have been settling a second ruling silently.
+     *
+     * The 2026-08-06 ruling on #5298 closed that question ("has a value") and
+     * applied #5347's disposition A to `$exists` by name. So the carve-out
+     * becomes the gate, with the same envelope and the same wording shape.
+     *
+     * What did NOT change with it: the emitter's `opValue === false` arm and
+     * the polarity table's `value === false` arm. Both are exhaustive two-way
+     * choices once only booleans reach them, and #5369's suggestion to tighten
+     * the latter to `=== true` points the wrong way — that table answers
+     * "does a NULL column SATISFY the operator", and a NULL column satisfies
+     * `$exists` when the caller asked for `false`.
+     */
+    const NON_BOOLEAN: Array<[label: string, value: unknown]> = [
+      ["the string 'yes'", 'yes'],
+      ['the number 1', 1],
+      ['the number 0', 0],
+      ['null', null],
+      ['undefined', undefined],
+      ['an object', {}],
+      ["the STRING 'false'", 'false'],
+    ];
+
+    for (const [label, value] of NON_BOOLEAN) {
+      it(`refuses ${label} with INVALID_FILTER / 400`, async () => {
+        const err = await refusalOf({ stage: { $exists: value } });
+        expect(err.code).toBe('INVALID_FILTER');
+        expect(err.status).toBe(400);
+        expect(err.message).toContain('Operator "$exists" on field "stage" requires a boolean comparand');
+        expect(err.message).toContain('filter.stage.$exists');
+        expect(err.message).not.toContain('[sql-driver]');
+      });
+    }
+
+    it('refuses inside a combinator, and inside $not', async () => {
+      for (const where of [
+        { $and: [{ stage: { $exists: 'yes' } }] },
+        { $or: [{ stage: 'won' }, { stage: { $exists: 1 } }] },
+        { $not: { stage: { $exists: 'yes' } } },
+      ]) {
+        const err = await refusalOf(where);
+        expect(err.code).toBe('INVALID_FILTER');
+        expect(err.message).toContain('requires a boolean comparand');
+      }
+    });
+
+    it('true and false are unchanged, line by line', async () => {
+      expect(await ids({ stage: { $exists: true } })).toEqual(['1']);
+      expect(await ids({ stage: { $exists: false } })).toEqual(['2']);
+      expect(await ids({ $not: { stage: { $exists: true } } })).toEqual(['2']);
+      // The complement `$null` answers the mirror image, on every comparand —
+      // the invariant #5298 made the platform-wide reading of these two.
+      expect(await ids({ stage: { $exists: true } })).toEqual(await ids({ stage: { $null: false } }));
+      expect(await ids({ stage: { $exists: false } })).toEqual(await ids({ stage: { $null: true } }));
     });
   });
 
@@ -237,7 +292,9 @@ describe('[#5347/#5348] SqlDriver refuses out-of-contract filter input', () => {
     it('the ordinary vocabulary still answers', async () => {
       expect(await ids({ stage: 'won' })).toEqual(['1']);
       expect(await ids({ stage: { $in: ['won'] } })).toEqual(['1']);
-      expect(await ids({ stage: { $ne: 'won' } })).toEqual([]);
+      // [#5298] NULL-safe: row 2's `stage` is NULL, and "not won" is true of a
+      // value that is not there. This line read `[]` before that ruling.
+      expect(await ids({ stage: { $ne: 'won' } })).toEqual(['2']);
       expect(await ids({ score: { $between: [5, 15] } })).toEqual(['1']);
       expect(await ids({ score: { $gte: 10 } })).toEqual(['1', '2']);
       expect(await ids({ stage: { $startsWith: 'w' } })).toEqual(['1']);

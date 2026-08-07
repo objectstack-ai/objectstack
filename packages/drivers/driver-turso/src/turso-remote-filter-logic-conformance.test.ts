@@ -44,6 +44,8 @@ const CONFORMANCE_OBJECT = {
     a: { type: 'string' },
     b: { type: 'string' },
     c: { type: 'string' },
+    // [#5298] The NULL-bearing column; rows 3-4 seed it as `null`.
+    d: { type: 'string' },
     owner: { type: 'string' },
     status: { type: 'string' },
     parent_object: { type: 'string' },

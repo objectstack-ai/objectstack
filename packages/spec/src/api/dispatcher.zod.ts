@@ -78,6 +78,8 @@ export const DispatcherRouteSchema = z.object({
 });
 
 export type DispatcherRoute = z.infer<typeof DispatcherRouteSchema>;
+/** Post-parse shape of {@link DispatcherRoute} — defaults applied, transforms run (ADR-0122). */
+export type DispatcherRouteParsed = z.infer<typeof DispatcherRouteSchema>;
 export type DispatcherRouteInput = z.input<typeof DispatcherRouteSchema>;
 
 // ============================================================================
@@ -125,6 +127,8 @@ export const DispatcherConfigSchema = z.object({
 });
 
 export type DispatcherConfig = z.infer<typeof DispatcherConfigSchema>;
+/** Post-parse shape of {@link DispatcherConfig} — defaults applied, transforms run (ADR-0122). */
+export type DispatcherConfigParsed = z.infer<typeof DispatcherConfigSchema>;
 export type DispatcherConfigInput = z.input<typeof DispatcherConfigSchema>;
 
 // ============================================================================

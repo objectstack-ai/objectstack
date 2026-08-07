@@ -27,7 +27,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -52,6 +52,28 @@ const GATED: ReadonlyArray<{
   gen: string;
   artifact: string;
   readsDist?: true;
+  /**
+   * This gate renders from `packages/spec/json-schema/`, and the value names the
+   * gate in this very list that PRODUCES that tree (#4723).
+   *
+   * The tree is gitignored, so no checkout carries it — someone has to generate
+   * it, and until #4723 that someone was `check:docs` itself: its first step was
+   * `gen:schema`, which also repairs the two TRACKED projections whenever they
+   * are behind. So running this aggregate on a stale manifest produced a report
+   * that was red at `check:authorable-surface` and a working tree that had been
+   * quietly fixed by the gate two lines below it — a red verdict over a file
+   * already repaired, which is harder to explain than the staleness was.
+   *
+   * The generation moved to the caller, and the caller here is this list's ORDER.
+   * That is a real dependency, so it is declared rather than left to the array
+   * literal's shape: `reconcileLedger` fails if the named producer is absent or
+   * runs after its consumer. It is not a second `gen:` step — the producer is a
+   * `--check` run, which writes the gitignored tree and refuses to touch a
+   * tracked file (#4711). Anything that DID regenerate here would repair the
+   * projections before `check:authorable-surface` could report them, which is the
+   * defect wearing a fix's clothes.
+   */
+  readsSchemaTree?: string;
   ratchet?: true;
 }> = [
   { check: 'check:spec-changes', gen: 'gen:spec-changes', artifact: 'spec-changes.json' },
@@ -62,14 +84,19 @@ const GATED: ReadonlyArray<{
   {
     check: 'check:authorable-surface',
     gen: 'gen:schema',
-    artifact: 'authorable-surface.json (+ its .base.json anchor) + JSON schemas',
+    artifact: 'authorable-surface/ (+ its .base.json anchor) + JSON schemas',
   },
   // Reads the BUILT `dist/*.d.ts`, not the source. On a stale dist it reports
   // every export added since the last build as a "breaking removal" — a phantom
   // that has cost real triage time (AGENTS.md records the trap). Flagged so the
   // failure explains itself instead of sending the next reader after a ghost.
-  { check: 'check:api-surface', gen: 'gen:api-surface', artifact: 'api-surface.json', readsDist: true },
-  { check: 'check:docs', gen: 'gen:docs', artifact: 'content/docs/references/**' },
+  { check: 'check:api-surface', gen: 'gen:api-surface', artifact: 'api-surface/', readsDist: true },
+  {
+    check: 'check:docs',
+    gen: 'gen:docs',
+    artifact: 'content/docs/references/**',
+    readsSchemaTree: 'check:authorable-surface',
+  },
   // Moved out of NO_GENERATOR at #5107: the strictness ledger's numbers became a
   // generated artifact, so this gate now has something to regenerate. It still
   // audits source too (a hand-written row must name a live sited file), which is
@@ -116,10 +143,6 @@ const GATED: ReadonlyArray<{
 const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   { check: 'check:liveness', why: 'audits whether declared spec properties have a reader — no artifact' },
   { check: 'check:empty-state', why: 'audits empty-state coverage — no artifact' },
-  {
-    check: 'check:react-declaration-parity',
-    why: 'compares the spec schema props against the registry-declared inputs — two declarations, no artifact (and no renderer: #4472)',
-  },
   { check: 'check:skill-examples', why: 'validates skill examples parse — no artifact' },
   // Landed in #4177 while this ledger landed in #4183 — neither PR could see the
   // other, so `main` carried an unclassified script and this reconciliation was
@@ -153,13 +176,65 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
 ];
 
 /**
+ * Source audits that CANNOT RUN from this repository at all, because the input
+ * they compare against does not exist here and cannot be produced here.
+ *
+ * A separate bucket from `NO_GENERATOR` because the two say different things to a
+ * reader, and #4690 is what conflating them cost. `NO_GENERATOR` means "runnable,
+ * deliberately not run in this aggregate — run it yourself and it will answer".
+ * This one means "you cannot run it here at all, and here is the input it wants
+ * and who produces it". Sitting in the first list, `check:react-declaration-parity`
+ * read as the former for the entire time it was the latter: it was wired into no
+ * workflow, and a manual run without `MANIFEST` printed a `⚠` and exited 0, so no
+ * path existed on which the gate could go red. Whoever read "deliberately not run"
+ * reasonably assumed someone, somewhere, was running it.
+ *
+ * Encoding WHY in the ledger follows EXPLICIT_GENERATORS (#5807/#5358): a
+ * classification that records only a name is a classification the next reader has
+ * to re-derive. `runBy` is what keeps this bucket honest rather than an escape
+ * hatch — it names the in-repo entry point that DOES run the gate with its input,
+ * and `reconcileLedger` fails if that file has stopped naming the check. "Cannot
+ * run here" is a statement about this aggregate; "runs nowhere" would be the defect
+ * this category is supposed to make visible, not hide.
+ */
+const EXTERNAL_INPUT_REQUIRED: ReadonlyArray<{
+  check: string;
+  input: string;
+  runBy: string;
+  why: string;
+}> = [
+  {
+    check: 'check:react-declaration-parity',
+    input: 'MANIFEST=<sdui.manifest.json> — objectui\'s registry-inputs dump',
+    runBy: 'scripts/gen-sdui-manifest.sh',
+    why:
+      'compares the spec schema props against the registry-declared inputs (two declarations, no renderer: #4472). ' +
+      'The registry is a browser app, so its manifest exists only after objectui is built at .objectui-sha and ' +
+      'enumerated in a real browser — nothing in this repo (console dist is gitignored, the published console ships ' +
+      'no sdui.manifest.json) can hand it one. `pnpm sdui:manifest` produces it and runs the ratchet; without it the ' +
+      'gate now exits 1 rather than skipping (#4690)',
+  },
+];
+
+/**
  * Generators whose output NOTHING verifies. Recorded rather than ignored: each
  * one is an artifact that can silently drift from its source, which is the class
  * every gate above exists to prevent. Adding a gate for either is a real
  * follow-up, not a formality.
  */
 const UNGATED_GENERATORS: ReadonlyArray<{ gen: string; why: string }> = [
-  { gen: 'gen:openapi', why: 'the OpenAPI document is generated but no check gate compares it to the routes' },
+  // The `why` used to read "no check gate compares it to the routes". Since
+  // #5744 that names a reconciliation with no second party: the document
+  // carries no route section at all — built-in routes are produced at serve
+  // time by the package that mounts them (#5588 ruling C, #5078, ADR-0076), so
+  // there is nothing here to compare against a route table. What IS still
+  // ungated is staleness against `src/api`: nothing fails when a contract
+  // schema changes and the artifact is not regenerated. Coherence is covered
+  // (the generator self-checks before writing, #5168) — currency is not.
+  {
+    gen: 'gen:openapi',
+    why: 'the OpenAPI document is generated but nothing compares its components.schemas against src/api — a stale artifact fails nothing (it IS self-checked for coherence at write time, #5168, and since #5744 it describes no routes to reconcile)',
+  },
   { gen: 'gen:sbom', why: 'the SBOM is a release artifact, regenerated at publish time rather than checked in' },
 ];
 
@@ -203,7 +278,11 @@ const SELF = 'check:generated';
  */
 function reconcileLedger(scripts: Record<string, string>): void {
   const problems: string[] = [];
-  const declaredChecks = new Set([...GATED.map((g) => g.check), ...NO_GENERATOR.map((n) => n.check)]);
+  const declaredChecks = new Set([
+    ...GATED.map((g) => g.check),
+    ...NO_GENERATOR.map((n) => n.check),
+    ...EXTERNAL_INPUT_REQUIRED.map((e) => e.check),
+  ]);
   const declaredGens = new Set([
     ...GATED.map((g) => g.gen),
     ...UNGATED_GENERATORS.map((u) => u.gen),
@@ -213,8 +292,9 @@ function reconcileLedger(scripts: Record<string, string>): void {
   for (const name of Object.keys(scripts)) {
     if (name === SELF) continue;
     if (name.startsWith('check:') && !declaredChecks.has(name)) {
-      problems.push(`  \`${name}\` exists in package.json but is in neither GATED nor NO_GENERATOR.\n` +
-        `    Classify it: does it compare a checked-in artifact against a generator, or audit source?`);
+      problems.push(`  \`${name}\` exists in package.json but is in neither GATED nor NO_GENERATOR (nor EXTERNAL_INPUT_REQUIRED).\n` +
+        `    Classify it: does it compare a checked-in artifact against a generator, audit source,\n` +
+        `    or audit source against an input this repo cannot produce (name where it DOES run)?`);
     }
     if (name.startsWith('gen:') && !declaredGens.has(name)) {
       problems.push(`  \`${name}\` exists in package.json but no GATED entry names it and it is not in UNGATED_GENERATORS.\n` +
@@ -226,6 +306,30 @@ function reconcileLedger(scripts: Record<string, string>): void {
   for (const { check } of GATED) if (!scripts[check]) problems.push(`  GATED names \`${check}\`, which package.json no longer has.`);
   for (const { gen } of GATED) if (!scripts[gen]) problems.push(`  GATED names \`${gen}\`, which package.json no longer has.`);
   for (const { check } of NO_GENERATOR) if (!scripts[check]) problems.push(`  NO_GENERATOR names \`${check}\`, which package.json no longer has.`);
+  for (const { check, runBy } of EXTERNAL_INPUT_REQUIRED) {
+    if (!scripts[check]) problems.push(`  EXTERNAL_INPUT_REQUIRED names \`${check}\`, which package.json no longer has.`);
+    // The claim that makes this category honest rather than an escape hatch: the
+    // gate cannot run HERE, but it does run SOMEWHERE, and that somewhere is a file
+    // in this repo that still invokes it. A `runBy` that has stopped naming the
+    // check is #4690 all over again — a gate classified as "runs elsewhere" while
+    // running nowhere.
+    const runner = join(pkgRoot, '..', '..', runBy);
+    // Named on a line that RUNS it, not merely one that talks about it: these
+    // runners are shell scripts whose comments discuss the gate at length, and a
+    // surviving comment is exactly the evidence a deleted invocation leaves behind.
+    const invokes = existsSync(runner) &&
+      readFileSync(runner, 'utf8')
+        .split('\n')
+        .some((line) => line.includes(check) && !line.trim().startsWith('#'));
+    if (!existsSync(runner)) {
+      problems.push(`  EXTERNAL_INPUT_REQUIRED says \`${check}\` runs via \`${runBy}\`, which does not exist.`);
+    } else if (!invokes) {
+      problems.push(
+        `  EXTERNAL_INPUT_REQUIRED says \`${check}\` runs via \`${runBy}\`, which no longer invokes it.\n` +
+          `    Either restore the call or reclassify: a gate that runs nowhere is the hole this category records (#4690).`,
+      );
+    }
+  }
   for (const { gen } of UNGATED_GENERATORS) if (!scripts[gen]) problems.push(`  UNGATED_GENERATORS names \`${gen}\`, which package.json no longer has.`);
   for (const { gen, gatedBy } of EXPLICIT_GENERATORS) {
     if (!scripts[gen]) problems.push(`  EXPLICIT_GENERATORS names \`${gen}\`, which package.json no longer has.`);
@@ -236,6 +340,38 @@ function reconcileLedger(scripts: Record<string, string>): void {
       problems.push(
         `  EXPLICIT_GENERATORS says \`${gen}\` is gated by \`${gatedBy}\`, which this ledger does not declare.\n` +
           `    An explicit generator is only "covered" if some gate here verifies its artifact.`,
+      );
+    }
+  }
+
+  // ── A declared input dependency must actually be satisfiable HERE (#4723) ──
+  //
+  // `readsSchemaTree` says "this gate renders from packages/spec/json-schema/,
+  // which that gate generates". Both halves have to hold, and the second one is
+  // an ORDER, which an array literal expresses by accident. Left unchecked, a
+  // later reader tidying this list alphabetically would move `check:docs` above
+  // its producer and turn it into a gate reporting on the previous run's tree —
+  // green or red for reasons unrelated to the commit, with nothing saying so.
+  //
+  // Cheap to state, so it is stated: the producer must be in this list, and it
+  // must run first. (Belt and braces, not belt alone: `build-docs.ts` refuses on a
+  // stale tree no matter who invoked it. This is the half that keeps the ORDER
+  // honest so the refusal never has to fire.)
+  for (const [i, entry] of GATED.entries()) {
+    if (!entry.readsSchemaTree) continue;
+    const producer = GATED.findIndex((g) => g.check === entry.readsSchemaTree);
+    if (producer < 0) {
+      problems.push(
+        `  GATED says \`${entry.check}\` reads the json-schema/ tree produced by \`${entry.readsSchemaTree}\`,\n` +
+          `    which this ledger does not run. Name a gate that IS run here, or the tree is\n` +
+          `    whatever the last unrelated command left on disk (#4723).`,
+      );
+    } else if (producer > i) {
+      problems.push(
+        `  GATED runs \`${entry.check}\` (position ${i + 1}) BEFORE its declared producer\n` +
+          `    \`${entry.readsSchemaTree}\` (position ${producer + 1}). packages/spec/json-schema/ is\n` +
+          `    gitignored, so on that order this gate reads whatever tree happened to be on disk.\n` +
+          `    Move the producer above it.`,
       );
     }
   }
@@ -277,8 +413,19 @@ if (reconcileOnly) {
   console.log(
     `✓ check:generated ledger reconciles with package.json: ${checks} check: + ${gens} gen: scripts, ` +
       `all classified (${GATED.length} gated, ${NO_GENERATOR.length} source audits, ` +
+      `${EXTERNAL_INPUT_REQUIRED.length} needing an external input, ` +
       `${UNGATED_GENERATORS.length} ungated generators, ${EXPLICIT_GENERATORS.length} explicit ` +
       `manual-only generators, 1 aggregate).\n` +
+      // Named, not just counted: this bucket's whole reason for existing is that a
+      // bare count is what let #4690 read as "someone runs it".
+      EXTERNAL_INPUT_REQUIRED.map(
+        (e) => `  ⚠ cannot run here: ${e.check} — needs ${e.input}; runs in ${e.runBy}.\n`,
+      ).join('') +
+      // Named for the same reason as the bucket above: an ordering constraint
+      // nobody can see is one a later tidy-up silently breaks (#4723).
+      GATED.filter((g) => g.readsSchemaTree)
+        .map((g) => `  ↳ ${g.check} renders from json-schema/, generated by ${g.readsSchemaTree} above it.\n`)
+        .join('') +
       `  --reconcile-only: no gates were run — this verifies coverage, not artifacts.`,
   );
   process.exit(0);
@@ -300,12 +447,26 @@ for (const entry of GATED) {
       console.log(`        \`pnpm --filter @objectstack/spec build\` since your last pull, the removals`);
       console.log(`        above are phantoms. Build first, then re-run, before regenerating.`);
     }
+    if (entry.readsSchemaTree) {
+      console.log(`      ℹ this gate renders from packages/spec/json-schema/, generated by`);
+      console.log(`        \`${entry.readsSchemaTree}\` above. It no longer regenerates that tree itself —`);
+      console.log(`        the first step that did also repaired two TRACKED projections (#4711, #4723).`);
+    }
   }
 }
 
 // Narrowing is never silent: say what was deliberately not run.
 console.log(`\nNot run here (${NO_GENERATOR.length} source audits with no artifact to regenerate): ` +
   NO_GENERATOR.map((n) => n.check).join(', '));
+// Narrowing is never silent, part three — and this one is a different sentence:
+// "deliberately not run" invites the reader to run it, which for these is not an
+// option from this repo. Say what the missing input is and who supplies it.
+if (EXTERNAL_INPUT_REQUIRED.length) {
+  console.log(`Cannot run here (${EXTERNAL_INPUT_REQUIRED.length} source audit(s) whose input this repo cannot produce):`);
+  for (const e of EXTERNAL_INPUT_REQUIRED) {
+    console.log(`  ${e.check} — needs ${e.input}\n    runs in ${e.runBy}; ${e.why}`);
+  }
+}
 if (UNGATED_GENERATORS.length) {
   console.log(`Generated but ungated (${UNGATED_GENERATORS.length}): ` +
     UNGATED_GENERATORS.map((u) => u.gen).join(', ') + ' — nothing verifies these are current.');
@@ -379,6 +540,11 @@ for (const s of stale) {
   // generated files against `main`. --fix is the one path that WRITES, so it is
   // the one place the trap is unsurvivable: a visible conflict is recoverable,
   // a confidently wrong artifact is not (#4675).
+  // `readsSchemaTree` gets no refusal of its own here, deliberately. Its
+  // generator (`build-docs.ts`) carries the guard itself, so EVERY caller is
+  // covered rather than this one — and by the time --fix runs, the producer gate
+  // above has already rebuilt the tree from the sources under test, so the guard
+  // is a backstop rather than the mechanism (#4723).
   if (s.readsDist && distIsStale()) {
     failed++;
     console.log(`  ✗ ${s.gen} — REFUSED`);

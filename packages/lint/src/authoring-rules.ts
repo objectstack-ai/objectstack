@@ -558,18 +558,32 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       + 'severity change on a published rule id and belongs in its own PR, not riding a wiring change.',
     run: (stack) => validateCapabilityReferences(stack),
   },
-  // A record-change flow whose start-node objectName matches nothing never
-  // fires — silently. Reads the pre-parse tier so an author sees what they
-  // wrote. Advisory: the object may come from another installed package.
+  // A flow that LOOKS armed and never launches — silently. Reads the pre-parse
+  // tier so an author sees what they wrote.
+  //
+  // `gating` since #5762, which reviewed the file's rules as one family and
+  // split them on a single question: is THIS STACK enough to know the flow is
+  // dead? Three rules answer yes and now emit `error` — a `config.timeRelative`
+  // the spec's own `TimeRelativeTriggerSchema` refuses, one the engine's routing
+  // predicate cannot route at all, and a `record-*` triggerType outside the
+  // closed token grammar `triggerTypeToHookEvents` maps. None of those verdicts
+  // can be changed by installing a package, so there is no reading under which
+  // the flow fires. `flow-trigger-unknown-object` deliberately stayed `warning`
+  // (the object may come from another installed package — a hedge this rule
+  // cannot decide), as did `flow-draft-status-ambiguous` (draft flows DO fire;
+  // that one is ambiguity of intent, not a dead flow).
   {
     name: 'validateFlowTriggerReadiness',
-    tier: 'advisory',
+    tier: 'gating',
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-flow-trigger-readiness.ts',
-    // Runtime publish gate (#4463): the FLOW family. Advisory at this surface
-    // too — its findings are logged, not thrown (P1 gates on `error` only; P2
-    // puts advisories on the response for Studio to render).
+    // Runtime publish gate (#4463): the FLOW family. Its `error` findings now
+    // REFUSE a `state: 'active'` write (P1 gates on `error` only); the rules that
+    // stayed `warning` keep being logged as advisories. The gate judges a
+    // snapshot whose `flows` holds only the written item and subtracts the
+    // baseline's findings, so this refuses the dead flow's own publish — never
+    // another flow's save on account of a stored one.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow'],
     run: (stack) => validateFlowTriggerReadiness(stack),

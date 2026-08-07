@@ -36,7 +36,7 @@
  */
 
 import type { Middleware, IHttpRequest, IHttpResponse } from '@objectstack/core';
-import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth';
+import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 
 import { buildApiError } from '../error-envelope.js';
 import {

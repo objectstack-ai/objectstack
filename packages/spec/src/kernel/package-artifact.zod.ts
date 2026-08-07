@@ -112,6 +112,8 @@ export const ArtifactChecksumSchema = lazySchema(() => z.object({
 }).describe('Checksum manifest for artifact integrity verification'));
 
 export type ArtifactChecksum = z.infer<typeof ArtifactChecksumSchema>;
+/** Post-parse shape of {@link ArtifactChecksum} — defaults applied, transforms run (ADR-0122). */
+export type ArtifactChecksumParsed = z.infer<typeof ArtifactChecksumSchema>;
 
 // ==========================================
 // Artifact Signature
@@ -144,6 +146,8 @@ export const ArtifactSignatureSchema = lazySchema(() => z.object({
 }).describe('Digital signature for artifact authenticity verification'));
 
 export type ArtifactSignature = z.infer<typeof ArtifactSignatureSchema>;
+/** Post-parse shape of {@link ArtifactSignature} — defaults applied, transforms run (ADR-0122). */
+export type ArtifactSignatureParsed = z.infer<typeof ArtifactSignatureSchema>;
 
 // ==========================================
 // Package Artifact Schema
@@ -200,4 +204,6 @@ export const PackageArtifactSchema = lazySchema(() => z.object({
 }).describe('Package artifact structure and metadata'));
 
 export type PackageArtifact = z.infer<typeof PackageArtifactSchema>;
+/** Post-parse shape of {@link PackageArtifact} — defaults applied, transforms run (ADR-0122). */
+export type PackageArtifactParsed = z.infer<typeof PackageArtifactSchema>;
 export type PackageArtifactInput = z.input<typeof PackageArtifactSchema>;

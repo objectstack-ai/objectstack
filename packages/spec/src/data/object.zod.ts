@@ -901,6 +901,8 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
 }));
 
 export type ObjectFieldGroup = z.infer<typeof ObjectFieldGroupSchema>;
+/** Post-parse shape of {@link ObjectFieldGroup} — defaults applied, transforms run (ADR-0122). */
+export type ObjectFieldGroupParsed = z.infer<typeof ObjectFieldGroupSchema>;
 export type ObjectFieldGroupInput = z.input<typeof ObjectFieldGroupSchema>;
 
 /**
@@ -987,6 +989,8 @@ export const ObjectExternalBindingSchema = strictObject({
 }).describe('External datasource binding (ADR-0015)');
 
 export type ObjectExternalBinding = z.infer<typeof ObjectExternalBindingSchema>;
+/** Post-parse shape of {@link ObjectExternalBinding} — defaults applied, transforms run (ADR-0122). */
+export type ObjectExternalBindingParsed = z.infer<typeof ObjectExternalBindingSchema>;
 
 /**
  * Object form of a `userActions.edit` / `userActions.delete` override —
@@ -1022,6 +1026,8 @@ export const RowCrudActionOverrideSchema = z.object({
   ),
 }).strict().describe('Boolean-or-predicates override for a built-in row CRUD affordance.');
 export type RowCrudActionOverride = z.infer<typeof RowCrudActionOverrideSchema>;
+/** Post-parse shape of {@link RowCrudActionOverride} — defaults applied, transforms run (ADR-0122). */
+export type RowCrudActionOverrideParsed = z.infer<typeof RowCrudActionOverrideSchema>;
 export type RowCrudActionOverrideInput = z.input<typeof RowCrudActionOverrideSchema>;
 
 /**
@@ -1097,10 +1103,13 @@ const MANAGED_BY_SYSTEM_RETIRED =
   + 'labelling admin/user-writable platform DATA under a name that says the opposite. '
   + "Use `managedBy: 'system-data'` (platform-defined schema, admin/user-writable data; "
   + 'authz stays the DelegatedAdminGate / RLS / permission sets). Rename the value; nothing '
-  + 'else about the object changes. Note `system-data` defaults to FULL CRUD affordances '
-  + '(the old `system` default was locked), so a `userActions` block that existed only to '
-  + 're-open create/edit/delete is now redundant and can be deleted — keep it only to '
-  + 'NARROW. Run `os migrate meta --from 16` to rewrite it automatically.';
+  + 'else about the object changes. Note `system-data` defaults to WRITABLE affordances — '
+  + 'create, edit, delete and exportCsv (the old `system` default was locked) — so a '
+  + '`userActions` block that existed only to re-open create/edit/delete is now redundant '
+  + 'and can be deleted; keep it only to NARROW. CSV `import` is deliberately NOT in that '
+  + 'default (#4671): it stays opt-in per object via `userActions: { import: true }`, which '
+  + 'is what a v16 `system` object already resolved to. Run `os migrate meta --from 16` to '
+  + 'rewrite it automatically.';
 
 const ObjectSchemaBase = z.object({
   /**
@@ -2028,8 +2037,9 @@ function assertSystemDataIsWritable(
     + 'false. Use `managedBy: \'engine-owned\'` for rows a platform service owns end to end '
     + '(written via `isSystem` / a service SYSTEM_CTX), or `append-only` for an immutable '
     + 'audit log. If the object IS user-writable, drop the `userActions` entries closing '
-    + 'create/edit/delete — the `system-data` default is full CRUD, and `userActions` is for '
-    + 'NARROWING only (#3355).',
+    + 'create/edit/delete — the `system-data` default already grants create, edit, delete and '
+    + 'exportCsv, so `userActions` is for NARROWING those (#3355). The one verb it does not '
+    + 'grant is CSV `import`, which is opt-in per object (#4671).',
   );
 }
 
@@ -2166,11 +2176,19 @@ export const ObjectSchema = lazySchema(() => {
 });
 
 export type ServiceObject = z.infer<typeof ObjectSchemaBase>;
+/** Post-parse shape of {@link ServiceObject} — defaults applied, transforms run (ADR-0122). */
+export type ServiceObjectParsed = z.infer<typeof ObjectSchemaBase>;
 export type ServiceObjectInput = z.input<typeof ObjectSchemaBase>;
 export type ObjectCapabilities = z.infer<typeof ObjectCapabilities>;
+/** Post-parse shape of {@link ObjectCapabilities} — defaults applied, transforms run (ADR-0122). */
+export type ObjectCapabilitiesParsed = z.infer<typeof ObjectCapabilities>;
 export type ObjectIndex = z.infer<typeof IndexSchema>;
+/** Post-parse shape of {@link ObjectIndex} — defaults applied, transforms run (ADR-0122). */
+export type ObjectIndexParsed = z.infer<typeof IndexSchema>;
 export type TenancyConfig = z.infer<typeof TenancyConfigSchema>;
 export type ObjectAccessConfig = z.infer<typeof ObjectAccessConfigSchema>;
+/** Post-parse shape of {@link ObjectAccessConfig} — defaults applied, transforms run (ADR-0122). */
+export type ObjectAccessConfigParsed = z.infer<typeof ObjectAccessConfigSchema>;
 export type LifecycleClass = z.infer<typeof LifecycleClassSchema>;
 export type Lifecycle = z.infer<typeof LifecycleSchema>;
 
@@ -2191,7 +2209,12 @@ export type Lifecycle = z.infer<typeof LifecycleSchema>;
 export interface CrudAffordances {
   /** Generic "New" button (single record creation form). */
   create: boolean;
-  /** CSV bulk-import wizard. Disabled for config / system / append-only / better-auth by default. */
+  /**
+   * CSV bulk-import wizard. `platform` is the only bucket that grants it by
+   * default; every other bucket — `config`, `system-data`, `engine-owned`,
+   * `append-only`, `better-auth` — makes it opt-in via
+   * `userActions: { import: true }`.
+   */
   import: boolean;
   /** Inline + form editing of existing rows. */
   edit: boolean;
@@ -2232,6 +2255,12 @@ export interface RowCrudPredicates {
  *                  (RBAC link tables, prefs, messaging config). DEFAULT is
  *                  WRITABLE — the bucket exists to say "the data is yours" —
  *                  and an object that takes less NARROWS via `userActions`.
+ *                  The ONE exception is CSV import, which is opt-IN here:
+ *                  the bucket's charter members are the RBAC link tables, and
+ *                  a bulk-import entry point on a grant table is a lever a
+ *                  bucket default should not hand out by inheritance (#4671).
+ *                  An object that genuinely wants the wizard writes
+ *                  `userActions: { import: true }`.
  *                  Affordance declaration only; authz stays the delegated-admin
  *                  gate / RLS / permission sets (ADR-0103, renamed from the
  *                  locked-default `system` in v17 — #3355)
@@ -2246,7 +2275,7 @@ export interface RowCrudPredicates {
 const CRUD_AFFORDANCE_DEFAULTS: Record<NonNullable<ServiceObject['managedBy']> | 'platform', CrudAffordances> = {
   platform:       { create: true,  import: true,  edit: true,  delete: true,  exportCsv: true },
   config:         { create: true,  import: false, edit: true,  delete: true,  exportCsv: true },
-  'system-data':  { create: true,  import: true,  edit: true,  delete: true,  exportCsv: true },
+  'system-data':  { create: true,  import: false, edit: true,  delete: true,  exportCsv: true },
   'engine-owned': { create: false, import: false, edit: false, delete: false, exportCsv: true },
   'append-only':  { create: false, import: false, edit: false, delete: false, exportCsv: true },
   'better-auth':  { create: false, import: false, edit: false, delete: false, exportCsv: true },
@@ -2404,6 +2433,8 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
 }));
 
 export type ObjectExtension = z.infer<typeof ObjectExtensionSchema>;
+/** Post-parse shape of {@link ObjectExtension} — defaults applied, transforms run (ADR-0122). */
+export type ObjectExtensionParsed = z.infer<typeof ObjectExtensionSchema>;
 /** Authoring input for {@link ObjectExtension} — defaulted fields are optional. */
 export type ObjectExtensionInput = z.input<typeof ObjectExtensionSchema>;
 

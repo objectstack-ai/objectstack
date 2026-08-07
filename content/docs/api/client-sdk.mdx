@@ -696,7 +696,7 @@ Integration tests verify end-to-end communication with a live ObjectStack server
 
 For detailed information about the client's protocol implementation:
 
-- **[Protocol Compliance Matrix](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/CLIENT_SPEC_COMPLIANCE.md)** — Method-by-method verification of all API methods across 13 namespaces
+- **[Protocol Compliance Matrix (retired)](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/CLIENT_SPEC_COMPLIANCE.md)** — Historical only: retired 2026-07-27 by the #3563 route audit, which disproved its "fully compliant" verdict (27 routes had no SDK expression on the day it still claimed one). Kept so inbound links don't break; coverage today is asserted in CI by [`packages/runtime/src/route-ledger.ts`](https://github.com/objectstack-ai/objectstack/blob/main/packages/runtime/src/route-ledger.ts) and the conformance tests on both sides
 - **[Integration Tests](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/tests/integration/README.md)** — What client-server integration coverage exists today, and the backlog of namespaces still unwritten
 - **[Package README](https://github.com/objectstack-ai/objectstack/blob/main/packages/client/README.md)** — Developer navigation and API reference
 

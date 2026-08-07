@@ -117,8 +117,17 @@ save, the connection probe — reported success.
 Two things live **outside** `config`, because they are not driver-specific:
 
 - **Pool sizing** — the `pool` block on the datasource (`min`, `max`,
-  `idleTimeoutMillis`, `connectionTimeoutMillis`), honoured for every SQL driver
-  and mapped onto the Mongo client's `minPoolSize` / `maxPoolSize`.
+  `idleTimeoutMillis`, `connectionTimeoutMillis`), honoured by the pooled
+  drivers: `postgres` and `mysql` pass it to Knex, `mongo` maps `min` / `max`
+  onto the client's `minPoolSize` / `maxPoolSize`. Declaring it on a **sqlite**
+  or **sqlite-wasm** datasource is rejected — by the Setup wizard when you save,
+  and by the boot when a declared datasource carries one: a SQLite connection
+  strategy is owned by the driver (one connection per database, because a second
+  connection to `:memory:` opens a separate, empty one), so a pool declared
+  there could never take effect. It used to be dropped in silence — an `app-crm`
+  datasource asking for `max: 5` measurably ran on one connection
+  ([#5714](https://github.com/objectstack-ai/objectstack/issues/5714)). The fix
+  is to delete the block; it is a no-op on SQLite either way.
 - **TLS certificates** — the `ssl` block on the datasource (`enabled`,
   `rejectUnauthorized`, `ca`, `cert`, `key`). Inside `config`, `ssl` is the
   on/off boolean shorthand.

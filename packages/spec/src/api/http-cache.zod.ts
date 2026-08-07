@@ -93,6 +93,8 @@ export const ETagSchema = lazySchema(() => z.object({
 }));
 
 export type ETag = z.infer<typeof ETagSchema>;
+/** Post-parse shape of {@link ETag} — defaults applied, transforms run (ADR-0122). */
+export type ETagParsed = z.infer<typeof ETagSchema>;
 
 // ==========================================
 // Metadata Cache Request
@@ -156,6 +158,8 @@ export const MetadataCacheResponseSchema = lazySchema(() => z.object({
 }));
 
 export type MetadataCacheResponse = z.infer<typeof MetadataCacheResponseSchema>;
+/** Post-parse shape of {@link MetadataCacheResponse} — defaults applied, transforms run (ADR-0122). */
+export type MetadataCacheResponseParsed = z.infer<typeof MetadataCacheResponseSchema>;
 
 // ==========================================
 // Metadata Cache Invalidation
@@ -196,6 +200,8 @@ export const CacheInvalidationRequestSchema = lazySchema(() => z.object({
 }));
 
 export type CacheInvalidationRequest = z.infer<typeof CacheInvalidationRequestSchema>;
+/** Post-parse shape of {@link CacheInvalidationRequest} — defaults applied, transforms run (ADR-0122). */
+export type CacheInvalidationRequestParsed = z.infer<typeof CacheInvalidationRequestSchema>;
 
 /**
  * Cache Invalidation Response Schema

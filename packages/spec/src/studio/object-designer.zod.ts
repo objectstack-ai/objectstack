@@ -103,6 +103,8 @@ export const FieldPropertySectionSchema = lazySchema(() => strictObject({
 }));
 
 export type FieldPropertySection = z.infer<typeof FieldPropertySectionSchema>;
+/** Post-parse shape of {@link FieldPropertySection} — defaults applied, transforms run (ADR-0122). */
+export type FieldPropertySectionParsed = z.infer<typeof FieldPropertySectionSchema>;
 
 /**
  * Field grouping configuration — organizes fields into collapsible groups
@@ -129,6 +131,8 @@ export const FieldGroupSchema = lazySchema(() => strictObject({
 }));
 
 export type FieldGroup = z.infer<typeof FieldGroupSchema>;
+/** Post-parse shape of {@link FieldGroup} — defaults applied, transforms run (ADR-0122). */
+export type FieldGroupParsed = z.infer<typeof FieldGroupSchema>;
 
 /**
  * Field Editor configuration — controls the visual field editing experience.
@@ -173,6 +177,8 @@ export const FieldEditorConfigSchema = lazySchema(() => strictObject({
 }));
 
 export type FieldEditorConfig = z.infer<typeof FieldEditorConfigSchema>;
+/** Post-parse shape of {@link FieldEditorConfig} — defaults applied, transforms run (ADR-0122). */
+export type FieldEditorConfigParsed = z.infer<typeof FieldEditorConfigSchema>;
 
 // ─── Relationship Mapper ─────────────────────────────────────────────
 
@@ -201,6 +207,8 @@ export const RelationshipDisplaySchema = lazySchema(() => strictObject({
 }));
 
 export type RelationshipDisplay = z.infer<typeof RelationshipDisplaySchema>;
+/** Post-parse shape of {@link RelationshipDisplay} — defaults applied, transforms run (ADR-0122). */
+export type RelationshipDisplayParsed = z.infer<typeof RelationshipDisplaySchema>;
 
 /**
  * Relationship Mapper configuration — controls the relationship
@@ -228,6 +236,8 @@ export const RelationshipMapperConfigSchema = lazySchema(() => strictObject({
 }));
 
 export type RelationshipMapperConfig = z.infer<typeof RelationshipMapperConfigSchema>;
+/** Post-parse shape of {@link RelationshipMapperConfig} — defaults applied, transforms run (ADR-0122). */
+export type RelationshipMapperConfigParsed = z.infer<typeof RelationshipMapperConfigSchema>;
 
 // ─── ER Diagram ──────────────────────────────────────────────────────
 
@@ -272,6 +282,8 @@ export const ERNodeDisplaySchema = lazySchema(() => strictObject({
 }));
 
 export type ERNodeDisplay = z.infer<typeof ERNodeDisplaySchema>;
+/** Post-parse shape of {@link ERNodeDisplay} — defaults applied, transforms run (ADR-0122). */
+export type ERNodeDisplayParsed = z.infer<typeof ERNodeDisplaySchema>;
 
 /**
  * ER Diagram configuration — controls the entity-relationship
@@ -333,6 +345,8 @@ export const ERDiagramConfigSchema = lazySchema(() => strictObject({
 }));
 
 export type ERDiagramConfig = z.infer<typeof ERDiagramConfigSchema>;
+/** Post-parse shape of {@link ERDiagramConfig} — defaults applied, transforms run (ADR-0122). */
+export type ERDiagramConfigParsed = z.infer<typeof ERDiagramConfigSchema>;
 
 // ─── Object Manager ──────────────────────────────────────────────────
 
@@ -383,6 +397,8 @@ export const ObjectFilterSchema = lazySchema(() => strictObject({
 }));
 
 export type ObjectFilter = z.infer<typeof ObjectFilterSchema>;
+/** Post-parse shape of {@link ObjectFilter} — defaults applied, transforms run (ADR-0122). */
+export type ObjectFilterParsed = z.infer<typeof ObjectFilterSchema>;
 
 /**
  * Object Manager configuration — controls the unified object list,
@@ -430,6 +446,8 @@ export const ObjectManagerConfigSchema = lazySchema(() => strictObject({
 }));
 
 export type ObjectManagerConfig = z.infer<typeof ObjectManagerConfigSchema>;
+/** Post-parse shape of {@link ObjectManagerConfig} — defaults applied, transforms run (ADR-0122). */
+export type ObjectManagerConfigParsed = z.infer<typeof ObjectManagerConfigSchema>;
 
 // ─── Object Preview ──────────────────────────────────────────────────
 
@@ -458,6 +476,8 @@ export const ObjectPreviewTabSchema = lazySchema(() => strictObject({
 }));
 
 export type ObjectPreviewTab = z.infer<typeof ObjectPreviewTabSchema>;
+/** Post-parse shape of {@link ObjectPreviewTab} — defaults applied, transforms run (ADR-0122). */
+export type ObjectPreviewTabParsed = z.infer<typeof ObjectPreviewTabSchema>;
 
 /**
  * Object Preview configuration — defines the tabs and layout
@@ -490,6 +510,8 @@ export const ObjectPreviewConfigSchema = lazySchema(() => strictObject({
 }));
 
 export type ObjectPreviewConfig = z.infer<typeof ObjectPreviewConfigSchema>;
+/** Post-parse shape of {@link ObjectPreviewConfig} — defaults applied, transforms run (ADR-0122). */
+export type ObjectPreviewConfigParsed = z.infer<typeof ObjectPreviewConfigSchema>;
 
 // ─── Top-Level Object Designer Config ────────────────────────────────
 
@@ -629,6 +651,8 @@ export const ObjectDesignerConfigSchema = lazySchema(() => strictObject({
 }));
 
 export type ObjectDesignerConfig = z.infer<typeof ObjectDesignerConfigSchema>;
+/** Post-parse shape of {@link ObjectDesignerConfig} — defaults applied, transforms run (ADR-0122). */
+export type ObjectDesignerConfigParsed = z.infer<typeof ObjectDesignerConfigSchema>;
 
 // ─── Helper: defineObjectDesignerConfig ──────────────────────────────
 

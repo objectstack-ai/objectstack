@@ -15,24 +15,6 @@ import {
 import { resolveNamedMapping, applyMappingToRows, type MappingArtifactLike } from './import-mapping.js';
 
 /**
- * Detect the `getMetaItem` response envelope (`{ type, name, item, lock, … }`)
- * whose translatable metadata document is nested at `.item`. The cached read
- * path and `getMetaItems` element shape hand back the already-unwrapped
- * document instead, so translation helpers must distinguish the two: an
- * envelope carries a nested `item` object alongside its own `type`/`name`,
- * which a bare metadata document never does.
- */
-export function isMetaEnvelope(value: any): boolean {
-    return !!value
-        && typeof value === 'object'
-        && typeof value.type === 'string'
-        && typeof value.name === 'string'
-        && value.item != null
-        && typeof value.item === 'object'
-        && !Array.isArray(value.item);
-}
-
-/**
  * Minimal RFC-4180-style CSV parser used by the bulk-import endpoint
  * (M10.9). Handles quoted fields (including embedded quotes via "" and
  * embedded commas/newlines) and both CRLF and LF line endings.
@@ -395,8 +377,12 @@ export async function prepareImportRequest(
     try {
         let schema: any = undefined;
         if (typeof p.getMetaItem === 'function') {
-            const r = await p.getMetaItem({ type: 'object', name: objectName });
-            schema = isMetaEnvelope(r) ? r.item : r;
+            // `getMetaItem` answers the `{ type, name, item, lock, … }`
+            // envelope — one shape, on every read path, since #5563. The
+            // translatable schema document is at `.item`; read it directly
+            // rather than sniffing which of two shapes arrived.
+            const r: any = await p.getMetaItem({ type: 'object', name: objectName });
+            schema = r?.item;
         }
         if (!schema && typeof p.getObjectSchema === 'function') {
             schema = await p.getObjectSchema(objectName, environmentId);

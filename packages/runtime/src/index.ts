@@ -33,6 +33,8 @@ export type { SeedSourceOutcome } from './seed-summary.js';
 // contract shared by AppPlugin and the marketplace install path so a new org
 // replays the UNION of every seed source, not just the first one.
 export { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
+export { declareSeedSource, readSeedSettlement } from './seed-settlement.js';
+export type { SeedSourceHandle } from './seed-settlement.js';
 // External Datasource Federation — boot-validation gate (ADR-0015, Gate 2)
 export { ExternalValidationPlugin, createExternalValidationPlugin } from './external-validation-plugin.js';
 export type { ExternalSchemaDriftEvent } from './external-validation-plugin.js';
@@ -45,7 +47,15 @@ export { createSystemEnvironmentPlugin, SYSTEM_ENVIRONMENT_ID } from './system-e
 export type { SystemEnvironmentPluginConfig } from './system-environment-plugin.js';
 
 // Export HTTP Server Components
-export { HttpServer } from './http-server.js';
+// NOTE: the `HttpServer` delegating wrapper (`./http-server.ts`) is RETIRED
+// (#5122, #4939 precedent). It declared `implements IHttpServer` but forwarded
+// only the REQUIRED members, so every optional one — `getPort`, `getRawApp`
+// and above all `setFallbackHandler`, the single seam declarative `apis:`
+// endpoints enter through since #5111 — read as absent to the `typeof x ===
+// 'function'` probe the contract tells consumers to use. Do not reintroduce a
+// same-shaped wrapper: a host composes the framework by registering an
+// `IHttpServer` ADAPTER INSTANCE as `http.server`, which is what every real
+// host already does. Absence is held by `http-server-retirement.test.ts`.
 export { HttpDispatcher } from './http-dispatcher.js';
 export type { HttpProtocolContext, HttpDispatcherResult } from './http-dispatcher.js';
 // ADR-0006 generic kernel-resolution seam (retained framework contract; the
@@ -146,6 +156,7 @@ export type {
   ScriptOrigin,
   ScriptResult,
   ScriptRunOptions,
+  ScriptSession,
   QuickJSScriptRunnerOptions,
 } from './sandbox/index.js';
 

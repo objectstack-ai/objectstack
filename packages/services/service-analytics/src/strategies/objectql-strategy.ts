@@ -11,6 +11,7 @@ import {
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
+import { invalidMemberError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
@@ -433,6 +434,17 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * cannot be merged). A loud error beats the silent mis-bucket #3654 kills.
    * `generateSql()` calls this too, so the preview accepts/rejects the same set.
    *
+   * [#5716] All four refusals below are `invalidMemberError` — `INVALID_FIELD` /
+   * 400, naming the member — and the MESSAGES are unchanged (they are good
+   * diagnostics, and #5923's tests read them). Each is decided by two caller-side
+   * facts and nothing else: a member the query named, and whether that member
+   * resolves across a join. Neither is an internal invariant — a cube where the
+   * member exists and a driver that could serve it are both perfectly ordinary,
+   * which is exactly what the "run this on a native-SQL driver" half of each
+   * message says. They are member-level rather than dataset-level (hence not
+   * `datasetInvalidError`) because the fix is always to change or drop ONE named
+   * member, and because they fire on `/analytics/query` where no dataset exists.
+   *
    * Detection is on RESOLVED field names, so a dotted dimension the cube
    * flattens to a real column is treated as base, not cross-object.
    */
@@ -450,22 +462,37 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     for (const td of query.timeDimensions ?? []) {
       const field = this.resolveFieldName(cube, td.dimension, 'dimension');
       if (this.isCrossObjectField(cube, field, baseObject)) {
-        throw new Error(
+        throw invalidMemberError(
           `[Analytics] ObjectQLStrategy cannot bucket a cross-object time dimension ("${field}").`,
+          { member: td.dimension, param: 'timeDimensions', cube: cube.name },
         );
       }
     }
 
     // A cross-object MEASURE or FILTER can only be evaluated with a real join.
+    // [#5716] `member` is the entry AS THE REQUEST SPELLED IT (`revenue`), which
+    // is what a caller can act on; `field` is what it RESOLVED to
+    // (`account.balance`), which is what the message explains the refusal with.
+    // The measure's request spelling used to be dropped here — the map kept only
+    // the resolved field — so the envelope had nothing to name.
     const nonDim = [
-      ...(query.measures ?? []).map((m) => ({ where: 'measure', field: this.resolveMeasureAggregation(cube, m).field })),
-      ...Object.keys(filter).map((f) => ({ where: 'filter', field: f })),
+      ...(query.measures ?? []).map((m) => ({
+        where: 'measure', member: m, field: this.resolveMeasureAggregation(cube, m).field,
+      })),
+      ...Object.keys(filter).map((f) => ({ where: 'filter', member: f, field: f })),
     ].filter((r) => this.isCrossObjectField(cube, r.field, baseObject));
     if (nonDim.length > 0) {
-      throw new Error(
+      throw invalidMemberError(
         `[Analytics] ObjectQLStrategy cannot evaluate a cross-object ${nonDim[0].where} ` +
         `("${nonDim[0].field}") — the engine cannot join in an aggregate. Run this ` +
         `query on a native-SQL driver, or remove the cross-object ${nonDim[0].where}.`,
+        {
+          member: nonDim[0].member,
+          // The two kinds share one throw, so the request key follows the kind
+          // rather than being guessed by the reader of the message.
+          param: nonDim[0].where === 'measure' ? 'measures' : 'where',
+          cube: cube.name,
+        },
       );
     }
 
@@ -477,9 +504,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       const [alias, ...rest] = field.split('.');
       const attr = rest.join('.');
       if (attr.includes('.')) {
-        throw new Error(
+        throw invalidMemberError(
           `[Analytics] ObjectQLStrategy supports only single-hop cross-object ` +
           `dimensions; "${field}" traverses more than one relationship.`,
+          { member: dim, param: 'dimensions', cube: cube.name },
         );
       }
       crossDims.push({ outputName: dim, fkField: alias, attr, refObject: cube.joins?.[alias]?.name ?? alias });
@@ -491,11 +519,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     for (const m of query.measures ?? []) {
       const { method } = this.resolveMeasureAggregation(cube, m);
       if (!RECOMBINABLE_METHODS.has(method)) {
-        throw new Error(
+        throw invalidMemberError(
           `[Analytics] ObjectQLStrategy cannot group by a cross-object dimension ` +
           `with a "${method}" measure ("${m}") — its value cannot be recombined ` +
           `across the intermediate FK grouping. Use sum/count/min/max, or run on ` +
           `a native-SQL driver.`,
+          { member: m, param: 'measures', cube: cube.name },
         );
       }
     }

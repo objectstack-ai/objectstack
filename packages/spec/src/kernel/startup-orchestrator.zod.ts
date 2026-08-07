@@ -65,6 +65,8 @@ export const StartupOptionsSchema = lazySchema(() => z.object({
 }));
 
 export type StartupOptions = z.infer<typeof StartupOptionsSchema>;
+/** Post-parse shape of {@link StartupOptions} — defaults applied, transforms run (ADR-0122). */
+export type StartupOptionsParsed = z.infer<typeof StartupOptionsSchema>;
 export type StartupOptionsInput = z.input<typeof StartupOptionsSchema>;
 
 // ============================================================================

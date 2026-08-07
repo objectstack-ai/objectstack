@@ -121,6 +121,8 @@ export const WaitExecutorConfigSchema = lazySchema(() => z.object({
 }).describe('Wait node executor plugin configuration'));
 
 export type WaitExecutorConfig = z.infer<typeof WaitExecutorConfigSchema>;
+/** Post-parse shape of {@link WaitExecutorConfig} — defaults applied, transforms run (ADR-0122). */
+export type WaitExecutorConfigParsed = z.infer<typeof WaitExecutorConfigSchema>;
 
 // ─── Node Executor Descriptor ────────────────────────────────────────
 
@@ -164,6 +166,8 @@ export const NodeExecutorDescriptorSchema = lazySchema(() => z.object({
 }).describe('Node executor plugin descriptor'));
 
 export type NodeExecutorDescriptor = z.infer<typeof NodeExecutorDescriptorSchema>;
+/** Post-parse shape of {@link NodeExecutorDescriptor} — defaults applied, transforms run (ADR-0122). */
+export type NodeExecutorDescriptorParsed = z.infer<typeof NodeExecutorDescriptorSchema>;
 
 // ─── Action Descriptor (ADR-0018, canonical) ─────────────────────────
 
@@ -403,6 +407,8 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
 }).describe('Canonical cross-paradigm action/node descriptor (ADR-0018)'));
 
 export type ActionDescriptor = z.infer<typeof ActionDescriptorSchema>;
+/** Post-parse shape of {@link ActionDescriptor} — defaults applied, transforms run (ADR-0122). */
+export type ActionDescriptorParsed = z.infer<typeof ActionDescriptorSchema>;
 export type ActionDescriptorInput = z.input<typeof ActionDescriptorSchema>;
 
 /**

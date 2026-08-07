@@ -14,6 +14,11 @@
 
 import type { Client, InStatement, ResultSet } from '@libsql/client';
 import { StandardErrorCode } from '@objectstack/spec/api';
+import { FILTER_OPERATORS, LOGICAL_OPERATORS } from '@objectstack/spec/data';
+// The DECLARED aggregate vocabulary (#5907) — read from the spec so this
+// transport's "the protocol has no such function" refusal cannot drift from what
+// `AggregationNodeSchema.function` admits, nor from the local driver's twin.
+import { AggregationFunction } from '@objectstack/spec/data';
 import { nanoid } from 'nanoid';
 
 /**
@@ -59,6 +64,39 @@ const SUPPORTED_FILTER_OPERATORS = [
   '$null',
   '$exists',
 ] as const;
+
+/**
+ * The `$`-keys a filter NODE may carry (#5769).
+ *
+ * `FilterConditionSchema` declares exactly three combinators; every OTHER key
+ * of a node is a FIELD NAME. Taken from `@objectstack/spec`'s own
+ * `LOGICAL_OPERATORS` rather than restated here — a private copy of a shared
+ * vocabulary agrees with the spec on the day it is typed and never again, which
+ * is the note `driver-memory`'s `SUPPORTED_FIELD_OPERATORS` already carries.
+ */
+const NODE_COMBINATORS: ReadonlySet<string> = new Set<string>(LOGICAL_OPERATORS);
+
+/**
+ * The `$`-keys that are FIELD operators, i.e. legal one level DOWN (#5769).
+ *
+ * Used only to pick which sentence a refusal prints — never whether to refuse.
+ * That distinction matters because `FILTER_OPERATORS` is a runtime allowlist
+ * other packages derive enforcement from (#5701): a name added there must not
+ * be able to change this transport's VERDICT on a node-position key, and here
+ * it cannot — both branches of {@link RemoteTransport.undeclaredCombinator}
+ * throw `INVALID_FILTER`, they differ only in the repair they suggest.
+ *
+ * `$regex` is added for the same reason {@link SUPPORTED_FILTER_OPERATORS}
+ * carries it: it is not spec-declared but is what better-auth's adapter emits,
+ * so a caller really can misplace it. `$between` comes in with the spec list
+ * even though this transport never compiles it (TursoDriver lowers it first) —
+ * a misplaced `$between` is still a misplaced FIELD operator, and telling its
+ * author "unknown combinator" would send them looking for the wrong mistake.
+ */
+const MISPLACED_FIELD_OPERATORS: ReadonlySet<string> = new Set<string>([
+  ...FILTER_OPERATORS,
+  '$regex',
+]);
 
 /**
  * Where the wildcard goes in a LIKE pattern: `contains` → `%v%`,
@@ -166,6 +204,236 @@ function isFilterNode(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
+// ── [#5146 / #5298] NULL-safe negation ───────────────────────────────────────
+//
+// The THIRD implementation of one ruling, and deliberately so. `driver-sql`
+// carries it as `nullSafeNegationOperand` (a module-private function over a
+// knex builder's operand) and `service-analytics`'s `read-scope-sql.ts` carries
+// it a second time for the RLS read lowering; that file's header records why a
+// copy was preferable to an import, and the same two reasons hold here:
+//
+//  1. **This module imports no driver.** Its header states it outright — "No
+//     local SQLite or Knex dependency" — and `driver-sql`'s entry point pulls in
+//     knex. The one exportable piece is not the emitter, it is the RULING.
+//  2. **Each polarity table is matched to its OWN emitter, not copied from
+//     another one.** `read-scope-sql` reads `$null`/`$exists` by truthiness
+//     because its emitter writes `val ? … : …`; `driver-sql` reads them by
+//     identity against `false` because its emitter does. This transport reads
+//     them by identity too — see the two arms below — because that is what
+//     `buildWhereSQL` emits. The invariant is the agreement of guard with
+//     emitter, not the sameness of the source text.
+//
+// What holds the three to one answer is not their text but the shared case
+// table: `FILTER_LOGIC_CASES` runs the `$ne` and `$not` rows through all eleven
+// harnesses, and `turso-local-remote-null-parity.test.ts` in this package runs
+// the same filters through BOTH faces of this driver — which is the divergence
+// #5903 actually was.
+
+/**
+ * What one field constraint needs so its compiled SQL is TOTAL — TRUE or FALSE
+ * for every row, never UNKNOWN.
+ *
+ * - `'none'`         — already total (`IS NULL` / `IS NOT NULL`), or a shape
+ *                      this compiler refuses outright, which must keep refusing.
+ * - `'requireValue'` — a NULL column does NOT satisfy it: `col IS NOT NULL AND (…)`.
+ * - `'allowNull'`    — a NULL column DOES satisfy it: `col IS NULL OR (…)`.
+ */
+type NullGuard = 'none' | 'requireValue' | 'allowNull';
+
+/**
+ * Does a NULL column satisfy this one operator, under the semantics #5146 and
+ * #5298 ruled canonical — the two-valued answer the JS backends (`driver-memory`
+ * `match`, `formula` `matchesFilterCondition`) give a value that is not there?
+ *
+ * The default is the large positive-comparison family (`$gt`, `$in`,
+ * `$contains`, `$startsWith`, `$endsWith`, `$regex`, and any operator this
+ * transport refuses outright), every member of which answers `false` for a value
+ * that is not there.
+ */
+function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
+  switch (op) {
+    // `$eq: null` IS the null predicate (the emitter writes `IS NULL`); any
+    // other comparand is a value test a NULL column fails.
+    //
+    // [#6050] The `|| value === undefined` half is GONE from both arms. It was
+    // correct while this transport COMPILED an undefined comparand to the null
+    // predicate — the table pinned its own emitter, which is the #5298
+    // invariant — and it is wrong now that the comparand is refused before
+    // either runs: the emitter arms below dropped their `undefined` half in the
+    // same edit, so guard and emitter still read the identical value set. This
+    // is deliberately not "harmless extra tolerance": a spelling that keeps
+    // answering for a value nobody ruled on is exactly what #5347 tightened out
+    // of `driver-sql`'s `$null` arm, and it is what let this family diverge.
+    case '$eq': return value === null;
+    // Mirror image: `$ne: null` compiles to `IS NOT NULL`, which a NULL fails.
+    // This is the polarity-by-COMPARAND rule #5298 is explicit about — `$ne`
+    // does not get one answer because of its name.
+    case '$ne': return value !== null;
+    // Read by IDENTITY, matching this transport's emitter, and total over the
+    // declared domain because both comparands are now refused unless boolean
+    // (`$null` since #1116/#5347, `$exists` since #5903 — see
+    // {@link RemoteTransport.nonBooleanExistsComparand}).
+    case '$null': return value === true;
+    // `$null: true` and `$exists: false` are the same question, so these two
+    // arms are each other's MIRROR, not each other's copy.
+    case '$exists': return value === false;
+    // Negative-polarity set / substring tests hold vacuously for an absent
+    // value — the #5298 half of the ruling.
+    case '$nin': return true;
+    // `$notContains` is the one operator the two JS backends disagree on for a
+    // null-valued field (`driver-memory` answers false because `typeof null !==
+    // 'string'`; `formula` answers true). `formula` is followed because
+    // `driver-sql` follows it, so this transport casts no vote on a
+    // disagreement that is filed elsewhere.
+    case '$notContains': return true;
+    default: return false;
+  }
+}
+
+/** Is this operator's compiled SQL already total for a NULL column? */
+function operatorIsNullTotal(op: string, value: unknown): boolean {
+  switch (op) {
+    // Compile to `IS NULL` / `IS NOT NULL` — two-valued by construction.
+    case '$null':
+    case '$exists':
+      return true;
+    // A null comparand makes these null PREDICATES too, not comparisons — see
+    // the `$eq` / `$ne` arms of the emitter. [#6050] `undefined` dropped here
+    // for the reason given on {@link nullValueSatisfiesOperator}'s twin arms:
+    // it is refused upstream, so the two tables and the emitter read one set.
+    case '$eq':
+    case '$ne':
+      return value === null;
+    default:
+      return false;
+  }
+}
+
+/**
+ * The guard one field constraint needs. A constraint is the AND of its
+ * operators, so it is total when every operator is, and a NULL column satisfies
+ * it only when it satisfies all of them.
+ */
+function nullGuardForFieldSpec(spec: unknown): NullGuard {
+  // `{ field: null }` compiles to `IS NULL` — already total.
+  //
+  // [#6050] `undefined` no longer shares this arm. The old comment's reasoning
+  // ("this transport's field arm reads it as the null predicate, and a guard
+  // classified from another emitter's reading would contradict what this one
+  // emits") was right about the invariant and has simply run out of subject:
+  // the field arm no longer reads it as anything, because
+  // {@link RemoteTransport.assertDefinedComparands} refuses it before this
+  // classification runs.
+  if (spec === null) return 'none';
+  // A scalar / Date is an implicit `=`; a NULL column fails it. A bare array is
+  // REFUSED by `serializeComparand`; classifying it here keeps that refusal
+  // reachable — the unrewritten `{field: […]}` conjunct still throws its own
+  // message.
+  if (typeof spec !== 'object' || isBindableObjectComparand(spec) || Array.isArray(spec)) return 'requireValue';
+  const entries = Object.entries(spec as Record<string, unknown>);
+  // `{ field: {} }` is refused by {@link RemoteTransport.emptyFieldFilter} and a
+  // non-`$` key by {@link RemoteTransport.unsupportedOperator}. Passing them
+  // through unrewritten is what preserves the exact message; wrapping them in a
+  // guard would only change which error the caller reads.
+  if (entries.length === 0) return 'none';
+  let total = true;
+  let nullSatisfies = true;
+  for (const [op, value] of entries) {
+    if (!operatorIsNullTotal(op, value)) total = false;
+    if (!nullValueSatisfiesOperator(op, value)) nullSatisfies = false;
+  }
+  if (total) return 'none';
+  return nullSatisfies ? 'allowNull' : 'requireValue';
+}
+
+/**
+ * [#5146] Rewrite the operand of a `$not` so every leaf compiles to a TOTAL
+ * predicate — which is what makes `NOT (…)` mean here what it means in
+ * `driver-memory`, `formula`, `driver-sql` (since #5296) and this driver's own
+ * LOCAL transport.
+ *
+ * # The defect
+ *
+ * SQL is three-valued: `NULL = 'won'` is UNKNOWN, `NOT UNKNOWN` is still
+ * UNKNOWN, and a `WHERE` keeps only TRUE — so `{ $not: { stage: 'won' } }`
+ * dropped every row whose `stage` is NULL. Measured on `origin/main`
+ * (2026-08-06) against the shared fixture: LOCAL answered `['2','3','4']` and
+ * REMOTE `['2']`, for one filter whose only difference was the `url` it was sent
+ * to. On a CEL `!expr` read scope lowered by `cel-to-filter.ts` that is not a
+ * count that differs — it is the SAME permission rule admitting a different set
+ * of rows per connection mode.
+ *
+ * # Why the guard rides the LEAF, not the `NOT`
+ *
+ * For a flat operand `NOT (a IS NOT NULL AND a = ?)` and `NOT (a = ?) OR a IS
+ * NULL` are the same predicate. They stop being the same as soon as the operand
+ * nests: hoisting the guard above a `$not` whose operand is a `$or` re-admits
+ * rows the JS backends exclude — a NULL `a` would satisfy the whole negation
+ * even when the `$or`'s OTHER branch is satisfied. Totalising each leaf makes
+ * the rewrite compositional instead: De Morgan is sound over two-valued leaves,
+ * so `$and`, `$or` and a nested `$not` all stay correct with no special cases.
+ *
+ * # Why polarity is per operator
+ *
+ * A blanket `OR col IS NULL` would WIDEN the negative-polarity operators:
+ * `{ $not: { a: { $ne: 5 } } }` means "a is 5", and both JS backends exclude a
+ * NULL row from it. Adding an unconditional null escape there would hand back
+ * exactly the rows the filter excludes. So each leaf is guarded in the direction
+ * its OWN operator answers, per {@link nullValueSatisfiesOperator}.
+ *
+ * # Why it is expressed as a filter TREE, not as SQL
+ *
+ * The guards are emitted as ordinary `$null` constraints inside `$and` / `$or`
+ * nodes and handed back to {@link RemoteTransport.buildWhereSQL}, so every
+ * parenthesis is the one that compiler already writes for a combinator. This
+ * transport joins a node's keys with a bare ` AND `; a hand-built `col IS NULL
+ * OR …` spliced into that list would bind LOOSER than the AND and silently widen
+ * the whole filter — the trap #5298's own driver-side twin records. Compiling
+ * the guard as structure makes that unrepresentable.
+ *
+ * A non-node `$and` / `$or` element is passed through untouched so
+ * {@link RemoteTransport.buildSubFilterSQL} still refuses it by name (#1073),
+ * and a nested `$not` is left alone because its own branch totalises its
+ * operand — `NOT <total>` is itself total, so recursing would stack a redundant
+ * guard on the same column.
+ */
+function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const guarded: unknown[] = [];
+  for (const [key, value] of Object.entries(node)) {
+    if ((key === '$and' || key === '$or') && Array.isArray(value)) {
+      out[key] = value.map((element) =>
+        isFilterNode(element) ? nullSafeNegationOperand(element) : element,
+      );
+      continue;
+    }
+    if (key.startsWith('$')) {
+      // `$not` (totalised by its own branch) and anything else `$`-prefixed keep
+      // whatever this transport does with them today — the rewrite rules on
+      // NULL, not on the operator vocabulary, and an undeclared combinator must
+      // still reach the #5769 gate that refuses it.
+      out[key] = value;
+      continue;
+    }
+    const guard = nullGuardForFieldSpec(value);
+    if (guard === 'none') {
+      out[key] = value;
+    } else if (guard === 'requireValue') {
+      // `col IS NOT NULL AND (…)` — both conjuncts of the enclosing node.
+      guarded.push({ [key]: { $null: false } }, { [key]: value });
+    } else {
+      // `col IS NULL OR (…)` — ONE conjunct, so the OR binds tighter than the
+      // AND this node's keys form.
+      guarded.push({ $or: [{ [key]: { $null: true } }, { [key]: value }] });
+    }
+  }
+  if (guarded.length > 0) {
+    const existing = Array.isArray(out.$and) ? out.$and : [];
+    out.$and = [...existing, ...guarded];
+  }
+  return out;
+}
+
 /** How long a refused comparand may be echoed back in an error message. */
 const COMPARAND_PREVIEW_LIMIT = 120;
 
@@ -237,6 +505,112 @@ function invalidFilterError(message: string): Error {
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
   return err;
+}
+
+/**
+ * [#5907] The aggregate functions this TRANSPORT lowers into SQL, and the SQL
+ * function each becomes.
+ *
+ * The twin of `driver-sql`'s `SQL_AGGREGATE_FUNCTIONS`, and separate on purpose:
+ * this transport is deliberately free of knex and of `SqlDriver` (see the file
+ * header), so the two faces state their own capability and the refusals below
+ * read it off the table instead of a hand-kept list (#5345). They compile the
+ * same five today; a face that gains one says so here, alone.
+ */
+const REMOTE_AGGREGATE_FUNCTIONS: ReadonlyMap<string, string> = new Map([
+  ['count', 'count'],
+  ['sum', 'sum'],
+  ['avg', 'avg'],
+  ['min', 'min'],
+  ['max', 'max'],
+]);
+
+/**
+ * [#5907] The aggregate vocabulary the Query Protocol DECLARES, read from the
+ * spec rather than restated — `AggregationNodeSchema.function` is this enum.
+ */
+const DECLARED_AGGREGATE_FUNCTIONS: readonly string[] = AggregationFunction.options;
+
+/**
+ * [#5907] Class 1 — a function name the Query Protocol does not declare.
+ *
+ * The twin of `driver-sql`'s `undeclaredAggregateFunctionError`, word for word,
+ * and that is the point of this whole issue: the same `median` had to stop
+ * meaning two different things depending on whether `url` put the caller on the
+ * local driver or on this transport. #5240's rule — one condition, one wording —
+ * is pinned across the two packages by
+ * `remote-transport-aggregate-function-refusal.test.ts`, which compares the two
+ * RUNTIME messages rather than two copies of a literal.
+ *
+ * `INVALID_QUERY` / 400: the caller wrote a name no backend can run, and 400
+ * puts it on `@objectstack/rest`'s `isExpectedQueryRejection` list so a client
+ * mistake stops being logged as an unhandled server fault. It is the code the
+ * PROTOCOL DOOR already gives this condition — `metadata-protocol`'s
+ * `invalidQueryError` refuses "a function outside the spec enum" on the
+ * aggregations axis with `400 INVALID_QUERY` (#4254) — so the in-process caller
+ * and the REST caller now read the same answer.
+ */
+function undeclaredAggregateFunctionError(func: string): Error {
+  const err = new Error(
+    `Aggregate function "${func}" is not a declared aggregate function. ` +
+    `Declared functions: ${DECLARED_AGGREGATE_FUNCTIONS.join(', ')} ` +
+    `(@objectstack/spec AggregationFunction). Fix the "function" key of the aggregations[] ` +
+    `entry — the Query Protocol has no such function, so this is a query no backend can run, ` +
+    `not a gap in this one (#5907).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  return err;
+}
+
+/**
+ * [#5907] Class 2 — a DECLARED function this transport cannot compile.
+ *
+ * The twin of `driver-sql`'s `uncompilableAggregateFunctionError`; its docblock
+ * carries the full rationale for `NOT_IMPLEMENTED` / 501 and for why the two
+ * classes must not be collapsed. In one line: `count_distinct`, `array_agg` and
+ * `string_agg` are declared and other backends compile them, so a caller who
+ * wrote one has made no mistake — this is the backend's gap, and an error that
+ * says otherwise tells a dashboard author to fix a query that is already right.
+ */
+function uncompilableAggregateFunctionError(func: string): Error {
+  const err = new Error(
+    `Aggregate function "${func}" is declared but not implemented by this backend. ` +
+    `Compiled here: ${[...REMOTE_AGGREGATE_FUNCTIONS.keys()].join(', ')}. The name is spelled ` +
+    `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
+    `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
+    `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
+    `itself should stand is #6188 (ADR-0049 enforce-or-remove) (#5907).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  return err;
+}
+
+/**
+ * [#5907] Which refusal a name this transport cannot compile deserves — the
+ * twin of `driver-sql`'s `refuseAggregateFunction`.
+ *
+ * `func` is the name the CALLER wrote, before this transport's `toLowerCase()`.
+ * Measured on `origin/main` @ `80f7dc6a3`, the two faces do not normalise alike:
+ *
+ * ```
+ * COUNT           REMOTE -> RESOLVED  ("SELECT count(...)")   LOCAL -> threw
+ * COUNT_DISTINCT  REMOTE -> threw "…: count_distinct"         LOCAL -> threw "…: COUNT_DISTINCT"
+ * ```
+ *
+ * Judging the CALLER's spelling against the case-sensitive enum is what keeps
+ * that pre-existing fork from spreading into the envelope: on the lowercased
+ * name this transport would call `COUNT_DISTINCT` a capability gap (501) while
+ * the local driver, reading the name raw, called it undeclared (400) — one
+ * query, two wire identities, which is the fork this issue exists to close.
+ * The normalisation difference itself — `COUNT` compiles here and is refused by
+ * the local driver — is untouched by this change and filed as #6203.
+ */
+function refuseAggregateFunction(func: string): never {
+  throw DECLARED_AGGREGATE_FUNCTIONS.includes(func)
+    ? uncompilableAggregateFunctionError(func)
+    : undeclaredAggregateFunctionError(func);
 }
 
 /**
@@ -457,10 +831,13 @@ export class RemoteTransport {
 
     const aggregations = query?.aggregations || query?.aggregate || [];
     for (const agg of aggregations) {
-      const funcRaw = String(agg.function || agg.func || '').toLowerCase();
-      if (!['count', 'sum', 'avg', 'min', 'max'].includes(funcRaw)) {
-        throw new Error(`Unsupported aggregate function: ${funcRaw}`);
-      }
+      // [#5907] `funcWritten` is the caller's spelling — what the refusal quotes
+      // back and what the declared-vocabulary check is judged against; `funcRaw`
+      // is this transport's own normalised lookup key, unchanged.
+      const funcWritten = String(agg.function || agg.func || '');
+      const funcRaw = funcWritten.toLowerCase();
+      const sqlFunc = REMOTE_AGGREGATE_FUNCTIONS.get(funcRaw);
+      if (sqlFunc === undefined) refuseAggregateFunction(funcWritten);
       const field = agg.field || '*';
       let fieldSql: string;
       if (field === '*') {
@@ -469,9 +846,13 @@ export class RemoteTransport {
         this.assertSafeIdentifier(field);
         fieldSql = `"${field}"`;
       }
+      // The default alias keeps spelling itself with the normalised NAME
+      // (`count_stage`), unchanged; the emitted SQL uses the lowering table's
+      // value so that table is what decides the statement, not a membership
+      // check beside it. Identical text for all five entries today.
       const alias = agg.alias || `${funcRaw}_${field === '*' ? 'all' : field}`;
       this.assertSafeIdentifier(alias);
-      selectParts.push(`${funcRaw}(${fieldSql}) AS "${alias}"`);
+      selectParts.push(`${sqlFunc}(${fieldSql}) AS "${alias}"`);
     }
 
     if (selectParts.length === 0) selectParts.push('*');
@@ -1033,8 +1414,24 @@ export class RemoteTransport {
    * test before the loop runs. The only remaining sources of `''` are
    * genuinely-empty inputs (`{}`, `$and: []`, an `$or` with a TRUE disjunct) —
    * all of which ARE TRUE.
+   *
+   * Since #5769 that list is also *reachable-from* correct: an `$or` whose TRUE
+   * disjunct absorbed the group used to be the one way a MALFORMED sibling
+   * could still produce `''`, because its compiled clauses were discarded along
+   * with the branch. The node gate at the top of the loop below refuses the
+   * sibling on the way in, so `''` now means TRUE **and** every key of every
+   * node was one this transport compiles.
+   *
+   * `path` names this node's position for a refusal message — `where` at the
+   * top, `where.$or[0]` inside a disjunct. It is read by the #5769 gate ONLY;
+   * every refusal that predates it keeps its own wording and its own way of
+   * naming a location, so threading this parameter changes no existing message.
    */
-  private buildWhereSQL(object: string, filters: any): { whereClauses: string; args: any[] } {
+  private buildWhereSQL(
+    object: string,
+    filters: any,
+    path = 'where',
+  ): { whereClauses: string; args: any[] } {
     // "No filter" is spelled by ABSENCE, and that is the only spelling. All
     // five call sites hand this method `query?.where` (`query.where` in
     // `buildSelectSQL`), so a caller that supplied no filter arrives as
@@ -1080,15 +1477,87 @@ export class RemoteTransport {
       return { whereClauses: '', args: [] };
     }
 
+    // [#6050] Refuse every `undefined` comparand in the WHOLE subtree, before a
+    // single clause is emitted and before the `$not` branch below rewrites its
+    // operand through the polarity tables.
+    //
+    // The pre-walk is what makes the gate hold for `{ $not: { d: undefined } }`.
+    // Compiling key-by-key would reach `nullSafeNegationOperand` — a GUARD —
+    // with the undefined still in it, and #6050's whole point is that guard and
+    // emitter must never get to disagree about this value. Walking first makes
+    // the disagreement unreachable rather than merely repaired, and it is the
+    // same discipline `driver-sql` applies with `reduceFilterNode`.
+    //
+    // Idempotent by construction: `$and`/`$or`/`$not` re-enter this method
+    // through `buildSubFilterSQL`, so a nested node is walked more than once and
+    // answers the same both times. Cheap, and cheaper than a second gate.
+    this.assertDefinedComparands(object, filters, path);
+
     const clauses: string[] = [];
     const args: any[] = [];
 
     for (const [key, value] of Object.entries(filters)) {
+      // [#5769] Declared = enforced, in the NODE position.
+      //
+      // Everything `$`-prefixed here that is not one of the three declared
+      // combinators fell through to the FIELD arms below and was compiled as a
+      // COLUMN of that name — the #1051/#1076 diagnostic detour, one level up
+      // from where `$not` used to land. Measured on `origin/main` against three
+      // rows, with a capturing client:
+      //
+      //   { $eq: 'won' }                 → SELECT … WHERE "$eq" = ?          → []
+      //   { $where: 'return true' }      → SELECT … WHERE "$where" = ?       → []
+      //   { $or: [{}, { $where: 'x' }] } → SELECT … (no WHERE at all)        → every row
+      //
+      // The first two are the silent empty set: SQLite's backwards-compatible
+      // rule degrades a double-quoted name that resolves to no column into a
+      // STRING LITERAL, so the statement compiles, runs and matches nothing —
+      // and where a build disables that rule (`SQLITE_DQS=0`) `find()`'s own
+      // `no such column` backstop swallows the error into `[]` anyway. Two
+      // roads, one answer, and neither is distinguishable from "no rows
+      // matched".
+      //
+      // The third is the expensive direction, and it needs no dialect quirk at
+      // all: a `{}` disjunct absorbs its `$or` to TRUE, the compiled clauses are
+      // discarded with it, and the statement loses its WHERE entirely. On
+      // `deleteMany`/`updateMany` that is the whole table — measured, all three
+      // rows updated by a filter naming none of them.
+      //
+      // `SqlDriver` refuses the same shape on its validation walk
+      // (`reduceFilterKey`, objectstack#5348 / PR #5368), which Turso's LOCAL
+      // transport inherits. This transport was the one remaining face, and the
+      // fork ran the wrong way: strict locally, silent remotely, for one filter
+      // whose only difference was the `url` it was sent to.
+      //
+      // Placed inline in this loop rather than on a separate validation walk —
+      // the opposite of `SqlDriver`'s placement, for a reason particular to
+      // this compiler. `SqlDriver`'s emitter is skipped wholesale by a boolean
+      // identity, so an emitter-side gate there would be conditional on a
+      // node's SIBLINGS. This one is not: the `$and` and `$or` branches below
+      // compile EVERY element before applying their identity rule (the third
+      // measurement above is that fact — `{ $where: 'x' }` was compiled, then
+      // its clause thrown away), so this loop already visits every node of the
+      // tree, `$or`'s TRUE-absorbing branch included. The pinning cases for
+      // exactly that are in `remote-transport-node-operator-refusal.test.ts`.
+      if (key.startsWith('$')) {
+        if (!NODE_COMBINATORS.has(key)) {
+          throw this.undeclaredCombinator(object, key, `${path}.${key}`);
+        }
+        // The three declared names still have to carry the shape they are
+        // declared with. `{ $and: 'x' }` fell through the `Array.isArray` tests
+        // below into the very same field arm — `WHERE "$and" = ?` — so leaving
+        // it out would put a hole in this gate at precisely the three keys the
+        // gate is defined by. `$not` takes a single operand rather than a list
+        // and is refused by shape one level down, in `buildSubFilterSQL`.
+        if ((key === '$and' || key === '$or') && !Array.isArray(value)) {
+          throw this.nonListCombinator(object, key, value, `${path}.${key}`);
+        }
+      }
       if (key === '$and' && Array.isArray(value)) {
         const subClauses: string[] = [];
         const subArgs: any[] = [];
         for (const [index, sub] of value.entries()) {
-          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub);
+          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub, path);
           // A TRUE conjunct is AND's identity element: `x AND TRUE ≡ x`, so
           // dropping it loses nothing. This is the ONE direction the old
           // "skip whatever compiled to nothing" rule happened to get right.
@@ -1112,7 +1581,7 @@ export class RemoteTransport {
         // truth value — which is the asymmetry #1073 is about.
         let hasTrueDisjunct = false;
         for (const [index, sub] of value.entries()) {
-          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub);
+          const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, index, sub, path);
           if (!sc) {
             hasTrueDisjunct = true;
             continue;
@@ -1157,13 +1626,26 @@ export class RemoteTransport {
         // path, i.e. straight back into the bug. Every `$not` is compiled
         // here, and a value that is not a filter node is refused BY NAME.
         //
-        // NULL semantics are SQL's, matching what `whereNot` emits locally:
-        // `NOT ("stage" = ?)` is UNKNOWN for a row whose `stage` is NULL, so
-        // that row is not returned. `driver-memory`/`matchesFilterCondition`
-        // return it (JS `undefined !== 'won'`). The divergence is the SQL
-        // family's, not this transport's, and remote mode is pinned to the
-        // family it belongs to — filed as objectstack#5146.
-        const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, null, value);
+        // [#5146 → #5903] NULL semantics are NO LONGER "SQL's, whatever they
+        // are". This comment used to argue the opposite — `NOT ("stage" = ?)`
+        // is UNKNOWN for a NULL `stage`, so that row was dropped, and remote was
+        // "pinned to the family it belongs to" so local and remote SQL agreed.
+        // That premise expired the day PR #5296 landed #5146 on
+        // `SqlDriver.applyFilterCondition`: LOCAL mode inherits that fix
+        // (`TursoDriver extends SqlDriver`), this independent compiler inherited
+        // none of it, and the two faces of ONE driver started answering one
+        // filter by connection mode. #5146 ruled the JS backends' two-valued
+        // answer canonical — "the column has no value" does NOT satisfy the
+        // negated condition, so the row IS returned.
+        //
+        // The rewrite totalises every leaf of the operand BEFORE it is compiled,
+        // so `NOT (…)` negates a predicate that is TRUE or FALSE for every row
+        // and never UNKNOWN. Only a filter NODE is rewritten: a non-node operand
+        // must reach `buildSubFilterSQL` exactly as the caller wrote it, so the
+        // refusal keeps naming the shape that was sent (the branch above has no
+        // `isFilterNode` guard for precisely that reason).
+        const operand = isFilterNode(value) ? nullSafeNegationOperand(value) : value;
+        const { whereClauses: sc, args: sa } = this.buildSubFilterSQL(object, key, null, operand, path);
         if (sc) {
           clauses.push(`NOT (${sc})`);
           args.push(...sa);
@@ -1188,7 +1670,12 @@ export class RemoteTransport {
         for (const [op, opValue] of Object.entries(value as Record<string, any>)) {
           switch (op) {
             case '$eq':
-              if (opValue === null || opValue === undefined) {
+              // [#6050] `=== null` only. `undefined` used to share this arm and
+              // compile to `IS NULL`, which is the silent half of the
+              // local/remote fork this issue closes; it is refused by
+              // {@link RemoteTransport.assertDefinedComparands} before the loop
+              // starts, so the arm now spells exactly the comparand it serves.
+              if (opValue === null) {
                 clauses.push(`${column} IS NULL`);
               } else {
                 const bind = this.serializeComparand(object, key, op, opValue);
@@ -1197,11 +1684,20 @@ export class RemoteTransport {
               }
               break;
             case '$ne':
-              if (opValue === null || opValue === undefined) {
+              // [#6050] `=== null` only, the mirror of the `$eq` arm above and
+              // the exact spelling `driver-sql`'s `$ne` emitter now carries —
+              // the two compilers of one driver agree on the value set, which
+              // is what #5298's invariant asks of a deliberate copy.
+              if (opValue === null) {
+                // [#5298] UNCHANGED, and deliberately: `IS NOT NULL` is already
+                // TOTAL, and both sides of the ruling agree a row with no value
+                // does NOT have "any value". Polarity follows the COMPARAND, not
+                // the operator's name — only the value COMPARISON below becomes
+                // NULL-safe.
                 clauses.push(`${column} IS NOT NULL`);
               } else {
                 const bind = this.serializeComparand(object, key, op, opValue);
-                clauses.push(`${field} <> ?`);
+                clauses.push(this.nullSafeNegative(column, `${field} <> ?`));
                 args.push(bind);
               }
               break;
@@ -1234,7 +1730,11 @@ export class RemoteTransport {
               const binds = ninVals.map((v: any, i: number) =>
                 this.serializeComparand(object, key, `${op}[${i}]`, v),
               );
-              clauses.push(`${field} NOT IN (${binds.map(() => '?').join(', ')})`);
+              // [#5298] NULL-safe: "not among this list" holds vacuously for a
+              // value that is not there, which is what every JS backend answers.
+              clauses.push(
+                this.nullSafeNegative(column, `${field} NOT IN (${binds.map(() => '?').join(', ')})`),
+              );
               args.push(...binds);
               break;
             }
@@ -1259,7 +1759,19 @@ export class RemoteTransport {
               this.pushLike(clauses, args, column, this.serializeComparand(object, key, op, opValue), 'contains');
               break;
             case '$notContains':
-              this.pushLike(clauses, args, column, this.serializeComparand(object, key, op, opValue), 'contains', true);
+              // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
+              // "does not contain" is true of a value that is not there. The
+              // guard is applied INSIDE `pushLike` so the LIKE family keeps its
+              // single emission point.
+              this.pushLike(
+                clauses,
+                args,
+                column,
+                this.serializeComparand(object, key, op, opValue),
+                'contains',
+                true,
+                true,
+              );
               break;
             case '$startsWith':
               this.pushLike(clauses, args, column, this.serializeComparand(object, key, op, opValue), 'starts');
@@ -1291,13 +1803,41 @@ export class RemoteTransport {
               clauses.push(`${column} IS ${opValue ? 'NULL' : 'NOT NULL'}`);
               break;
             case '$exists':
-              // Deliberately NOT given the same guard (#1116's scope fence).
-              // `$exists` carries the identical `=== false` bisection, but its
-              // divergence is on another axis — whether "exists" means "key
-              // present" or "has a value" is objectstack#5299's open question,
-              // reopened as #5369 — and framework left it alone for exactly
-              // this reason. Tightening it here ALONE would manufacture a
-              // local/remote fork rather than close one.
+              // [#5369 → #5903] The fence this arm used to carry is DOWN. It
+              // read: "deliberately NOT given the same guard — whether `exists`
+              // means 'key present' or 'has a value' is #5299's open question,
+              // and tightening it here ALONE would manufacture a local/remote
+              // fork rather than close one." Both halves of that reasoning have
+              // since been answered, in the caller's favour:
+              //
+              //  - #5298's four-point ruling (2026-08-06) settled the semantics
+              //    on **has a value** — field existence is a property of the
+              //    SCHEMA, not of a record — so `$exists` and `$null` are strict
+              //    mirrors. This arm's `IS NULL` / `IS NOT NULL` was already
+              //    that reading and does not move.
+              //  - PR #5962 landed the non-boolean refusal on `driver-sql`, so
+              //    LOCAL mode now refuses what this arm still answered. The fork
+              //    the fence was protecting against EXISTS TODAY, pointing the
+              //    other way: measured on `origin/main`, `{ $exists: 'yes' }`
+              //    threw `INVALID_FILTER` locally and returned the valued rows
+              //    remotely. Closing it is what this guard does.
+              //
+              // Refused for the reason `$null` is (#5347-A): `opValue === false`
+              // is a BISECTION, so every non-boolean — `'yes'`, `1`, `0`, `null`,
+              // `undefined`, `{}` and the string `'false'` — landed on the
+              // `NOT NULL` side and answered as if `true` had been written.
+              if (typeof opValue !== 'boolean') {
+                throw this.nonBooleanExistsComparand(object, key, opValue);
+              }
+              // Left as the `=== false` identity test rather than rewritten to a
+              // total two-way choice the way the `$null` arm above was. The two
+              // are not the same edit: `$null`'s emitter had `true` on its
+              // DEFAULT side, so a third value read as "the caller asked for
+              // null"; here `false` is the value being tested FOR, and with the
+              // guard holding there is no third value left for a default to
+              // catch. Its polarity twin in {@link nullValueSatisfiesOperator}
+              // is spelled `value === false` for exactly the same reason —
+              // `$null: true` and `$exists: false` are one question asked twice.
               clauses.push(`${column} IS ${opValue === false ? 'NULL' : 'NOT NULL'}`);
               break;
             default:
@@ -1314,7 +1854,13 @@ export class RemoteTransport {
         if (clauses.length === clausesBefore) {
           throw this.emptyFieldFilter(object, key, value);
         }
-      } else if (value === null || value === undefined) {
+      } else if (value === null) {
+        // [#6050] `=== null` only — `{ field: undefined }` is refused by
+        // {@link RemoteTransport.assertDefinedComparands} before this loop, and
+        // it was THE shape the issue opened on: `{ owner_id: ctx.user?.id }`
+        // with a missing id landed here and compiled `owner_id IS NULL`,
+        // matching every env-wide row. `null` keeps this arm untouched.
+        //
         // Null equality MUST use `IS NULL` — `col = NULL` is always UNKNOWN
         // in SQL, so it matches zero rows. Env-wide metadata (and drafts) are
         // stored with `organization_id IS NULL`; emitting `= ?` here is what
@@ -1376,11 +1922,44 @@ export class RemoteTransport {
     value: unknown,
     shape: LikeShape,
     negate = false,
+    nullSafe = false,
   ): void {
     const escaped = String(value).replace(/[\\%_]/g, '\\$&');
     const pattern = shape === 'starts' ? `${escaped}%` : shape === 'ends' ? `%${escaped}` : `%${escaped}%`;
-    clauses.push(`${column} ${negate ? 'NOT LIKE' : 'LIKE'} ? ESCAPE '\\'`);
+    const predicate = `${column} ${negate ? 'NOT LIKE' : 'LIKE'} ? ESCAPE '\\'`;
+    clauses.push(nullSafe ? this.nullSafeNegative(column, predicate) : predicate);
     args.push(pattern);
+  }
+
+  /**
+   * [#5298] Wrap a negative-polarity value test so a row whose column has no
+   * value SATISFIES it: `(col IS NULL OR <test>)`.
+   *
+   * The remote twin of `driver-sql`'s `applyNullSafeNegative` and
+   * `read-scope-sql`'s `nullSafeNegative`, and the only shape all three use:
+   * OR-expansion, never `IS DISTINCT FROM` / `IS NOT` / `<=>`. The three reasons
+   * are recorded on the driver-side twin and every one of them applies here with
+   * force — `NOT LIKE` has no such form at all, so `$notContains` would need the
+   * OR shape anyway and this compiler would carry two shapes for one ruling; the
+   * SQLite spelling depends on an engine version nothing pins (this transport
+   * talks to whatever libSQL the remote endpoint runs, which is further outside
+   * this repo's control than the local `sql.js`/`better-sqlite3` pair); and the
+   * measured query plans are identical either way, because `<>`, `NOT IN` and
+   * `NOT LIKE` were already full scans.
+   *
+   * **The parentheses are not optional.** {@link RemoteTransport.buildWhereSQL}
+   * joins a node's clauses with a bare ` AND `, so an unwrapped `col IS NULL OR
+   * …` would bind LOOSER than that AND: `a = ? AND b IS NULL OR b <> ?` parses as
+   * `(a = ? AND b IS NULL) OR b <> ?`, which returns rows the caller's `a`
+   * predicate excludes. A silently WIDENED filter is the bypass class this file
+   * keeps paying for (#1004, #1058, #1073), reached from a fourth direction.
+   *
+   * `column` is the PLAIN quoted column, never the {@link comparisonColumn}
+   * rewrite: whether a value is there is not something a storage form can
+   * change, which is the same reasoning the `$null` / `$exists` arms already use.
+   */
+  private nullSafeNegative(column: string, test: string): string {
+    return `(${column} IS NULL OR ${test})`;
   }
 
   /**
@@ -1447,6 +2026,46 @@ export class RemoteTransport {
   }
 
   /**
+   * The error for an `$exists` whose comparand is not a boolean (#5369, landed
+   * on this face by #5903).
+   *
+   * The twin of {@link nonBooleanNullComparand} one method up, and written as a
+   * separate method rather than folded into a shared two-name helper on purpose:
+   * each operator's message names its OWN emitter's default direction, and one
+   * loop over `['$null', '$exists']` is where those two messages would start
+   * drifting into one imprecise sentence.
+   *
+   * The leading sentence is `driver-sql`'s `nonBooleanExistsComparandError`,
+   * verbatim, so a caller who hits this on Turso remote reads exactly what they
+   * would read on Postgres or on Turso LOCAL. Only the location is spelled in
+   * this transport's own convention — it names `'object.field'` rather than
+   * threading a `filter.…` path, matching every other refusal in this file.
+   *
+   * Measured on `origin/main` before this gate, against the shared conformance
+   * fixture (rows 1-2 valued, rows 3-4 NULL): `{ d: { $exists: v } }` for `v` in
+   * `'yes'`, `1`, `0`, `null`, `{}` each returned `['1','2']` — the answer for
+   * `$exists: true` — while the same five filters threw `INVALID_FILTER` on
+   * LOCAL mode. Five wrong answers and one right one, chosen by `url`.
+   */
+  private nonBooleanExistsComparand(object: string, field: string, value: unknown): Error {
+    // `describeValue` calls `null` "an object" and `undefined` "a undefined" —
+    // both are among the comparands most likely to arrive here, so they are
+    // named outright, exactly as the `$null` twin does.
+    const shown = value === null ? 'null' : value === undefined ? 'undefined' : describeValue(value);
+    return invalidFilterError(
+      `[RemoteTransport] Operator "$exists" on field "${field}" requires a boolean comparand (true or ` +
+        `false). Received ${shown} (${preview(value)}) at '${object}.${field}'.$exists. ` +
+        `@objectstack/spec FieldOperatorsSchema declares $exists as a boolean. It is refused rather ` +
+        `than coerced for the same reason $null is (objectstack#5347): a non-boolean lands on ` +
+        `whichever side the backend's two-branch conditional happens to default to, and those ` +
+        `defaults point in OPPOSITE directions — this transport's \`=== false\` test compiled ` +
+        `IS NOT NULL for anything but false, a \`=== true\` test compiles IS NULL for anything but ` +
+        `true. Note "false" the STRING is truthy, so it landed on the side opposite the false it was ` +
+        `written to mean (objectstack#5369, objectstack#5903).`,
+    );
+  }
+
+  /**
    * The error for an operator this transport does not compile.
    *
    * `$between` gets its own sentence because it is not missing by oversight:
@@ -1480,6 +2099,85 @@ export class RemoteTransport {
   }
 
   /**
+   * The error for a `$`-key in a NODE position that is not a declared
+   * combinator (#5769).
+   *
+   * The leading sentence is `driver-sql`'s and `driver-memory`'s, verbatim —
+   * they are word-for-word identical to each other because #5240 ruled that one
+   * condition speaks one wording, and this is the same condition on a third
+   * backend. Only the tail differs, and it says what THIS transport used to do
+   * with the key, because what it used to do is not what the others used to do:
+   * they handed it to knex or to mingo, this one quoted it into SQL as a column
+   * name.
+   *
+   * ## Two tails, one verdict
+   *
+   * A node-position `$eq` and a node-position `$where` are not the same
+   * mistake. The first is a real operator ONE LEVEL too high — the author wrote
+   * `{ $eq: 'won' }` where `{ stage: { $eq: 'won' } }` was meant, which is the
+   * single most likely way to arrive here from a hand-written or AI-authored
+   * filter — and the repair is to name the field. The second names nothing this
+   * protocol declares at any level, and its repair is to stop using it. Telling
+   * a misplaced `$eq`'s author "$eq is not a combinator" is true and useless.
+   *
+   * Both are refused, with the same `INVALID_FILTER` / 400 and the same first
+   * sentence; only the closing direction differs. Nothing branches on the
+   * distinction — see {@link MISPLACED_FIELD_OPERATORS} for why it must stay
+   * that way.
+   */
+  private undeclaredCombinator(object: string, key: string, path: string): Error {
+    const shared =
+      `[RemoteTransport] Unsupported filter combinator "${key}" at ${path} on '${object}'. A filter ` +
+      `node's $-prefixed keys are the declared logical operators $and, $or and $not ` +
+      `(@objectstack/spec LOGICAL_OPERATORS); every other key is a field name. It is refused rather ` +
+      `than compiled as a COLUMN of that name, which is what this transport used to do — SQLite ` +
+      `degrades a double-quoted name that matches no column into a string literal, so the statement ` +
+      `compiled, ran and matched nothing, and a caller could not tell "no rows matched" from "the ` +
+      `filter never compiled"`;
+    if (MISPLACED_FIELD_OPERATORS.has(key)) {
+      return invalidFilterError(
+        `${shared}. "${key}" IS a field operator, one level down: write ` +
+          `{ <field>: { "${key}": <value> } } — e.g. { stage: { "${key}": … } } — rather than putting ` +
+          `it at the condition level (objectstack#5769, objectstack#5348).`,
+      );
+    }
+    return invalidFilterError(
+      `${shared}. The Filter Protocol declares no "${key}" at any level; on a read it cost an empty ` +
+        `page, and on deleteMany/updateMany the predicate is constantly false or constantly true ` +
+        `depending on which side of the comparison the literal lands (objectstack#5769, ` +
+        `objectstack#5348).`,
+    );
+  }
+
+  /**
+   * The error for `$and` / `$or` carrying something other than a list (#5769).
+   *
+   * Split from {@link undeclaredCombinator} because the key is not the mistake:
+   * `$and` is declared, it is spelled correctly, and its VALUE is wrong. Told
+   * "unsupported combinator", its author would go looking for a typo that is
+   * not there.
+   *
+   * It belongs to #5769 all the same, because the OLD ending was identical:
+   * both branches below tested `Array.isArray` before claiming the key, so a
+   * non-list `$and` fell straight through them into the field arms and compiled
+   * to `WHERE "$and" = ?` — measured on `origin/main`, the same silent empty set
+   * as `{ $eq: 'won' }`. `SqlDriver` refuses it on its walk
+   * (`assertFilterNodeList`), so local and remote now agree here too.
+   *
+   * The requirement sentence is `driver-sql`'s, so the two read alike.
+   */
+  private nonListCombinator(object: string, key: string, value: unknown, path: string): Error {
+    const shown = value === null ? 'null' : value === undefined ? 'undefined' : describeValue(value);
+    return invalidFilterError(
+      `[RemoteTransport] Filter combinator "${key}" at ${path} on '${object}' requires an array of ` +
+        `filter conditions, but received ${shown} (${preview(value)}). @objectstack/spec ` +
+        `FilterConditionSchema declares "${key}" as FilterCondition[]. Refusing rather than falling ` +
+        `through to the field path, which read '${key}' as a COLUMN NAME and compiled a predicate ` +
+        `against a column that cannot exist (objectstack#5769).`,
+    );
+  }
+
+  /**
    * Compile ONE sub-filter of a logical operator — an element of `$and` / `$or`
    * (#1073), or the whole operand of `$not` (#1076).
    *
@@ -1497,15 +2195,130 @@ export class RemoteTransport {
    *
    * `index` is the element's position for the array operators, and `null` for
    * `$not`, which takes a single operand rather than a list.
+   *
+   * `path` is the ENCLOSING node's position; this method extends it with the
+   * branch it is descending into, so a #5769 refusal raised further down can
+   * name the disjunct it came from (`where.$or[1].$where`) rather than only the
+   * key. Nothing else reads it — see {@link buildWhereSQL}.
    */
+  /**
+   * [#6050] Refuse every `undefined` sitting in a COMPARAND position anywhere in
+   * one filter subtree.
+   *
+   * Ruled REFUSED on 2026-08-07 (ruling B on #6050) — the disposition #5347-A
+   * gave a non-boolean `$null`, applied to the one value JavaScript cannot tell
+   * apart from an absent key. Measured on `origin/main` (`cba7454df`) against
+   * the shared conformance fixture, the SAME `TursoDriver` answered these two
+   * ways depending only on the `url` it was constructed with:
+   *
+   * | filter | LOCAL (`SqlDriver`) | REMOTE (here) |
+   * |---|---|---|
+   * | `{ d: undefined }`             | bare knex `Undefined binding(s)` | `['3','4']` |
+   * | `{ d: { $eq: undefined } }`    | bare knex `Undefined binding(s)` | `['3','4']` |
+   * | `{ $not: { d: undefined } }`   | bare knex `Undefined binding(s)` | `['1','2']` |
+   * | `{ $not: { d: { $ne: undefined } } }` | `[]`                      | `['3','4']` |
+   * | `{ d: { $in: [undefined] } }`  | bare knex `Undefined binding(s)` | `[]` |
+   *
+   * This transport's half was the SILENT half, and it is the dangerous one:
+   * `undefined` cannot survive a JSON round trip, so it only ever arrives from
+   * in-process code — `{ owner_id: ctx.user?.id }` with a missing id compiled to
+   * `owner_id IS NULL` and returned every env-wide row, which is a read the
+   * caller's own filter was written to prevent.
+   *
+   * ⛔ `null` is untouched, in every position: `{ f: null }` / `{ $eq: null }`
+   * stay `IS NULL`, `{ $ne: null }` stays `IS NOT NULL`, `$null` is unchanged.
+   * `null` IS a declared comparand. `undefined` is not, and `{ f: undefined }`
+   * versus `{}` — a predicate versus no constraint at all — is a distinction the
+   * language does not preserve, so any compilation of it is a guess.
+   *
+   * The positions, enumerated rather than swept (comparand is a POSITION, not a
+   * type): the direct comparand, an operator's comparand, and each MEMBER of a
+   * list operator's array. `$null` / `$exists` are skipped — their comparand is
+   * a declared BOOLEAN and {@link RemoteTransport.nonBooleanNullComparand} /
+   * {@link RemoteTransport.nonBooleanExistsComparand} already refuse `undefined`
+   * there by naming the declared domain, which is the better message for that
+   * mistake and the one #5240 says must stay the only one.
+   *
+   * Node positions are recursed, never judged: a `$not` operand or an `$and`
+   * element that is not a filter node keeps reaching its own refusal
+   * ({@link RemoteTransport.uncompilableSubFilter}) with the shape the caller
+   * actually sent.
+   */
+  private assertDefinedComparands(object: string, node: Record<string, unknown>, path: string): void {
+    for (const [key, value] of Object.entries(node)) {
+      if (key === '$and' || key === '$or') {
+        if (!Array.isArray(value)) continue;
+        value.forEach((element, index) => {
+          if (isFilterNode(element)) {
+            this.assertDefinedComparands(object, element, `${path}.${key}[${index}]`);
+          }
+        });
+        continue;
+      }
+      if (key === '$not') {
+        if (isFilterNode(value)) this.assertDefinedComparands(object, value, `${path}.${key}`);
+        continue;
+      }
+      // Any other `$`-key is an undeclared combinator, refused by name in the
+      // compile loop (#5769). Leaving it alone here keeps that message.
+      if (key.startsWith('$')) continue;
+
+      const here = `${path}.${key}`;
+      if (value === undefined) throw this.undefinedComparand(object, key, here);
+      // `isOperatorMap` and NOT `isFilterNode`, because this must walk exactly
+      // what the compile loop below ROUTES to its operator arms — a `Date` is a
+      // value comparand on both tests, but a class instance is an operator map
+      // to the router and not a filter node, and its entries do reach the
+      // operator loop (#1066's routing seam).
+      if (!isOperatorMap(value)) continue;
+      for (const [op, opValue] of Object.entries(value as Record<string, unknown>)) {
+        if (op === '$null' || op === '$exists') continue;
+        const opPath = `${here}.${op}`;
+        if (opValue === undefined) throw this.undefinedComparand(object, key, opPath);
+        if (!Array.isArray(opValue)) continue;
+        opValue.forEach((member, index) => {
+          if (member === undefined) throw this.undefinedComparand(object, key, `${opPath}[${index}]`);
+        });
+      }
+    }
+  }
+
+  /**
+   * The error for an `undefined` comparand (#6050).
+   *
+   * The requirement sentence is `driver-sql`'s
+   * ({@link undefinedComparandError}), word for word from "Comparand at" to
+   * "matched every env-wide row instead of failing" — one condition, one
+   * wording, whichever transport the caller happened to reach (#5240). Only the
+   * `[RemoteTransport]` prefix and the `'<object>'` qualifier are added, exactly
+   * as {@link RemoteTransport.undeclaredCombinator} adds them to its own shared
+   * sentence.
+   */
+  private undefinedComparand(object: string, field: string, path: string): Error {
+    return invalidFilterError(
+      `[RemoteTransport] Comparand at ${path} on '${object}' is undefined. @objectstack/spec ` +
+        `FieldOperatorsSchema declares no undefined comparand, and in JavaScript ` +
+        `{ "${field}": undefined } cannot be told apart from omitting the key — yet the two mean ` +
+        `OPPOSITE things (a predicate versus no constraint at all), so there is no reading of it ` +
+        `that is not a guess. Write null if you meant the null predicate ({ "${field}": null } or ` +
+        `{ "${field}": { "$null": true } }), or omit the key when the value is genuinely absent ` +
+        `(e.g. \`if (id !== undefined) where.${field} = id\`). It is refused rather than compiled ` +
+        `because the backends disagreed: driver-sql handed it to knex and got a bare "Undefined ` +
+        `binding(s)" Error carrying no code, while Turso's remote transport compiled it to IS NULL ` +
+        `— so \`{ owner_id: ctx.user?.id }\` with a missing id silently matched every env-wide row ` +
+        `instead of failing (#6050).`,
+    );
+  }
+
   private buildSubFilterSQL(
     object: string,
     branch: '$and' | '$or' | '$not',
     index: number | null,
     sub: unknown,
+    path = 'where',
   ): { whereClauses: string; args: any[] } {
     if (!isFilterNode(sub)) throw this.uncompilableSubFilter(object, branch, index, sub);
-    return this.buildWhereSQL(object, sub);
+    return this.buildWhereSQL(object, sub, index === null ? `${path}.${branch}` : `${path}.${branch}[${index}]`);
   }
 
   /**
@@ -1652,7 +2465,12 @@ export class RemoteTransport {
    * and an OPERATOR MAP there (#1066).
    */
   private serializeComparand(object: string, field: string, op: string, value: unknown): any {
-    if (value === null || value === undefined) return null;
+    // [#6050] `undefined` no longer maps silently to a `null` bind. That
+    // mapping is how `{ $gt: undefined }` became `col > NULL` (UNKNOWN for
+    // every row — a filter that answers the empty page and reports nothing);
+    // the comparand is refused upstream, and if one ever reached here it now
+    // falls to the allow-list below and is named rather than laundered.
+    if (value === null) return null;
     if (isBindableObjectComparand(value)) return value.toISOString();
     if (
       typeof value === 'string' ||

@@ -56,12 +56,56 @@ import { fileURLToPath } from 'node:url';
 
 import { RENAMED_DEFS } from './lib/renamed-defs';
 import { CONVERSIONS_BY_MAJOR } from '../src/conversions/registry';
-import { MIGRATIONS_BY_MAJOR } from '../src/migrations/registry';
+import {
+  MIGRATIONS_BY_MAJOR,
+  RETIRED_DEFS_BY_MAJOR,
+  RETIRED_KEYS_BY_MAJOR,
+} from '../src/migrations/registry';
+import {
+  AUTHORABLE_SURFACE_DIR_NAME,
+  SCHEMA_MANIFEST_DIR_NAME,
+  aggregateCategoryShards,
+  authorableSurfaceShardTexts,
+  schemaManifestShardTexts,
+  writeShards,
+} from './lib/sharded-artifacts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
 const TSX = path.join(PKG, 'node_modules', '.bin', 'tsx');
-const REAL_MANIFEST = path.join(PKG, 'json-schema.manifest.json');
+
+/**
+ * Both ratchets are DIRECTORIES since #5837 (one shard per category), so every
+ * fixture here writes a shard set and every "the file was not touched"
+ * assertion compares the whole set's bytes. That is the same assertion it always
+ * was: the gate reads the directory as one set, so "these exact bytes, still"
+ * means the same thing it meant about one file.
+ */
+function shardBytes(dir: string): string {
+  if (!fs.existsSync(dir)) return '';
+  return fs
+    .readdirSync(dir)
+    .sort()
+    .map((f) => `=== ${f} ===\n${fs.readFileSync(path.join(dir, f), 'utf8')}`)
+    .join('');
+}
+
+/** Write a key set as canonical authorable-surface shards; returns the bytes. */
+function writeSurfaceShards(dir: string, keys: readonly string[]): string {
+  writeShards(dir, authorableSurfaceShardTexts([...keys].sort()));
+  return shardBytes(dir);
+}
+
+/** Write a def-key set as canonical manifest shards; returns the bytes. */
+function writeManifestShards(dir: string, schemas: readonly string[]): string {
+  writeShards(dir, schemaManifestShardTexts([...schemas].sort()));
+  return shardBytes(dir);
+}
+
+/** Aggregate a shard directory back into its sorted key set. */
+function readShardKeys(dir: string, field: 'keys' | 'schemas'): string[] {
+  return aggregateCategoryShards(dir, field)?.entries ?? [];
+}
 
 /**
  * Every run loads the entire spec surface and emits ~1700 JSON Schemas (~7s
@@ -71,6 +115,8 @@ const REAL_MANIFEST = path.join(PKG, 'json-schema.manifest.json');
  */
 const SPAWN_TIMEOUT_MS = 180_000;
 
+/** The mark `authorable-surface.json` puts on a tombstoned key (build-schemas.ts). */
+const RETIRED_MARK = ' [RETIRED]';
 /** A schema key the committed manifest carries; dropping it fakes "one addition pending". */
 const KNOWN_KEY = 'ui/View';
 /** A key no build can emit — the `missing` (disappearance) ratchet's input. */
@@ -78,11 +124,11 @@ const PHANTOM_KEY = 'ui/ZzzNeverEmittedByAnyBuild';
 
 let sandbox: string;
 let script: string;
-let manifestPath: string;
-let surfacePath: string;
+let manifestDir: string;
+let surfaceDir: string;
 let surfaceBasePath: string;
-let pristine: string;
-let pristineSurface: string;
+let pristine: string[];
+let pristineSurface: string[];
 /** The generator's own description line for the in-tree anchor, so fixtures
  *  written here are byte-canonical exactly the way `gen:schema` writes it —
  *  a hand-rolled string would trip the anchor's own hand-edit check (#5235). */
@@ -108,7 +154,7 @@ function git(...args: string[]): string {
  * file — so fixtures must go through here rather than patching bytes.
  */
 function seedSurfaceBase(baseRev: string, mutate: (keys: string[]) => string[]): string {
-  const keys = mutate((JSON.parse(pristineSurface) as { keys: string[] }).keys);
+  const keys = mutate([...pristineSurface]);
   const text = JSON.stringify({ description: surfaceBaseDescription, baseRev, keys }, null, 2) + '\n';
   fs.writeFileSync(surfaceBasePath, text);
   return text;
@@ -117,8 +163,10 @@ function seedSurfaceBase(baseRev: string, mutate: (keys: string[]) => string[]):
 const readSurfaceBase = () => fs.readFileSync(surfaceBasePath, 'utf8');
 
 beforeAll(() => {
-  pristine = fs.readFileSync(REAL_MANIFEST, 'utf8');
-  pristineSurface = fs.readFileSync(path.join(PKG, 'authorable-surface.json'), 'utf8');
+  pristine = readShardKeys(path.join(PKG, SCHEMA_MANIFEST_DIR_NAME), 'schemas');
+  pristineSurface = readShardKeys(path.join(PKG, AUTHORABLE_SURFACE_DIR_NAME), 'keys');
+  expect(pristine.length, `${SCHEMA_MANIFEST_DIR_NAME}/ is empty — it is a committed artifact`).toBeGreaterThan(0);
+  expect(pristineSurface.length, `${AUTHORABLE_SURFACE_DIR_NAME}/ is empty — it is a committed artifact`).toBeGreaterThan(0);
   const realBase = path.join(PKG, 'authorable-surface.base.json');
   if (!fs.existsSync(realBase)) {
     throw new Error(
@@ -133,22 +181,19 @@ beforeAll(() => {
   for (const entry of ['src', 'node_modules', 'package.json']) {
     fs.symlinkSync(path.join(PKG, entry), path.join(sandbox, entry));
   }
+  script = path.join(sandbox, 'scripts', 'build-schemas.ts');
+  manifestDir = path.join(sandbox, SCHEMA_MANIFEST_DIR_NAME);
+  surfaceDir = path.join(sandbox, AUTHORABLE_SURFACE_DIR_NAME);
+  surfaceBasePath = path.join(sandbox, 'authorable-surface.base.json');
   // The authorable-surface ratchet runs after the manifest one; give it the
   // committed snapshot so a check that gets that far judges the same contract.
-  fs.copyFileSync(
-    path.join(PKG, 'authorable-surface.json'),
-    path.join(sandbox, 'authorable-surface.json'),
-  );
-  script = path.join(sandbox, 'scripts', 'build-schemas.ts');
-  manifestPath = path.join(sandbox, 'json-schema.manifest.json');
-  surfacePath = path.join(sandbox, 'authorable-surface.json');
-  surfaceBasePath = path.join(sandbox, 'authorable-surface.base.json');
+  writeSurfaceShards(surfaceDir, pristineSurface);
   // Anchor for the #4650 deletion check: a git repo whose origin/main holds the
   // committed baseline. Only the baseline is tracked — src/node_modules stay
   // symlinked, untracked reads the same as any dirty worktree.
   git('init', '-q', '-b', 'main', '.');
-  git('add', 'authorable-surface.json');
-  git('commit', '-q', '-m', 'baseline: committed authorable-surface.json');
+  git('add', AUTHORABLE_SURFACE_DIR_NAME);
+  git('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
   // The in-tree anchor (#5235), authentic by construction: it mirrors the
   // baseline at the commit just made, which stays reachable from origin/main for
   // every fixture below (this repo's history is linear).
@@ -172,30 +217,27 @@ function run(args: string[] = []): { status: number; output: string } {
   return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 
-/** Seed the sandbox manifest from the committed one; returns the exact bytes written. */
+/** Seed the sandbox manifest shards from the committed set; returns the bytes. */
 function seedManifest(mutate: (schemas: string[]) => string[]): string {
-  const doc = JSON.parse(pristine) as { description?: string; schemas: string[] };
-  doc.schemas = mutate(doc.schemas);
-  const text = JSON.stringify(doc, null, 2) + '\n';
-  fs.writeFileSync(manifestPath, text);
-  return text;
+  return writeManifestShards(manifestDir, mutate([...pristine]));
 }
 
-const readManifest = () => fs.readFileSync(manifestPath, 'utf8');
+const readManifest = () => shardBytes(manifestDir);
+const readManifestKeys = () => readShardKeys(manifestDir, 'schemas');
 
 describe('build-schemas.ts --check — a check reports, it does not write (#4711)', () => {
   it(
     'fails on a manifest behind on additions, and leaves the file byte-identical',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      expect(JSON.parse(pristine).schemas).toContain(KNOWN_KEY);
+      expect(pristine).toContain(KNOWN_KEY);
       const stale = seedManifest((s) => s.filter((k) => k !== KNOWN_KEY));
 
       const { status, output } = run(['--check']);
 
       // The exit code is half the fix: before #4711 this branch exited 0.
       expect(status).toBe(1);
-      expect(output).toMatch(/json-schema\.manifest\.json is out of date \(1 schema\(s\) not recorded\)/);
+      expect(output).toMatch(/json-schema\.manifest\/ is out of date \(1 schema\(s\) not recorded\)/);
       expect(output).toContain(`+ json-schema/${KNOWN_KEY}.json`);
       // The remedy must be the generator, exactly as the other seven artifacts say.
       expect(output).toMatch(/gen:schema/);
@@ -225,7 +267,7 @@ describe('build-schemas.ts --check — a check reports, it does not write (#4711
 
       expect(status).toBe(1);
       expect(output).toMatch(
-        /json-schema\.manifest\.json is out of date .*1 renamed-away key\(s\) still listed/,
+        /json-schema\.manifest\/ is out of date .*1 renamed-away key\(s\) still listed/,
       );
       expect(output).toContain(`- json-schema/${renamedSource}.json  (renamed away)`);
       expect(readManifest()).toBe(withStaleRename);
@@ -256,9 +298,9 @@ describe('build-schemas.ts --check — a check reports, it does not write (#4711
       const { status, output } = run([]);
 
       expect(status).toBe(0);
-      expect(output).toContain('📒 json-schema.manifest.json updated (+1 schema(s))');
+      expect(output).toContain('📒 json-schema.manifest/ updated (+1 schema(s) across 1 shard(s))');
       expect(readManifest()).not.toBe(stale);
-      expect(JSON.parse(readManifest()).schemas).toContain(KNOWN_KEY);
+      expect(readManifestKeys()).toContain(KNOWN_KEY);
     },
   );
 
@@ -276,7 +318,7 @@ describe('build-schemas.ts --check — a check reports, it does not write (#4711
 
       const { status, output } = run(['--check']);
 
-      expect(output).not.toMatch(/json-schema\.manifest\.json is out of date/);
+      expect(output).not.toMatch(/json-schema\.manifest\/ is out of date/);
       expect(output).not.toContain('📒');
       expect(readManifest()).toBe(current);
       expect(status).toBe(0);
@@ -301,21 +343,17 @@ describe('build-schemas.ts --check — a check reports, it does not write (#4711
 // The live end-to-end shape — delete a prop from src AND its baseline line —
 // is exercised in the PR's recorded sabotage evidence instead.
 
-const readSurface = () => fs.readFileSync(surfacePath, 'utf8');
+const readSurface = () => shardBytes(surfaceDir);
 
 /** Write a mutated baseline to the sandbox worktree; returns the exact bytes. */
 function seedSurface(mutate: (keys: string[]) => string[]): string {
-  const doc = JSON.parse(pristineSurface) as { description: string; keys: string[] };
-  doc.keys = mutate(doc.keys);
-  const text = JSON.stringify(doc, null, 2) + '\n';
-  fs.writeFileSync(surfacePath, text);
-  return text;
+  return writeSurfaceShards(surfaceDir, mutate([...pristineSurface]));
 }
 
 /** Commit a BASE variant of the baseline and point origin/main at it. */
 function seedBase(mutate: (keys: string[]) => string[]): string {
   seedSurface(mutate);
-  git('add', 'authorable-surface.json');
+  git('add', AUTHORABLE_SURFACE_DIR_NAME);
   git('commit', '-q', '--allow-empty', '-m', 'base variant');
   const sha = git('rev-parse', 'HEAD');
   git('update-ref', 'refs/remotes/origin/main', sha);
@@ -378,7 +416,7 @@ const DELETED_BY_RENAME = `${DELETED_BY_RENAME_SOURCE_DEF}:source`;
 describe('build-schemas.ts — deleted baseline lines must prove themselves (#4650)', () => {
   beforeAll(() => {
     // Fixture validity, asserted loudly instead of silently going stale.
-    const keys = (JSON.parse(pristineSurface) as { keys: string[] }).keys;
+    const keys = pristineSurface;
     for (const injected of [
       DELETED_LIVE,
       DELETED_UNREGISTERED,
@@ -442,7 +480,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       // Commit the sabotaged (canonical-minus-line, relative to base) file so
       // the worktree is CLEAN — the state CI checks out. A `git show HEAD:`
       // anchor would now compare the commit to itself and never fire.
-      git('add', 'authorable-surface.json');
+      git('add', AUTHORABLE_SURFACE_DIR_NAME);
       git('commit', '-q', '-m', 'PR commit deleting a baseline line');
 
       const check = run(['--check']);
@@ -477,7 +515,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(output).toContain('not a license to change the schema');
       // Whole-def removal is the manifest ratchet's jurisdiction.
       expect(output).toContain('identity/Session:* (2 line(s))');
-      expect(output).toContain('json-schema.manifest.json (#2978)');
+      expect(output).toContain('json-schema.manifest/ (#2978)');
       // Aged-out tombstone names its registration major.
       expect(output).toMatch(/data\/Object:compactLayout — \[RETIRED\] at [0-9a-f]+ and registered at major 11/);
       expect(output).toContain('tombstone aged out');
@@ -509,21 +547,31 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
     { timeout: SPAWN_TIMEOUT_MS * 2 },
     () => {
       seedBase((s) => s);
-      const handEdited = seedSurface((s) => s).replace(
-        'Ratchet of every AUTHORABLE key',
-        'Ratchet  of every AUTHORABLE key',
+      const canonical = seedSurface((s) => s);
+      // One SHARD is hand-edited, not the whole set — the sharded shape of the
+      // #4662 fixture, and a strictly narrower one: the gate has to name the
+      // shard rather than notice the aggregate moved.
+      const editedShard = path.join(surfaceDir, 'data.json');
+      fs.writeFileSync(
+        editedShard,
+        fs
+          .readFileSync(editedShard, 'utf8')
+          .replace('Ratchet of every AUTHORABLE key', 'Ratchet  of every AUTHORABLE key'),
       );
-      fs.writeFileSync(surfacePath, handEdited);
+      const handEdited = readSurface();
+      expect(handEdited).not.toBe(canonical);
 
       const check = run(['--check']);
       expect(check.status).toBe(1);
       expect(check.output).toContain('does not match its generated form');
+      expect(check.output).toContain('~ authorable-surface/data.json  (stale)');
       expect(readSurface()).toBe(handEdited);
 
       const write = run([]);
       expect(write.status).toBe(0);
-      expect(write.output).toContain('🔑 authorable-surface.json updated');
-      expect(readSurface()).toBe(pristineSurface);
+      expect(write.output).toContain('🔑 authorable-surface/ updated');
+      expect(write.output).toContain('touched: data.json');
+      expect(readSurface()).toBe(canonical);
     },
   );
 
@@ -562,7 +610,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(Object.keys(RENAMED_DEFS)).toContain(DELETED_BY_RENAME_SOURCE_DEF);
       // The carried key must actually land under the NEW def, or this asserts
       // nothing — a rename entry whose target lost the key is check (a0)'s case.
-      expect((JSON.parse(pristineSurface) as { keys: string[] }).keys).toContain(
+      expect(pristineSurface).toContain(
         `${RENAMED_DEFS[DELETED_BY_RENAME_SOURCE_DEF]}:source`,
       );
       seedBase((s) => [...s, DELETED_BY_RENAME].sort());
@@ -693,7 +741,7 @@ describe('build-schemas.ts — an in-tree anchor carries the deletion gate offli
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
       expect(
-        (JSON.parse(pristineSurface) as { keys: string[] }).keys,
+        pristineSurface,
         `${SHED_FROM_ANCHOR} is no longer in the baseline — pick another live key`,
       ).toContain(SHED_FROM_ANCHOR);
       // The bypass this file exists to prevent, moved one file over: drop the
@@ -810,7 +858,7 @@ describe('build-schemas.ts — an in-tree anchor carries the deletion gate offli
       const doc = JSON.parse(readSurfaceBase()) as { baseRev: string; keys: string[] };
       // Written from the git-resolved baseline — the merge base, not this tree.
       expect(doc.baseRev).toBe(head);
-      expect(doc.keys).toEqual((JSON.parse(pristineSurface) as { keys: string[] }).keys);
+      expect(doc.keys).toEqual(pristineSurface);
     },
   );
 });
@@ -924,7 +972,7 @@ describe('build-schemas.ts — only --update-base moves the in-tree anchor (#535
       const doc = JSON.parse(readSurfaceBase()) as { baseRev: string; keys: string[] };
       // From the merge base, never from this build's own emitted surface (#5235).
       expect(doc.baseRev).toBe(tip);
-      expect(doc.keys).toEqual((JSON.parse(pristineSurface) as { keys: string[] }).keys);
+      expect(doc.keys).toEqual(pristineSurface);
       expect(doc.keys).toContain(LAGGING_KEY);
       // Restore the fixture for the sibling cases — beforeEach re-commits anyway,
       // but a dirty tree between tests would make a failure here read as a failure
@@ -1052,7 +1100,7 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
     path.resolve(sandbox, git('rev-parse', '--git-path', 'MERGE_HEAD'));
 
   beforeAll(() => {
-    const keys = (JSON.parse(pristineSurface) as { keys: string[] }).keys;
+    const keys = pristineSurface;
     for (const k of [FORKED_KEY, LANDED_KEY]) {
       expect(keys, `${k} is no longer in the baseline — pick another live key`).toContain(k);
     }
@@ -1069,7 +1117,7 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
     seedBase((s) => s);
     seedSurface((s) => s);
     anchorAtTip = seedSurfaceBase(tip, (k) => k.filter((x) => x !== LANDED_KEY));
-    git('add', 'authorable-surface.json', 'authorable-surface.base.json');
+    git('add', AUTHORABLE_SURFACE_DIR_NAME, 'authorable-surface.base.json');
     git('commit', '-q', '-m', 'fixture: anchor at the middle upstream commit');
     mainTip = git('rev-parse', 'HEAD');
     git('update-ref', 'refs/remotes/origin/main', mainTip);
@@ -1082,7 +1130,7 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
     git('checkout', '-q', '-B', 'issue-5370-fork', older);
     seedSurface((s) => s);
     seedSurfaceBase(tip, (k) => k.filter((x) => x !== LANDED_KEY));
-    git('add', 'authorable-surface.json', 'authorable-surface.base.json');
+    git('add', AUTHORABLE_SURFACE_DIR_NAME, 'authorable-surface.base.json');
     git('commit', '-q', '-m', 'fixture: branch work, forked before the anchor advanced');
     expect(git('status', '--porcelain', '-uno')).toBe('');
     expect(git('merge-base', 'HEAD', mainTip)).toBe(older);
@@ -1135,7 +1183,7 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
       const doc = JSON.parse(readSurfaceBase()) as { baseRev: string; keys: string[] };
       expect(doc.baseRev).toBe(mainTip);
       expect(doc.keys).toContain(LANDED_KEY);
-      expect(doc.keys).toEqual((JSON.parse(pristineSurface) as { keys: string[] }).keys);
+      expect(doc.keys).toEqual(pristineSurface);
     },
   );
 
@@ -1215,6 +1263,809 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
       expect(output).toContain(tip.slice(0, 12));
       expect(output).not.toContain('#5370');
       expect(readSurfaceBase()).toBe(anchorAtTip);
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #5371 — the output clean is scoped to THIS generator's artifacts.
+//
+// `packages/spec/json-schema/` has two writers: this script emits
+// `<category>/<Name>.json` and `objectstack.json`, and `gen:openapi`
+// (build-openapi.ts) emits `openapi.json`. The clean used to remove the
+// DIRECTORY, so it took the sibling's file with it. `pnpm build` never shows
+// it (`gen:schema && gen:openapi` rewrites the file last), but every entry
+// point that stops after this script leaves the artifact gone — and the tree is
+// gitignored with no gate over it (`check:generated` says so itself: "Generated
+// but ungated (2): gen:openapi, gen:sbom"), so nothing reports the hole.
+//
+// It surfaces two packages away instead, as `@objectstack/rest`'s openapi route
+// tests failing `expected 503 to be 200` against a diff that never touched
+// them. Four independent reports, each one an attribution lap: #5371 itself,
+// then mid-#5126, mid-#5588 and mid-#5672.
+//
+// `--check` gets its own case because it is the reported trigger, not a variant
+// of the write path: `check:authorable-surface` IS this script with that flag,
+// `check:generated` runs it, and a command whose name says "check" destroying a
+// build artifact is precisely what made the cause so hard to reach.
+//
+// The unit-level behaviour of the clean (nested trees, back-off, an entry it
+// cannot remove) is pinned in scripts/json-schema-out-dir.test.ts. What these
+// two cases add is the half that file cannot assert: that this script still
+// routes its clean through it.
+describe('build-schemas.ts — the output clean spares a sibling generator (#5371)', () => {
+  const OUT = () => path.join(sandbox, 'json-schema');
+  const OPENAPI = 'openapi.json';
+  /** Bytes only `gen:openapi` could have written — identity, not just presence. */
+  const OPENAPI_BYTES = JSON.stringify(
+    { openapi: '3.1.0', 'x-fixture': 'written by gen:openapi, never by gen:schema' },
+    null,
+    2,
+  );
+  /** Output of this generator that no current build emits — the clean's own job. */
+  const STALE_FILE = 'zzStaleFromAnEarlierRun.json';
+  const STALE_DIR = 'zzretiredcategory';
+
+  /** Seed json-schema/ the way a completed `pnpm build` leaves it, plus stale debris. */
+  function seedOutDir(): void {
+    fs.mkdirSync(path.join(OUT(), STALE_DIR), { recursive: true });
+    fs.writeFileSync(path.join(OUT(), STALE_DIR, 'Gone.json'), '{}');
+    fs.writeFileSync(path.join(OUT(), STALE_FILE), '{}');
+    fs.writeFileSync(path.join(OUT(), OPENAPI), OPENAPI_BYTES);
+  }
+
+  /** The clean really ran, over a tree this run really regenerated. */
+  function expectCleanedAndRegenerated(): void {
+    expect(fs.existsSync(path.join(OUT(), STALE_FILE))).toBe(false);
+    expect(fs.existsSync(path.join(OUT(), STALE_DIR))).toBe(false);
+    expect(fs.existsSync(path.join(OUT(), 'objectstack.json'))).toBe(true);
+    expect(fs.existsSync(path.join(OUT(), 'data', 'Object.json'))).toBe(true);
+  }
+
+  beforeEach(() => {
+    // A current, self-consistent tree, so the run exits 0 and the assertions
+    // below are about the clean rather than about some ratchet upstream of it.
+    seedManifest((s) => s);
+    const tip = seedBase((s) => s);
+    seedSurface((s) => s);
+    seedSurfaceBase(tip, (k) => k);
+  });
+
+  it(
+    "leaves gen:openapi's artifact byte-identical while still sweeping its own stale output",
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedOutDir();
+
+      const { status, output } = run([]);
+
+      expect(status).toBe(0);
+      // "No stale files remain" is unchanged — this is not a narrower clean.
+      expectCleanedAndRegenerated();
+      // …and the sibling's artifact is neither deleted nor rewritten.
+      expect(fs.readFileSync(path.join(OUT(), OPENAPI), 'utf8')).toBe(OPENAPI_BYTES);
+      // Announced, so an exemption is never indistinguishable from a miss.
+      expect(output).toContain(`kept ${OPENAPI}`);
+      expect(output).toContain('gen:openapi');
+    },
+  );
+
+  it(
+    '--check does the same — the reported trigger was a command named check: (#5371)',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedOutDir();
+
+      const { status } = run(['--check']);
+
+      expect(status).toBe(0);
+      // `--check` still rebuilds the gitignored tree it computes from (that is
+      // #4711's boundary: it may not write a TRACKED file), so the clean runs
+      // here too — which is exactly why this path could delete the artifact.
+      expectCleanedAndRegenerated();
+      expect(fs.readFileSync(path.join(OUT(), OPENAPI), 'utf8')).toBe(OPENAPI_BYTES);
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #4659 — check (b) registers a tombstone by its EXACT key, not by its leaf.
+//
+// Until this change, "live → retired must be registered" was satisfied by
+// matching the key's LEAF against every ' / '-separated conversion/migration
+// `surface` in the ADR-0087 registries — `endsWith('.' + name)`, across all
+// majors, ignoring which def the key belonged to. So any unrelated registration
+// ending in the same leaf registered a tombstone for free. #4658 measured it:
+// tombstoning `automation/Event:type` passed silently because protocol 11's
+// `flow-node-http-callout-rename` had registered `flow.node.type`. #5509 widened
+// the leaf vocabulary to `.description`, one of the most common keys on
+// authorable shapes, and the exposure grew with every conversion.
+//
+// The registration now lives in its own table — RETIRED_KEYS_BY_MAJOR in
+// src/migrations/registry.ts, values the literal `${defKey}:${name}` — and
+// check (b) is exact set membership over it. Conversion `surface` prose is
+// untouched: it addresses authors in the shape they write metadata
+// (`flow.nodes[].outputSchema`) and no rule can map that back onto a def key.
+//
+// ── Why a SECOND sandbox ──────────────────────────────────────────────────
+// These tests need the gate to read a registry that differs per case, and the
+// sandbox above symlinks `src/`, so writing one there would write the repo's
+// tracked registry. This one COPIES `src/` instead (10 MB, ~40 ms) so its
+// `src/migrations/registry.ts` is a fixture. Nothing else changes: the gate
+// under test is the same copied `scripts/build-schemas.ts`, reading a byte-equal
+// spec source, and no test-only seam is added to it — the substituted table is
+// fixture data exactly as the fabricated `refs/remotes/origin/main` is.
+//
+// ── Why the green cases still exit 1 ──────────────────────────────────────
+// A live → retired transition exists only when the committed baseline disagrees
+// with the emitted contract, so every fixture here is, by construction, a
+// baseline the generated-form reporter at the end of the script will call stale.
+// That reporter is a different failure with a different remedy, and the
+// assertions below discriminate on the message, never on the exit code alone.
+
+/** Retired keys whose ONLY registered clause names a DIFFERENT def — the defect. */
+const LEAF_COLLIDER_A = 'api/HttpFindQueryParams:distinct';
+/** …matched by this clause, which registers `data/Query`'s key, not this one. */
+const LEAF_COLLIDER_A_CLAUSE = 'data.query.distinct';
+/** The issue's own `.type` shape: an index type dated by a flow node rename. */
+const LEAF_COLLIDER_B = 'data/Index:type';
+/** …registered at protocol 11 by `flow-node-http-callout-rename`. Unrelated. */
+const LEAF_COLLIDER_B_CLAUSE = 'flow.node.type';
+/** A key no author has ever been able to lose — the (b2) "still LIVE" fixture. */
+const STILL_LIVE_KEY = 'data/Object:name';
+/** A key no build emits: the aged-out steady state a stale entry decays into. */
+const AGED_OUT_KEY = 'data/Object:zzAgedOutTombstone4659';
+
+/**
+ * The pre-#4659 matcher, reproduced ONLY to prove the fixtures still model the
+ * defect: every registered clause whose leaf would have registered `key`. If
+ * this ever returns nothing for a fixture, the fixture stopped being a
+ * collision and the test below asserts something weaker than it claims.
+ */
+function clausesMatchingLeafOf(key: string): string[] {
+  const leaf = key.slice(key.indexOf(':') + 1);
+  const out: string[] = [];
+  const consider = (surface: string): void => {
+    for (const clause of surface.split(' / ')) if (clause.endsWith('.' + leaf)) out.push(clause);
+  };
+  for (const list of Object.values(CONVERSIONS_BY_MAJOR)) for (const c of list) consider(c.surface);
+  for (const step of Object.values(MIGRATIONS_BY_MAJOR)) {
+    for (const sem of step.semantic ?? []) consider(sem.surface);
+  }
+  return out;
+}
+
+describe('build-schemas.ts — check (b) matches the exact retired key, not its leaf (#4659)', () => {
+  let box: string;
+  let boxScript: string;
+  let boxSurfaceDir: string;
+  let boxRegistry: string;
+  let pristineRegistry: string;
+
+  const boxGit = (...args: string[]): string => {
+    const r = spawnSync(
+      'git',
+      ['-c', 'user.name=build-schemas-test', '-c', 'user.email=test@example.invalid', ...args],
+      { cwd: box, encoding: 'utf8' },
+    );
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed (${r.status}): ${r.stderr}`);
+    return (r.stdout ?? '').trim();
+  };
+
+  const runBox = (args: string[] = []): { status: number; output: string } => {
+    const r = spawnSync(TSX, [boxScript, ...args], {
+      cwd: box,
+      encoding: 'utf8',
+      timeout: SPAWN_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+
+  /** Untombstone keys in the sandbox baseline: the gate then sees live → retired. */
+  const untombstone = (...keys: string[]): void => {
+    writeSurfaceShards(
+      boxSurfaceDir,
+      pristineSurface.map((e) => (keys.includes(e.replace(RETIRED_MARK, '')) ? e.replace(RETIRED_MARK, '') : e)),
+    );
+  };
+
+  /** Substitute RETIRED_KEYS_BY_MAJOR in the sandbox's own copy of the registry. */
+  const seedRetiredKeys = (table: Record<number, readonly string[]>): void => {
+    const rendered =
+      `export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {\n` +
+      Object.keys(table)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((m) => `  ${m}: [\n${table[m]!.map((k) => `    '${k}',\n`).join('')}  ],\n`)
+        .join('') +
+      `};\n`;
+    const anchor = /export const RETIRED_KEYS_BY_MAJOR[\s\S]*?\n\};\n/;
+    expect(
+      anchor.test(pristineRegistry),
+      'RETIRED_KEYS_BY_MAJOR is no longer a single object literal in src/migrations/registry.ts — ' +
+        'this fixture substitutes it textually and can no longer find it',
+    ).toBe(true);
+    fs.writeFileSync(boxRegistry, pristineRegistry.replace(anchor, rendered));
+  };
+
+  const CHECK_B = 'key(s) were tombstoned with no registered retirement';
+
+  beforeAll(() => {
+    // Fixture validity, loud: both keys must still be leaf-collisions (they are
+    // the defect), and neither may be registered in the real table (they are
+    // NOT retirements this repo made under the new gate).
+    expect(clausesMatchingLeafOf(LEAF_COLLIDER_A)).toContain(LEAF_COLLIDER_A_CLAUSE);
+    expect(clausesMatchingLeafOf(LEAF_COLLIDER_B)).toContain(LEAF_COLLIDER_B_CLAUSE);
+    const declared = Object.values(RETIRED_KEYS_BY_MAJOR).flat();
+    for (const k of [LEAF_COLLIDER_A, LEAF_COLLIDER_B]) {
+      expect(declared, `${k} is now registered for real — pick an unregistered fixture`).not.toContain(k);
+    }
+    const baselineKeys = pristineSurface;
+    for (const k of [LEAF_COLLIDER_A, LEAF_COLLIDER_B]) {
+      expect(baselineKeys, `${k} is no longer tombstoned — re-pick`).toContain(k + RETIRED_MARK);
+    }
+    expect(baselineKeys, `${STILL_LIVE_KEY} is no longer a live authorable key`).toContain(STILL_LIVE_KEY);
+    expect(baselineKeys.some((k) => k.startsWith(AGED_OUT_KEY))).toBe(false);
+
+    box = fs.mkdtempSync(path.join(os.tmpdir(), 'build-schemas-retired-keys-'));
+    fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
+    fs.cpSync(path.join(PKG, 'src'), path.join(box, 'src'), { recursive: true });
+    for (const entry of ['node_modules', 'package.json']) {
+      fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
+    }
+    writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
+    boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
+    writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    boxScript = path.join(box, 'scripts', 'build-schemas.ts');
+    boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
+    pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
+
+    boxGit('init', '-q', '-b', 'main', '.');
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
+    fs.writeFileSync(
+      path.join(box, 'authorable-surface.base.json'),
+      JSON.stringify(
+        {
+          description: surfaceBaseDescription,
+          baseRev: boxGit('rev-parse', 'HEAD'),
+          keys: pristineSurface,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    boxGit('add', 'authorable-surface.base.json');
+    boxGit('commit', '-q', '-m', 'baseline anchor');
+    boxGit('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  });
+
+  afterAll(() => {
+    if (box) fs.rmSync(box, { recursive: true, force: true });
+  });
+
+  it(
+    'a tombstone whose leaf collides with an unrelated registered surface is NOT registered (#4658)',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The repro, in the shape #4658 recorded it: two keys tombstoned, no entry
+      // written for either, and both leaves already spoken for by conversions
+      // belonging to other defs. Before this change the gate said nothing at all
+      // about them and the run fell through to the staleness reporter.
+      seedRetiredKeys({});
+      untombstone(LEAF_COLLIDER_A, LEAF_COLLIDER_B);
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`2 ${CHECK_B}`);
+      expect(output).toContain(`     - ${LEAF_COLLIDER_A}`);
+      expect(output).toContain(`     - ${LEAF_COLLIDER_B}`);
+      // The prescription IS the contract: the exact line to paste, and where.
+      expect(output).toContain(`        '${LEAF_COLLIDER_A}',`);
+      expect(output).toContain(`        '${LEAF_COLLIDER_B}',`);
+      expect(output).toContain('RETIRED_KEYS_BY_MAJOR');
+      expect(output).toContain(`under \`${CURRENT_MAJOR}: [ … ]\``);
+      // The D2 conversion is still asked for — the table did not replace it.
+      expect(output).toContain('src/conversions/registry.ts');
+    },
+  );
+
+  it(
+    'registering one key registers exactly that key — its neighbour with the same leaf still fails',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // `data.query.distinct` covered A only by leaf; now even a REAL entry for
+      // B cannot cover A. This is the whole change in one run: membership is per
+      // key, and nothing radiates from one registration to another.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [LEAF_COLLIDER_B] });
+      untombstone(LEAF_COLLIDER_A, LEAF_COLLIDER_B);
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${CHECK_B}`);
+      expect(output).toContain(`     - ${LEAF_COLLIDER_A}`);
+      expect(output).not.toContain(`     - ${LEAF_COLLIDER_B}`);
+    },
+  );
+
+  it(
+    'both keys registered by exact name: check (b) is silent (the run then only owes the regenerated baseline)',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedRetiredKeys({ [CURRENT_MAJOR]: [LEAF_COLLIDER_A, LEAF_COLLIDER_B] });
+      untombstone(LEAF_COLLIDER_A, LEAF_COLLIDER_B);
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(CHECK_B);
+      expect(output).not.toContain('still LIVE');
+      expect(output).not.toContain('deleted without proof');
+      // Intrinsic to the fixture, not a residue of the gate: a live → retired
+      // transition IS a baseline that has not been regenerated yet, so the run
+      // still owes `gen:schema`. Asserted rather than papered over.
+      expect(status).toBe(1);
+      expect(output).toContain('authorable-surface/ is out of date (2 key(s) not recorded)');
+      expect(output).toContain(`+ ${LEAF_COLLIDER_A}${RETIRED_MARK}`);
+    },
+  );
+
+  it(
+    'an entry naming a key that is still LIVE fails: a registration nothing consumed (b2)',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The mirror defect. Without this, an author could pre-register the key
+      // they intend to retire, and the tombstone would then land — months later,
+      // in someone else's PR — with check (b) already satisfied and nobody
+      // writing anything down.
+      seedRetiredKeys({ [CURRENT_MAJOR]: [STILL_LIVE_KEY] });
+      untombstone(); // baseline pristine: nothing is newly retired
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('RETIRED_KEYS_BY_MAJOR entr(ies) name a key that is still LIVE');
+      expect(output).toContain(`     - ${STILL_LIVE_KEY}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).toContain('retiredKey(');
+      expect(output).not.toContain(CHECK_B);
+    },
+  );
+
+  it(
+    'an entry naming a key this build no longer emits is the aged-out steady state, not an error',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // A tombstone ages out after TOMBSTONE_AGE_MAJORS and check (c) lets its
+      // baseline line go; the entry here stays and then names nothing. Pinned
+      // because the opposite ruling — "an entry must always resolve" — would
+      // force every aged-out retirement to be un-declared to keep the gate
+      // green, which is the record deleting itself.
+      seedRetiredKeys({ 11: [AGED_OUT_KEY] });
+      untombstone();
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain('still LIVE');
+      expect(output).not.toContain(CHECK_B);
+      expect(output).not.toContain('deleted without proof');
+      expect(status).toBe(0);
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #4725 — a deleted json-schema.manifest.json key must prove itself too.
+//
+// #4650 closed the hand-edit shortcut for authorable KEYS and left whole-DEF
+// removals to the #2978 manifest ratchet — check (c) route 3 says so verbatim:
+// "whole-schema removals are adjudicated by json-schema.manifest.json". They
+// were not. That ratchet's `missing` set is `manifest − emitted` with the
+// manifest read from the SAME commit, so a PR deleting the export, the manifest
+// line and the baseline lines together produced an empty `missing`, a check (c)
+// that waived every key under the now-gone def, and an `api-surface` diff a
+// regeneration turns green. Three gates, nothing said — the same shape #4650
+// closed one level down, with the two gates deferring to each other.
+//
+// Measured before the fix, by deleting ONE barrel line (`export * from
+// './validation.zod'` in src/data/index.ts, whose defs ObjectSchema imports
+// DIRECTLY and so keeps parsing `object` metadata with): 7 defs and 116
+// authorable keys left the published contract, `gen:schema` and
+// `check:authorable-surface` both exiting 0. The last case in this block is that
+// repro, run for real against the copied `src/`.
+//
+// ── Why declaration, and not reachability ─────────────────────────────────
+// The issue proposed reusing the #4650 BFS ("the def is unreachable from the
+// metadata roots"). It cannot be reused in this direction, and the failure is
+// silent: `reachableVia()` looks the def up in `zodByDefKey`, which is populated
+// only for defs the build EMITS, so a def that just stopped being emitted
+// answers `null` — "unreachable", i.e. waived — for exactly the removals the
+// gate exists to catch. Widening the BFS cannot fix that: the def is gone from
+// the source, so there is no schema left to walk. The proof is therefore a
+// DECLARATION, RETIRED_DEFS_BY_MAJOR, following #4659's exact-key precedent one
+// level up. The `zzOverCollectedFamily` fixture below is deliberately a def the
+// build never emitted, so it would answer "unreachable" too — a gate that
+// consulted reachability would let it through, and this block would be green.
+//
+// ── Why a THIRD sandbox ───────────────────────────────────────────────────
+// Two reasons, both structural. The gate reads the manifest AT THE MERGE BASE,
+// so `json-schema.manifest.json` has to be a TRACKED file whose committed
+// content differs from the worktree's — the first sandbox commits only the
+// authorable surface, and tracking the manifest there would make every
+// `seedManifest()` dirty the tree that the #5358 block asserts is clean. And the
+// registry table has to differ per case, which needs a copied `src/` (the first
+// sandbox symlinks it). Same discipline as the #4659 box: production code path
+// byte-for-byte, fixture data only.
+
+/** Planted in the BASE manifest, emitted by no build: a def that "left". */
+const REMOVED_DEF = 'ui/ZzzOverCollectedFamily4725';
+/** A second one, so the prescription is pinned in the plural. */
+const REMOVED_DEF_2 = 'ui/ZzzOverCollectedFamily4725Sibling';
+/** A def every build publishes — the mirror's fixture. */
+const STILL_PUBLISHED_DEF = 'ui/View';
+/** The barrel line whose removal unpublishes a REACHABLE def family. */
+const BARREL_LINE = "export * from './validation.zod';\n";
+/** The defs that line publishes; `ObjectSchema` imports them directly, so every
+ *  one of them stays reachable from the `object` metadata root after it goes. */
+const UNPUBLISHED_FAMILY = [
+  'data/ConditionalValidation',
+  'data/CrossFieldValidation',
+  'data/FormatValidation',
+  'data/JSONValidation',
+  'data/ScriptValidation',
+  'data/StateMachineValidation',
+  'data/ValidationRule',
+];
+
+describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)', () => {
+  let box: string;
+  let boxScript: string;
+  let boxManifestDir: string;
+  let boxSurfaceDir: string;
+  let boxRegistry: string;
+  let boxBarrel: string;
+  let pristineRegistry: string;
+  let pristineBarrel: string;
+  let head: string;
+
+  const boxGit = (...args: string[]): string => {
+    const r = spawnSync(
+      'git',
+      ['-c', 'user.name=build-schemas-test', '-c', 'user.email=test@example.invalid', ...args],
+      { cwd: box, encoding: 'utf8' },
+    );
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed (${r.status}): ${r.stderr}`);
+    return (r.stdout ?? '').trim();
+  };
+
+  const runBox = (args: string[] = []): { status: number; output: string } => {
+    const r = spawnSync(TSX, [boxScript, ...args], {
+      cwd: box,
+      encoding: 'utf8',
+      timeout: SPAWN_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+
+  /** Write the box's worktree manifest shards from the committed set. */
+  const writeManifest = (mutate: (schemas: string[]) => string[]): void => {
+    writeManifestShards(boxManifestDir, mutate([...pristine]));
+  };
+
+  /**
+   * Commit a BASE variant of the manifest and point origin/main at it, then
+   * restore the worktree manifest to the canonical one. Set-wise identical to
+   * the real removal — a key present at the merge base and absent from what this
+   * build emits — without needing the source that emitted it.
+   */
+  const seedBaseManifest = (mutate: (schemas: string[]) => string[]): void => {
+    writeManifest(mutate);
+    boxGit('add', SCHEMA_MANIFEST_DIR_NAME);
+    boxGit('commit', '-q', '--allow-empty', '-m', 'base manifest variant');
+    head = boxGit('rev-parse', 'HEAD');
+    boxGit('update-ref', 'refs/remotes/origin/main', head);
+    writeManifest((s) => s);
+  };
+
+  /** Substitute RETIRED_DEFS_BY_MAJOR in the box's own copy of the registry. */
+  const seedRetiredDefs = (table: Record<number, readonly string[]>): void => {
+    const rendered =
+      `export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {\n` +
+      Object.keys(table)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((m) => `  ${m}: [\n${table[m]!.map((k) => `    '${k}',\n`).join('')}  ],\n`)
+        .join('') +
+      `};\n`;
+    const anchor = /export const RETIRED_DEFS_BY_MAJOR[\s\S]*?\n\};\n/;
+    expect(
+      anchor.test(pristineRegistry),
+      'RETIRED_DEFS_BY_MAJOR is no longer a single object literal in src/migrations/registry.ts — ' +
+        'this fixture substitutes it textually and can no longer find it',
+    ).toBe(true);
+    fs.writeFileSync(boxRegistry, pristineRegistry.replace(anchor, rendered));
+  };
+
+  const NO_REGISTERED_REMOVAL = 'schema(s) left the published set with no registered removal (#4725)';
+
+  beforeAll(() => {
+    // Fixture validity, loud rather than silently stale.
+    const manifestKeys = pristine;
+    for (const def of [REMOVED_DEF, REMOVED_DEF_2]) {
+      expect(manifestKeys, `${def} is a real published def — pick a phantom`).not.toContain(def);
+    }
+    expect(manifestKeys, `${STILL_PUBLISHED_DEF} is no longer published — pick another`).toContain(
+      STILL_PUBLISHED_DEF,
+    );
+    for (const def of UNPUBLISHED_FAMILY) {
+      expect(manifestKeys, `${def} is no longer published — the end-to-end repro needs a new family`).toContain(def);
+    }
+    const declared = Object.values(RETIRED_DEFS_BY_MAJOR).flat();
+    for (const def of [REMOVED_DEF, REMOVED_DEF_2, STILL_PUBLISHED_DEF, ...UNPUBLISHED_FAMILY]) {
+      expect(declared, `${def} is now registered for real — pick an unregistered fixture`).not.toContain(def);
+    }
+
+    box = fs.mkdtempSync(path.join(os.tmpdir(), 'build-schemas-manifest-removal-'));
+    fs.cpSync(path.join(PKG, 'scripts'), path.join(box, 'scripts'), { recursive: true });
+    fs.cpSync(path.join(PKG, 'src'), path.join(box, 'src'), { recursive: true });
+    for (const entry of ['node_modules', 'package.json']) {
+      fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
+    }
+    boxScript = path.join(box, 'scripts', 'build-schemas.ts');
+    boxManifestDir = path.join(box, SCHEMA_MANIFEST_DIR_NAME);
+    boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
+    boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
+    boxBarrel = path.join(box, 'src', 'data', 'index.ts');
+    pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
+    pristineBarrel = fs.readFileSync(boxBarrel, 'utf8');
+    expect(
+      pristineBarrel.includes(BARREL_LINE),
+      'src/data/index.ts no longer re-exports ./validation.zod — the end-to-end repro needs a new family',
+    ).toBe(true);
+
+    writeManifestShards(boxManifestDir, pristine);
+    writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    boxGit('init', '-q', '-b', 'main', '.');
+    // BOTH artifacts tracked here: the merge-base manifest is what this gate
+    // reads, and the surface baseline keeps the #4650 gate honest alongside it.
+    boxGit('add', SCHEMA_MANIFEST_DIR_NAME, AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('commit', '-q', '-m', 'baseline: committed manifest + authorable surface');
+    fs.writeFileSync(
+      path.join(box, 'authorable-surface.base.json'),
+      JSON.stringify(
+        {
+          description: surfaceBaseDescription,
+          baseRev: boxGit('rev-parse', 'HEAD'),
+          keys: pristineSurface,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    boxGit('add', 'authorable-surface.base.json');
+    boxGit('commit', '-q', '-m', 'baseline anchor');
+    head = boxGit('rev-parse', 'HEAD');
+    boxGit('update-ref', 'refs/remotes/origin/main', head);
+  });
+
+  beforeEach(() => {
+    // A clean, current base every time — including the merge-base MANIFEST,
+    // which each fixture below mutates and which would otherwise leak the
+    // previous case's planted removal into the next one's count.
+    seedRetiredDefs({});
+    writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    fs.writeFileSync(boxBarrel, pristineBarrel);
+    seedBaseManifest((s) => s);
+  });
+
+  afterAll(() => {
+    if (box) fs.rmSync(box, { recursive: true, force: true });
+  });
+
+  it(
+    'is silent when nothing left the published set — the new failure is the removal, not the gate',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Negative control. Without it, "always red" would satisfy every assertion
+      // below while breaking `check:authorable-surface` for everyone.
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(NO_REGISTERED_REMOVAL);
+      expect(output).not.toContain('left the published set since');
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'the bypass repro: a def gone from the build AND from the manifest is red, naming it',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The #4725 shape, set-wise: two defs present in the manifest at the merge
+      // base, emitted by no build, and absent from the manifest this commit
+      // carries. Before the fix `missing` was empty and every gate exited 0.
+      seedBaseManifest((s) => [...s, REMOVED_DEF, REMOVED_DEF_2].sort());
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`2 ${NO_REGISTERED_REMOVAL}`);
+      expect(output).toContain(`     - json-schema/${REMOVED_DEF}.json`);
+      expect(output).toContain(`     - json-schema/${REMOVED_DEF_2}.json`);
+      // The prescription IS the contract: the exact lines to paste, and where.
+      expect(output).toContain(`        '${REMOVED_DEF}',`);
+      expect(output).toContain(`        '${REMOVED_DEF_2}',`);
+      expect(output).toContain('RETIRED_DEFS_BY_MAJOR');
+      expect(output).toContain(`under \`${CURRENT_MAJOR}: [ … ]\``);
+      // …and the two other routes a reader might actually need are named.
+      expect(output).toContain('RENAMED_DEFS');
+      expect(output).toContain('src/conversions/registry.ts');
+      // Anchored on the merge base, which is the half a hand-edit cannot reach.
+      expect(output).toContain(`merge base ${head.slice(0, 12)}`);
+    },
+  );
+
+  it(
+    'write mode refuses identically — regenerating cannot bless a removal either',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedBaseManifest((s) => [...s, REMOVED_DEF].sort());
+      const before = shardBytes(boxManifestDir);
+
+      const { status, output } = runBox([]);
+
+      expect(status).toBe(1);
+      expect(output).toContain(NO_REGISTERED_REMOVAL);
+      expect(output).toContain(REMOVED_DEF);
+      expect(shardBytes(boxManifestDir)).toBe(before);
+    },
+  );
+
+  it(
+    'a declared removal passes, and the run says which major declared it',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedBaseManifest((s) => [...s, REMOVED_DEF].sort());
+      seedRetiredDefs({ [CURRENT_MAJOR]: [REMOVED_DEF] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(NO_REGISTERED_REMOVAL);
+      expect(output).toContain('1 schema(s) left the published set since');
+      expect(output).toContain(`json-schema/${REMOVED_DEF}.json — RETIRED_DEFS_BY_MAJOR, major ${CURRENT_MAJOR}`);
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'registration is per DEF: declaring one does not cover its sibling',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The #4659 lesson, inherited rather than re-learned: nothing radiates
+      // from one entry to another, and no name is matched by prefix or leaf.
+      seedBaseManifest((s) => [...s, REMOVED_DEF, REMOVED_DEF_2].sort());
+      seedRetiredDefs({ [CURRENT_MAJOR]: [REMOVED_DEF] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`1 ${NO_REGISTERED_REMOVAL}`);
+      expect(output).toContain(`     - json-schema/${REMOVED_DEF_2}.json`);
+      // The declared one appears only in the ℹ️ notice, never in the fatal list.
+      // Matched with its trailing newline, because the notice's line opens with
+      // the same path and then goes on to name the major.
+      expect(output).toContain(
+        `json-schema/${REMOVED_DEF}.json — RETIRED_DEFS_BY_MAJOR, major ${CURRENT_MAJOR}`,
+      );
+      expect(output).not.toContain(`     - json-schema/${REMOVED_DEF}.json\n`);
+    },
+  );
+
+  it(
+    'an entry naming a schema this build still publishes is red: a registration nothing consumed',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The mirror of check (b2), one level up. Without it an author could
+      // pre-register the def they intend to unpublish, and the real removal
+      // would land later — in someone else's PR — with this gate already
+      // satisfied and nobody writing anything down at the time it happened.
+      seedRetiredDefs({ [CURRENT_MAJOR]: [STILL_PUBLISHED_DEF] });
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('RETIRED_DEFS_BY_MAJOR entr(ies) name a schema this build still publishes');
+      expect(output).toContain(`     - ${STILL_PUBLISHED_DEF}  (registered at major ${CURRENT_MAJOR})`);
+      expect(output).not.toContain(NO_REGISTERED_REMOVAL);
+    },
+  );
+
+  it(
+    'a declared def rename is not a removal — RENAMED_DEFS is consulted before the table',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const [renamedSource] = Object.keys(RENAMED_DEFS);
+      expect(renamedSource, 'RENAMED_DEFS is empty — this test exercises nothing').toBeTruthy();
+      // The source def is gone from the build by construction (checkRenameTable
+      // rejects a table whose source is still emitted), so at the merge base it
+      // is a manifest key this build does not emit — a removal in every respect
+      // except the one that matters.
+      seedBaseManifest((s) => [...s, renamedSource!].sort());
+
+      const { status, output } = runBox(['--check']);
+
+      expect(output).not.toContain(NO_REGISTERED_REMOVAL);
+      expect(output).not.toContain('left the published set since');
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'offline: the comparison says so and skips, while the registration mirror still runs',
+    { timeout: SPAWN_TIMEOUT_MS * 2 },
+    () => {
+      // #5235's posture, not a third one. The comparison has no baseline with
+      // origin/main out of reach, so it reports that and skips — those trees are
+      // immutable, already-merged builds (image stages, air-gapped, forks,
+      // historical tags) where "what did this PR delete relative to main" is not
+      // a question that exists. The mirror needs no git and therefore keeps
+      // running: an entry that pre-approves a removal is wrong everywhere.
+      seedBaseManifest((s) => [...s, REMOVED_DEF].sort());
+      boxGit('update-ref', '-d', 'refs/remotes/origin/main');
+      try {
+        const skipped = runBox(['--check']);
+        expect(skipped.status).toBe(0);
+        expect(skipped.output).toContain('json-schema.manifest/ removal check');
+        expect(skipped.output).toContain('no git-resolved baseline');
+        expect(skipped.output).not.toContain(NO_REGISTERED_REMOVAL);
+
+        seedRetiredDefs({ [CURRENT_MAJOR]: [STILL_PUBLISHED_DEF] });
+        const mirrored = runBox(['--check']);
+        expect(mirrored.status).toBe(1);
+        expect(mirrored.output).toContain('name a schema this build still publishes');
+      } finally {
+        boxGit('update-ref', 'refs/remotes/origin/main', head);
+      }
+    },
+  );
+
+  it(
+    'end to end: unpublishing a REACHABLE def family is red, where every gate used to be green',
+    { timeout: SPAWN_TIMEOUT_MS * 2 },
+    () => {
+      // The measured repro, run against real source rather than modelled. The
+      // barrel line goes; `ObjectSchema` still imports ValidationRuleSchema from
+      // './validation.zod', so all 7 defs stay reachable from the `object`
+      // metadata root and every one of their 116 keys stays authorable — only
+      // their JSON Schemas, their manifest lines and the ratchet's record of
+      // them disappear. Then the two hand-edits the old procedure sanctioned:
+      // delete the manifest lines ("a deliberate retirement") and the baseline
+      // lines (without which check (a) fires first).
+      fs.writeFileSync(boxBarrel, pristineBarrel.replace(BARREL_LINE, ''));
+      writeManifest((s) => s.filter((k) => !UNPUBLISHED_FAMILY.includes(k)));
+      const kept = pristineSurface.filter(
+        (k) => !UNPUBLISHED_FAMILY.some((d) => k.startsWith(d + ':')),
+      );
+      expect(
+        pristineSurface.length - kept.length,
+        'the family stopped carrying authorable keys — re-measure the repro',
+      ).toBeGreaterThan(0);
+      writeSurfaceShards(boxSurfaceDir, kept);
+
+      const { status, output } = runBox(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`${UNPUBLISHED_FAMILY.length} ${NO_REGISTERED_REMOVAL}`);
+      for (const def of UNPUBLISHED_FAMILY) {
+        expect(output).toContain(`     - json-schema/${def}.json`);
+        expect(output).toContain(`        '${def}',`);
+      }
+      // The old verdict, in full: check (c) waived all 116 lines as "def no
+      // longer emitted", the manifest ratchet said nothing, and the run exited
+      // 0. The gate now exits before check (c) reaches that branch at all.
+      expect(output).not.toContain('carry their own proof');
+      expect(output).not.toContain('baseline deletion(s) since');
     },
   );
 });

@@ -37,17 +37,16 @@ import { defineCapability } from '@objectstack/spec';
  * capability that never existed — one boot `warn` and an inert security
  * declaration.
  *
- * Why it is authored here rather than inferred: the registry stamp never
- * reaches an app-declared capability, because `capabilities` is missing from
- * the metadata-array key list the ObjectQL engine registers a stack's
- * collections through — so the "fallback" is in practice mandatory. That is a
- * PLATFORM gap, filed as #4967 (together with the sharper half: a refused
- * declaration is still counted as declared, which suppresses the back-compat
- * derivation and leaves the capability existing nowhere), not something the
- * showcase should work around. Declaring `packageId` is the spec's own
- * sanctioned entry point, so this both fixes the app and demonstrates the
- * field; when the platform stamps `_packageId` that takes precedence and this
- * stays consistent with it.
+ * Why it is still authored here now that the platform stamps: it used to be
+ * MANDATORY, because `capabilities` was missing from the metadata-array key
+ * list the ObjectQL engine registers a stack's collections through, so the
+ * registry stamp never reached an app-declared capability and the documented
+ * "fallback" was the only provenance there was. #5870 (#4967 Part 2) closed
+ * that seam — `registerApp` now stamps `_packageId` on capabilities exactly as
+ * it does on permission sets — so this line is once again what the spec says it
+ * is: the fallback, kept because it also DEMONSTRATES the field. It names the
+ * same id as the stack (`com.example.showcase`), so the stamp that now takes
+ * precedence agrees with it.
  */
 export const ExportDataCapability = defineCapability({
   name: 'showcase.export_data',
@@ -57,4 +56,27 @@ export const ExportDataCapability = defineCapability({
   packageId: 'com.example.showcase',
 });
 
-export const allCapabilities = [ExportDataCapability];
+/**
+ * A capability that is DEFINED and granted to NOBODY — the falsifiable half of
+ * the ADR-0066 three-way separation, and the one a demo usually leaves out.
+ *
+ * Its whole job is to be required and never held: `showcase_zoo_perm_missing`
+ * (and the AND-gate specimen next to it, see ui/actions/predicate-matrix.action.ts)
+ * lists it in `requiredPermissions`, so those buttons must be absent for every
+ * caller on every one of the four action surfaces. Without a capability nobody
+ * holds there is nothing to notice when a surface stops applying the gate —
+ * which is exactly how the selection bar shipped ignoring `requiredPermissions`
+ * outright (objectui#3492) while three other surfaces honoured it.
+ *
+ * Deliberately absent from every permission set. If a future set grants it, the
+ * two specimens stop testing anything.
+ */
+export const RestrictedOpsCapability = defineCapability({
+  name: 'showcase.restricted_ops',
+  label: 'Restricted Showcase Operations',
+  description: 'Reserved for the capability-gate specimens — intentionally granted to no permission set.',
+  scope: 'org',
+  packageId: 'com.example.showcase',
+});
+
+export const allCapabilities = [ExportDataCapability, RestrictedOpsCapability];

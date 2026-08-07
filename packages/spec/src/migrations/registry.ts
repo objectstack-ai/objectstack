@@ -623,8 +623,16 @@ const step17: MigrationStep = {
     + 'reintroduce the confusion at the point of choosing. Because v16 already drained the '
     + 'engine side, the conversion is a ONE-TO-ONE mechanical value rename with no judgement '
     + 'call. One deliberate consequence: `system` defaulted LOCKED and each object re-opened its '
-    + 'writes through `userActions`, while `system-data` defaults WRITABLE, so those blocks '
-    + 'become redundant and are deleted (keep `userActions` only to NARROW). No enforcement '
+    + 'writes through `userActions`, while `system-data` defaults WRITABLE on create, edit, '
+    + 'delete and exportCsv, so those blocks become redundant and are deleted (keep '
+    + '`userActions` only to NARROW). CSV `import` is the one verb that default deliberately '
+    + 'withholds (#4671): it stays opt-in per object via `userActions: { import: true }`, so a '
+    + 'v16 `system` object — which resolved `import: false`, because the re-open blocks only '
+    + 'ever named create/edit/delete — keeps resolving `import: false` after the rename. The '
+    + 'reason is leverage, not authorization: three of the eight members are the RBAC link '
+    + 'tables, and a bulk-grant entry point on the permission model\'s grant surface should be '
+    + 'a per-object declaration rather than something inherited by being filed in the right '
+    + 'bucket. No enforcement '
     + 'moves — the engine write guard, the DelegatedAdminGate, RLS and permission sets all '
     + 'adjudicate off resolved affordances and the principal, never off the bucket name; '
     + '`system-data` simply joins `platform`/`config` as a bucket the guard does not cover, '
@@ -992,6 +1000,18 @@ const step17: MigrationStep = {
     + '`session.isSystem` in the hook, and judge PRIVILEGE through the security service, which '
     + 'reads capability grants (`permissions`), placements (`positions`) and the derived posture '
     + 'off the execution context.\n\n'
+    + 'The same enforce-or-remove reading reaches the storage contract: '
+    + '`IStorageService.list(prefix)` is removed (#5540, analysis #5266). It had no '
+    + 'consumer — the only in-repo call site was a proxy pass-through — and the two shipped '
+    + 'adapters answered it with two different, silently incomplete semantics: the local '
+    + 'adapter listed a single level and reported directories as files, the S3 adapter '
+    + 'recursed and stopped at 1000 objects without reading `IsTruncated` / '
+    + '`ContinuationToken`. Enumerating a prefix without a cursor is the wrong signature to '
+    + 'inherit, so nothing replaces it in place: query the file records you wrote, and let a '
+    + 'real caller bring back a cursor-shaped `list(prefix, { cursor, limit })` with '
+    + 'adapter-conformance cases behind it. Same shape and same disposition as the '
+    + '`findStream` retirement above — a TS/API contract, no stored source, no tombstone, '
+    + 'tsc at the call site.\n\n'
     + 'Finally it retires the two inert `IndexSchema` keys, `indexes[].type` and '
     + '`indexes[].partial` (#5248, #4943). Neither ever had a DDL consumer: '
     + '`SqlDriver.syncDeclaredIndexes` creates declared indexes through knex\'s `table.index()` / '
@@ -1011,7 +1031,29 @@ const step17: MigrationStep = {
     + 'incremental sync — design cost for a capability nothing has asked for. Both are lossless '
     + 'deletes: no DDL changes, because no DDL ever depended on them. Drift detection is '
     + 'untouched — the `partial` flag it consumes is parsed back out of the database\'s OWN '
-    + '`CREATE INDEX` DDL and never came from this key.',
+    + '`CREATE INDEX` DDL and never came from this key.\n\n'
+    + 'It also retires the field-mapping `transform` key and the whole five-member '
+    + '`FieldMappingTransform` union behind it (#5552): `constant` / `cast` / `lookup` / '
+    + '`javascript` / `map`, declared on `shared/FieldMapping` and inherited by '
+    + '`integration/ConnectorFieldMapping` and `data/ExternalFieldMapping`. Nothing ever '
+    + 'executed one. `fieldMappings` is spelled only inside `packages/spec` itself — the '
+    + 'connector packages, the automation engine, REST and objectui never read it, and no '
+    + 'code anywhere switches on `transform.type` — so all five members were '
+    + 'declared-but-unenforced together, not just the one that got the bug filed. That one '
+    + 'is the sharpest evidence though: `javascript`\'s `.describe()` recommended the '
+    + 'dialect `js`, which `ExpressionDialect` retired at #3278 (ADR-0058 addendum), so the '
+    + 'envelope the documentation taught was rejected by the enum; the only spelling that '
+    + 'parsed was the bare string, which `ExpressionInputSchema` wraps as `cel`; and the CEL '
+    + 'that resulted could not evaluate the `value.toUpperCase()` the same line offered as '
+    + 'its example. Three surfaces disagreeing about a capability with no implementation '
+    + 'under any of them. Fixing the sentence alone was rejected (maintainer, 2026-08-06) as '
+    + 'gilding a member that cannot run. The key is tombstoned rather than deleted because '
+    + 'the schema and both extenders are plain `z.object`s and `ConnectorSchema.parse` is a '
+    + 'live receiver, so a bare deletion would strip silently. What is NOT affected, despite '
+    + 'the shared word: the import mapping\'s `mapping.fieldMapping[].transform`, a flat '
+    + 'string enum applied row by row by the REST import path and live in the liveness '
+    + 'ledger — including its own `javascript` value, which that path rejects with a 400 '
+    + 'rather than pretending to run.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1057,6 +1099,7 @@ const step17: MigrationStep = {
     'theme-inert-token-scales-removed',
     'page-header-subtitle-alias',
     'object-index-type-partial-removed',
+    'field-mapping-transform-removed',
   ],
   semantic: [
     {
@@ -1955,6 +1998,131 @@ const step17: MigrationStep = {
         + 'and a body still reading it sees `undefined` — which is why the read must be moved '
         + 'inside the window rather than at its close.',
     },
+    {
+      id: 'actor-user-roles-to-positions',
+      surface: 'action body / AI route: ctx.user.roles (req.user.roles)',
+      replacement:
+        'ctx.user.positions (an AI route handler reads `req.user.positions`) — the same array, '
+        + 'under the one spelling ADR-0090 D3 sanctions',
+      reason:
+        'The THIRD face of the ADR-0090 `roles` → `positions` rename, and the only one whose '
+        + 'surface the spec never declared. `ActorUser` '
+        + '(`packages/runtime/src/security/actor-user.ts`) is the ONE producer of the `user` '
+        + 'envelope handed to an action body as `ctx.user` and to an AI route handler as '
+        + '`req.user`; it declared `positions` and `roles` side by side and filled them from a '
+        + 'SINGLE assignment (`roles: core.positions`), so the two keys were verbatim identical '
+        + 'on every dispatch — a second spelling of the vocabulary ADR-0090 D3 reserves and bans, '
+        + 'published straight into author-written code. The maintainer ruled it closed IMMEDIATELY '
+        + '(2026-08-06 14:49Z, #6011): no deprecation window, no dual-emit, the alias simply gone '
+        + 'in 17 (PR #6048). '
+        + '⚠️ Do not read this entry across to its neighbour above: '
+        + '`action-session-roles-to-positions` governs `ctx.session`, a DIFFERENT object reached '
+        + 'through the same `ctx`, and that one KEEPS its one-window dual-emit (#5613). Same word, '
+        + 'same dispatch, two faces, two schedules — `ctx.user.roles` is absent in 17 while '
+        + '`ctx.session.roles` still answers for the length of its window. '
+        + 'What makes this entry different in KIND from both session-side siblings: `ctx.user` has '
+        + 'no spec schema and never had one. It is a runtime TS interface, so unlike '
+        + '`HookContext.session.roles` (tombstoned on a deliberately non-strict `HookContextSchema`, '
+        + '#5050) and unlike `ActionSessionSchema` (declared contract-first at #5697 precisely so '
+        + 'its key could be renamed), there is no schema key here to tombstone and no '
+        + '`retiredKey()` prescription that could reach anybody — nothing ever ran an `ActorUser` '
+        + 'through a `.parse()`, so a prescription there would have no one to reach. The enforced '
+        + 'channel is tsc, and it reports at the READ site inside the author\'s own body; for an '
+        + 'untyped or sandboxed body there is no enforced channel at all, which is exactly why '
+        + 'this ledger entry has to exist — `spec-changes.json` and the generated upgrade guide '
+        + 'are the ONLY way such a reader learns of the rename. It is the `findStream` (#4484) / '
+        + '`IStorageService.list` (#5540) disposition — a TS/API contract, no stored source, no '
+        + 'tombstone, tsc at the call site — applied to a surface that lives one layer further '
+        + 'out than either: those two are at least DECLARED in `packages/spec/src/contracts`, '
+        + 'this one only in `packages/runtime`. '
+        + 'Why it is a D3 semantic TODO and not a D2 conversion, on the same two independent '
+        + 'grounds as its session sibling: FIRST, there is no source to convert — an `ActorUser` '
+        + 'is constructed per dispatch and never persisted, so no `sys_metadata` row, example or '
+        + 'template can carry the key (the `openApi31` (#4579) / `activationEvents` (#4657) / '
+        + '`hook-context-session-roles-retired` (#5050) shape). SECOND, the only place the key is '
+        + 'ever SPELLED is inside an action body or an AI route handler: author-written JS/TS, or '
+        + 'a sandboxed script. A declarative transform cannot safely rewrite an identifier inside '
+        + 'free-form code — the same reason the ADR-0090 wave delegated `current_user.roles` to '
+        + 'the author at step 13 (`cel-current-user-roles-to-positions`) instead of substituting '
+        + 'text. '
+        + 'The removal\'s hard precondition was met before it landed, and the result is recorded '
+        + 'here because the ledger is where an upgrading consumer meets it: the declaration\'s own '
+        + 'comment claimed the alias was "kept for the REST/AI shapes", and that claim was '
+        + 'DISPROVEN face by face against `origin/main` — repo-wide `user.roles` was 4 hits, all '
+        + 'of them in the pins PR #6048 flipped; the four `ActorUser` construction sites build '
+        + 'server-side envelopes that never enter a response body; objectui\'s `.roles` reads '
+        + 'belong to two unrelated producers (the better-auth session, and the '
+        + '`/auth/me/permissions` payload). The `cloud` repo was NOT reachable in that session and '
+        + 'is the one consumer face left unverified — this entry, and the changeset\'s FROM/TO '
+        + 'prescription, are its disposition. ADR-0090 D3 / ADR-0049 / ADR-0087, #6011 (PR #6048).',
+      acceptanceCriteria:
+        'No action body reads `ctx.user.roles` and no AI route handler reads `req.user.roles`; '
+        + 'every such read is `.positions` and observes the SAME array — the value was '
+        + '`ExecutionContext.positions` on both sides, so this is a pure key rename and no value '
+        + 'has to be re-derived. Privilege is NOT re-derived from either spelling: a read that was '
+        + '`roles.includes(\'admin\')` as an access check is rewritten to ask the security service '
+        + '(capability grants / placements / derived posture, ADR-0095), never renamed to '
+        + '`positions.includes(\'admin\')` — renaming that read migrates the defect rather than the '
+        + 'code. Unlike `ctx.session` there is NO window to migrate inside: in 17 the key is '
+        + 'already absent, so a typed body fails `tsc` at the read while an untyped or sandboxed '
+        + 'one silently sees `undefined` — move the read AS you upgrade, not after it. Verify '
+        + 'against a real dispatch rather than a fixture: invoke an action (and an AI route) as a '
+        + 'caller holding positions, assert the body observed them under the canonical key, and '
+        + 'assert the old key is ABSENT by key existence (`\'roles\' in ctx.user === false`) rather '
+        + 'than by `undefined`, which cannot tell a removed key from one left behind holding '
+        + 'nothing — the runtime pin `action-ctx-user-shape.test.ts` asserts both halves that way.',
+    },
+    {
+      id: 'storage-service-list-retired',
+      surface: 'contracts.IStorageService.list',
+      replacement:
+        'no replacement — track the keys you wrote (sys_file / file-reference records, '
+        + 'queryable through ObjectQL with real pagination) instead of enumerating the bucket',
+      reason:
+        '`list(prefix)` was an OPTIONAL contract method documented as "List files in a '
+        + 'directory/prefix", and the two shipped adapters answered the same call with two '
+        + 'different semantics — both of them silently incomplete. `LocalStorageAdapter.list` '
+        + 'was a single-level `readdir`, so a nested key `a/b/c` was invisible under '
+        + '`list(\'a\')` (only `a/b` came back), and a subdirectory that `stat` succeeded on '
+        + 'was pushed into the result as a file, yielding a `StorageFileInfo` whose `size` is '
+        + 'a directory inode and which cannot be downloaded at all. `S3StorageAdapter.list` '
+        + 'was RECURSIVE (`ListObjectsV2` matches the whole key) and read neither '
+        + '`IsTruncated` nor `ContinuationToken`, so past 1000 objects the "all files" a '
+        + 'caller received was the first page, with no signal. One contract method, two '
+        + 'dialects, both quietly incomplete — and the first feature that genuinely needed to '
+        + 'enumerate a prefix (backup, orphan sweep, migration audit) would have got two '
+        + 'different answers on two deployments without an error on either. #5172 was nearly '
+        + 'that feature: it planned to drive attachment reclamation off '
+        + '`list(EMAIL_ATTACHMENT_KEY_PREFIX)`, found the local adapter could not see one '
+        + 'level down, and switched to queue-driven deferred work instead. Nothing consumed '
+        + 'it afterwards: the only in-repo call site was the `SwappableStorageService` '
+        + 'pass-through (which itself rejects when the active adapter has no `list`), and '
+        + 'REST, CLI and the storage routes never called it. Remove was chosen over '
+        + 'align-and-tighten (maintainer ruling, 2026-08-05, #5266): aligning would grow a '
+        + 'conformance surface nobody walks, while a prefix listing that cannot paginate is '
+        + 'the wrong signature to inherit — when a real caller needs enumeration it returns '
+        + 'cursor-shaped, `list(prefix, { cursor, limit })`, with adapter-conformance cases '
+        + '(nested keys, directory entries, >1000 objects) proving both backends agree. This '
+        + 'is a TS/API contract surface — a storage adapter is CODE, never stack metadata — '
+        + 'so there is no source for the chain to rewrite, and deliberately no schema '
+        + 'tombstone: nothing ever ran an adapter through a `.parse()`, so a prescription '
+        + 'there would reach no one. The enforced channel is tsc, and it reports at the call '
+        + 'site. Same disposition, and the same reason, as '
+        + '`data-driver-find-stream-retired` (#4484). ADR-0049 / ADR-0087, #5540 '
+        + '(analysis #5266).',
+      acceptanceCriteria:
+        'No code calls `storage.list(...)` on the `file-storage` service or on any '
+        + '`IStorageService` value. Code that needed "which files are under this prefix" '
+        + 'reads the records it wrote — `sys_file` / file-reference rows carry the storage '
+        + 'key and page deterministically through ObjectQL — rather than asking the bucket, '
+        + 'which is also the only form that stays correct past 1000 objects and across both '
+        + 'adapters. An adapter that still IMPLEMENTS `list` keeps compiling (an extra '
+        + 'method is not an error on a class) and is simply unreachable through the '
+        + 'contract, so deleting it is cleanup that can follow. The break is on the CALLER '
+        + 'side: `storage.list(...)` no longer type-checks, and a PROXY typed against '
+        + '`IStorageService` that forwards to `inner.list` is exactly such a caller — the '
+        + 'one in `@objectstack/service-storage` goes with the adapters (#5541).',
+    },
   ],
 };
 
@@ -1973,3 +2141,160 @@ export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
 export const MIGRATION_MAJORS: readonly number[] = Object.keys(MIGRATIONS_BY_MAJOR)
   .map(Number)
   .sort((a, b) => a - b);
+
+/**
+ * Every authorable key TOMBSTONED at each protocol major, named EXACTLY.
+ *
+ * One entry per key, spelled `${defKey}:${name}` — the same string
+ * `packages/spec/authorable-surface.json` records, minus its `[RETIRED]` mark
+ * (`'automation/Event:type'`, `'ui/App:sharing'`). Not a surface path, not a
+ * prose clause, not a prefix: the literal key.
+ *
+ * ## What reads it
+ *
+ * Check (b) of `scripts/build-schemas.ts` (`check:authorable-surface`): a key
+ * that flips live → retired must appear here, by exact set membership, or the
+ * build fails. Nothing else consumes the table, and nothing infers an entry —
+ * the author writes the key down or the gate stays red.
+ *
+ * ## Why exact keys, and not the conversion `surface`
+ *
+ * Check (b) used to satisfy itself by matching the key's LEAF against every
+ * `surface` registered in {@link CONVERSIONS_BY_MAJOR} / {@link
+ * MIGRATIONS_BY_MAJOR} — `endsWith('.' + name)`, across all majors, ignoring
+ * which def the key belonged to. Any unrelated registration ending in the same
+ * leaf therefore registered a tombstone for free: measured in #4658, tombstoning
+ * `automation/Event:type` passed silently because protocol 11's
+ * `flow-node-http-callout-rename` had registered `flow.node.type`. The exposure
+ * grew with the vocabulary — `type`, `name`, `config`, `filter`, `schema`,
+ * `description` (#5509) are ordinary leaves on hundreds of authorable shapes —
+ * so the gate's whole guarantee had lapsed for the most common keys (#4659).
+ *
+ * A `surface` is deliberately PROSE: it addresses authors in the shape they
+ * write metadata (`flow.nodes[].outputSchema`), which no rule can map back onto
+ * a def key. So the registration moved here instead of being encoded into the
+ * surface — the conversion keeps its prose, and this table carries the machine
+ * fact.
+ *
+ * ## What it does NOT replace
+ *
+ * The D2 conversion (`src/conversions/registry.ts`) and D3 semantic entry stay
+ * the *documentation* channel: `spec-changes.json` (ADR-0087 D4), the generated
+ * upgrade guide and `os migrate meta` are projections of those, not of this
+ * table. An entry here is the *proof the retirement was declared*; the
+ * conversion is the *prescription a consumer follows*. A retirement needs both.
+ *
+ * ## Not a backfill of history
+ *
+ * Check (b) fires only on a NEW live → retired transition — measured against the
+ * committed `authorable-surface.json` baseline, which already records every
+ * older tombstone as `[RETIRED]`. Retirements that landed before this table
+ * existed therefore never re-trigger it and are deliberately absent: this reads
+ * "retirements registered under the exact-key gate", not "every retirement
+ * ever". Do not reconstruct the missing history by leaf-matching the conversion
+ * registry — that is precisely the inference #4659 removed.
+ *
+ * ## Lifecycle
+ *
+ * Entries are permanent. A tombstone ages out after ~two majors and its line
+ * leaves `authorable-surface.json` (check (c)); its entry here stays, and then
+ * names a key the build no longer emits — the expected steady state, not an
+ * error. The one state the gate rejects is an entry naming a key that is still
+ * LIVE: a registration nothing consumed, pre-approving a retirement that has not
+ * happened.
+ *
+ * @see scripts/build-schemas.ts — checks (b)/(b2), the only consumers
+ */
+export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {
+  // The first entries since #4659 built this table (#5552). ONE tombstone
+  // produces THREE keys: `transform` is declared on `shared/FieldMapping` and
+  // `integration/ConnectorFieldMapping` / `data/ExternalFieldMapping` are
+  // `.extend()`s of it, so the retired property is copied into all three walked
+  // shapes and `authorable-surface.json` marks each `[RETIRED]` separately.
+  // Registered per key, as the gate reads them — nothing radiates from the base.
+  17: [
+    'data/ExternalFieldMapping:transform',
+    'integration/ConnectorFieldMapping:transform',
+    'shared/FieldMapping:transform',
+  ],
+};
+
+/**
+ * Every whole JSON Schema **def** UNPUBLISHED at each protocol major, named
+ * EXACTLY.
+ *
+ * One entry per def, spelled `${category}/${SchemaName}` — the same string
+ * `packages/spec/json-schema.manifest.json` records (`'identity/Session'`,
+ * `'data/ValidationRule'`). The sibling of {@link RETIRED_KEYS_BY_MAJOR} one
+ * level up: that table registers a single authorable KEY being tombstoned, this
+ * one registers a whole SCHEMA leaving the published set.
+ *
+ * ## What reads it
+ *
+ * The manifest deletion gate in `scripts/build-schemas.ts`
+ * (`check:authorable-surface`): a def listed in `json-schema.manifest.json` at
+ * the merge base with origin/main that this build no longer emits must appear
+ * here, by exact set membership, or the build fails. Nothing else consumes the
+ * table, and nothing infers an entry.
+ *
+ * ## Why the manifest line alone was not a declaration
+ *
+ * The #2978 ratchet asks for one, in a comment: "remove a key ONLY for a
+ * deliberate retirement". Nothing checked it. The ratchet's `missing` set is
+ * `manifest − emitted` with the manifest read from the SAME commit, so a PR that
+ * deleted the export and the manifest line together produced an empty `missing`
+ * and a silent gate — the exact shape #4650 had just closed one level down, for
+ * authorable keys. Worse, the two gates deferred to each other: the #4650
+ * deletion gate waives every baseline key under a def the build stopped emitting
+ * ("adjudicated by json-schema.manifest.json"), and the manifest said nothing.
+ * Measured on #4725 by dropping one barrel re-export: 7 defs and 116 authorable
+ * keys left the contract with `gen:schema`, `check:authorable-surface` and
+ * `check:api-surface` all green.
+ *
+ * The fix is the #4650 structure: the removal is judged against the manifest at
+ * the merge base — which the commit under test cannot rewrite — and the deleted
+ * line has to be answered by a declaration written down HERE, under a major.
+ *
+ * ## Why not reachability
+ *
+ * #4650's per-key gate lets a deletion prove itself by showing the def is
+ * unreachable from the metadata-type roots, computed by BFS over the build's own
+ * Zod graph. That proof is unavailable one level up, and unavailable in the
+ * dangerous direction: reachability is keyed by `zodByDefKey`, which only holds
+ * defs this build EMITS, so a def that just stopped being emitted answers
+ * "unreachable" — a waiver for exactly the removals the gate exists to catch.
+ * Declaration is therefore the only honest proof at def granularity.
+ *
+ * ## What it does NOT replace
+ *
+ * A rename is not a retirement: a def published under a new name is declared in
+ * `scripts/lib/renamed-defs.ts` (`RENAMED_DEFS`), which the gate consults first,
+ * and an entry here would be a false claim that the contract shrank. And as with
+ * {@link RETIRED_KEYS_BY_MAJOR}, the D2 conversion (`src/conversions/registry.ts`)
+ * plus its D3 chain step stay the *documentation* channel that `spec-changes.json`,
+ * the upgrade guide and `os migrate meta` project; an entry here is the *proof
+ * the removal was declared*. A retirement needs both.
+ *
+ * ## Not a backfill of history
+ *
+ * The gate fires only on a def that leaves the published set relative to the
+ * merge base, so removals that landed before this table existed never re-trigger
+ * it and are deliberately absent. This reads "whole-schema removals registered
+ * under the manifest deletion gate", not "every schema ever unpublished".
+ *
+ * ## Lifecycle
+ *
+ * Entries are permanent, and after the removal merges they name a def no build
+ * emits — the expected steady state. The one state the gate rejects is an entry
+ * naming a def this build STILL publishes: a registration nothing consumed,
+ * pre-approving a removal that has not happened.
+ *
+ * @see scripts/build-schemas.ts — the manifest deletion gate, the only consumer
+ */
+export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {
+  // The first entry since #4725 built this table (#5552). The `transform` key's
+  // value schema had no other consumer, so it goes with the key rather than
+  // surviving as an exported union nothing references — an exported schema with
+  // no consumer reads as a capability to whoever finds it (#3950).
+  17: ['shared/FieldMappingTransform'],
+};

@@ -44,6 +44,8 @@ export const BackupRetentionSchema = lazySchema(() => z.object({
 }).describe('Backup retention policy'));
 
 export type BackupRetention = z.infer<typeof BackupRetentionSchema>;
+/** Post-parse shape of {@link BackupRetention} — defaults applied, transforms run (ADR-0122). */
+export type BackupRetentionParsed = z.infer<typeof BackupRetentionSchema>;
 
 /**
  * Backup Configuration Schema
@@ -79,6 +81,8 @@ export const BackupConfigSchema = lazySchema(() => z.object({
 }).describe('Backup configuration'));
 
 export type BackupConfig = z.infer<typeof BackupConfigSchema>;
+/** Post-parse shape of {@link BackupConfig} — defaults applied, transforms run (ADR-0122). */
+export type BackupConfigParsed = z.infer<typeof BackupConfigSchema>;
 export type BackupConfigInput = z.input<typeof BackupConfigSchema>;
 
 /**
@@ -128,6 +132,8 @@ export const FailoverConfigSchema = lazySchema(() => z.object({
 }).describe('Failover configuration'));
 
 export type FailoverConfig = z.infer<typeof FailoverConfigSchema>;
+/** Post-parse shape of {@link FailoverConfig} — defaults applied, transforms run (ADR-0122). */
+export type FailoverConfigParsed = z.infer<typeof FailoverConfigSchema>;
 export type FailoverConfigInput = z.input<typeof FailoverConfigSchema>;
 
 /**
@@ -143,6 +149,8 @@ export const RPOSchema = lazySchema(() => z.object({
 }).describe('Recovery Point Objective (maximum acceptable data loss)'));
 
 export type RPO = z.infer<typeof RPOSchema>;
+/** Post-parse shape of {@link RPO} — defaults applied, transforms run (ADR-0122). */
+export type RPOParsed = z.infer<typeof RPOSchema>;
 
 /**
  * Recovery Time Objective (RTO) Schema
@@ -157,6 +165,8 @@ export const RTOSchema = lazySchema(() => z.object({
 }).describe('Recovery Time Objective (maximum acceptable downtime)'));
 
 export type RTO = z.infer<typeof RTOSchema>;
+/** Post-parse shape of {@link RTO} — defaults applied, transforms run (ADR-0122). */
+export type RTOParsed = z.infer<typeof RTOSchema>;
 
 /**
  * Disaster Recovery Plan Schema
@@ -245,4 +255,6 @@ export const DisasterRecoveryPlanSchema = lazySchema(() => z.object({
 }).describe('Complete disaster recovery plan configuration'));
 
 export type DisasterRecoveryPlan = z.infer<typeof DisasterRecoveryPlanSchema>;
+/** Post-parse shape of {@link DisasterRecoveryPlan} — defaults applied, transforms run (ADR-0122). */
+export type DisasterRecoveryPlanParsed = z.infer<typeof DisasterRecoveryPlanSchema>;
 export type DisasterRecoveryPlanInput = z.input<typeof DisasterRecoveryPlanSchema>;

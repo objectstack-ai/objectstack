@@ -41,7 +41,7 @@
  * (`Record<string, any>`, `any[]`, an `$eq?: any` operator field) is NOT flagged:
  * that is a different and far broader question, and drawing the line here keeps
  * the gate at zero false positives so red keeps meaning broken. The authorable
- * key surface is ratcheted separately (`authorable-surface.json`, #3855).
+ * key surface is ratcheted separately (`authorable-surface/`, #3855).
  *
  * Fix, don't declare: annotate the recursion with the type instead of `any` —
  * infer the non-recursive part and tie the recursive knot in the type (the

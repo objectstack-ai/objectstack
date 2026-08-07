@@ -239,6 +239,8 @@ export const PackageSchema = lazySchema(() => z.object({
 }));
 
 export type Package = z.infer<typeof PackageSchema>;
+/** Post-parse shape of {@link Package} — defaults applied, transforms run (ADR-0122). */
+export type PackageParsed = z.infer<typeof PackageSchema>;
 
 // ---------------------------------------------------------------------------
 // Request / Response

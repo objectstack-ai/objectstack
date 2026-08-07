@@ -71,6 +71,8 @@ export const FilePersistenceConfigSchema = lazySchema(() => z.object({
 }).describe('File-system persistence configuration'));
 
 export type FilePersistenceConfig = z.infer<typeof FilePersistenceConfigSchema>;
+/** Post-parse shape of {@link FilePersistenceConfig} — defaults applied, transforms run (ADR-0122). */
+export type FilePersistenceConfigParsed = z.infer<typeof FilePersistenceConfigSchema>;
 
 /**
  * localStorage persistence configuration.
@@ -330,4 +332,8 @@ export const MemoryDriverSpec = {
 // ==========================================================================
 
 export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
+/** Post-parse shape of {@link MemoryConfig} — defaults applied, transforms run (ADR-0122). */
+export type MemoryConfigParsed = z.infer<typeof MemoryConfigSchema>;
 export type MemoryPersistenceConfig = z.infer<typeof MemoryPersistenceConfigSchema>;
+/** Post-parse shape of {@link MemoryPersistenceConfig} — defaults applied, transforms run (ADR-0122). */
+export type MemoryPersistenceConfigParsed = z.infer<typeof MemoryPersistenceConfigSchema>;

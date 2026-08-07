@@ -184,6 +184,8 @@ export const WidgetEventSchema = lazySchema(() => z.object({
 }));
 
 export type WidgetEvent = z.infer<typeof WidgetEventSchema>;
+/** Post-parse shape of {@link WidgetEvent} — defaults applied, transforms run (ADR-0122). */
+export type WidgetEventParsed = z.infer<typeof WidgetEventSchema>;
 
 /**
  * Widget Property Definition Schema
@@ -256,6 +258,8 @@ export const WidgetPropertySchema = lazySchema(() => z.object({
 }));
 
 export type WidgetProperty = z.infer<typeof WidgetPropertySchema>;
+/** Post-parse shape of {@link WidgetProperty} — defaults applied, transforms run (ADR-0122). */
+export type WidgetPropertyParsed = z.infer<typeof WidgetPropertySchema>;
 
 /**
  * Widget Manifest Schema
@@ -304,6 +308,8 @@ export const WidgetSourceSchema = lazySchema(() => z.discriminatedUnion('type', 
 ]));
 
 export type WidgetSource = z.infer<typeof WidgetSourceSchema>;
+/** Post-parse shape of {@link WidgetSource} — defaults applied, transforms run (ADR-0122). */
+export type WidgetSourceParsed = z.infer<typeof WidgetSourceSchema>;
 
 export const WidgetManifestSchema = lazySchema(() => z.object({
   /**
@@ -417,6 +423,8 @@ export const WidgetManifestSchema = lazySchema(() => z.object({
 }));
 
 export type WidgetManifest = z.infer<typeof WidgetManifestSchema>;
+/** Post-parse shape of {@link WidgetManifest} — defaults applied, transforms run (ADR-0122). */
+export type WidgetManifestParsed = z.infer<typeof WidgetManifestSchema>;
 
 /**
  * Field Widget Props Schema
@@ -458,13 +466,27 @@ export const FieldWidgetPropsSchema = lazySchema(() => z.object({
 
   /**
    * Whether the field is required.
-   * Widget should indicate required state visually and validate accordingly.
+   *
+   * The required MARKER (the `*`) is owned by the host's field label, not by
+   * the widget — a widget that draws its own produces two markers for one
+   * field (objectui#3222, landed in objectui#3289). Validation is likewise the
+   * host's: it owns the form state that decides whether the field passes.
+   *
+   * A widget reflects the state on the control it renders, via
+   * `aria-required` — `AriaAttributes` already declares that key, so this
+   * needs no additional contract key (objectui#3290).
    */
   required: z.boolean().default(false).describe('Required field flag'),
 
   /**
-   * Validation error message to display.
-   * When present, widget should display the error in its UI.
+   * The active validation message for this field; `undefined` while the field
+   * is valid.
+   *
+   * Consumed as a SIGNAL, not as content: a widget reads it only to drive
+   * `aria-invalid` on the control it renders, which is the one element the
+   * host cannot reach. The message TEXT is rendered by the host's form message
+   * slot (`FormMessage` in objectui); a widget that renders it too
+   * double-displays it (objectui#3222, landed in objectui#3289).
    */
   error: z.string().optional().describe('Validation error message'),
 
@@ -491,3 +513,5 @@ export const FieldWidgetPropsSchema = lazySchema(() => z.object({
  * TypeScript type for Field Widget Props
  */
 export type FieldWidgetProps = z.infer<typeof FieldWidgetPropsSchema>;
+/** Post-parse shape of {@link FieldWidgetProps} — defaults applied, transforms run (ADR-0122). */
+export type FieldWidgetPropsParsed = z.infer<typeof FieldWidgetPropsSchema>;

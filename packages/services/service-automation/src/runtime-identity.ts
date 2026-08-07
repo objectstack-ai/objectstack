@@ -16,13 +16,27 @@ export interface RunIdentityContext {
   isSystem: boolean;
   /**
    * Service-principal label for audit attribution (`ExecutionContext.actor`,
-   * ADR-0014 D2): `svc:flow:<flowName>` on a `runAs:'system'` run, which
-   * resolves no user. Without it the audit writer records `user_id=null,
-   * actor=null` and the history UI renders "Unknown user" (#4366).
-   * Attribution only — no security middleware keys on it.
+   * ADR-0014 D2): `svc:flow:<flowName>` on a `runAs:'system'` run. It names
+   * WHICH automation performed the write (ADR-0118 D5's "related field", not a
+   * second actor spelling); the acting human, when the trigger resolved one,
+   * rides {@link userId} beside it. Without at least one of the two the audit
+   * writer records `user_id=null, actor=null` and the history UI renders
+   * "Unknown user" (#4366). Attribution only — no security middleware keys on
+   * it.
    */
   actor?: string;
-  /** Acting user id — drives owner/role RLS for `runAs:'user'` runs. */
+  /**
+   * Acting user id. On a `runAs:'user'` run it drives owner/role RLS. On a
+   * `runAs:'system'` run it is carried through UNCHANGED from the trigger when
+   * one resolved a user (#5494): elevation and anonymity are separate choices
+   * (ADR-0073's authorization-vs-attribution axes; the #3783 approvals-mirror
+   * `{ isSystem: true, userId }` shape), and the security middleware's
+   * `isSystem` short-circuit precedes every gate that reads `userId`, so under
+   * elevation it grants nothing — it only keeps the run's writes attributable
+   * (`created_by`/`updated_by` audit stamps, `sys_audit_log` actor) and lets
+   * record-change flows fired by those writes resolve the same triggering
+   * human instead of being refused user-less (#3760).
+   */
   userId?: string;
   /** Acting user's role names (RLS parity with a direct REST request). */
   positions: string[];
@@ -113,10 +127,25 @@ export type RunDataContext = RunIdentityContext | RunProvenanceContext;
  * Translate a flow run's {@link AutomationContext} into the ObjectQL `context`
  * its CRUD nodes must pass, honoring `runAs` (ADR-0049 / #1888):
  *
- *  - `runAs:'system'` → `{ isSystem: true, actor: 'svc:flow:<flowName>' }` —
- *    the security middleware short-circuits, so the run reads/writes with full
- *    access, bypassing RLS; the `actor` label keeps those writes attributable
- *    in the audit log (ADR-0014 D2, #4366).
+ *  - `runAs:'system'` → `{ isSystem: true, actor: 'svc:flow:<flowName>' }`,
+ *    PLUS the trigger's `userId` / `tenantId` when the trigger resolved them
+ *    (#5494) — the security middleware short-circuits on `isSystem`, so the
+ *    run reads/writes with full access, bypassing RLS; the `actor` label and
+ *    the carried-through acting user keep those writes attributable in the
+ *    audit log and in the rows' own `created_by`/`updated_by` stamps
+ *    (ADR-0014 D2, #4366), and the carried org lets the driver's tenant
+ *    machinery fill `organization_id` on born rows like any user-path insert.
+ *    `runAs` declares the run's AUTHORIZATION posture, not its identity
+ *    (ADR-0073 D2) — discarding the trigger identity here is what used to
+ *    insert rows with all three platform columns NULL: outside the org
+ *    partition, and untouchable even by the triggering member (the default
+ *    `owner_only_writes` RLS keys on `created_by`). Same envelope shape as
+ *    the action-body seam's `{ ...caller, isSystem: true }` (the
+ *    hotcrm#548-family fix in @objectstack/runtime) — one platform posture
+ *    for "elevated, user-triggered" writers. A run whose trigger genuinely
+ *    resolved no user (a schedule) stays user-less: the actor label +
+ *    `flowRunId` are its provenance, and ADR-0118 D1 forbids inventing a
+ *    sentinel or pseudo-user in its place.
  *  - `runAs:'user'` (default) → the triggering user's identity
  *    (`{ userId, positions, permissions, tenantId? }`), so the security middleware
  *    enforces that user's row-level security. The run can never exceed the
@@ -149,12 +178,43 @@ export type RunDataContext = RunIdentityContext | RunProvenanceContext;
 export function resolveRunDataContext(context: AutomationContext | undefined): RunDataContext | undefined {
   const flowRunId = context?.flowRunId;
   if (context?.runAs === 'system') {
-    // A system run resolves no user, so name the flow as the acting service
-    // principal (`svc:flow:<name>`, ADR-0014 D2) — the audit writer falls back
-    // to `session.actor` when `userId` is absent, which is what keeps these
+    // Name the flow as the acting service principal (`svc:flow:<name>`,
+    // ADR-0014 D2) — the audit writer falls back to `session.actor` when
+    // `userId` is absent, which is what keeps a genuinely user-less run's
     // writes attributable instead of "Unknown user" (#4366).
     const actor = `svc:flow:${context.flowName ?? 'automation'}`;
-    return { isSystem: true, actor, positions: [], permissions: [], ...(flowRunId ? { flowRunId } : {}) };
+    return {
+      isSystem: true,
+      actor,
+      // #5494 — elevation is not anonymity. When the trigger resolved a user
+      // (a manual run, a record-change fired by a user's write), carry them
+      // through: `isSystem` alone decides authorization (the middleware
+      // short-circuits before any gate reads `userId`), while the user drives
+      // the platform's attribution stamps — `created_by`/`updated_by` via the
+      // engine's audit hook — and downstream record-change dispatch, exactly
+      // like the #3783 approvals mirror's `{ isSystem: true, userId }` writes.
+      // A schedule-shaped trigger resolves no user and stays user-less; per
+      // ADR-0118 D1 its actor representation IS null (never a sentinel).
+      ...(context.userId ? { userId: context.userId } : {}),
+      // #5494 — and elevation is not org-lessness either. The trigger's org
+      // rides along, which is what makes the driver's tenant machinery treat
+      // this run's INSERTs exactly like a user-path insert: `organization_id`
+      // filled on rows that omit it (per-table opt-outs respected), autonumber
+      // sequences org-scoped. Without it, every row a user-triggered system
+      // sweep created was born org-NULL — outside the org partition, where
+      // unique indexes don't bite and org-scoped queries don't look. Reads /
+      // updates / deletes org-scope to `(org = trigger-org OR org IS NULL)` at
+      // the driver — the same posture the action-body seam ships for its
+      // `{ ...caller, isSystem: true }` envelope (the hotcrm#548-family fix):
+      // the tenant wall survives elevation for an org-triggered run, while
+      // org-NULL (pre-fix / global) rows stay reachable via the OR-NULL arm.
+      // A run that must genuinely cross orgs is a user-less one (a schedule
+      // carries no org, nothing narrows) or sets explicit fields.
+      ...(context.tenantId ? { tenantId: context.tenantId } : {}),
+      positions: [],
+      permissions: [],
+      ...(flowRunId ? { flowRunId } : {}),
+    };
   }
   if (!context?.userId) {
     // #3760 — FAIL CLOSED. There is no identity to present, and presenting none
@@ -180,6 +240,65 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   if (context.tenantId) out.tenantId = context.tenantId;
   if (flowRunId) out.flowRunId = flowRunId;
   return out;
+}
+
+/**
+ * Fill `owner_id` on a `runAs:'system'` create's payload from the run's acting
+ * user, when the run has one and the flow did not set an owner itself (#5494).
+ *
+ * The ownership anchor is normally stamped by the security middleware ("an
+ * empty `owner_id` is auto-stamped to the acting user", #3004 step 3.5), but
+ * that middleware — including the stamp — short-circuits on `isSystem`, so for
+ * a system-elevated write the payload is the only channel. Left NULL, the row
+ * is born outside every owner-scoped grant: nobody's `own`-depth write scope
+ * matches it, and repairing it needs a transfer grant the affected users may
+ * not hold — #5494's "born untouchable even by admin". Stamping the ACTING
+ * USER restores exactly the default the same trigger would have produced under
+ * `runAs:'user'`; it does not put a system identity in the column (ADR-0118 D6
+ * keeps `owner_id` a business-ownership axis — the system never owns records,
+ * and ADR-0073 D3 forbids force-owning rows to an automation principal).
+ *
+ * Fill-only and schema-guarded:
+ *  - an author-set `owner_id` in the node's `fields` wins (flow logic sets
+ *    ownership explicitly — ADR-0073 D3), matching the middleware's own
+ *    "empty means stamp" test (`null`/`''` count as empty);
+ *  - objects that do not carry the column (`ownership: 'org' | 'none'`,
+ *    platform-managed tables) are left alone — stamping would make the driver
+ *    INSERT a column the table does not have. Same duck-typed `getSchema`
+ *    posture as the engine's audit hook and plugin-security: no schema
+ *    surface → no stamp (today's behavior, not an error).
+ *  - a user-less system run (a schedule) stamps nothing: there is no acting
+ *    user, and ADR-0118 D1 forbids a sentinel or pseudo-user in its place.
+ */
+export function stampSystemInsertOwner(
+  fields: Record<string, unknown>,
+  dataCtx: RunDataContext | undefined,
+  data: unknown,
+  objectName: string,
+): void {
+  if (!dataCtx || (dataCtx as RunIdentityContext).isSystem !== true) return;
+  const userId = (dataCtx as RunIdentityContext).userId;
+  if (!userId) return;
+  // Own-property test + the middleware's own "empty" definition: a present,
+  // non-empty owner is the author's explicit choice and is never overwritten.
+  if (
+    Object.prototype.hasOwnProperty.call(fields, 'owner_id') &&
+    fields.owner_id != null &&
+    fields.owner_id !== ''
+  ) {
+    return;
+  }
+  const getSchema = (data as { getSchema?: (o: string) => unknown } | null | undefined)?.getSchema;
+  if (typeof getSchema !== 'function') return;
+  try {
+    const schema = getSchema.call(data, objectName) as { fields?: Record<string, unknown> } | null | undefined;
+    const schemaFields = schema?.fields;
+    if (!schemaFields || typeof schemaFields !== 'object') return;
+    if (!Object.prototype.hasOwnProperty.call(schemaFields, 'owner_id')) return;
+  } catch {
+    return;
+  }
+  fields.owner_id = userId;
 }
 
 /**

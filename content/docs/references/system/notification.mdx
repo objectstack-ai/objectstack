@@ -5,24 +5,6 @@ description: Notification protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-Notification Channel Enum
-
-Supported notification delivery channels.
-
-⚠️ PARTIALLY ENFORCED — the delivery channels actually registered by
-
-`service-messaging` are `inbox`, `email`, and `sms` (#3197). `push`,
-
-`slack`, `teams`, and `webhook` have no delivery implementation, and the
-
-dispatcher dead-letters any message addressed to an unregistered channel.
-
-Note also the naming drift: this enum says `in-app` while the implemented
-
-channel registers as `inbox` (which this enum does not contain) —
-
-reconcile before wiring this enum into the runtime.
-
 <Callout type="info">
 **Source:** `packages/spec/src/system/notification.zod.ts`
 </Callout>

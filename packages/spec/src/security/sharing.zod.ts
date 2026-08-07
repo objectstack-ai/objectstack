@@ -217,9 +217,13 @@ export const CriteriaSharingRuleSchema = lazySchema(() => BaseSharingRuleSchema.
 export const SharingRuleSchema = CriteriaSharingRuleSchema;
 
 export type SharingRule = z.infer<typeof SharingRuleSchema>;
+/** Post-parse shape of {@link SharingRule} — defaults applied, transforms run (ADR-0122). */
+export type SharingRuleParsed = z.infer<typeof SharingRuleSchema>;
 /** Authoring input for {@link SharingRule} — defaulted fields are optional. */
 export type SharingRuleInput = z.input<typeof SharingRuleSchema>;
 export type CriteriaSharingRule = z.infer<typeof CriteriaSharingRuleSchema>;
+/** Post-parse shape of {@link CriteriaSharingRule} — defaults applied, transforms run (ADR-0122). */
+export type CriteriaSharingRuleParsed = z.infer<typeof CriteriaSharingRuleSchema>;
 
 /**
  * Type-safe factory for a record sharing rule. Validates at authoring time via

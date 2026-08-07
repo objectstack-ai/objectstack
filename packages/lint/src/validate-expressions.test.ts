@@ -1887,3 +1887,134 @@ describe('validateStackExpressions — the field-formula check now actually runs
     expect(keysReadOff('f').filter((k) => !declared.includes(k))).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// [#5378] Registry-injected system columns resolve like any other field.
+//
+// The defect this pins: `buildFieldIndex` read the AUTHORED `fields` map only,
+// so every column the registry injects was invisible and any predicate touching
+// one was hard-rejected — the platform's linter denying the platform's own
+// contract. Apps could only escape by re-declaring system columns (hotcrm#548
+// added `owner_id` to all 12 business objects for exactly this).
+//
+// The counter-examples matter as much as the fix: injection is CONDITIONAL, so
+// the pass must keep rejecting an injected column on an object the registry does
+// NOT inject it on. The conditions come from the spec derivation the registry
+// itself consumes (`resolveInjectedSystemColumns`), never a list copied here.
+// ---------------------------------------------------------------------------
+describe('validateStackExpressions — injected system columns (#5378)', () => {
+  /** Injection-only: declares NO system column of its own. */
+  const injectionOnly = (extra: Record<string, unknown> = {}) => ({
+    name: 'crm_contact',
+    fields: { name: { type: 'text' }, email: { type: 'email' } },
+    ...extra,
+  });
+
+  const withCondition = (object: Record<string, unknown>, condition: string) =>
+    validateStackExpressions({
+      objects: [object],
+      objectValidations: undefined,
+      flows: [{
+        name: 'contact_welcome',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'crm_contact', condition } },
+        ],
+        edges: [],
+      }],
+    });
+
+  // The issue's acceptance criterion #1, verbatim.
+  it('accepts has(record.owner_id) on an object that does not declare owner_id', () => {
+    expect(withCondition(injectionOnly(), 'has(record.owner_id)')).toHaveLength(0);
+  });
+
+  it.each([
+    'has(record.created_at)',
+    'has(record.created_by)',
+    'has(record.updated_at)',
+    'has(record.updated_by)',
+    'has(record.organization_id)',
+    'has(record.owning_business_unit_id)',
+    // Driver-provisioned primary key — the same class, and the commonest of all.
+    'has(record.id)',
+  ])('accepts %s on an injection-only object', (condition) => {
+    expect(withCondition(injectionOnly(), condition)).toHaveLength(0);
+  });
+
+  // ── Counter-examples: the pass must NOT become a blanket allowance ──
+
+  it("still rejects record.owner_id on ownership: 'none' (no owner column is injected)", () => {
+    const issues = withCondition(injectionOnly({ ownership: 'none' }), 'has(record.owner_id)');
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/unknown field `owner_id`/);
+  });
+
+  it("still rejects record.owner_id on ownership: 'org'", () => {
+    const issues = withCondition(injectionOnly({ ownership: 'org' }), 'has(record.owner_id)');
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/unknown field `owner_id`/);
+  });
+
+  it('still rejects record.organization_id when the object opts out of tenancy', () => {
+    const issues = withCondition(
+      injectionOnly({ tenancy: { enabled: false } }),
+      'has(record.organization_id)',
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/unknown field `organization_id`/);
+  });
+
+  it('still rejects an audit column when the object opts out of audit fields', () => {
+    const issues = withCondition(
+      injectionOnly({ systemFields: { audit: false } }),
+      'has(record.created_at)',
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/unknown field `created_at`/);
+  });
+
+  it('still rejects a genuinely unknown field on an injection-only object', () => {
+    const issues = withCondition(injectionOnly(), 'has(record.no_such_field)');
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/unknown field `no_such_field`/);
+  });
+
+  // The resolved names join the "did you mean?" candidates, so a typo'd system
+  // column now gets the same help an authored field always got.
+  it('suggests an injected column for a near-miss spelling', () => {
+    const issues = withCondition(injectionOnly(), 'has(record.ownerid)');
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toMatch(/unknown field `ownerid`/);
+    expect(issues[0].message).toMatch(/did you mean `owner_id`/);
+  });
+
+  // A DECLARED system column keeps working — re-declaration stays legal, which
+  // is why an existing app that took the hotcrm#548 workaround sees no change.
+  it('accepts a declared owner_id exactly as before (re-declaration stays legal)', () => {
+    const declared = {
+      name: 'crm_contact',
+      fields: {
+        name: { type: 'text' },
+        owner_id: { type: 'lookup', reference: 'sys_user', system: true },
+      },
+    };
+    expect(withCondition(declared, 'has(record.owner_id)')).toHaveLength(0);
+  });
+
+  // Reverse verification, in the direction that is actually available here: the
+  // injected half is what carries the verdict, so removing it must turn the
+  // acceptance criterion RED while leaving the counter-examples untouched. Pinned
+  // by construction — an empty injected set is exactly pre-#5378 behaviour.
+  it('the injected half is load-bearing: an object whose plan injects nothing rejects every system column', () => {
+    // `systemFields: false` is the platform's own "inject nothing" switch, so it
+    // reproduces the old blindness on purpose — minus `id`, which is the
+    // driver's and survives the opt-out.
+    const optedOut = injectionOnly({ systemFields: false });
+    for (const condition of ['has(record.owner_id)', 'has(record.created_at)', 'has(record.organization_id)']) {
+      const issues = withCondition(optedOut, condition);
+      expect(issues, condition).toHaveLength(1);
+      expect(issues[0].message).toMatch(/unknown field/);
+    }
+    expect(withCondition(optedOut, 'has(record.id)')).toHaveLength(0);
+  });
+});

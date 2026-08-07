@@ -87,6 +87,8 @@ export const ServiceMetadataSchema = lazySchema(() => z.object({
 }));
 
 export type ServiceMetadata = z.infer<typeof ServiceMetadataSchema>;
+/** Post-parse shape of {@link ServiceMetadata} — defaults applied, transforms run (ADR-0122). */
+export type ServiceMetadataParsed = z.infer<typeof ServiceMetadataSchema>;
 
 // ============================================================================
 // Service Registry Configuration Schemas
@@ -141,6 +143,8 @@ export const ServiceRegistryConfigSchema = lazySchema(() => z.object({
 }));
 
 export type ServiceRegistryConfig = z.infer<typeof ServiceRegistryConfigSchema>;
+/** Post-parse shape of {@link ServiceRegistryConfig} — defaults applied, transforms run (ADR-0122). */
+export type ServiceRegistryConfigParsed = z.infer<typeof ServiceRegistryConfigSchema>;
 export type ServiceRegistryConfigInput = z.input<typeof ServiceRegistryConfigSchema>;
 
 // ============================================================================
@@ -190,6 +194,8 @@ export const ServiceFactoryRegistrationSchema = lazySchema(() => z.object({
 }));
 
 export type ServiceFactoryRegistration = z.infer<typeof ServiceFactoryRegistrationSchema>;
+/** Post-parse shape of {@link ServiceFactoryRegistration} — defaults applied, transforms run (ADR-0122). */
+export type ServiceFactoryRegistrationParsed = z.infer<typeof ServiceFactoryRegistrationSchema>;
 
 // ============================================================================
 // Scoped Service Schemas

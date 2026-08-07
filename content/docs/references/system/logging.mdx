@@ -267,7 +267,7 @@ Logging configuration
 | **level** | `Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>` | ✅ | Extended log severity level |
 | **default** | `{ name?: string; level: Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>; format: Enum<'json' \| 'text' \| 'pretty'>; redact: string[]; … }` | optional | Default logger configuration |
 | **loggers** | `Record<string, { name?: string; level: Enum<'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal' \| 'silent'>; format: Enum<'json' \| 'text' \| 'pretty'>; redact: string[]; … }>` | optional | Named logger configurations |
-| **destinations** | `{ name: string; type: Enum<'console' \| 'file' \| 'syslog' \| 'elasticsearch' \| 'cloudwatch' \| 'stackdriver' \| 'azure_monitor' \| 'datadog' \| 'splunk' \| 'loki' \| 'http' \| 'kafka' \| 'redis' \| 'custom'>; level: Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>; enabled: boolean; … }[]` | ✅ | Log destinations |
+| **destinations** | `{ name: string; type: Enum<'console' \| 'file' \| 'syslog' \| 'elasticsearch' \| 'cloudwatch' \| 'stackdriver' \| … +8 more>; level: Enum<'trace' \| 'debug' \| 'info' \| 'warn' \| 'error' \| 'fatal'>; enabled: boolean; … }[]` | ✅ | Log destinations |
 | **enrichment** | `{ staticFields?: Record<string, any>; dynamicEnrichers?: string[]; addHostname: boolean; addProcessId: boolean; … }` | optional | Log enrichment configuration |
 | **redact** | `string[]` | ✅ | Fields to redact |
 | **sampling** | `{ enabled: boolean; rate: number; rateByLevel?: Record<string, number> }` | optional |  |

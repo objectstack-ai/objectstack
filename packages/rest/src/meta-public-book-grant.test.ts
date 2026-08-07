@@ -44,7 +44,11 @@ function setup() {
       if (t === 'object') return [{ name: 'crm_account' }];
       return [];
     }),
-    getMetaItem: vi.fn(async ({ name }: any) => BOOKS.find((b) => b.name === name) ?? { name }),
+    // The `{ type, name, item }` envelope every read path answers (#5563) —
+    // the audience gate reads the book's `audience` from under `item`.
+    getMetaItem: vi.fn(async ({ type, name }: any) => ({
+      type, name, item: BOOKS.find((b) => b.name === name) ?? { name },
+    })),
     saveMetaItem: vi.fn().mockResolvedValue({}),
     findData: vi.fn().mockResolvedValue([]),
   };

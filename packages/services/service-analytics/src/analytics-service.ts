@@ -81,6 +81,31 @@ type AnalyticsResultWithDrill = AnalyticsResult & {
 };
 
 /**
+ * [#5717] Does this error carry an ADR-0112 envelope — i.e. did its PRODUCER
+ * already classify it?
+ *
+ * The structural fact, read exactly as `rest-server.ts`'s
+ * `/analytics/dataset/query` catch reads it (`envelopeStatus`/`envelopeCode`):
+ * a numeric `status` plus a non-empty string `code`. Deliberately the SAME
+ * predicate rather than a second dialect of "looks enveloped" — a producer that
+ * ships half an envelope has a bug of its own and must be found, not guessed at
+ * from either end of the wire.
+ *
+ * Status RANGE is deliberately not part of it. The 4xx case is the loud one
+ * (#5717's own: a `DATASET_INVALID` / 400 refusal must reach the caller as a
+ * 400, never as an empty grid), but a DECLARED 5xx — `read-scope-sql.ts`'s
+ * `READ_SCOPE_COMPILE_FAILED` / 500 fail-closed refusals — is if anything worse
+ * to swallow: an RLS lowering that failed closed, rendered as a confident empty
+ * chart, is a server fault nobody is told about. Either way the producer has
+ * ANSWERED the classification question, and {@link isMissingSourceError} — a
+ * heuristic over DRIVER phrasing — has no business re-opening it.
+ */
+function hasDeclaredErrorEnvelope(err: unknown): boolean {
+  const e = err as { code?: unknown; status?: unknown } | null | undefined;
+  return typeof e?.status === 'number' && typeof e?.code === 'string' && e.code.length > 0;
+}
+
+/**
  * Detect the "backing object/table isn't present in this kernel" class of
  * error so a dataset query can degrade to an empty result instead of failing
  * the widget with a 500. Matches the missing-relation signatures across the
@@ -88,12 +113,43 @@ type AnalyticsResultWithDrill = AnalyticsResult & {
  * framework's own unknown-object signal. Deliberately scoped to MISSING SOURCE
  * (table/object/relation) — not column/syntax errors, which stay hard failures
  * so real query bugs still surface.
+ *
+ * ⚠️ It is a heuristic over driver PHRASING, so it is the SECOND question the
+ * degradation path asks, never the first: {@link hasDeclaredErrorEnvelope} runs
+ * ahead of it (#5717), and only an error whose producer declared nothing is
+ * classified by its words here.
+ *
+ * [#5717] The postgres limb is ANCHORED to postgres's actual wording
+ * (`relation "x" does not exist`, relation name quoted or bare) instead of the
+ * `includes('relation') && includes('does not exist')` conjunction it used to
+ * be. That conjunction matched any sentence carrying both words — including
+ * `dataset-compiler.ts`'s `… includes relationship "R" which does not exist on
+ * object "O"`, where the "relation" is inside "relationship" and the missing
+ * thing is a RELATIONSHIP, not a table. The anchor is the same pattern the
+ * sibling {@link missingSourceRelation} already uses for postgres (and the same
+ * shape as `metadata/src/utils/schema-sync-errors.ts`), so "is something
+ * missing" and "what is missing" can no longer disagree on this limb.
+ *
+ * MEASURED over the wordings this repo actually carries — 13 strings: the three
+ * driver families' phrasings (including sql-prefixed and schema-qualified
+ * forms), the framework's not-registered signals, and this package's own
+ * refusals — exactly ONE verdict moves, the compiler refusal above. No driver
+ * wording changes, which is what makes this a narrowing rather than a
+ * behaviour change for #5033's leniency.
+ *
+ * Known residue, filed as #6035 rather than widened into here: postgres spells
+ * a missing COLUMN on the write path as `column "c" of relation "t" does not
+ * exist`, which carries a whole missing-relation phrase inside it and so is a
+ * hit both before and after this anchor. Dormant on a read-only face (a SELECT
+ * says `column "c" does not exist`, no `relation`), but it is the one case
+ * where this predicate is still wider than the paragraph above it.
  */
 function isMissingSourceError(err: unknown): boolean {
-  const msg = String((err as { message?: unknown })?.message ?? err ?? '').toLowerCase();
+  const raw = String((err as { message?: unknown })?.message ?? err ?? '');
+  const msg = raw.toLowerCase();
   return (
     msg.includes('no such table') ||      // sqlite / libsql
-    (msg.includes('relation') && msg.includes('does not exist')) || // postgres
+    /relation\s+[`"']?[A-Za-z0-9_$.]+[`"']?\s+does not exist/i.test(raw) || // postgres
     msg.includes("doesn't exist") ||      // mysql ("table ... doesn't exist")
     msg.includes('not registered') ||     // framework: object not in registry
     msg.includes('unknown object') ||
@@ -789,10 +845,22 @@ export class AnalyticsService implements IAnalyticsService {
     // wearing a new cause: the base table is right there, and the widget would keep
     // rendering the confident `0` this issue is about. So triage by WHICH relation
     // the driver named, and let a cross-datasource dataset fail loudly.
+    //
+    // #5717 — and the leniency is scoped to errors NOBODY classified. The
+    // triage below reads message text, so before it runs, an error that carries
+    // an ADR-0112 envelope is re-thrown untouched: its producer already said
+    // what it is, and a `DATASET_INVALID` / 400 turned into `{rows: []}` is the
+    // #5033 symptom wearing the opposite disguise — the caller's own mistake
+    // reported as "no data", with no exception, no 4xx, no 5xx, just a warn and
+    // a confident empty chart. See {@link hasDeclaredErrorEnvelope}.
     let result: AnalyticsResult;
     try {
       result = await new DatasetExecutor(this, orderLabels).execute(compiled, selection, context);
     } catch (err) {
+      // The producer answered the classification question — the route's
+      // envelope reader serves it (4xx as itself, declared 5xx through the
+      // `ANALYTICS_QUERY_FAILED` path). Nothing here may re-judge it by wording.
+      if (hasDeclaredErrorEnvelope(err)) throw err;
       if (isMissingSourceError(err)) {
         const missing = missingSourceRelation(err);
         const detail = String((err as Error)?.message ?? err);
@@ -1022,9 +1090,31 @@ export class AnalyticsService implements IAnalyticsService {
     // entry in `fields` for this pass to enrich. Fixed where the grid is
     // assembled (see that method's #5537 note), which is also the only place
     // that knows what the active strategy actually projected.
-    if (result.fields?.length && selectedDims.length) {
-      const dimByName = new Map(selectedDims.map((d) => [d.name, d]));
-      const dimByField = new Map(selectedDims.filter((d) => !!d.field).map((d) => [d.field as string, d]));
+    //
+    // #5688 — the set to describe FROM is wider than `selection.dimensions`. A
+    // `timeDimensions` entry that resolves a granularity is GROUPED BY, so it is
+    // a result column even when the caller never listed it under `dimensions`
+    // (#4033's `projectedDimensions`) — and reading `selection.dimensions` alone
+    // left exactly that column carrying a `type` and no `label`, the blind spot
+    // #5537's PR pinned as a control case. Widening the LOOKUP is not the same
+    // as widening the projection: the loop still enriches only entries
+    // `result.fields` already carries, so an entry that stays a pure window
+    // contributes no column and receives no descriptor.
+    //
+    // Kept out of `selectedDims` deliberately. Drill metadata and row-value
+    // label resolution above answer a different question — which dimensions the
+    // caller GROUPED THE GRID BY, i.e. what a click can be turned back into
+    // records — and widening those would change drill payloads and row values,
+    // not table headers.
+    const describableDims = [...selectedDims];
+    for (const t of selection.timeDimensions ?? []) {
+      if (describableDims.some((d) => d.name === t.dimension)) continue;
+      const d = dataset.dimensions?.find((x) => x.name === t.dimension);
+      if (d) describableDims.push(d);
+    }
+    if (result.fields?.length && describableDims.length) {
+      const dimByName = new Map(describableDims.map((d) => [d.name, d]));
+      const dimByField = new Map(describableDims.filter((d) => !!d.field).map((d) => [d.field as string, d]));
       for (const f of result.fields) {
         if (f.label != null) continue;
         // Result fields may be keyed by the dataset dimension NAME or the
@@ -1569,20 +1659,65 @@ export class AnalyticsService implements IAnalyticsService {
     const measures: Record<string, any> = {};
     const dimensions: Record<string, any> = {};
 
-    const stripPrefix = (m: string) => (m.includes('.') ? m.split('.').slice(1).join('.') : m);
+    // [#5739] Strip the `<cube>.` QUALIFIER, and nothing else.
+    //
+    // The predecessor (`stripPrefix`) dropped the first segment of ANY dotted
+    // member, which conflated two different facts wearing the same punctuation:
+    //
+    //   `deal.stage`   — the canonical analytics QUALIFIER. `getMeta` hands
+    //                    members out cube-prefixed and callers echo them back,
+    //                    so the prefix is noise and stripping it is right.
+    //   `owner.region` — a relation TRAVERSAL. Stripping it minted
+    //                    `dimensions.region = {sql: 'region'}`, a BASE-TABLE
+    //                    column, and `lookupMember`'s "plain second-segment"
+    //                    tier then found it BEFORE its synthetic-traversal tier
+    //                    could hand the dotted path to the JOIN machinery. Where
+    //                    the base table happened to carry a same-named column
+    //                    that filtered/grouped the WRONG column with no error to
+    //                    read; where it did not, the 400 named `region` for a
+    //                    caller who wrote `owner.region`.
+    //
+    // Only the first is a qualifier, and only the first is stripped. Everything
+    // else is minted VERBATIM (`{sql: 'owner.region'}`), which is precisely what
+    // `lookupMember`'s synthetic tier already hands the strategies for an
+    // undeclared dotted member — so the ad-hoc path now compiles the traversal
+    // the array `where` spelling has compiled all along, and the two spellings
+    // converge instead of disagreeing. Maintainer ruling, 2026-08-06 (#5739).
+    //
+    // Scope, measured rather than assumed: this governs the DIMENSION-shaped
+    // mints (`dimensions`, the `where`'s field keys, `timeDimensions`) and NOT
+    // `measures`, which keeps the old blanket strip below. See that loop.
+    const stripCubeQualifier = (m: string): string => {
+      const dot = m.indexOf('.');
+      if (dot < 0) return m;
+      return m.slice(0, dot) === cubeName ? m.slice(dot + 1) : m;
+    };
 
     // Always provide a default `count` measure
     measures.count = { name: 'count', label: 'Count', type: 'count', sql: '*' };
 
     for (const m of query.measures || []) {
-      const key = stripPrefix(m);
+      // [#5739] MEASURES keep the blanket strip, deliberately and on measurement.
+      // `lookupMember`'s synthetic relation-traversal tier is DIMENSION-ONLY
+      // (`if (kind === 'dimension')`), so a dotted measure has no traversal
+      // answer to converge with — minting `measures['total.sum']` verbatim does
+      // not join anything, it only re-routes the member into ObjectQL's
+      // "cannot evaluate a cross-object measure" throw, which carries no
+      // `code`/`status`. Measured on this tree: `measures: ['total.sum']` (a
+      // `total_sum` typo, not a traversal) would go from #4437's
+      // `400 INVALID_FIELD` naming `sum` to that uncoded 5xx-class error. A
+      // worse envelope and a wrong diagnosis, for a spelling that is not what
+      // this issue is about — so the strip stays until a dotted MEASURE is ruled
+      // on in its own right. Its own residue (`owner.region_count_distinct`
+      // silently aggregating the BASE `region`, measured) is filed as #5918.
+      const key = m.includes('.') ? m.split('.').slice(1).join('.') : m;
       if (measures[key]) continue;
       const inferred = inferMeasure(key);
       measures[key] = inferred;
     }
 
     for (const d of query.dimensions || []) {
-      const key = stripPrefix(d);
+      const key = stripCubeQualifier(d);
       if (dimensions[key]) continue;
       dimensions[key] = { name: key, label: key, type: 'string', sql: key };
     }
@@ -1621,57 +1756,23 @@ export class AnalyticsService implements IAnalyticsService {
       // genuinely differ — `{stage: {$in: []}}` lowers to the boolean constant
       // FALSE, binding nothing while still naming `stage`.
       for (const key of conjunctFieldKeys(lowered)) {
-        // BARE keys only — a dotted one is a relation traversal, and #5353 cannot
-        // unify those. See the residue loop below for why, and for the ONE case
-        // that still answers per-spelling.
-        if (key.includes('.')) continue;
-        if (dimensions[key] || measures[key]) continue;
-        dimensions[key] = { name: key, label: key, type: 'string', sql: key };
-      }
-    }
-
-    // ── #5739 residue: dotted keys, still answered per SPELLING ───────────────
-    //
-    // A dotted key names a relation traversal, and an ad-hoc single-table cube
-    // has nothing to declare it as. `stripPrefix` mints the TAIL as a BASE-TABLE
-    // dimension, which is #5739's mis-cast, and today only the OBJECT spelling
-    // reaches that mint. #5353 can go neither way on its own:
-    //
-    //   - PROPAGATE it to the array spelling (`stripPrefix` in the loop above) is
-    //     a measured REGRESSION. On cube `deal`, filter `owner.region = 'NA'`:
-    //       {'owner.region': 'NA'}      → WHERE region = $1            (both, after)
-    //       [['owner.region','=','NA']] → LEFT JOIN "owner" ON "deal"."owner" =
-    //                                     "owner"."id" WHERE "owner"."region" = $1
-    //                                                                  (before)
-    //     …i.e. a working traversal becomes a different-rows base-column filter —
-    //     and where the base has no `region` column, a 400 INVALID_FIELD, because
-    //     `declaredMemberEntry`'s dotted tail lookup resolves `owner.region` to
-    //     the minted dimension and hands #5669's gate a column that is absent.
-    //   - WITHDRAW it from the object spelling (skip dotted keys entirely) breaks
-    //     an invariant #5740 pinned deliberately: one dotted member gets one
-    //     answer across the `where` and `dimensions` request keys, sharing
-    //     `resolveMemberSource`, and "if that reading is ever judged wrong it must
-    //     change for BOTH keys at once". Withdrawing here alone would leave
-    //     `where: {'owner.region': …}` standing down while
-    //     `dimensions: ['owner.region']` still 400s on `region`.
-    //
-    // Both directions are #5739's to choose, so this loop reproduces `origin/main`
-    // verbatim — the OBJECT `where`'s own top-level dotted keys, `stripPrefix`ed —
-    // and the asymmetry #5353 is about survives for dotted keys alone. Delete the
-    // loop (or fold it into the one above) when #5739 rules; the parity test names
-    // the case that then flips.
-    const rawWhere = (query as { where?: unknown }).where;
-    if (rawWhere && typeof rawWhere === 'object' && !Array.isArray(rawWhere)) {
-      for (const key of Object.keys(rawWhere as Record<string, unknown>)) {
-        if (key.startsWith('$') || !key.includes('.')) continue;
-        const stripped = stripPrefix(key);
-        if (dimensions[stripped] || measures[stripped]) continue;
-        dimensions[stripped] = { name: stripped, label: stripped, type: 'string', sql: stripped };
+        // [#5739] Dotted keys ride this loop too, and that is the FOLD #5353 left
+        // for this issue. Until the ruling, a dotted key was skipped here and
+        // re-minted from the RAW object `where` by a separate residue loop —
+        // stripped to its tail, so one filter got one answer per spelling: the
+        // object spelling mis-cast `owner.region` to base `region`, the array
+        // spelling minted nothing and compiled the traversal. One loop over the
+        // LOWERED condition mints both spellings identically, and
+        // `stripCubeQualifier` keeps them a traversal instead of a base column,
+        // so the cube AND the compiled SQL now match on either spelling.
+        const minted = stripCubeQualifier(key);
+        if (dimensions[minted] || measures[minted]) continue;
+        dimensions[minted] = { name: minted, label: minted, type: 'string', sql: minted };
       }
     }
 
     for (const td of query.timeDimensions || []) {
-      const key = stripPrefix(td.dimension);
+      const key = stripCubeQualifier(td.dimension);
       if (dimensions[key]) continue;
       dimensions[key] = {
         name: key, label: key, type: 'time', sql: key,

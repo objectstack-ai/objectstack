@@ -21,6 +21,10 @@ import {
   ConnectorTypeSchema,
   ConnectorStatusSchema,
 
+  // Action + its declared upstream effect (#4395)
+  ConnectorActionSchema,
+  ConnectorActionEffectSchema,
+
   // Error Mapping
   ErrorMappingConfigSchema,
   ErrorMappingRuleSchema,
@@ -170,18 +174,22 @@ describe('ConnectorFieldMappingSchema', () => {
     expect(() => ConnectorFieldMappingSchema.parse(mapping)).not.toThrow();
   });
   
-  it('should accept field with transformation', () => {
-    const mapping = {
+  // Was `should accept field with transformation`, asserting this exact literal
+  // parsed and came back as `type: 'javascript'`. Replaced rather than
+  // re-spelled: #5552 retired the key and the whole union behind it, so there is
+  // no other member to move the fixture to. Its `value.toUpperCase()` is also
+  // the string that got the bug filed — `ExpressionInputSchema` wrapped it as
+  // `dialect: 'cel'`, where that method does not exist.
+  it('[#5552] rejects a field transformation — the key and its union are retired', () => {
+    const result = ConnectorFieldMappingSchema.safeParse({
       source: 'name',
       target: 'full_name',
-      transform: {
-        type: 'javascript' as const,
-        expression: 'value.toUpperCase()',
-      },
-    };
-    
-    const parsed = ConnectorFieldMappingSchema.parse(mapping);
-    expect(parsed.transform?.type).toBe('javascript');
+      transform: { type: 'javascript', expression: 'value.toUpperCase()' },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.path.join('.')).toBe('transform');
+    expect(result.error!.issues[0]!.message).toMatch(/removed in @objectstack\/spec 17\.0\.0/s);
   });
   
   it('should use default values', () => {
@@ -339,6 +347,51 @@ describe('RetryConfigSchema', () => {
     expect(() => RetryConfigSchema.parse({ maxAttempts: -1 })).toThrow();
     expect(() => RetryConfigSchema.parse({ maxAttempts: 11 })).toThrow();
     expect(() => RetryConfigSchema.parse({ maxAttempts: 5 })).not.toThrow();
+  });
+});
+
+// ============================================================================
+// Connector Action Effect (#4395)
+// ============================================================================
+
+describe('ConnectorActionSchema.effect (#4395)', () => {
+  it('declares exactly read | write — the two countable answers', () => {
+    expect(ConnectorActionEffectSchema.options).toEqual(['read', 'write']);
+  });
+
+  it('is optional, and absent stays absent (the uncountable default)', () => {
+    const parsed = ConnectorActionSchema.parse({ key: 'push', label: 'Push' });
+    expect(parsed.effect).toBeUndefined();
+    expect('effect' in parsed).toBe(false);
+  });
+
+  it('carries a declared effect through ConnectorSchema.parse, which is the ONLY producer', () => {
+    // The regression this pins: `ConnectorSchema` is a non-strict `z.object`,
+    // so before #4395 an authored `effect` was SILENTLY STRIPPED here. The
+    // engine stores this parsed def and both the `connector_action` executor
+    // and `GET /connectors` read the declaration back out of it — a descriptor
+    // field alone could never have been populated by anything.
+    const parsed = ConnectorSchema.parse({
+      name: 'crm',
+      label: 'CRM',
+      type: 'saas',
+      actions: [
+        { key: 'push_opportunity', label: 'Push Opportunity', effect: 'write' },
+        { key: 'lookup_account', label: 'Lookup Account', effect: 'read' },
+        { key: 'legacy', label: 'Legacy' },
+      ],
+    });
+    expect(parsed.actions?.map((a) => a.effect)).toEqual(['write', 'read', undefined]);
+  });
+
+  it('rejects a value outside the enum instead of coercing it', () => {
+    // `writes` is the `FlowFunctionEffectSchema` (#4396) spelling — the nearest
+    // wrong word an author already knows. It must fail loudly here rather than
+    // parse to something the executor then counts.
+    expect(ConnectorActionEffectSchema.safeParse('writes').success).toBe(false);
+    expect(ConnectorActionEffectSchema.safeParse('reads').success).toBe(false);
+    expect(ConnectorActionEffectSchema.safeParse('pure').success).toBe(false);
+    expect(() => ConnectorActionSchema.parse({ key: 'k', label: 'L', effect: 'write ' })).toThrow();
   });
 });
 
@@ -917,18 +970,17 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     const sharedEntry = await import('../shared/index');
     const integrationEntry = await import('./index');
 
-    // Four keys, `transform` a discriminated union, `source`/`target` required.
+    // Three live keys since #5552 retired `transform`: `source`/`target`
+    // required, `defaultValue` optional.
     expect(
       sharedEntry.FieldMappingSchema.parse({
         source: 'FirstName',
         target: 'first_name',
-        transform: { type: 'cast', targetType: 'string' },
         defaultValue: '',
       }),
     ).toEqual({
       source: 'FirstName',
       target: 'first_name',
-      transform: { type: 'cast', targetType: 'string' },
       defaultValue: '',
     });
 
@@ -939,36 +991,42 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     );
   });
 
-  // ── Difference 1: `transform` is the same key name with mutually
-  //    unparseable value types. The hardest evidence that these are two
-  //    concepts rather than three spellings of one.
-  it('`transform` means a discriminated union on two sides and a flat enum on the third', async () => {
+  // ── Difference 1: `transform` is the same key name meaning opposite things.
+  //    Until #5552 that read "a discriminated union on two sides and a flat
+  //    enum on the third", and the object/enum forms were mutually unparseable.
+  //    The retirement did not soften the difference, it sharpened it: on
+  //    shared/integration the key is now RETIRED — the union it named had no
+  //    executor on any of the five members — while on ./data it is the live,
+  //    enforced import pipeline. So the same word is now "gone, with a
+  //    prescription" versus "runs on every imported row", which is the loudest
+  //    the distinction has ever been, and the reason a snippet copied across
+  //    these domains can no longer half-work.
+  it('`transform` is retired on shared/integration and live on ./data', async () => {
     const dataEntry = await import('../data/index');
     const sharedEntry = await import('../shared/index');
     const integrationEntry = await import('./index');
 
     const unionForm = { type: 'cast' as const, targetType: 'string' as const };
 
-    // shared / integration: the object form parses…
-    expect(
-      sharedEntry.FieldMappingSchema.parse({ source: 'a', target: 'b', transform: unionForm })
-        .transform,
-    ).toEqual(unionForm);
-    expect(
-      integrationEntry.ConnectorFieldMappingSchema.parse({
-        source: 'a',
-        target: 'b',
-        transform: unionForm,
-      }).transform,
-    ).toEqual(unionForm);
-    // …and the enum form does NOT.
+    // shared / integration: the object form is refused BY NAME, with the #5552
+    // prescription — not stripped, and not a generic "unrecognized key".
+    for (const schema of [
+      sharedEntry.FieldMappingSchema,
+      integrationEntry.ConnectorFieldMappingSchema,
+    ]) {
+      const result = schema.safeParse({ source: 'a', target: 'b', transform: unionForm });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.some((i) => /#5552/.test(i.message))).toBe(true);
+    }
+    // The enum form does not get in either — retired is retired, whatever the
+    // value's shape.
     expect(
       sharedEntry.FieldMappingSchema.safeParse({ source: 'a', target: 'b', transform: 'join' })
         .success,
     ).toBe(false);
 
-    // data: exactly the other way round — a bare enum steering a flat `params`
-    // bag, defaulting to 'none'.
+    // data: untouched by #5552 — a bare enum steering a flat `params` bag,
+    // defaulting to 'none', and still rejecting the union form.
     expect(
       dataEntry.ImportFieldMappingSchema.parse({ source: 'a', target: 'b' }).transform,
     ).toBe('none');

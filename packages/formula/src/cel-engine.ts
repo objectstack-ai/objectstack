@@ -13,7 +13,8 @@
  *    third-party plugins can't ship runaway predicates.
  */
 
-import { Environment, serialize } from '@marcbachmann/cel-js';
+import { Environment, ParseError, serialize } from '@marcbachmann/cel-js';
+import type { ASTNode } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
 import { buildScope, registerNumericCoercions, registerStdLib } from './stdlib';
@@ -174,6 +175,78 @@ export function collectCelRootIdentifiers(
   } catch (err) {
     const classified = classifyError(err);
     return { ok: false, error: classified.ok === false ? classified.error.message : String(err) };
+  }
+}
+
+/**
+ * A parsed CEL AST node, re-exported so a consumer can name the type this
+ * package already hands it without importing `@marcbachmann/cel-js` itself.
+ *
+ * The alias is not cosmetic. {@link lowerCelAst} has always *taken* a cel-js
+ * `ASTNode` while the type stayed unexported, so every caller that wanted to
+ * hold an AST had to reach past this package to the parser — which is precisely
+ * how a second, differently-configured parse entry gets built (#4812). Prefixed
+ * `Cel` to match the package's other CEL-domain public names
+ * (`CelFilterCompileResult`, `collectCelRootIdentifiers`, `isPushdownableCel`);
+ * bare `ASTNode` would be ambiguous in a package that also owns the cron and
+ * template dialects.
+ */
+export type CelAstNode = ASTNode;
+
+/**
+ * The canonical parse env. Identical in configuration to the one
+ * {@link celEngine.compile} builds per call — same `unlistedVariablesAreDyn`,
+ * same `enableOptionalTypes`, same {@link DEFAULT_LIMITS}, same stdlib — and
+ * built once because `parse` neither mutates the environment nor depends on the
+ * `now()` it was given (the same reasoning `recordScopeEnv` already relies on).
+ * The parity suite pins the equivalence against a freshly-built env, so this
+ * memo cannot silently drift away from `compile`.
+ */
+let canonicalParseEnv: Environment | undefined;
+
+/**
+ * Parse a CEL source to its AST through the **canonical** front end — the one
+ * answer in this repo to "what parses" (#4812).
+ *
+ * Every other entry point in this package (`compile`, `evaluate`,
+ * {@link collectCelRootIdentifiers}) reaches the parser through the same three
+ * things, and so does this one:
+ *
+ *  1. {@link rewriteNullableTernary} — the #3306 `cond ? value : null` rewrite,
+ *     so the AST a consumer analyses is the AST the runtime will execute, not
+ *     the shape the author happened to type;
+ *  2. {@link DEFAULT_LIMITS} — the platform's bounds. A source over
+ *     `maxAstNodes` / `maxDepth` / `maxListElements` does **not** parse here,
+ *     because it does not parse anywhere else on the platform either;
+ *  3. the registered stdlib and `unlistedVariablesAreDyn: true` env.
+ *
+ * A consumer that built its own `new Environment(...)` instead got a different
+ * answer to (2) in particular — it would happily parse, and then reason about,
+ * a predicate `compile()` rejects outright. That is not a hypothetical: it is
+ * what `@objectstack/lint`'s null-guard pass did until #4812.
+ *
+ * Returns `null` — never throws — when the source is empty or does not parse,
+ * so a caller whose job is *not* to adjudicate syntax can skip it in one line
+ * and leave the verdict to the gate that owns it (`validateExpression`, which
+ * reports both the syntax fault and the bounds fault with a message written for
+ * self-correction).
+ *
+ * This is `parse` only, deliberately **not** `parse + check`: `compile()` is the
+ * entry that also type-checks. A caller that wants the AST of an expression
+ * which parses but does not type-check (a great many predicates over `dyn`
+ * operands) must not be denied it, and a caller that wants the type verdict
+ * should ask `compile()` for it. The parity suite pins both halves of that
+ * asymmetry so neither side drifts.
+ */
+export function parseCelToAst(source: string): CelAstNode | null {
+  if (typeof source !== 'string' || !source.trim()) return null;
+  try {
+    // A wall-clock-free `now()` — the stdlib is registered for parse-time shape
+    // only and is never called on this path.
+    canonicalParseEnv ??= buildEnv(() => new Date(0));
+    return canonicalParseEnv.parse(rewriteNullableTernary(source)).ast;
+  } catch {
+    return null;
   }
 }
 
@@ -727,12 +800,63 @@ function hydrateOverloadStrings(value: unknown): unknown {
   return value;
 }
 
+/**
+ * cel-js's code for a bounds violation. Raised **only** from the parser
+ * (`Parser#limitExceeded`, one call site per limit key), so it always arrives as
+ * a {@link ParseError} and must be read before the ParseError → `parse` rule
+ * below — otherwise every `maxAstNodes` / `maxDepth` overrun would be reported
+ * as a syntax fault.
+ */
+const CEL_LIMIT_EXCEEDED_CODE = 'limit_exceeded';
+
+/**
+ * Grade a cel-js fault off the error **class** the parser threw, not off its
+ * prose. Returns `undefined` for anything that is not a cel-js error, so the
+ * caller can fall back to the legacy keyword table.
+ *
+ * Why the class and not the message (#6133): `classifyError` used to decide
+ * between `parse` / `type` / `runtime` by regex-matching the error text, and
+ * cel-js has ~19 distinct parse-time wordings of which only three contain
+ * `parse` / `unexpected` / `syntax`. Everything else — `Expected RPAREN, got
+ * EOF` (unbalanced parens), `Expected RBRACKET, got EOF`, `Unterminated
+ * string`, `Reserved identifier: package`, the seven escape-sequence faults —
+ * fell through to the default `runtime`, and `kind` is not an internal field:
+ * it is interpolated verbatim into the author-facing rejection text
+ * (`objectql`'s `rule-validator` / `cel-fault`) and into the REST `reason`.
+ * An author who forgot a closing paren was told their *data* was at fault.
+ *
+ * Topping the keyword list up cannot fix this, because cel-js embeds the
+ * **author's own source line** in `message` (see `formatErrorWithHighlight` in
+ * `lib/errors.js`), so the author controls the text being matched. Measured on
+ * cel-js 8.0.0: `((record.type_id)` — a plain unbalanced paren — classified as
+ * `type`, purely because the echoed source contains the substring "type".
+ * Classifying on prose is not a table with holes in it; it is the hole.
+ *
+ * Scope note, deliberate: only the ParseError arm is structural here. cel-js's
+ * `TypeChecker` picks its error class **by phase**, not by fault
+ * (`this.createError = isEvaluating ? evaluationError : typeError`), so the same
+ * `unknown_variable` fault is a `TypeError` at check time and an
+ * `EvaluationError` at evaluate time. Routing `EvaluationError` → `runtime`
+ * wholesale would therefore silently re-grade faults the keyword table gets
+ * right today (`Unknown variable: x` → `type`). Those arms stay on the keyword
+ * table until that mapping is measured per code — see #6133 for the audit.
+ */
+function classifyCelParseFault(err: unknown): 'parse' | 'bounds' | undefined {
+  if (!(err instanceof ParseError)) return undefined;
+  return err.code === CEL_LIMIT_EXCEEDED_CODE ? 'bounds' : 'parse';
+}
+
 function classifyError(err: unknown): EvalResult<never> {
   const message = err instanceof Error ? err.message : String(err);
-  let kind: 'parse' | 'type' | 'runtime' | 'bounds' = 'runtime';
-  if (/Exceeded max/i.test(message)) kind = 'bounds';
-  else if (/parse|unexpected|syntax/i.test(message)) kind = 'parse';
-  else if (/type|unknown variable|undeclared/i.test(message)) kind = 'type';
+  let kind: 'parse' | 'type' | 'runtime' | 'bounds' | undefined = classifyCelParseFault(err);
+  if (kind === undefined) {
+    // Legacy keyword table — the residual path for faults that carry no
+    // structured contract at all (our own stdlib, a native JS throw).
+    kind = 'runtime';
+    if (/Exceeded max/i.test(message)) kind = 'bounds';
+    else if (/parse|unexpected|syntax/i.test(message)) kind = 'parse';
+    else if (/type|unknown variable|undeclared/i.test(message)) kind = 'type';
+  }
   return { ok: false, error: { kind, message } };
 }
 

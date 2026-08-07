@@ -789,11 +789,21 @@ export const ChartAggregateSchema = lazySchema(() =>
 );
 
 export type ChartConfig = z.infer<typeof ChartConfigSchema>;
+/** Post-parse shape of {@link ChartConfig} — defaults applied, transforms run (ADR-0122). */
+export type ChartConfigParsed = z.infer<typeof ChartConfigSchema>;
 export type ChartAggregate = z.infer<typeof ChartAggregateSchema>;
 export type ChartAggregateFunction = z.infer<typeof ChartAggregateFunctionSchema>;
 export type ChartGroupBy = z.infer<typeof ChartGroupBySchema>;
 export type ChartAxis = z.infer<typeof ChartAxisSchema>;
+/** Post-parse shape of {@link ChartAxis} — defaults applied, transforms run (ADR-0122). */
+export type ChartAxisParsed = z.infer<typeof ChartAxisSchema>;
 export type ChartSeries = z.infer<typeof ChartSeriesSchema>;
+/** Post-parse shape of {@link ChartSeries} — defaults applied, transforms run (ADR-0122). */
+export type ChartSeriesParsed = z.infer<typeof ChartSeriesSchema>;
 export type ChartAnnotation = z.infer<typeof ChartAnnotationSchema>;
+/** Post-parse shape of {@link ChartAnnotation} — defaults applied, transforms run (ADR-0122). */
+export type ChartAnnotationParsed = z.infer<typeof ChartAnnotationSchema>;
 export type ChartInteraction = z.infer<typeof ChartInteractionSchema>;
+/** Post-parse shape of {@link ChartInteraction} — defaults applied, transforms run (ADR-0122). */
+export type ChartInteractionParsed = z.infer<typeof ChartInteractionSchema>;
 export type ChartDrillDown = z.infer<typeof ChartDrillDownSchema>;

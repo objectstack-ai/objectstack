@@ -33,6 +33,8 @@ import {
   IDataDriver,
   IDataEngine,
   type IObjectQLEngine,
+  type EngineTransactionInfo,
+  type EngineTransactionOptions,
   Logger,
   createLogger,
   withTransientRetry,
@@ -41,6 +43,12 @@ import {
   resolveFilterTokens,
 } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
+import { CrossDatasourceTransactionWriteError, TransactionUnsupportedError } from './transaction-errors.js';
+import {
+  aggregateSummaryValue,
+  summaryEmptySetValue,
+  type SummaryDescriptor,
+} from './summary-aggregate.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import {
   DriverConnectError,
@@ -52,6 +60,15 @@ import {
   type DatasourceUnavailableKind,
 } from './driver-connect-errors.js';
 import { resolveAllowDriverConnectFailure } from '@objectstack/types';
+// [#5979] The ONE shared "which read failure is benign?" predicate (#4825
+// family). Imported from the leaf `/errors` subpath — which exists precisely
+// so a cross-package consumer gets the 40-line predicate without the manager,
+// the loaders or the YAML/filesystem machinery behind `@objectstack/metadata`'s
+// root entry. Asking the shared predicate rather than hand-rolling a
+// `code === '42P01'` test here is load-bearing, not stylistic: a second
+// vocabulary of "benign driver error" is the exact debt that module exists to
+// retire, and `check:durability-log-level` exempts only this declared name.
+import { isMissingTableError } from '@objectstack/metadata/errors';
 
 /**
  * Per-row outcome of {@link ObjectQL.insertMany} (framework#3172). One entry
@@ -787,22 +804,12 @@ function resolveMetadataItemName(key: string, item: any): string | undefined {
  * - CoreServiceName.data (CRUD)
  * - CoreServiceName.metadata (Schema Registry)
  */
-/** A roll-up `summary` field on a parent object that aggregates a child. */
-interface SummaryDescriptor {
-  parentObject: string;
-  summaryField: string;
-  /** FK field on the child pointing back to the parent. */
-  fkField: string;
-  fn: 'count' | 'sum' | 'min' | 'max' | 'avg';
-  /** Child field aggregated (unused for count). */
-  sourceField: string;
-  /**
-   * Optional predicate (a query `where` FilterCondition) restricting which child
-   * rows are aggregated. ANDed with the parent-FK match when the aggregate runs.
-   * Undefined ⇒ aggregate every child of the parent.
-   */
-  filter?: Record<string, unknown>;
-}
+// [#6063] `SummaryDescriptor`, `summaryEmptySetValue` and the single-descriptor
+// aggregate moved to `./summary-aggregate.js` — unchanged, and still the one
+// place each is written down. The move exists so the one-off backfill of
+// pre-#6013 `NULL` rows computes its value through the SAME code this engine
+// does, instead of a second implementation that agrees only until one of them
+// is edited.
 
 // `implements IObjectQLEngine` is the verification step of #4251 B3: every
 // member the `objectql` slot's contract declares is checked against this class
@@ -908,10 +915,16 @@ function eventMatchedCount(value: unknown): number | undefined {
  * What the engine knows about the transaction it opened, beyond the handle
  * itself (#4619, ADR-0119 D1 follow-up).
  *
- * Purely an OBSERVABILITY record: nothing here changes which driver a write is
- * routed to, whether a transaction is opened, or what is committed. It exists
- * so the write path can tell a caller that a write it believes is inside the
- * transaction is not — the one thing today's engine cannot say.
+ * It began as a pure OBSERVABILITY record — #4619 could say a write was outside
+ * the transaction but deliberately did not act on it, because acting changes
+ * ADR-0119 D1's declared contract and that was a decision for the maintainer,
+ * not for the PR that found the defect. Since the 2026-08-06 ruling on #5351
+ * this record is LOAD-BEARING: `enforceTransactionOrigin` refuses a
+ * cross-driver business write on it, and `transactionCoversDriverFor` uses it
+ * to keep a transaction handle from ever reaching a driver that does not own
+ * it. Routing itself is still untouched — a write goes exactly where `getDriver`
+ * sends it; what changed is whether it goes there carrying someone else's
+ * connection.
  */
 interface TransactionScope {
   /**
@@ -924,9 +937,11 @@ interface TransactionScope {
   /** The datasource name that driver is registered under — for the message. */
   readonly datasource: string;
   /**
-   * Datasources already reported for THIS transaction. AGENTS.md's
-   * "say it once, at the first degradation, not once per failed write" — a
-   * 500-row batch routed elsewhere is one split, not 500.
+   * Datasources already noted for THIS transaction. AGENTS.md's "say it once,
+   * at the first degradation, not once per failed write" — a 500-row audit
+   * batch carved out of this transaction is one note, not 500. Only the
+   * carve-out path consumes the budget; a refused business write throws, and a
+   * throw is never deduplicated.
    */
   readonly reportedOutOfScope: Set<string>;
 }
@@ -948,7 +963,8 @@ export class ObjectQL implements IObjectQLEngine {
      * that is part of the declared contract (ADR-0119 D1) — so a write routed
      * elsewhere by `setDatasourceMapping` runs OUTSIDE it and cannot be rolled
      * back with it. Carrying the owner here is what lets the write path SAY so
-     * ({@link reportWriteOutsideTransaction}); it changes no routing.
+     * ({@link enforceTransactionOrigin}) — and, since #5351, to DECIDE what
+     * happens to it: a business write is refused, a system ledger is carved out.
      *
      * Absent on the sandbox runner's explicitly-threaded handles (the
      * `beginTransaction`/`commit`/`rollback` trio does not use this store at
@@ -1750,7 +1766,17 @@ export class ObjectQL implements IObjectQLEngine {
     const tx = execCtx?.transaction !== undefined
       ? execCtx.transaction
       : this.txStore.getStore()?.transaction;
-    const hasTx = tx !== undefined;
+    // [#5351] SAME-ORIGIN GATE. A transaction handle is a property of ONE
+    // driver's connection; handing it to a different driver does not put that
+    // driver's statement inside the transaction, it executes the statement on
+    // the WRONG CONNECTION — measured on knex/SQLite as `no such table` against
+    // a database that never held the object. The write path's
+    // `enforceTransactionOrigin` has already refused a business write by the
+    // time we get here (and let a system ledger through by decision), so this
+    // is the structural half: whatever survives to here, the handle only ever
+    // reaches the driver that owns it. It covers READS too, which have no gate
+    // of their own and were riding the same wrong connection.
+    const hasTx = tx !== undefined && this.transactionCoversDriverFor(object, tx);
     const hasTenant =
       execCtx?.tenantId !== undefined &&
       !isTenancyDisabled(this._registry.getObject(object));
@@ -1796,6 +1822,45 @@ export class ObjectQL implements IObjectQLEngine {
       opts.preserveAudit = true;
     }
     return opts;
+  }
+
+  /**
+   * Does the open transaction `tx` actually cover the driver `object` resolves
+   * to? — the same-origin question, asked by instance IDENTITY (#5351).
+   *
+   * Answers `true` in two cases: the resolved driver IS the transaction's
+   * owner, or the engine cannot tell who the owner is. The second case is the
+   * DECLARED LIMIT of this gate, not an oversight, and it is exactly one
+   * shape: a handle the engine never opened and cannot attribute.
+   *
+   * `TransactionScope` (#5724) records the owner for every transaction the
+   * engine opens, and `transaction()` also threads that same handle down as
+   * `execCtx.transaction`, so the dominant explicit-threading path is covered
+   * by identity-matching the handle back to the store entry. What is NOT
+   * covered:
+   *
+   * - `ScopedContext`'s discrete `beginTransaction`/`commit`/`rollback` trio,
+   *   which threads the handle across `setImmediate` boundaries where
+   *   AsyncLocalStorage does not survive, and so never populates txStore;
+   * - any handle an outside caller obtained elsewhere and passed in as
+   *   `execCtx.transaction`.
+   *
+   * For those the engine holds an opaque driver object with no back-reference
+   * to its driver, so there is no honest comparison to make. Guessing — say,
+   * assuming an unattributed handle belongs to the default driver — would
+   * refuse legitimate single-datasource work on one side and carve out writes
+   * that were genuinely covered on the other. So the gate declines to judge and
+   * the pre-#5351 behaviour stands on that path: recorded in the ADR-0067/0119
+   * revision, and closable only by making handle ownership discoverable on
+   * `IDataDriver` (filed separately).
+   */
+  private transactionCoversDriverFor(object: string, tx: unknown): boolean {
+    const store = this.txStore.getStore();
+    // The scope describes the handle in the store. An explicitly-threaded
+    // handle is covered by it only when it IS that handle.
+    const scope = store !== undefined && tx === store.transaction ? store.scope : undefined;
+    if (!scope) return true;
+    return this.getDriver(object) === scope.driver;
   }
 
   /**
@@ -2082,8 +2147,20 @@ export class ObjectQL implements IObjectQLEngine {
         if (digits) max = Math.max(max, parseInt(digits, 10) || 0);
       }
       return max;
-    } catch {
-      return 0;
+    } catch (error) {
+      // [#5979] Discriminate by error TYPE. Seeding from 0 is the truth for
+      // exactly ONE failure reason — the table has not been provisioned, so
+      // there are genuinely no rows and number 1 collides with nothing.
+      if (isMissingTableError(error)) return 0;
+      // Every other failure (connection drop, timeout, permission denial,
+      // query error) means the rows may well exist and simply were not seen.
+      // Answering 0 there restarts the sequence at 1 against a table already
+      // holding N rows and issues autonumbers that COLLIDE with existing ones
+      // — a value written wrong, which no retry and no restart repairs. So the
+      // read failure propagates and the caller allocates nothing: the write
+      // fails loudly instead of succeeding with a forged business identifier.
+      // This is the hazard the #4371 comment above the read already named.
+      throw error;
     }
   }
 
@@ -2209,8 +2286,17 @@ export class ObjectQL implements IObjectQLEngine {
         // Automation Protocol
         'flows', 'workflows', 'approvals', 'webhooks',
         'jobs',
-        // Security Protocol
-        'roles', 'permissions', 'profiles', 'sharingRules', 'policies',
+        // Security Protocol — `capabilities` is here for the same reason as
+        // `permissions` (#5870, #4967 Part 2): the ONLY seam that stamps
+        // ADR-0010 provenance is `registerItem` → `applyProtection`, so a
+        // collection missing from this list reaches no registry with a
+        // `_packageId`. `bootstrapDeclaredCapabilities` resolves the owning
+        // package as `cap._packageId ?? cap.packageId`; while `capabilities`
+        // sat outside this list the first half could never be satisfied and
+        // `readDeclared(ql, 'capability')` returned nothing, which made the
+        // author-side `packageId` — documented as the FALLBACK — mandatory,
+        // and its omission a silent, unenforced authorization declaration.
+        'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
         // AI Protocol
         'agents', 'tools', 'skills', 'ragPipelines',
         // API Protocol
@@ -2374,7 +2460,11 @@ export class ObjectQL implements IObjectQLEngine {
       const metadataArrayKeys = [
           'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets', 'themes',
           'flows', 'workflows', 'approvals', 'webhooks',
-          'roles', 'permissions', 'profiles', 'sharingRules', 'policies',
+          // `capabilities` per #5870 — same stamping seam, one level down: a
+          // nested plugin's declarations must carry the parent package's
+          // provenance too, or the same declared-≠-enforced hole reopens for
+          // packages that ship their capabilities from a nested plugin.
+          'roles', 'permissions', 'capabilities', 'profiles', 'sharingRules', 'policies',
           'agents', 'ragPipelines', 'apis',
           'hooks', 'mappings', 'analyticsCubes', 'connectors',
           'docs', 'books',
@@ -3275,6 +3365,50 @@ export class ObjectQL implements IObjectQLEngine {
   static readonly LIFECYCLE_DATASOURCE = 'telemetry';
 
   /**
+   * The lifecycle classes that make an object an APPEND-ONLY SYSTEM LEDGER —
+   * the audit trail, telemetry, and the event log (ADR-0057 §3.6).
+   *
+   * One constant, read by both places that must agree (#5351):
+   *
+   * 1. {@link getDriver} step 3 — which objects lifecycle-class separation
+   *    routes to the dedicated datasource;
+   * 2. {@link enforceTransactionOrigin} — which cross-datasource writes are
+   *    CARVED OUT of an ambient transaction instead of refused.
+   *
+   * Two hand-written copies of this tuple would drift by one class and produce
+   * the worst outcome available: an object routed away by rule 1 and refused by
+   * rule 2 loses exactly the compliance row this whole change exists to save.
+   *
+   * `transient` is deliberately absent, matching step 3: those objects stay on
+   * the primary, so they never reach the gate at all.
+   */
+  static readonly SYSTEM_LEDGER_LIFECYCLE_CLASSES: ReadonlySet<string> = new Set([
+    'audit',
+    'telemetry',
+    'event',
+  ]);
+
+  /**
+   * Is `objectName` an append-only system ledger? — the #5351 carve-out's
+   * discriminator, and deliberately a property of the object's DECLARATION
+   * (`lifecycle.class`) rather than of the deployment's routing.
+   *
+   * Why the declaration and not "was it routed by step 3": an audit ledger
+   * pinned to its own datasource by an explicit `datasource:` binding, or by a
+   * `datasourceMapping` rule, is the same append-only compliance ledger with
+   * the same reason to be carved out — the routing mechanism is an operator's
+   * choice, the class is the author's statement about what the data IS. Judging
+   * by the mechanism would make the carve-out depend on which of three
+   * equivalent configurations a deployment happened to use.
+   */
+  private isSystemLedgerObject(objectName: string): boolean {
+    const lifecycleClass = (
+      this._registry.getObject(objectName) as { lifecycle?: { class?: string } } | undefined
+    )?.lifecycle?.class;
+    return lifecycleClass !== undefined && ObjectQL.SYSTEM_LEDGER_LIFECYCLE_CLASSES.has(lifecycleClass);
+  }
+
+  /**
    * Helper to get the target driver
    *
    * Resolution priority (first match wins):
@@ -3362,7 +3496,8 @@ export class ObjectQL implements IObjectQLEngine {
     // the engine — splitting their storage would split their brain.
     const lifecycleClass = (object as { lifecycle?: { class?: string } } | undefined)?.lifecycle?.class;
     if (
-      (lifecycleClass === 'telemetry' || lifecycleClass === 'event' || lifecycleClass === 'audit') &&
+      lifecycleClass !== undefined &&
+      ObjectQL.SYSTEM_LEDGER_LIFECYCLE_CLASSES.has(lifecycleClass) &&
       this.drivers.has(ObjectQL.LIFECYCLE_DATASOURCE)
     ) {
       return this.drivers.get(ObjectQL.LIFECYCLE_DATASOURCE)!;
@@ -3901,10 +4036,20 @@ export class ObjectQL implements IObjectQLEngine {
    * order — the certificate is already in the ledger and the contradicting
    * value lands afterwards, which is reachable whenever the deployment is
    * still lenient at that moment (`OS_ALLOW_LAX_MEDIA_VALUES` /
-   * `OS_ALLOW_LAX_VALUE_SHAPES`, or a seed that finishes in the background
-   * after its budget). Without this the ledger would keep asserting a fact the
-   * store contradicts, and the NEXT boot would enforce it against exactly the
-   * data this one wrote.
+   * `OS_ALLOW_LAX_VALUE_SHAPES`) or whenever a writer runs after the
+   * attestation point at all — the `os dev` hot-reload seeder and a runtime
+   * marketplace install both seed on a store this boot created. Without this
+   * the ledger would keep asserting a fact the store contradicts, and the NEXT
+   * boot would enforce it against exactly the data this one wrote.
+   *
+   * The boot's own inline seed used to head that list, via the background
+   * continuation of a run that overran `OS_INLINE_SEED_BUDGET_MS` — the
+   * attestation's `kernel:ready` backstop fired mid-seed and the tail landed
+   * against the certificate it had just issued. #4795 closed that ordering at
+   * the source: the attestation now defers while the `seed-settlement` contract
+   * reports a source outstanding, so the inline seed can no longer contradict
+   * a certificate this boot issued. This stays the safety net rather than the
+   * first line of defence for it.
    *
    * Deliberately narrow:
    *
@@ -4143,6 +4288,15 @@ export class ObjectQL implements IObjectQLEngine {
    *  parent objects that aggregate it. Invalidated when packages register. */
   private summaryIndex: Map<string, SummaryDescriptor[]> | null = null;
 
+  /** The SAME descriptors, indexed the other way: parent object name → the
+   *  roll-up summary fields that object OWNS. Built in the same pass as
+   *  {@link summaryIndex} and invalidated with it. The child index answers
+   *  "whose summaries must I recompute after writing this row"; this one answers
+   *  "which of my own summary fields must be seeded when I create this row"
+   *  (#5749) — the question the child index structurally cannot answer, because
+   *  a parent that has never had a child appears in no child write. */
+  private summaryIndexByParent: Map<string, SummaryDescriptor[]> | null = null;
+
   /**
    * Retry options for roll-up summary recompute (framework#3147). Public so a
    * test can inject a no-op sleep for deterministic backoff; production uses
@@ -4153,12 +4307,20 @@ export class ObjectQL implements IObjectQLEngine {
   /** Invalidate the cached roll-up summary index (call when metadata changes). */
   private invalidateSummaryIndex(): void {
     this.summaryIndex = null;
+    this.summaryIndexByParent = null;
   }
 
-  /** Scan all registered objects for `summary` fields and index them by the
-   *  child object they aggregate, resolving the child→parent FK field. */
-  private buildSummaryIndex(): Map<string, SummaryDescriptor[]> {
+  /** Scan all registered objects for `summary` fields and index them BOTH ways
+   *  — by the child object they aggregate and by the parent object that owns
+   *  them — resolving the child→parent FK field. One scan, two views of the
+   *  identical descriptor objects, so the two indexes can never disagree about
+   *  which roll-ups exist. */
+  private buildSummaryIndex(): {
+    byChild: Map<string, SummaryDescriptor[]>;
+    byParent: Map<string, SummaryDescriptor[]>;
+  } {
     const index = new Map<string, SummaryDescriptor[]>();
+    const byParent = new Map<string, SummaryDescriptor[]>();
     let objects: any[] = [];
     try { objects = (this._registry as any).getAllObjects?.() ?? []; } catch { objects = []; }
     for (const parent of objects) {
@@ -4191,18 +4353,34 @@ export class ObjectQL implements IObjectQLEngine {
         const filter = so.filter && typeof so.filter === 'object' && !Array.isArray(so.filter)
           ? so.filter as Record<string, unknown>
           : undefined;
+        const descriptor: SummaryDescriptor = {
+          parentObject: parent.name, summaryField, childObject, fkField, fn, sourceField: so.field, filter,
+        };
         const list = index.get(childObject) ?? [];
-        list.push({ parentObject: parent.name, summaryField, fkField, fn, sourceField: so.field, filter });
+        list.push(descriptor);
         index.set(childObject, list);
+        // Same descriptor, parent-side view. Only descriptors that made it this
+        // far are indexed either way, so "seeded at insert" and "maintained by
+        // recompute" are the same set by construction — a roll-up whose
+        // relationship could not be resolved (the `continue` above) is left
+        // untouched on both paths rather than seeded with a 0 nothing updates.
+        const owned = byParent.get(parent.name) ?? [];
+        owned.push(descriptor);
+        byParent.set(parent.name, owned);
       }
     }
-    return index;
+    return { byChild: index, byParent };
   }
 
   /** `registry.objectRevision` the cached {@link summaryIndex} was built at. */
   private summaryIndexRevision = -1;
 
-  private getSummaryDescriptors(childObject: string): SummaryDescriptor[] {
+  /**
+   * Ensure both roll-up indexes are present and current. Split out of
+   * {@link getSummaryDescriptors} so the parent-side view (#5749) shares the
+   * exact same staleness rule instead of re-deriving one.
+   */
+  private ensureSummaryIndexes(): void {
     // Rebuild whenever the REGISTRY's object set has moved since the index was
     // built — not only when someone remembered to call
     // `invalidateSummaryIndex`. That single site (`registerApp`) is bypassed by
@@ -4215,11 +4393,73 @@ export class ObjectQL implements IObjectQLEngine {
     // "已完成任务数" shipped empty over correct metadata (cloud#970).
     const revision = (this._registry as unknown as { objectRevision?: number })?.objectRevision;
     const stale = typeof revision === 'number' && revision !== this.summaryIndexRevision;
-    if (!this.summaryIndex || stale) {
-      this.summaryIndex = this.buildSummaryIndex();
+    if (!this.summaryIndex || !this.summaryIndexByParent || stale) {
+      const built = this.buildSummaryIndex();
+      this.summaryIndex = built.byChild;
+      this.summaryIndexByParent = built.byParent;
       if (typeof revision === 'number') this.summaryIndexRevision = revision;
     }
-    return this.summaryIndex.get(childObject) ?? [];
+  }
+
+  /** Roll-up descriptors for summaries that aggregate `childObject` — i.e. the
+   *  ones a write to `childObject` must recompute. Semantics unchanged. */
+  private getSummaryDescriptors(childObject: string): SummaryDescriptor[] {
+    this.ensureSummaryIndexes();
+    return this.summaryIndex!.get(childObject) ?? [];
+  }
+
+  /** Roll-up descriptors for the summary fields `parentObject` OWNS (#5749) —
+   *  i.e. the ones a NEW row of `parentObject` must have seeded.
+   *
+   *  Public since #6063: the one-off backfill of pre-#6013 `NULL` rows
+   *  (`os migrate summary-nulls`) iterates parents, and reading the engine's
+   *  OWN index is what makes it see exactly the roll-ups the engine maintains —
+   *  same FK resolution, same filter, same staleness rule. Re-deriving them
+   *  would be a second index that disagrees the first time either moves. */
+  getOwnedSummaryDescriptors(parentObject: string): SummaryDescriptor[] {
+    this.ensureSummaryIndexes();
+    return this.summaryIndexByParent!.get(parentObject) ?? [];
+  }
+
+  /**
+   * Seed the roll-up `summary` fields a freshly-created row owns (#5749).
+   *
+   * `recomputeSummaries` only ever visits parents named by a child write, so a
+   * parent that has NEVER had a child is never visited and its summary column
+   * keeps whatever insert put there — `null`. Delete the last child and the
+   * parent DOES get visited (via `previous`) and lands on 0. Same logical state,
+   * two different values: `filter ["task_count","=",0]` silently skipped every
+   * parent that never had a child, and so did sorting, GROUP BY and any formula
+   * reading the field (null propagation).
+   *
+   * The fix is at the producer: write the empty-collection value at create time,
+   * so `count`/`sum` start at 0 and only ever move to another number.
+   * `min`/`max`/`avg` have no empty-set value and deliberately stay `null` —
+   * {@link summaryEmptySetValue} is the single list both this and the recompute
+   * fallback read.
+   *
+   * Author-supplied values are never overwritten. The `!= null` test matches
+   * {@link applyFieldDefaults} exactly (#2706): on INSERT an explicit `null` is
+   * "no value supplied", any real value — including a deliberate 0 or a seeded
+   * count — is respected. Runs before the `beforeInsert` hooks for the same
+   * reason defaults do, so a hook still has the final say.
+   *
+   * Existing rows are untouched: this is create-time only, so parents already
+   * stored with `null` stay `null` until a child write recomputes them.
+   */
+  private initializeSummaryFields(object: string, record: any): any {
+    const descriptors = this.getOwnedSummaryDescriptors(object);
+    if (descriptors.length === 0) return record;
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return record;
+    let out: Record<string, unknown> = record;
+    for (const desc of descriptors) {
+      const seed = summaryEmptySetValue(desc.fn);
+      if (seed == null) continue; // min/max/avg — undefined on an empty set
+      if (out[desc.summaryField] != null) continue; // author supplied a value
+      if (out === record) out = { ...record };
+      out[desc.summaryField] = seed;
+    }
+    return out;
   }
 
   /**
@@ -4250,21 +4490,12 @@ export class ObjectQL implements IObjectQLEngine {
           // aggregate/update) with backoff — a network blip here used to leave
           // the parent summary silently stale (framework#3147).
           await withTransientRetry(async () => {
-            // AND the parent-FK match with the optional per-summary filter so
-            // only matching child rows are aggregated (e.g. received receipts).
-            const fkMatch = { [desc.fkField]: parentId };
-            const where = desc.filter ? { $and: [fkMatch, desc.filter] } : fkMatch;
-            const rows = await this.aggregate(childObject, {
-              where,
-              aggregations: [{
-                function: desc.fn,
-                ...(desc.fn === 'count' ? {} : { field: desc.sourceField }),
-                alias: 'value',
-              }],
-              context: execCtx,
-            } as any);
-            let value = rows?.[0]?.value;
-            if (value == null) value = (desc.fn === 'count' || desc.fn === 'sum') ? 0 : null;
+            // The aggregate — parent-FK match ANDed with the optional
+            // per-summary filter, empty-set fallback included — is
+            // `aggregateSummaryValue` (#6063). Behaviour unchanged; it simply
+            // lives where the insert-time seed and the one-off NULL backfill
+            // can read the identical computation instead of copying it.
+            const value = await aggregateSummaryValue(this, desc, parentId, execCtx);
             await this.update(desc.parentObject, { id: parentId, [desc.summaryField]: value }, { context: execCtx } as any);
           }, this.summaryRetryOptions);
         } catch (err) {
@@ -5005,8 +5236,10 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
     const driver = this.getDriver(object);
-    // #4619 — diagnostic only, changes nothing about where this write goes.
-    this.reportWriteOutsideTransaction(object, driver, 'insert');
+    // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
+    // carve an append-only system ledger out of the transaction. Before any
+    // hook, default or validation runs, so a refusal costs nothing.
+    this.enforceTransactionOrigin(object, driver, 'insert');
 
     const opCtx: OperationContext = {
       object,
@@ -5024,13 +5257,28 @@ export class ObjectQL implements IObjectQLEngine {
       // (#2703). The hook still has final say — it runs after and may override
       // any defaulted field. `applyFieldDefaults` returns a fresh copy and only
       // fills fields left `undefined`, so client-supplied values are untouched.
+      //
+      // [#5749] Roll-up `summary` fields this object OWNS are seeded in the same
+      // pass, right after the declared defaults: `count`/`sum` over the empty
+      // child collection is 0, and a brand-new parent HAS an empty child
+      // collection. Without it the row stored `null` and stayed there until some
+      // child write happened to name it — so "never had a child" (null) and
+      // "had one, deleted it" (0) read differently and `= 0` filters dropped
+      // rows. Same placement rules as the defaults above: caller-supplied values
+      // untouched, hooks run after and may override.
       const nowSnap = new Date();
       const isBatch = Array.isArray(opCtx.data);
       const defaultedData = isBatch
         ? (opCtx.data as any[]).map((row) =>
-            this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap),
+            this.initializeSummaryFields(
+              object,
+              this.applyFieldDefaults(object, row as Record<string, unknown>, opCtx.context, nowSnap),
+            ),
           )
-        : this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap);
+        : this.initializeSummaryFields(
+            object,
+            this.applyFieldDefaults(object, opCtx.data as Record<string, unknown>, opCtx.context, nowSnap),
+          );
 
       // Batch inserts trigger beforeInsert/afterInsert PER ROW, each with the
       // exact single-record context shape (`input.data` = one row, `result` =
@@ -5354,8 +5602,10 @@ export class ObjectQL implements IObjectQLEngine {
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
      const driver = this.getDriver(object);
-     // #4619 — diagnostic only, changes nothing about where this write goes.
-     this.reportWriteOutsideTransaction(object, driver, 'update');
+     // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
+     // carve an append-only system ledger out of the transaction. Before any
+     // hook, default or validation runs, so a refusal costs nothing.
+     this.enforceTransactionOrigin(object, driver, 'update');
 
      // Fold the `filter` alias into `where` FIRST (#4346): everything below —
      // token resolution, the by-id fast path, the #2982 AST seeding — reads
@@ -6007,8 +6257,10 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
     const driver = this.getDriver(object);
-    // #4619 — diagnostic only, changes nothing about where this write goes.
-    this.reportWriteOutsideTransaction(object, driver, 'delete');
+    // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
+    // carve an append-only system ledger out of the transaction. Before any
+    // hook, default or validation runs, so a refusal costs nothing.
+    this.enforceTransactionOrigin(object, driver, 'delete');
 
     // Fold the `filter` alias into `where` first — same reasoning as update()
     // above (#4346): unfolded, a `multi: true` delete with `{ filter }` had no
@@ -6495,24 +6747,39 @@ export class ObjectQL implements IObjectQLEngine {
    *   the API safe to call on drivers without ACID support (e.g. the
    *   in-memory driver in tests). It is DECLARED behaviour (ADR-0119 D1), not
    *   a bug to be discovered — but since v17 it is no longer *silent*: the
-   *   degrade warns once per driver (#4619, {@link warnTransactionUnsupported}).
+   *   degrade warns once per driver (#4619, {@link warnTransactionUnsupported}),
+   *   and a caller who cannot live with it says so with `opts.require: true`,
+   *   which THROWS {@link TransactionUnsupportedError} instead (#5696 point 1).
    * - On callback success the transaction is committed; on any thrown error
    *   it is rolled back and the original error is re-thrown.
-   * - The transaction covers the DEFAULT datasource only — also declared
-   *   (ADR-0119 D1). A write that `setDatasourceMapping` routes elsewhere runs
-   *   OUTSIDE it and survives the rollback; that split is now reported at
-   *   `error` from the write path (#4619,
-   *   {@link reportWriteOutsideTransaction}). Reporting it does not fix it:
-   *   refusing, or committing across drivers, would change the declared
-   *   contract and is tracked by #4619's spec half.
+   * - The transaction covers ONE driver's connection — the default one — as
+   *   ADR-0119 D1 declared and this engine still provides (no two-phase
+   *   commit). What a write routed elsewhere gets is decided by
+   *   {@link enforceTransactionOrigin} (#5351 / #5696, 2026-08-06 ruling): a
+   *   BUSINESS write is refused with
+   *   {@link CrossDatasourceTransactionWriteError}; an append-only SYSTEM
+   *   LEDGER (`lifecycle.class` audit / telemetry / event) is carved out and
+   *   executed OUTSIDE the transaction, so it survives a rollback — the orphan
+   *   row is the deliberate direction of error for a compliance ledger. Either
+   *   way the other driver never receives this transaction's handle, which is
+   *   what the pre-v17 engine did and what put statements on the wrong
+   *   connection entirely.
+   * - The callback's SECOND argument says whether this call owns the
+   *   transaction (#5696 point 3): `owned: true` when this call opened it,
+   *   `false` when it JOINED an outer one (ADR-0067 D2) — and `false` on the
+   *   degrade path too, where there is no transaction to own. A callback whose
+   *   own guarantees are phrased as "this all rolls back together" only holds
+   *   that promise when it owns the transaction; before this signal it had no
+   *   way to tell. One-argument callbacks are unaffected.
    *
    * Use case: multi-step operations that must be atomic (e.g. CRM
    * `convertLead`, which creates an account + contact + opportunity + flips
    * the lead in a single unit of work).
    */
   async transaction<T>(
-    callback: (trxCtx: any) => Promise<T>,
+    callback: (trxCtx: any, info: EngineTransactionInfo) => Promise<T>,
     baseContext?: any,
+    opts?: EngineTransactionOptions,
   ): Promise<T> {
     // ADR-0067 D2 — JOIN an already-open ambient transaction instead of
     // opening a nested driver transaction. A nested begin would acquire a
@@ -6524,15 +6791,29 @@ export class ObjectQL implements IObjectQLEngine {
     // sys-metadata repository's `withTxn`, hook-driven writes, …).
     const ambient = this.txStore.getStore();
     if (ambient?.transaction) {
-      return callback({ ...(baseContext ?? {}), transaction: ambient.transaction });
+      // JOINED, not owned: some outer caller decides commit vs rollback (#5696).
+      return callback(
+        { ...(baseContext ?? {}), transaction: ambient.transaction },
+        { owned: false },
+      );
     }
     const driver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
     const drv = driver as any;
     if (!drv?.beginTransaction) {
+      const datasource = this.defaultDriver ?? drv?.name;
+      if (opts?.require === true) {
+        // Fail CLOSED (#5696 point 1): the caller declared it cannot tolerate
+        // running without a rollback, so refuse BEFORE the callback writes
+        // anything rather than degrade behind a warning it may never read.
+        // Generalizes `batchData`'s atomic gate (ADR-0119 D4).
+        throw new TransactionUnsupportedError(datasource ?? '<no default datasource>');
+      }
       // Declared degrade (ADR-0119 D1) — behaviour unchanged, but no longer
       // mute: the caller asked for atomicity and is not getting it (#4619).
-      this.warnTransactionUnsupported(this.defaultDriver ?? drv?.name);
-      return callback(baseContext);
+      this.warnTransactionUnsupported(datasource);
+      // `owned: false` — honest: there is no transaction here to own, and no
+      // rollback the callback may promise on the strength of it.
+      return callback(baseContext, { owned: false });
     }
     const trx = await drv.beginTransaction();
     const trxCtx = { ...(baseContext ?? {}), transaction: trx };
@@ -6541,7 +6822,7 @@ export class ObjectQL implements IObjectQLEngine {
       // queries during writes reuse this transaction's connection (ADR-0034).
       const result = await this.txStore.run(
         { transaction: trx, scope: this.newTransactionScope(driver!) },
-        () => callback(trxCtx),
+        () => callback(trxCtx, { owned: true }),
       );
       if (drv.commit) await drv.commit(trx);
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
@@ -6623,51 +6904,76 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * A write inside an open `transaction()` was routed to a driver that
-   * transaction does not cover (#4619).
+   * A write inside an open `transaction()` resolved to a driver that
+   * transaction does not cover — decide what happens to it (#5351, #5696).
    *
-   * `transaction()` opens on the DEFAULT datasource only — declared behaviour
-   * (ADR-0119 D1) — so an object that `setDatasourceMapping` (or an explicit
-   * `datasource:` binding, or lifecycle-class separation) routes elsewhere is
-   * written on another connection entirely. It commits immediately, the
-   * transaction's rollback cannot reach it, and today NOTHING says so: a failed
-   * "atomic" multi-datasource write reverts one store, keeps the other, and
-   * returns a clean rejection either way.
+   * Called at the TOP of `insert`/`update`/`delete`, before hooks, validation
+   * or defaults run: a refusal here has cost the caller nothing.
    *
-   * `error`, per AGENTS.md's judgment question — after the degradation the
-   * system looks entirely normal from the outside while a write it claimed was
-   * part of an atomic unit has landed on its own. This is the durability class,
-   * not the functional one.
+   * This seam replaced `reportWriteOutsideTransaction` (#4619 / PR #5724),
+   * which reported the split at `error` and let the write proceed with the
+   * owner's handle. Reporting was the right first move — it made the defect
+   * audible without pre-empting a decision that changes ADR-0119 D1's declared
+   * contract for every multi-datasource deployment. The 2026-08-06 maintainer
+   * ruling made that decision, and it is TWO answers, not one, because the two
+   * kinds of write fail in opposite directions:
    *
-   * Diagnostic ONLY: the write still goes exactly where routing sent it.
-   * Refusing the cross-driver write would change the declared contract and
-   * belongs to #4619's spec half.
+   * - **Business writes are REFUSED** ({@link CrossDatasourceTransactionWriteError},
+   *   #5696 point 2). The caller opened a transaction and asked for one unit of
+   *   work; there is no way to give them one across two drivers (no two-phase
+   *   commit on `IDataDriver`, deliberately out of scope). Silently committing
+   *   part of it — which is what the pre-v17 engine did, on the wrong
+   *   connection at that — is the outcome a caller can neither detect nor undo.
+   *   Refusing hands them the choice: one datasource per transaction, or
+   *   per-datasource units they reconcile themselves.
+   * - **Append-only system ledgers are CARVED OUT** (#5351): audit / telemetry
+   *   / event rows execute OUTSIDE the transaction, on their own connection,
+   *   with no foreign handle. They therefore survive a rollback of the business
+   *   transaction — an "orphan row" describing a write that was undone. For an
+   *   append-only compliance ledger that is the correct direction of error:
+   *   a spurious row is reconcilable, a MISSING row for a write that did
+   *   commit is an unrecoverable compliance hole, and the missing row is what
+   *   shipped before this change. It is also what lets a plugin author write an
+   *   ordinary `afterInsert` audit hook with no knowledge that datasource
+   *   routing exists — refusing here would be swallowed by that hook's
+   *   try/catch and lose the row exactly as before.
+   *
+   * No `error` log survives on either path. The refusal IS the report, louder
+   * than any line; and the carve-out is now DECLARED behaviour that fires on
+   * every audited write of every transaction in a lifecycle-split deployment —
+   * logging it at `error`, or even `warn`, would train readers to skim the
+   * levels that carry real durability failures, which AGENTS.md names as the
+   * mirror-image mistake. It is recorded at `debug`, once per transaction per
+   * datasource, for the operator who is asking why an audit row outlived a
+   * rolled-back write; the durable answer lives in ADR-0067/ADR-0119.
    */
-  private reportWriteOutsideTransaction(
+  private enforceTransactionOrigin(
     objectName: string,
     driver: IDataDriver,
     operation: 'insert' | 'update' | 'delete',
   ): void {
     const scope = this.txStore.getStore()?.scope;
     // No engine-owned transaction in scope (or a handle threaded explicitly by
-    // the sandbox trio, which this store never sees) — nothing to be outside of.
+    // the sandbox trio, which this store never sees) — nothing to be outside
+    // of. See `transactionCoversDriverFor` for why that limit is declared.
     if (!scope) return;
     // Identity, not name: this is about riding the same connection.
     if (driver === scope.driver) return;
     const target = this.datasourceNameOf(driver);
+
+    if (!this.isSystemLedgerObject(objectName)) {
+      throw new CrossDatasourceTransactionWriteError(objectName, operation, target, scope.datasource);
+    }
+
     if (scope.reportedOutOfScope.has(target)) return;
     scope.reportedOutOfScope.add(target);
-    this.logger.error(
-      `${operation} of '${objectName}' inside transaction() is routed to datasource '${target}', but the ` +
-        `transaction was opened on the default datasource '${scope.datasource}' and covers only that one — ` +
-        'so this write is running OUTSIDE the transaction. It commits on its own the moment it executes, and ' +
-        "rolling the transaction back will NOT undo it: a failed \"atomic\" unit of work reverts " +
-        `'${scope.datasource}' while these rows stay behind in '${target}', and the caller is told only that ` +
-        'the whole thing failed. Keep every object written inside one transaction() on the default ' +
-        'datasource (move the object, or drop the datasourceMapping rule that routes it away), or split the ' +
-        'work into per-datasource units and have the caller reconcile them explicitly — cross-driver ' +
-        'atomicity is not something this engine provides. Reported once per transaction per datasource.',
-      undefined,
+    this.logger.debug(
+      `${operation} of '${objectName}' inside transaction() is routed to datasource '${target}' while the ` +
+        `transaction is open on '${scope.datasource}' — executing it OUTSIDE the transaction, on its own ` +
+        'connection (ADR-0057 §3.6 system ledger, carved out by #5351). It commits independently and will ' +
+        'SURVIVE a rollback of this transaction: an audit/telemetry/event row may describe a write that was ' +
+        'undone. That is the decided direction of error for an append-only ledger — an extra reconcilable ' +
+        'row beats a missing row for a write that did commit. Said once per transaction per datasource.',
       { object: objectName, operation, datasource: target, transactionDatasource: scope.datasource },
     );
   }
@@ -7134,8 +7440,16 @@ export class ScopedContext {
    * caveats report through the SAME engine-side helpers the engine's own
    * `transaction()` uses, so the sandbox surface is no quieter than the direct
    * one and "say it once" holds across both.
+   *
+   * `opts.require` and the callback's `owned` argument (#5696) are honoured
+   * here for the same reason: a second implementation of one primitive must not
+   * become a second DIALECT of it. A hook body that fails closed through
+   * `ctx.api.transaction` gets the same refusal the engine's own surface gives.
    */
-  async transaction(callback: (trxCtx: ScopedContext) => Promise<any>): Promise<any> {
+  async transaction(
+    callback: (trxCtx: ScopedContext, info: EngineTransactionInfo) => Promise<any>,
+    opts?: EngineTransactionOptions,
+  ): Promise<any> {
     const engine = this.engine as any;
 
     // Find the default driver for transaction support
@@ -7144,11 +7458,16 @@ export class ScopedContext {
       : undefined;
 
     if (!driver?.beginTransaction) {
+      const datasource = engine.defaultDriver ?? driver?.name;
+      if (opts?.require === true) {
+        // Same fail-closed refusal as the engine surface (#5696 point 1).
+        throw new TransactionUnsupportedError(datasource ?? '<no default datasource>');
+      }
       // No transaction support — execute directly. Declared (ADR-0119 D1), but
       // said out loud since #4619: the caller asked for atomicity and the
       // callback is about to run without any.
-      engine.warnTransactionUnsupported?.(engine.defaultDriver ?? driver?.name);
-      return callback(this);
+      engine.warnTransactionUnsupported?.(datasource);
+      return callback(this, { owned: false });
     }
 
     const trx = await driver.beginTransaction();
@@ -7169,7 +7488,9 @@ export class ScopedContext {
       txStore ? txStore.run({ transaction: trx, scope }, fn) : fn();
 
     try {
-      const result = await runIn(() => callback(trxCtx));
+      // This surface always OPENS (it has no ADR-0067 D2 join branch of its
+      // own), so a callback that reaches here owns the outcome.
+      const result = await runIn(() => callback(trxCtx, { owned: true }));
       if (driver.commit) await driver.commit(trx);
       else if (driver.commitTransaction) await driver.commitTransaction(trx);
       return result;

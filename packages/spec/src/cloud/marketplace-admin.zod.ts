@@ -301,12 +301,22 @@ export const TrendingListingSchema = lazySchema(() => z.object({
 // ==========================================
 
 export type ReviewCriterion = z.infer<typeof ReviewCriterionSchema>;
+/** Post-parse shape of {@link ReviewCriterion} — defaults applied, transforms run (ADR-0122). */
+export type ReviewCriterionParsed = z.infer<typeof ReviewCriterionSchema>;
 export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
 export type RejectionReason = z.infer<typeof RejectionReasonSchema>;
 export type SubmissionReview = z.infer<typeof SubmissionReviewSchema>;
+/** Post-parse shape of {@link SubmissionReview} — defaults applied, transforms run (ADR-0122). */
+export type SubmissionReviewParsed = z.infer<typeof SubmissionReviewSchema>;
 export type FeaturedListing = z.infer<typeof FeaturedListingSchema>;
+/** Post-parse shape of {@link FeaturedListing} — defaults applied, transforms run (ADR-0122). */
+export type FeaturedListingParsed = z.infer<typeof FeaturedListingSchema>;
 export type CuratedCollection = z.infer<typeof CuratedCollectionSchema>;
+/** Post-parse shape of {@link CuratedCollection} — defaults applied, transforms run (ADR-0122). */
+export type CuratedCollectionParsed = z.infer<typeof CuratedCollectionSchema>;
 export type PolicyViolationType = z.infer<typeof PolicyViolationTypeSchema>;
 export type PolicyAction = z.infer<typeof PolicyActionSchema>;
+/** Post-parse shape of {@link PolicyAction} — defaults applied, transforms run (ADR-0122). */
+export type PolicyActionParsed = z.infer<typeof PolicyActionSchema>;
 export type MarketplaceHealthMetrics = z.infer<typeof MarketplaceHealthMetricsSchema>;
 export type TrendingListing = z.infer<typeof TrendingListingSchema>;

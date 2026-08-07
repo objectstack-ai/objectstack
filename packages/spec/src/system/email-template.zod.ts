@@ -41,6 +41,8 @@ export const EmailTemplateDefinitionVariableSchema = lazySchema(() => z.object({
   description: z.string().optional().describe('Author hint shown in Studio'),
 }));
 export type EmailTemplateDefinitionVariable = z.infer<typeof EmailTemplateDefinitionVariableSchema>;
+/** Post-parse shape of {@link EmailTemplateDefinitionVariable} — defaults applied, transforms run (ADR-0122). */
+export type EmailTemplateDefinitionVariableParsed = z.infer<typeof EmailTemplateDefinitionVariableSchema>;
 
 export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
   surface: 'this email template',
@@ -152,6 +154,8 @@ function EmailAddressInlineSchema() {
 }
 
 export type EmailTemplateDefinition = z.infer<typeof EmailTemplateDefinitionSchema>;
+/** Post-parse shape of {@link EmailTemplateDefinition} — defaults applied, transforms run (ADR-0122). */
+export type EmailTemplateDefinitionParsed = z.infer<typeof EmailTemplateDefinitionSchema>;
 /** Authoring input for {@link EmailTemplateDefinition} — defaulted fields are optional. */
 export type EmailTemplateDefinitionInput = z.input<typeof EmailTemplateDefinitionSchema>;
 

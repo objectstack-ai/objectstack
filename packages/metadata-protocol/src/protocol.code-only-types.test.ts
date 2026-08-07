@@ -358,7 +358,12 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
     // one answered `200 {"success":true,"message":"Saved customization overlay
     // (env-wide) — type=…"}` with no `state=`, no `[seq=…]`, and no history
     // row. That is precisely the answer #5086 caught the showcase giving for a
-    // `job`. They are green before the removal too — a branch nothing reaches
+    // `job`. (#5265 later split the surviving repository sentence in two: the
+    // overlay noun is now conditional on `isArtifactBacked`, so a runtime-only
+    // save reads `Saved <type> '<name>' (env-wide, state=…) [seq=…]`. The
+    // discriminators these pins assert on — `state=` and `[seq=…]` — are on
+    // BOTH branches, which is why they are matched here and the noun is not.)
+    // They are green before the removal too — a branch nothing reaches
     // is what "dead" means — so they are not a regression test for the
     // deletion; they are the guard that stops a second historyless write path
     // from being introduced, and they fail loudly if the #5086 gate is ever

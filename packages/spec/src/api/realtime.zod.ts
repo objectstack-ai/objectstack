@@ -105,3 +105,5 @@ export const RealtimeConfigSchema = lazySchema(() => z.object({
 }).passthrough()); // Allow additional properties
 
 export type RealtimeConfig = z.infer<typeof RealtimeConfigSchema>;
+/** Post-parse shape of {@link RealtimeConfig} — defaults applied, transforms run (ADR-0122). */
+export type RealtimeConfigParsed = z.infer<typeof RealtimeConfigSchema>;

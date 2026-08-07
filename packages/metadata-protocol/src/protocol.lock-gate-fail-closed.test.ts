@@ -57,6 +57,12 @@
 //     {"success":true,…,"message":"Saved customization overlay (env-wide, …)"}
 //     {"success":true,"reset":true,…,"message":"Customization overlay deleted — view/v1 …"}
 //
+// (#5265 — that first line is the measurement AS TAKEN, kept verbatim rather
+// than back-dated. Re-run today it reads `"Saved view 'v1' (env-wide, …)"`:
+// this file's registry holds no artifact for `v1`, so the save overlays
+// nothing and the receipt no longer claims it does. Neither the direction nor
+// the 5/7 split changes — only the noun in the resolved value.)
+//
 // Predicted 4 (the four in the first describe); the fifth is the last case of
 // the artifact describe, which is itself a fail-closed assertion and only lives
 // there for narrative reasons. Recorded as measured rather than rounded to the

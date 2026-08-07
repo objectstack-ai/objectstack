@@ -13,6 +13,22 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// [#5855] The fake engine's write verbs route through the producer's OWN
+// dispatch predicates (#4550 delete / #5480 update), so this double cannot
+// accept a call `ObjectQL.<verb>` refuses. Imported from
+// `@objectstack/metadata-core` and not from `@objectstack/objectql`: objectql
+// depends on this package, so that import would close a dependency cycle turbo
+// rejects — which is why both of this file's (file, verb) pairs sat in the
+// gate's DEBT ledger until #5619 sank the two predicates into a package that
+// depends on neither side. `@objectstack/metadata-core` is a devDependency
+// here for exactly this import, and nothing else.
+import {
+  assertEngineDeleteDispatch,
+  assertEngineUpdateDispatch,
+  type EngineDeleteDispatchInput,
+  type EngineUpdateDispatchData,
+  type EngineUpdateDispatchInput,
+} from '@objectstack/metadata-core';
 import {
   runMigrationJournal,
   resumeMigrationJournal,
@@ -72,8 +88,23 @@ class FakeEngine {
     return (await this.find(objectName, query))[0] ?? null;
   }
 
-  async update(): Promise<unknown> { throw new Error('not used'); }
-  async delete(): Promise<unknown> { throw new Error('not used'); }
+  // Neither verb is driven by anything this suite runs — the journal writes
+  // rows and reads them back. They stay `not used`, but the dispatch assert
+  // comes FIRST so the stub can never become the lax double of #4434 the day a
+  // test starts writing through it: a call the real engine rejects is rejected
+  // here, with the producer's own message, before `not used` is ever reached.
+  async update(
+    _objectName: string,
+    data: EngineUpdateDispatchData,
+    options?: EngineUpdateDispatchInput,
+  ): Promise<unknown> {
+    assertEngineUpdateDispatch(data, options);
+    throw new Error('not used');
+  }
+  async delete(_objectName: string, options?: EngineDeleteDispatchInput): Promise<unknown> {
+    assertEngineDeleteDispatch(options);
+    throw new Error('not used');
+  }
   async count(): Promise<number> { return 0; }
   async aggregate(): Promise<unknown[]> { return []; }
   getObject(name: string): unknown { return { name }; }

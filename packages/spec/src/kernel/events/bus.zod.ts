@@ -75,3 +75,5 @@ export const EventBusConfigSchema = lazySchema(() => z.object({
 }));
 
 export type EventBusConfig = z.infer<typeof EventBusConfigSchema>;
+/** Post-parse shape of {@link EventBusConfig} — defaults applied, transforms run (ADR-0122). */
+export type EventBusConfigParsed = z.infer<typeof EventBusConfigSchema>;

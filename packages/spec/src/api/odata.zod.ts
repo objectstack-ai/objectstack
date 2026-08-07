@@ -378,6 +378,8 @@ export const ODataMetadataSchema = lazySchema(() => z.object({
 }));
 
 export type ODataMetadata = z.infer<typeof ODataMetadataSchema>;
+/** Post-parse shape of {@link ODataMetadata} — defaults applied, transforms run (ADR-0122). */
+export type ODataMetadataParsed = z.infer<typeof ODataMetadataSchema>;
 
 /**
  * Helper functions for OData operations
@@ -457,3 +459,5 @@ export const ODataConfigSchema = lazySchema(() => z.object({
 }).passthrough()); // Allow additional properties for flexibility
 
 export type ODataConfig = z.infer<typeof ODataConfigSchema>;
+/** Post-parse shape of {@link ODataConfig} — defaults applied, transforms run (ADR-0122). */
+export type ODataConfigParsed = z.infer<typeof ODataConfigSchema>;

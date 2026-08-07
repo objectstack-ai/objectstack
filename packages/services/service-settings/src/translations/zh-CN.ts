@@ -63,6 +63,7 @@ export const zhCN: TranslationData = {
         provider: { title: '服务商', description: '选择此工作区如何发送外发短信。' },
         aliyun: { title: '阿里云短信' },
         twilio: { title: 'Twilio' },
+        limits: { title: '发送额度', description: '限制本部署的外发短信量。短信是付费通道,每一条都产生真实费用。' },
       },
       keys: {
         provider: {
@@ -87,6 +88,10 @@ export const zhCN: TranslationData = {
           help: 'E.164 格式的发信方,例如 +15005550006。此项与 Messaging Service SID 二选一。',
         },
         twilio_messaging_service_sid: { label: 'Messaging Service SID' },
+        daily_quota: {
+          label: '每日发送上限',
+          help: '本部署每个 UTC 自然日最多可发送的短信条数,涵盖 OTP 登录、邀请与通知。0 表示不限。超出上限的发送将被拒绝,直到 00:00 UTC。',
+        },
       },
       actions: {
         test: { label: '发送测试短信' },

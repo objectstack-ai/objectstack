@@ -90,6 +90,27 @@ export function orgRoleGrade(raw: unknown): number {
 }
 
 /**
+ * Does this `sys_member.role` value carry an ADMINISTRATIVE grade — i.e. is
+ * its holder one of the people who administer the organization?
+ *
+ * The grade ladder above is the one place that answers it, so every consumer
+ * asks here rather than re-spelling `role === 'owner' || role === 'admin'`:
+ * a hand-written copy drops the comma-joined (`'owner,member'`) and array
+ * spellings `parseOrgRoles` handles, and on a security path that difference is
+ * silent. Second consumer, and the reason this is exported: the break-glass
+ * ban guard (`last-admin-ban-guard.ts`, ADR-0024 D5.2), which counts the
+ * administrators an environment would have left after a ban — a guard that
+ * mistook the only owner for an ordinary member would wave the lockout
+ * through.
+ *
+ * `delegated_admin` is NOT an administrative grade (ADR-0105 D8: it can reach
+ * an endpoint, it carries no authority), and neither is an unresolvable value.
+ */
+export function isOrgAdminGrade(raw: unknown): boolean {
+  return orgRoleGrade(raw) >= GRADE_ADMIN;
+}
+
+/**
  * Is this invitation exactly a plain `member`? Such an invitation can never
  * trip the cap, so the hook skips resolving the issuer's membership row — the
  * common path costs no extra query.

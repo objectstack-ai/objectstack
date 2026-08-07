@@ -312,8 +312,32 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             const result = await protocol.saveMetaItem({ type: 'app', name: 'test_app', item: sampleApp });
 
             expect(result.success).toBe(true);
-            // env-wide (no organizationId) overlay save
-            expect(result.message).toMatch(/Saved customization overlay/);
+            // #5265 — the registry here is empty, so `test_app` is backed by no
+            // code artifact: this write overlays nothing, and the receipt must
+            // not claim it did. It still has to carry the same substance the
+            // overlay sentence carries — the type, the name, the org dimension
+            // and the change-log cursor.
+            expect(result.message).not.toMatch(/customization overlay/);
+            expect(result.message).toMatch(/^Saved app 'test_app' \(env-wide, state=active\) \[seq=\d+\]$/);
+        });
+
+        it('[#5265] an artifact-backed save still reports a customization overlay', async () => {
+            // The other half of the same fact: when a code package DOES ship
+            // this name, the row genuinely customizes it and the historical
+            // sentence is the true one. Pinned so the split cannot collapse
+            // into "never say overlay".
+            // A clone: `registerItem` stamps `_packageId` onto the item it is
+            // given, and `sampleApp` is shared by every case in this file.
+            registry.registerItem('app', { ...sampleApp }, 'name', 'com.acme.showcase');
+
+            const result = await protocol.saveMetaItem({
+                type: 'app', name: 'test_app', item: sampleApp, organizationId: 'org_alpha',
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.message).toMatch(
+                /^Saved customization overlay \(org=org_alpha, state=active\) — type=app, name=test_app \[seq=\d+\]$/,
+            );
         });
 
         it('should fail-fast with 500 when DB findOne is unavailable (ADR-0005)', async () => {

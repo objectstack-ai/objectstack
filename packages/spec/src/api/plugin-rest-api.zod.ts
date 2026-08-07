@@ -189,6 +189,8 @@ export const RestApiEndpointSchema = lazySchema(() => z.object({
 }));
 
 export type RestApiEndpoint = z.infer<typeof RestApiEndpointSchema>;
+/** Post-parse shape of {@link RestApiEndpoint} — defaults applied, transforms run (ADR-0122). */
+export type RestApiEndpointParsed = z.infer<typeof RestApiEndpointSchema>;
 
 /**
  * REST API Route Registration Schema
@@ -260,6 +262,8 @@ export const RestApiRouteRegistrationSchema = z.object({
 });
 
 export type RestApiRouteRegistration = z.infer<typeof RestApiRouteRegistrationSchema>;
+/** Post-parse shape of {@link RestApiRouteRegistration} — defaults applied, transforms run (ADR-0122). */
+export type RestApiRouteRegistrationParsed = z.infer<typeof RestApiRouteRegistrationSchema>;
 
 // ==========================================
 // Request Validation Configuration
@@ -339,6 +343,8 @@ export const RequestValidationConfigSchema = z.object({
 });
 
 export type RequestValidationConfig = z.infer<typeof RequestValidationConfigSchema>;
+/** Post-parse shape of {@link RequestValidationConfig} — defaults applied, transforms run (ADR-0122). */
+export type RequestValidationConfigParsed = z.infer<typeof RequestValidationConfigSchema>;
 export type RequestValidationConfigInput = z.input<typeof RequestValidationConfigSchema>;
 
 // ==========================================
@@ -401,6 +407,8 @@ export const ResponseEnvelopeConfigSchema = z.object({
 });
 
 export type ResponseEnvelopeConfig = z.infer<typeof ResponseEnvelopeConfigSchema>;
+/** Post-parse shape of {@link ResponseEnvelopeConfig} — defaults applied, transforms run (ADR-0122). */
+export type ResponseEnvelopeConfigParsed = z.infer<typeof ResponseEnvelopeConfigSchema>;
 export type ResponseEnvelopeConfigInput = z.input<typeof ResponseEnvelopeConfigSchema>;
 
 // ==========================================
@@ -476,6 +484,8 @@ export const ErrorHandlingConfigSchema = z.object({
 });
 
 export type ErrorHandlingConfig = z.infer<typeof ErrorHandlingConfigSchema>;
+/** Post-parse shape of {@link ErrorHandlingConfig} — defaults applied, transforms run (ADR-0122). */
+export type ErrorHandlingConfigParsed = z.infer<typeof ErrorHandlingConfigSchema>;
 export type ErrorHandlingConfigInput = z.input<typeof ErrorHandlingConfigSchema>;
 
 // ==========================================
@@ -592,6 +602,8 @@ export const OpenApiGenerationConfigSchema = z.object({
 });
 
 export type OpenApiGenerationConfig = z.infer<typeof OpenApiGenerationConfigSchema>;
+/** Post-parse shape of {@link OpenApiGenerationConfig} — defaults applied, transforms run (ADR-0122). */
+export type OpenApiGenerationConfigParsed = z.infer<typeof OpenApiGenerationConfigSchema>;
 export type OpenApiGenerationConfigInput = z.input<typeof OpenApiGenerationConfigSchema>;
 
 // ==========================================
@@ -682,6 +694,8 @@ export const RestApiPluginConfigSchema = z.object({
 });
 
 export type RestApiPluginConfig = z.infer<typeof RestApiPluginConfigSchema>;
+/** Post-parse shape of {@link RestApiPluginConfig} — defaults applied, transforms run (ADR-0122). */
+export type RestApiPluginConfigParsed = z.infer<typeof RestApiPluginConfigSchema>;
 export type RestApiPluginConfigInput = z.input<typeof RestApiPluginConfigSchema>;
 
 // ==========================================

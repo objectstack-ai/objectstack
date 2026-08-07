@@ -19,6 +19,8 @@
  * `type`. The declaration moved here; the engine imports it back.
  */
 
+import type { ConnectorActionEffect } from './connector.zod';
+
 /**
  * How a registered connector reached the engine (ADR-0097 §4). `plugin` — a
  * connector plugin called `registerConnector` directly (ADR-0018 §Addendum).
@@ -40,8 +42,9 @@ export type ConnectorOrigin = 'plugin' | 'declarative';
 export type ConnectorState = 'ready' | 'degraded';
 
 /**
- * A designer-facing view of one connector action — identity + its JSON-Schema
- * input/output. The runtime handler is intentionally omitted; this is metadata.
+ * A designer-facing view of one connector action — identity, its JSON-Schema
+ * input/output, and what it does upstream. The runtime handler is intentionally
+ * omitted; this is metadata.
  */
 export interface ConnectorActionDescriptor {
   readonly key: string;
@@ -49,6 +52,18 @@ export interface ConnectorActionDescriptor {
   readonly description?: string;
   readonly inputSchema?: Record<string, unknown>;
   readonly outputSchema?: Record<string, unknown>;
+  /**
+   * What the action does upstream (#4395): `read` never mutates; `write` does.
+   * Absent keeps the pre-#4395 behaviour — the run reports the effect as
+   * uncountable (`ExecutionStepMetrics.unmeasuredEffect`) rather than as zero.
+   *
+   * Projected verbatim from the connector's authored
+   * `ConnectorActionSchema.effect`, which is where an author or a provider
+   * factory declares it. This interface is the READ side: it is what
+   * `GET /api/v1/automation/connectors` serves, so a designer can show that a
+   * `crm.push_opportunity` writes while a `crm.lookup_account` does not.
+   */
+  readonly effect?: ConnectorActionEffect;
 }
 
 /**

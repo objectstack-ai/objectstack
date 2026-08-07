@@ -256,10 +256,22 @@ in neither). So:
   pre-write row, made total over the same declared fields, and it is the same
   binding a validation predicate reads.
 - **`previous` is UNBOUND where there is no prior state**, and a reference to an
-  unbound root makes the whole condition unevaluable. That means: insert events
-  (`beforeInsert` / `afterInsert`) — write those over `record` alone — and
-  predicate (`multi: true`) bulk updates, where one write matches N rows and the
-  hook fires once, so there is no single prior record to bind.
+  unbound root makes the whole condition unevaluable. Two cases: insert events
+  (`beforeInsert` / `afterInsert`) — write those over `record` alone — and the
+  **`before*` dispatch of a predicate (`multi: true`) write**, which fires **once
+  for the whole batch**: a `before*` hook may still rewrite the shared payload and
+  one batch carries one payload, so there is no single prior record to bind.
+  (`record` is that bare payload there too, so a *declared* field this write does
+  not set is unevaluable as well.) Reading `previous` on that dispatch is rejected
+  **by name**, and the rejection points you at the after-type event.
+- **`after*` hooks fire PER ROW, so a bulk write needs no special condition
+  (#5038).** A predicate (`multi: true`) update/delete dispatches its `after*`
+  hooks **once per matched row**, each on a single-record-shaped context —
+  `previous` is that row's pre-image, `record` is that row's real state (not the
+  bare payload), and `input.id` names the row. A transition condition therefore
+  **is** available on `afterUpdate` / `afterDelete`: write it once and it means
+  the same thing whether the write carried an id or a predicate, with no
+  bulk-aware branch of its own.
 - **Guard optional values with `!= null`, never with `has(...)`.** A declared
   field holding `null` is *present*, so `has(record.spent)` is uniformly true and
   `has(record.spent) && record.spent > record.budget` still faults on
@@ -270,16 +282,18 @@ in neither). So:
 (`record.stauts`), a `previous` reference on an insert, or a comparison CEL has
 no overload for does **not** degrade to "the hook did not fire" — it **fails the
 write**. Until protocol 17 the gate emitted a `logger.warn` and returned `false`,
-which is why the two bullets above are load-bearing rather than stylistic: a
-`before*` guard swallowed into `false` silently let writes through, and an audit
-hook swallowed into `false` silently dropped records. Those are opposite
-failures, so "the condition said no" and "the platform could not work out what
-the condition says" are now different outcomes and the second one is loud.
+which is why the unbound-`previous` and `has(...)` bullets above are load-bearing
+rather than stylistic: a `before*` guard swallowed into `false` silently let
+writes through, and an audit hook swallowed into `false` silently dropped
+records. Those are opposite failures, so "the condition said no" and "the
+platform could not work out what the condition says" are now different outcomes
+and the second one is loud.
 
 Practical consequence when authoring: spell keys against the object's **declared**
-fields, and never reach for `previous` in a hook that can fire on insert or on a
-`multi: true` write — that mistake used to cost you a hook that quietly never
-ran, and now costs you every write the hook is attached to.
+fields, and put a condition that reads `previous` on an **after-type** event —
+never on an insert event, and never on a `before*` hook that can fire on a
+`multi: true` write. That mistake used to cost you a hook that quietly never ran,
+and now costs you every write the hook is attached to.
 
 #### `onError` — Error Handling
 

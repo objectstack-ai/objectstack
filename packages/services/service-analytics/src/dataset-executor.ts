@@ -9,7 +9,7 @@ import type {
 } from '@objectstack/spec/contracts';
 import { emptyGroupValueFor, type FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { filterTokenContextFrom, resolveFilterTokens } from '@objectstack/core';
+import { bucketKeyToCalendarRange, filterTokenContextFrom, resolveFilterTokens } from '@objectstack/core';
 import type { CompiledDataset, DerivedMeasureSpec } from './dataset-compiler.js';
 import { datasetInvalidError } from './dataset-refusal.js';
 import type { OrderLabelResolver } from './dimension-labels.js';
@@ -35,7 +35,11 @@ export type CompareTo = DatasetCompareTo;
  *   - evaluates derived measures (ratio/sum/difference/product) row-by-row (Q1),
  *   - shifts the queries for `compareTo` (previousPeriod / previousYear) and
  *     attaches `<measure>__compare` columns, re-running the same measure pass
- *     so a filtered measure means the same thing in both columns,
+ *     so a filtered measure means the same thing in both columns, and — when
+ *     the shifted dimension is the grid's own time axis — restating the
+ *     comparison rows' bucket keys in CURRENT-period terms so the two grids
+ *     merge into one row per bucket instead of stacking two windows on one
+ *     axis (#6007),
  *   - computes server-side totals (`selection.totals.groupings`, #1753) by
  *     re-running the selection per dimension subset, so matrix subtotals and
  *     the grand total use each measure's true aggregate,
@@ -286,7 +290,16 @@ export type DateGranularityValue = NonNullable<DatasetSelection['dateGranularity
  *
  * The unit of precedence is the GRANULARITY, not the entry: a `timeDimensions`
  * entry carrying only a `dateRange` (what `compareTo` needs) states a WINDOW,
- * not a bucket size, and must not suppress bucketing.
+ * not a bucket size, and so cannot VETO a bucket size stated elsewhere for a
+ * dimension that is being grouped.
+ *
+ * This answers "how big is the bucket", never "is this dimension bucketed at
+ * all" — a separate question, decided per query by `buildQuery`'s
+ * `bucketsUnstatedEntry` (#5688), because a window-only entry for a dimension
+ * nobody grouped must stay a filter. Every caller here is already past that
+ * question: `buildQuery` asks it first, and the post-processing sites in
+ * `analytics-service` iterate `selection.dimensions`, which are grouped by
+ * definition.
  *
  * **Why this is exported.** The bucket size chosen here decides three things
  * that MUST agree: the `GROUP BY` the query compiles to, the humanized label
@@ -463,7 +476,14 @@ export function resolveOrdering(
 function parseUTC(date: string): number {
   // Accepts 'YYYY-MM-DD' (and ISO datetimes); interpreted as UTC.
   const ms = Date.parse(date.length === 10 ? `${date}T00:00:00Z` : date);
-  if (Number.isNaN(ms)) throw new Error(`[dataset-executor] invalid date in dateRange: "${date}"`);
+  // [#5716] `DATASET_INVALID` / 400 — the string comes from the REQUEST
+  // (`selection.timeDimensions[].dateRange`, usually a dashboard's date filter),
+  // reaches here only through `shiftRange`'s `compareTo` math, and no schema
+  // refines it into a date. A caller who sends an unparseable bound gets told
+  // which bound it was; nothing about it is a server fault.
+  if (Number.isNaN(ms)) {
+    throw datasetInvalidError(`[dataset-executor] invalid date in dateRange: "${date}"`);
+  }
   return ms;
 }
 
@@ -508,7 +528,15 @@ function resolveCompareDimension(selection: DatasetSelection): string {
 
   if (cmp.dimension != null) {
     if (!names.includes(cmp.dimension)) {
-      throw new Error(
+      // [#5716] `DATASET_INVALID` / 400 for all three refusals in this function.
+      // Every one of them is a verdict about the SELECTION as a whole — which
+      // `timeDimensions` carry a `dateRange`, and whether `compareTo` can pick
+      // one — so it is `datasetInvalidError`, not the member-level
+      // `invalidMemberError`: the fix is to add a window or drop `compareTo`,
+      // not to correct a misspelled member. Same request, same document, same
+      // family as the order-key and totals refusals already enveloped here
+      // (#5367).
+      throw datasetInvalidError(
         `[dataset-executor] compareTo requires a timeDimension "${cmp.dimension}" with a dateRange. `
         + (names.length > 0
           ? `This selection dates ${names.map((n) => `"${n}"`).join(', ')} — name one of those, or omit compareTo.dimension to let the executor choose when there is only one.`
@@ -521,7 +549,7 @@ function resolveCompareDimension(selection: DatasetSelection): string {
   if (names.length === 1) return names[0];
 
   if (names.length === 0) {
-    throw new Error(
+    throw datasetInvalidError(
       '[dataset-executor] compareTo needs a dated window to shift, but this selection declares no '
       + 'timeDimension with a dateRange. Give the time dimension a dateRange (a dashboard date-range '
       + 'filter is the usual source), or drop compareTo — a period-over-period comparison is only '
@@ -529,7 +557,7 @@ function resolveCompareDimension(selection: DatasetSelection): string {
     );
   }
 
-  throw new Error(
+  throw datasetInvalidError(
     `[dataset-executor] compareTo.dimension is ambiguous: ${names.length} time dimensions carry a `
     + `dateRange (${names.map((n) => `"${n}"`).join(', ')}). Name the one to shift — `
     + `compareTo: { kind: '${cmp.kind}', dimension: '${names[0]}' }.`,
@@ -549,6 +577,173 @@ export function shiftRange(range: [string, string], kind: CompareTo['kind']): [s
   const prevEndMs = startMs - DAY_MS;
   const prevStartMs = prevEndMs - (lengthDays - 1) * DAY_MS;
   return [toISODate(prevStartMs), toISODate(prevEndMs)];
+}
+
+// ── compareTo bucket alignment (#6007) ───────────────────────────────────────
+
+/**
+ * The ISO-8601 week label (`2026-W23`) of the UTC calendar day at `ms`.
+ *
+ * Mirrors the week branch of `@objectstack/objectql`'s `bucketDateValue` — the
+ * function that MINTS the bucket keys this executor then has to realign. It is
+ * copied rather than imported because `service-analytics` does not depend on
+ * `objectql` (it talks to the runtime through `IAnalyticsService`), and the
+ * copy is not a blind one: {@link bucketKeyAtOrdinal} is pinned round-trip
+ * against `bucketKeyToCalendarRange` — `@objectstack/core`'s exported INVERSE
+ * of the same vocabulary, which rejects an impossible week outright — so a
+ * drift in either direction fails a test rather than mislabelling a bucket.
+ */
+function isoWeekKeyOfUtcMs(ms: number): string {
+  const target = new Date(ms);
+  const dayNum = (target.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+  target.setUTCDate(target.getUTCDate() - dayNum + 3); // that week's Thursday
+  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+  const weekNo =
+    1 +
+    Math.round(
+      ((target.getTime() - firstThursday.getTime()) / DAY_MS - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7,
+    );
+  return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+/**
+ * The ORDINAL of the bucket a UTC calendar day falls in: a monotone integer
+ * that advances by exactly 1 per bucket, at every granularity.
+ *
+ * This is what makes "the same relative position in the other window" a
+ * computable thing rather than an array index. Counting POSITIONS in the two
+ * result sets would have been the obvious implementation and is wrong for the
+ * reason every gap-sensitive alignment is wrong: a bucket the current window
+ * reported no rows for is missing from that array, so every later bucket
+ * silently shifts by one and the comparison column lands on its neighbour.
+ * Ordinals are computed from the CALENDAR, so a gap costs nothing.
+ *
+ * @param ymd - a `YYYY-MM-DD` UTC calendar day.
+ */
+export function bucketOrdinalOfDay(ymd: string, granularity: DateGranularityValue): number {
+  const ms = parseUTC(ymd);
+  const d = new Date(ms);
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth(); // 0-11
+  switch (granularity) {
+    case 'year':
+      return y;
+    case 'quarter':
+      return y * 4 + Math.floor(m / 3);
+    case 'month':
+      return y * 12 + m;
+    // 1970-01-01 was a Thursday, so shifting by 3 days puts the Monday boundary
+    // on a multiple of 7 and the ordinal advances exactly at each ISO week start.
+    case 'week':
+      return Math.floor((ms + 3 * DAY_MS) / (7 * DAY_MS));
+    case 'day':
+    default:
+      return Math.floor(ms / DAY_MS);
+  }
+}
+
+/**
+ * The canonical bucket KEY at an ordinal — the inverse of
+ * {@link bucketOrdinalOfDay}, and the only place this package mints a bucket key
+ * of its own.
+ *
+ * The keys produced here MUST be byte-identical to the ones the runtime's
+ * grouping produced for the primary pass, because they are compared as merge
+ * keys: `2026-01`, `2026-Q1`, `2026`, `2026-01-07`, `2026-W03`. That equality is
+ * pinned round-trip against `bucketKeyToCalendarRange` rather than asserted by
+ * eye — see `dataset-compare-bucket-alignment.test.ts`.
+ */
+export function bucketKeyAtOrdinal(ordinal: number, granularity: DateGranularityValue): string {
+  switch (granularity) {
+    case 'year':
+      return String(ordinal);
+    case 'quarter':
+      return `${Math.floor(ordinal / 4)}-Q${(ordinal % 4) + 1}`;
+    case 'month':
+      return `${Math.floor(ordinal / 12)}-${String((ordinal % 12) + 1).padStart(2, '0')}`;
+    case 'week':
+      return isoWeekKeyOfUtcMs(ordinal * 7 * DAY_MS - 3 * DAY_MS);
+    case 'day':
+    default:
+      return toISODate(ordinal * DAY_MS);
+  }
+}
+
+/**
+ * Restate ONE comparison bucket key in CURRENT-period terms (#6007) — the
+ * maintainer's ruling of 2026-08-07, direction 1.
+ *
+ * ## What goes wrong without it
+ *
+ * When the dimension `compareTo` anchors on is ALSO a grid dimension — a trend
+ * chart's own time axis, the standard "this period vs the same period last
+ * year" shape — the comparison pass groups the SHIFTED window, so its rows key
+ * to shifted buckets. {@link mergeByDimensions} keys on `selection.dimensions`,
+ * and `2025-01` is not `2026-01`, so not one comparison row ever merged: every
+ * one of them was APPENDED as a new row. The grid then read half real value and
+ * half confident `0` on every row (`fillEmptyGroups` filling the halves each
+ * pass never reported), with the shifted buckets sitting in it as rows from
+ * outside the very window the caller filtered to. A 2×2 answer came back as
+ * 4 rows × 2 columns with a zero in each.
+ *
+ * ## The two shift-backs
+ *
+ *  - **`previousYear`** — the shift is a calendar year, so the inverse is a
+ *    calendar year forward, applied to the bucket's own first day and re-bucketed.
+ *    `2025-01` → `2026-01`, `2025-Q1` → `2026-Q1`, `2025-W03` → `2026-W03`
+ *    (the week one year on, which is how a year-over-year weekly trend reads).
+ *    It is deliberately the exact inverse of the {@link shiftRange} arithmetic
+ *    that produced the window, `setUTCFullYear` rollover included, so window and
+ *    key can never disagree about what "one year" meant.
+ *  - **`previousPeriod`** — an arbitrary-length day window has no calendar
+ *    counterpart, so alignment is by **bucket ordinal**: the n-th bucket of the
+ *    previous window is the n-th bucket of this one, with `n` counted from each
+ *    window's own start. This is a semantic the ruling states, not one derived
+ *    from anything already here.
+ *
+ * ## Fail-closed, in both directions
+ *
+ * Returns `null` — meaning "leave this row's key alone", i.e. exactly the
+ * pre-#6007 behaviour — whenever the alignment is not certain:
+ *
+ *  - the key is not a string (the empty bucket keys as `null` on both
+ *    aggregation paths, #3839; the two passes' empty buckets already merge with
+ *    each other, and "one year after nothing" is not a date);
+ *  - the key is not a bucket key of this granularity, so there is no span to
+ *    shift (a raw timestamp from an unbucketed date dimension lands here);
+ *  - the shifted-back bucket falls outside the CURRENT window. Two equal-length
+ *    day windows can tile into different bucket counts (a 31-day window
+ *    straddling a month boundary yields two month buckets, its neighbour one),
+ *    and the ordinal rule then has a last bucket with no counterpart. Moving it
+ *    to a bucket the caller did not ask for would trade a visibly foreign row
+ *    for a plausible-looking wrong one; it keeps its own key and appends, as it
+ *    did before.
+ *
+ * @param currentRange - the selection's own window for the anchor dimension.
+ * @param shiftedRange - what {@link shiftRange} made of it.
+ */
+export function alignedCompareBucketKey(
+  key: unknown,
+  granularity: DateGranularityValue,
+  kind: CompareTo['kind'],
+  currentRange: [string, string],
+  shiftedRange: [string, string],
+): string | null {
+  if (typeof key !== 'string' || key.length === 0) return null;
+  const span = bucketKeyToCalendarRange(key, granularity);
+  if (!span) return null;
+
+  const targetOrdinal =
+    kind === 'previousYear'
+      ? bucketOrdinalOfDay(shiftYear(span.start, 1), granularity)
+      : bucketOrdinalOfDay(span.start, granularity) +
+        (bucketOrdinalOfDay(currentRange[0], granularity) -
+          bucketOrdinalOfDay(shiftedRange[0], granularity));
+
+  const first = bucketOrdinalOfDay(currentRange[0], granularity);
+  const last = bucketOrdinalOfDay(currentRange[1], granularity);
+  if (targetOrdinal < first || targetOrdinal > last) return null;
+  return bucketKeyAtOrdinal(targetOrdinal, granularity);
 }
 
 export class DatasetExecutor {
@@ -711,7 +906,13 @@ export class DatasetExecutor {
     //   - the compareTo pass appends a row for every bucket that existed in the
     //     PREVIOUS window and not in this one, on which *every* base measure is
     //     absent — including unfiltered ones, which is why the fill covers all
-    //     base measures rather than only the filter-scoped ones.
+    //     base measures rather than only the filter-scoped ones. Since #6007
+    //     that append is once again the EDGE it was always documented to be
+    //     ("this group sold last month and nothing this month"): when the
+    //     shifted dimension is the grid's own time axis the comparison keys are
+    //     realigned onto the current period first, so the append no longer
+    //     fires on every single row and no longer carries a bucket from outside
+    //     the caller's window.
     // Running it before the compare merge left that last class blank, so a lead
     // source that sold last month and nothing this month rendered as "no data"
     // instead of 0 — the same worst-row bias, one merge later.
@@ -871,6 +1072,29 @@ export class DatasetExecutor {
     return dimensions.filter((d) => compiled.cube.dimensions[d]?.type === 'time');
   }
 
+  /**
+   * The EFFECTIVE bucket size one dimension is grouped at for this selection,
+   * or `undefined` when it is not a date dimension or nothing states a size (in
+   * which case the runtime groups the raw column).
+   *
+   * One definition, two readers, deliberately: {@link buildQuery} uses it to
+   * decide the `GROUP BY`, and {@link runCompare} uses it to realign the
+   * comparison pass's bucket keys (#6007). Those two MUST agree — realigning
+   * `month` keys a query grouped by `quarter` would move every comparison value
+   * onto a bucket that does not exist — and the way to make them agree is to
+   * have one of them, not two that look alike.
+   */
+  private granularityOf(
+    compiled: CompiledDataset,
+    selection: DatasetSelection,
+    name: string,
+  ): DateGranularityValue | undefined {
+    const cd = compiled.cube.dimensions[name];
+    if (cd?.type !== 'time') return undefined;
+    const datasetDefault = cd.granularities?.length === 1 ? String(cd.granularities[0]) : undefined;
+    return resolveDimensionGranularity(selection, name, datasetDefault);
+  }
+
   private buildQuery(
     compiled: CompiledDataset,
     opts: {
@@ -912,23 +1136,73 @@ export class DatasetExecutor {
     //      `dateGranularity` to a single-entry `granularities`; the 5-entry
     //      "all granularities" list means the dataset stated no default).
     //
-    // Note the unit of precedence is the GRANULARITY, not the entry. A
-    // `timeDimensions` entry that only carries a `dateRange` (which is exactly
-    // what `compareTo` needs) states a WINDOW, not a bucket size — letting its
-    // mere presence suppress bucketing left the compared pass grouping raw
-    // timestamps while the primary pass grouped months, so the two grids shared
-    // no dimension key and every `__compare` column came back empty.
+    // Note the unit of precedence is the GRANULARITY, not the entry: a stated
+    // `granularity` is never overridden, and an entry that states none does not
+    // veto a bucket size the selection or the dataset supplies for a dimension
+    // that IS being grouped. That is `resolveDimensionGranularity`'s job, and it
+    // is unchanged — see `granularityFor` below.
+    //
+    // What an entry that carries only a `dateRange` decides is something else:
+    // whether the dimension is grouped AT ALL (#5688). It is a WINDOW — a
+    // filter, and a dashboard date-range picker is the usual source. A filter
+    // removes rows; it does not add a grid column or split rows. Backfilling the
+    // dataset's default bucket size onto such an entry turned "by Owner, this
+    // quarter" into "by Owner × month": one extra column nobody selected, and
+    // one row per owner PER MONTH, with a KPI card then reading the first of
+    // them. So the backfill is scoped by {@link bucketsUnstatedEntry} to the
+    // entries that are genuinely asking for a bucket.
+    //
+    // `compareTo` alignment survives that narrowing BY CONSTRUCTION, and this is
+    // the pairing to keep in mind before widening or narrowing it again
+    // (#3588/#4870 vs #5688 — the two demands meet exactly here):
+    //
+    //   - the comparison pass re-enters this method through `runMeasurePass`
+    //     with the SAME `opts.dimensions` and the same `selection.dateGranularity`,
+    //     differing only in the shifted `dateRange`. Both passes therefore reach
+    //     the same verdict for the same entry, so the two grids are bucketed
+    //     alike or not at all — never one of each, which is the state #4870
+    //     fixed (a month-bucketed primary grid merged against raw-timestamp
+    //     comparison rows shared no dimension key, and every `__compare` column
+    //     came back empty);
+    //   - an anchor that IS grouped (listed in `dimensions`, or carrying its own
+    //     `granularity`) keeps its bucket on both passes — #3588/#4870 intact;
+    //   - an anchor used only as a window is grouped on NEITHER pass, so it is
+    //     not a column on either side and the two grids align on the dimensions
+    //     `mergeByDimensions` actually keys by. That merge has always keyed on
+    //     `dimensions` alone, so the bucket column the backfill added was never
+    //     part of the key: with several month-split rows per group the
+    //     comparison value landed on whichever one the index happened to hold
+    //     last and the rest read a confident `0`. Not bucketing the window
+    //     restores the alignment rather than weakening it.
     const selTimeDims = opts.selection.timeDimensions ?? [];
     const selDims = new Set(selTimeDims.map((t) => t.dimension));
-    const granularityFor = (name: string): string | undefined => {
-      const cd = compiled.cube.dimensions[name];
-      if (cd?.type !== 'time') return undefined;
-      const datasetDefault = cd.granularities?.length === 1 ? String(cd.granularities[0]) : undefined;
-      return resolveDimensionGranularity(opts.selection, name, datasetDefault);
-    };
-    // Fill in a bucket size for caller-supplied entries that named none.
+    const groupedDims = new Set(opts.dimensions);
+    const granularityFor = (name: string): string | undefined =>
+      this.granularityOf(compiled, opts.selection, name);
+    /**
+     * Does a caller-supplied entry that stated NO granularity get one filled in?
+     *
+     * Only when something in the request says this date is being bucketed:
+     *   - the dimension is one of the grid dimensions this query groups by (so
+     *     it is a column regardless, and leaving it unbucketed would group raw
+     *     timestamps — one bucket per row, the #3588 defect); or
+     *   - `selection.dateGranularity` is set, which is the presentation stating
+     *     a bucket size for its date axes.
+     * An entry carrying its own `granularity` never reaches here (nothing to
+     * fill in), and stays grouped.
+     *
+     * The dataset dimension's own `dateGranularity` is deliberately NOT such a
+     * signal on its own: it is how this date renders WHEN grouped, not a request
+     * to group by it. Reading it as one is what made a date-range filter behave
+     * like a second GROUP BY.
+     */
+    const bucketsUnstatedEntry = (dimension: string): boolean =>
+      groupedDims.has(dimension) || opts.selection.dateGranularity != null;
+    // Fill in a bucket size for caller-supplied entries that named none — for
+    // the entries that are asking to be bucketed at all.
     const resolvedTimeDims = selTimeDims.map((t) => {
       if (t.granularity) return t;
+      if (!bucketsUnstatedEntry(t.dimension)) return t;
       const granularity = granularityFor(t.dimension);
       return granularity ? { ...t, granularity } : t;
     });
@@ -989,10 +1263,38 @@ export class DatasetExecutor {
       { ...selection, timeDimensions: shiftedTd },
       { measures, dimensions, baseFilter, context },
     );
+
+    // #6007 — when the anchor is ALSO a grid dimension, the comparison rows key
+    // to the SHIFTED buckets they were grouped into, and `mergeByDimensions`
+    // keys on `dimensions`: `2025-01` never equals `2026-01`, so every
+    // comparison row was appended instead of merged and the grid came back with
+    // twice the rows, a confident `0` in each, and the shifted buckets showing
+    // as rows from outside the caller's own window. Restate each comparison
+    // bucket key in current-period terms BEFORE the merge — see
+    // {@link alignedCompareBucketKey} for the two shift-backs and for every
+    // case it deliberately declines to align.
+    //
+    // Scoped to exactly the shape that is broken, and no wider:
+    //   - the anchor must be a GRID dimension. A window-only anchor is not a
+    //     column on either pass, so the two grids already align on the
+    //     dimensions the merge keys by (#5688) and there is nothing to move;
+    //   - it must be BUCKETED. An ungrouped date dimension groups raw
+    //     timestamps, which are instants and not bucket keys — there is no
+    //     "same bucket, one year on" for them, so they are left alone.
+    // Both passes read the bucket size through the same `granularityOf`, so the
+    // size realigned here is by construction the size grouped by.
+    const granularity = dimensions.includes(dimension)
+      ? this.granularityOf(compiled, selection, dimension)
+      : undefined;
+
     // Rename measure columns to `<measure>__compare` so they merge alongside primary.
     return sub.rows.map((row) => {
       const out: Record<string, unknown> = {};
       for (const dim of dimensions) out[dim] = row[dim];
+      if (granularity) {
+        const aligned = alignedCompareBucketKey(row[dimension], granularity, cmp.kind, range, shifted);
+        if (aligned != null) out[dimension] = aligned;
+      }
       for (const m of measures) out[`${m}__compare`] = row[m];
       return out;
     });

@@ -214,14 +214,48 @@ describe('TursoDriver remote — Field.time conformance', () => {
 });
 
 /**
+ * Drop a column's "already backfilled" marker — the remote twin of
+ * `LegacyStorageDriver.forgetCanonical` in `driver-sql`, and needed here for
+ * the same reason since objectstack#5770 gave remote mode a backfill.
+ *
+ * A legacy sweep needs BOTH halves to be honest: rows seeded raw, AND the
+ * canonical marker cleared. Without the second, the driver would correctly
+ * conclude the column is clean, skip the read-side repair, and the sweep would
+ * measure the wrong thing.
+ */
+const forgetCanonical = (driver: TursoDriver, table: string, field: string, kind: 'datetime' | 'time') => {
+  const key = kind === 'datetime' ? 'canonicalDatetimeFields' : 'canonicalTimeFields';
+  (driver as never as Record<string, Record<string, Set<string>>>)[key][table]?.delete(field);
+};
+
+/**
+ * The driver's own answer to "does this column still owe the read-side repair?"
+ * — the remote twin of `LegacyStorageDriver.legacyDatetimeRepairApplies`,
+ * exposed so a sweep can ASSERT its premise instead of stating it in a comment.
+ */
+const repairApplies = (driver: TursoDriver, table: string, field: string, kind: 'datetime' | 'time') => {
+  const method = kind === 'datetime' ? 'needsLegacyDatetimeRepair' : 'needsLegacyTimeRepair';
+  return (driver as never as Record<string, (t: string, f: string) => boolean>)[method].call(
+    driver,
+    table,
+    field,
+  );
+};
+
+/**
  * Sweep 3 — the same matrix over un-backfilled legacy `datetime` storage.
  *
  * Seeded through the stub's raw handle: BELOW the transport, so no write path
  * can converge the forms (the remote twin of the local suite's
  * `LegacyStorageTursoDriver`, which inserts through Knex for the same reason).
- * Nothing needs un-marking afterwards the way local does — remote mode has no
- * backfill to mark a column canonical in the first place, which is exactly why
- * this sweep is not hypothetical here.
+ *
+ * The marker is then cleared, exactly as the local twin does. Until
+ * objectstack#5770 that was unnecessary here — remote mode had no backfill, so
+ * no column was ever marked canonical, and this sweep was un-backfilled by
+ * accident. Now that a remote backfill exists, "un-backfilled" is a state the
+ * fixture must DECLARE rather than inherit: it is the state of a database whose
+ * backfill hit its batch budget or could not run, which D-B3 requires to keep
+ * answering correctly. That is precisely what this sweep measures.
  */
 describe('TursoDriver remote — temporal conformance on un-backfilled legacy storage', () => {
   let driver: TursoDriver;
@@ -250,6 +284,7 @@ describe('TursoDriver remote — temporal conformance on un-backfilled legacy st
           : r.at.replace('T', ' ').replace('Z', '');
       insert.run(r.id, at, r.on, r.why);
     }
+    forgetCanonical(driver, 'conformance', 'at', 'datetime');
   });
 
   afterAll(async () => {
@@ -270,6 +305,11 @@ describe('TursoDriver remote — temporal conformance on un-backfilled legacy st
       expect(row.at, `${row.id}.at`).not.toBe(r.at);
       expect(row.at, `${row.id}.at`).toMatch(r.writerForm === 'native' ? /\+08:00$/ : / /);
     }
+    // The other half of the premise (#5770): the driver must still OWE this
+    // column its repair. Without this, a future change that re-marked the
+    // column would leave the sweep below passing for the wrong reason — it
+    // would be measuring canonical storage under a legacy-storage name.
+    expect(repairApplies(driver, 'conformance', 'at', 'datetime')).toBe(true);
   });
 
   // Literal spellings only, as in the local legacy sweep: the token axis is
@@ -301,6 +341,7 @@ describe('TursoDriver remote — Field.time conformance on un-backfilled legacy 
         r.writerForm === 'native' ? `2026-07-28T${r.at}Z` : `2026-07-28 ${r.at}`;
       insert.run(r.id, at, r.why);
     }
+    forgetCanonical(driver, 'time_conformance', 'at', 'time');
   });
 
   afterAll(async () => {
@@ -319,6 +360,8 @@ describe('TursoDriver remote — Field.time conformance on un-backfilled legacy 
       // defect this axis is about — so none of them is canonical wall clock.
       expect(row.at, `${row.id}.at`).toMatch(/^2026-07-28[T ]/);
     }
+    // See the `datetime` twin above (#5770).
+    expect(repairApplies(driver, 'time_conformance', 'at', 'time')).toBe(true);
   });
 
   for (const c of TEMPORAL_TIME_CASES) {

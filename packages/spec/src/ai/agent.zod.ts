@@ -113,6 +113,8 @@ export const StructuredOutputConfigSchema = lazySchema(() => strictObject({
 export type StructuredOutputFormat = z.infer<typeof StructuredOutputFormatSchema>;
 export type TransformPipelineStep = z.infer<typeof TransformPipelineStepSchema>;
 export type StructuredOutputConfig = z.infer<typeof StructuredOutputConfigSchema>;
+/** Post-parse shape of {@link StructuredOutputConfig} — defaults applied, transforms run (ADR-0122). */
+export type StructuredOutputConfigParsed = z.infer<typeof StructuredOutputConfigSchema>;
 
 /**
  * AI Agent Schema
@@ -392,3 +394,5 @@ export function defineAgent(config: z.input<typeof AgentSchema>): Agent {
 }
 
 export type Agent = z.infer<typeof AgentSchema>;
+/** Post-parse shape of {@link Agent} — defaults applied, transforms run (ADR-0122). */
+export type AgentParsed = z.infer<typeof AgentSchema>;

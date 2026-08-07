@@ -62,6 +62,8 @@ export const PackageDependencySchema = lazySchema(() => z.object({
 }).describe('Package dependency declaration'));
 
 export type PackageDependency = z.infer<typeof PackageDependencySchema>;
+/** Post-parse shape of {@link PackageDependency} — defaults applied, transforms run (ADR-0122). */
+export type PackageDependencyParsed = z.infer<typeof PackageDependencySchema>;
 
 /**
  * Lightweight manifest embedded in `sys_package_version.manifest_json`.
@@ -118,6 +120,8 @@ export const PackageManifestSchema = lazySchema(() => z.object({
 }).describe('Package manifest snapshot embedded in a package version'));
 
 export type PackageManifest = z.infer<typeof PackageManifestSchema>;
+/** Post-parse shape of {@link PackageManifest} — defaults applied, transforms run (ADR-0122). */
+export type PackageManifestParsed = z.infer<typeof PackageManifestSchema>;
 
 // ---------------------------------------------------------------------------
 // sys_package_version — Immutable release snapshot
@@ -185,6 +189,8 @@ export const PackageVersionSchema = lazySchema(() => z.object({
 }));
 
 export type PackageVersion = z.infer<typeof PackageVersionSchema>;
+/** Post-parse shape of {@link PackageVersion} — defaults applied, transforms run (ADR-0122). */
+export type PackageVersionParsed = z.infer<typeof PackageVersionSchema>;
 
 // ---------------------------------------------------------------------------
 // Request / Response

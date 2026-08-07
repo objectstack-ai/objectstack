@@ -98,8 +98,12 @@ export const MCPToolBindingSchema = lazySchema(() => z.object({
 
 export type MCPTransport = z.infer<typeof MCPTransportSchema>;
 export type MCPServerRef = z.infer<typeof MCPServerRefSchema>;
+/** Post-parse shape of {@link MCPServerRef} — defaults applied, transforms run (ADR-0122). */
+export type MCPServerRefParsed = z.infer<typeof MCPServerRefSchema>;
 export type MCPApprovalPolicy = z.infer<typeof MCPApprovalPolicySchema>;
 export type MCPToolBinding = z.infer<typeof MCPToolBindingSchema>;
+/** Post-parse shape of {@link MCPToolBinding} — defaults applied, transforms run (ADR-0122). */
+export type MCPToolBindingParsed = z.infer<typeof MCPToolBindingSchema>;
 
 /**
  * OAuth 2.1 scopes for the platform's OWN MCP endpoint (`/api/v1/mcp`).

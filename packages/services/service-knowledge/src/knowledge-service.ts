@@ -283,17 +283,7 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   private sourcesForObject(object: string): KnowledgeSource[] {
-    const out: KnowledgeSource[] = [];
-    for (const source of this.sources.values()) {
-      if (
-        source.source.kind === 'object' &&
-        (source.source as ObjectKnowledgeSource).object === object &&
-        (source.refresh?.onRecordChange ?? true) !== false
-      ) {
-        out.push(source);
-      }
-    }
-    return out;
+    return objectSourcesFor([...this.sources.values()], object);
   }
 
   /**
@@ -373,6 +363,31 @@ export class KnowledgeService implements IKnowledgeService {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * The `object` sources whose per-record projection of `object` is kept in step
+ * with row changes — i.e. those the service may upsert into, delete from, or
+ * (since #4672) de-index on behalf of, in reaction to a row's lifecycle.
+ *
+ * One definition, deliberately: the event-sync path
+ * (`handleRecordUpsert` / `handleRecordDelete`) and the lifecycle reap guard
+ * (`knowledge-reap-guard.ts`) are the two halves of one responsibility, and a
+ * second copy of this predicate is exactly how they would drift into disagreeing
+ * about which sources a row's disappearance concerns.
+ *
+ * `refresh.onRecordChange: false` opts a source out of both halves: it declares
+ * that an external indexer owns the index, and the reap guard vetoes rows whose
+ * de-index fails — so honouring it here is also what keeps an opted-out source
+ * from ever holding up another package's retention.
+ */
+export function objectSourcesFor(sources: KnowledgeSource[], object: string): KnowledgeSource[] {
+  return sources.filter(
+    (source) =>
+      source.source.kind === 'object' &&
+      (source.source as ObjectKnowledgeSource).object === object &&
+      (source.refresh?.onRecordChange ?? true) !== false,
+  );
+}
 
 /** Deterministic document id derived from the source + record id. */
 export function documentIdFor(sourceId: string, recordId: string): string {

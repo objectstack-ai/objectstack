@@ -67,6 +67,15 @@ export type {
   DatasourceUnavailableKind,
 } from './driver-connect-errors.js';
 export type { InsertManyRowOutcome } from './engine.js';
+// [#5696] Thrown by `transaction(cb, base, { require: true })` when the
+// datasource cannot give a real transaction. Exported so a caller that fails
+// closed can narrow on the class; `code` is the boundary-crossing identity.
+export { TransactionUnsupportedError } from './transaction-errors.js';
+// [#5351/#5696] Thrown when a BUSINESS write inside an open transaction()
+// resolves to a driver that transaction does not cover. Append-only system
+// ledgers (lifecycle.class audit/telemetry/event) are carved out and never
+// raise it. Narrow on the class in-process; `code` crosses package boundaries.
+export { CrossDatasourceTransactionWriteError } from './transaction-errors.js';
 
 // [#4550] The delete-dispatch contract, exported so a TEST DOUBLE that stands
 // in for the engine can import the producer's own decision rather than
@@ -144,6 +153,25 @@ export type {
     ValueShapeScanOptions,
     ValueShapeScanLogger,
 } from './validation/scan-value-shapes.js';
+// [#6063 / #5749] The one-off backfill behind `os migrate summary-nulls`, and
+// the roll-up core it shares with the engine. Same package as the roll-up it
+// repairs (the owning-package half of the migration-family shape: the CLI holds
+// only the command shell).
+export {
+    backfillSummaryNulls,
+    formatSummaryBackfillReport,
+    summaryBackfillComplete,
+} from './summary-backfill.js';
+export type {
+    SummaryBackfillReport,
+    SummaryBackfillFieldOutcome,
+    SummaryBackfillFailure,
+    SummaryBackfillEngine,
+    SummaryBackfillLogger,
+    SummaryBackfillOptions,
+} from './summary-backfill.js';
+export { summaryEmptySetValue, summaryNullIsBackfillable, aggregateSummaryValue } from './summary-aggregate.js';
+export type { SummaryDescriptor, SummaryAggregateEngine } from './summary-aggregate.js';
 export { evaluateValidationRules, needsPriorRecord, legalNextStates } from './validation/rule-validator.js';
 export type { EvaluateRulesOptions } from './validation/rule-validator.js';
 export {

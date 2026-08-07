@@ -160,6 +160,8 @@ export const FlowFunctionDeclarationSchema = lazySchema(() => strictObject({
 }).describe('A named handler function plus its declared effect (#4396)'));
 
 export type FlowFunctionDeclaration = z.infer<typeof FlowFunctionDeclarationSchema>;
+/** Post-parse shape of {@link FlowFunctionDeclaration} — defaults applied, transforms run (ADR-0122). */
+export type FlowFunctionDeclarationParsed = z.infer<typeof FlowFunctionDeclarationSchema>;
 export type FlowFunctionDeclarationInput = z.input<typeof FlowFunctionDeclarationSchema>;
 
 /**
@@ -192,6 +194,8 @@ export const FlowFunctionEntrySchema = lazySchema(() => z.union([
 ]).describe('A named handler function, a declaration record stating its effect, or a lowered handler ref'));
 
 export type FlowFunctionEntry = z.infer<typeof FlowFunctionEntrySchema>;
+/** Post-parse shape of {@link FlowFunctionEntry} — defaults applied, transforms run (ADR-0122). */
+export type FlowFunctionEntryParsed = z.infer<typeof FlowFunctionEntrySchema>;
 
 /** Any callable registerable under a name (a hook body, a flow function). */
 export type FlowFunctionCallable = (...args: never[]) => unknown;

@@ -16,8 +16,8 @@ Migrated to [shared/http.zod.ts](/docs/references/shared/http). Re-exported here
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, FormButtonConfig, FormField, FormSection, FormView, GalleryConfig, GroupingConfig, HttpRequest, ListChartConfig, ListColumn, ListView, NavigationConfig, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, FormButtonConfig, FormField, FormSection, FormView, GalleryConfig, GroupingConfig, HttpMethodSubset, HttpRequest, ListChartConfig, ListColumn, ListView, NavigationConfig, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfigSchema.parse(data);
@@ -181,9 +181,9 @@ Column footer summary configuration
 | **collapsed** | `boolean` | optional |  |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record`+`current_user` (runtime forms) or `data` (metadata forms). |
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
-| **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| '1' \| '2' \| '3' \| '4'` | optional |  |
+| **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional |  |
 | **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
-| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| 'datetime' \| 'time' \| 'boolean' \| 'toggle' \| 'select' \| 'multiselect' \| 'radio' \| 'checkboxes' \| 'lookup' \| 'master_detail' \| 'tree' \| 'user' \| 'image' \| 'file' \| 'avatar' \| 'video' \| 'audio' \| 'formula' \| 'summary' \| 'autonumber' \| 'composite' \| 'repeater' \| 'record' \| 'location' \| 'address' \| 'code' \| 'json' \| 'color' \| 'rating' \| 'slider' \| 'signature' \| 'qrcode' \| 'progress' \| 'tags' \| 'vector'>; options?: { label: string; value: string; color?: string; default?: boolean; … }[]; reference?: string; … })[]` | ✅ |  |
+| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; options?: { label: string; value: string; color?: string; default?: boolean; … }[]; reference?: string; … })[]` | ✅ |  |
 
 
 ---
@@ -213,12 +213,12 @@ Column footer summary configuration
 | **sections** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
-| **defaultSort** | `any` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. |
+| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior |
 | **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998). |
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
-| **aria** | `any` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. |
+| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. |
 
 
 ---
@@ -307,7 +307,9 @@ Record grouping configuration
 
 ---
 
-## HttpMethod
+## HttpMethodSubset
+
+HTTP methods a view data source may request — the subset of `HttpMethod` without `HEAD`/`OPTIONS`.
 
 ### Allowed Values
 
@@ -380,7 +382,7 @@ List chart view configuration
 | **wrap** | `boolean` | optional | Allow text wrapping |
 | **type** | `string` | optional | Renderer type override (e.g., "currency", "date") |
 | **pinned** | `Enum<'left' \| 'right'>` | optional | Pin/freeze column to left or right side |
-| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
+| **summary** | `Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| 'percent_empty' \| 'percent_filled' \| 'sum' \| 'avg' \| 'min' \| 'max'> \| { type: Enum<'none' \| 'count' \| 'count_empty' \| 'count_filled' \| 'count_unique' \| … +6 more>; field?: string }` | optional | Footer aggregation for this column — the function alone, or `{ type, field }` to aggregate another field |
 | **prefix** | `{ field: string; type: Enum<'badge' \| 'text'> }` | optional | Field rendered inline before this cell value |
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
@@ -399,7 +401,7 @@ List chart view configuration
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| 'less_than_or_equal' \| 'in' \| 'not_in' \| 'is_empty' \| 'is_not_empty' \| 'is_null' \| 'is_not_null' \| 'before' \| 'after' \| 'between'>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
@@ -440,8 +442,8 @@ List chart view configuration
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string; message?: string; icon?: string }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `any` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. |
-| **performance** | `any` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. |
+| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. |
+| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. |
 
 
 ---
@@ -488,7 +490,7 @@ List chart view configuration
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns |
-| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| 'less_than_or_equal' \| 'in' \| 'not_in' \| 'is_empty' \| 'is_not_empty' \| 'is_null' \| 'is_not_null' \| 'before' \| 'after' \| 'between'>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **filter** | `{ field: string; operator?: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
@@ -528,8 +530,8 @@ List chart view configuration
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string; message?: string; icon?: string }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `any` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. |
-| **performance** | `any` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. |
+| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. |
+| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: { field: string; label?: string; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: { value: string \| number \| boolean; label: string; color?: string }[]; … }[] }` | optional |  |
 
 
@@ -965,7 +967,7 @@ Tab configuration for multi-tab view interface
 | **label** | `string` | optional | Display label |
 | **icon** | `string` | optional | Tab icon name |
 | **view** | `string` | optional | Referenced list view name from listViews |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| 'less_than_or_equal' \| 'in' \| 'not_in' \| 'is_empty' \| 'is_not_empty' \| 'is_null' \| 'is_not_null' \| 'before' \| 'after' \| 'between'>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| … +14 more>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
 | **order** | `integer` | optional | Tab display order |
 | **pinned** | `boolean` | ✅ | Pin tab (cannot be removed by users) |
 | **isDefault** | `boolean` | ✅ | Set as the default active tab |

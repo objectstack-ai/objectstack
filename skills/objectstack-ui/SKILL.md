@@ -16,10 +16,10 @@ description: >
   ships with the platform). CEL expressions in
   visibility/conditional rules: load objectstack-formula alongside.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "1.2"
+  version: "1.3"
   domain: ui
   tags: view, app, page, dashboard, report, chart, action, widget, doc
 ---
@@ -475,7 +475,11 @@ export const CrmApp = App.create({
   name: 'crm_enterprise',
   label: 'Enterprise CRM',
   icon: 'briefcase',
-  defaultAgent: 'sales_copilot',          // optional AI copilot binding
+  // defaultAgent: 'build',                // ADR-0063 §2 — the resolvable set is exactly two
+                                           // platform agents: `ask` (data surface) / `build`
+                                           // (authoring, e.g. Studio). Any other name parses
+                                           // but binds nothing at chat time. A data app like
+                                           // this one omits the key — `ask` is the default.
   // hidden: true,                         // ADR-0045 — drop from the App Switcher but keep
                                            // routable & permission-checked; the shell surfaces
                                            // hidden apps (e.g. `account`) via the avatar menu.
@@ -1821,6 +1825,25 @@ RLS/FLS), so a body that must scope by org reads it from `ctx` explicitly.
 `ctx.session?.organizationId` when the action must work regardless. (Same two
 isolation axes as hooks — `organization_id` row-scoping vs environment /
 database-per-tenant; see the objectstack-data hooks reference.)
+
+The caller's position names are on `ctx.session.positions` — the ADR-0090 D3
+spelling, the same one the hook `ctx.session`, `ctx.user.positions` and the
+sharing service use:
+
+```typescript
+// ✅ Canonical since #5613
+const positions = ctx.session?.positions ?? [];
+```
+
+> The key is **absent** (not empty) when the caller holds no positions, and the
+> whole `ctx.session` is `undefined` for a call with no identity envelope. The
+> pre-ADR-0090 alias of this same array is still emitted for one migration
+> window and then removed — see `action-session-*-to-positions` in the protocol
+> upgrade guide for the prescription. Migrate the READ to `positions`; do not
+> migrate an access check by renaming it. **This array is not an authorization
+> input**: `positions.includes('admin')` is the same defect under a blessed
+> name. Ask the security service for privilege (capability grants, placements,
+> derived posture — ADR-0095).
 
 ### Opening in a New Tab (`openIn` / `opensInNewTab` / `newTabUrl`)
 

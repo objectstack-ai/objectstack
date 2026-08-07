@@ -89,7 +89,8 @@ const EXTRA_ENTRIES = {
     'llms.txt': 'Protocol summary for LLM consumers.',
     'src/**/*.zod.ts':
       'The Zod schemas are themselves the contract (Prime Directive #1); downstream code imports them directly, so these sources are product rather than build input. Narrowed to *.zod.ts so no test or helper rides along.',
-    'api-surface.json': 'Export snapshot used by downstream compatibility checks.',
+    'api-surface':
+      'Export snapshot used by downstream compatibility checks — one file per published entry point since #5837.',
     'spec-changes.json': 'Machine-readable spec change log driving the upgrade guide.',
   },
 };

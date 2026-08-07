@@ -53,12 +53,21 @@ export type ExecutionStatus = z.infer<typeof ExecutionStatus>;
  * is different from `0` — "read nothing" is a fact, "reads nothing" is a kind.
  *
  * And `unmeasuredEffect` is the third answer, which a two-counter model would
- * have had to fake: a `connector_action` reaches an external system through a
- * descriptor that declares nothing about whether the action reads or writes, so
- * `0` understates a write and `1` overstates a read. Both are worse than saying
- * so — an understated `0` fires the broken-sweep alert on a healthy run until
- * operators learn to ignore it, and an overstated `1` makes the alert never
- * fire at all, which is the original bug back again.
+ * have had to fake: a `connector_action` reaches an external system, and when
+ * the action declares nothing about whether it reads or writes, `0` understates
+ * a write and `1` overstates a read. Both are worse than saying so — an
+ * understated `0` fires the broken-sweep alert on a healthy run until operators
+ * learn to ignore it, and an overstated `1` makes the alert never fire at all,
+ * which is the original bug back again.
+ *
+ * [#4395] "Declares nothing" is now the fallback rather than the only case:
+ * `ConnectorActionSchema.effect` lets an action say `read` or `write`, and a
+ * step dispatching a declared action reports a real `acted` (0 for a read, 1
+ * for an accepted write) instead of this flag. `unmeasuredEffect` keeps exactly
+ * its meaning and its consumers — it is what an UNdeclared action still
+ * reports, alongside a declared write whose dispatch failed (the upstream may
+ * have been reached) and a `script` step calling a function declared
+ * `'writes'` (#4396).
  */
 export const ExecutionStepMetricsSchema = lazySchema(() => z.object({
   selected: z.number().int().min(0).optional()

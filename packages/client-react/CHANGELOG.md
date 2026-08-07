@@ -1,5 +1,262 @@
 # @objectstack/client-react
 
+## 17.0.0-rc.5
+
+### Major Changes
+
+- def5919: refactor(client)!: `subscribeMetadata` 的 `type` 收窄为 `MetadataEventSubject`，订阅一个合同上永远不会来的事件改为编译报错 (#4627)
+
+  `MetadataEventType` 是一个封闭枚举：13 个 metadata 类型 × 3 个动作。#4602 已经把生产端钉成 declared = enforced —— 枚举外的类型（`translation`、`datasource`、`page`、`hook`、`trigger`、`validation` 等，全都是 `DEFAULT_METADATA_TYPE_REGISTRY` 里可注册的真实类型）**不发布**任何 realtime 事件，因为不存在能合法交付给 `(event: MetadataEvent) => void` 回调的事件形状。
+
+  消费端却一直是宽的 `string`。于是 `client.events.subscribeMetadata('translation', cb)` 编译全绿、运行永盲：回调永远不会被调用，而类型系统一个字都没说。这正是 AI 写订阅代码最容易踩的形状 —— 它看起来订阅上了。
+
+  本次把消费端也钉上，两端对齐后这种代码写不出来。
+
+  **新增导出**：`@objectstack/spec/api` 的 `MetadataEventSubject` —— `metadata.{type}.{action}` 的 `{type}` 半边，`'object' | 'field' | 'view' | …`。它是从 `MetadataEventType` **派生**的（模板字面量 + 分发式条件类型），不是在旁边重抄一份，所以两者不可能各说各话：枚举加一个成员，这个联合自动跟着长。`check:api-surface` 记录为 0 breaking / 1 added。
+
+  **签名收窄**（三处，全部只是把 `string` 换成这个联合）：
+
+  - `@objectstack/client` 的 `RealtimeAPI.subscribeMetadata(type, …)`
+  - `@objectstack/client-react` 的 `useMetadataSubscription(type, …)`
+  - `@objectstack/client-react` 的 `useMetadataSubscriptionCallback(type, …)`
+
+  **FROM → TO —— 原来传 `string` 的代码怎么改**
+
+  枚举内的字面量一个字都不用动，本仓 6 处调用点（`'object'`）零迁移：
+
+  ```ts
+  // 照常编译，没有变化
+  client.events.subscribeMetadata("object", onEvent);
+  useMetadataSubscription("view");
+  ```
+
+  真正被拒绝的只有两种写法，各有各的一行修复：
+
+  ```ts
+  // FROM —— 变量声明成了宽的 string
+  const type: string = route.params.metaType;
+  client.events.subscribeMetadata(type, onEvent); // TS2345
+
+  // TO —— 把变量（或 state、或路由参数）的类型改成这个联合
+  import type { MetadataEventSubject } from "@objectstack/spec/api";
+  const type: MetadataEventSubject = "object";
+  client.events.subscribeMetadata(type, onEvent);
+  ```
+
+  ```ts
+  // FROM —— 订阅一个没有 realtime 合同的类型
+  client.events.subscribeMetadata("translation", onEvent); // TS2345
+
+  // TO —— 删掉它。这段代码从 #4602 起就收不到任何事件，
+  //       编译器现在说的是它一直以来的运行时事实，不是新增的限制。
+  ```
+
+  编译器会把每一处指出来，错误码都是 **TS2345**（`Argument of type '"translation"' is not assignable to parameter of type 'MetadataEventSubject'`）。**运行时行为零变化** —— 被拒绝的调用本来就收不到事件，标 major 是因为这是源码级破坏性变更（#5181 的同一条先例：源码级破坏、运行时不变，仍走 major）。
+
+  **本次不做、也不预答的**：哪些可注册类型「应该」有 realtime 事件，是 #4627 的轴 2 —— 一个由真实需求驱动的产品覆盖面问题（例如 #4426 的 flow/workflow i18n 若落地会把 `translation` 推上来）。枚举没有动一个成员。派生关系保证了这件事将来只需要改一处：枚举加三个名字，两端同时跟上。
+
+### Patch Changes
+
+- Updated dependencies [e8f8f6c]
+- Updated dependencies [7f713b6]
+- Updated dependencies [c960170]
+- Updated dependencies [def5919]
+- Updated dependencies [ce0cfe9]
+- Updated dependencies [1363084]
+  - @objectstack/spec@17.0.0-rc.5
+  - @objectstack/client@17.0.0-rc.5
+  - @objectstack/core@17.0.0-rc.5
+
+## 17.0.0-rc.4
+
+### Major Changes
+
+- d9cac60: **BREAKING** — `GET /meta/:type/:name` now answers exactly one body shape: the
+  `GetMetaItemResponseSchema` envelope `{ type, name, item, … }` that
+  `packages/spec` has always declared for it. On the default configuration this
+  endpoint used to answer the **bare metadata document** instead (#5563).
+
+  ### What changed, and why it is breaking
+
+  The route had two mutually exclusive branches with different response
+  structures. The cached branch — reached whenever `metadata.enableCache` is on,
+  which is the **default** (`enableCache: z.boolean().default(true)`) — served
+  `getMetaItemCached`'s `result.data`, and that value has the envelope already
+  stripped. The uncached branch served `getMetaItem`'s envelope. So the one shape
+  the spec declared was the one a default deployment could not obtain, and the
+  envelope surfaced only when the cache was off or when the read structurally
+  bypassed it (`app`, `doc`, `book`, `?state=draft`, `?preview=draft`,
+  `?package=`). Consumers had no correct static type — they sniffed at runtime or
+  reached for `as any` (#5545 was blocked on exactly this).
+
+  The dispatcher's `/meta` domain had the same split one layer down: the protocol
+  resolver answered the envelope while the ObjectQL-registry and MetadataService
+  fallbacks answered bare documents. Both fallbacks now wrap what they found,
+  taking `type`/`name` from the request.
+
+  ### Migration
+
+  `GET /api/v1/meta/object/customer`, default configuration:
+
+  ```jsonc
+  // before — the bare document
+  { "name": "customer", "label": "Customer", "fields": { /* … */ } }
+
+  // after — the declared envelope; the document is verbatim under `item`
+  {
+    "type": "object",
+    "name": "customer",
+    "item": { "name": "customer", "label": "Customer", "fields": { /* … */ } }
+  }
+  ```
+
+  - **Reading the body directly** (`fetch`, `client.meta.getItem`,
+    `client.meta.getCached().data`): read the document at `.item`. Nothing inside
+    it changed. `type` is the canonical singular metadata type name, so
+    `/meta/objects/customer` and `/meta/object/customer` answer the same `type`.
+  - **`useObject` / `useFields` (`@objectstack/client-react`)**: `useObject().data`
+    is now the envelope — `data.item.label`, `data.item.fields`, where it used to
+    be `data.label` / `data.fields`. `useFields()` is unchanged (it already
+    returns the flattened field list) and is the shorter path when fields are all
+    you need.
+  - **`isMetaEnvelope`, exported from `@objectstack/rest`, is REMOVED.** It
+    existed only to tell the two shapes apart. There is one shape now, so the
+    replacement for `isMetaEnvelope(r) ? r.item : r` is `r.item`.
+  - **Not converged, deliberately**: `?layers=true` still answers the layered
+    diagnostic projection `{ type, name, code, overlay, overlayScope, effective,
+validation }`. Collapsing three layers into one `item` would delete the
+    diagnostic. Unaffected unless you pass that flag.
+
+### Patch Changes
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [aa25a81]
+- Updated dependencies [3a18e24]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/client@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

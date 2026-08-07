@@ -45,10 +45,10 @@
  * this call identify a single row by primary key?* — asked of two places, in
  * this order:
  *
- *  - **`data.id`, taken verbatim when truthy** → `by-id`: routes to
- *    `driver.update(object, id, data, …)`.
- *  - otherwise, `options.where.id` is a **scalar** (`string` / `number` /
- *    `bigint`, not `null`) **and truthy** → `by-id`, same route.
+ *  - **`data.id`** is a **scalar** (`string` / `number` / `bigint`, not `null`)
+ *    **and truthy** → `by-id`: routes to `driver.update(object, id, data, …)`.
+ *  - otherwise, `options.where.id` is a **scalar** **and truthy** → `by-id`,
+ *    same route.
  *  - otherwise, `options.multi` is truthy → `multi`: routes to
  *    `driver.updateMany` with the middleware-composed AST (#2982).
  *  - otherwise → **`reject`**. The call names neither one row nor a bulk
@@ -57,23 +57,31 @@
  * Three things about that list are load-bearing and easy to get wrong when
  * copying it by hand — which is the whole argument for importing it instead:
  *
- * 1. **The `where.id` scalar test.** `{ id: { $in: [...] } }` / `{ id: [...] }`
- *    / `{ id: null }` are predicates over many rows. Treating one as an id
- *    would bind the operator object literally into `driver.update(object,
- *    {$in: […]}, …)` **and** skip the #2982 row-scoping AST seeding. So they
- *    are `reject` unless the caller also said `multi`.
- * 2. **`data.id` is NOT scalar-tested.** `ObjectQL.update` reads `data.id`
- *    first and uses it as-is whenever it is truthy, so an operator object
- *    parked there wins over everything below it — including an explicit
- *    `multi: true`. This module reports that verdict rather than quietly
- *    improving on it: a predicate that is *better* than the producer is a
- *    second opinion, which is exactly what #4550 removed. (The asymmetry
- *    itself is filed as objectstack#5748; when it is fixed, it is fixed **here
- *    and in `engine.ts` together**, which is now one edit instead of two.)
+ * 1. **The scalar test, on BOTH id sources.** `{ id: { $in: [...] } }` /
+ *    `{ id: [...] }` / `{ id: null }` are predicates over many rows. Treating
+ *    one as an id would bind the operator object literally into
+ *    `driver.update(object, {$in: […]}, …)` **and** skip the #2982 row-scoping
+ *    AST seeding. So they are `reject` unless the caller also said `multi` —
+ *    and that holds wherever the non-scalar sits, `options.where.id` or the
+ *    payload's `data.id`.
+ * 2. **`data.id` outranks `where.id`, but only when it IS an id.** The payload
+ *    is read first, so a scalar `data.id` still wins over `where` and over an
+ *    explicit `multi: true`; `update(o, { id: 'rec_1', … }, { multi: true })`
+ *    is one by-id write, unchanged. What a non-scalar `data.id` no longer does
+ *    is *outrank* anything: it is not an id, so the decision falls through to
+ *    `where.id`, then to `multi`, then to `reject` — exactly the ladder a
+ *    non-scalar `where.id` falls down. Until objectstack#5748 the payload half
+ *    took `data.id` verbatim whenever it was truthy, which made the same
+ *    operator object an id in `data` and a predicate in `where` — two rules
+ *    for one primary key inside one method, with the payload one binding
+ *    `{$in: […]}` into the primary-key position and swallowing a declared
+ *    `multi: true` with no diagnostic. Now there is one rule, defined once
+ *    below and reached by both halves.
  * 3. **Truthiness, not `!== undefined`.** The engine branches on
  *    `if (hookContext.input.id)`, so a falsy scalar id — `where: { id: 0 }`,
- *    `where: { id: '' }` — does **not** take the by-id route; it falls through
- *    to `multi`/`reject` like any other non-identifying call.
+ *    `data: { id: 0 }`, `where: { id: '' }` — does **not** take the by-id
+ *    route; it falls through to `multi`/`reject` like any other
+ *    non-identifying call.
  *
  * ## What the predicate deliberately does NOT model
  *
@@ -99,7 +107,7 @@ export const ENGINE_UPDATE_REJECT_MESSAGE = 'Update requires an ID or options.mu
 
 /** What `ObjectQLEngine.update` will do with a given `(data, options)` pair. */
 export type EngineUpdateDispatch =
-  /** A truthy `data.id`, or a truthy scalar `where.id` — `driver.update`. */
+  /** A truthy scalar `data.id`, or a truthy scalar `where.id` — `driver.update`. */
   | { readonly kind: 'by-id'; readonly id: unknown }
   /** No single id but `options.multi` — `driver.updateMany` with the composed AST. */
   | { readonly kind: 'multi' }
@@ -120,6 +128,29 @@ export interface EngineUpdateDispatchData {
 }
 
 /**
+ * "Is this VALUE a primary key, or a predicate over many rows?" — the one
+ * scalar test, so that the two places an update can carry an id
+ * (`options.where.id` and `data.id`) cannot answer it differently.
+ *
+ * `null`, `undefined`, arrays and operator objects (`{ $in: [...] }`,
+ * `{ $ne: … }`) all yield `undefined`: they select a SET, and binding one into
+ * the primary-key position of `driver.update(object, id, …)` is the #4434 /
+ * #4550 failure the whole family exists to prevent.
+ *
+ * Not exported: callers want a verdict about a CALL, which is
+ * {@link resolveEngineUpdateDispatch}, or about the `where` half, which is
+ * {@link scalarUpdateId}. Adding a third public spelling of the same question
+ * is how a rule with one definition grows a second one.
+ */
+function asScalarId(value: unknown): string | number | bigint | undefined {
+  const t = typeof value;
+  if (value !== null && (t === 'string' || t === 'number' || t === 'bigint')) {
+    return value as string | number | bigint;
+  }
+  return undefined;
+}
+
+/**
  * Extract the SCALAR `where.id`, or `undefined` when the call's `where` does
  * not name one row by primary key.
  *
@@ -127,8 +158,8 @@ export interface EngineUpdateDispatchData {
  * arrays and operator objects (`{ $in: [...] }`, `{ $ne: … }`) all yield
  * `undefined`, because they are predicates over many rows.
  *
- * Note this covers only the `where` half of the update decision; `data.id`
- * outranks it and is taken verbatim (see the module header, point 2). Use
+ * Note this covers only the `where` half of the update decision; a scalar
+ * `data.id` outranks it (see the module header, point 2). Use
  * {@link resolveEngineUpdateDispatch} for the whole answer.
  */
 export function scalarUpdateId(
@@ -137,12 +168,7 @@ export function scalarUpdateId(
   const where = options?.where;
   if (!where || typeof where !== 'object') return undefined;
   if (!('id' in (where as Record<string, unknown>))) return undefined;
-  const whereId = (where as Record<string, unknown>).id;
-  const t = typeof whereId;
-  if (whereId !== null && (t === 'string' || t === 'number' || t === 'bigint')) {
-    return whereId as string | number | bigint;
-  }
-  return undefined;
+  return asScalarId((where as Record<string, unknown>).id);
 }
 
 /**
@@ -163,9 +189,13 @@ export function resolveEngineUpdateDispatch(
   data: EngineUpdateDispatchData,
   options?: EngineUpdateDispatchInput | null,
 ): EngineUpdateDispatch {
-  // `let id = data.id; if (!id && <scalar where.id>) id = whereId;` — the
-  // producer's own two lines, in the producer's own order.
-  let id: unknown = data.id;
+  // The payload is still read FIRST and still outranks `where` — but it only
+  // outranks with an actual id. `data.id` goes through the same scalar test as
+  // `where.id` (objectstack#5748), so an operator object / array / `null`
+  // parked in the payload is not an id and does not shadow the ladder below
+  // it. `data.id` stays UNGUARDED so a missing payload is the producer's
+  // `TypeError`, not a kinder verdict.
+  let id: unknown = asScalarId(data.id);
   if (!id) {
     const fromWhere = scalarUpdateId(options);
     if (fromWhere !== undefined) id = fromWhere;
@@ -208,8 +238,8 @@ export function assertEngineUpdateDispatch(
  *
  * Every case names a call shape and the verdict the **real engine** gives it.
  * A double proved against these is proved against the producer, including the
- * shapes that look like an id and are not — and the one that does not look
- * like an id and is (`data.id`).
+ * shapes that look like an id and are not — in `where` and, since
+ * objectstack#5748, in the payload too.
  */
 export interface EngineUpdateDispatchCase {
   /** What the shape is, in the words a failure message should use. */
@@ -220,6 +250,18 @@ export interface EngineUpdateDispatchCase {
   readonly options: EngineUpdateDispatchInput | undefined;
   /** The verdict the engine gives it. */
   readonly expect: EngineUpdateDispatch['kind'];
+  /**
+   * For a `by-id` case, the value that must land in the PRIMARY-KEY position
+   * of `driver.update(object, id, …)`.
+   *
+   * `expect` alone cannot separate "picked the right id" from "picked an id":
+   * a payload carrying `{ id: { $in: […] } }` beside a scalar `where.id`
+   * dispatches `by-id` under both the old rule and the new one, and only the
+   * bound value says which id source won — the operator object (#5748's bug)
+   * or the scalar (#5748's fix). Optional: omit it when the case's id source
+   * is unambiguous.
+   */
+  readonly expectId?: unknown;
 }
 
 export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] = [
@@ -227,14 +269,25 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   { what: 'scalar string where.id', data: { title: 'x' }, options: { where: { id: 'rec_1' } }, expect: 'by-id' },
   { what: 'scalar number where.id', data: { title: 'x' }, options: { where: { id: 42 } }, expect: 'by-id' },
   { what: 'scalar where.id alongside other predicates', data: { title: 'x' }, options: { where: { id: 'rec_1', tenant: 't1' } }, expect: 'by-id' },
-  // ── by-id via the PAYLOAD, which outranks `where` and `multi` alike.
-  { what: 'id carried in the data payload, no where at all', data: { id: 'rec_1', title: 'x' }, options: undefined, expect: 'by-id' },
-  { what: 'data.id wins over an explicit multi:true', data: { id: 'rec_1', title: 'x' }, options: { where: { tenant: 't1' }, multi: true }, expect: 'by-id' },
+  // ── by-id via the PAYLOAD. A SCALAR `data.id` still outranks `where` and
+  //    `multi` alike — that is the common, legal `update(o, { id, …fields })`
+  //    spelling and objectstack#5748 left it exactly as it was.
+  { what: 'id carried in the data payload, no where at all', data: { id: 'rec_1', title: 'x' }, options: undefined, expect: 'by-id', expectId: 'rec_1' },
+  { what: 'a SCALAR data.id still wins over an explicit multi:true', data: { id: 'rec_1', title: 'x' }, options: { where: { tenant: 't1' }, multi: true }, expect: 'by-id', expectId: 'rec_1' },
+  { what: 'a SCALAR data.id still wins over a scalar where.id', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 'rec_2' } }, expect: 'by-id', expectId: 'rec_1' },
+  // ── The payload's scalar test (objectstack#5748). A non-scalar `data.id`
+  //    names no row, so it stops shadowing everything under it: the decision
+  //    falls through to `where.id`, then `multi`, then `reject`. Before #5748
+  //    each of these dispatched `by-id` with the operator object itself bound
+  //    into `driver.update`'s primary-key position.
+  { what: 'operator object in data.id, scalar where.id — the WHERE id wins, the operator is not one', data: { id: { $in: ['a', 'b'] }, title: 'x' }, options: { where: { id: 'rec_1' } }, expect: 'by-id', expectId: 'rec_1' },
   // ── multi.
   { what: 'multi with a predicate', data: { title: 'x' }, options: { where: { tenant: 't1' }, multi: true }, expect: 'multi' },
   { what: 'multi with no predicate at all', data: { title: 'x' }, options: { multi: true }, expect: 'multi' },
   { what: 'multi alongside an $in id set', data: { title: 'x' }, options: { where: { id: { $in: ['a', 'b'] } }, multi: true }, expect: 'multi' },
   { what: 'multi with a FALSY data.id (0 does not identify a row)', data: { id: 0, title: 'x' }, options: { multi: true }, expect: 'multi' },
+  { what: 'operator object in data.id WITH multi:true — the declared bulk intent is honoured (#5748)', data: { id: { $in: ['a', 'b'] }, title: 'x' }, options: { multi: true }, expect: 'multi' },
+  { what: 'array data.id with multi:true', data: { id: ['a', 'b'], title: 'x' }, options: { multi: true }, expect: 'multi' },
   // ── The rejects. Every one of these is a call a fake that mirrors the rule
   //    by hand tends to accept, and a running server answers 500 to.
   { what: 'predicate on a non-id column, no multi', data: { title: 'x' }, options: { where: { tenant: 't1' } }, expect: 'reject' },
@@ -245,4 +298,11 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   { what: 'empty where, no multi', data: { title: 'x' }, options: { where: {} }, expect: 'reject' },
   { what: 'no options at all', data: { title: 'x' }, options: undefined, expect: 'reject' },
   { what: 'multi explicitly false with a predicate', data: { title: 'x' }, options: { where: { tenant: 't1' }, multi: false }, expect: 'reject' },
+  // ── The typo shape #5748's B option was worried about, pinned LOUD: an
+  //    operator object in the payload with NO declared bulk intent is a
+  //    rejection, never a silent promotion to a bulk write.
+  { what: 'operator object in data.id, NO multi — rejected, NOT silently promoted to a bulk write (#5748)', data: { id: { $in: ['a', 'b'] }, title: 'x' }, options: undefined, expect: 'reject' },
+  { what: 'operator object in data.id, multi explicitly false', data: { id: { $in: ['a', 'b'] }, title: 'x' }, options: { multi: false }, expect: 'reject' },
+  { what: 'array data.id, no multi', data: { id: ['a', 'b'], title: 'x' }, options: undefined, expect: 'reject' },
+  { what: 'null data.id, no multi', data: { id: null, title: 'x' }, options: undefined, expect: 'reject' },
 ];

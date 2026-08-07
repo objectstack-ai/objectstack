@@ -7,6 +7,7 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
+import { declareSeedSource } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IJobService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
@@ -1035,6 +1036,15 @@ export class AppPlugin implements Plugin {
                  ctx.logger.warn('[Seeder] Failed to register seed-datasets/seed-replayer service', { error: e?.message });
              }
 
+             // #4795 — declare this source BEFORE choosing what to do with it.
+             // Consumers that must not act until the boot's own rows have
+             // landed (the ADR-0104 fresh-datastore attestation) read the
+             // tally at `kernel:ready`; counting the source only on the
+             // branch that seeds would leave exactly the gap they are asking
+             // about. Every branch below closes the handle — settle when the
+             // write is done, suppress when this boot will not write at all.
+             const seedSource = declareSeedSource(ctx);
+
              // Decide whether to also run the seed inline at AppPlugin
              // start. In multi-tenant mode, the per-org replay (driven
              // by OrgScopingPlugin's sys_organization middleware) is the
@@ -1047,8 +1057,17 @@ export class AppPlugin implements Plugin {
              if (this.skipSeedData) {
                  // #3917: this boot exists to READ metadata (os migrate
                  // plan/apply). It must not write to the target database.
+                 // The source stays pending for the life of the boot, which
+                 // is what keeps ADR-0104 from self-certifying over rows this
+                 // boot deliberately never wrote (#4795).
+                 seedSource.suppress('skip-seed-data');
                  ctx.logger.info('[Seeder] skipSeedData — inline seed suppressed; no rows written by this boot');
              } else if (multiTenant) {
+                 // Same posture, different cause: the rows these datasets
+                 // describe are written per org on `sys_organization` insert,
+                 // so at boot they do not exist yet and nothing observed now
+                 // can prove a claim about them (#4795).
+                 seedSource.suppress('multi-tenant-replay');
                  ctx.logger.info('[Seeder] multi-tenant mode — skipping inline seed; per-org replay will run on sys_organization insert');
              } else {
              // Inline seed budget: large bundles (e.g. CRM Starter's 10
@@ -1170,6 +1189,15 @@ export class AppPlugin implements Plugin {
              // `kernel:ready` — those users would stay member-less until the
              // next restart. Emitting on settle lets the backfill re-run (#2996).
              const emitSeedSettled = (overBudget: boolean) => {
+                 // #4795 — settle FIRST, and before the `trigger` guard below.
+                 // Two orderings depend on it: a consumer running inside the
+                 // `app:seeded` hook must see this source already settled (it
+                 // asks "has everything landed?" and would otherwise defer
+                 // forever on the very signal telling it to act), and a kernel
+                 // context with no `trigger()` must not strand the tally at
+                 // pending — the seed still finished, there is simply nobody
+                 // to tell.
+                 seedSource.settle();
                  const trigger = (ctx as any).trigger;
                  if (typeof trigger !== 'function') return;
                  try {

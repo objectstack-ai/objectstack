@@ -54,10 +54,29 @@ import { analyzeSites, listSchemaFiles, type Posture } from './strictness-ledger
 
 /**
  * The `Class` vocabulary the ledger uses. Every one of these was introduced by a
- * measurement that needed it, and two of them (`no door` / `no gate`) imply
- * OPPOSITE follow-ups — retiring a `no gate` shape deletes something authors use.
- * So the parser rejects anything outside this set rather than bucketing it as
- * "other".
+ * measurement that needed it, and three of them (`no door` / `no gate` /
+ * `covered`) imply MUTUALLY EXCLUSIVE follow-ups off the SAME measurement —
+ * retiring a `no gate` shape deletes something authors use, and retiring a
+ * `covered` one deletes a key its consumers still gate. So the parser rejects
+ * anything outside this set rather than bucketing it as "other".
+ *
+ * ## Why the list grows instead of rounding to the nearest word (#5249)
+ *
+ * `covered` is the third verdict added because the existing vocabulary returned
+ * the WRONG ACTION rather than merely an imprecise label, and that is the only
+ * bar a new word has to clear. Twice now the two-axis read (carrier / parse) has
+ * produced one answer for two situations whose right next steps are opposite:
+ *
+ *   - 批 15 added `no gate` — parse absent, but the carrier is LIVE, so the fix
+ *     is to wire the parse, not to retire the vocabulary;
+ *   - #5249 adds `covered` — carrier absent AND parse absent (mechanically `no
+ *     door`), but the vocabulary is fully guarded at every consumer, so the
+ *     follow-up is NOTHING. `no door` would have pointed the next agent at
+ *     ADR-0049 retirement of a key nine live nav branches share.
+ *
+ * The cell is read by future agents, so a verdict that names the wrong action is
+ * the classification-layer mirror of a lenient consumer: the error does not stop
+ * at the cell, it is amplified by whoever acts on it.
  */
 export const VERDICTS = [
   'authorable',
@@ -68,20 +87,38 @@ export const VERDICTS = [
   'open',
   'no door',
   'no gate',
+  'covered',
 ] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
 /** The buckets the subtotals report. */
-export const BUCKETS = ['authorable', 'unresolved', 'wire/open', 'no door', 'no gate', 'unclassified'] as const;
+export const BUCKETS = [
+  'authorable',
+  'unresolved',
+  'wire/open',
+  'no door',
+  'no gate',
+  'covered',
+  'unclassified',
+] as const;
 export type Bucket = (typeof BUCKETS)[number];
 
 /**
  * Verdict → bucket, for the verdicts that name exactly one class.
  *
- * `verify` counts as **authorable**: `ui/app.zod.ts`'s `BaseNavItemSchema` is held
- * pending the finding-16 `.extend()` check, which is a readiness flag on an
- * authorable site, not a third class — and the ledger's published subtotal
- * (`view` 6 + `app` 1 = 7) already counted it that way.
+ * `verify` counts as **authorable** — a readiness flag on an authorable site, not
+ * a third class, and the ledger's published subtotal (`view` 6 + `app` 1 = 7)
+ * counted it that way from the start. The mapping is unchanged at #5249; what
+ * changed is that its one instance (`ui/app.zod.ts`'s `BaseNavItemSchema`, held
+ * pending the finding-16 `.extend()` check) has since been checked and moved to
+ * `covered`. `verify` keeps both its meaning and its bucket for the next site
+ * that needs holding.
+ *
+ * `covered` gets its **own** bucket rather than sharing `no door`'s. Both are
+ * carrier-absent + parse-absent, so an arithmetic merge would be defensible — but
+ * the subtotal is a worklist readout, and the two rows prescribe opposite work
+ * (`no door` → ADR-0049 retirement; `covered` → none). Folding them would restore
+ * exactly the ambiguity the verdict was added to remove, one layer up.
  *
  * `mixed` / `split` name no single class and are resolved separately: with an
  * explicit breakdown when the per-schema read has been done, or as `unresolved`
@@ -94,6 +131,7 @@ const BUCKET_OF: Partial<Record<Verdict, Bucket>> = {
   open: 'wire/open',
   'no door': 'no door',
   'no gate': 'no gate',
+  covered: 'covered',
 };
 
 export interface ParsedClass {
@@ -220,7 +258,15 @@ export function bucketize(
 }
 
 export function emptyBuckets(): Record<Bucket, number> {
-  return { authorable: 0, unresolved: 0, 'wire/open': 0, 'no door': 0, 'no gate': 0, unclassified: 0 };
+  return {
+    authorable: 0,
+    unresolved: 0,
+    'wire/open': 0,
+    'no door': 0,
+    'no gate': 0,
+    covered: 0,
+    unclassified: 0,
+  };
 }
 
 /* -------------------------------------------------------------- ledger parse */
@@ -464,6 +510,7 @@ const BUCKET_LABEL: Record<Bucket, string> = {
   'wire/open': 'wire / open — out of forced scope',
   'no door': 'no door — no carrier, ADR-0049 territory',
   'no gate': 'no gate — carrier live, no parse',
+  covered: 'covered — no carrier, no parse, guarded at every consumer',
   unclassified: '⚠️ unclassified — no ledger row',
 };
 

@@ -824,14 +824,36 @@ export const PluginLoadingStateSchema = lazySchema(() => z.object({
 // Export types
 export type PluginLoadingStrategy = z.infer<typeof PluginLoadingStrategySchema>;
 export type PluginPreloadConfig = z.infer<typeof PluginPreloadConfigSchema>;
+/** Post-parse shape of {@link PluginPreloadConfig} — defaults applied, transforms run (ADR-0122). */
+export type PluginPreloadConfigParsed = z.infer<typeof PluginPreloadConfigSchema>;
 export type PluginCodeSplitting = z.infer<typeof PluginCodeSplittingSchema>;
+/** Post-parse shape of {@link PluginCodeSplitting} — defaults applied, transforms run (ADR-0122). */
+export type PluginCodeSplittingParsed = z.infer<typeof PluginCodeSplittingSchema>;
 export type PluginDynamicImport = z.infer<typeof PluginDynamicImportSchema>;
+/** Post-parse shape of {@link PluginDynamicImport} — defaults applied, transforms run (ADR-0122). */
+export type PluginDynamicImportParsed = z.infer<typeof PluginDynamicImportSchema>;
 export type PluginInitialization = z.infer<typeof PluginInitializationSchema>;
+/** Post-parse shape of {@link PluginInitialization} — defaults applied, transforms run (ADR-0122). */
+export type PluginInitializationParsed = z.infer<typeof PluginInitializationSchema>;
 export type PluginDependencyResolution = z.infer<typeof PluginDependencyResolutionSchema>;
+/** Post-parse shape of {@link PluginDependencyResolution} — defaults applied, transforms run (ADR-0122). */
+export type PluginDependencyResolutionParsed = z.infer<typeof PluginDependencyResolutionSchema>;
 export type PluginHotReload = z.infer<typeof PluginHotReloadSchema>;
+/** Post-parse shape of {@link PluginHotReload} — defaults applied, transforms run (ADR-0122). */
+export type PluginHotReloadParsed = z.infer<typeof PluginHotReloadSchema>;
 export type PluginCaching = z.infer<typeof PluginCachingSchema>;
+/** Post-parse shape of {@link PluginCaching} — defaults applied, transforms run (ADR-0122). */
+export type PluginCachingParsed = z.infer<typeof PluginCachingSchema>;
 export type PluginSandboxing = z.infer<typeof PluginSandboxingSchema>;
+/** Post-parse shape of {@link PluginSandboxing} — defaults applied, transforms run (ADR-0122). */
+export type PluginSandboxingParsed = z.infer<typeof PluginSandboxingSchema>;
 export type PluginPerformanceMonitoring = z.infer<typeof PluginPerformanceMonitoringSchema>;
+/** Post-parse shape of {@link PluginPerformanceMonitoring} — defaults applied, transforms run (ADR-0122). */
+export type PluginPerformanceMonitoringParsed = z.infer<typeof PluginPerformanceMonitoringSchema>;
 export type PluginLoadingConfig = z.infer<typeof PluginLoadingConfigSchema>;
+/** Post-parse shape of {@link PluginLoadingConfig} — defaults applied, transforms run (ADR-0122). */
+export type PluginLoadingConfigParsed = z.infer<typeof PluginLoadingConfigSchema>;
 export type PluginLoadingEvent = z.infer<typeof PluginLoadingEventSchema>;
 export type PluginLoadingState = z.infer<typeof PluginLoadingStateSchema>;
+/** Post-parse shape of {@link PluginLoadingState} — defaults applied, transforms run (ADR-0122). */
+export type PluginLoadingStateParsed = z.infer<typeof PluginLoadingStateSchema>;

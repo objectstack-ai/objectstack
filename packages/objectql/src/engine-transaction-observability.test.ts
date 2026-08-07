@@ -14,11 +14,17 @@
 // committed reported nothing at all. These tests pin the diagnostics that make
 // the two DISCOVERABLE.
 //
-// What they deliberately do NOT pin is any change of behaviour. Refusing the
-// degrade (`opts.require`) or refusing the cross-driver write would tighten the
-// declared contract in `packages/spec/src/contracts/objectql-engine.ts`; that
-// half of #4619 is spec-lane work and is not done here. So every assertion
-// below is of the form "the same thing happens, and now it is also said".
+// ⚠️ SCOPE UPDATE (#5351 / #5696, 2026-08-06 ruling). This file originally
+// pinned BOTH caveats and pinned neither's behaviour, on the standing note that
+// tightening either would change the declared contract and was spec-lane work.
+// That work landed. Caveat 2's subject is gone — a cross-driver business write
+// is now REFUSED and a system ledger is CARVED OUT, so there is no split left
+// to report — and its section has moved wholesale to
+// `engine-transaction-same-origin.test.ts`, re-asked against the decided
+// verdict rather than re-spelled. Caveat 1 is untouched and still lives here:
+// the degrade still happens and still warns once; `opts.require` (#5696) made
+// refusing it a caller's OPTION without changing the default this section
+// covers, and that option is pinned in `engine-transaction-contract.test.ts`.
 
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from './engine.js';
@@ -129,7 +135,7 @@ describe('transaction() degrade with no beginTransaction warns once (#4619)', ()
     const driver = makeDriver('memory', { transactional: false });
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, '__test__');
     return { rec, engine, driver };
   }
 
@@ -191,7 +197,7 @@ describe('transaction() degrade with no beginTransaction warns once (#4619)', ()
     const engine = new ObjectQL({ logger: rec.logger } as any);
     engine.registerDriver(makeDriver('memory'), true);
     await engine.init();
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, '__test__');
 
     await engine.transaction(async () => {
       await engine.insert('thing', { name: 'A' });
@@ -219,181 +225,29 @@ describe('transaction() degrade with no beginTransaction warns once (#4619)', ()
 });
 
 // ---------------------------------------------------------------------------
-// 2. Default-driver-only → loud cross-datasource routing diagnostic
+// 2. Default-driver-only — MOVED. The subject of this section was decided.
 // ---------------------------------------------------------------------------
-
-describe('a write inside transaction() routed off the default datasource is reported at error (#4619)', () => {
-  async function twoDatasourceEngine() {
-    const rec = recordingLogger();
-    const engine = new ObjectQL({ logger: rec.logger } as any);
-    const primary = makeDriver('primary');
-    const ledgerDs = makeDriver('ledger_db');
-    const archiveDs = makeDriver('archive_db');
-    engine.registerDriver(ledgerDs);
-    engine.registerDriver(archiveDs);
-    engine.registerDriver(primary, true); // default
-    await engine.init();
-    // `ledger` and `archive` live elsewhere; `thing` stays on the default.
-    engine.setDatasourceMapping([
-      { objectPattern: 'ledger', datasource: 'ledger_db' },
-      { objectPattern: 'archive', datasource: 'archive_db' },
-    ]);
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
-    engine.registry.registerObject({ name: 'ledger', fields: { name: { type: 'text' } } } as any);
-    engine.registry.registerObject({ name: 'archive', fields: { name: { type: 'text' } } } as any);
-    const splits = () => matching(rec.at('error'), 'running OUTSIDE the transaction');
-    return { rec, engine, primary, ledgerDs, archiveDs, splits };
-  }
-
-  it('reports the split — which object, which datasource, and that it is outside the transaction', async () => {
-    const { engine, ledgerDs, splits } = await twoDatasourceEngine();
-
-    await engine.transaction(async () => {
-      await engine.insert('thing', { name: 'covered' });
-      await engine.insert('ledger', { name: 'NOT covered' });
-    });
-
-    const found = splits();
-    expect(found).toHaveLength(1);
-    expect(found[0].message).toContain("insert of 'ledger'");
-    expect(found[0].message).toContain("datasource 'ledger_db'");
-    expect(found[0].message).toContain("default datasource 'primary'");
-    // The consequence, concretely, and the fix — both owed by an `error`.
-    expect(found[0].message).toContain('rolling the transaction back will NOT undo it');
-    expect(found[0].message).toContain('datasourceMapping');
-    expect(meta(found[0])).toMatchObject({
-      object: 'ledger',
-      operation: 'insert',
-      datasource: 'ledger_db',
-      transactionDatasource: 'primary',
-    });
-
-    // BEHAVIOUR IS UNCHANGED: the write still went to the mapped datasource,
-    // exactly as before. This PR reports; refusing is the spec half.
-    expect(ledgerDs.writes).toHaveLength(1);
-    expect(ledgerDs.writes[0]).toMatchObject({ object: 'ledger', op: 'create' });
-
-    // And it is worse than "written without a transaction", which is what the
-    // contract's caveat says. `buildDriverOptions` reads the ambient handle
-    // with no idea which driver is about to receive it, so `ledger_db`'s driver
-    // is handed `primary`'s transaction object. Pinned here as OBSERVED, not
-    // endorsed — it predates this change (nothing here touches
-    // `buildDriverOptions`) and is filed separately; the assertion exists so
-    // that whoever fixes it sees this test, rather than a silent shift under a
-    // `toBeUndefined()` that was only ever a guess.
-    expect(ledgerDs.writes[0].transaction).toEqual({ __trx: 'primary' });
-  });
-
-  it('does not fire for writes that stay on the default datasource', async () => {
-    const { engine, primary, splits } = await twoDatasourceEngine();
-
-    await engine.transaction(async () => {
-      await engine.insert('thing', { name: 'A' });
-      await engine.insert('thing', { name: 'B' });
-    });
-
-    expect(splits()).toHaveLength(0);
-    // and those writes really did ride the transaction
-    expect(primary.writes).toHaveLength(2);
-    expect(primary.writes[0].transaction).toBeTruthy();
-  });
-
-  it('does not fire for a mapped write made OUTSIDE any transaction — no false positive', async () => {
-    const { engine, splits } = await twoDatasourceEngine();
-
-    // Routing an object to another datasource is a normal, supported thing to
-    // do. It is only a problem while a transaction is open and claiming to
-    // cover the work, so an ordinary write must stay silent.
-    const seeded = await engine.insert('ledger', { name: 'plain write' });
-    await engine.update('ledger', { id: seeded.id, name: 'renamed' });
-    await engine.delete('ledger', { where: { id: seeded.id } } as any);
-
-    expect(splits()).toHaveLength(0);
-  });
-
-  it('says it once per transaction per datasource, and separately for a second datasource', async () => {
-    const { engine, splits } = await twoDatasourceEngine();
-
-    await engine.transaction(async () => {
-      await engine.insert('ledger', { name: 'a' });
-      await engine.insert('ledger', { name: 'b' });
-      await engine.insert('ledger', { name: 'c' });
-      await engine.insert('archive', { name: 'd' });
-      await engine.insert('archive', { name: 'e' });
-    });
-
-    // Three writes to `ledger_db` + two to `archive_db` = two splits, not five.
-    // AGENTS.md: "say it once, at the first degradation, not once per failed
-    // write" — a 500-row batch off the default datasource is ONE split.
-    const found = splits();
-    expect(found).toHaveLength(2);
-    expect(found.map((r) => meta(r).datasource).sort()).toEqual(['archive_db', 'ledger_db']);
-  });
-
-  it('re-reports in a NEW transaction — the budget is per transaction, not per engine', async () => {
-    const { engine, splits } = await twoDatasourceEngine();
-
-    await engine.transaction(async () => { await engine.insert('ledger', { name: 'first' }); });
-    await engine.transaction(async () => { await engine.insert('ledger', { name: 'second' }); });
-
-    // Two units of work, two partial commits, two reports: each one is a
-    // separate atomicity claim that did not hold.
-    expect(splits()).toHaveLength(2);
-  });
-
-  it('covers update and delete, not just insert', async () => {
-    const { engine, splits } = await twoDatasourceEngine();
-
-    const seeded = await engine.insert('ledger', { name: 'seed' });
-
-    await engine.transaction(async () => {
-      await engine.update('ledger', { id: seeded.id, name: 'renamed' });
-    });
-    await engine.transaction(async () => {
-      await engine.delete('ledger', { where: { id: seeded.id } } as any);
-    });
-
-    const found = splits();
-    expect(found).toHaveLength(2);
-    expect(found.map((r) => meta(r).operation)).toEqual(['update', 'delete']);
-  });
-
-  it('fires for a nested transaction() that JOINED the outer one (ADR-0067 D2)', async () => {
-    const { engine, splits } = await twoDatasourceEngine();
-
-    // A joined nested call does not open its own transaction — it runs inside
-    // the outer one's ambient scope, so the outer owner is what the write is
-    // measured against. The write is just as uncovered as at the top level.
-    await engine.transaction(async () => {
-      await engine.transaction(async () => {
-        await engine.insert('ledger', { name: 'nested' });
-      });
-    });
-
-    expect(splits()).toHaveLength(1);
-    expect(meta(splits()[0])).toMatchObject({ transactionDatasource: 'primary' });
-  });
-
-  it('fires from ScopedContext.transaction too (ctx.api.transaction in a sandboxed hook body)', async () => {
-    const { engine, splits } = await twoDatasourceEngine();
-
-    const scoped = (engine as any).createContext({ userId: 'u1' });
-    await scoped.transaction(async () => {
-      await engine.insert('ledger', { name: 'from sandbox' });
-    });
-
-    expect(splits()).toHaveLength(1);
-    expect(meta(splits()[0])).toMatchObject({ datasource: 'ledger_db', transactionDatasource: 'primary' });
-  });
-
-  it('stays silent after the transaction closes — the scope does not leak', async () => {
-    const { engine, splits } = await twoDatasourceEngine();
-
-    await engine.transaction(async () => {
-      await engine.insert('thing', { name: 'covered' });
-    });
-    await engine.insert('ledger', { name: 'after' });
-
-    expect(splits()).toHaveLength(0);
-  });
-});
+//
+// This file used to carry nine tests pinning the `error`-level diagnostic that
+// PR #5724 added for a write routed off the transaction's datasource, under the
+// standing note that reporting the split "does not fix it: refusing, or
+// committing across drivers, would change the declared contract".
+//
+// The 2026-08-06 maintainer ruling on #5351 changed that contract. There is no
+// longer a diagnostic to pin, because the engine no longer lets the write
+// happen the way the diagnostic described: a BUSINESS write across drivers is
+// refused (`CrossDatasourceTransactionWriteError`), and an append-only SYSTEM
+// LEDGER is carved out and executed outside the transaction, with neither ever
+// receiving the owner's handle.
+//
+// So this section did not become wrong — its subject moved. Every one of its
+// facts is re-asked against the decided verdict in
+// `engine-transaction-same-origin.test.ts`: the once-per-transaction budget
+// (now on the carve-out note, since a refusal throws and a throw is never
+// deduplicated), update/delete coverage, the joined-nested case, the
+// `ScopedContext` surface, "no false positive outside a transaction", and "the
+// scope does not leak". Leaving stubs behind here would pin nothing twice.
+//
+// Section 1 above stays exactly as it was: the warn-once degrade IS still
+// observability-only, and `opts.require` (#5696) made it a caller's choice
+// without changing the default it reports on.

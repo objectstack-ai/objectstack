@@ -55,6 +55,8 @@ export const EventQueueConfigSchema = lazySchema(() => z.object({
 }));
 
 export type EventQueueConfig = z.infer<typeof EventQueueConfigSchema>;
+/** Post-parse shape of {@link EventQueueConfig} — defaults applied, transforms run (ADR-0122). */
+export type EventQueueConfigParsed = z.infer<typeof EventQueueConfigSchema>;
 
 // ==========================================
 // Event Replay
@@ -105,6 +107,8 @@ export const EventReplayConfigSchema = lazySchema(() => z.object({
 }));
 
 export type EventReplayConfig = z.infer<typeof EventReplayConfigSchema>;
+/** Post-parse shape of {@link EventReplayConfig} — defaults applied, transforms run (ADR-0122). */
+export type EventReplayConfigParsed = z.infer<typeof EventReplayConfigSchema>;
 
 // ==========================================
 // Event Sourcing
@@ -165,3 +169,5 @@ export const EventSourcingConfigSchema = lazySchema(() => z.object({
 }));
 
 export type EventSourcingConfig = z.infer<typeof EventSourcingConfigSchema>;
+/** Post-parse shape of {@link EventSourcingConfig} — defaults applied, transforms run (ADR-0122). */
+export type EventSourcingConfigParsed = z.infer<typeof EventSourcingConfigSchema>;

@@ -141,6 +141,8 @@ export const InstalledPackageSchema = lazySchema(() => z.object({
     .describe('Namespace prefixes registered by this package'),
 }).describe('Installed package with runtime lifecycle state'));
 export type InstalledPackage = z.infer<typeof InstalledPackageSchema>;
+/** Post-parse shape of {@link InstalledPackage} — defaults applied, transforms run (ADR-0122). */
+export type InstalledPackageParsed = z.infer<typeof InstalledPackageSchema>;
 
 // ==========================================
 // Namespace Registry
@@ -216,6 +218,8 @@ export const ListPackagesResponseSchema = lazySchema(() => z.object({
   total: z.number().describe('Total package count'),
 }).describe('List packages response'));
 export type ListPackagesResponse = z.infer<typeof ListPackagesResponseSchema>;
+/** Post-parse shape of {@link ListPackagesResponse} — defaults applied, transforms run (ADR-0122). */
+export type ListPackagesResponseParsed = z.infer<typeof ListPackagesResponseSchema>;
 
 /**
  * Get Package Request
@@ -233,6 +237,8 @@ export const GetPackageResponseSchema = lazySchema(() => z.object({
   package: InstalledPackageSchema.describe('Package details'),
 }).describe('Get package response'));
 export type GetPackageResponse = z.infer<typeof GetPackageResponseSchema>;
+/** Post-parse shape of {@link GetPackageResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetPackageResponseParsed = z.infer<typeof GetPackageResponseSchema>;
 
 /**
  * Install Package Request
@@ -258,6 +264,8 @@ export const InstallPackageRequestSchema = lazySchema(() => z.object({
     .describe('Current platform version for compatibility verification'),
 }).describe('Install package request'));
 export type InstallPackageRequest = z.infer<typeof InstallPackageRequestSchema>;
+/** Post-parse shape of {@link InstallPackageRequest} — defaults applied, transforms run (ADR-0122). */
+export type InstallPackageRequestParsed = z.infer<typeof InstallPackageRequestSchema>;
 
 /**
  * Install Package Response
@@ -270,6 +278,8 @@ export const InstallPackageResponseSchema = lazySchema(() => z.object({
     .describe('Dependency resolution result from install analysis'),
 }).describe('Install package response'));
 export type InstallPackageResponse = z.infer<typeof InstallPackageResponseSchema>;
+/** Post-parse shape of {@link InstallPackageResponse} — defaults applied, transforms run (ADR-0122). */
+export type InstallPackageResponseParsed = z.infer<typeof InstallPackageResponseSchema>;
 
 /**
  * Uninstall Package Request
@@ -307,6 +317,8 @@ export const EnablePackageResponseSchema = lazySchema(() => z.object({
   message: z.string().optional().describe('Enable status message'),
 }).describe('Enable package response'));
 export type EnablePackageResponse = z.infer<typeof EnablePackageResponseSchema>;
+/** Post-parse shape of {@link EnablePackageResponse} — defaults applied, transforms run (ADR-0122). */
+export type EnablePackageResponseParsed = z.infer<typeof EnablePackageResponseSchema>;
 
 /**
  * Disable Package Request
@@ -325,3 +337,5 @@ export const DisablePackageResponseSchema = lazySchema(() => z.object({
   message: z.string().optional().describe('Disable status message'),
 }).describe('Disable package response'));
 export type DisablePackageResponse = z.infer<typeof DisablePackageResponseSchema>;
+/** Post-parse shape of {@link DisablePackageResponse} — defaults applied, transforms run (ADR-0122). */
+export type DisablePackageResponseParsed = z.infer<typeof DisablePackageResponseSchema>;

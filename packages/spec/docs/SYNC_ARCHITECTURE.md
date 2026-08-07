@@ -218,12 +218,22 @@ Complete, production-grade integration with external systems. Includes authentic
 > `method` / `timeoutMs` / `isActive` / `signatureAlgorithm` — is optional when
 > you write a connector, and `syncConfig.schedule` takes the bare cron string
 > the schema wraps for you. Annotate the **result** of
-> `ConnectorSchema.parse(…)` with the bare **`Connector`**, which is `z.infer`:
+> `ConnectorSchema.parse(…)` with **`ConnectorParsed`**, which is `z.infer`:
 > there those keys are all present and `schedule` is already the
-> `{ dialect: 'cron', source }` envelope. Note the asymmetry with L2 above,
-> where the bare `ETLPipeline` *is* the author shape and the parse result is
-> `ETLPipelineParsed` — `integration/connector.zod.ts` has not been moved onto
-> that house convention yet (#5551). The example below states the defaulted
+> `{ dialect: 'cron', source }` envelope. (The bare **`Connector`** still means
+> that same parsed shape today, and both names are live — but `ConnectorParsed`
+> is the one that keeps meaning it.) Note the asymmetry with L2 above, where the
+> bare `ETLPipeline` *is* the author shape and the parse result is
+> `ETLPipelineParsed`. That asymmetry is real and is being removed, in the
+> direction L2 already points: **[ADR-0122](../../../docs/adr/0122-schema-type-alias-naming-convention.md)
+> makes the bare name the author state and `XParsed` the parsed state**
+> repo-wide. Earlier revisions of this note called L2's spelling "the house
+> convention" and said connector had not caught up; #5551 measured the corpus and
+> that was backwards — connector's spelling was the 1384-alias majority and L2's
+> the 8-file minority, with neither recorded anywhere. ADR-0122 is that record.
+> Its phase 1 (additive, no break) has already given every schema with two
+> distinct shapes its `XParsed` name, `Connector` included; phase 2 flips the
+> bare names in a major. The example below states the defaulted
 > keys anyway, because it is a tour of the surface; the Migration Guide's
 > sketches omit them, because that is what ordinary authoring looks like.
 > To have the literal validated as you write it, prefer `defineConnector(…)`,
@@ -275,14 +285,15 @@ const sapConnector: ConnectorInput = {
       source: 'order_value',
       target: 'order_total',
       dataType: 'number',
-      // `transform.type` is a discriminated union with exactly five members:
-      // `constant` / `cast` / `lookup` / `javascript` / `map`. The bare string
-      // below is `ExpressionInput` shorthand — the schema wraps it into an
-      // `{ dialect, source }` envelope on parse.
-      transform: {
-        type: 'javascript',
-        expression: 'value / 100' // Convert cents to dollars
-      },
+      // (`transform` sat here until #5552 retired it, together with the whole
+      // five-member `FieldMappingTransform` union — `constant` / `cast` /
+      // `lookup` / `javascript` / `map`. None of the five ever had an executor:
+      // an L3 connector mapping moves a value from `source` to `target`, and
+      // nothing anywhere read the transform. The `javascript` member is what
+      // made the gap visible — it recommended the retired `js` dialect
+      // (#3278), so the only spelling that parsed was a bare string, which
+      // means CEL. Value conversion belongs on a surface that runs it: the L2
+      // import mapping's own `transform`, or an ETL transformation step.)
       syncMode: 'bidirectional'
     }
   ],

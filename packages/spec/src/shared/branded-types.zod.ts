@@ -35,6 +35,8 @@ export const ObjectNameSchema = lazySchema(() => SnakeCaseIdentifierSchema
   .describe('Branded object name (snake_case, no dots)'));
 
 export type ObjectName = z.infer<typeof ObjectNameSchema>;
+/** Post-parse shape of {@link ObjectName} — defaults applied, transforms run (ADR-0122). */
+export type ObjectNameParsed = z.infer<typeof ObjectNameSchema>;
 
 /**
  * FieldName — Branded type for field (column) names.
@@ -48,6 +50,8 @@ export const FieldNameSchema = lazySchema(() => SnakeCaseIdentifierSchema
   .describe('Branded field name (snake_case, no dots)'));
 
 export type FieldName = z.infer<typeof FieldNameSchema>;
+/** Post-parse shape of {@link FieldName} — defaults applied, transforms run (ADR-0122). */
+export type FieldNameParsed = z.infer<typeof FieldNameSchema>;
 
 /**
  * ViewName — Branded type for view identifiers.
@@ -61,6 +65,8 @@ export const ViewNameSchema = lazySchema(() => SystemIdentifierSchema
   .describe('Branded view name (system identifier)'));
 
 export type ViewName = z.infer<typeof ViewNameSchema>;
+/** Post-parse shape of {@link ViewName} — defaults applied, transforms run (ADR-0122). */
+export type ViewNameParsed = z.infer<typeof ViewNameSchema>;
 
 /**
  * AppName — Branded type for application identifiers.
@@ -74,6 +80,8 @@ export const AppNameSchema = lazySchema(() => SystemIdentifierSchema
   .describe('Branded app name (system identifier)'));
 
 export type AppName = z.infer<typeof AppNameSchema>;
+/** Post-parse shape of {@link AppName} — defaults applied, transforms run (ADR-0122). */
+export type AppNameParsed = z.infer<typeof AppNameSchema>;
 
 /**
  * FlowName — Branded type for flow identifiers.
@@ -87,6 +95,8 @@ export const FlowNameSchema = lazySchema(() => SystemIdentifierSchema
   .describe('Branded flow name (system identifier)'));
 
 export type FlowName = z.infer<typeof FlowNameSchema>;
+/** Post-parse shape of {@link FlowName} — defaults applied, transforms run (ADR-0122). */
+export type FlowNameParsed = z.infer<typeof FlowNameSchema>;
 
 /**
  * RoleName — Branded type for role identifiers.
@@ -100,3 +110,5 @@ export const RoleNameSchema = lazySchema(() => SystemIdentifierSchema
   .describe('Branded role name (system identifier)'));
 
 export type RoleName = z.infer<typeof RoleNameSchema>;
+/** Post-parse shape of {@link RoleName} — defaults applied, transforms run (ADR-0122). */
+export type RoleNameParsed = z.infer<typeof RoleNameSchema>;

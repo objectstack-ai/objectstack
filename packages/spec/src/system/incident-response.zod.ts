@@ -155,6 +155,8 @@ export const IncidentNotificationRuleSchema = lazySchema(() => z.object({
 }).describe('Incident notification rule per severity level'));
 
 export type IncidentNotificationRule = z.infer<typeof IncidentNotificationRuleSchema>;
+/** Post-parse shape of {@link IncidentNotificationRule} — defaults applied, transforms run (ADR-0122). */
+export type IncidentNotificationRuleParsed = z.infer<typeof IncidentNotificationRuleSchema>;
 
 /**
  * Notification Matrix Schema
@@ -182,6 +184,8 @@ export const IncidentNotificationMatrixSchema = lazySchema(() => z.object({
 }).describe('Incident notification matrix with escalation policies'));
 
 export type IncidentNotificationMatrix = z.infer<typeof IncidentNotificationMatrixSchema>;
+/** Post-parse shape of {@link IncidentNotificationMatrix} — defaults applied, transforms run (ADR-0122). */
+export type IncidentNotificationMatrixParsed = z.infer<typeof IncidentNotificationMatrixSchema>;
 
 /**
  * Incident Schema
@@ -366,3 +370,5 @@ export type IncidentCategory = z.infer<typeof IncidentCategorySchema>;
 export type IncidentStatus = z.infer<typeof IncidentStatusSchema>;
 export type Incident = z.infer<typeof IncidentSchema>;
 export type IncidentResponsePolicy = z.infer<typeof IncidentResponsePolicySchema>;
+/** Post-parse shape of {@link IncidentResponsePolicy} — defaults applied, transforms run (ADR-0122). */
+export type IncidentResponsePolicyParsed = z.infer<typeof IncidentResponsePolicySchema>;

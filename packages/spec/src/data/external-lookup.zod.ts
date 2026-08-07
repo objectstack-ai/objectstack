@@ -307,5 +307,9 @@ export const ExternalLookupSchema = lazySchema(() => z.object({
 
 // Type exports
 export type ExternalLookup = z.infer<typeof ExternalLookupSchema>;
+/** Post-parse shape of {@link ExternalLookup} — defaults applied, transforms run (ADR-0122). */
+export type ExternalLookupParsed = z.infer<typeof ExternalLookupSchema>;
 export type ExternalDataSource = z.infer<typeof ExternalDataSourceSchema>;
 export type ExternalFieldMapping = z.infer<typeof ExternalFieldMappingSchema>;
+/** Post-parse shape of {@link ExternalFieldMapping} — defaults applied, transforms run (ADR-0122). */
+export type ExternalFieldMappingParsed = z.infer<typeof ExternalFieldMappingSchema>;

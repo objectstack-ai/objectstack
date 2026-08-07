@@ -70,6 +70,8 @@ export const ConnectorAuthConfigSchema = lazySchema(() => z.discriminatedUnion('
 ]));
 
 export type ConnectorAuthConfig = z.infer<typeof ConnectorAuthConfigSchema>;
+/** Post-parse shape of {@link ConnectorAuthConfig} — defaults applied, transforms run (ADR-0122). */
+export type ConnectorAuthConfigParsed = z.infer<typeof ConnectorAuthConfigSchema>;
 
 /**
  * The **static** subset of {@link ConnectorAuthConfig} — the open-source auth

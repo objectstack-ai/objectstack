@@ -739,38 +739,69 @@ export function enforceActionParams(deps: ActionExecutionDeps,
 }
 
 /**
- * Build the action-body `ctx.session` from the request ExecutionContext,
- * mirroring the hook `ctx.session` shape (#3280) so an action author reads
- * the caller's active org under the SAME blessed name as a hook author.
+ * Build the action-body `ctx.session` from the request ExecutionContext.
+ *
+ * The shape this returns is DECLARED by {@link ActionSessionSchema}
+ * (`@objectstack/spec/ui`), for which this function is the ONLY producer —
+ * #5697 declared the shape as it stood, #5779 added the canonical `positions`
+ * key and demoted `roles` to a deprecated alias, and this function is the
+ * matching producer half (#5613). The consistency between what is declared and
+ * what is built is pinned in `action-session-shape-contract.test.ts`; that pin,
+ * not this comment, is what keeps the two from drifting.
  *
  * `organizationId` is the blessed name for the caller's active org — the
  * same value as the `organization_id` column and `current_user.organizationId`
  * (RLS). The deprecated `session.tenantId` alias (#3280) was removed in v11
  * (#3290); the driver-layer `ExecutionContext.tenantId` it is sourced from is
- * a distinct, configurable axis and stays. Returns undefined for a genuinely
- * context-less / self-invoked call so a body can distinguish "no session" the
- * same way hooks do.
+ * a distinct, configurable axis and stays. Returns `undefined` — never `{}` —
+ * for a genuinely context-less / self-invoked call, so a body can tell "no
+ * identity envelope at all" from "an anonymous caller" (#3712).
  *
- * [#5697] The shape this returns is now DECLARED — {@link ActionSessionSchema}
- * in `@objectstack/spec/ui`, phase 1 of #5613's contract-first ruling — and the
- * annotation here is that declaration, not a restatement of it. Nothing about
- * what this builds changed; the consistency between the two is pinned in
- * `action-session-shape-contract.test.ts`.
+ * ## `positions` is canonical, `roles` is its deprecated alias (#5613)
  *
- * ⚠️ Two sentences above are tracked as WRONG, deliberately left standing for
- * #5613 phase 2 to correct together with the rename they belong to: "mirroring
- * the hook `ctx.session` shape" has not been true since #5050 retired
- * `HookContext.session.roles` (the hook session is a different key set from a
- * different producer), and the `roles` key this builds carries `ec.positions`,
- * i.e. the ADR-0090 D3 vocabulary under the spelling that ADR bans. Read the
- * schema's docblock before relying on either.
+ * Both keys carry the SAME array, `ExecutionContext.positions` — the ADR-0090
+ * D3 vocabulary. `positions` is the spelling an action body should read.
+ * `roles` is emitted only for the length of the deprecation window announced by
+ * the ADR-0087 semantic migration `action-session-roles-to-positions`, and is
+ * then removed on the path `session.tenantId` already walked (#3280 deprecate →
+ * #3290 remove). Emitting both, with identical values, is precisely what makes
+ * the migration a change of key and nothing else — a body can be moved to
+ * `positions` and verified while the alias is still live.
+ *
+ * The conditional spread is unchanged, so absent still means the KEY IS ABSENT:
+ * a context with no positions (or a non-array `positions`) yields NEITHER key,
+ * and since a session is only built at all when the context carries a user or
+ * an org, neither key can ever appear alone.
+ *
+ * ⚠️ Under either spelling this array is NOT an authorization input. Privilege
+ * is judged by the security service — capability grants, placements, derived
+ * posture (ADR-0095) — never by a name-string comparison; rewriting
+ * `roles.includes('admin')` as `positions.includes('admin')` migrates the
+ * defect rather than the read.
+ *
+ * ## NOT the hook `ctx.session`
+ *
+ * This docblock used to say it mirrors the hook `ctx.session` shape (#3280).
+ * That claim stopped being true at #5050, which retired
+ * `HookContext.session.roles` outright: the hook session is a DIFFERENT key set
+ * (`actor`, `accessToken`, `isSystem`, the skip flags) from a different producer
+ * (ObjectQL's `buildSession()`), so "same key, two realities" was exactly the
+ * hazard the sentence advertised as a convenience. The two surfaces do now
+ * agree on `positions` — same vocabulary, same "descriptive, never an
+ * authorization input" boundary (#5605 declared it hook-side) — which is the
+ * POINT of this rename, not a coincidence.
  */
 export function buildActionSession(_deps: ActionExecutionDeps, ec: any): ActionSession | undefined {
     if (!ec || (ec.userId == null && ec.tenantId == null)) return undefined;
     return {
         ...(ec.userId != null ? { userId: String(ec.userId) } : {}),
         ...(ec.tenantId != null ? { organizationId: String(ec.tenantId) } : {}),
-        ...(Array.isArray(ec.positions) && ec.positions.length ? { roles: ec.positions } : {}),
+        // Dual-emitted for the #5613 deprecation window: `positions` canonical,
+        // `roles` the alias, ONE array under two names (same value, by
+        // construction — not two reads that could drift apart).
+        ...(Array.isArray(ec.positions) && ec.positions.length
+            ? { positions: ec.positions, roles: ec.positions }
+            : {}),
     };
 }
 

@@ -119,6 +119,8 @@ export const BlueprintViewSchema = lazySchema(() => z.object({
     .describe('REQUIRED for kanban views: the select/status field whose options become the board columns (e.g. "stage", "status"). Without it a kanban renders as a plain list. Optional for gantt (groups leaf tasks into summary rows).'),
 }));
 export type BlueprintView = z.infer<typeof BlueprintViewSchema>;
+/** Post-parse shape of {@link BlueprintView} — defaults applied, transforms run (ADR-0122). */
+export type BlueprintViewParsed = z.infer<typeof BlueprintViewSchema>;
 
 /**
  * A single comparison that scopes WHICH records a dashboard widget
@@ -164,6 +166,8 @@ export const BlueprintNavItemSchema = lazySchema(() => z.object({
   icon: z.string().optional().describe('Lucide icon name for the nav entry'),
 }));
 export type BlueprintNavItem = z.infer<typeof BlueprintNavItemSchema>;
+/** Post-parse shape of {@link BlueprintNavItem} — defaults applied, transforms run (ADR-0122). */
+export type BlueprintNavItemParsed = z.infer<typeof BlueprintNavItemSchema>;
 
 /**
  * The navigation shell (the thing end users open in the App Launcher) that
@@ -178,6 +182,8 @@ export const BlueprintAppSchema = lazySchema(() => z.object({
     .describe('Navigation entries; omit to auto-surface every created object and dashboard'),
 }));
 export type BlueprintApp = z.infer<typeof BlueprintAppSchema>;
+/** Post-parse shape of {@link BlueprintApp} — defaults applied, transforms run (ADR-0122). */
+export type BlueprintAppParsed = z.infer<typeof BlueprintAppSchema>;
 
 /**
  * Seed data the agent suggests. Mirrors {@link SeedSchema.records}. NOTE:
@@ -218,6 +224,8 @@ export const SolutionBlueprintSchema = lazySchema(() => z.object({
     .describe('Suggested seed data (reported, not auto-applied in Phase C)'),
 }));
 export type SolutionBlueprint = z.infer<typeof SolutionBlueprintSchema>;
+/** Post-parse shape of {@link SolutionBlueprint} — defaults applied, transforms run (ADR-0122). */
+export type SolutionBlueprintParsed = z.infer<typeof SolutionBlueprintSchema>;
 
 /**
  * Factory mirroring `defineAgent` / `defineTool` / `defineSkill`: validates a

@@ -66,5 +66,7 @@ export type {
     IDataEngine,
     IObjectQLEngine,
     EngineSchemaRegistryView,
+    EngineTransactionOptions,
+    EngineTransactionInfo,
     IDataDriver,
 } from '@objectstack/spec/contracts';

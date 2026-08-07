@@ -2,6 +2,11 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { SmsService, LogSmsTransport, maskPhoneNumber, normalizeSmsRecipient } from './sms-service.js';
+import {
+  SmsDailyQuota,
+  SMS_QUOTA_EXCEEDED_CODE,
+  SMS_QUOTA_EXCEEDED_ERROR,
+} from './sms-daily-quota.js';
 
 const collectingLogger = () => {
   const lines: string[] = [];
@@ -125,5 +130,77 @@ describe('LogSmsTransport', () => {
       process.env.NODE_ENV = prev;
     }
     expect(logger.lines.join('\n')).toContain('code 424242');
+  });
+});
+
+describe('SmsService — the daily cost ceiling is charged HERE (#2814)', () => {
+  const NOON = Date.UTC(2026, 7, 6, 12, 0, 0);
+  const quotaOf = (limit: number, logger?: { info: any; warn: any }) => {
+    const q = new SmsDailyQuota({ now: () => NOON, ...(logger ? { logger } : {}) });
+    q.setQuota(limit);
+    return q;
+  };
+
+  it('refuses past the ceiling with the per-number guard’s code and no quota detail', async () => {
+    const send = vi.fn(async () => ({ messageId: 'prov_1' }));
+    const svc = new SmsService({ transport: { send }, configured: true, dailyQuota: quotaOf(2) });
+
+    expect((await svc.send({ to: '+8613800000001', body: 'a' })).status).toBe('sent');
+    expect((await svc.send({ to: '+8613800000002', body: 'b' })).status).toBe('sent');
+
+    const refused = await svc.send({ to: '+8613800000003', body: 'c' });
+    expect(refused.status).toBe('failed');
+    expect(refused.error).toBe(SMS_QUOTA_EXCEEDED_ERROR);
+    expect(refused.error).toContain(SMS_QUOTA_EXCEEDED_CODE);
+    // "不泄露配额剩余细节" — the refusal carries no numbers at all.
+    expect(refused.error).not.toMatch(/\d/);
+    expect(send).toHaveBeenCalledTimes(2); // the transport was never reached
+  });
+
+  it('counts EVERY caller against one budget — OTP, invitation and notification alike', async () => {
+    const send = vi.fn(async () => ({ messageId: 'p' }));
+    const svc = new SmsService({ transport: { send }, configured: true, dailyQuota: quotaOf(2) });
+    // Three different call shapes, one budget: the point of moving the gate
+    // into the service instead of the auth endpoints.
+    await svc.send({ to: '+8613800000001', body: 'otp 123456', templateParams: { code: '123456' } });
+    await svc.send({ to: '+8613800000002', body: 'invite', templateParams: { content: 'invite' } });
+    const third = await svc.send({ to: '+8613800000003', body: 'notify', templateParams: { content: 'notify' } });
+    expect(third.status).toBe('failed');
+    expect(third.error).toContain(SMS_QUOTA_EXCEEDED_CODE);
+  });
+
+  it('does not spend a unit on input the service rejects outright', async () => {
+    const send = vi.fn(async () => ({ messageId: 'p' }));
+    const quota = quotaOf(1);
+    const svc = new SmsService({ transport: { send }, configured: true, dailyQuota: quota });
+    await expect(svc.send({ to: 'not-a-phone', body: 'x' })).rejects.toThrow(/VALIDATION_FAILED/);
+    // The malformed call cost nothing, so the one budgeted send still gets through.
+    expect((await svc.send({ to: '+8613800000001', body: 'x' })).status).toBe('sent');
+  });
+
+  it('logs the refusal with a MASKED recipient and never the body', async () => {
+    const logger = collectingLogger();
+    const svc = new SmsService({
+      transport: { send: async () => ({ messageId: 'p' }) },
+      configured: true,
+      logger,
+      dailyQuota: quotaOf(1),
+    });
+    await svc.send({ to: '+8613812345678', body: 'code 424242' });
+    await svc.send({ to: '+8613812345678', body: 'code 999999' });
+    const out = logger.lines.join('\n');
+    expect(out).toContain('daily quota exhausted');
+    expect(out).not.toContain('424242');
+    expect(out).not.toContain('999999');
+    expect(out).not.toContain('+8613812345678');
+  });
+
+  it('is entirely absent when no quota is wired (pre-#2814 behaviour)', async () => {
+    const send = vi.fn(async () => ({ messageId: 'p' }));
+    const svc = new SmsService({ transport: { send }, configured: true });
+    for (let i = 0; i < 20; i++) {
+      expect((await svc.send({ to: '+8613800000001', body: 'x' })).status).toBe('sent');
+    }
+    expect(send).toHaveBeenCalledTimes(20);
   });
 });

@@ -58,10 +58,13 @@ interface FieldWidgetProps {
   // Read-only mode flag. When true, display the value but don't allow editing.
   readonly: boolean;
 
-  // Required field flag. Indicate the required state visually and validate accordingly.
+  // Required field flag. Reflect it as `aria-required` on the control you render.
+  // Never draw your own required marker — the host's label already owns the `*`.
   required: boolean;
 
-  // Validation error message to display, when present.
+  // The active validation message, absent while the field is valid. A signal for
+  // `aria-invalid`, not text for the widget to render: the host renders the
+  // message itself. See "Who Renders What" below.
   error?: string;
 
   // Complete field definition from the schema (type, constraints, options, etc.).
@@ -84,7 +87,13 @@ import type { FieldWidgetProps } from '@objectstack/spec/ui';
 
 function CustomRatingField({ value, onChange, readonly, required, error }: FieldWidgetProps) {
   return (
-    <div className="rating-field" aria-invalid={!!error}>
+    <div
+      className="rating-field"
+      // `error` drives the invalid STATE. Its text is the host's to render.
+      aria-invalid={!!error}
+      // The required STATE, on the control. Not a second asterisk.
+      aria-required={required || undefined}
+    >
       {[1, 2, 3, 4, 5].map((star) => (
         <Star
           key={star}
@@ -92,11 +101,44 @@ function CustomRatingField({ value, onChange, readonly, required, error }: Field
           onClick={() => !readonly && onChange(star)}
         />
       ))}
-      {error && <span className="error">{error}</span>}
     </div>
   );
 }
 ```
+
+### Who Renders What
+
+A widget shares a field's chrome with its host, and each piece below has exactly **one**
+owner. Rendering one the host already renders is the classic custom-widget defect: the
+same sentence, or the same asterisk, appears twice.
+
+| Concern | Owner |
+|---|---|
+| `aria-invalid` on the control element | **the widget** — only it renders that element |
+| The validation message **text** | **the host** (objectui's `<FormMessage />`) |
+| The required marker `*` | **the host** (objectui's `<FormLabel>`) |
+
+- **`error` is a signal, not text to render.** It carries the active message string —
+  objectui feeds it from react-hook-form's `fieldState.error?.message` and leaves it
+  `undefined` while the field is valid — but the host already renders that text below the
+  control. Read it to set `aria-invalid`, nothing else. A widget that also prints it
+  displays the same message twice (objectui#3222).
+- **If you compute `aria-invalid` yourself, derive it from `error` — and mind the spread
+  order.** A host may already be injecting a correct `aria-invalid`: objectui's
+  `<FormControl>` is a Radix `Slot` that does. So forward the props you don't consume
+  onto the control you render, and never write an `aria-invalid` computed from something
+  else *after* that spread — it silently overwrites the host's correct value with `false`.
+  That is exactly what seven built-in objectui widgets did while the slot went unproduced,
+  so an invalid field was never announced to a screen reader (objectui#3222).
+- **Never draw your own required marker.** The host's label owns the `*`; a second author
+  for it produces the same double display, which is why `required` is deliberately absent
+  from objectui's rendered props type. The one thing a widget genuinely adds is the state
+  on the control — `aria-required`, which assistive tech announces *as* a state instead of
+  folding it into the accessible name, and which keeps working for a field rendered with
+  no label at all (objectui#3290). Reflect `required` as `aria-required` and stop there;
+  objectui goes further and injects `aria-required` itself, so forwarding your leftover
+  props gets it for free. Do **not** set the native `required` attribute — that arms the
+  browser's own constraint-validation bubble alongside the host's messages.
 
 ## Field Types
 

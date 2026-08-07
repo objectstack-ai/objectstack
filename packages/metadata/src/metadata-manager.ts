@@ -780,6 +780,23 @@ export class MetadataManager implements IMetadataService {
   /**
    * Get a metadata item by type and name.
    * Checks in-memory registry first, then falls back to loaders.
+   *
+   * Returns `undefined` both when nothing declares the item and when every
+   * loader that could have held it FAILED — see {@link getDiagnosed} when the
+   * caller must tell those apart. This is the same relationship {@link load}
+   * has with {@link loadDiagnosed}, so every existing caller keeps its exact
+   * behaviour and only callers that ASK for the verdict pay for it.
+   *
+   * [#5840] Deliberately NOT expressed as `(await getDiagnosed(…)).data`,
+   * although that is what it computes. The obvious delegation adds one
+   * `await` hop, and a registry hit here is observed one microtask sooner than
+   * it would be through a second async frame — which `register()`'s watchers
+   * depend on, because `notifyWatchers` does not await its handlers and
+   * ObjectQL's bridge re-reads through `get()` on the event rather than
+   * trusting the payload (`register-notifies-watchers.test.ts` pins it, and
+   * went red on the delegating version). The duplication is three lines and is
+   * pinned from the other side: `get()` and `getDiagnosed().data` are asserted
+   * to agree on every case in `metadata-manager-get-diagnosed.test.ts`.
    */
   async get(type: string, name: string): Promise<unknown | undefined> {
     // Check in-memory registry first
@@ -791,6 +808,45 @@ export class MetadataManager implements IMetadataService {
     // Fallback to loaders
     const result = await this.load(type, name);
     return result ?? undefined;
+  }
+
+  /**
+   * `get`, plus whether the answer can be trusted as complete.
+   *
+   * [#5840] {@link loadDiagnosed} already computes this verdict — and `get()`
+   * threw it away two hops later (`load` kept only `.data`, `get` turned that
+   * `null` into `undefined`), so no caller of `get` could reach the one fact
+   * ADR-0110 D3 exists to preserve: **a miss and an outage are different facts
+   * with opposite security meanings.** A consumer that gates on a declaration
+   * MUST NOT read `undefined` as "the author declared nothing" — an
+   * availability failure would silently widen access (the REST `/actions`
+   * fail-open branch, #3935) or make a positive claim about authorship from a
+   * read that never happened (`code: null` in the layered read, #5707/#5532).
+   *
+   * This is the registry-first counterpart of {@link loadDiagnosed}, and that
+   * difference is why callers of `get` cannot simply switch to `loadDiagnosed`:
+   * doing so would skip the in-memory registry and change what they resolve.
+   *
+   * `degraded` is true when at least one loader threw AND nothing answered with
+   * the item — never when the in-memory registry answered, because that answer
+   * needed no loader. A clean miss (every loader answered, none had it) is NOT
+   * degraded. The posture is deliberately conservative: with a loader down we
+   * cannot prove the item is absent, so we decline to claim it is.
+   */
+  async getDiagnosed(
+    type: string,
+    name: string
+  ): Promise<{ data: unknown | undefined; degraded: boolean; errors: string[] }> {
+    // Check in-memory registry first — a hit here consulted no loader, so
+    // there is nothing to be degraded about.
+    const typeStore = this.registry.get(type);
+    if (typeStore?.has(name)) {
+      return { data: typeStore.get(name), degraded: false, errors: [] };
+    }
+
+    // Fallback to loaders, keeping the verdict this time.
+    const { data, degraded, errors } = await this.loadDiagnosed(type, name);
+    return { data: data ?? undefined, degraded, errors };
   }
 
   /**

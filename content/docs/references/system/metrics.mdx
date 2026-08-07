@@ -206,12 +206,12 @@ Metrics configuration
 | **name** | `string` | ✅ | Configuration name (snake_case, max 64 chars) |
 | **label** | `string` | ✅ | Display label |
 | **enabled** | `boolean` | optional |  |
-| **metrics** | `{ name: string; label?: string; type: Enum<'counter' \| 'gauge' \| 'histogram' \| 'summary'>; unit?: Enum<'nanoseconds' \| 'microseconds' \| 'milliseconds' \| 'seconds' \| 'minutes' \| 'hours' \| 'days' \| 'bytes' \| 'kilobytes' \| 'megabytes' \| 'gigabytes' \| 'terabytes' \| 'requests_per_second' \| 'events_per_second' \| 'bytes_per_second' \| 'percent' \| 'ratio' \| 'count' \| 'operations' \| 'custom'>; … }[]` | optional |  |
+| **metrics** | `{ name: string; label?: string; type: Enum<'counter' \| 'gauge' \| 'histogram' \| 'summary'>; unit?: Enum<'nanoseconds' \| 'microseconds' \| 'milliseconds' \| 'seconds' \| 'minutes' \| … +15 more>; … }[]` | optional |  |
 | **defaultLabels** | `Record<string, string>` | optional | Metric labels |
-| **aggregations** | `{ type: Enum<'sum' \| 'avg' \| 'min' \| 'max' \| 'count' \| 'p50' \| 'p75' \| 'p90' \| 'p95' \| 'p99' \| 'p999' \| 'rate' \| 'stddev'>; window?: object; groupBy?: string[]; filters?: Record<string, any> }[]` | optional |  |
+| **aggregations** | `{ type: Enum<'sum' \| 'avg' \| 'min' \| 'max' \| 'count' \| 'p50' \| 'p75' \| 'p90' \| 'p95' \| 'p99' \| … +3 more>; window?: object; groupBy?: string[]; filters?: Record<string, any> }[]` | optional |  |
 | **slis** | `{ name: string; label: string; description?: string; metric: string; … }[]` | optional |  |
 | **slos** | `{ name: string; label: string; description?: string; sli: string; … }[]` | optional |  |
-| **exports** | `{ type: Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| 'cloudwatch' \| 'stackdriver' \| 'azure_monitor' \| 'http' \| 'custom'>; endpoint?: string; interval?: integer; batch?: object; … }[]` | optional |  |
+| **exports** | `{ type: Enum<'prometheus' \| 'openmetrics' \| 'graphite' \| 'statsd' \| 'influxdb' \| 'datadog' \| … +5 more>; endpoint?: string; interval?: integer; batch?: object; … }[]` | optional |  |
 | **collectionInterval** | `integer` | optional |  |
 | **retention** | `{ period?: integer; downsampling?: { afterSeconds: integer; resolution: integer }[] }` | optional |  |
 | **cardinalityLimits** | `{ maxLabelCombinations?: integer; onLimitExceeded?: Enum<'drop' \| 'sample' \| 'alert'> }` | optional |  |

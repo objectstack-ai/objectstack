@@ -697,11 +697,12 @@ _context: HttpProtocolContext,
                 readErrors.push(`read ${name}: ${(e as Error)?.message ?? String(e)}`);
             }
         }
-        // protocol.getMetaItem (called directly, unlike the HTTP endpoint
-        // which unwraps) returns a WRAPPER: `{ type, name, item, lock,
+        // protocol.getMetaItem returns a WRAPPER: `{ type, name, item, lock,
         // editable, … }` — the seed body (object/records) lives under
-        // `.item`. Tolerate the wrapper (`.item`) plus the body-direct and
-        // `.metadata`/`.body` shapes other protocols may return.
+        // `.item`. ([#5563] The HTTP endpoint answers that same envelope now;
+        // it used to unwrap on its default path, which is what the parenthetical
+        // here used to say.) Tolerate the wrapper (`.item`) plus the
+        // body-direct and `.metadata`/`.body` shapes other protocols may return.
         const seed = item?.object && Array.isArray(item?.records)
             ? item
             : (item?.item ?? item?.metadata ?? item?.body);

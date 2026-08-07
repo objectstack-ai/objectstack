@@ -65,13 +65,18 @@ describe('dogfood: a Studio-designer-shaped (layout-less) dashboard saves + publ
   it('reads the published dashboard back with its layout-less widgets intact', async () => {
     const res = await stack.apiAs(token, 'GET', `/meta/dashboard/${DASH}`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as
-      | { widgets?: Array<{ id: string; layout?: unknown }> }
-      | { item?: { widgets?: Array<{ id: string; layout?: unknown }> } };
-    const widgets =
-      (body as { widgets?: Array<{ id: string; layout?: unknown }> }).widgets ??
-      (body as { item?: { widgets?: Array<{ id: string; layout?: unknown }> } }).item?.widgets ??
-      [];
+    // [#5563] The route answers ONE shape now — the `{ type, name, item }`
+    // envelope `packages/spec` declares — so the dashboard document is read
+    // straight off `item`. This used to be a `body.widgets ?? body.item?.widgets`
+    // sniff, which passed under either shape and therefore could not have caught
+    // the split it was written around.
+    const body = (await res.json()) as {
+      type?: string;
+      name?: string;
+      item?: { widgets?: Array<{ id: string; layout?: unknown }> };
+    };
+    expect(body).toMatchObject({ type: 'dashboard', name: DASH });
+    const widgets = body.item?.widgets ?? [];
     expect(widgets).toHaveLength(3);
     // The exact shape that broke save: widgets persisted WITHOUT a layout.
     expect(widgets.every((w) => w.layout === undefined)).toBe(true);

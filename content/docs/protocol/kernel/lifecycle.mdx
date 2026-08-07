@@ -509,7 +509,6 @@ os generate migration --dry-run     # Preview without writing
 The generated TypeScript file uses plain Knex-style `up(db)` / `down(db)`
 functions — no custom migration DSL:
 
-{/* os:check */}
 ```typescript
 // migrations/20260101000000_migration.ts — auto-generated
 export async function up(db: any): Promise<void> {

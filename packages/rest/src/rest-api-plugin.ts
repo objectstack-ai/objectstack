@@ -1,13 +1,71 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
-import { RestServer, RestKernelManager, RestProtocol, RestRequestEnvResolver } from './rest-server.js';
+import { RestServer, RestKernelManager, RestProtocol, RestRequestEnvResolver, RestEnvRegistry } from './rest-server.js';
 import { RestServerConfig } from '@objectstack/spec/api';
 import { registerPackageRoutes } from './package-routes.js';
 import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
 import type { PackageService } from '@objectstack/service-package';
-import type { IMetadataService } from '@objectstack/spec/contracts';
+import type { ResolvedSettingValue } from '@objectstack/spec/system';
+// [#4251 B4] Every slot this composition root resolves, named by its contract.
+// The lookup already returns the slot's contract; annotating the result `any`
+// switched that checking off while looking identical to code that has it.
+// Each contract below is EVIDENCED by an `implements` on the class its provider
+// registers into the slot (`EmailService implements IEmailService`, …), so the
+// compiler verifies the shape on the producer side every build and this file
+// only has to name it — the #4404 discipline that replaced seven unchecked
+// local stand-ins with one checked claim.
+import type {
+    IAnalyticsService,
+    IApprovalService,
+    IAuthService,
+    IEmailService,
+    II18nService,
+    IMetadataService,
+    IObjectQLEngine,
+    IReportService,
+    ISecurityService,
+    ISharingRuleService,
+    ISharingService,
+} from '@objectstack/spec/contracts';
 import { SysImportJob } from '@objectstack/platform-objects/audit';
+
+/**
+ * The `default-project` slot's occupant, as this file reads it.
+ *
+ * [#4251 B4] No contract and no entry in `ServiceSlotContracts`: the slot is
+ * host-provided, and no provider in this repo or in `cloud` registers it (the
+ * `createSingleEnvironmentPlugin` named in the comment below, and in five other
+ * comments across `runtime`/`rest`, exists in neither) — filed separately
+ * rather than widened here. So this declares only the ONE field this file
+ * reads, the #5195 narrow-slice discipline: `runtime`'s own reader declares the
+ * fuller `{ environmentId: string; orgId?: string }`, and `orgId` is not read
+ * here. A named slice is checked where an `any` was not — and when it is wrong,
+ * it says so, which `any` never does.
+ */
+interface DefaultEnvironmentSurface {
+    readonly environmentId: string;
+}
+
+/**
+ * The `settings` slot's occupant, as the platform reads it.
+ *
+ * [#4251 B4] Named surface rather than a ledger entry, following the B2
+ * decision for this slot: `service-settings` is OPTIONAL, so the REST layer
+ * must not acquire a runtime dependency on it, and its `SettingsService`
+ * declares no `implements` — there is no contract to name. The one method the
+ * platform consumes is `get`, through `resolveLocalizationContext`'s 4-tier
+ * timezone/locale/currency cascade; its return type is the PUBLIC
+ * `ResolvedSettingValue` from `@objectstack/spec/system`, so only the context
+ * argument is described structurally (`SettingsContext` is service-local).
+ */
+interface SettingsReadSurface {
+    get<T = unknown>(
+        namespace: string,
+        key: string,
+        ctx?: { tenantId?: string; userId?: string },
+    ): Promise<ResolvedSettingValue<T>>;
+}
 
 export interface RestApiPluginConfig {
     serverServiceName?: string;
@@ -97,9 +155,12 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // routes so a remote runtime node can dispatch every request
             // to the matching per-environment kernel without requiring callers
             // to know the environmentId.
-            let envRegistry: any;
+            // Typed as the shape RestServer's constructor declares for it
+            // (`RestEnvRegistry`), so the argument is checked rather than
+            // waved through — the `any` here made that parameter unverifiable.
+            let envRegistry: RestEnvRegistry | undefined;
             try {
-                envRegistry = ctx.getService<any>('env-registry');
+                envRegistry = ctx.getService<RestEnvRegistry>('env-registry');
             } catch (e) {
                 // Not running in runtime/multi-environment mode — fine.
             }
@@ -148,7 +209,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // lone project's kernel.
             const defaultEnvironmentIdProvider = (): string | undefined => {
                 try {
-                    const dp: any = ctx.getService('default-project');
+                    const dp = ctx.getService<DefaultEnvironmentSurface>('default-project');
                     return dp?.environmentId;
                 } catch { return undefined; }
             };
@@ -157,73 +218,77 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // single-kernel deployments where there is no kernelManager.
             // Multi-kernel paths look up auth via kernelManager.getOrCreate,
             // so this provider is the single-kernel fallback.
-            const authServiceProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            const authServiceProvider = async (_environmentId?: string): Promise<IAuthService | undefined> => {
                 try {
-                    return ctx.getService<any>('auth');
+                    return ctx.getService<IAuthService>('auth');
                 } catch { return undefined; }
             };
 
             // ObjectQL resolver — single-kernel fallback so resolveExecCtx
             // can run sys_member / sys_user_permission_set lookups when
             // there is no kernelManager wired (e.g. `pnpm dev:crm`).
-            const objectQLProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            // [#4251 B3] `IObjectQLEngine`, not `IDataEngine`: the `objectql`
+            // slot is the SAME instance as `data` seen whole, and the consumer
+            // (`resolveExecCtx`, and the `transaction` probe behind the batch
+            // routes) reaches the full engine, not just the data plane.
+            const objectQLProvider = async (_environmentId?: string): Promise<IObjectQLEngine | undefined> => {
                 try {
-                    return ctx.getService<any>('objectql');
+                    return ctx.getService<IObjectQLEngine>('objectql');
                 } catch { return undefined; }
             };
 
             // Email service resolver — used by POST /email/send. Single-
             // kernel deployments resolve from the local kernel; multi-
             // tenant paths would resolve via kernelManager.getOrCreate.
-            const emailServiceProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            const emailServiceProvider = async (_environmentId?: string): Promise<IEmailService | undefined> => {
                 try {
-                    return ctx.getService<any>('email');
+                    return ctx.getService<IEmailService>('email');
                 } catch { return undefined; }
             };
 
             // Sharing service resolver — used by /data/:object/:id/shares.
-            const sharingServiceProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            const sharingServiceProvider = async (_environmentId?: string): Promise<ISharingService | undefined> => {
                 try {
-                    return ctx.getService<any>('sharing');
+                    return ctx.getService<ISharingService>('sharing');
                 } catch { return undefined; }
             };
 
             // Reports service resolver — used by /reports/* routes.
-            const reportsServiceProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            const reportsServiceProvider = async (_environmentId?: string): Promise<IReportService | undefined> => {
                 try {
-                    return ctx.getService<any>('reports');
+                    return ctx.getService<IReportService>('reports');
                 } catch { return undefined; }
             };
 
             // Approvals service resolver — used by /approvals/* routes.
-            const approvalsServiceProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            const approvalsServiceProvider = async (_environmentId?: string): Promise<IApprovalService | undefined> => {
                 try {
-                    return ctx.getService<any>('approvals');
+                    return ctx.getService<IApprovalService>('approvals');
                 } catch { return undefined; }
             };
 
             // Sharing-rule service resolver — used by /sharing/rules/* routes.
-            const sharingRulesServiceProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            const sharingRulesServiceProvider = async (_environmentId?: string): Promise<ISharingRuleService | undefined> => {
                 try {
-                    return ctx.getService<any>('sharingRules');
+                    return ctx.getService<ISharingRuleService>('sharingRules');
                 } catch { return undefined; }
             };
 
             // i18n service resolver — used to localize view / action / object
             // metadata. Single-kernel fallback so labels and select options
             // get translated even without a full multi-tenant kernelManager.
-            const i18nServiceProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            const i18nServiceProvider = async (_environmentId?: string): Promise<II18nService | undefined> => {
                 try {
-                    return ctx.getService<any>('i18n');
+                    return ctx.getService<II18nService>('i18n');
                 } catch { return undefined; }
             };
 
             // Analytics service resolver — used by /analytics/dataset/query
             // (ADR-0021 dataset preview/query). Returns undefined when no
             // analytics service is registered so the route fails cleanly (501).
-            const analyticsServiceProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            const analyticsServiceProvider = async (_environmentId?: string): Promise<IAnalyticsService | undefined> => {
                 try {
-                    return ctx.getService<any>('analytics');
+                    return ctx.getService<IAnalyticsService>('analytics');
                 } catch { return undefined; }
             };
 
@@ -231,9 +296,9 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // reference timezone/locale (localization manifest) through the 4-tier
             // cascade incl. the `OS_LOCALIZATION_TIMEZONE` env override. Returns
             // undefined when no settings service is registered (UTC default).
-            const settingsServiceProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            const settingsServiceProvider = async (_environmentId?: string): Promise<SettingsReadSurface | undefined> => {
                 try {
-                    return ctx.getService<any>('settings');
+                    return ctx.getService<SettingsReadSurface>('settings');
                 } catch { return undefined; }
             };
 
@@ -256,9 +321,9 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // /security/suggested-bindings routes and the D6 /security/explain
             // route (plugin-security). Returns undefined when plugin-security
             // is not mounted so the routes fail cleanly (501).
-            const securityServiceProvider = async (_environmentId?: string): Promise<any | undefined> => {
+            const securityServiceProvider = async (_environmentId?: string): Promise<ISecurityService | undefined> => {
                 try {
-                    return ctx.getService<any>('security');
+                    return ctx.getService<ISecurityService>('security');
                 } catch { return undefined; }
             };
 
@@ -276,8 +341,13 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             
             // Single-env service-existence probe for nav capability gates
             // (ADR-0057 D10). Multi-env uses the per-request kernel instead.
+            // `unknown`, deliberately: the slot name is a runtime argument, so no
+            // contract can be named here — and this probe asks only whether
+            // SOMETHING occupies the slot, never touching its shape. `unknown`
+            // says exactly that and, unlike `any`, makes any future member
+            // access through this lookup a compile error instead of a silent one.
             const serviceExistsProvider = (name: string): boolean => {
-                try { return ctx.getService<any>(name) != null; } catch { return false; }
+                try { return ctx.getService<unknown>(name) != null; } catch { return false; }
             };
             try {
                 const restServer = new RestServer(server, protocol, config.api as any, kernelManager, envRegistry, defaultEnvironmentIdProvider, authServiceProvider, objectQLProvider, emailServiceProvider, sharingServiceProvider, reportsServiceProvider, approvalsServiceProvider, sharingRulesServiceProvider, i18nServiceProvider, analyticsServiceProvider, settingsServiceProvider, serviceExistsProvider, securityServiceProvider, requestEnvResolver, metadataServiceProvider);

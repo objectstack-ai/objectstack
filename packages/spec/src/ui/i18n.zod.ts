@@ -224,6 +224,8 @@ export const NumberFormatSchema = lazySchema(() => z.object({
 }).describe('Number formatting rules'));
 
 export type NumberFormat = z.infer<typeof NumberFormatSchema>;
+/** Post-parse shape of {@link NumberFormat} — defaults applied, transforms run (ADR-0122). */
+export type NumberFormatParsed = z.infer<typeof NumberFormatSchema>;
 
 /**
  * Date Format Schema
@@ -287,3 +289,5 @@ export const LocaleConfigSchema = lazySchema(() => z.object({
 }).describe('Locale configuration'));
 
 export type LocaleConfig = z.infer<typeof LocaleConfigSchema>;
+/** Post-parse shape of {@link LocaleConfig} — defaults applied, transforms run (ADR-0122). */
+export type LocaleConfigParsed = z.infer<typeof LocaleConfigSchema>;
