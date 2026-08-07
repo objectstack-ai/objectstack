@@ -6,7 +6,7 @@
 //
 // `check:docs` used to be `pnpm gen:schema && tsx scripts/build-docs.ts --check`.
 // That first step is a GENERATOR, and on a stale tree it rewrites two TRACKED
-// files (`json-schema.manifest.json`, `authorable-surface.json`), so a script
+// files (`json-schema.manifest/`, `authorable-surface/`), so a script
 // called `check:` edited the working tree of whoever ran it and left the
 // staleness unreported — #4711's defect at a different entry point.
 //

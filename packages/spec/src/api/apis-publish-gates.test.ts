@@ -199,6 +199,65 @@ describe('[#5111] gate (c) — namespace carve-out (ADR-0121 D1/D2)', () => {
   });
 });
 
+describe('[#5310] the `path` vocabulary text is itself publishable', () => {
+  /**
+   * `ApiEndpointSchema.path`'s `.describe()` is not a code comment. Since `api`
+   * became a registered metadata kind (#5271) it is the field help the
+   * metadata-admin endpoint form renders, and it lands in the generated JSON
+   * Schema — so it is the first-hand prompt an author copies, and the author is
+   * very often an AI maintainer (ADR-0033) that copies it verbatim. It used to
+   * read `URL Path (e.g. /api/v1/customers)`, an example `namespaceGate` rejects
+   * on sight (ADR-0121 D1): the vocabulary's own example was the one shape
+   * publish refuses.
+   *
+   * The assertion reads the text back OUT of the schema instead of restating
+   * it, so it cannot drift from the string an author actually sees — put a
+   * rejected path back into the `.describe()` and this file goes red.
+   */
+  const description = ApiEndpointSchema.shape.path.description ?? '';
+
+  /** Concrete paths in that text. `<manifest.namespace>` is a placeholder, not an example. */
+  const concreteExamples = (description.match(/\/[A-Za-z0-9_<>./-]+/g) ?? []).filter(
+    (candidate) => !candidate.includes('<'),
+  );
+
+  it('shows the author at least one CONCRETE example path', () => {
+    expect(description, '`path` must carry a description — it is the form\'s field help').not.toBe('');
+    expect(
+      concreteExamples,
+      `no concrete example path found in: ${description}`,
+    ).not.toHaveLength(0);
+  });
+
+  it('every concrete example it shows PASSES the gate that judges authored paths', () => {
+    for (const path of concreteExamples) {
+      const carveOut = /^\/api\/v1\/apps\/([a-z][a-z0-9_]{1,19})\/(.+)$/.exec(path);
+      expect(
+        carveOut,
+        `example '${path}' is not \`/api/v1/apps/[namespace]/[subpath]\` — the shape ADR-0121 D1 requires`,
+      ).not.toBeNull();
+
+      // Judged under the namespace the example itself names: the carve-out is
+      // derived from `manifest.namespace` (D2), so an example is only honest
+      // paired with the manifest that could declare it.
+      const namespace = carveOut![1]!;
+      const issues = validateApiEndpointDeclarations(
+        [ApiEndpointSchema.parse({ ...validObjectEndpoint, path })],
+        { namespace },
+      );
+      expect(
+        issues.map((issue) => issue.message).join('\n'),
+        `example '${path}' must publish under \`manifest.namespace: '${namespace}'\``,
+      ).toBe('');
+    }
+  });
+
+  it('the example it USED to show is still rejected — the defect itself, pinned', () => {
+    const message = reject({ manifest, apis: [{ ...validObjectEndpoint, path: '/api/v1/customers' }] });
+    expect(message).toMatch(/not inside this stack's endpoint carve-out/);
+  });
+});
+
 describe('[#5111] gate (a) — the supported subset (mirrors `planEndpointTarget`)', () => {
   it("rejects `type: 'script'` with the flow prescription", () => {
     const message = reject({

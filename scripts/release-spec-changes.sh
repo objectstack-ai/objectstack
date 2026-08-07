@@ -32,15 +32,23 @@ prev_version=$(npm view @objectstack/spec versions --json \
 workdir=$(mktemp -d)
 prev_surface=""
 if [ -n "${prev_version}" ]; then
-  echo "Diffing api-surface against previously published @objectstack/spec@${prev_version}"
+  echo "Diffing the export surface against previously published @objectstack/spec@${prev_version}"
   tarball=$(cd "${workdir}" && npm pack "@objectstack/spec@${prev_version}" --silent)
+  # Three shapes, because a published tarball is immutable and we unpack whichever
+  # one that release shipped:
+  #   - `package/api-surface/`     — sharded by entry point, #5837 onward;
+  #   - `package/api-surface.json` — the single file, protocol 15 .. #5837;
+  #   - neither                    — before protocol 15.
+  tar -xzf "${workdir}/${tarball}" -C "${workdir}" package/api-surface 2>/dev/null || true
   tar -xzf "${workdir}/${tarball}" -C "${workdir}" package/api-surface.json 2>/dev/null || true
-  if [ -f "${workdir}/package/api-surface.json" ]; then
+  if [ -d "${workdir}/package/api-surface" ]; then
+    prev_surface="${workdir}/package/api-surface"
+  elif [ -f "${workdir}/package/api-surface.json" ]; then
     prev_surface="${workdir}/package/api-surface.json"
   else
-    # Releases before protocol 15 did not ship api-surface.json in the npm
+    # Releases before protocol 15 did not ship an export snapshot in the npm
     # artifact; the manifest is still attached, with empty added[]/removed[].
-    echo "@objectstack/spec@${prev_version} ships no api-surface.json — added/removed stay empty"
+    echo "@objectstack/spec@${prev_version} ships no api-surface snapshot — added/removed stay empty"
   fi
 fi
 
