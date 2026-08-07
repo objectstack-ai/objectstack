@@ -879,7 +879,7 @@ which contain components.
 | `type`               | Use |
 |:---------------------|:----|
 | `page:header`        | Title + subtitle + breadcrumb + inline `actions: Action[]` |
-| `page:card`          | Bordered/un-bordered card with `body: Component[]` |
+| `page:card`          | Bordered/un-bordered card with `children: Component[]` (plus an optional `footer: Component[]` slot) |
 | `flex`               | Generic styleable box (`properties.children`) — the workhorse for custom layout; style via `responsiveStyles` (see Styling below) |
 | `element:text`       | Text node — `properties.content`; style via `responsiveStyles` |
 | `element:button`     | Button — `properties.label` + `variant`/`size` + optional `action` |

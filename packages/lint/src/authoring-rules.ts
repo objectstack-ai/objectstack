@@ -481,6 +481,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `displayField` (#5775) — so gating today would fail the platform's own pages
   // to enforce declarations the platform does not keep. The error upgrade is a
   // separate step, once the warning-period inventory is empty.
+  //
+  // #5775 has since settled its half: `displayField` is retired in favour of the
+  // `labelField` the renderer actually reads, and the rest of the keys the
+  // renderers honour are declared. #5728 and two page rewrites are what remain.
   {
     name: 'validateComponentProps',
     tier: 'advisory',

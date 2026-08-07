@@ -11,7 +11,8 @@ import {
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
-import { RouteManager } from './route-manager.js';
+import { RouteManager, type RouteEntry } from './route-manager.js';
+import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import type { FieldErrorCode } from '@objectstack/spec/api';
@@ -1601,10 +1602,33 @@ export interface RestRequestEnvResolver {
     resolveRequestEnvironmentId(req: unknown): Promise<string | undefined>;
 }
 
+/**
+ * One route this server knows is mounted, and how it got there (#5822).
+ *
+ * `RouteEntry` plus `source`: `route-manager` for the routes this server
+ * registered itself, `direct-mount` for the ones a bypassing registrar mounted
+ * on the same host server and reported through
+ * {@link RestServer.recordDirectMountedRoutes}. Both are equally mounted and
+ * equally documented; the column exists because the route ledger audits them
+ * per source, and because a debugging reader deserves to know which registrar
+ * to look in.
+ */
+export interface MountedRoute extends RouteEntry {
+    readonly source: MountedRouteSource;
+}
+
 export class RestServer {
     private protocol: RestProtocol;
     private config: NormalizedRestServerConfig;
     private routeManager: RouteManager;
+    /**
+     * Routes mounted on the SAME host server by a registrar that bypasses
+     * `RouteManager`, as reported by the composition step that called it
+     * (#5822). Facts, not intentions: a registrar the boot never called
+     * contributes nothing here, so `getRoutes()` and the OpenAPI document stay
+     * silent about it. See `direct-mount.ts`.
+     */
+    private readonly directMountedRoutes: MountedRoute[] = [];
     private kernelManager?: RestKernelManager;
     private envRegistry?: RestEnvRegistry;
     /**
@@ -3287,11 +3311,13 @@ export class RestServer {
                 //    route the router will match: same table, read at request
                 //    time, so the prefix follows `apiPath`, the verbs are the
                 //    registered ones, and a route that is not mounted cannot be
-                //    described. `routeManager.getAll()` is the whole surface —
-                //    the filtering to THIS base (and away from the project-
+                //    described. `getRoutes()` is the whole surface — since
+                //    #5822 that includes the direct-mount registrars' routes,
+                //    but only the ones this boot actually mounted and reported.
+                //    The filtering to THIS base (and away from the project-
                 //    scoped mirror, which gets its own document) is
                 //    `buildBuiltinPaths`'s.
-                const builtin = buildBuiltinPaths(this.routeManager.getAll(), basePath);
+                const builtin = buildBuiltinPaths(this.getRoutes(), basePath);
                 enriched.paths = builtin.paths;
                 // The tag list describes that same section, so it is produced
                 // with it rather than inherited from the artifact — otherwise a
@@ -8683,11 +8709,38 @@ export class RestServer {
     getRouteManager(): RouteManager {
         return this.routeManager;
     }
-    
+
     /**
-     * Get all registered routes
+     * Record routes a bypassing registrar mounted on this server's host
+     * `IHttpServer` (#5822).
+     *
+     * Called by the composition step that invoked the registrar
+     * (`mountAndRecordDirectRoutes`), with the array the registrar returned —
+     * which is the array it iterated to mount, so this records what happened
+     * rather than what was intended. Nothing here re-derives, re-checks or
+     * re-orders that fact; a registrar that was never called reports nothing,
+     * which is how "not mounted ⇒ not enumerable" survives.
      */
-    getRoutes() {
-        return this.routeManager.getAll();
+    recordDirectMountedRoutes(routes: readonly DirectMountedRoute[]): void {
+        for (const route of routes) {
+            this.directMountedRoutes.push({ ...route, source: 'direct-mount' });
+        }
+    }
+
+    /**
+     * Get all routes mounted for this boot — the whole surface this server
+     * knows about, RouteManager's table and the recorded direct mounts alike.
+     *
+     * This is the introspection seam: the OpenAPI built-in section
+     * (`buildBuiltinPaths`), the route-ledger conformance guard and every
+     * debugging reader ask exactly this one question. Before #5822 it answered
+     * only for `routeManager`, so nine mounted routes — eight of them SDK
+     * capabilities — were invisible to all three.
+     */
+    getRoutes(): MountedRoute[] {
+        return [
+            ...this.routeManager.getAll().map((route): MountedRoute => ({ ...route, source: 'route-manager' })),
+            ...this.directMountedRoutes,
+        ];
     }
 }

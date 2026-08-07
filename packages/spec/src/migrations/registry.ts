@@ -1053,7 +1053,29 @@ const step17: MigrationStep = {
     + 'the shared word: the import mapping\'s `mapping.fieldMapping[].transform`, a flat '
     + 'string enum applied row by row by the REST import path and live in the liveness '
     + 'ledger — including its own `javascript` value, which that path rejects with a 400 '
-    + 'rather than pretending to run.',
+    + 'rather than pretending to run.\n\n'
+    + 'Last, it reconciles the SDUI component-props surface with the renderers that serve it '
+    + '(#5775). #5068 wired the first parse `ComponentPropsMap` ever had, and the corpus it '
+    + 'landed on diverged in BOTH directions: keys objectui honours that the schema never '
+    + 'declared, and keys the schema declared — one of them REQUIRED — that no renderer reads. '
+    + 'The maintainer ruled direction A (2026-08-06), the #5611 rule again: the delivered and '
+    + 'authorized shape is the contract. So the honoured keys are declared '
+    + '(`element:record_picker` `labelField`/`valueField`/`label`/`emptyText`, `record:path` '
+    + '`stages[].terminal`, `page:tabs` `items[].value`/`items[].count`, `page:card` `children`, '
+    + 'and `children` on `page:section`/`page:footer`/`page:sidebar`, which were declared '
+    + '`EmptyProps` while their renderers rendered a child list), and four keys retire. Two are '
+    + 'synonym renames: `element:record_picker.displayField` → `labelField` (the required key no '
+    + 'renderer read, while `labelField ?? \'name\'` is what actually renders the row — so an '
+    + 'author who followed the schema got a picker listing `name` with no diagnostic, the '
+    + 'ADR-0078 shape), and `page:card.body` → `children` (one composition key across every '
+    + 'container; the card renderer already reads both, and the showcase authors `children`). '
+    + 'Two are enforce-or-remove deletions: `element:record_picker.searchFields` and '
+    + '`.multiple` — the control is a shadcn single-select with no search input, binding ONE '
+    + 'record id into a page variable, so `searchFields` narrowed nothing and `multiple: true` '
+    + 'selected nothing extra while reporting success. Either returns the day the capability '
+    + 'is implemented (#5021 / #4988). Not in scope, and deliberately: `page:card.visible` is a '
+    + 'component-level visibility predicate written into `properties` and hoisted by the '
+    + 'renderer — a page to rewrite onto the ADR-0089 `visibleWhen`, not a key to declare.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1100,6 +1122,9 @@ const step17: MigrationStep = {
     'page-header-subtitle-alias',
     'object-index-type-partial-removed',
     'field-mapping-transform-removed',
+    'record-picker-display-field-to-label-field',
+    'record-picker-inert-keys-removed',
+    'page-card-body-to-children',
   ],
   semantic: [
     {
@@ -2243,6 +2268,14 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     'data/ExternalFieldMapping:transform',
     'integration/ConnectorFieldMapping:transform',
     'shared/FieldMapping:transform',
+    // #5775 — the SDUI component-props reconciliation. Three keys on the record
+    // picker (`displayField` was the REQUIRED one, and the synonym of the key
+    // the renderer actually reads) and the card's second spelling of the
+    // composition slot every other container calls `children`.
+    'ui/ElementRecordPickerProps:displayField',
+    'ui/ElementRecordPickerProps:multiple',
+    'ui/ElementRecordPickerProps:searchFields',
+    'ui/PageCardProps:body',
   ],
 };
 

@@ -73,6 +73,16 @@ import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { escapeLikePattern, likePattern, LIKE_ESCAPE_CHAR } from '../like-pattern.js';
+import { isBindableComparand, isRenderableTextComparand } from '../comparand-shape.js';
+
+/** A label for a comparand that survives `undefined`, a `Date` and a buffer. */
+function describe1(v: unknown): string {
+  if (v === undefined) return 'undefined';
+  if (v instanceof Date) return `Date(${v.toISOString()})`;
+  if (ArrayBuffer.isView(v)) return 'Uint8Array';
+  if (typeof v === 'bigint') return `${v}n`;
+  return JSON.stringify(v) ?? String(v);
+}
 
 /**
  * The issue's four measured rows, plus a pair for the escape character itself.
@@ -205,6 +215,89 @@ describe('[#5567] analytics LIKE compilers escape their comparand', () => {
       expect(likePattern('contains', '_admin')).toBe('%\\_admin%');
       expect(likePattern('starts', '_admin')).toBe('\\_admin%');
       expect(likePattern('ends', '_admin')).toBe('%\\_admin');
+    });
+  });
+
+  // ── [#5234] Which comparands may reach that transform at all ────────────────
+
+  /**
+   * The escape expression above answers "how is a comparand rendered"; this
+   * block answers "which comparands are rendered at all", and the two must move
+   * together. `escapeLikePattern` still takes `unknown` and still calls
+   * `String()` unconditionally — that is only safe while both packages agree on
+   * the fence in front of it, so the fence is mirrored here exactly the way
+   * `driverSqlEscape` mirrors the transform.
+   *
+   * Why it is a fence and not a tolerant `String()`: `String({})` is the literal
+   * `'[object Object]'`, which builds a valid, parameterised `LIKE` pattern
+   * nobody wrote — and against a row storing that text it MATCHES. The
+   * `$notContains` direction then excludes a real row. Measured before the fix
+   * on `driver-sql`, `driver-memory` and both faces here.
+   */
+  describe('[#5234] the comparand fence in front of that transform', () => {
+    /**
+     * `driver-sql`'s `isRenderableTextComparand`, mirrored — same reason the
+     * escape expression is mirrored above. If either package widens or narrows
+     * its allow-list, this assertion is what goes red.
+     */
+    const driverSqlRenderable = (v: unknown): boolean => {
+      if (v === null || v === undefined) return true;
+      const kind = typeof v;
+      if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
+      return v instanceof Date;
+    };
+
+    /** `driver-sql`'s `isBindableComparand`, mirrored — the `$in`-member half. */
+    const driverSqlBindable = (v: unknown): boolean => {
+      if (v === null || v === undefined) return true;
+      const kind = typeof v;
+      if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
+      return v instanceof Date || ArrayBuffer.isView(v);
+    };
+
+    /**
+     * One table, both predicates, spanning every branch of each: the primitives
+     * #5526 deliberately kept, the `Date` `driver-turso`'s allow-list keeps as
+     * its one object conversion, the binary that binds but does not render, and
+     * the object shapes #5234 refuses.
+     */
+    const VALUES: unknown[] = [
+      '_admin', '', 'plain', 0, 5, -1.5, 9n, true, false, null, undefined,
+      new Date('2026-01-01T00:00:00.000Z'), new Uint8Array([1, 2]),
+      {}, { foo: 1 }, { $field: 'other' }, ['al', 'be'], [],
+    ];
+
+    it('`isRenderableTextComparand` matches `driver-sql`, value for value', () => {
+      for (const v of VALUES) {
+        expect(isRenderableTextComparand(v), `renderable(${describe1(v)})`).toBe(driverSqlRenderable(v));
+      }
+    });
+
+    it('`isBindableComparand` matches `driver-sql`, value for value', () => {
+      for (const v of VALUES) {
+        expect(isBindableComparand(v), `bindable(${describe1(v)})`).toBe(driverSqlBindable(v));
+      }
+    });
+
+    it('every value the fence admits, `String()` renders faithfully', () => {
+      // The property that makes the unconditional `String()` in
+      // `escapeLikePattern` correct rather than merely unexercised.
+      for (const v of VALUES.filter(isRenderableTextComparand)) {
+        expect(String(v), describe1(v)).not.toBe('[object Object]');
+      }
+      // …and the refused ones are exactly the values that would have produced a
+      // pattern nobody wrote.
+      expect(String({})).toBe('[object Object]');
+      expect(String(['al', 'be'])).toBe('al,be');
+    });
+
+    it('the array case is a SPLIT this fence closes, not a behaviour it invents', () => {
+      // `read-scope-sql` bound `%al,be%` (String of the whole array) while the
+      // analytics `where` door bound `%al%` (it reads `values[0]`), for one
+      // filter. Both doors now refuse it, so there is no third answer to pick.
+      expect(isRenderableTextComparand(['al', 'be'])).toBe(false);
+      expect(likePattern('contains', 'al')).toBe('%al%');
+      expect(likePattern('contains', ['al', 'be'] as unknown as string)).toBe('%al,be%');
     });
   });
 

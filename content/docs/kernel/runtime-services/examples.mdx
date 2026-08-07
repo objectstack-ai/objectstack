@@ -123,17 +123,6 @@ hook adds is the **business** rule the engine cannot know.
 ```ts
 import { defineHook, type HookContext } from '@objectstack/spec/data';
 
-/**
- * The one call this hook makes on `ctx.api`. The contract declares
- * `HookContext.api` opaque (`api: unknown`) because the object the engine binds is
- * ObjectQL's `ScopedContext`, so a typed handler names the slice it uses.
- */
-type CrossObjectApi = {
-  object(name: string): {
-    findOne(query: { where: Record<string, unknown> }): Promise<{ credit_limit?: number } | null>;
-  };
-};
-
 export const ContractWithinCreditLimit = defineHook({
   name: 'contract_within_credit_limit',
   object: 'contract',
@@ -142,10 +131,11 @@ export const ContractWithinCreditLimit = defineHook({
     const accountId = ctx.input.account_id;
     if (typeof accountId !== 'string') return;
 
-    const api = ctx.api as CrossObjectApi;
-    const account = await api.object('crm_account').findOne({ where: { id: accountId } });
+    // `ctx.api` is typed (`IScopedContext`) — no cast. It is optional because a
+    // context can be built without a live engine, so reach it with `?.`.
+    const account = await ctx.api?.object('crm_account').findOne({ where: { id: accountId } });
 
-    const limit = account?.credit_limit ?? 0;
+    const limit = Number(account?.credit_limit ?? 0);
     const amount = Number(ctx.input.amount ?? 0);
     if (limit > 0 && amount > limit) {
       throw new Error('VALIDATION_FAILED: contract amount exceeds the account credit limit');

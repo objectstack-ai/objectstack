@@ -19,6 +19,8 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Transitive dependencies
 
+- `node_modules/@objectstack/spec/src/automation/flow-function.zod.ts` — The contract for a **named handler function a `script` node invokes** —
+- `node_modules/@objectstack/spec/src/data/driver.zod.ts` — Common Driver Options
 - `node_modules/@objectstack/spec/src/data/driver/common.zod.ts` — Shared building blocks for the per-driver `datasource.config` shapes (#4410).
 - `node_modules/@objectstack/spec/src/data/driver/config-registry.zod.ts` — The driver-id → `datasource.config` shape registry (#4410).
 - `node_modules/@objectstack/spec/src/data/driver/memory.zod.ts` — Memory Driver Configuration Schema
@@ -28,8 +30,10 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/driver/sqlite.zod.ts` — SQLite driver configuration — the `config` slot of a `datasource` whose
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Capability tokens a script body may request.
+- `node_modules/@objectstack/spec/src/data/query.zod.ts` — Sort Node
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
 - `node_modules/@objectstack/spec/src/security/rls.zod.ts` — Row-Level Security (RLS) Protocol
+- `node_modules/@objectstack/spec/src/shared/enums.zod.ts` — Exports: SortDirectionEnum, SortItemSchema, MutationEventEnum, IsolationLevelEnum
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/http.zod.ts` — Shared HTTP Schemas
 - `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — System Identifier Schema

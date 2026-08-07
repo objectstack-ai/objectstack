@@ -38,6 +38,8 @@
 import type { HookBody, ScriptBody, ExpressionBody, HookContext } from '@objectstack/spec/data';
 import type { ActionSession } from '@objectstack/spec/ui';
 
+import type { ActorUser } from '../security/actor-user.js';
+
 /**
  * The caller session a sandboxed body receives on `ctx.session` — the union of
  * the two DECLARED producer shapes this one seam carries (#5613).
@@ -52,6 +54,57 @@ import type { ActionSession } from '@objectstack/spec/ui';
  * which is the practical payoff of the rename.
  */
 export type ScriptSession = ActionSession | HookContext['session'];
+
+/**
+ * The caller a sandboxed body receives on `ctx.user` — the union of the two
+ * REAL producer shapes this one seam carries (#5521).
+ *
+ * Same construction, and for the same reason, as {@link ScriptSession}
+ * (#5613/#5991) one field over: the seam is genuinely generic over both body
+ * kinds, so collapsing it to either single type would be a contract lie in the
+ * other direction.
+ *
+ *  - an ACTION body gets {@link ActorUser} — the ONE producer of the dispatch
+ *    user shape (`../security/actor-user.ts`), built through the spec's
+ *    `createEvalUser` factory and shared by REST `/actions`, MCP `run_action`
+ *    and the AI routes since #5372. Every key is present with a defined value
+ *    except `email` / `organizationId`;
+ *  - a HOOK body gets `HookContext['user']` (`@objectstack/spec/data`) —
+ *    ObjectQL's `buildUser()` shortcut, whose whole key set is
+ *    `id` / `name` / `email` / `organizationId`, every one of them optional.
+ *
+ * The two do NOT converge, which is exactly why this is a union and not
+ * `ActorUser`: the hook shortcut carries no `positions`, no `permissions`, no
+ * `systemPermissions` and no `userId` / `displayName` alias, so declaring
+ * `ActorUser` alone here would assert an authority vocabulary the hook path has
+ * never produced — the "one key, two realities" defect #5613 exists to close,
+ * pointed at the other field.
+ *
+ * ⚠️ It is NOT `EvalUser` either, and that was measured rather than assumed.
+ * `EvalUser` (ADR-0068 D1) is what the issue's option 1 proposed as the
+ * "minimum common denominator", but it requires `id: string` and
+ * `positions: string[]`, and `buildUser()` (`packages/objectql/src/engine.ts`)
+ * emits neither guarantee — no `positions` key at all. So `EvalUser` is a
+ * SUPERSET of what the hook side delivers, and declaring it would have been the
+ * same over-claim in a spec-shaped disguise. `ActorUser extends EvalUser`, so
+ * the action arm still carries the ADR-0068 contract on the path that has it.
+ *
+ * The `?? …session?.user` fallback chain both writers carry (`body-runner.ts`
+ * `:315` / `:340`) forces no THIRD arm — measured, not presumed: neither
+ * session shape reaching this seam declares a `user` key
+ * (`HookContext['session']`, `ActionSession`) and neither producer writes one
+ * (`buildSession()` in objectql, `buildActionSession()` in
+ * `../action-execution.ts`), so that arm is unreachable on every real path —
+ * the #4984 dead-limb family. It is left in place here because this change
+ * types a seam and does not get to re-decide a runtime expression; the limb is
+ * filed separately.
+ *
+ * `undefined` is a member (via `HookContext['user']`'s own optionality, exactly
+ * as in {@link ScriptSession}) and it is a REAL value on this seam, not just
+ * spelling: ObjectQL's `ScopedRepo.execute()` — the second `executeAction` call
+ * site — passes an action context with no `user` and no `session` at all.
+ */
+export type ScriptUser = ActorUser | HookContext['user'];
 
 /**
  * Identity / origin information used by the sandbox for diagnostics, capability
@@ -83,7 +136,36 @@ export interface ScriptContext {
    */
   input: unknown;
   previous?: unknown;
-  user?: unknown;
+  /**
+   * The acting caller. TWO different shapes reach this one field, for the same
+   * structural reason {@link session} does — this interface is a single generic
+   * seam over both body kinds:
+   *
+   *  - a HOOK body gets `HookContext.user` (`@objectstack/spec/data`), the
+   *    engine's `session.userId` shortcut: `id` / `name` / `email` /
+   *    `organizationId`, built by ObjectQL's `buildUser()`;
+   *  - an ACTION body gets an {@link ActorUser} (`../security/actor-user.ts`) —
+   *    the identity core (`EvalUser`, ADR-0068 D1) plus the transport aliases
+   *    (`userId` / `displayName`) and the two authority channels
+   *    (`permissions` = permission-SET names, `systemPermissions` =
+   *    CAPABILITIES, never merged, #4705).
+   *
+   * Typed as {@link ScriptUser}, the union of those two REAL producer shapes,
+   * since #5521. It was `unknown` because the seam's two dispatch faces had
+   * never been measured against each other — and under `unknown` a fourth
+   * dispatch face could hand-roll a fifth user shape here without the compiler
+   * saying a word, which is precisely how #5372's three disagreeing shapes
+   * lived for several versions: there was no declaration to violate. The
+   * runtime shape has been correct and pin-tested since #5372
+   * (`../action-ctx-user-shape.test.ts` asserts the three dispatch paths key
+   * for key and value for value); this adds the compile-time half that pin
+   * cannot give, because a pin can only check the producers it names.
+   *
+   * ⚠️ Deliberately NOT narrowed to `ActorUser` alone, and deliberately not
+   * declared as the spec's `EvalUser`: the hook shortcut satisfies neither.
+   * See {@link ScriptUser} for the measurement behind both refusals.
+   */
+  user?: ScriptUser;
   /**
    * The caller session. TWO different shapes reach this one field, because
    * this interface is a single generic seam over both body kinds:
