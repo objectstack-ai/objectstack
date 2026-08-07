@@ -1097,10 +1097,13 @@ const MANAGED_BY_SYSTEM_RETIRED =
   + 'labelling admin/user-writable platform DATA under a name that says the opposite. '
   + "Use `managedBy: 'system-data'` (platform-defined schema, admin/user-writable data; "
   + 'authz stays the DelegatedAdminGate / RLS / permission sets). Rename the value; nothing '
-  + 'else about the object changes. Note `system-data` defaults to FULL CRUD affordances '
-  + '(the old `system` default was locked), so a `userActions` block that existed only to '
-  + 're-open create/edit/delete is now redundant and can be deleted — keep it only to '
-  + 'NARROW. Run `os migrate meta --from 16` to rewrite it automatically.';
+  + 'else about the object changes. Note `system-data` defaults to WRITABLE affordances — '
+  + 'create, edit, delete and exportCsv (the old `system` default was locked) — so a '
+  + '`userActions` block that existed only to re-open create/edit/delete is now redundant '
+  + 'and can be deleted; keep it only to NARROW. CSV `import` is deliberately NOT in that '
+  + 'default (#4671): it stays opt-in per object via `userActions: { import: true }`, which '
+  + 'is what a v16 `system` object already resolved to. Run `os migrate meta --from 16` to '
+  + 'rewrite it automatically.';
 
 const ObjectSchemaBase = z.object({
   /**
@@ -2028,8 +2031,9 @@ function assertSystemDataIsWritable(
     + 'false. Use `managedBy: \'engine-owned\'` for rows a platform service owns end to end '
     + '(written via `isSystem` / a service SYSTEM_CTX), or `append-only` for an immutable '
     + 'audit log. If the object IS user-writable, drop the `userActions` entries closing '
-    + 'create/edit/delete — the `system-data` default is full CRUD, and `userActions` is for '
-    + 'NARROWING only (#3355).',
+    + 'create/edit/delete — the `system-data` default already grants create, edit, delete and '
+    + 'exportCsv, so `userActions` is for NARROWING those (#3355). The one verb it does not '
+    + 'grant is CSV `import`, which is opt-in per object (#4671).',
   );
 }
 
@@ -2191,7 +2195,12 @@ export type Lifecycle = z.infer<typeof LifecycleSchema>;
 export interface CrudAffordances {
   /** Generic "New" button (single record creation form). */
   create: boolean;
-  /** CSV bulk-import wizard. Disabled for config / system / append-only / better-auth by default. */
+  /**
+   * CSV bulk-import wizard. `platform` is the only bucket that grants it by
+   * default; every other bucket — `config`, `system-data`, `engine-owned`,
+   * `append-only`, `better-auth` — makes it opt-in via
+   * `userActions: { import: true }`.
+   */
   import: boolean;
   /** Inline + form editing of existing rows. */
   edit: boolean;
@@ -2232,6 +2241,12 @@ export interface RowCrudPredicates {
  *                  (RBAC link tables, prefs, messaging config). DEFAULT is
  *                  WRITABLE — the bucket exists to say "the data is yours" —
  *                  and an object that takes less NARROWS via `userActions`.
+ *                  The ONE exception is CSV import, which is opt-IN here:
+ *                  the bucket's charter members are the RBAC link tables, and
+ *                  a bulk-import entry point on a grant table is a lever a
+ *                  bucket default should not hand out by inheritance (#4671).
+ *                  An object that genuinely wants the wizard writes
+ *                  `userActions: { import: true }`.
  *                  Affordance declaration only; authz stays the delegated-admin
  *                  gate / RLS / permission sets (ADR-0103, renamed from the
  *                  locked-default `system` in v17 — #3355)
@@ -2246,7 +2261,7 @@ export interface RowCrudPredicates {
 const CRUD_AFFORDANCE_DEFAULTS: Record<NonNullable<ServiceObject['managedBy']> | 'platform', CrudAffordances> = {
   platform:       { create: true,  import: true,  edit: true,  delete: true,  exportCsv: true },
   config:         { create: true,  import: false, edit: true,  delete: true,  exportCsv: true },
-  'system-data':  { create: true,  import: true,  edit: true,  delete: true,  exportCsv: true },
+  'system-data':  { create: true,  import: false, edit: true,  delete: true,  exportCsv: true },
   'engine-owned': { create: false, import: false, edit: false, delete: false, exportCsv: true },
   'append-only':  { create: false, import: false, edit: false, delete: false, exportCsv: true },
   'better-auth':  { create: false, import: false, edit: false, delete: false, exportCsv: true },

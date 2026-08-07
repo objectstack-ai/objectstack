@@ -20,7 +20,12 @@ import { NotificationSubscription } from './notification-subscription.object.js'
 import { NotificationPreference } from './notification-preference.object.js';
 
 const V16_EXPECTED = { create: true, import: false, edit: true, delete: true, exportCsv: true };
-const V17_EXPECTED = { create: true, import: true, edit: true, delete: true, exportCsv: true };
+/**
+ * Byte-identical to {@link V16_EXPECTED} since #4671 narrowed the bucket default's
+ * `import` to opt-in — kept as its own constant so a future move of EITHER side
+ * shows up as a diff rather than being absorbed by a shared literal.
+ */
+const V17_EXPECTED = { create: true, import: false, edit: true, delete: true, exportCsv: true };
 
 /**
  * The v16 declaration shape, reconstructed so the equivalence is COMPUTED rather
@@ -54,22 +59,25 @@ describe('#3355 — messaging config grids move to `system-data` with their affo
         expect(obj.userActions).toBeUndefined();
       });
 
-      it('resolves the full-CRUD matrix from the bucket default alone', () => {
+      it('resolves create / edit / delete / exportCsv — but NOT import — from the bucket default alone', () => {
         expect(resolveCrudAffordances(obj as never)).toEqual(V17_EXPECTED);
       });
 
-      it('is write-equivalent to its v16 self on create / edit / delete / exportCsv', () => {
+      it('is affordance-equivalent to its v16 self on EVERY verb, import included (#4671)', () => {
         const v16 = resolveCrudAffordances(asV16(obj) as never);
         const v17 = resolveCrudAffordances(obj as never);
         expect(v16).toEqual(V16_EXPECTED);
-        for (const verb of ['create', 'edit', 'delete', 'exportCsv'] as const) {
+        for (const verb of ['create', 'import', 'edit', 'delete', 'exportCsv'] as const) {
           expect(v17[verb], `${name}.${verb} must not move`).toBe(v16[verb]);
         }
+        expect(v17).toEqual(v16);
       });
 
-      it('gains CSV import — the one adjudicated delta, pinned so it cannot move silently', () => {
-        expect(resolveCrudAffordances(asV16(obj) as never).import).toBe(false);
-        expect(resolveCrudAffordances(obj as never).import).toBe(true);
+      it('keeps CSV import opt-IN — off by bucket default, reachable only by declaring it (#4671)', () => {
+        expect(resolveCrudAffordances(obj as never).import).toBe(false);
+        const optedIn = resolveCrudAffordances({ ...obj, userActions: { import: true } } as never);
+        expect(optedIn.import).toBe(true);
+        expect({ ...optedIn, import: false }).toEqual(V17_EXPECTED);
       });
     });
   }
