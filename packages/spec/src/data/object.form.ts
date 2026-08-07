@@ -117,21 +117,21 @@ export const objectForm = defineForm({
             // through `inlineHelpText` / `description`.
 
             // Text constraints
-            { field: 'maxLength', type: 'number', helpText: 'Max characters', visibleWhen: "type in ['text','textarea','email','url','phone','password','markdown','html','richtext']" },
-            { field: 'minLength', type: 'number', helpText: 'Min characters', visibleWhen: "type in ['text','textarea','email','url','phone','password','markdown','html','richtext']" },
+            { field: 'maxLength', type: 'number', helpText: 'Max characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext']" },
+            { field: 'minLength', type: 'number', helpText: 'Min characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext']" },
 
             // Numeric constraints
-            { field: 'min', type: 'number', helpText: 'Minimum value', visibleWhen: "type in ['number','currency','percent','rating','slider','progress']" },
-            { field: 'max', type: 'number', helpText: 'Maximum value', visibleWhen: "type in ['number','currency','percent','rating','slider','progress']" },
-            { field: 'precision', type: 'number', helpText: 'Total digits', visibleWhen: "type in ['number','currency','percent']" },
-            { field: 'scale', type: 'number', helpText: 'Decimal places', visibleWhen: "type in ['number','currency','percent']" },
+            { field: 'min', type: 'number', helpText: 'Minimum value', visibleWhen: "data.type in ['number','currency','percent','rating','slider','progress']" },
+            { field: 'max', type: 'number', helpText: 'Maximum value', visibleWhen: "data.type in ['number','currency','percent','rating','slider','progress']" },
+            { field: 'precision', type: 'number', helpText: 'Total digits', visibleWhen: "data.type in ['number','currency','percent']" },
+            { field: 'scale', type: 'number', helpText: 'Decimal places', visibleWhen: "data.type in ['number','currency','percent']" },
 
             // Selection options
             {
               field: 'options',
               type: 'repeater',
               helpText: 'Available choices',
-              visibleWhen: "type in ['select','multiselect','radio','checkboxes']",
+              visibleWhen: "data.type in ['select','multiselect','radio','checkboxes']",
               fields: [
                 { field: 'label', type: 'text', required: true },
                 { field: 'value', type: 'text', required: true },
@@ -142,24 +142,24 @@ export const objectForm = defineForm({
             },
 
             // Relational
-            { field: 'reference', type: 'text', helpText: 'Target object name', visibleWhen: "type in ['lookup','master_detail','tree']" },
+            { field: 'reference', type: 'text', helpText: 'Target object name', visibleWhen: "data.type in ['lookup','master_detail','tree']" },
             // `lookupFilters`, not `referenceFilter`: an array of
             // {field, operator, value} rules, not a CEL string.
-            { field: 'lookupFilters', widget: 'json', helpText: 'Filter rules applied to the picker ({field, operator, value})', visibleWhen: "type in ['lookup','master_detail']" },
+            { field: 'lookupFilters', widget: 'json', helpText: 'Filter rules applied to the picker ({field, operator, value})', visibleWhen: "data.type in ['lookup','master_detail']" },
             // `deleteBehavior`, not a `cascadeDelete` boolean: the schema models
             // three outcomes, and only one of them is "cascade".
-            { field: 'deleteBehavior', type: 'select', helpText: 'What happens when the referenced record is deleted', visibleWhen: "type in ['lookup','master_detail']", options: [
+            { field: 'deleteBehavior', type: 'select', helpText: 'What happens when the referenced record is deleted', visibleWhen: "data.type in ['lookup','master_detail']", options: [
               { label: 'Set null', value: 'set_null' },
               { label: 'Cascade (delete children)', value: 'cascade' },
               { label: 'Restrict (block the delete)', value: 'restrict' },
             ] },
-            { field: 'multiple', type: 'boolean', helpText: 'Allow selecting multiple records', visibleWhen: "type in ['lookup']" },
+            { field: 'multiple', type: 'boolean', helpText: 'Allow selecting multiple records', visibleWhen: "data.type in ['lookup']" },
 
             // Formula / summary
             // `expression`, not `formula` — the key is named for what it holds,
             // not for the field type that uses it.
-            { field: 'expression', type: 'code', language: 'expression', helpText: 'CEL formula expression', visibleWhen: "type == 'formula'" },
-            { field: 'returnType', type: 'select', helpText: 'Result type for formulas', visibleWhen: "type == 'formula'", options: [
+            { field: 'expression', type: 'code', language: 'expression', helpText: 'CEL formula expression', visibleWhen: "data.type == 'formula'" },
+            { field: 'returnType', type: 'select', helpText: 'Result type for formulas', visibleWhen: "data.type == 'formula'", options: [
               { label: 'Text', value: 'text' }, { label: 'Number', value: 'number' }, { label: 'Boolean', value: 'boolean' },
               { label: 'Date', value: 'date' }, { label: 'Datetime', value: 'datetime' }, { label: 'Currency', value: 'currency' },
             ] },
@@ -170,7 +170,7 @@ export const objectForm = defineForm({
               field: 'summaryOperations',
               type: 'composite',
               helpText: 'Roll-up: which child object, which field, which aggregation',
-              visibleWhen: "type == 'summary'",
+              visibleWhen: "data.type == 'summary'",
               fields: [
                 { field: 'object', type: 'text', required: true, helpText: 'Source child object name' },
                 { field: 'field', type: 'text', required: true, helpText: 'Field on the child object to aggregate (ignored for count)' },
@@ -184,10 +184,10 @@ export const objectForm = defineForm({
             // Autonumber — `autonumberFormat`, not `displayFormat`. There is no
             // `startingNumber`: the counter resets per rendered prefix, which the
             // format string itself determines (e.g. AD{YYYYMMDD}{0000} resets daily).
-            { field: 'autonumberFormat', type: 'text', helpText: 'e.g. "INV-{0000}"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported', visibleWhen: "type == 'autonumber'" },
+            { field: 'autonumberFormat', type: 'text', helpText: 'e.g. "INV-{0000}"; date tokens {YYYY}/{MM}/{DD} and {field_name} interpolation supported', visibleWhen: "data.type == 'autonumber'" },
 
             // Code language
-            { field: 'language', type: 'text', helpText: 'Editor language (e.g. sql, javascript)', visibleWhen: "type == 'code'" },
+            { field: 'language', type: 'text', helpText: 'Editor language (e.g. sql, javascript)', visibleWhen: "data.type == 'code'" },
 
             // Governance. `validation` / `errorMessage` are not FieldSchema keys —
             // a record-level predicate is a `validation` metadata item on the

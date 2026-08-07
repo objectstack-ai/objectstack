@@ -36,7 +36,7 @@ import { lazySchema } from '../shared/lazy-schema';
 export const AutomationFlowPathParamsSchema = lazySchema(() => z.object({
   name: z.string().describe('Flow machine name (snake_case)'),
 }));
-export type AutomationFlowPathParams = z.infer<typeof AutomationFlowPathParamsSchema>;
+export type AutomationFlowPathParams = z.input<typeof AutomationFlowPathParamsSchema>;
 
 /**
  * Path parameters for run-level operations.
@@ -44,7 +44,7 @@ export type AutomationFlowPathParams = z.infer<typeof AutomationFlowPathParamsSc
 export const AutomationRunPathParamsSchema = lazySchema(() => AutomationFlowPathParamsSchema.extend({
   runId: z.string().describe('Execution run ID'),
 }));
-export type AutomationRunPathParams = z.infer<typeof AutomationRunPathParamsSchema>;
+export type AutomationRunPathParams = z.input<typeof AutomationRunPathParamsSchema>;
 
 // ==========================================
 // 2. List Flows (GET /api/automation)
@@ -65,7 +65,7 @@ export const ListFlowsRequestSchema = lazySchema(() => z.object({
   cursor: z.string().optional()
     .describe('Cursor for pagination'),
 }));
-export type ListFlowsRequest = z.infer<typeof ListFlowsRequestSchema>;
+export type ListFlowsRequest = z.input<typeof ListFlowsRequestSchema>;
 /** Post-parse shape of {@link ListFlowsRequest} — defaults applied, transforms run (ADR-0122). */
 export type ListFlowsRequestParsed = z.infer<typeof ListFlowsRequestSchema>;
 
@@ -82,7 +82,7 @@ export const FlowSummarySchema = lazySchema(() => z.object({
   nodeCount: z.number().int().optional().describe('Number of nodes in the flow'),
   lastRunAt: z.string().datetime().optional().describe('Last execution timestamp'),
 }));
-export type FlowSummary = z.infer<typeof FlowSummarySchema>;
+export type FlowSummary = z.input<typeof FlowSummarySchema>;
 
 /**
  * Response for the list flows endpoint.
@@ -95,7 +95,7 @@ export const ListFlowsResponseSchema = lazySchema(() => BaseResponseSchema.exten
     hasMore: z.boolean().describe('Whether more flows are available'),
   }),
 }));
-export type ListFlowsResponse = z.infer<typeof ListFlowsResponseSchema>;
+export type ListFlowsResponse = z.input<typeof ListFlowsResponseSchema>;
 /** Post-parse shape of {@link ListFlowsResponse} — defaults applied, transforms run (ADR-0122). */
 export type ListFlowsResponseParsed = z.infer<typeof ListFlowsResponseSchema>;
 
@@ -107,7 +107,7 @@ export type ListFlowsResponseParsed = z.infer<typeof ListFlowsResponseSchema>;
  * Request parameters for getting a single flow.
  */
 export const GetFlowRequestSchema = lazySchema(() => AutomationFlowPathParamsSchema);
-export type GetFlowRequest = z.infer<typeof GetFlowRequestSchema>;
+export type GetFlowRequest = z.input<typeof GetFlowRequestSchema>;
 
 /**
  * Response for the get flow endpoint.
@@ -115,7 +115,7 @@ export type GetFlowRequest = z.infer<typeof GetFlowRequestSchema>;
 export const GetFlowResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: FlowSchema.describe('Full flow definition'),
 }));
-export type GetFlowResponse = z.infer<typeof GetFlowResponseSchema>;
+export type GetFlowResponse = z.input<typeof GetFlowResponseSchema>;
 /** Post-parse shape of {@link GetFlowResponse} — defaults applied, transforms run (ADR-0122). */
 export type GetFlowResponseParsed = z.infer<typeof GetFlowResponseSchema>;
 
@@ -131,6 +131,8 @@ export type GetFlowResponseParsed = z.infer<typeof GetFlowResponseSchema>;
  */
 export const CreateFlowRequestSchema = lazySchema(() => FlowSchema);
 export type CreateFlowRequest = z.input<typeof CreateFlowRequestSchema>;
+/** Post-parse shape of {@link CreateFlowRequest} — defaults applied, transforms run (ADR-0122). */
+export type CreateFlowRequestParsed = z.infer<typeof CreateFlowRequestSchema>;
 
 /**
  * Response after creating a flow.
@@ -138,7 +140,7 @@ export type CreateFlowRequest = z.input<typeof CreateFlowRequestSchema>;
 export const CreateFlowResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: FlowSchema.describe('The created flow definition'),
 }));
-export type CreateFlowResponse = z.infer<typeof CreateFlowResponseSchema>;
+export type CreateFlowResponse = z.input<typeof CreateFlowResponseSchema>;
 /** Post-parse shape of {@link CreateFlowResponse} — defaults applied, transforms run (ADR-0122). */
 export type CreateFlowResponseParsed = z.infer<typeof CreateFlowResponseSchema>;
 
@@ -155,7 +157,7 @@ export type CreateFlowResponseParsed = z.infer<typeof CreateFlowResponseSchema>;
 export const UpdateFlowRequestSchema = lazySchema(() => AutomationFlowPathParamsSchema.extend({
   definition: FlowSchema.partial().describe('Partial flow definition to update'),
 }));
-export type UpdateFlowRequest = z.infer<typeof UpdateFlowRequestSchema>;
+export type UpdateFlowRequest = z.input<typeof UpdateFlowRequestSchema>;
 /** Post-parse shape of {@link UpdateFlowRequest} — defaults applied, transforms run (ADR-0122). */
 export type UpdateFlowRequestParsed = z.infer<typeof UpdateFlowRequestSchema>;
 
@@ -165,7 +167,7 @@ export type UpdateFlowRequestParsed = z.infer<typeof UpdateFlowRequestSchema>;
 export const UpdateFlowResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: FlowSchema.describe('The updated flow definition'),
 }));
-export type UpdateFlowResponse = z.infer<typeof UpdateFlowResponseSchema>;
+export type UpdateFlowResponse = z.input<typeof UpdateFlowResponseSchema>;
 /** Post-parse shape of {@link UpdateFlowResponse} — defaults applied, transforms run (ADR-0122). */
 export type UpdateFlowResponseParsed = z.infer<typeof UpdateFlowResponseSchema>;
 
@@ -177,7 +179,7 @@ export type UpdateFlowResponseParsed = z.infer<typeof UpdateFlowResponseSchema>;
  * Request parameters for deleting a flow.
  */
 export const DeleteFlowRequestSchema = lazySchema(() => AutomationFlowPathParamsSchema);
-export type DeleteFlowRequest = z.infer<typeof DeleteFlowRequestSchema>;
+export type DeleteFlowRequest = z.input<typeof DeleteFlowRequestSchema>;
 
 /**
  * Response after deleting a flow.
@@ -188,7 +190,7 @@ export const DeleteFlowResponseSchema = lazySchema(() => BaseResponseSchema.exte
     deleted: z.boolean().describe('Whether the flow was deleted'),
   }),
 }));
-export type DeleteFlowResponse = z.infer<typeof DeleteFlowResponseSchema>;
+export type DeleteFlowResponse = z.input<typeof DeleteFlowResponseSchema>;
 /** Post-parse shape of {@link DeleteFlowResponse} — defaults applied, transforms run (ADR-0122). */
 export type DeleteFlowResponseParsed = z.infer<typeof DeleteFlowResponseSchema>;
 
@@ -214,7 +216,7 @@ export const TriggerFlowRequestSchema = lazySchema(() => AutomationFlowPathParam
   params: z.record(z.string(), z.unknown()).optional()
     .describe('Additional contextual data'),
 }));
-export type TriggerFlowRequest = z.infer<typeof TriggerFlowRequestSchema>;
+export type TriggerFlowRequest = z.input<typeof TriggerFlowRequestSchema>;
 
 /**
  * Response after triggering a flow execution.
@@ -227,7 +229,7 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
     durationMs: z.number().optional().describe('Execution duration in milliseconds'),
   }),
 }));
-export type TriggerFlowResponse = z.infer<typeof TriggerFlowResponseSchema>;
+export type TriggerFlowResponse = z.input<typeof TriggerFlowResponseSchema>;
 /** Post-parse shape of {@link TriggerFlowResponse} — defaults applied, transforms run (ADR-0122). */
 export type TriggerFlowResponseParsed = z.infer<typeof TriggerFlowResponseSchema>;
 
@@ -244,7 +246,7 @@ export type TriggerFlowResponseParsed = z.infer<typeof TriggerFlowResponseSchema
 export const ToggleFlowRequestSchema = lazySchema(() => AutomationFlowPathParamsSchema.extend({
   enabled: z.boolean().describe('Whether to enable (true) or disable (false) the flow'),
 }));
-export type ToggleFlowRequest = z.infer<typeof ToggleFlowRequestSchema>;
+export type ToggleFlowRequest = z.input<typeof ToggleFlowRequestSchema>;
 
 /**
  * Response after toggling a flow.
@@ -255,7 +257,7 @@ export const ToggleFlowResponseSchema = lazySchema(() => BaseResponseSchema.exte
     enabled: z.boolean().describe('New enabled state'),
   }),
 }));
-export type ToggleFlowResponse = z.infer<typeof ToggleFlowResponseSchema>;
+export type ToggleFlowResponse = z.input<typeof ToggleFlowResponseSchema>;
 /** Post-parse shape of {@link ToggleFlowResponse} — defaults applied, transforms run (ADR-0122). */
 export type ToggleFlowResponseParsed = z.infer<typeof ToggleFlowResponseSchema>;
 
@@ -276,7 +278,7 @@ export const ListRunsRequestSchema = lazySchema(() => AutomationFlowPathParamsSc
   cursor: z.string().optional()
     .describe('Cursor for pagination'),
 }));
-export type ListRunsRequest = z.infer<typeof ListRunsRequestSchema>;
+export type ListRunsRequest = z.input<typeof ListRunsRequestSchema>;
 /** Post-parse shape of {@link ListRunsRequest} — defaults applied, transforms run (ADR-0122). */
 export type ListRunsRequestParsed = z.infer<typeof ListRunsRequestSchema>;
 
@@ -291,7 +293,7 @@ export const ListRunsResponseSchema = lazySchema(() => BaseResponseSchema.extend
     hasMore: z.boolean().describe('Whether more runs are available'),
   }),
 }));
-export type ListRunsResponse = z.infer<typeof ListRunsResponseSchema>;
+export type ListRunsResponse = z.input<typeof ListRunsResponseSchema>;
 /** Post-parse shape of {@link ListRunsResponse} — defaults applied, transforms run (ADR-0122). */
 export type ListRunsResponseParsed = z.infer<typeof ListRunsResponseSchema>;
 
@@ -303,7 +305,7 @@ export type ListRunsResponseParsed = z.infer<typeof ListRunsResponseSchema>;
  * Request parameters for getting a single execution run.
  */
 export const GetRunRequestSchema = lazySchema(() => AutomationRunPathParamsSchema);
-export type GetRunRequest = z.infer<typeof GetRunRequestSchema>;
+export type GetRunRequest = z.input<typeof GetRunRequestSchema>;
 
 /**
  * Response for the get run endpoint.
@@ -311,7 +313,7 @@ export type GetRunRequest = z.infer<typeof GetRunRequestSchema>;
 export const GetRunResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: ExecutionLogSchema.describe('Full execution log with step details'),
 }));
-export type GetRunResponse = z.infer<typeof GetRunResponseSchema>;
+export type GetRunResponse = z.input<typeof GetRunResponseSchema>;
 /** Post-parse shape of {@link GetRunResponse} — defaults applied, transforms run (ADR-0122). */
 export type GetRunResponseParsed = z.infer<typeof GetRunResponseSchema>;
 
@@ -333,7 +335,7 @@ export const AutomationApiErrorCode = z.enum([
   'node_executor_not_found',
   'concurrent_execution_limit',
 ]);
-export type AutomationApiErrorCode = z.infer<typeof AutomationApiErrorCode>;
+export type AutomationApiErrorCode = z.input<typeof AutomationApiErrorCode>;
 
 // ==========================================
 // 12. Automation API Contract Registry

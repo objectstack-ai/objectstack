@@ -26,6 +26,14 @@ export {
   type RateLimitKeyKind,
   type RateLimitLogger,
 } from './inbound-rate-limit.js';
+// The dispatch-side arm of the sandbox seam's `ScriptUser` union (#5521).
+// Exported as a TYPE only: `ScriptUser` is public, so both its arms must be
+// nameable by a consumer that wants to discriminate one — the sibling
+// `ScriptSession`'s arms (`ActionSession`, `HookContext['session']`) already
+// are, being spec types. The builders stay internal; nothing outside this
+// package produces an `ActorUser`, and #5372's whole point is that there is
+// exactly ONE producer.
+export type { ActorUser } from './actor-user.js';
 export {
   API_KEY_PREFIX,
   hashApiKey,

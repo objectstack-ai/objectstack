@@ -49,7 +49,7 @@ import { lazySchema } from '../shared/lazy-schema';
 export const ExplainOperationSchema = z.enum([
   'read', 'create', 'update', 'delete', 'transfer', 'restore', 'purge', 'export',
 ]);
-export type ExplainOperation = z.infer<typeof ExplainOperationSchema>;
+export type ExplainOperation = z.input<typeof ExplainOperationSchema>;
 
 /**
  * [ADR-0095 D2] The monotonic posture ladder resolved once in
@@ -70,7 +70,7 @@ export const AuthzPostureSchema = z.enum([
   'ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; ' +
   'TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL sees only explicitly shared rows.',
 );
-export type AuthzPosture = z.infer<typeof AuthzPostureSchema>;
+export type AuthzPosture = z.input<typeof AuthzPostureSchema>;
 
 /**
  * [C2 / ADR-0090 D6] A single concrete rule that governed a SPECIFIC record at
@@ -122,7 +122,7 @@ export const ExplainMatchedRuleSchema = lazySchema(() => z.object({
   effect: z.enum(['admits', 'excludes', 'neutral'])
     .describe('The rule\'s effect on THIS record: admits, excludes, or neutral.'),
 }));
-export type ExplainMatchedRule = z.infer<typeof ExplainMatchedRuleSchema>;
+export type ExplainMatchedRule = z.input<typeof ExplainMatchedRuleSchema>;
 
 /**
  * [C2 / ADR-0090 D6] A pipeline layer's determination for ONE specific record.
@@ -150,7 +150,7 @@ export const ExplainRecordAttributionSchema = lazySchema(() => z.object({
   detail: z.string().optional()
     .describe('Human-readable, record-specific explanation of this layer\'s outcome.'),
 }));
-export type ExplainRecordAttribution = z.infer<typeof ExplainRecordAttributionSchema>;
+export type ExplainRecordAttribution = z.input<typeof ExplainRecordAttributionSchema>;
 /** Post-parse shape of {@link ExplainRecordAttribution} — defaults applied, transforms run (ADR-0122). */
 export type ExplainRecordAttributionParsed = z.infer<typeof ExplainRecordAttributionSchema>;
 
@@ -213,7 +213,7 @@ export const ExplainLayerSchema = lazySchema(() => z.object({
   record: ExplainRecordAttributionSchema.optional()
     .describe('Row-level determination for the specific record under explanation; set only for record-grained requests.'),
 }));
-export type ExplainLayer = z.infer<typeof ExplainLayerSchema>;
+export type ExplainLayer = z.input<typeof ExplainLayerSchema>;
 /** Post-parse shape of {@link ExplainLayer} — defaults applied, transforms run (ADR-0122). */
 export type ExplainLayerParsed = z.infer<typeof ExplainLayerSchema>;
 
@@ -240,9 +240,7 @@ export const ExplainRequestSchema = lazySchema(() => z.object({
    */
   userId: z.string().optional(),
 }));
-export type ExplainRequest = z.infer<typeof ExplainRequestSchema>;
-/** Authoring input for {@link ExplainRequest}. */
-export type ExplainRequestInput = z.input<typeof ExplainRequestSchema>;
+export type ExplainRequest = z.input<typeof ExplainRequestSchema>;
 
 /** The full decision report. */
 export const ExplainDecisionSchema = lazySchema(() => z.object({
@@ -304,7 +302,7 @@ export const ExplainDecisionSchema = lazySchema(() => z.object({
     ]).optional().describe('The pipeline layer that decided the record-level outcome (excluded it, or last admitted it).'),
   })).optional().describe('Row-level verdict for the specific record; set only for record-grained requests.'),
 }));
-export type ExplainDecision = z.infer<typeof ExplainDecisionSchema>;
+export type ExplainDecision = z.input<typeof ExplainDecisionSchema>;
 /** Post-parse shape of {@link ExplainDecision} — defaults applied, transforms run (ADR-0122). */
 export type ExplainDecisionParsed = z.infer<typeof ExplainDecisionSchema>;
 
@@ -331,7 +329,7 @@ export const AccessMatrixEntrySchema = lazySchema(() => z.object({
   /** The object's declared OWD (record baseline) for context. */
   sharingModel: z.string().optional(),
 }));
-export type AccessMatrixEntry = z.infer<typeof AccessMatrixEntrySchema>;
+export type AccessMatrixEntry = z.input<typeof AccessMatrixEntrySchema>;
 
 export const AccessMatrixSchema = lazySchema(() => z.object({
   /** Snapshot format version. */
@@ -339,6 +337,6 @@ export const AccessMatrixSchema = lazySchema(() => z.object({
   /** Sorted (permissionSet, object) entries — stable for diffing. */
   entries: z.array(AccessMatrixEntrySchema).default([]),
 }));
-export type AccessMatrix = z.infer<typeof AccessMatrixSchema>;
+export type AccessMatrix = z.input<typeof AccessMatrixSchema>;
 /** Post-parse shape of {@link AccessMatrix} — defaults applied, transforms run (ADR-0122). */
 export type AccessMatrixParsed = z.infer<typeof AccessMatrixSchema>;

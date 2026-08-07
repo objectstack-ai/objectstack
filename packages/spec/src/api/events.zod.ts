@@ -56,7 +56,7 @@ export const MetadataEventType = z.enum([
   'metadata.permission.deleted',
 ]);
 
-export type MetadataEventType = z.infer<typeof MetadataEventType>;
+export type MetadataEventType = z.input<typeof MetadataEventType>;
 
 /**
  * The `{action}` half of `metadata.{type}.{action}`.
@@ -141,7 +141,7 @@ export const DataEventType = z.enum([
   'data.record.deleted',
 ]);
 
-export type DataEventType = z.infer<typeof DataEventType>;
+export type DataEventType = z.input<typeof DataEventType>;
 
 /**
  * Bulk Data Event Types
@@ -174,7 +174,7 @@ export const BulkDataEventType = z.enum([
   'data.records.deleted',
 ]);
 
-export type BulkDataEventType = z.infer<typeof BulkDataEventType>;
+export type BulkDataEventType = z.input<typeof BulkDataEventType>;
 
 /**
  * Metadata Event Payload
@@ -208,7 +208,7 @@ export const MetadataEventSchema = lazySchema(() => z.object({
   timestamp: z.string().datetime().describe('Event timestamp'),
 }));
 
-export type MetadataEvent = z.infer<typeof MetadataEventSchema>;
+export type MetadataEvent = z.input<typeof MetadataEventSchema>;
 
 /**
  * Data Event Payload
@@ -245,7 +245,7 @@ export const DataEventSchema = lazySchema(() => z.object({
   timestamp: z.string().datetime().describe('Event timestamp'),
 }));
 
-export type DataEvent = z.infer<typeof DataEventSchema>;
+export type DataEvent = z.input<typeof DataEventSchema>;
 
 /**
  * Bulk Data Event Payload
@@ -297,4 +297,4 @@ export const BulkDataEventSchema = lazySchema(() => z.object({
   timestamp: z.string().datetime().describe('Event timestamp'),
 }));
 
-export type BulkDataEvent = z.infer<typeof BulkDataEventSchema>;
+export type BulkDataEvent = z.input<typeof BulkDataEventSchema>;

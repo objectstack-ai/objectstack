@@ -160,10 +160,9 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Response format options'),
 }));
 
-export type RestApiConfig = z.infer<typeof RestApiConfigSchema>;
+export type RestApiConfig = z.input<typeof RestApiConfigSchema>;
 /** Post-parse shape of {@link RestApiConfig} — defaults applied, transforms run (ADR-0122). */
 export type RestApiConfigParsed = z.infer<typeof RestApiConfigSchema>;
-export type RestApiConfigInput = z.input<typeof RestApiConfigSchema>;
 
 // ==========================================
 // CRUD Endpoint Configuration
@@ -180,7 +179,7 @@ export const CrudOperation = z.enum([
   'list',     // GET /api/v1/data/{object}
 ]);
 
-export type CrudOperation = z.infer<typeof CrudOperation>;
+export type CrudOperation = z.input<typeof CrudOperation>;
 
 /**
  * CRUD Endpoint Pattern Schema
@@ -217,7 +216,7 @@ export const CrudEndpointPatternSchema = lazySchema(() => z.object({
   description: z.string().optional().describe('Operation description'),
 }));
 
-export type CrudEndpointPattern = z.infer<typeof CrudEndpointPatternSchema>;
+export type CrudEndpointPattern = z.input<typeof CrudEndpointPatternSchema>;
 
 /**
  * CRUD Endpoints Configuration Schema
@@ -253,10 +252,9 @@ export const CrudEndpointsConfigSchema = lazySchema(() => z.object({
     .describe('How object name is passed (path param or query param)'),
 }));
 
-export type CrudEndpointsConfig = z.infer<typeof CrudEndpointsConfigSchema>;
+export type CrudEndpointsConfig = z.input<typeof CrudEndpointsConfigSchema>;
 /** Post-parse shape of {@link CrudEndpointsConfig} — defaults applied, transforms run (ADR-0122). */
 export type CrudEndpointsConfigParsed = z.infer<typeof CrudEndpointsConfigSchema>;
-export type CrudEndpointsConfigInput = z.input<typeof CrudEndpointsConfigSchema>;
 
 // ==========================================
 // Metadata Endpoint Configuration
@@ -304,10 +302,9 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Enable/disable specific endpoints'),
 }));
 
-export type MetadataEndpointsConfig = z.infer<typeof MetadataEndpointsConfigSchema>;
+export type MetadataEndpointsConfig = z.input<typeof MetadataEndpointsConfigSchema>;
 /** Post-parse shape of {@link MetadataEndpointsConfig} — defaults applied, transforms run (ADR-0122). */
 export type MetadataEndpointsConfigParsed = z.infer<typeof MetadataEndpointsConfigSchema>;
-export type MetadataEndpointsConfigInput = z.input<typeof MetadataEndpointsConfigSchema>;
 
 // ==========================================
 // Batch Operation Endpoint Configuration
@@ -356,10 +353,9 @@ export const BatchEndpointsConfigSchema = lazySchema(() => z.object({
     .describe('Default atomic/transaction mode for batch operations'),
 }));
 
-export type BatchEndpointsConfig = z.infer<typeof BatchEndpointsConfigSchema>;
+export type BatchEndpointsConfig = z.input<typeof BatchEndpointsConfigSchema>;
 /** Post-parse shape of {@link BatchEndpointsConfig} — defaults applied, transforms run (ADR-0122). */
 export type BatchEndpointsConfigParsed = z.infer<typeof BatchEndpointsConfigSchema>;
-export type BatchEndpointsConfigInput = z.input<typeof BatchEndpointsConfigSchema>;
 
 // ==========================================
 // Route Generation Configuration
@@ -399,10 +395,9 @@ export const RouteGenerationConfigSchema = lazySchema(() => z.object({
   })).optional().describe('Per-object route customization'),
 }));
 
-export type RouteGenerationConfig = z.infer<typeof RouteGenerationConfigSchema>;
+export type RouteGenerationConfig = z.input<typeof RouteGenerationConfigSchema>;
 /** Post-parse shape of {@link RouteGenerationConfig} — defaults applied, transforms run (ADR-0122). */
 export type RouteGenerationConfigParsed = z.infer<typeof RouteGenerationConfigSchema>;
-export type RouteGenerationConfigInput = z.input<typeof RouteGenerationConfigSchema>;
 
 // ==========================================
 // OpenAPI 3.1 Webhooks & Callbacks — REMOVED (#4579)
@@ -505,10 +500,9 @@ export const RestServerConfigSchema = lazySchema(() => z.object({
   ),
 }));
 
-export type RestServerConfig = z.infer<typeof RestServerConfigSchema>;
+export type RestServerConfig = z.input<typeof RestServerConfigSchema>;
 /** Post-parse shape of {@link RestServerConfig} — defaults applied, transforms run (ADR-0122). */
 export type RestServerConfigParsed = z.infer<typeof RestServerConfigSchema>;
-export type RestServerConfigInput = z.input<typeof RestServerConfigSchema>;
 
 // ==========================================
 // Endpoint Registry
@@ -560,7 +554,7 @@ export const GeneratedEndpointSchema = lazySchema(() => z.object({
   }).optional(),
 }));
 
-export type GeneratedEndpoint = z.infer<typeof GeneratedEndpointSchema>;
+export type GeneratedEndpoint = z.input<typeof GeneratedEndpointSchema>;
 
 /**
  * Endpoint Registry Schema
@@ -590,7 +584,7 @@ export const EndpointRegistrySchema = lazySchema(() => z.object({
     .describe('Endpoints grouped by operation'),
 }));
 
-export type EndpointRegistry = z.infer<typeof EndpointRegistrySchema>;
+export type EndpointRegistry = z.input<typeof EndpointRegistrySchema>;
 
 // ==========================================
 // Helper Functions

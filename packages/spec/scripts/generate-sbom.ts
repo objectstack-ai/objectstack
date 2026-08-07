@@ -11,7 +11,6 @@ import fs from 'fs';
 import path from 'path';
 
 const ROOT = path.resolve(__dirname, '..');
-const PACKAGES_DIR = path.resolve(ROOT, '..'); // packages/
 
 interface SBOMComponent {
   type: string;

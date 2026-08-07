@@ -64,7 +64,7 @@ export const FlowNodeShapeSchema = lazySchema(() => z.enum([
   'screen_rect',    // Screen / user-interaction node
 ]).describe('Visual shape for rendering a flow node on the canvas'));
 
-export type FlowNodeShape = z.infer<typeof FlowNodeShapeSchema>;
+export type FlowNodeShape = z.input<typeof FlowNodeShapeSchema>;
 
 /**
  * Maps each FlowNodeAction to its canvas rendering descriptor.
@@ -107,7 +107,7 @@ export const FlowNodeRenderDescriptorSchema = lazySchema(() => strictObject({
     .describe('Palette category for grouping'),
 }).describe('Visual render descriptor for a flow node type'));
 
-export type FlowNodeRenderDescriptor = z.infer<typeof FlowNodeRenderDescriptorSchema>;
+export type FlowNodeRenderDescriptor = z.input<typeof FlowNodeRenderDescriptorSchema>;
 /** Post-parse shape of {@link FlowNodeRenderDescriptor} — defaults applied, transforms run (ADR-0122). */
 export type FlowNodeRenderDescriptorParsed = z.infer<typeof FlowNodeRenderDescriptorSchema>;
 
@@ -148,7 +148,7 @@ export const FlowCanvasNodeSchema = lazySchema(() => strictObject({
   annotation: z.string().optional().describe('User annotation displayed near the node'),
 }).describe('Canvas layout data for a flow node'));
 
-export type FlowCanvasNode = z.infer<typeof FlowCanvasNodeSchema>;
+export type FlowCanvasNode = z.input<typeof FlowCanvasNodeSchema>;
 /** Post-parse shape of {@link FlowCanvasNode} — defaults applied, transforms run (ADR-0122). */
 export type FlowCanvasNodeParsed = z.infer<typeof FlowCanvasNodeSchema>;
 
@@ -167,7 +167,7 @@ export const FlowCanvasEdgeStyleSchema = lazySchema(() => z.enum([
   'back',     // ADR-0044 back-edge (revise loop) — curved dashed return arc
 ]).describe('Edge line style'));
 
-export type FlowCanvasEdgeStyle = z.infer<typeof FlowCanvasEdgeStyleSchema>;
+export type FlowCanvasEdgeStyle = z.input<typeof FlowCanvasEdgeStyleSchema>;
 
 /**
  * A sequence-flow edge on the flow canvas with visual properties.
@@ -203,7 +203,7 @@ export const FlowCanvasEdgeSchema = lazySchema(() => strictObject({
   animated: z.boolean().default(false).describe('Show animated flow indicator'),
 }).describe('Canvas layout and visual data for a flow edge'));
 
-export type FlowCanvasEdge = z.infer<typeof FlowCanvasEdgeSchema>;
+export type FlowCanvasEdge = z.input<typeof FlowCanvasEdgeSchema>;
 /** Post-parse shape of {@link FlowCanvasEdge} — defaults applied, transforms run (ADR-0122). */
 export type FlowCanvasEdgeParsed = z.infer<typeof FlowCanvasEdgeSchema>;
 
@@ -219,7 +219,7 @@ export const FlowLayoutAlgorithmSchema = lazySchema(() => z.enum([
   'manual',      // User-positioned (no auto-layout)
 ]).describe('Auto-layout algorithm for the flow canvas'));
 
-export type FlowLayoutAlgorithm = z.infer<typeof FlowLayoutAlgorithmSchema>;
+export type FlowLayoutAlgorithm = z.input<typeof FlowLayoutAlgorithmSchema>;
 
 /**
  * Direction for the auto-layout.
@@ -231,7 +231,7 @@ export const FlowLayoutDirectionSchema = lazySchema(() => z.enum([
   'RL',  // Right to left
 ]).describe('Auto-layout direction'));
 
-export type FlowLayoutDirection = z.infer<typeof FlowLayoutDirectionSchema>;
+export type FlowLayoutDirection = z.input<typeof FlowLayoutDirectionSchema>;
 
 // ─── Flow Builder Config ─────────────────────────────────────────────
 
@@ -307,7 +307,7 @@ export const FlowBuilderConfigSchema = lazySchema(() => strictObject({
     .describe('Validate connections before creating edges'),
 }).describe('Studio Flow Builder configuration'));
 
-export type FlowBuilderConfig = z.infer<typeof FlowBuilderConfigSchema>;
+export type FlowBuilderConfig = z.input<typeof FlowBuilderConfigSchema>;
 /** Post-parse shape of {@link FlowBuilderConfig} — defaults applied, transforms run (ADR-0122). */
 export type FlowBuilderConfigParsed = z.infer<typeof FlowBuilderConfigSchema>;
 
@@ -355,6 +355,6 @@ export const BUILT_IN_NODE_DESCRIPTORS: FlowNodeRenderDescriptor[] = [
  */
 export function defineFlowBuilderConfig(
   input: z.input<typeof FlowBuilderConfigSchema>,
-): FlowBuilderConfig {
+): FlowBuilderConfigParsed {
   return FlowBuilderConfigSchema.parse(input);
 }

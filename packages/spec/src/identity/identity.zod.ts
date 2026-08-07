@@ -54,7 +54,7 @@ export const UserSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().describe('Last update timestamp'),
 }));
 
-export type User = z.infer<typeof UserSchema>;
+export type User = z.input<typeof UserSchema>;
 /** Post-parse shape of {@link User} — defaults applied, transforms run (ADR-0122). */
 export type UserParsed = z.infer<typeof UserSchema>;
 
@@ -141,7 +141,7 @@ export const AccountSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().describe('Last update timestamp'),
 }));
 
-export type Account = z.infer<typeof AccountSchema>;
+export type Account = z.input<typeof AccountSchema>;
 
 /*
  * The bare `Session` / `SessionSchema` names are NOT declared here (#4641).
@@ -192,7 +192,7 @@ export const VerificationTokenSchema = lazySchema(() => z.object({
   createdAt: z.string().datetime().describe('Token creation timestamp'),
 }));
 
-export type VerificationToken = z.infer<typeof VerificationTokenSchema>;
+export type VerificationToken = z.input<typeof VerificationTokenSchema>;
 
 /**
  * API Key Schema
@@ -301,6 +301,6 @@ export const ApiKeySchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom metadata'),
 }));
 
-export type ApiKey = z.infer<typeof ApiKeySchema>;
+export type ApiKey = z.input<typeof ApiKeySchema>;
 /** Post-parse shape of {@link ApiKey} — defaults applied, transforms run (ADR-0122). */
 export type ApiKeyParsed = z.infer<typeof ApiKeySchema>;

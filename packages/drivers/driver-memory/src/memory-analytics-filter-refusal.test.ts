@@ -30,9 +30,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 import { AnalyticsQuerySchema } from '@objectstack/spec/data';
-import type { AnalyticsQuery, AnalyticsQueryInput, Cube, FilterCondition } from '@objectstack/spec/data';
+import type { AnalyticsQuery, Cube, FilterCondition } from '@objectstack/spec/data';
 
-const asQuery = (input: AnalyticsQueryInput): AnalyticsQuery => AnalyticsQuerySchema.parse(input);
+const asQuery = (input: AnalyticsQuery): AnalyticsQuery => AnalyticsQuerySchema.parse(input);
 
 /** Five rows over two stages, so a dropped predicate shows up as a bigger count. */
 const DEALS = [

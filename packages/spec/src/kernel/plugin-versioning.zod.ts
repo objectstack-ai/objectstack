@@ -461,28 +461,28 @@ export const PluginVersionMetadataSchema = lazySchema(() => z.object({
 }));
 
 // Export types
-export type SemanticVersion = z.infer<typeof SemanticVersionSchema>;
-export type VersionConstraint = z.infer<typeof VersionConstraintSchema>;
-export type CompatibilityLevel = z.infer<typeof CompatibilityLevelSchema>;
-export type BreakingChange = z.infer<typeof BreakingChangeSchema>;
+export type SemanticVersion = z.input<typeof SemanticVersionSchema>;
+export type VersionConstraint = z.input<typeof VersionConstraintSchema>;
+export type CompatibilityLevel = z.input<typeof CompatibilityLevelSchema>;
+export type BreakingChange = z.input<typeof BreakingChangeSchema>;
 /** Post-parse shape of {@link BreakingChange} — defaults applied, transforms run (ADR-0122). */
 export type BreakingChangeParsed = z.infer<typeof BreakingChangeSchema>;
-export type DeprecationNotice = z.infer<typeof DeprecationNoticeSchema>;
-export type CompatibilityMatrixEntry = z.infer<typeof CompatibilityMatrixEntrySchema>;
+export type DeprecationNotice = z.input<typeof DeprecationNoticeSchema>;
+export type CompatibilityMatrixEntry = z.input<typeof CompatibilityMatrixEntrySchema>;
 /** Post-parse shape of {@link CompatibilityMatrixEntry} — defaults applied, transforms run (ADR-0122). */
 export type CompatibilityMatrixEntryParsed = z.infer<typeof CompatibilityMatrixEntrySchema>;
-export type PluginCompatibilityMatrix = z.infer<typeof PluginCompatibilityMatrixSchema>;
+export type PluginCompatibilityMatrix = z.input<typeof PluginCompatibilityMatrixSchema>;
 /** Post-parse shape of {@link PluginCompatibilityMatrix} — defaults applied, transforms run (ADR-0122). */
 export type PluginCompatibilityMatrixParsed = z.infer<typeof PluginCompatibilityMatrixSchema>;
-export type DependencyConflict = z.infer<typeof DependencyConflictSchema>;
+export type DependencyConflict = z.input<typeof DependencyConflictSchema>;
 /** Post-parse shape of {@link DependencyConflict} — defaults applied, transforms run (ADR-0122). */
 export type DependencyConflictParsed = z.infer<typeof DependencyConflictSchema>;
-export type PluginDependencyResolutionResult = z.infer<typeof PluginDependencyResolutionResultSchema>;
+export type PluginDependencyResolutionResult = z.input<typeof PluginDependencyResolutionResultSchema>;
 /** Post-parse shape of {@link PluginDependencyResolutionResult} — defaults applied, transforms run (ADR-0122). */
 export type PluginDependencyResolutionResultParsed = z.infer<typeof PluginDependencyResolutionResultSchema>;
-export type MultiVersionSupport = z.infer<typeof MultiVersionSupportSchema>;
+export type MultiVersionSupport = z.input<typeof MultiVersionSupportSchema>;
 /** Post-parse shape of {@link MultiVersionSupport} — defaults applied, transforms run (ADR-0122). */
 export type MultiVersionSupportParsed = z.infer<typeof MultiVersionSupportSchema>;
-export type PluginVersionMetadata = z.infer<typeof PluginVersionMetadataSchema>;
+export type PluginVersionMetadata = z.input<typeof PluginVersionMetadataSchema>;
 /** Post-parse shape of {@link PluginVersionMetadata} — defaults applied, transforms run (ADR-0122). */
 export type PluginVersionMetadataParsed = z.infer<typeof PluginVersionMetadataSchema>;

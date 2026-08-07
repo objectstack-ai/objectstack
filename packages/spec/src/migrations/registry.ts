@@ -1053,7 +1053,53 @@ const step17: MigrationStep = {
     + 'the shared word: the import mapping\'s `mapping.fieldMapping[].transform`, a flat '
     + 'string enum applied row by row by the REST import path and live in the liveness '
     + 'ledger — including its own `javascript` value, which that path rejects with a 400 '
-    + 'rather than pretending to run.',
+    + 'rather than pretending to run.\n\n'
+    + 'The last of the #4001 enforce-or-remove batch lands on two more `ui/` files (#5055, '
+    + 'ADR-0049 — read it next to #4988 above, it is the same shape one batch later). '
+    + '`ui/widget.zod.ts` published a whole widget-REGISTRATION vocabulary — `WidgetManifest` '
+    + 'with `WidgetLifecycle` hooks, `WidgetEvent`s, `WidgetProperty` knobs and a '
+    + '`WidgetSource` npm/remote/inline implementation union — and `ui/i18n.zod.ts` published '
+    + '`I18nObject`, `PluralRule`, `NumberFormat`, `DateFormat` and `LocaleConfig`. Ten defs, '
+    + 'twenty exported names, and not one carrier key between them: nothing under '
+    + '`packages/spec/src` imported `widget.zod` at all, the only live imports of `i18n.zod` '
+    + 'name `I18nLabelSchema` / `AriaPropsSchema`, the BFS from all 24 metadata-type roots '
+    + 'plus `defineStack` reached none of them, and no repo ever parsed one. So again nothing '
+    + 'is applied for you and nothing needs to be — the change is TS2305 on an import, and a '
+    + '`field.widget: "my_picker"` string is untouched, because that key names a component the '
+    + 'RENDERER registered and never referenced `WidgetManifest`. ⚠️ Read this scope precisely '
+    + 'too, because BOTH files split. `ui/i18n.zod.ts` keeps `I18nLabelSchema` (the label '
+    + 'primitive the whole `ui/` tree imports) and `AriaPropsSchema` — a REAL door, carried as '
+    + '`aria:` on ~30 live shapes and closed by 批 16, untouched here. And `ui/widget.zod.ts` '
+    + 'keeps `FieldWidgetPropsSchema`, the one site of the nine whose evidence differs: it is '
+    + 'a React props contract rather than authorable metadata (it never appeared in the '
+    + 'authorable surface or the schema manifest — `onChange` is a `z.function()`), so having '
+    + 'no parse is its design; and objectui PR #3289 (2026-08-03) made it a live compile-time '
+    + 'consumer, renaming `@object-ui/fields`\' validation slot onto this contract\'s `error` '
+    + 'with no alias and pinning it as a deliberate tripwire. Retiring it would have broken '
+    + 'the one consumer the batch had, one day after it appeared. The measurement that decides '
+    + 'a site is the CURRENT one, not the one in the issue body.\n\n'
+    + 'Last, it reconciles the SDUI component-props surface with the renderers that serve it '
+    + '(#5775). #5068 wired the first parse `ComponentPropsMap` ever had, and the corpus it '
+    + 'landed on diverged in BOTH directions: keys objectui honours that the schema never '
+    + 'declared, and keys the schema declared — one of them REQUIRED — that no renderer reads. '
+    + 'The maintainer ruled direction A (2026-08-06), the #5611 rule again: the delivered and '
+    + 'authorized shape is the contract. So the honoured keys are declared '
+    + '(`element:record_picker` `labelField`/`valueField`/`label`/`emptyText`, `record:path` '
+    + '`stages[].terminal`, `page:tabs` `items[].value`/`items[].count`, `page:card` `children`, '
+    + 'and `children` on `page:section`/`page:footer`/`page:sidebar`, which were declared '
+    + '`EmptyProps` while their renderers rendered a child list), and four keys retire. Two are '
+    + 'synonym renames: `element:record_picker.displayField` → `labelField` (the required key no '
+    + 'renderer read, while `labelField ?? \'name\'` is what actually renders the row — so an '
+    + 'author who followed the schema got a picker listing `name` with no diagnostic, the '
+    + 'ADR-0078 shape), and `page:card.body` → `children` (one composition key across every '
+    + 'container; the card renderer already reads both, and the showcase authors `children`). '
+    + 'Two are enforce-or-remove deletions: `element:record_picker.searchFields` and '
+    + '`.multiple` — the control is a shadcn single-select with no search input, binding ONE '
+    + 'record id into a page variable, so `searchFields` narrowed nothing and `multiple: true` '
+    + 'selected nothing extra while reporting success. Either returns the day the capability '
+    + 'is implemented (#5021 / #4988). Not in scope, and deliberately: `page:card.visible` is a '
+    + 'component-level visibility predicate written into `properties` and hoisted by the '
+    + 'renderer — a page to rewrite onto the ADR-0089 `visibleWhen`, not a key to declare.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1100,6 +1146,9 @@ const step17: MigrationStep = {
     'page-header-subtitle-alias',
     'object-index-type-partial-removed',
     'field-mapping-transform-removed',
+    'record-picker-display-field-to-label-field',
+    'record-picker-inert-keys-removed',
+    'page-card-body-to-children',
   ],
   semantic: [
     {
@@ -1777,6 +1826,93 @@ const step17: MigrationStep = {
         + 'a session-only endpoint returns 401 rather than data.',
     },
     {
+      id: 'ui-widget-i18n-family-retired',
+      surface:
+        'ui.widgetManifest / ui.widgetLifecycle / ui.widgetEvent / ui.widgetProperty '
+        + '/ ui.widgetSource / ui.i18nObject / ui.pluralRule / ui.numberFormat / ui.dateFormat '
+        + '/ ui.localeConfig (the widget-registration vocabulary of ui/widget.zod.ts, and the '
+        + 'five doorless shapes of ui/i18n.zod.ts — 10 defs, 26 exported names)',
+      replacement:
+        '(removed — there is no replacement key, because there was never a key. A custom field '
+        + 'widget is still named the same way it always was: `field.widget` is a plain string '
+        + 'naming a component the RENDERER has registered, and objectui\'s registry has always '
+        + 'carried its own runtime manifest for that (`RuntimeWidgetManifest` / '
+        + '`RuntimeWidgetSource` in `@object-ui/types`, objectui#3161 / #4115), which models '
+        + 'different keys and never derived from these. For localisation: write the '
+        + 'default-language string on `label` / `description` — the framework generates the '
+        + 'translation key at registration time from the naming convention — and put '
+        + 'translations in translation files, which is the LIVE `system/translation.zod.ts` '
+        + 'surface. Widget registration and locale formatting as authorable protocol metadata '
+        + 'return via the ENFORCE route of ADR-0049 through a new ADR — the registry / loader / '
+        + 'formatter first, the vocabulary second)',
+      reason:
+        '`ui/widget.zod.ts` published a complete widget-registration vocabulary — a manifest '
+        + 'with lifecycle hooks, custom events, configurable properties and an '
+        + 'npm/remote/inline implementation-source union — and `ui/i18n.zod.ts` published a '
+        + 'structured-label, plural-rule and locale-formatting vocabulary. NOTHING in the '
+        + 'protocol carried either. Three independent measurements, re-run on `origin/main` '
+        + 'immediately before the removal with their controls passing in the SAME run: (1) no '
+        + 'module under `packages/spec/src` imported `widget.zod` at all, and the only imports '
+        + 'of `i18n.zod` anywhere name `I18nLabelSchema` / `AriaPropsSchema` (both KEPT), so no '
+        + 'schema declared a carrier key — `field.widget` is a `z.string()` naming a registered '
+        + 'component and has never referenced `WidgetManifest`; (2) a BFS over the in-memory '
+        + 'Zod graph from all 24 metadata-type roots plus `defineStack`\'s `ObjectStackSchema` '
+        + 'reached none of them, while `PageSchema` / `ObjectListViewSchema` resolved `direct` '
+        + 'in the same run and a synthetic carrier flipped every one of them; (3) zero '
+        + '`.parse()` / `.safeParse()` in objectstack, objectui or cloud outside these files\' '
+        + 'own unit tests. `NumberFormat` / `DateFormat` DID have a carrier key '
+        + '(`LocaleConfig.numberFormat` / `.dateFormat`) but the carrier was itself doorless, '
+        + 'so the subtree was `no door` rather than `no gate` and goes whole — leaving the two '
+        + 'leaves behind would strand exported schemas with no consumer (#3950). '
+        + '`I18nObjectSchema` was additionally superseded by its own file-neighbour: '
+        + '`I18nLabelSchema`\'s documentation already says translation keys are generated at '
+        + 'registration time and translations live in translation files, and the live '
+        + 'translation surface is `system/translation.zod.ts`, which uses none of these shapes. '
+        + 'The 2026-08-06 ruling weighed giving them a carrier (option B) and rejected it: that '
+        + 'is a feature with a registry and a renderer behind it, not ledger clean-up. '
+        + 'Tightening them to `strictObject` was rejected earlier and explicitly (#4001 批 16) '
+        + '— strictness is a property of a PARSE and there is no parse, so it would spend a '
+        + 'breaking change to leave "a precisely validated dead slot, the more convincing lie" '
+        + '(#4583). With no carrier key there is nothing to tombstone and no `sys_metadata` row '
+        + 'or source file for a D2 conversion to rewrite: this entry is the D3 record, route 3, '
+        + 'the same shape as #4988 (the ui/ interaction config family), #4834 (kernel '
+        + 'plugin-runtime family) and #4938 (`HttpServerConfig`). '
+        + '⚠️ `WidgetManifest.performance`\'s own `retiredKey()` tombstone (#3896 close-out) is '
+        + 'SUBSUMED here, the #4657/#4834 way: it goes with the shape that carried it, which is '
+        + 'strictly stronger than the tombstone, because there is no longer a manifest to '
+        + 'author the key INTO. '
+        + '⚠️ One of the nine widget sites is deliberately NOT retired. '
+        + '`FieldWidgetPropsSchema` survives: it is a REACT PROPS CONTRACT rather than '
+        + 'authorable metadata (it never appeared in `authorable-surface/` or '
+        + '`json-schema.manifest/` — its `onChange` is a `z.function()`), so "zero parse" is its '
+        + 'design and not its defect, and it acquired a live cross-repo compile-time consumer '
+        + 'one day before 批 16 measured: objectui PR #3289 (2026-08-03) renamed '
+        + '`@object-ui/fields`\' validation slot onto the spec\'s `error` with no alias, the '
+        + 'form renderer began producing it, and '
+        + '`packages/fields/src/__tests__/spec-symbol-batch7.test.ts` pins the shape against '
+        + '`import type { FieldWidgetProps } from \'@objectstack/spec/ui\'` as an intentional '
+        + 'tripwire. Re-verified on objectui `origin/main` 2026-08-07. ADR-0049, #5055.',
+      acceptanceCriteria:
+        'No code imports `WidgetManifest(Schema|Parsed)`, `WidgetLifecycle(Schema)`, '
+        + '`WidgetEvent(Schema|Parsed)`, `WidgetProperty(Schema|Parsed)`, '
+        + '`WidgetSource(Schema|Parsed)`, `I18nObject(Schema)`, `PluralRule(Schema)`, '
+        + '`NumberFormat(Schema|Parsed)`, `DateFormat(Schema)` or '
+        + '`LocaleConfig(Schema|Parsed)` from `@objectstack/spec` or `@objectstack/spec/ui` — '
+        + 'every one is TS2305 after upgrade, on every public entry (pinned by resolved symbol '
+        + 'identity in `ui/widget-i18n-retirement.test.ts`). No metadata document needs '
+        + 'editing, because none could ever carry one of these shapes: a stack that parsed '
+        + 'before parses byte-for-byte the same after, and a `field.widget: "my_picker"` string '
+        + 'is untouched. `FieldWidgetProps` / `FieldWidgetPropsSchema` / '
+        + '`FieldWidgetPropsParsed`, `I18nLabel(Schema)` and `AriaProps(Schema)` all still '
+        + 'resolve on `@objectstack/spec/ui` and are asserted to. ⚠️ objectui needs a companion '
+        + 'PR in the same window: `packages/types/src/__tests__/page-nav-misc-spec-parity.test.ts` '
+        + 'asserts the spec STILL owns `WidgetManifest` / `WidgetSource` (it is the '
+        + '"a workaround should not outlive its reason" half of the objectui#3169 tripwire, '
+        + 'designed to go red exactly here), and `packages/types/src/widget.ts`\'s '
+        + '"Renamed off the spec\'s `WidgetManifest` name" comments now point at names that no '
+        + 'longer exist. Both are prescribed responses to this removal, not collateral damage.',
+    },
+    {
       id: 'ui-interaction-config-family-retired',
       surface:
         'ui.touchInteraction / ui.gestureConfig / ui.dndConfig / ui.keyboardNavigationConfig '
@@ -2123,6 +2259,107 @@ const step17: MigrationStep = {
         + '`IStorageService` that forwards to `inner.list` is exactly such a caller — the '
         + 'one in `@objectstack/service-storage` goes with the adapters (#5541).',
     },
+    {
+      id: 'driver-aggregate-undeclared-key-aliases-removed',
+      // No backticks in `surface`: the upgrade-guide renderer wraps this string
+      // in a code span of its own, and a nested pair renders as literal ticks.
+      surface: "driver aggregate() call argument — query.aggregate and aggregations[].func",
+      replacement:
+        'query.aggregations and aggregations[].function — the spellings QueryASTSchema and '
+        + 'AggregationNodeSchema have always declared',
+      reason:
+        '`SqlDriver.aggregate` and `RemoteTransport.aggregate` each read two aliases the '
+        + 'Query Protocol has never declared: `query.aggregations || query.aggregate` and '
+        + '`agg.function || agg.func`. "Never declared" is measured, not assumed — `git log '
+        + '-S` over `data/query.zod.ts` finds no commit that ever introduced either name, '
+        + 'there is no `retiredKey()` tombstone and no alias-table entry for them (the file\'s '
+        + 'only alias table is `SortNode`\'s `direction` → `order`), and neither appears in any '
+        + 'upgrade guide or release note. So this entry does not record a declared surface '
+        + 'being withdrawn; it records a LENIENCY being withdrawn, which is why it is here '
+        + 'rather than behind a tombstone. The only writers in this repository were the two '
+        + 'driver packages\' own fixtures — #4984\'s family, where a fixture spelling the alias '
+        + 'keeps the tolerant limb green forever and no test in existence can go red on its '
+        + 'deletion — so ADR-0049 enforce-or-remove applies once those are re-spelt. ⚠️ Do '
+        + 'NOT read this across to `dashboard`/`page` measures: `aggregate` IS the canonical '
+        + 'key there and `func` IS a declared, loudly-suggesting alias (`DatasetMeasureSchema`, '
+        + 'ui/dataset.zod.ts). That neighbouring vocabulary is untouched, and it is the most '
+        + 'likely reason an off-repo caller ever wrote these keys on a QUERY — one habit, two '
+        + 'surfaces, only one of which declared it. This is a driver CALL ARGUMENT — code, '
+        + 'never stack metadata — so there is no source for the D2 chain to rewrite and '
+        + 'deliberately no schema tombstone: nothing ever ran a query through '
+        + '`QueryASTSchema.parse()` on this path. The enforced channel is tsc at the call '
+        + 'site, once the parameter is `DriverQuery` — and for an untyped JS caller there is '
+        + 'no enforced channel at all, which is exactly why this ledger entry has to exist: '
+        + 'the generated upgrade guide is the only way such a reader learns of the rename. '
+        + 'Same disposition, and the same reason, as `data-driver-find-stream-retired` '
+        + '(#4484), `storage-service-list-retired` (#5540) and `actor-user-roles-to-positions` '
+        + '(#6011). ADR-0049 / ADR-0087, #6321 (PR #6404).',
+      acceptanceCriteria:
+        'No caller passes `aggregate:` to a driver\'s `aggregate()`, and no aggregation entry '
+        + 'spells its function `func:`; both are written `aggregations:` / `function:`. An '
+        + 'inline literal still using either old spelling no longer type-checks (TS2353 at the '
+        + 'call site). An untyped JS caller that keeps writing `aggregate:` silently receives '
+        + 'no aggregate column — the grouping still happens, the measure is simply absent — '
+        + 'and one that keeps writing `func:` receives INVALID_QUERY / 400 naming the '
+        + 'undeclared function, identically on the local driver and the Turso remote '
+        + 'transport.',
+    },
+    {
+      id: 'spec-type-alias-input-suffix-retired',
+      // Plain text, no markdown: build-upgrade-guide.ts renders this field inside a
+      // code span AND inside a table cell, so backticks here break both.
+      surface:
+        'type alias: the 102 XInput names of @objectstack/spec '
+        + '(ConnectorInput, AppInput, PageInput, ActionInput, ServiceObjectInput, '
+        + 'ExecutionContextInput, TaskInput, … — 52 files across api/ automation/ data/ '
+        + 'identity/ integration/ kernel/ security/ system/ ui/)',
+      replacement:
+        'the BARE name. ADR-0122 phase 2 moved the author state onto `X`, which makes `XInput` '
+        + 'a character-for-character synonym of it — the permanent synonym D3 forbids. Drop the '
+        + '`Input` suffix: `ConnectorInput` -> `Connector`. Symmetrically, a consumer that held '
+        + 'a PARSE RESULT under the bare name moves to `XParsed`, which phase 1 (16.x) already '
+        + 'declared for every schema whose two shapes differ, so the target name has existed for '
+        + 'a release. NINE `*Input` names are NOT retired and need no edit: `ExpressionInput`, '
+        + '`CronExpressionInput`, `TemplateExpressionInput` and `PredicateInput` are the bare '
+        + 'aliases of their own `…InputSchema`, and `FormFieldInput`, `QueryInput`, `FieldInput`, '
+        + '`ObjectStackDefinitionInput` and `NavigationItemInput` are composed (recursive or '
+        + '`Partial`-shaped) types no bare alias denotes.',
+      reason:
+        'This entry exists for the reason `data-driver-find-stream-retired` (#4484), '
+        + '`storage-service-list-retired` (#5540) and `actor-user-roles-to-positions` (#6011) '
+        + 'exist, and it is the same disposition: the surface is a TYPESCRIPT NAME, never stack '
+        + 'metadata, so there is no source for a D2 conversion to rewrite and deliberately no '
+        + 'schema tombstone — an `XInput` alias never had a carrier key, never emitted a def, '
+        + 'and no `.parse()` ever saw it. Measured and verified rather than assumed: '
+        + '`json-schema/`, `json-schema.manifest/` and `authorable-surface/` are BYTE-IDENTICAL '
+        + 'across this change, because those generators enumerate runtime `z.ZodType` exports '
+        + 'and never read a type alias. So nothing left the published metadata surface and '
+        + 'RETIRED_DEFS_BY_MAJOR is deliberately untouched — an entry there would falsely claim '
+        + 'the metadata contract shrank. The enforced channel is tsc: the name is gone, so every '
+        + 'consumer gets TS2724/TS2305 naming the import. That is loud but MUTE about the '
+        + 'replacement — a compile error says `ConnectorInput` does not exist, not that '
+        + '`Connector` now means what it meant. The generated upgrade guide is the only channel '
+        + 'that carries the second half, which is precisely the #6048 gap ADR-0087 registration '
+        + 'exists to close. ⚠️ Deliberately NOT registered alongside it: the 1384 bare aliases '
+        + 'the same change FLIPPED from `z.infer` to `z.input`. Those names all still exist and '
+        + 'still resolve; what moved is which of a schema\'s two shapes they denote, and only '
+        + 'where the two differ (663 of 1384 — the rest are isomorphic and the flip is a no-op '
+        + 'there, pinned as such). A consumer holding an authored literal is made MORE correct '
+        + 'by it, silently; one holding a parse result gets a tsc error at the first defaulted '
+        + 'key it reads. Registering that as a rename would misdescribe it — no name was '
+        + 'retired — and the changeset carries its own FROM -> TO for it. ADR-0122 D8/D9, '
+        + '#6083 (PR #6279).',
+      acceptanceCriteria:
+        'No source imports a name ending `Input` from `@objectstack/spec` except the nine listed '
+        + 'above: `rg "\\b\\w+Input\\b" --type ts` over consumer code resolves only to those. A '
+        + 'literal annotated with a bare spec type compiles while listing ONLY the keys the '
+        + 'author means — `const c: Connector = { name, label, type }` type-checks, which it did '
+        + 'not in 16.x — and a value read out of `XSchema.parse()` annotated with the bare name '
+        + 'no longer compiles at the first defaulted key it reads (TS18048/TS2532), the signal '
+        + 'that the annotation should be `XParsed`. `pnpm check:spec-parsed-alias` reports every '
+        + 'bare alias as `z.input` and refuses both a bare `z.infer` alias and a reintroduced '
+        + '`XInput` synonym.',
+    },
   ],
 };
 
@@ -2243,6 +2480,14 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     'data/ExternalFieldMapping:transform',
     'integration/ConnectorFieldMapping:transform',
     'shared/FieldMapping:transform',
+    // #5775 — the SDUI component-props reconciliation. Three keys on the record
+    // picker (`displayField` was the REQUIRED one, and the synonym of the key
+    // the renderer actually reads) and the card's second spelling of the
+    // composition slot every other container calls `children`.
+    'ui/ElementRecordPickerProps:displayField',
+    'ui/ElementRecordPickerProps:multiple',
+    'ui/ElementRecordPickerProps:searchFields',
+    'ui/PageCardProps:body',
   ],
 };
 
@@ -2323,5 +2568,33 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
   // value schema had no other consumer, so it goes with the key rather than
   // surviving as an exported union nothing references — an exported schema with
   // no consumer reads as a capability to whoever finds it (#3950).
-  17: ['shared/FieldMappingTransform'],
+  //
+  // The ten that follow are #5055 (ADR-0049 enforce-or-remove, maintainer ruling
+  // 2026-08-06, window moved to protocol 17 on 2026-08-07): `ui/widget.zod.ts`'s
+  // widget-registration vocabulary and the five doorless shapes of
+  // `ui/i18n.zod.ts`. None had a carrier key, none was reachable from the
+  // metadata-type roots, and none was ever parsed in objectstack / objectui /
+  // cloud — so there is no tombstone and no D2 conversion (route 3 of the
+  // retirement playbook), and this table plus the D3 `SemanticMigration`
+  // `ui-widget-i18n-family-retired` IS the declaration. Same shape as #4988.
+  //
+  // ⚠️ `ui/FieldWidgetProps` is deliberately NOT here — it was never in the
+  // manifest to begin with (its `onChange` is a `z.function()`, so no JSON
+  // Schema is emitted) and it survives the retirement: it is a React props
+  // contract, not authorable metadata, and it has a live compile-time consumer
+  // in objectui (`packages/fields/src/__tests__/spec-symbol-batch7.test.ts`,
+  // landed by objectui PR #3289).
+  17: [
+    'shared/FieldMappingTransform',
+    'ui/WidgetManifest',
+    'ui/WidgetLifecycle',
+    'ui/WidgetEvent',
+    'ui/WidgetProperty',
+    'ui/WidgetSource',
+    'ui/I18nObject',
+    'ui/PluralRule',
+    'ui/NumberFormat',
+    'ui/DateFormat',
+    'ui/LocaleConfig',
+  ],
 };

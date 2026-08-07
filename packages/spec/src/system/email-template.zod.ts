@@ -32,7 +32,7 @@ export const EmailTemplateDefinitionCategorySchema = lazySchema(() => z.enum([
   'marketing',     // Outbound campaigns
   'custom',        // App-defined
 ]));
-export type EmailTemplateDefinitionCategory = z.infer<typeof EmailTemplateDefinitionCategorySchema>;
+export type EmailTemplateDefinitionCategory = z.input<typeof EmailTemplateDefinitionCategorySchema>;
 
 export const EmailTemplateDefinitionVariableSchema = lazySchema(() => z.object({
   name: z.string().describe('Variable name as referenced in placeholders (snake_case or dotted path)'),
@@ -40,7 +40,7 @@ export const EmailTemplateDefinitionVariableSchema = lazySchema(() => z.object({
   required: z.boolean().default(false),
   description: z.string().optional().describe('Author hint shown in Studio'),
 }));
-export type EmailTemplateDefinitionVariable = z.infer<typeof EmailTemplateDefinitionVariableSchema>;
+export type EmailTemplateDefinitionVariable = z.input<typeof EmailTemplateDefinitionVariableSchema>;
 /** Post-parse shape of {@link EmailTemplateDefinitionVariable} — defaults applied, transforms run (ADR-0122). */
 export type EmailTemplateDefinitionVariableParsed = z.infer<typeof EmailTemplateDefinitionVariableSchema>;
 
@@ -153,17 +153,15 @@ function EmailAddressInlineSchema() {
   });
 }
 
-export type EmailTemplateDefinition = z.infer<typeof EmailTemplateDefinitionSchema>;
+export type EmailTemplateDefinition = z.input<typeof EmailTemplateDefinitionSchema>;
 /** Post-parse shape of {@link EmailTemplateDefinition} — defaults applied, transforms run (ADR-0122). */
 export type EmailTemplateDefinitionParsed = z.infer<typeof EmailTemplateDefinitionSchema>;
-/** Authoring input for {@link EmailTemplateDefinition} — defaulted fields are optional. */
-export type EmailTemplateDefinitionInput = z.input<typeof EmailTemplateDefinitionSchema>;
 
 /**
  * Type-safe factory for an email template. Validates at authoring time via
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: EmailTemplateDefinition` literal.
  */
-export function defineEmailTemplateDefinition(config: z.input<typeof EmailTemplateDefinitionSchema>): EmailTemplateDefinition {
+export function defineEmailTemplateDefinition(config: z.input<typeof EmailTemplateDefinitionSchema>): EmailTemplateDefinitionParsed {
   return EmailTemplateDefinitionSchema.parse(config);
 }

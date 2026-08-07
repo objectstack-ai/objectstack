@@ -8,17 +8,13 @@ description: Package Version protocol schemas
 Package Version Protocol
 
 A **package version** is an **immutable** release snapshot of a package.
-
 Once published (`status = 'published'`), its `manifestJson` and `checksum`
-
 fields are frozen — publishing is the act of sealing the snapshot.
 
 Lifecycle:
-
-draft → published → deprecated
+  draft → published → deprecated
 
 Installing a package means pointing a `sys_package_installation` row at a
-
 specific `sys_package_version` UUID. Upgrading swaps that pointer atomically.
 
 See `docs/adr/0003-package-as-first-class-citizen.md` for the full rationale.

@@ -277,9 +277,26 @@ export class MessagingService {
      *
      * A message is unread until its event has a `read`/`clicked`/`dismissed`
      * receipt; the `read` filter (when given) is applied in-memory after the
-     * join. `unreadCount` is computed over the fetched window (bounded by
-     * `limit`, like the Console bell's poll). Returns the REST contract shape
-     * (`ListNotificationsResponseSchema`): `{ notifications, unreadCount }`.
+     * join.
+     *
+     * Two different bounds, deliberately (#6363):
+     *
+     *   * `notifications[]` is the fetched WINDOW — `limit` rows, defaulting to
+     *     50 and hard-capped at 200, newest first. Unchanged: the Console
+     *     bell's poll and every other caller page through this list.
+     *   * `unreadCount` is the **total** unread across the user's whole
+     *     matching inbox, which is what `ListNotificationsResponseSchema`
+     *     publishes into the API reference ("Total number of unread
+     *     notifications"). Counting it over `rows` — the window — made the
+     *     badge saturate at the window size forever: a user with 60 unread was
+     *     told 50, and `?limit=10` told them 10. The declaration was right and
+     *     the implementation was wrong (maintainer ruling, #6363 Option A).
+     *
+     * The `read` filter never moves `unreadCount`: asking for the read half of
+     * the inbox does not mean the badge is zero. A `type` filter does — the
+     * count answers the query that was asked, as it always has.
+     *
+     * Returns the REST contract shape: `{ notifications, unreadCount }`.
      */
     async listInbox(
         userId: string,
@@ -313,12 +330,12 @@ export class MessagingService {
             }
         }
 
-        let unreadCount = 0;
+        let windowUnread = 0;
         const all: InboxNotificationView[] = rows.map((m) => {
             const nid = m?.notification_id != null ? String(m.notification_id) : null;
             const state = nid ? stateByNotif.get(nid) : undefined;
             const read = state ? READ_RECEIPT_STATES.has(state) : false;
-            if (!read) unreadCount += 1;
+            if (!read) windowUnread += 1;
             return {
                 id: nid ?? String(m.id),
                 type: (m.topic as string) ?? 'notification',
@@ -330,8 +347,60 @@ export class MessagingService {
             };
         });
 
+        // A window that came back SHORT is the whole matching set — nothing was
+        // truncated, so the window count already IS the total and the second
+        // read would be a duplicate of the first. Only a saturated window
+        // (`rows.length === limit`) can be hiding rows, and that is exactly the
+        // case #6363 is about. So the common inbox — fewer messages than the
+        // page size — costs precisely what it cost before this change.
+        const unreadCount = rows.length < limit
+            ? windowUnread
+            : await this.countUnreadTotal(data, where, stateByNotif);
+
         const notifications = opts.read === undefined ? all : all.filter((n) => n.read === opts.read);
         return { notifications, unreadCount };
+    }
+
+    /**
+     * Total unread across the user's whole matching inbox — the reverse join
+     * `unreadCount` is declared to answer (#6363).
+     *
+     * Read-state lives on `sys_notification_receipt`, not on the inbox row
+     * (ADR-0030), so no single `count()` answers this: the predicate spans two
+     * objects. The receipt side is already fully in memory — `listInbox` reads
+     * every one of the user's inbox receipts, unbounded, to build the join —
+     * so all that is missing is the message side, and it is read as a
+     * PROJECTION of one column with no `orderBy` and no `limit`. That keeps
+     * this the same order of work as the receipt scan the method already
+     * performs unconditionally, one column wide, and it stays exact under a
+     * `type` filter and for rows carrying no `notification_id` (never
+     * receipted, therefore always unread) — neither of which a
+     * `count(messages) - count(read receipts)` subtraction survives.
+     *
+     * NOT best-effort, unlike the receipt read above. That one degrades because
+     * receipts are a DIFFERENT object which a minimal stack may not have
+     * registered at all; this one re-reads the very object whose `find` just
+     * succeeded with the very same `where`. There is no state in which it fails
+     * and the caller still holds a trustworthy list — and swallowing it would
+     * silently restore the window-sized lie this method exists to stop telling.
+     */
+    private async countUnreadTotal(
+        data: IDataEngine,
+        where: Record<string, unknown>,
+        stateByNotif: ReadonlyMap<string, string>,
+    ): Promise<number> {
+        const ids = (await data.find(INBOX_OBJECT, {
+            where,
+            fields: ['notification_id'],
+        })) as Array<Record<string, unknown>>;
+
+        let unread = 0;
+        for (const row of ids) {
+            const nid = row?.notification_id != null ? String(row.notification_id) : null;
+            const state = nid ? stateByNotif.get(nid) : undefined;
+            if (!state || !READ_RECEIPT_STATES.has(state)) unread += 1;
+        }
+        return unread;
     }
 
     /**

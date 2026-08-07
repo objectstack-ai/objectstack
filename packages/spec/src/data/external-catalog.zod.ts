@@ -24,7 +24,7 @@ export const ExternalColumnSchema = z.object({
     .describe('ObjectStack field type suggested by the type-compat matrix'),
 });
 
-export type ExternalColumn = z.infer<typeof ExternalColumnSchema>;
+export type ExternalColumn = z.input<typeof ExternalColumnSchema>;
 /** Post-parse shape of {@link ExternalColumn} — defaults applied, transforms run (ADR-0122). */
 export type ExternalColumnParsed = z.infer<typeof ExternalColumnSchema>;
 
@@ -41,7 +41,7 @@ export const ExternalTableSchema = z.object({
   rowCountEstimate: z.number().optional().describe('Approximate row count'),
 });
 
-export type ExternalTable = z.infer<typeof ExternalTableSchema>;
+export type ExternalTable = z.input<typeof ExternalTableSchema>;
 /** Post-parse shape of {@link ExternalTable} — defaults applied, transforms run (ADR-0122). */
 export type ExternalTableParsed = z.infer<typeof ExternalTableSchema>;
 
@@ -58,6 +58,6 @@ export const ExternalCatalogSchema = lazySchema(() => z.object({
   tables: z.array(ExternalTableSchema).describe('Snapshotted remote tables.'),
 }));
 
-export type ExternalCatalog = z.infer<typeof ExternalCatalogSchema>;
+export type ExternalCatalog = z.input<typeof ExternalCatalogSchema>;
 /** Post-parse shape of {@link ExternalCatalog} — defaults applied, transforms run (ADR-0122). */
 export type ExternalCatalogParsed = z.infer<typeof ExternalCatalogSchema>;

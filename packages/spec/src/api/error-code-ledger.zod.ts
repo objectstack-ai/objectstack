@@ -32,6 +32,20 @@ import { StandardErrorCode } from './errors.zod';
  * A code emitted by several packages is listed once per emitting package —
  * the union dedupes; the per-package rows are provenance, not identity.
  *
+ * ## Retiring a code
+ *
+ * A row whose last EMITTER is deleted comes out with it. The admission rules
+ * below check casing, duplication and shadowing — never whether anyone still
+ * throws the code — so a registered-but-unemittable row stays green forever
+ * while promising a client a code no response can carry. That is ADR-0112's
+ * "no silent fourth state" read backwards, and it is not hypothetical:
+ * `OVERLAY_PERSISTENCE_FAILED` outlived its only producer by one PR (#5264
+ * deleted `saveMetaItem`'s legacy raw-engine branch; #5783 unregistered the
+ * code). Before deleting a row, check that no producer remains repo-wide AND
+ * that no consumer — including `objectui` and `cloud` — reads the literal;
+ * tests that merely CONSTRUCT the code are not producers, and a test pinned to
+ * a producerless code is pinning nothing (#4984's phantom-check family).
+ *
  * Field-level codes (`FieldErrorSchema.code`, the `fields[]` array) are a
  * SEPARATE vocabulary and do not belong here — see #3977 (ADR-0112 D6).
  */
@@ -213,7 +227,6 @@ export const ERROR_CODE_LEDGER = {
     'NOT_ATTEMPTED',              // atomic data-batch row never ran — an earlier row's failure aborted the batch (#4793)
     'NOT_CREATABLE',
     'NOT_OVERRIDABLE',
-    'OVERLAY_PERSISTENCE_FAILED',
     'ROLLED_BACK',                // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',

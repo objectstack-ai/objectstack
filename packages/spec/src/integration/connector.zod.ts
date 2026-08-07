@@ -147,7 +147,7 @@ export const ConnectorFieldMappingSchema = lazySchema(() => BaseFieldMappingSche
   ]).default('bidirectional').describe('Sync mode'),
 }));
 
-export type ConnectorFieldMapping = z.infer<typeof ConnectorFieldMappingSchema>;
+export type ConnectorFieldMapping = z.input<typeof ConnectorFieldMappingSchema>;
 /** Post-parse shape of {@link ConnectorFieldMapping} — defaults applied, transforms run (ADR-0122). */
 export type ConnectorFieldMappingParsed = z.infer<typeof ConnectorFieldMappingSchema>;
 
@@ -165,7 +165,7 @@ export const SyncStrategySchema = lazySchema(() => z.enum([
   'append_only',    // Only insert new records
 ]).describe('Synchronization strategy'));
 
-export type SyncStrategy = z.infer<typeof SyncStrategySchema>;
+export type SyncStrategy = z.input<typeof SyncStrategySchema>;
 
 /**
  * Connector Conflict Resolution Strategy
@@ -191,7 +191,7 @@ export const ConnectorConflictResolutionSchema = lazySchema(() => z.enum([
   'manual',         // Flag for manual resolution
 ]).describe('Conflict resolution strategy'));
 
-export type ConnectorConflictResolution = z.infer<typeof ConnectorConflictResolutionSchema>;
+export type ConnectorConflictResolution = z.input<typeof ConnectorConflictResolutionSchema>;
 
 /**
  * Data Synchronization Configuration
@@ -251,7 +251,7 @@ export const DataSyncConfigSchema = lazySchema(() => z.object({
   filters: z.record(z.string(), z.unknown()).optional().describe('Filter criteria for selective sync'),
 }));
 
-export type DataSyncConfig = z.infer<typeof DataSyncConfigSchema>;
+export type DataSyncConfig = z.input<typeof DataSyncConfigSchema>;
 /** Post-parse shape of {@link DataSyncConfig} — defaults applied, transforms run (ADR-0122). */
 export type DataSyncConfigParsed = z.infer<typeof DataSyncConfigSchema>;
 
@@ -273,7 +273,7 @@ export const WebhookEventSchema = lazySchema(() => z.enum([
   'rate_limit.exceeded',
 ]).describe('Webhook event type'));
 
-export type WebhookEvent = z.infer<typeof WebhookEventSchema>;
+export type WebhookEvent = z.input<typeof WebhookEventSchema>;
 
 /**
  * Webhook Signature Algorithm
@@ -284,7 +284,7 @@ export const WebhookSignatureAlgorithmSchema = lazySchema(() => z.enum([
   'none',
 ]).describe('Webhook signature algorithm'));
 
-export type WebhookSignatureAlgorithm = z.infer<typeof WebhookSignatureAlgorithmSchema>;
+export type WebhookSignatureAlgorithm = z.input<typeof WebhookSignatureAlgorithmSchema>;
 
 /**
  * Webhook Configuration Schema
@@ -310,7 +310,7 @@ export const WebhookConfigSchema = lazySchema(() => WebhookSchema.extend({
   signatureAlgorithm: WebhookSignatureAlgorithmSchema.optional().default('hmac_sha256'),
 }));
 
-export type WebhookConfig = z.infer<typeof WebhookConfigSchema>;
+export type WebhookConfig = z.input<typeof WebhookConfigSchema>;
 /** Post-parse shape of {@link WebhookConfig} — defaults applied, transforms run (ADR-0122). */
 export type WebhookConfigParsed = z.infer<typeof WebhookConfigSchema>;
 
@@ -363,7 +363,7 @@ export const ConnectorRetryStrategySchema = lazySchema(() => z.enum([
   'no_retry',
 ]).describe('Retry strategy'));
 
-export type ConnectorRetryStrategy = z.infer<typeof ConnectorRetryStrategySchema>;
+export type ConnectorRetryStrategy = z.input<typeof ConnectorRetryStrategySchema>;
 
 /**
  * Retry Configuration
@@ -410,7 +410,7 @@ export const RetryConfigSchema = lazySchema(() => z.object({
   jitter: z.boolean().optional().default(true).describe('Add jitter to retry delays'),
 }));
 
-export type RetryConfig = z.infer<typeof RetryConfigSchema>;
+export type RetryConfig = z.input<typeof RetryConfigSchema>;
 /** Post-parse shape of {@link RetryConfig} — defaults applied, transforms run (ADR-0122). */
 export type RetryConfigParsed = z.infer<typeof RetryConfigSchema>;
 
@@ -439,7 +439,7 @@ export const ConnectorErrorCategorySchema = lazySchema(() => z.enum([
   'integration_error',
 ]).describe('Standard error category'));
 
-export type ConnectorErrorCategory = z.infer<typeof ConnectorErrorCategorySchema>;
+export type ConnectorErrorCategory = z.input<typeof ConnectorErrorCategorySchema>;
 
 /**
  * Error Mapping Rule
@@ -456,7 +456,7 @@ export const ErrorMappingRuleSchema = lazySchema(() => z.object({
   userMessage: z.string().optional().describe('Human-readable message to show users'),
 }).describe('Error mapping rule'));
 
-export type ErrorMappingRule = z.infer<typeof ErrorMappingRuleSchema>;
+export type ErrorMappingRule = z.input<typeof ErrorMappingRuleSchema>;
 
 /**
  * Error Mapping Configuration
@@ -470,7 +470,7 @@ export const ErrorMappingConfigSchema = lazySchema(() => z.object({
   logUnmapped: z.boolean().optional().default(true).describe('Log unmapped errors'),
 }).describe('Error mapping configuration'));
 
-export type ErrorMappingConfig = z.infer<typeof ErrorMappingConfigSchema>;
+export type ErrorMappingConfig = z.input<typeof ErrorMappingConfigSchema>;
 /** Post-parse shape of {@link ErrorMappingConfig} — defaults applied, transforms run (ADR-0122). */
 export type ErrorMappingConfigParsed = z.infer<typeof ErrorMappingConfigSchema>;
 
@@ -494,7 +494,7 @@ export const HealthCheckConfigSchema = lazySchema(() => z.object({
   healthyThreshold: z.number().optional().default(1).describe('Consecutive successes before marking healthy'),
 }).describe('Health check configuration'));
 
-export type HealthCheckConfig = z.infer<typeof HealthCheckConfigSchema>;
+export type HealthCheckConfig = z.input<typeof HealthCheckConfigSchema>;
 /** Post-parse shape of {@link HealthCheckConfig} — defaults applied, transforms run (ADR-0122). */
 export type HealthCheckConfigParsed = z.infer<typeof HealthCheckConfigSchema>;
 
@@ -512,7 +512,7 @@ export const CircuitBreakerConfigSchema = lazySchema(() => z.object({
   fallbackStrategy: z.enum(['cache', 'default_value', 'error', 'queue']).optional().describe('Fallback strategy when circuit is open'),
 }).describe('Circuit breaker configuration'));
 
-export type CircuitBreakerConfig = z.infer<typeof CircuitBreakerConfigSchema>;
+export type CircuitBreakerConfig = z.input<typeof CircuitBreakerConfigSchema>;
 /** Post-parse shape of {@link CircuitBreakerConfig} — defaults applied, transforms run (ADR-0122). */
 export type CircuitBreakerConfigParsed = z.infer<typeof CircuitBreakerConfigSchema>;
 
@@ -526,7 +526,7 @@ export const ConnectorHealthSchema = lazySchema(() => z.object({
   circuitBreaker: CircuitBreakerConfigSchema.optional().describe('Circuit breaker configuration'),
 }).describe('Connector health configuration'));
 
-export type ConnectorHealth = z.infer<typeof ConnectorHealthSchema>;
+export type ConnectorHealth = z.input<typeof ConnectorHealthSchema>;
 /** Post-parse shape of {@link ConnectorHealth} — defaults applied, transforms run (ADR-0122). */
 export type ConnectorHealthParsed = z.infer<typeof ConnectorHealthSchema>;
 
@@ -546,7 +546,7 @@ export const ConnectorTypeSchema = lazySchema(() => z.enum([
   'custom',         // Custom connector
 ]).describe('Connector type'));
 
-export type ConnectorType = z.infer<typeof ConnectorTypeSchema>;
+export type ConnectorType = z.input<typeof ConnectorTypeSchema>;
 
 /**
  * Connector Status
@@ -558,7 +558,7 @@ export const ConnectorStatusSchema = lazySchema(() => z.enum([
   'configuring',    // Connector is being set up
 ]).describe('Connector status'));
 
-export type ConnectorStatus = z.infer<typeof ConnectorStatusSchema>;
+export type ConnectorStatus = z.input<typeof ConnectorStatusSchema>;
 
 /**
  * What one connector action does **upstream** (#4395).
@@ -597,7 +597,7 @@ export const ConnectorActionEffectSchema = lazySchema(() => z.enum([
   'write',
 ]).describe("What the action does upstream: 'read' never mutates (reports acted:0); 'write' does (a successful dispatch reports acted:1). Omit when the effect is not knowable — the step is then reported as unmeasured, not as zero"));
 
-export type ConnectorActionEffect = z.infer<typeof ConnectorActionEffectSchema>;
+export type ConnectorActionEffect = z.input<typeof ConnectorActionEffectSchema>;
 
 /**
  * Connector Action Definition
@@ -808,18 +808,16 @@ export const ConnectorSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom connector metadata'),
 }));
 
-export type Connector = z.infer<typeof ConnectorSchema>;
+export type Connector = z.input<typeof ConnectorSchema>;
 /** Post-parse shape of {@link Connector} — defaults applied, transforms run (ADR-0122). */
 export type ConnectorParsed = z.infer<typeof ConnectorSchema>;
-/** Authoring input for {@link Connector} — defaulted fields are optional. */
-export type ConnectorInput = z.input<typeof ConnectorSchema>;
 
 /**
  * Type-safe factory for an external-system connector. Validates at authoring time via
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: Connector` literal.
  */
-export function defineConnector(config: z.input<typeof ConnectorSchema>): Connector {
+export function defineConnector(config: z.input<typeof ConnectorSchema>): ConnectorParsed {
   return ConnectorSchema.parse(config);
 }
 
@@ -885,7 +883,7 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
   }),
 );
 
-export type DeclarativeConnectorEntry = z.infer<typeof DeclarativeConnectorEntrySchema>;
+export type DeclarativeConnectorEntry = z.input<typeof DeclarativeConnectorEntrySchema>;
 /** Post-parse shape of {@link DeclarativeConnectorEntry} — defaults applied, transforms run (ADR-0122). */
 export type DeclarativeConnectorEntryParsed = z.infer<typeof DeclarativeConnectorEntrySchema>;
 

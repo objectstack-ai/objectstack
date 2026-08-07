@@ -49,7 +49,7 @@ export const DeadLetterQueueEntrySchema = lazySchema(() => z.object({
   failedHandler: z.string().optional().describe('Handler ID that failed'),
 }));
 
-export type DeadLetterQueueEntry = z.infer<typeof DeadLetterQueueEntrySchema>;
+export type DeadLetterQueueEntry = z.input<typeof DeadLetterQueueEntrySchema>;
 /** Post-parse shape of {@link DeadLetterQueueEntry} — defaults applied, transforms run (ADR-0122). */
 export type DeadLetterQueueEntryParsed = z.infer<typeof DeadLetterQueueEntrySchema>;
 
@@ -99,6 +99,6 @@ export const EventLogEntrySchema = lazySchema(() => z.object({
   totalDurationMs: z.number().int().optional().describe('Total processing time'),
 }));
 
-export type EventLogEntry = z.infer<typeof EventLogEntrySchema>;
+export type EventLogEntry = z.input<typeof EventLogEntrySchema>;
 /** Post-parse shape of {@link EventLogEntry} — defaults applied, transforms run (ADR-0122). */
 export type EventLogEntryParsed = z.infer<typeof EventLogEntrySchema>;

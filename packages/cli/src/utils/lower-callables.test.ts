@@ -1,6 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { defineStack, normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
+import { FlowFunctionEntrySchema } from '@objectstack/spec/automation';
 import { lowerCallables } from './lower-callables.js';
 
 // ── #3855: `target` is the only handler slot ────────────────────────────────
@@ -122,5 +124,97 @@ describe('lowerCallables — declared `functions` entries (#4396)', () => {
     });
     const [entry] = functionsOf(result) as unknown as Array<Record<string, unknown>>;
     expect(entry).toEqual({ name: 'syncBilling', handler: 'syncBilling', effect: 'writes' });
+  });
+});
+
+// ── #4976: the lowering and the schema must round-trip ──────────────────────
+//
+// Every test above stops at the shape `lowerCallables` EMITS, and every spec
+// test parses only shapes an author WRITES. Nothing crossed the boundary — so
+// when #4396 taught this step to keep a declared entry's declaration, and the
+// union in `flow-function.zod.ts` was not extended in the same change, both
+// halves stayed green and `objectstack build` failed on the join with
+// `invalid_union: Invalid input` and no path past `functions`.
+//
+// These tests are that boundary, driven through the real build pipeline
+// (`defineStack` → `normalizeStackInput` → `lowerCallables` → parse) rather
+// than a hand-written sample of what the lowering is believed to emit: a
+// hand-written sample is a third copy of the truth and drifts exactly the way
+// the two halves already did.
+//
+// SCOPE: the map form. The ARRAY form (`functions: [{ name, handler }]`) does
+// not round-trip either — in both its bare and declared spellings, since #4343
+// and #4976 each only ever touched the map — and its member lives in
+// `stack.zod.ts` rather than in `FlowFunctionEntrySchema`. Filed as #6238;
+// extend the parametrisation below when it lands.
+describe('lowerCallables → the spec parses what it emits (#4976)', () => {
+  const base = {
+    manifest: { id: 'com.example.demo', name: 'demo', version: '1.0.0', type: 'app' as const },
+  };
+
+  /** Exactly what `objectstack compile` does, in the order it does it. */
+  const buildPipeline = (functions: Record<string, unknown>) => {
+    const stack = defineStack({ ...base, functions } as never);
+    const normalized = normalizeStackInput(stack as Record<string, unknown>);
+    return lowerCallables(normalized);
+  };
+
+  const cases: Array<[label: string, functions: Record<string, unknown>]> = [
+    ['a bare handler', { scoreLead: () => ({ score: 1 }) }],
+    ['a declared writer', { syncBilling: { handler: () => ({ ok: true }), effect: 'writes' } }],
+    ['a declaration that states the pure default', { scoreLead: { handler: () => ({ score: 1 }), effect: 'pure' } }],
+    ['a declaration that states nothing', { scoreLead: { handler: () => ({ score: 1 }) } }],
+    ['both spellings side by side', {
+      scoreLead: () => ({ score: 1 }),
+      syncBilling: { handler: () => ({ ok: true }), effect: 'writes' },
+    }],
+  ];
+
+  for (const [label, functions] of cases) {
+    it(`parses every entry it emits for ${label}`, () => {
+      const emitted = (buildPipeline(functions).lowered as {
+        functions: Record<string, unknown>;
+      }).functions;
+
+      for (const [name, entry] of Object.entries(emitted)) {
+        const result = FlowFunctionEntrySchema.safeParse(entry);
+        expect(
+          result.success,
+          `emitted entry '${name}' (${JSON.stringify(entry)}) is not a shape FlowFunctionEntrySchema accepts: `
+          + JSON.stringify(result.success ? [] : result.error.issues),
+        ).toBe(true);
+      }
+    });
+
+    it(`parses the whole lowered stack for ${label}`, () => {
+      // The assertion the build itself makes (`compile.ts` step 3). Parsing the
+      // entries one by one can pass while the stack does not — `functions` is a
+      // union of a record and an array, so a rejected entry surfaces only as
+      // `invalid_union` on the parent, which is precisely the unreadable error
+      // the issue is about.
+      const { lowered } = buildPipeline(functions);
+      const result = ObjectStackDefinitionSchema.safeParse(lowered);
+      expect(
+        result.success,
+        `lowered stack rejected: ${JSON.stringify(result.success ? [] : result.error.issues)}`,
+      ).toBe(true);
+    });
+  }
+
+  it('carries the declaration into the artifact, not just past the parse', () => {
+    // Surviving the parse is worthless if `effect` is dropped on the way — that
+    // would re-create #4396's silent un-declaring with a green build. The
+    // artifact must still SAY 'writes', because that string is what
+    // `mergeRuntimeModule` re-attaches the module's callable to at boot.
+    const { lowered } = buildPipeline({
+      syncBilling: { handler: () => ({ ok: true }), effect: 'writes' },
+    });
+    const parsed = ObjectStackDefinitionSchema.parse(lowered) as {
+      functions: Record<string, { handler: string; effect: string }>;
+    };
+    expect(parsed.functions.syncBilling).toEqual({ handler: 'syncBilling', effect: 'writes' });
+    // And it is JSON — the artifact is `objectstack.json`, not a module.
+    expect(JSON.parse(JSON.stringify(lowered)).functions.syncBilling)
+      .toEqual({ handler: 'syncBilling', effect: 'writes' });
   });
 });

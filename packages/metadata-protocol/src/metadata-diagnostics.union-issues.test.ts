@@ -136,3 +136,71 @@ describe('#5598 the entries that never went through a union are unchanged', () =
         expect(computeMetadataDiagnostics('service', { name: 'whatever' })).toBeUndefined();
     });
 });
+
+/**
+ * #5599 — the OTHER half of the same badge, closed in `packages/spec`.
+ *
+ * #5598 fixed a stored view whose defect collapsed to one rootless line. It could
+ * not touch the worse case one row over: a stored view that is not a view at all
+ * got `valid: true`. `ViewMetadataSchema`'s fourth union member both stripped
+ * unknown keys and required none, so `{ nope: 1 }` MATCHED, and the badge this
+ * module computes from that same schema said the document was fine. The two bugs
+ * are one mechanism seen from both ends — a union that explains its rejections
+ * badly, and a union that does not reject at all — which is why the ruling on
+ * #5599 asked for the disappearance of this false `valid: true` to be asserted
+ * from the READ path, not only from the schema's own unit tests.
+ */
+describe('#5599 a stored `view` that is not a view is no longer badged valid', () => {
+    it('`{ nope: 1 }` — the issue\'s headline document — is now `valid: false`', () => {
+        // On `origin/main` this returned exactly `{ valid: true }`.
+        const diag = computeMetadataDiagnostics('view', { nope: 1 });
+        expect(diag?.valid).toBe(false);
+        expect(diag?.errors?.length).toBeGreaterThan(0);
+    });
+
+    it('…and the badge names WHY, so Studio has something to render', () => {
+        const diag = computeMetadataDiagnostics('view', { nope: 1 });
+        expect(diag?.errors?.[0]?.message).toContain('no recognized `view` key');
+        expect(diag?.errors?.[0]?.code).toBe('custom');
+    });
+
+    it('an empty stored `view` body is `valid: false` too', () => {
+        expect(computeMetadataDiagnostics('view', {})?.valid).toBe(false);
+    });
+
+    it('reaches Studio through `decorateMetadataItem`, like every other verdict', () => {
+        const decorated = decorateMetadataItem('view', { nope: 1 }) as {
+            _diagnostics?: { valid: boolean };
+        };
+        expect(decorated._diagnostics?.valid).toBe(false);
+    });
+
+    it('read and save still agree — one ranking, applied to the new rejection', () => {
+        // The #5598 invariant, re-proved on the issue class #5599 introduces:
+        // a document must not be "valid to open, invalid to save" or vice versa.
+        const schema = getMetadataTypeSchema('view') as z.ZodTypeAny;
+        const parsed = schema.safeParse({ nope: 1 });
+        expect(parsed.success).toBe(false);
+        const fromSharedRanking = zodIssuesToMetadataIssues(
+            (parsed as { error: { issues: unknown[] } }).error.issues,
+        );
+        expect(computeMetadataDiagnostics('view', { nope: 1 })?.errors).toEqual(fromSharedRanking);
+    });
+
+    it('a legitimately-lean overlay is still valid — no collateral badge', () => {
+        // The precondition asks "is this a view at all", never "is it complete".
+        expect(computeMetadataDiagnostics('view', { isPinned: true })).toEqual({ valid: true });
+        expect(computeMetadataDiagnostics('view', { hidden: true })).toEqual({ valid: true });
+    });
+
+    it('a stored row of pure identity is no longer valid either', () => {
+        // The stored twin of the write-path case: `{ nope: 1 }` was persisted as
+        // `{ nope: 1, name: … }` (plus inherited identity where a registry entry
+        // existed), so every such row read back `valid: true`. Those rows are
+        // exactly the ones an operator now has to find — see the changeset.
+        expect(computeMetadataDiagnostics('view', { nope: 1, name: 'garbage_view' })?.valid).toBe(false);
+        expect(computeMetadataDiagnostics('view', {
+            nope: 1, name: 'showcase_task.default', viewKind: 'list', object: 'showcase_task', label: 'All Tasks',
+        })?.valid).toBe(false);
+    });
+});

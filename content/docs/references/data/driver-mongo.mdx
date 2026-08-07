@@ -10,17 +10,11 @@ MongoDB Standard Driver Protocol
 Describes the MongoDB connection settings and capabilities.
 
 ENFORCED as of #4410. This block used to claim it was "used by the Platform
-
 to validate `datasource.config` when `driver: 'mongo'`", which was false: the
-
 config slot was a bare `z.record` and this schema had no consumer at all —
-
 not even an export, since `data/driver/` was reachable only from its own
-
 tests. It is now what `DatasourceSchema` parses `config` against for a mongo
-
 datasource, and the same schema is projected onto
-
 `MongoDriverSpec`.configSchema for the connection form.
 
 <Callout type="info">

@@ -156,6 +156,52 @@ describe('hookBodyRunnerFactory', () => {
     await fn!(engineCtx);
     expect(backing.website).toBe('https://acme.com');
   });
+
+  // [#5906] `input` and `previous` are the engine's own spellings, and the only
+  // ones: `HookContextSchema` declares no top-level `doc`/`previousDoc`, and
+  // objectql's `engine.ts` — the sole producer of a HookContext — builds neither.
+  // Alias limbs for both used to sit in `buildSandboxContext`; these two pin that
+  // the sandbox now seeds from the truth keys and from nothing else. The NEGATIVE
+  // one carries the weight: the truth keys sit FIRST in both reads, so the
+  // positive case would stay green if either alias limb were put back.
+  describe('seeds ctx.input / ctx.previous from the engine keys only', () => {
+    /** A `ql` whose single write records what the body observed. */
+    const probingQl = (seen: Array<Record<string, unknown>>) => ({
+      object: () => ({ insert: async (data: any) => { seen.push(data); return data; } }),
+    });
+
+    const probeHook = (seen: Array<Record<string, unknown>>) =>
+      hookBodyRunnerFactory(runner, { ql: probingQl(seen), appId: 'crm' })({
+        name: 'probe',
+        object: 'contact',
+        events: ['beforeUpdate'],
+        body: {
+          language: 'js',
+          source:
+            "await ctx.api.object('probe').insert({"
+            + ' input: JSON.stringify(ctx.input),'
+            + ' previous: JSON.stringify(ctx.previous ?? null) });',
+          capabilities: ['api.write'],
+        },
+      } as any);
+
+    it('reads `input` and `previous`', async () => {
+      const seen: Array<Record<string, unknown>> = [];
+      await probeHook(seen)!({ input: { email: 'new@x.io' }, previous: { email: 'old@x.io' } } as any);
+      expect(seen[0]).toEqual({
+        input: '{"email":"new@x.io"}',
+        previous: '{"email":"old@x.io"}',
+      });
+    });
+
+    it('does NOT read a `doc` / `previousDoc` alias — no engine path produces either', async () => {
+      const seen: Array<Record<string, unknown>> = [];
+      // The spellings the deleted limbs defended, and nothing else on the context:
+      // with them unread the body sees an empty input and no previous at all.
+      await probeHook(seen)!({ doc: { email: 'new@x.io' }, previousDoc: { email: 'old@x.io' } } as any);
+      expect(seen[0]).toEqual({ input: '{}', previous: 'null' });
+    });
+  });
 });
 
 describe('actionBodyRunnerFactory', () => {

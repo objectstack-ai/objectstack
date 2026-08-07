@@ -12,6 +12,10 @@ import { retiredKey } from '../shared/retired-key';
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { HookBodySchema } from './hook-body.zod';
+// Type-only, and it must stay that way: `contracts/` already imports `data/`
+// (`contracts/data-engine.ts`), so a VALUE import here would close a runtime
+// cycle. `import type` is erased, leaving the edge in the type graph only.
+import type { IScopedContext } from '../contracts/scoped-context';
 
 /*
  * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
@@ -328,14 +332,29 @@ export const HookContextSchema = lazySchema(() => z.object({
    * live there because only objectql can execute a dispatch, and spec must not
    * depend on it.
    *
-   * - find (also fires for findOne): { ast: QueryAST, options: DriverOptions }
-   * - insert (one context per row, batch inserts included): { data: Record, options: DriverOptions }
-   * - update (single id): { id: ID, data: Record, options: DriverOptions }
-   * - update (bulk, multi:true) — before: { id: undefined, data: Record, options: DriverOptions }
+   * - find (also fires for findOne): { ast: QueryAST, options: see PHASE below }
+   * - insert (one context per row, batch inserts included): { data: Record, options: see PHASE below }
+   * - update (single id): { id: ID, data: Record, options: see PHASE below }
+   * - update (bulk, multi:true) — before: { id: undefined, data: Record, options: EngineUpdateOptions }
    * - update (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, data: Record, options: DriverOptions }
-   * - delete (single id): { id: ID, options: DriverOptions }
-   * - delete (bulk, multi:true) — before: { id: undefined, options: DriverOptions }
+   * - delete (single id): { id: ID, options: see PHASE below }
+   * - delete (bulk, multi:true) — before: { id: undefined, options: EngineDeleteOptions }
    * - delete (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, options: DriverOptions }
+   *
+   * PHASE — `input.options` is the one slot whose TYPE depends on when you read
+   * it, on every path above. The engine builds the context with the CALLER's
+   * own options bag (`EngineQueryOptions` / `DataEngineInsertOptions` /
+   * `EngineUpdateOptions` / `EngineDeleteOptions`) and only AFTER the `before*`
+   * handlers return — before the driver call — merges the driver-facing keys
+   * onto it (`buildDriverOptions`: transaction, tenantId, timezone, …). So a
+   * `before*` handler reads the CALLER's bag, `where` and `multi` included; an
+   * `after*` handler and the driver read the `DriverOptions` view. The merge is
+   * ADDITIVE — it spreads the caller's bag and adds keys, never strips one — so
+   * the widening is one-way and nothing a `before*` handler saw disappears.
+   * #5997 corrected the two `before` rows above, which had said `DriverOptions`
+   * (a type that declares no `where` and no `multi`): that is not what the
+   * engine builds there, and not what the two consumers named below read.
+   * Measured and pinned in the same contract test as the rest of this table.
    *
    * A bulk (`multi: true`) update/delete fires the SAME `beforeUpdate`/
    * `beforeDelete` events as a single-id write, ONCE for the whole batch;
@@ -343,13 +362,26 @@ export const HookContextSchema = lazySchema(() => z.object({
    * there — binding it is precisely the test the engine dispatches on, so a
    * `before*` handler that sets it REROUTES the write onto the single-id path.
    *
-   * The row-scoping predicate is NOT reachable from `input` at all. It lives
-   * on the engine-internal `OperationContext.ast` (#2982) so that the filters
+   * The row-scoping predicate a bulk write EXECUTES is not reachable from
+   * `input` at all. It is the composed `ast`, which lives on the
+   * engine-internal `OperationContext.ast` (#2982) so that the filters
    * middleware composes onto it — RLS write policies, the sharing plugin's
-   * editable-rows filter — bind the driver call itself, where no handler can
-   * widen them. A bulk write therefore hands hooks no queryable predicate:
-   * scope the batch through `options.where` at the CALLER, or work per row on
-   * the `after*` events below.
+   * editable-rows filter — and binds the driver call itself, where no handler
+   * can widen it. What a `before*` handler CAN read is the strictly separate
+   * fact above: the caller's RAW predicate on `input.options.where` (with
+   * `input.options.multi`). The two differ by exactly the middleware's
+   * narrowing, and middleware only ever narrows, never widens — so treating
+   * the caller's predicate as the batch's row set is an UPPER-BOUND
+   * approximation. That is the safe direction for a fail-closed guard (it may
+   * refuse a write that would have touched fewer rows; it can never miss one
+   * that touches more) and the wrong direction for anything that needs the
+   * effective set exactly, which should work per row on the `after*` events
+   * below instead. Both of `plugin-auth`'s break-glass last-admin guards
+   * (#5892 ban half, #5941 delete half) are built on that upper bound, and
+   * objectql's own `isPredicateBulkWrite` (`hook-wrappers.ts`, #5038/#4775)
+   * reads `input.options.multi` from the same slot to tell a batch dispatch
+   * from a per-row one. Do not narrow `input.options` on the `before*` paths
+   * without re-reading all three.
    *
    * Since #5038 (ADR-0058's bulk-write addendum) the `after*` events on a bulk
    * write dispatch ONCE PER MATCHED ROW, each on a single-record-shaped
@@ -418,13 +450,25 @@ export const HookContextSchema = lazySchema(() => z.object({
      * `buildSession()` (`packages/objectql/src/engine.ts`).
      *
      * ⚠️ **Descriptive, NOT an authorization input.** A hook may READ this to
-     * describe the caller — forwarding it as the sharing service's evaluation
-     * context (`services.sharing.canEdit(..., { positions })`, the shape both
-     * `content/docs/kernel/runtime-services/` pages teach), tailoring a
-     * message, logging — and nothing more. It grants nothing on its own, no
-     * security middleware keys on it here, and a hook must never make the
-     * access decision itself by testing it
+     * describe the caller — tailoring a message, branching a *business* rule
+     * through its own channel (`ctx.api`), logging — and nothing more. It
+     * grants nothing on its own, no security middleware keys on it here, and a
+     * hook must never make the access decision itself by testing it
      * (`session.positions.includes('sales_manager')` is the anti-pattern).
+     *
+     * The example that used to stand here — forwarding this array as the
+     * sharing service's evaluation context,
+     * `services.sharing.canEdit(..., { positions })` — was itself unreachable
+     * and is gone (#6001). A hook context is assembled key by key by the engine
+     * (`buildSession()` / `buildSandboxContext()` in
+     * `packages/runtime/src/sandbox/body-runner.ts`) and carries **no
+     * `services` key**, so that call is `undefined()` at run time and the
+     * customary `if (!ok) throw` around it rejects every write (#5720). It was
+     * a defect shape wearing a good-practice label. The sharing gates run
+     * inside the engine and have already thrown `FORBIDDEN` before any hook is
+     * reached, so there is nothing for a hook to forward: see
+     * `content/docs/kernel/runtime-services/sharing-service.mdx`,
+     * "Enforcement is automatic — do not re-check it in a hook".
      * PRIVILEGE is judged by the security service on the ExecutionContext:
      * capability grants (`permissions`), placements (`positions`) and the
      * derived posture (ADR-0095 D3). A hook that re-decides access from this
@@ -443,10 +487,13 @@ export const HookContextSchema = lazySchema(() => z.object({
      */
     positions: z.array(z.string()).optional().describe(
       'Position names held by the caller (ADR-0090 D3; formerly `roles`), copied from '
-      + 'ExecutionContext.positions. For hook READS only — e.g. forwarding to the sharing '
-      + 'service as evaluation context. Authorization is decided by the security service on '
-      + 'the ExecutionContext (permissions / positions / derived posture); this is NOT an '
-      + 'authorization input and a hook must not gate a write by testing it.',
+      + 'ExecutionContext.positions. For hook READS only — e.g. tailoring a message, or '
+      + 'branching a business rule the hook runs through its own `ctx.api` channel. '
+      + 'Authorization is decided by the security service on the ExecutionContext '
+      + '(permissions / positions / derived posture); this is NOT an authorization input '
+      + 'and a hook must not gate a write by testing it. A hook context carries no '
+      + '`services` key, so the sharing service cannot be called from one either — the '
+      + 'sharing gates already ran inside the engine before the hook chain.',
     ),
     /**
      * Historical-import audit-preservation flag (#3493). Set by
@@ -580,13 +627,54 @@ export const HookContextSchema = lazySchema(() => z.object({
    * Cross-Object API
    * Provides a scoped data access interface for performing CRUD operations
    * on other objects within hooks. Bound to the current execution context
-   * (userId, tenantId, transaction).
+   * (userId, organizationId, transaction).
    *
-   * Usage in hooks:
-   *   const users = ctx.api.object('user');
-   *   const admin = await users.findOne({ where: { role: 'admin' } });
+   * Usage in hooks — this example COMPILES, and is pinned as a compile probe
+   * by `contracts/scoped-context.test.ts` so that it keeps doing so:
+   *
+   *   const owner = await ctx.api?.object('user').findOne({
+   *     where: { id: ctx.input.owner_id },
+   *   });
+   *
+   * TYPED as {@link IScopedContext} since #5945 (maintainer ruling C), where it
+   * was `z.unknown()` — which made `HookContext['api']` infer as `unknown`, so
+   * the two lines this JSDoc used to show were themselves a `TS18046: 'ctx.api'
+   * is of type 'unknown'`. Every document teaches `(ctx: HookContext)` plus
+   * `ctx.api.object(…)`; none of it type-checked, and the one doc block already
+   * under `check:skill-examples` compiled only by casting to a private
+   * hand-rolled `CrossObjectApi`. The declared face is deliberately the minimum
+   * the corpus is measured to CALL — see the evidence bar in
+   * `contracts/scoped-context.ts` for what is excluded and how to grow it.
+   *
+   * The RUNTIME schema stays `z.unknown()` and the narrowing is a static cast,
+   * the same idiom (and for the same reason) as `ObjectCapabilities.apiMethods`
+   * in `object.zod.ts`: keep the TS type the authors' one, keep the parse the
+   * permissive one. Two things force it here.
+   *
+   *  1. This key carries a LIVE engine object — ObjectQL's `ScopedContext`, a
+   *     class instance with methods — not authored data. Validating it would
+   *     mean checking a class against a JSON shape on every parse, on a schema
+   *     that is deliberately the non-authored runtime context (see the header).
+   *  2. `z.custom<IScopedContext>()` was the obvious spelling and is WRONG
+   *     here: `custom` is unrepresentable in JSON Schema, so `gen:schema`
+   *     stopped emitting `json-schema/data/HookContext.json` altogether —
+   *     "1 previously published schema disappeared", which unpublishes the
+   *     generated `references/data/hook.mdx` page on the next `gen:docs`
+   *     (#2978). Measured, not guessed: the spec build failed on it. `unknown`
+   *     keeps the schema representable, so the JSON Schema, the manifest and
+   *     the reference page are all byte-identical to before.
+   *
+   * The change is therefore type-only: same accepted values, same JSON Schema
+   * (`{}`), same generated row — only the `.describe()` text moves, which is
+   * that page's only channel for saying what the value is.
+   *
+   * Stays OPTIONAL, though `buildHookApi` sets it at all five dispatch sites:
+   * making it required would start REJECTING the partial contexts that
+   * `HookContextSchema.parse` accepts today (a context built without a live
+   * engine). Read it as `ctx.api?.object(…)`, or bind it once and narrow.
    */
-  api: z.unknown().optional().describe('Cross-object data access (ScopedContext)'),
+  api: (z.unknown().optional() as unknown as z.ZodOptional<z.ZodType<IScopedContext, IScopedContext>>)
+    .describe('Cross-object data access (IScopedContext — `object(name)` + `transaction(cb)`)'),
 
   /**
    * Current User Info
@@ -609,9 +697,11 @@ export const HookContextSchema = lazySchema(() => z.object({
 }));
 
 export type Hook = z.input<typeof HookSchema>;
+/** Post-parse shape of {@link Hook} — defaults applied, transforms run (ADR-0122). */
+export type HookParsed = z.infer<typeof HookSchema>;
 export type ResolvedHook = z.output<typeof HookSchema>;
-export type HookEventType = z.infer<typeof HookEvent>;
-export type HookContext = z.infer<typeof HookContextSchema>;
+export type HookEventType = z.input<typeof HookEvent>;
+export type HookContext = z.input<typeof HookContextSchema>;
 
 /**
  * Type-safe factory for a lifecycle hook. Validates at authoring time via

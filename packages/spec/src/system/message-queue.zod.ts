@@ -16,7 +16,7 @@ export const MessageQueueProviderSchema = lazySchema(() => z.enum([
   'azure-service-bus',
 ]).describe('Supported message queue backend provider'));
 
-export type MessageQueueProvider = z.infer<typeof MessageQueueProviderSchema>;
+export type MessageQueueProvider = z.input<typeof MessageQueueProviderSchema>;
 
 export const TopicConfigSchema = lazySchema(() => z.object({
   name: z.string().describe('Topic name identifier'),
@@ -26,7 +26,7 @@ export const TopicConfigSchema = lazySchema(() => z.object({
   compressionType: z.enum(['none', 'gzip', 'snappy', 'lz4']).default('none').describe('Message compression algorithm'),
 }).describe('Configuration for a message queue topic'));
 
-export type TopicConfig = z.infer<typeof TopicConfigSchema>;
+export type TopicConfig = z.input<typeof TopicConfigSchema>;
 /** Post-parse shape of {@link TopicConfig} — defaults applied, transforms run (ADR-0122). */
 export type TopicConfigParsed = z.infer<typeof TopicConfigSchema>;
 
@@ -37,7 +37,7 @@ export const ConsumerConfigSchema = lazySchema(() => z.object({
   maxPollRecords: z.number().default(500).describe('Maximum records returned per poll'),
 }).describe('Consumer group configuration for topic consumption'));
 
-export type ConsumerConfig = z.infer<typeof ConsumerConfigSchema>;
+export type ConsumerConfig = z.input<typeof ConsumerConfigSchema>;
 /** Post-parse shape of {@link ConsumerConfig} — defaults applied, transforms run (ADR-0122). */
 export type ConsumerConfigParsed = z.infer<typeof ConsumerConfigSchema>;
 
@@ -47,7 +47,7 @@ export const DeadLetterQueueSchema = lazySchema(() => z.object({
   queueName: z.string().describe('Name of the dead letter queue'),
 }).describe('Dead letter queue configuration for unprocessable messages'));
 
-export type DeadLetterQueue = z.infer<typeof DeadLetterQueueSchema>;
+export type DeadLetterQueue = z.input<typeof DeadLetterQueueSchema>;
 /** Post-parse shape of {@link DeadLetterQueue} — defaults applied, transforms run (ADR-0122). */
 export type DeadLetterQueueParsed = z.infer<typeof DeadLetterQueueSchema>;
 
@@ -64,6 +64,6 @@ export const MessageQueueConfigSchema = lazySchema(() => z.object({
   }).optional().describe('SASL authentication configuration'),
 }).describe('Top-level message queue configuration'));
 
-export type MessageQueueConfig = z.infer<typeof MessageQueueConfigSchema>;
+export type MessageQueueConfig = z.input<typeof MessageQueueConfigSchema>;
 /** Post-parse shape of {@link MessageQueueConfig} — defaults applied, transforms run (ADR-0122). */
 export type MessageQueueConfigParsed = z.infer<typeof MessageQueueConfigSchema>;

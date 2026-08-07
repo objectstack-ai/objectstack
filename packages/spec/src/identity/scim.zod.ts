@@ -119,7 +119,7 @@ export const SCIMMetaSchema = lazySchema(() => z.object({
     .describe('Entity tag (ETag) for concurrency control'),
 }));
 
-export type SCIMMeta = z.infer<typeof SCIMMetaSchema>;
+export type SCIMMeta = z.input<typeof SCIMMetaSchema>;
 
 /**
  * SCIM Name Schema
@@ -175,7 +175,7 @@ export const SCIMNameSchema = lazySchema(() => z.object({
     .describe('Honorific suffix (Jr., Sr.)'),
 }));
 
-export type SCIMName = z.infer<typeof SCIMNameSchema>;
+export type SCIMName = z.input<typeof SCIMNameSchema>;
 
 /**
  * SCIM Email Schema
@@ -213,7 +213,7 @@ export const SCIMEmailSchema = lazySchema(() => z.object({
     .describe('Primary email indicator'),
 }));
 
-export type SCIMEmail = z.infer<typeof SCIMEmailSchema>;
+export type SCIMEmail = z.input<typeof SCIMEmailSchema>;
 /** Post-parse shape of {@link SCIMEmail} — defaults applied, transforms run (ADR-0122). */
 export type SCIMEmailParsed = z.infer<typeof SCIMEmailSchema>;
 
@@ -252,7 +252,7 @@ export const SCIMPhoneNumberSchema = lazySchema(() => z.object({
     .describe('Primary phone indicator'),
 }));
 
-export type SCIMPhoneNumber = z.infer<typeof SCIMPhoneNumberSchema>;
+export type SCIMPhoneNumber = z.input<typeof SCIMPhoneNumberSchema>;
 /** Post-parse shape of {@link SCIMPhoneNumber} — defaults applied, transforms run (ADR-0122). */
 export type SCIMPhoneNumberParsed = z.infer<typeof SCIMPhoneNumberSchema>;
 
@@ -319,7 +319,7 @@ export const SCIMAddressSchema = lazySchema(() => z.object({
     .describe('Primary address indicator'),
 }));
 
-export type SCIMAddress = z.infer<typeof SCIMAddressSchema>;
+export type SCIMAddress = z.input<typeof SCIMAddressSchema>;
 /** Post-parse shape of {@link SCIMAddress} — defaults applied, transforms run (ADR-0122). */
 export type SCIMAddressParsed = z.infer<typeof SCIMAddressSchema>;
 
@@ -357,7 +357,7 @@ export const SCIMGroupReferenceSchema = lazySchema(() => z.object({
     .describe('Membership type'),
 }));
 
-export type SCIMGroupReference = z.infer<typeof SCIMGroupReferenceSchema>;
+export type SCIMGroupReference = z.input<typeof SCIMGroupReferenceSchema>;
 
 /**
  * SCIM Enterprise User Extension
@@ -411,7 +411,7 @@ export const SCIMEnterpriseUserSchema = lazySchema(() => z.object({
     .describe('Manager reference'),
 }));
 
-export type SCIMEnterpriseUser = z.infer<typeof SCIMEnterpriseUserSchema>;
+export type SCIMEnterpriseUser = z.input<typeof SCIMEnterpriseUserSchema>;
 
 /**
  * SCIM User Schema (Core)
@@ -646,7 +646,7 @@ export const SCIMUserSchema = lazySchema(() => z.object({
   }
 }));
 
-export type SCIMUser = z.infer<typeof SCIMUserSchema>;
+export type SCIMUser = z.input<typeof SCIMUserSchema>;
 /** Post-parse shape of {@link SCIMUser} — defaults applied, transforms run (ADR-0122). */
 export type SCIMUserParsed = z.infer<typeof SCIMUserSchema>;
 
@@ -684,7 +684,7 @@ export const SCIMMemberReferenceSchema = lazySchema(() => z.object({
     .describe('Member display name'),
 }));
 
-export type SCIMMemberReference = z.infer<typeof SCIMMemberReferenceSchema>;
+export type SCIMMemberReference = z.input<typeof SCIMMemberReferenceSchema>;
 
 /**
  * SCIM Group Schema
@@ -740,7 +740,7 @@ export const SCIMGroupSchema = lazySchema(() => z.object({
     .describe('Resource metadata'),
 }));
 
-export type SCIMGroup = z.infer<typeof SCIMGroupSchema>;
+export type SCIMGroup = z.input<typeof SCIMGroupSchema>;
 /** Post-parse shape of {@link SCIMGroup} — defaults applied, transforms run (ADR-0122). */
 export type SCIMGroupParsed = z.infer<typeof SCIMGroupSchema>;
 
@@ -804,7 +804,7 @@ export const SCIMListResponseSchema = lazySchema(() => z.object({
     .describe('Items per page'),
 }));
 
-export type SCIMListResponse = z.infer<typeof SCIMListResponseSchema>;
+export type SCIMListResponse = z.input<typeof SCIMListResponseSchema>;
 /** Post-parse shape of {@link SCIMListResponse} — defaults applied, transforms run (ADR-0122). */
 export type SCIMListResponseParsed = z.infer<typeof SCIMListResponseSchema>;
 
@@ -860,7 +860,7 @@ export const SCIMErrorSchema = lazySchema(() => z.object({
     .describe('Error detail message'),
 }));
 
-export type SCIMError = z.infer<typeof SCIMErrorSchema>;
+export type SCIMError = z.input<typeof SCIMErrorSchema>;
 /** Post-parse shape of {@link SCIMError} — defaults applied, transforms run (ADR-0122). */
 export type SCIMErrorParsed = z.infer<typeof SCIMErrorSchema>;
 
@@ -890,7 +890,7 @@ export const SCIMPatchOperationSchema = lazySchema(() => z.object({
     .describe('Value to set'),
 }));
 
-export type SCIMPatchOperation = z.infer<typeof SCIMPatchOperationSchema>;
+export type SCIMPatchOperation = z.input<typeof SCIMPatchOperationSchema>;
 
 /**
  * SCIM Patch Request
@@ -916,7 +916,7 @@ export const SCIMPatchRequestSchema = lazySchema(() => z.object({
     .describe('Patch operations'),
 }));
 
-export type SCIMPatchRequest = z.infer<typeof SCIMPatchRequestSchema>;
+export type SCIMPatchRequest = z.input<typeof SCIMPatchRequestSchema>;
 /** Post-parse shape of {@link SCIMPatchRequest} — defaults applied, transforms run (ADR-0122). */
 export type SCIMPatchRequestParsed = z.infer<typeof SCIMPatchRequestSchema>;
 
@@ -1006,7 +1006,7 @@ export const SCIMBulkOperationSchema = lazySchema(() => z.object({
     .describe('ETag for optimistic concurrency control'),
 }));
 
-export type SCIMBulkOperation = z.infer<typeof SCIMBulkOperationSchema>;
+export type SCIMBulkOperation = z.input<typeof SCIMBulkOperationSchema>;
 
 /**
  * SCIM Bulk Request Schema
@@ -1030,7 +1030,7 @@ export const SCIMBulkRequestSchema = lazySchema(() => z.object({
     .describe('Stop processing after this many errors'),
 }));
 
-export type SCIMBulkRequest = z.infer<typeof SCIMBulkRequestSchema>;
+export type SCIMBulkRequest = z.input<typeof SCIMBulkRequestSchema>;
 /** Post-parse shape of {@link SCIMBulkRequest} — defaults applied, transforms run (ADR-0122). */
 export type SCIMBulkRequestParsed = z.infer<typeof SCIMBulkRequestSchema>;
 
@@ -1063,7 +1063,7 @@ export const SCIMBulkResponseOperationSchema = lazySchema(() => z.object({
     .describe('Response body (typically present for errors)'),
 }));
 
-export type SCIMBulkResponseOperation = z.infer<typeof SCIMBulkResponseOperationSchema>;
+export type SCIMBulkResponseOperation = z.input<typeof SCIMBulkResponseOperationSchema>;
 
 /**
  * SCIM Bulk Response Schema
@@ -1080,6 +1080,6 @@ export const SCIMBulkResponseSchema = lazySchema(() => z.object({
     .describe('Results for each bulk operation'),
 }));
 
-export type SCIMBulkResponse = z.infer<typeof SCIMBulkResponseSchema>;
+export type SCIMBulkResponse = z.input<typeof SCIMBulkResponseSchema>;
 /** Post-parse shape of {@link SCIMBulkResponse} — defaults applied, transforms run (ADR-0122). */
 export type SCIMBulkResponseParsed = z.infer<typeof SCIMBulkResponseSchema>;

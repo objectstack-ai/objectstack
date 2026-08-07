@@ -188,18 +188,52 @@ const dataWarehousePipeline: ETLPipeline = {
 
 ### Purpose
 
-Complete, production-grade integration with external systems. Includes authentication, security, webhooks, rate limiting, and full lifecycle management.
+Complete, production-grade integration with external systems. Includes authentication, security, webhooks, retry policies, and full lifecycle management.
 
 ### Key Features
 
 - ✅ **Authentication**: OAuth2, JWT, SAML, API Key, Basic Auth
 - ✅ **Webhooks**: Bidirectional event notifications
-- ✅ **Rate Limiting**: Token bucket, leaky bucket algorithms
 - ✅ **Retry Policies**: Exponential backoff, circuit breaker
-- ✅ **Field Mapping**: With transformations and data type conversion
+- ✅ **Field Mapping**: `dataType` target type and `syncMode` per-field direction —
+  **no value transformation**; see below
 - ✅ **Conflict Resolution**: Multiple strategies (`ConnectorConflictResolution`)
 - ✅ **Security**: Signature verification, encryption
 - ✅ **Monitoring**: Health checks, metrics, logging
+- ❌ **Outbound rate limiting**: **not provided** — at this or any other level; see below
+
+> **There is no outbound rate limiting.** This list used to carry a ticked
+> "**Rate Limiting**: Token bucket, leaky bucket algorithms" line. It named two
+> algorithms that never existed. `connector.rateLimitConfig` — and the entire
+> `ConnectorRateLimitConfig` / `RateLimitStrategy` shape behind it — was removed
+> in `@objectstack/spec` 17.0.0 (#4911, ADR-0049 D2), because **no outbound
+> rate-limiting engine ever existed**. The platform's only token bucket
+> (runtime `security/rate-limit.ts`) throttles **INBOUND** requests *to* us;
+> nothing throttles the calls a connector makes *out*. Do **not** substitute
+> `shared`'s `RateLimitConfig` — that is the inbound limiter and would cap the
+> wrong direction. **Until an outbound throttle exists, rate-limit at the
+> connector provider or upstream gateway.** What L3 does declare for a
+> rate-limited upstream is `retryConfig` — whose `retryableStatusCodes` default
+> `[408, 429, 500, 502, 503, 504]` includes `429` — and `health.circuitBreaker`.
+
+> **Field mapping does not transform values.** The ticked line above used to read
+> "With transformations and data type conversion". Only the second half was ever
+> true: `ConnectorFieldMappingSchema` (`integration/connector.zod.ts`) extends the
+> base mapping with exactly three keys — `dataType`, `required` and `syncMode`.
+> `FieldMapping.transform` — authored as `connector.fieldMappings[].transform` and
+> `externalLookup.fieldMappings[].transform` — was removed in `@objectstack/spec`
+> 17.0.0 (#5552, ADR-0049), and the whole `FieldMappingTransform` union went with
+> it (`constant` / `cast` / `lookup` / `javascript` / `map`) — **no runtime ever
+> executed any of the five**, and the `javascript` member advertised
+> `dialect: "js"`, a dialect retired in #3278. An L3 connector mapping moves a
+> value from `source` to `target`; it does not compute one. **Value conversion
+> belongs on a surface that runs it:** the L2 import mapping's own `transform`
+> (`mapping.fieldMapping[].transform` in `data/mapping.zod.ts` — a string enum,
+> `none`/`constant`/`map`/`split`/`join`/`lookup`, with its settings in `params`),
+> applied row by row by the REST import path, which rejects its own `javascript`
+> value with a 400 rather than pretending to run it — or an ETL transformation
+> step (L2 above). Already authored the retired key? `os migrate meta --from 16`
+> rewrites it.
 
 ### Use Cases
 
@@ -210,7 +244,7 @@ Complete, production-grade integration with external systems. Includes authentic
 
 ### Example
 
-> **`ConnectorInput` is the AUTHOR shape.** It is `z.input` of
+> **The bare `Connector` is the AUTHOR shape.** It is `z.input` of
 > `ConnectorSchema`, so every key carrying a `.default()` — `enabled`,
 > `status`, `connectionTimeoutMs`, `requestTimeoutMs`, all of `syncConfig`'s
 > `strategy` / `direction` / `realtimeSync` / `conflictResolution` /
@@ -220,29 +254,29 @@ Complete, production-grade integration with external systems. Includes authentic
 > the schema wraps for you. Annotate the **result** of
 > `ConnectorSchema.parse(…)` with **`ConnectorParsed`**, which is `z.infer`:
 > there those keys are all present and `schedule` is already the
-> `{ dialect: 'cron', source }` envelope. (The bare **`Connector`** still means
-> that same parsed shape today, and both names are live — but `ConnectorParsed`
-> is the one that keeps meaning it.) Note the asymmetry with L2 above, where the
-> bare `ETLPipeline` *is* the author shape and the parse result is
-> `ETLPipelineParsed`. That asymmetry is real and is being removed, in the
-> direction L2 already points: **[ADR-0122](../../../docs/adr/0122-schema-type-alias-naming-convention.md)
-> makes the bare name the author state and `XParsed` the parsed state**
+> `{ dialect: 'cron', source }` envelope. This matches L2 above, where the bare
+> `ETLPipeline` is the author shape and the parse result is `ETLPipelineParsed`
+> — the two halves of the spec agree now, and
+> **[ADR-0122](../../../docs/adr/0122-schema-type-alias-naming-convention.md)
+> is why**: the bare name is the author state and `XParsed` is the parsed state,
 > repo-wide. Earlier revisions of this note called L2's spelling "the house
 > convention" and said connector had not caught up; #5551 measured the corpus and
 > that was backwards — connector's spelling was the 1384-alias majority and L2's
 > the 8-file minority, with neither recorded anywhere. ADR-0122 is that record.
-> Its phase 1 (additive, no break) has already given every schema with two
-> distinct shapes its `XParsed` name, `Connector` included; phase 2 flips the
-> bare names in a major. The example below states the defaulted
+> Its phase 1 (#5551, additive) gave every schema with two distinct shapes its
+> `XParsed` name; phase 2 (#6083, protocol 17) flipped the bare names and retired
+> the `XInput` synonyms the flip created — `ConnectorInput` among them, so write
+> `Connector` where you used to write `ConnectorInput`, and `ConnectorParsed`
+> where you used to write `Connector`. The example below states the defaulted
 > keys anyway, because it is a tour of the surface; the Migration Guide's
 > sketches omit them, because that is what ordinary authoring looks like.
 > To have the literal validated as you write it, prefer `defineConnector(…)`,
 > which takes this same input shape and returns the parsed one.
 
 ```typescript
-import type { ConnectorInput } from '@objectstack/spec/integration';
+import type { Connector } from '@objectstack/spec/integration';
 
-const sapConnector: ConnectorInput = {
+const sapConnector: Connector = {
   name: 'sap_erp_connector',
   label: 'SAP ERP Integration',
   type: 'saas',
@@ -270,7 +304,8 @@ const sapConnector: ConnectorInput = {
     deleteMode: 'soft_delete'
   },
 
-  // Field Mappings with Transformations.
+  // Field Mappings — `dataType` target type and `syncMode` direction. There is
+  // no value transformation here; see the tombstone on the second entry.
   // The keys are `source` / `target` — the canonical spelling of the base
   // protocol in `shared/mapping.zod.ts`, which every mapping surface extends.
   fieldMappings: [
@@ -353,7 +388,10 @@ const sapConnector: ConnectorInput = {
 ### Best Practices
 
 - **Security First**: Always use encrypted credentials and secure storage
-- **Rate Limiting**: Respect external API rate limits to avoid throttling
+- **Rate Limiting**: Respect the upstream API's limits — and enforce that at the
+  connector provider or upstream gateway, since the connector shape declares no
+  outbound throttle (#4911). `retryConfig` handles the `429` you get for exceeding a
+  limit; it does not keep you under one
 - **Error Handling**: Implement comprehensive retry logic with exponential backoff
 - **Monitoring**: Set up health checks and alerting for connector failures
 - **Testing**: Test authentication, sync, and webhook flows thoroughly
@@ -367,11 +405,11 @@ const sapConnector: ConnectorInput = {
 
 | Question | Answer → Level |
 |----------|----------------|
-| Do you need complex transformations (joins, aggregations)? | **Yes** → L2 (ETL) |
+| Do you need to transform values at all — joins and aggregations, or just a per-field convert? | **Yes** → L2 (ETL) for joins/aggregations, or the import mapping's `fieldMapping[].transform` for per-field conversion. **Not** L3: a connector's `fieldMappings` declares `dataType` and `syncMode` and performs no value transformation (#5552) |
 | Do you need multi-source aggregation? | **Yes** → L2 (ETL) |
 | Do you need real-time webhooks? | **Yes** → L3 (Connector) |
 | Do you need advanced authentication (OAuth2, SAML)? | **Yes** → L3 (Connector) |
-| Do you need rate limiting and retry policies? | **Yes** → L3 (Connector) |
+| Do you need retry policies and circuit breaking? | **Yes** → L3 (Connector) — `retryConfig`, `health.circuitBreaker`. Outbound **rate limiting** is not a reason to pick any level: no level provides it (#4911); throttle at the provider or gateway |
 | Is it a simple point-to-point sync with an external system? | **Yes** → L3 (Connector) with `syncConfig` |
 | Are you building a data warehouse pipeline? | **Yes** → L2 (ETL) |
 | Are you integrating with an enterprise system? | **Yes** → L3 (Connector) |
@@ -391,7 +429,7 @@ Use **L2 ETL Pipeline** for multi-source data warehousing.
 ```
 ObjectStack ↔ Enterprise Connector ↔ SAP
                     ↓
-               Webhooks, Auth, Rate Limiting
+               Webhooks, Auth, Retry / Circuit Breaker
 ```
 Use **L3 Enterprise Connector** for production-grade integrations — including
 straightforward point-to-point sync, via a connector instance with simple `auth`
@@ -410,11 +448,12 @@ Combine levels for complex scenarios.
 
 ### From L3 (`syncConfig`) to L2
 
-When a connector's declarative sync needs complex transformations:
+When a connector's declarative sync needs to transform values — joins and
+aggregations, or a per-field convert that `fieldMappings` cannot do (#5552):
 
 **Before (L3 `syncConfig`):**
 ```typescript
-const connector: ConnectorInput = {
+const connector: Connector = {
   name: 'orders',
   type: 'saas',
   authentication: { type: 'api-key', ... },
@@ -444,7 +483,8 @@ and `ETLPipeline` is the author shape.
 
 ### From L2 to L3
 
-When your ETL pipeline needs webhooks, advanced auth, or rate limiting:
+When your ETL pipeline needs webhooks, advanced auth, or retry / circuit-breaker
+policies:
 
 **Before (L2):**
 ```typescript
@@ -459,7 +499,7 @@ const pipeline: ETLPipeline = {
 
 **After (L3):**
 ```typescript
-const connector: ConnectorInput = {
+const connector: Connector = {
   authentication: { type: 'oauth2', ... },
   webhooks: [...],
   retryConfig: { ... }

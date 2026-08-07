@@ -8,10 +8,17 @@ import { Component, Zap, Code, Check, AlertCircle, Globe } from 'lucide-react';
 
 The **Widget Contract** defines the standard interface that custom ObjectUI field widgets implement. This contract ensures consistency across renderers and lets custom widgets integrate predictably with the rest of the UI system.
 
-The contract has two halves, both defined in `packages/spec/src/ui/widget.zod.ts`:
+The contract is **`FieldWidgetProps`** (`packages/spec/src/ui/widget.zod.ts`) — the props
+every field widget receives at render time. Implement it and your widget drops into any
+ObjectStack form.
 
-- **`FieldWidgetProps`** — the props every field widget receives at render time.
-- **`WidgetManifest`** — the static declaration that registers a custom widget (its supported field types, lifecycle hooks, events, configurable properties, and how its code is loaded).
+<Callout type="info">
+  The protocol declares what a widget *receives*, not how it is *registered*.
+  Registration belongs to the renderer, and metadata reaches it by naming a widget
+  with a string — see [Registering a Widget](#registering-a-widget). The
+  `WidgetManifest` family that used to sit beside this contract was removed in
+  `@objectstack/spec` 17.0.0 (#5055, ADR-0049): no schema anywhere ever carried it.
+</Callout>
 
 ## Philosophy: Props Down, Events Up
 
@@ -176,163 +183,53 @@ fields:
     widget: rating
 ```
 
-## Widget Manifest
+## Registering a Widget
 
-A custom widget is registered through a **Widget Manifest** (`WidgetManifestSchema`). The manifest declares the widget's identity, the field types it supports, its lifecycle and events, its configurable properties, and how its code is loaded.
+A field widget is named by a **string**, not by a metadata document. In a view, the
+field's `type` auto-infers a widget and an explicit `widget` name overrides that
+inference; the name resolves against the widgets the **renderer** has registered.
+That is the whole authorable surface, and it is the one shown under
+[Overriding the Inferred Widget](#overriding-the-inferred-widget) above.
 
-```typescript
-interface WidgetManifest {
-  name: string;                 // snake_case identifier
-  label: string;                // Display name
-  description?: string;
-  version?: string;             // semver
-  author?: string;
-  icon?: string;
-  fieldTypes?: string[];        // Supported field types, e.g. ['date', 'datetime']
-  category?: 'input' | 'display' | 'picker' | 'editor' | 'custom'; // default: 'custom'
+Registration itself belongs to the renderer. In objectui, `@object-ui/core`'s
+`WidgetRegistry` holds the runtime manifests (`RuntimeWidgetManifest` in
+`@object-ui/types`) and decides how a widget's code is discovered and loaded. The
+protocol declares the props contract that a widget must implement; it does not
+declare the registry.
 
-  lifecycle?: WidgetLifecycle;  // Lifecycle hooks
-  events?: WidgetEvent[];       // Custom events emitted
-  properties?: WidgetProperty[]; // Configurable properties
-  implementation?: WidgetSource; // How to load the widget code
+<Callout type="warn">
+  **`WidgetManifest` and its family were removed in `@objectstack/spec` 17.0.0**
+  (#5055, ADR-0049 enforce-or-remove). `WidgetManifestSchema`,
+  `WidgetLifecycleSchema`, `WidgetEventSchema`, `WidgetPropertySchema` and
+  `WidgetSourceSchema` — with the `npm` / `remote` / `inline` implementation
+  union, the `onMount` / `onValidate` lifecycle hooks and the declarable
+  `properties` and `events` — described a registration capability the platform
+  never had. **No schema anywhere carried them**: there was no key on any
+  metadata type whose value was a widget manifest, so no document could reach
+  these shapes and nothing ever parsed one. They are `TS2305` on
+  `@objectstack/spec/ui` after upgrade.
 
-  dependencies?: { name: string; version?: string; url?: string }[];
-  aria?: AriaProps;             // ARIA accessibility attributes
-}
-```
+  **Nothing needs rewriting.** A manifest was never writable, so no stored
+  metadata can contain one, and `field.widget: my_picker` — the key that names a
+  widget for real — is untouched. If you were building a value of one of these
+  types in your own TypeScript, delete it: the object was received by nobody.
 
-**Example:**
-```yaml
-name: custom_date_picker
-label: Custom Date Picker
-version: 1.0.0
-author: Acme Inc
-fieldTypes: [date, datetime]
-category: picker
-implementation:
-  type: npm
-  packageName: '@acme/custom-date-picker'
-  version: 1.0.0
-```
-
-### Widget Source
-
-`implementation` is a discriminated union on `type` that tells the host how to load the widget code:
-
-```yaml
-# NPM package
-implementation:
-  type: npm
-  packageName: '@acme/widgets'
-  version: latest
-  exportName: DatePicker   # optional named export
-
-# Module Federation remote
-implementation:
-  type: remote
-  url: https://cdn.example.com/remoteEntry.js
-  moduleName: ./DatePicker
-  scope: acme_widgets
-
-# Inline code
-implementation:
-  type: inline
-  code: |
-    return value ? new Date(value).toLocaleDateString() : '';
-```
-
-## Lifecycle Hooks
-
-Widget lifecycle hooks are defined on the manifest as **code-body strings** (not function references). They follow `WidgetLifecycleSchema`:
-
-{/* os:check */}
-```typescript
-interface WidgetLifecycle {
-  onMount?: string;     // Initialization when the widget mounts
-  onUpdate?: string;    // Runs when props change (receives prevProps)
-  onUnmount?: string;   // Cleanup before the widget unmounts
-  onValidate?: string;  // Custom validation; return an error message or null
-  onFocus?: string;     // Runs on focus
-  onBlur?: string;      // Runs on blur
-  onError?: string;     // Error handling
-}
-```
-
-**Example:**
-```yaml
-lifecycle:
-  onMount: "initializeDatePicker(); loadOptions();"
-  onUpdate: "if (prevProps.value !== props.value) { updateDisplay() }"
-  onValidate: "return value && value.length >= 10 ? null : 'Minimum 10 characters'"
-  onUnmount: "destroyDatePicker(); cancelPendingRequests();"
-```
-
-## Custom Events
-
-A widget can declare custom events it emits via `WidgetEventSchema`:
-
-{/* os:check */}
-```typescript
-interface WidgetEvent {
-  name: string;                          // lowercase, dash-separated, e.g. 'value-change'
-  label?: string;
-  description?: string;
-  bubbles?: boolean;                     // default false
-  cancelable?: boolean;                  // default false
-  payload?: Record<string, unknown>;     // payload shape
-}
-```
-
-**Example:**
-```yaml
-events:
-  - name: search-complete
-    label: Search Complete
-    bubbles: true
-    payload:
-      query: string
-      results: object
-```
-
-## Configurable Properties
-
-A widget exposes configuration knobs through `WidgetPropertySchema`. These describe the options a builder can set when placing the widget:
-
-{/* os:check */}
-```typescript
-interface WidgetProperty {
-  name: string;          // camelCase
-  label?: string;
-  type: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'function' | 'any';
-  required?: boolean;    // default false
-  default?: unknown;
-  description?: string;
-  validation?: Record<string, unknown>; // min/max, regex, enum, etc.
-  category?: string;     // for grouping in the builder UI
-}
-```
-
-**Example:**
-```yaml
-properties:
-  - name: maxLength
-    label: Maximum Length
-    type: number
-    required: false
-    default: 100
-    description: Maximum input length
-    category: validation
-```
+  Widget registration returns as protocol metadata only through the *enforce*
+  route of ADR-0049 — a registry and a loader first, then the vocabulary that
+  describes what they actually do.
+</Callout>
 
 ## Accessibility
 
-A widget manifest carries ARIA metadata through the shared `AriaProps` schema (`packages/spec/src/ui/i18n.zod.ts`). The supported attributes are intentionally minimal:
+`AriaProps` (`packages/spec/src/ui/i18n.zod.ts`) is the shared ARIA shape carried
+by the live UI schemas — views, pages, page components, charts and actions all
+declare an `aria:` block. The supported attributes are intentionally minimal:
 
 {/* os:check */}
 ```typescript
 interface AriaProps {
   ariaLabel?: string;       // Accessible label for screen readers
-  ariaDescribedBy?: string; // ID of an element that describes this widget
+  ariaDescribedBy?: string; // ID of an element that describes this element
   role?: string;            // WAI-ARIA role override
 }
 ```
@@ -345,15 +242,24 @@ aria:
   role: textbox
 ```
 
+`AriaPropsSchema` is `.strict()` (#4001), so a misspelled key is a parse failure
+carrying its own prescription rather than an accessible name that silently
+disappears. Note that a *widget* does not author this block — the shapes above do.
+What a widget contributes is the state on the control it renders
+(`aria-invalid`, `aria-required`), per [Who Renders What](#who-renders-what).
+
 ## Performance
 
-The widget manifest carries **no** performance block. Virtualization for large datasets is configured on the **view**, not on the widget: set the boolean `virtualScroll` on a list-shaped view (`ListViewSchema` in `packages/spec/src/ui/view.zod.ts`). That is the only virtual-scrolling switch objectui reads.
+There is **no** performance block anywhere in this contract. Virtualization for
+large datasets is configured on the **view**: set the boolean `virtualScroll` on a
+list-shaped view (`ListViewSchema` in `packages/spec/src/ui/view.zod.ts`). That is
+the only virtual-scrolling switch objectui reads.
 
-<Callout type="warn">
-  `widget.performance` was removed in `@objectstack/spec` 17.0.0 (#3896 audit
-  close-out) — it was authorable but no renderer or runtime ever read it. The key
-  is now refused at parse time, so a manifest that still carries it fails
-  validation: delete it and use the view's `virtualScroll` instead.
+<Callout type="info">
+  `widget.performance` was removed at the #3896 audit close-out and its tombstone
+  was subsumed by #5055 when the manifest that carried it was itself removed — so
+  there is no longer a key to reject, because there is no longer a shape to author
+  it into. Use the view's `virtualScroll`.
 </Callout>
 
 ## Theme

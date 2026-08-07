@@ -9,6 +9,10 @@ import {
 } from '../datasource-connection-service.js';
 import type { IDatasourceDriverFactory } from '../contracts/datasource-driver-factory.js';
 import type { DatasourceConnectPolicy } from '../contracts/connect-policy.js';
+import {
+  GENERIC_CONNECT_FAILURE_REMEDY,
+  isUnbuiltWorkspaceFailure,
+} from '../connect-failure-remedy.js';
 
 /** One `markDatasourceUnavailable` call, as the engine would receive it. */
 type UnavailableCall = { name: string; kind: 'blocked' | 'failed'; publicDetail?: string };
@@ -382,6 +386,274 @@ describe('DatasourceConnectionService.connect', () => {
       );
       expect(result.status).toBe('failed-degraded');
     });
+  });
+});
+
+// #5794: the fail-fast throw used to end on ONE sentence for every cause —
+// "Fix the datasource configuration, or set OS_ALLOW_DRIVER_CONNECT_FAILURE=1".
+// For a driver package whose `dist/` was never built, BOTH halves are harmful:
+// the configuration is already correct, and the flag boots a half-built
+// workspace that then fails every request. The one fix that works (`pnpm build`)
+// was never named. These pin the split — and pin that nothing else moved.
+describe('fail-fast remedy is chosen by CAUSE (#5794)', () => {
+  const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
+  let saved: string | undefined;
+  beforeEach(() => { saved = process.env[ENV]; delete process.env[ENV]; });
+  afterEach(() => {
+    if (saved === undefined) delete process.env[ENV];
+    else process.env[ENV] = saved;
+  });
+
+  /** A bound, managed datasource — the plainest route to a D5 fail-fast verdict. */
+  const analytics: ConnectableDatasource = {
+    name: 'analytics',
+    driver: 'sqlite',
+    schemaMode: 'managed',
+    config: {},
+  };
+
+  /**
+   * A factory whose `create()` throws exactly what the real one does when the
+   * driver package cannot be resolved. `create()` is the true failure site:
+   * every arm of `DefaultDatasourceDriverFactory.create()` reaches its driver
+   * through `await import('@objectstack/driver-…')`, so an unbuilt `dist/`
+   * rejects there, before any connection is attempted.
+   */
+  function factoryThrowing(err: unknown): IDatasourceDriverFactory {
+    return {
+      supports: () => true,
+      create: vi.fn(async () => {
+        throw err;
+      }),
+    };
+  }
+
+  /** Attach a Node error `code` without widening the declared Error type. */
+  function withCode(err: Error, code: string): Error {
+    (err as Error & { code?: string }).code = code;
+    return err;
+  }
+
+  /** Boot `analytics` with one bound object and return the thrown error. */
+  async function failFast(factory: IDatasourceDriverFactory): Promise<Error> {
+    const { service } = svc({ factory });
+    return service
+      .connect(analytics, { objects: ['visit'], context: { trigger: 'declared-auto' } })
+      .then(
+        () => { throw new Error('connect() resolved but should have thrown'); },
+        (e: unknown) => e as Error,
+      );
+  }
+
+  /** The two sentences that must never be said about an unbuilt workspace. */
+  function expectNoHarmfulAdvice(message: string): void {
+    expect(message).not.toContain('Fix the datasource configuration');
+    expect(message).not.toContain('OS_ALLOW_DRIVER_CONNECT_FAILURE');
+  }
+
+  describe('the unbuilt-workspace cause is recognised on BOTH criteria', () => {
+    // Criterion 1 — the STRUCTURED signal, which is what the classifier reads
+    // first. The message here says nothing a substring match could find, so
+    // only `err.code` can classify it.
+    it('by err.code alone: ERR_MODULE_NOT_FOUND with an unrecognisable message', async () => {
+      const err = await failFast(
+        factoryThrowing(withCode(new Error('the driver entry point is not on disk'), 'ERR_MODULE_NOT_FOUND')),
+      );
+      expect(err.message).toContain('pnpm install && pnpm build');
+      expectNoHarmfulAdvice(err.message);
+    });
+
+    it('by err.code alone: CJS require() reports MODULE_NOT_FOUND', async () => {
+      const err = await failFast(
+        factoryThrowing(withCode(new Error('the driver entry point is not on disk'), 'MODULE_NOT_FOUND')),
+      );
+      expect(err.message).toContain('pnpm install && pnpm build');
+      expectNoHarmfulAdvice(err.message);
+    });
+
+    // Criterion 2 — the MESSAGE text, with no `code` to read. Not a hypothetical
+    // fallback on this path: the factory's `sqlite-wasm` and `mongo` arms catch
+    // the import failure and re-throw a `new Error(...)` that interpolates the
+    // original message and drops its `code`.
+    it("by message alone: ESM's `Cannot find package`, no code", async () => {
+      const err = await failFast(
+        factoryThrowing(new Error("Cannot find package '@objectstack/driver-sql' imported from /w/factory.js")),
+      );
+      expect(err.message).toContain('pnpm install && pnpm build');
+      expectNoHarmfulAdvice(err.message);
+    });
+
+    it('by message alone: the factory-wrapped optional-driver form, no code', async () => {
+      const err = await failFast(
+        factoryThrowing(
+          new Error(
+            'sqlite-wasm driver requested but @objectstack/driver-sqlite-wasm is not installed ' +
+            "(Cannot find module '/w/node_modules/@objectstack/driver-sqlite-wasm/dist/index.mjs').",
+          ),
+        ),
+      );
+      expect(err.message).toContain('pnpm install && pnpm build');
+      expectNoHarmfulAdvice(err.message);
+    });
+
+    // The measured shape from an actually-unbuilt worktree: both signals present.
+    it('the real unbuilt-worktree shape names the build fix and nothing else', async () => {
+      const err = await failFast(
+        factoryThrowing(
+          withCode(
+            new Error(
+              "Cannot find module '/w/node_modules/@objectstack/driver-sql/dist/index.mjs' " +
+              'imported from /w/packages/services/service-datasource/dist/index.js',
+            ),
+            'ERR_MODULE_NOT_FOUND',
+          ),
+        ),
+      );
+      expect(err.message).toContain('pnpm install && pnpm build');
+      expectNoHarmfulAdvice(err.message);
+      // ONE fix, stated once — the same discipline check:dev-prereqs pins.
+      expect(err.message.match(/pnpm build/g)).toHaveLength(1);
+    });
+  });
+
+  it('keeps everything ABOVE the remedy — only the closing sentence differs', async () => {
+    const err = await failFast(
+      factoryThrowing(withCode(new Error("Cannot find package '@objectstack/driver-sql'"), 'ERR_MODULE_NOT_FOUND')),
+    );
+    expect(err.message).toContain("datasource 'analytics'");
+    expect(err.message).toContain('connect failed');
+    expect(err.message).toContain("Cannot find package '@objectstack/driver-sql'"); // the underlying cause
+    expect(err.message).toContain('1 object(s) bind to it explicitly');
+    expect(err.message).toContain('visit');
+    expect(err.message).toContain('fail-fast per ADR-0062 D5');
+  });
+
+  describe('every OTHER cause keeps its message, verbatim', () => {
+    // The exact sentence this error has always ended on. Spelled out here as a
+    // literal rather than as `GENERIC_CONNECT_FAILURE_REMEDY` so that renaming
+    // or "improving" the constant cannot quietly rewrite the pin with itself.
+    const GENERIC =
+      'Fix the datasource configuration, or set OS_ALLOW_DRIVER_CONNECT_FAILURE=1 to boot anyway ' +
+      'and serve errors until it is reachable.';
+
+    it('the exported constant IS that sentence (no drift between pin and source)', () => {
+      expect(GENERIC_CONNECT_FAILURE_REMEDY).toBe(GENERIC);
+    });
+
+    it('a genuine connection refusal still ends on it, byte for byte', async () => {
+      const err = await failFast(factoryThrowing(new Error('connection refused')));
+      expect(err.message.endsWith(GENERIC)).toBe(true);
+      expect(err.message).not.toContain('pnpm build');
+    });
+
+    it('a driver the factory cannot build still ends on it (no thrown value to read)', async () => {
+      const { service } = svc({ factory: fakeFactory({ supports: () => false }) });
+      const err = await service
+        .connect(analytics, { objects: ['visit'], context: { trigger: 'declared-auto' } })
+        .then(() => undefined, (e: Error) => e);
+      expect(err!.message).toContain('no driver factory supports');
+      expect(err!.message.endsWith(GENERIC)).toBe(true);
+    });
+
+    it('an unresolvable credential still ends on it', async () => {
+      const { service } = svc({ secrets: { resolve: async () => undefined } });
+      const err = await service
+        .connect(
+          { ...analytics, external: { credentialsRef: 'sys_secret:abc' } },
+          { objects: ['visit'], context: { trigger: 'declared-auto' } },
+        )
+        .then(() => undefined, (e: Error) => e);
+      expect(err!.message.endsWith(GENERIC)).toBe(true);
+    });
+  });
+
+  // "Diagnostic classification, zero behaviour change" is the whole claim of
+  // #5794 — so the things that did NOT move are pinned next to the thing that did.
+  describe('zero behaviour change', () => {
+    const unbuilt = () =>
+      factoryThrowing(withCode(new Error("Cannot find package '@objectstack/driver-sql'"), 'ERR_MODULE_NOT_FOUND'));
+
+    it('still fails fast, and still with a plain Error — not a new type', async () => {
+      const err = await failFast(unbuilt());
+      expect(err).toBeInstanceOf(Error);
+      expect(err.name).toBe('Error');
+    });
+
+    it('still degrades (no throw) when nothing binds to the datasource', async () => {
+      const { service } = svc({ factory: unbuilt() });
+      const result = await service.connect(
+        { ...analytics, autoConnect: true },
+        { context: { trigger: 'declared-auto' } },
+      );
+      expect(result.status).toBe('failed-degraded');
+    });
+
+    it('still degrades for a runtime-admin connect, never bricking a running server', async () => {
+      const { service } = svc({ factory: unbuilt() });
+      const result = await service.connect(analytics, {
+        objects: ['visit'],
+        context: { trigger: 'runtime-admin' },
+      });
+      expect(result.status).toBe('failed-degraded');
+    });
+
+    it('still boots degraded under the escape hatch, with the banner unchanged', async () => {
+      process.env[ENV] = '1';
+      const { service, warnings } = svc({ factory: unbuilt() });
+      const result = await service.connect(analytics, {
+        objects: ['visit'],
+        context: { trigger: 'declared-auto' },
+      });
+      expect(result.status).toBe('failed-degraded');
+      const warned = warnings.join('\n');
+      expect(warned).toContain('DEGRADED BOOT');
+      expect(warned).toContain('OS_ALLOW_DRIVER_CONNECT_FAILURE is set');
+    });
+
+    it('still retains the verdict for the admin surface', async () => {
+      const { service, engine } = svc({ factory: unbuilt() });
+      await service
+        .connect(analytics, { objects: ['visit'], context: { trigger: 'declared-auto' } })
+        .catch(() => undefined);
+      const state = service.getConnectionState('analytics');
+      expect(state?.status).toBe('failed-degraded');
+      expect(state?.availability).toBe('failed');
+      expect(engine!.unavailable.get('analytics')?.kind).toBe('failed');
+    });
+  });
+});
+
+// The classifier on its own, at the boundary it is responsible for.
+describe('isUnbuiltWorkspaceFailure (#5794)', () => {
+  it('reads the structured code first, in both module systems', () => {
+    const esm = Object.assign(new Error('nothing recognisable here'), { code: 'ERR_MODULE_NOT_FOUND' });
+    const cjs = Object.assign(new Error('nothing recognisable here'), { code: 'MODULE_NOT_FOUND' });
+    expect(isUnbuiltWorkspaceFailure(esm)).toBe(true);
+    expect(isUnbuiltWorkspaceFailure(cjs)).toBe(true);
+  });
+
+  it('falls back to the message when the code was dropped by a re-throw', () => {
+    expect(isUnbuiltWorkspaceFailure(new Error("Cannot find package '@objectstack/driver-sql'"))).toBe(true);
+    expect(isUnbuiltWorkspaceFailure(new Error("Cannot find module '/w/dist/index.mjs'"))).toBe(true);
+  });
+
+  it('leaves a real connect failure alone', () => {
+    expect(isUnbuiltWorkspaceFailure(new Error('connection refused'))).toBe(false);
+    expect(
+      isUnbuiltWorkspaceFailure(Object.assign(new Error('password authentication failed'), { code: '28P01' })),
+    ).toBe(false);
+  });
+
+  it('leaves a native-addon ABI mismatch alone — a rebuild, not an unbuilt workspace', () => {
+    const abi = Object.assign(
+      new Error('better_sqlite3.node was compiled against a different Node.js version'),
+      { code: 'ERR_DLOPEN_FAILED' },
+    );
+    expect(isUnbuiltWorkspaceFailure(abi)).toBe(false);
+  });
+
+  it('classifies nothing when there was no thrown value to read', () => {
+    expect(isUnbuiltWorkspaceFailure(undefined)).toBe(false);
   });
 });
 

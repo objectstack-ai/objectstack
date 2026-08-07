@@ -29,7 +29,7 @@ export const BackupStrategySchema = lazySchema(() => z.enum([
   'differential',
 ]).describe('Backup strategy type'));
 
-export type BackupStrategy = z.infer<typeof BackupStrategySchema>;
+export type BackupStrategy = z.input<typeof BackupStrategySchema>;
 
 /**
  * Backup Retention Policy Schema
@@ -43,7 +43,7 @@ export const BackupRetentionSchema = lazySchema(() => z.object({
   maxCopies: z.number().optional().describe('Maximum backup copies to store'),
 }).describe('Backup retention policy'));
 
-export type BackupRetention = z.infer<typeof BackupRetentionSchema>;
+export type BackupRetention = z.input<typeof BackupRetentionSchema>;
 /** Post-parse shape of {@link BackupRetention} — defaults applied, transforms run (ADR-0122). */
 export type BackupRetentionParsed = z.infer<typeof BackupRetentionSchema>;
 
@@ -80,10 +80,9 @@ export const BackupConfigSchema = lazySchema(() => z.object({
   verifyAfterBackup: z.boolean().default(true).describe('Verify backup integrity after creation'),
 }).describe('Backup configuration'));
 
-export type BackupConfig = z.infer<typeof BackupConfigSchema>;
+export type BackupConfig = z.input<typeof BackupConfigSchema>;
 /** Post-parse shape of {@link BackupConfig} — defaults applied, transforms run (ADR-0122). */
 export type BackupConfigParsed = z.infer<typeof BackupConfigSchema>;
-export type BackupConfigInput = z.input<typeof BackupConfigSchema>;
 
 /**
  * Failover Mode Schema
@@ -102,7 +101,7 @@ export const FailoverModeSchema = lazySchema(() => z.enum([
   'warm_standby',
 ]).describe('Failover mode'));
 
-export type FailoverMode = z.infer<typeof FailoverModeSchema>;
+export type FailoverMode = z.input<typeof FailoverModeSchema>;
 
 /**
  * Failover Configuration Schema
@@ -131,10 +130,9 @@ export const FailoverConfigSchema = lazySchema(() => z.object({
   }).optional().describe('DNS failover settings'),
 }).describe('Failover configuration'));
 
-export type FailoverConfig = z.infer<typeof FailoverConfigSchema>;
+export type FailoverConfig = z.input<typeof FailoverConfigSchema>;
 /** Post-parse shape of {@link FailoverConfig} — defaults applied, transforms run (ADR-0122). */
 export type FailoverConfigParsed = z.infer<typeof FailoverConfigSchema>;
-export type FailoverConfigInput = z.input<typeof FailoverConfigSchema>;
 
 /**
  * Recovery Point Objective (RPO) Schema
@@ -148,7 +146,7 @@ export const RPOSchema = lazySchema(() => z.object({
   unit: z.enum(['seconds', 'minutes', 'hours']).default('minutes').describe('RPO time unit'),
 }).describe('Recovery Point Objective (maximum acceptable data loss)'));
 
-export type RPO = z.infer<typeof RPOSchema>;
+export type RPO = z.input<typeof RPOSchema>;
 /** Post-parse shape of {@link RPO} — defaults applied, transforms run (ADR-0122). */
 export type RPOParsed = z.infer<typeof RPOSchema>;
 
@@ -164,7 +162,7 @@ export const RTOSchema = lazySchema(() => z.object({
   unit: z.enum(['seconds', 'minutes', 'hours']).default('minutes').describe('RTO time unit'),
 }).describe('Recovery Time Objective (maximum acceptable downtime)'));
 
-export type RTO = z.infer<typeof RTOSchema>;
+export type RTO = z.input<typeof RTOSchema>;
 /** Post-parse shape of {@link RTO} — defaults applied, transforms run (ADR-0122). */
 export type RTOParsed = z.infer<typeof RTOSchema>;
 
@@ -254,7 +252,6 @@ export const DisasterRecoveryPlanSchema = lazySchema(() => z.object({
   })).optional().describe('Emergency contact list for DR incidents'),
 }).describe('Complete disaster recovery plan configuration'));
 
-export type DisasterRecoveryPlan = z.infer<typeof DisasterRecoveryPlanSchema>;
+export type DisasterRecoveryPlan = z.input<typeof DisasterRecoveryPlanSchema>;
 /** Post-parse shape of {@link DisasterRecoveryPlan} — defaults applied, transforms run (ADR-0122). */
 export type DisasterRecoveryPlanParsed = z.infer<typeof DisasterRecoveryPlanSchema>;
-export type DisasterRecoveryPlanInput = z.input<typeof DisasterRecoveryPlanSchema>;

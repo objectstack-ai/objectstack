@@ -114,7 +114,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
     return this.execute({
       isExpression: false,
       source: body.source,
-      capabilities: body.capabilities,
+      // `ScriptBody` is the AUTHOR state since ADR-0122 and `capabilities` carries
+      // `.default([])`, so the runner states that default rather than passing
+      // `undefined` into a Set constructor typed for an array.
+      capabilities: body.capabilities ?? [],
       timeoutMs: this.resolveTimeout(opts, body.timeoutMs),
       memoryMb: body.memoryMb ?? this.opts.memoryMb,
       ctx,

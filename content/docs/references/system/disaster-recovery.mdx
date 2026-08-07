@@ -10,27 +10,17 @@ Backup Strategy Schema
 Defines backup methods for disaster recovery.
 
 - **full**: Complete snapshot of all data
-
 - **incremental**: Only changes since last backup
-
 - **differential**: All changes since last full backup
 
 @example
-
 ```typescript
-
-const backup: BackupConfig = \{
-
-strategy: 'incremental',
-
-schedule: '0 2 * * *',
-
-retention: \{ days: 30, minCopies: 3 \},
-
-encryption: \{ enabled: true, algorithm: 'AES-256-GCM' \},
-
-\};
-
+const backup: BackupConfig = {
+  strategy: 'incremental',
+  schedule: '0 2 * * *',
+  retention: { days: 30, minCopies: 3 },
+  encryption: { enabled: true, algorithm: 'AES-256-GCM' },
+};
 ```
 
 <Callout type="info">

@@ -15,7 +15,7 @@ export const SearchProviderSchema = lazySchema(() => z.enum([
   'opensearch',
 ]).describe('Supported full-text search engine provider'));
 
-export type SearchProvider = z.infer<typeof SearchProviderSchema>;
+export type SearchProvider = z.input<typeof SearchProviderSchema>;
 
 export const AnalyzerConfigSchema = lazySchema(() => z.object({
   type: z.enum(['standard', 'simple', 'whitespace', 'keyword', 'pattern', 'language']).describe('Text analyzer type'),
@@ -24,7 +24,7 @@ export const AnalyzerConfigSchema = lazySchema(() => z.object({
   customFilters: z.array(z.string()).optional().describe('Additional token filter names to apply'),
 }).describe('Text analyzer configuration for index tokenization and normalization'));
 
-export type AnalyzerConfig = z.infer<typeof AnalyzerConfigSchema>;
+export type AnalyzerConfig = z.input<typeof AnalyzerConfigSchema>;
 
 export const SearchIndexConfigSchema = lazySchema(() => z.object({
   indexName: z.string().describe('Name of the search index'),
@@ -42,7 +42,7 @@ export const SearchIndexConfigSchema = lazySchema(() => z.object({
   shards: z.number().default(1).describe('Number of index shards for distribution'),
 }).describe('Search index definition mapping an ObjectQL object to a search engine index'));
 
-export type SearchIndexConfig = z.infer<typeof SearchIndexConfigSchema>;
+export type SearchIndexConfig = z.input<typeof SearchIndexConfigSchema>;
 /** Post-parse shape of {@link SearchIndexConfig} — defaults applied, transforms run (ADR-0122). */
 export type SearchIndexConfigParsed = z.infer<typeof SearchIndexConfigSchema>;
 
@@ -52,7 +52,7 @@ export const FacetConfigSchema = lazySchema(() => z.object({
   sort: z.enum(['count', 'alpha']).default('count').describe('Facet value sort order'),
 }).describe('Faceted search configuration for a single field'));
 
-export type FacetConfig = z.infer<typeof FacetConfigSchema>;
+export type FacetConfig = z.input<typeof FacetConfigSchema>;
 /** Post-parse shape of {@link FacetConfig} — defaults applied, transforms run (ADR-0122). */
 export type FacetConfigParsed = z.infer<typeof FacetConfigSchema>;
 
@@ -66,6 +66,6 @@ export const SearchConfigSchema = lazySchema(() => z.object({
   ranking: z.array(z.enum(['typo', 'geo', 'words', 'filters', 'proximity', 'attribute', 'exact', 'custom'])).optional().describe('Custom ranking rule order'),
 }).describe('Top-level full-text search engine configuration'));
 
-export type SearchConfig = z.infer<typeof SearchConfigSchema>;
+export type SearchConfig = z.input<typeof SearchConfigSchema>;
 /** Post-parse shape of {@link SearchConfig} — defaults applied, transforms run (ADR-0122). */
 export type SearchConfigParsed = z.infer<typeof SearchConfigSchema>;

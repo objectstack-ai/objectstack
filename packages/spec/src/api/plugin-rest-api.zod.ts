@@ -91,7 +91,7 @@ export const RestApiRouteCategory = z.enum([
   'i18n',         // Internationalization
 ]);
 
-export type RestApiRouteCategory = z.infer<typeof RestApiRouteCategory>;
+export type RestApiRouteCategory = z.input<typeof RestApiRouteCategory>;
 
 // ==========================================
 // Route Registration Schema
@@ -107,7 +107,7 @@ export type RestApiRouteCategory = z.infer<typeof RestApiRouteCategory>;
  * - `planned`     – Declared in the protocol spec but not yet implemented.
  */
 export const HandlerStatusSchema = lazySchema(() => z.enum(['implemented', 'stub', 'planned']));
-export type HandlerStatus = z.infer<typeof HandlerStatusSchema>;
+export type HandlerStatus = z.input<typeof HandlerStatusSchema>;
 
 /**
  * REST API Endpoint Schema
@@ -188,7 +188,7 @@ export const RestApiEndpointSchema = lazySchema(() => z.object({
     .describe('Handler implementation status: implemented (default if omitted), stub, or planned'),
 }));
 
-export type RestApiEndpoint = z.infer<typeof RestApiEndpointSchema>;
+export type RestApiEndpoint = z.input<typeof RestApiEndpointSchema>;
 /** Post-parse shape of {@link RestApiEndpoint} — defaults applied, transforms run (ADR-0122). */
 export type RestApiEndpointParsed = z.infer<typeof RestApiEndpointSchema>;
 
@@ -261,7 +261,7 @@ export const RestApiRouteRegistrationSchema = z.object({
   }).optional().describe('Documentation metadata for this route group'),
 });
 
-export type RestApiRouteRegistration = z.infer<typeof RestApiRouteRegistrationSchema>;
+export type RestApiRouteRegistration = z.input<typeof RestApiRouteRegistrationSchema>;
 /** Post-parse shape of {@link RestApiRouteRegistration} — defaults applied, transforms run (ADR-0122). */
 export type RestApiRouteRegistrationParsed = z.infer<typeof RestApiRouteRegistrationSchema>;
 
@@ -279,7 +279,7 @@ export const ValidationMode = z.enum([
   'strip',      // Remove invalid fields and continue with valid data
 ]);
 
-export type ValidationMode = z.infer<typeof ValidationMode>;
+export type ValidationMode = z.input<typeof ValidationMode>;
 
 /**
  * Request Validation Configuration Schema
@@ -342,10 +342,9 @@ export const RequestValidationConfigSchema = z.object({
   schemaRegistry: z.string().optional().describe('Schema registry name to use for validation'),
 });
 
-export type RequestValidationConfig = z.infer<typeof RequestValidationConfigSchema>;
+export type RequestValidationConfig = z.input<typeof RequestValidationConfigSchema>;
 /** Post-parse shape of {@link RequestValidationConfig} — defaults applied, transforms run (ADR-0122). */
 export type RequestValidationConfigParsed = z.infer<typeof RequestValidationConfigSchema>;
-export type RequestValidationConfigInput = z.input<typeof RequestValidationConfigSchema>;
 
 // ==========================================
 // Response Envelope Configuration
@@ -406,10 +405,9 @@ export const ResponseEnvelopeConfigSchema = z.object({
   skipIfWrapped: z.boolean().default(true).describe('Skip wrapping if response already has success field'),
 });
 
-export type ResponseEnvelopeConfig = z.infer<typeof ResponseEnvelopeConfigSchema>;
+export type ResponseEnvelopeConfig = z.input<typeof ResponseEnvelopeConfigSchema>;
 /** Post-parse shape of {@link ResponseEnvelopeConfig} — defaults applied, transforms run (ADR-0122). */
 export type ResponseEnvelopeConfigParsed = z.infer<typeof ResponseEnvelopeConfigSchema>;
-export type ResponseEnvelopeConfigInput = z.input<typeof ResponseEnvelopeConfigSchema>;
 
 // ==========================================
 // Error Handling Configuration
@@ -483,10 +481,9 @@ export const ErrorHandlingConfigSchema = z.object({
   redactFields: z.array(z.string()).optional().describe('Field names to redact from error details'),
 });
 
-export type ErrorHandlingConfig = z.infer<typeof ErrorHandlingConfigSchema>;
+export type ErrorHandlingConfig = z.input<typeof ErrorHandlingConfigSchema>;
 /** Post-parse shape of {@link ErrorHandlingConfig} — defaults applied, transforms run (ADR-0122). */
 export type ErrorHandlingConfigParsed = z.infer<typeof ErrorHandlingConfigSchema>;
-export type ErrorHandlingConfigInput = z.input<typeof ErrorHandlingConfigSchema>;
 
 // ==========================================
 // OpenAPI Documentation Configuration
@@ -601,10 +598,9 @@ export const OpenApiGenerationConfigSchema = z.object({
   })).optional().describe('Security scheme definitions'),
 });
 
-export type OpenApiGenerationConfig = z.infer<typeof OpenApiGenerationConfigSchema>;
+export type OpenApiGenerationConfig = z.input<typeof OpenApiGenerationConfigSchema>;
 /** Post-parse shape of {@link OpenApiGenerationConfig} — defaults applied, transforms run (ADR-0122). */
 export type OpenApiGenerationConfigParsed = z.infer<typeof OpenApiGenerationConfigSchema>;
-export type OpenApiGenerationConfigInput = z.input<typeof OpenApiGenerationConfigSchema>;
 
 // ==========================================
 // REST API Plugin Configuration
@@ -693,10 +689,9 @@ export const RestApiPluginConfigSchema = z.object({
   }).optional().describe('Performance optimization settings'),
 });
 
-export type RestApiPluginConfig = z.infer<typeof RestApiPluginConfigSchema>;
+export type RestApiPluginConfig = z.input<typeof RestApiPluginConfigSchema>;
 /** Post-parse shape of {@link RestApiPluginConfig} — defaults applied, transforms run (ADR-0122). */
 export type RestApiPluginConfigParsed = z.infer<typeof RestApiPluginConfigSchema>;
-export type RestApiPluginConfigInput = z.input<typeof RestApiPluginConfigSchema>;
 
 // ==========================================
 // Default Route Registrations
@@ -1378,7 +1373,7 @@ export const RouteCoverageEntrySchema = z.object({
   healthCheckPassed: z.boolean().optional().describe('Whether the health check probe succeeded'),
 });
 
-export type RouteCoverageEntry = z.infer<typeof RouteCoverageEntrySchema>;
+export type RouteCoverageEntry = z.input<typeof RouteCoverageEntrySchema>;
 
 /**
  * Route Coverage Report Schema
@@ -1406,4 +1401,4 @@ export const RouteCoverageReportSchema = z.object({
   entries: z.array(RouteCoverageEntrySchema).describe('Per-endpoint coverage entries'),
 });
 
-export type RouteCoverageReport = z.infer<typeof RouteCoverageReportSchema>;
+export type RouteCoverageReport = z.input<typeof RouteCoverageReportSchema>;

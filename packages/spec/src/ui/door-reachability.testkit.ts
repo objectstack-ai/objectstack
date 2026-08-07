@@ -54,7 +54,9 @@
  *    leaves scores 1.0 however few they are, and still bridges. No threshold in
  *    (0, 1] excludes it, because a genuine `.strip()` scores 1.0 too. It costs
  *    nothing today (the real `no door` shapes measured so far sit far below the
- *    threshold — `WidgetManifestSchema` at 2/19), but read `cloneOverlap` and
+ *    threshold — `WidgetManifestSchema` at 2/19, until #5055 retired it under
+ *    ADR-0049; the ratio survives as a reconstructed fixture in the test), but
+ *    read `cloneOverlap` and
  *    the key count before trusting a `derived-clone` verdict on a SMALL shape.
  */
 
@@ -118,7 +120,8 @@ export interface DoorMeasurement {
  * `ObjectListViewSchema.strip()` at 1.0 — both pinned as the bridge's positive
  * control), and 批 16's false positive sits far below (`WidgetManifestSchema`,
  * 2 shared keys of 19 — `name` and `label`, both shared LEAVES rather than
- * shared structure, measured 0.105).
+ * shared structure, measured 0.105; the schema itself was retired by #5055 and
+ * the test rebuilds the same 2-of-19 shape to keep the number pinned).
  *
  * Note the chart family this bridge was originally written for measures
  * `direct`, not `derived-clone`: `ChartConfigSchema` is in the graph outright.

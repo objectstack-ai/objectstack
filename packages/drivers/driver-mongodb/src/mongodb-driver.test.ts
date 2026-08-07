@@ -315,7 +315,7 @@ describe.skipIf(!sharedMongod)('MongoDBDriver', () => {
     it('should count all records', async () => {
       const results = await driver.aggregate('order', {
         aggregations: [{ function: 'count', alias: 'total' }],
-      } as any);
+      });
       expect(results[0].total).toBe(4);
     });
 
@@ -323,7 +323,7 @@ describe.skipIf(!sharedMongod)('MongoDBDriver', () => {
       const results = await driver.aggregate('order', {
         aggregations: [{ function: 'sum', field: 'amount', alias: 'total_amount' }],
         groupBy: ['region'],
-      } as any);
+      });
 
       expect(results.length).toBe(2);
       const us = results.find((r) => r.region === 'US');

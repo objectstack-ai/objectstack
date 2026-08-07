@@ -4519,6 +4519,276 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
   },
 };
 
+/**
+ * The SDUI component-props reconciliation (protocol 17, #5775) — three entries
+ * below, one shared reason.
+ *
+ * #5068 wired the first parse `ComponentPropsMap` ever had and measured what
+ * the corpus actually authors against it. The measurement came back with
+ * divergence in BOTH directions: keys objectui's renderers honour that the
+ * schema never declared, and keys the schema declared (one of them REQUIRED)
+ * that no renderer has ever read. The maintainer's 2026-08-06 ruling took
+ * direction A — the #5611 rule, "the delivered and authorized shape is the
+ * contract" — so the honoured keys were declared and the unread ones retire
+ * here.
+ *
+ * **Region level is the reach, deliberately.** {@link mapPageComponents} walks
+ * `pages[].regions[].components[]` and stops: `PageComponentSchema` declares no
+ * children key, so a picker nested inside a card's `children` sits in another
+ * component's free-form `properties` and is not typed page-component shape.
+ * Same boundary as {@link pageHeaderSubtitleAlias}, drawn for the same reason.
+ * The tombstones are what cover the rest: they type the key `never`, so a
+ * nested authoring site fails `tsc` and carries its own prescription at parse
+ * time whether or not a conversion could reach it.
+ *
+ * All three are **retired from the load path**: each key is tombstoned in
+ * `ui/component.zod.ts`, so the loader rejects it loudly with the prescription
+ * and only `os migrate meta` rewrites sources.
+ */
+const RECORD_PICKER_COMPONENT_TYPE = 'element:record_picker';
+
+/**
+ * `element:record_picker.displayField` → `labelField` (protocol 17, #5775).
+ *
+ * Two spellings of one concept — "which field is the row's text" — of which the
+ * schema required the one nobody reads. `record-picker.tsx` resolves
+ * `props.labelField ?? 'name'` and renders `row[labelField]`; `displayField`
+ * appears nowhere in that renderer, and objectui's own component registry
+ * publishes `labelField` as the designer input. So an author who followed the
+ * schema and wrote `displayField: 'title'` got a picker listing `name`, with a
+ * success receipt and no diagnostic anywhere — the ADR-0078 shape.
+ *
+ * A rename rather than a deletion because the two keys are synonyms: the value
+ * (a field name) is exactly what `labelField` wants. Precedence is
+ * {@link renameKey}'s house rule (#4923) and nothing new — a redundant twin is
+ * dropped, a DISAGREEING pair is left for the author to reconcile rather than
+ * the loader picking a field.
+ */
+const recordPickerDisplayFieldToLabelField: MetadataConversion = {
+  id: 'record-picker-display-field-to-label-field',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'page.component.element:record_picker.displayField',
+  summary:
+    "record-picker component prop 'displayField' → 'labelField' (#5775 — the required key no renderer read; `labelField ?? 'name'` is what renders the row)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== RECORD_PICKER_COMPONENT_TYPE) return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const renamed = renameKey(properties, 'displayField', 'labelField');
+      if (!renamed) return component;
+      emit({ from: 'displayField', to: 'labelField', path: `${path}.properties.labelField` });
+      return { ...component, properties: renamed };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'showcase_page_variables',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:record_picker', properties: { object: 'showcase_project', displayField: 'title' } },
+                // Both spellings, SAME value: the redundant twin goes (#4923).
+                { type: 'element:record_picker', properties: { object: 'a', labelField: 'name', displayField: 'name' } },
+                // Both spellings, DIFFERENT fields: kept, so the author reconciles
+                // the two rather than the loader picking a column.
+                { type: 'element:record_picker', properties: { object: 'b', labelField: 'name', displayField: 'title' } },
+                // `displayField` is a live LOOKUP-FIELD key elsewhere on the
+                // surface — a different component's business, untouched here.
+                { type: 'element:form', properties: { object: 'c', displayField: 'title' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'showcase_page_variables',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:record_picker', properties: { object: 'showcase_project', labelField: 'title' } },
+                { type: 'element:record_picker', properties: { object: 'a', labelField: 'name' } },
+                { type: 'element:record_picker', properties: { object: 'b', labelField: 'name', displayField: 'title' } },
+                { type: 'element:form', properties: { object: 'c', displayField: 'title' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * `element:record_picker.searchFields` / `.multiple` — declared capabilities the
+ * control does not have (protocol 17, #5775, ADR-0049).
+ *
+ * The renderer is a shadcn `Select` over a `find()` result: no search input
+ * exists, so `searchFields` narrowed nothing, and the control is single-choice
+ * writing ONE id into the bound page variable, so `multiple: true` selected
+ * nothing extra while reporting success. Neither key has a reader anywhere in
+ * objectui. Enforce-or-remove: they are removed, not deprecated, and either
+ * returns the day the capability is implemented (#5021 / #4988 precedent).
+ *
+ * Pure lossless deletes — neither key ever had an effect to lose.
+ */
+const recordPickerInertKeysRemoved: MetadataConversion = {
+  id: 'record-picker-inert-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'page.component.element:record_picker.searchFields / page.component.element:record_picker.multiple',
+  summary:
+    "record-picker component props 'searchFields'/'multiple' removed (#5775 — the control is a plain single-select with no search box; neither key had a reader)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== RECORD_PICKER_COMPONENT_TYPE) return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const stripped = stripKeys(properties, ['searchFields', 'multiple'], emit, `${path}.properties`);
+      if (stripped === properties) return component;
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'picker_gallery',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'element:record_picker',
+                  properties: { object: 'showcase_project', searchFields: ['name', 'code'], multiple: true },
+                },
+                // `multiple` is a live FIELD key (lookup fields) — a different
+                // surface entirely, and not this entry's business.
+                { type: 'element:form', properties: { object: 'a', multiple: true } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'picker_gallery',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:record_picker', properties: { object: 'showcase_project' } },
+                { type: 'element:form', properties: { object: 'a', multiple: true } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * `page:card.body` → `children` (protocol 17, #5775).
+ *
+ * Every container on this surface composes through `children` — `grid`,
+ * `flex`, `page:section`, `page:accordion` items, `page:tabs` items — and the
+ * card renderer reads `schema.body ?? schema.children` with its own comment
+ * saying authors expect `children` to work here too. The showcase's two cards
+ * author `children`. Only the declaration said `body`, which made the #5068
+ * gate report the showcase's own correct pages as authoring an unknown key.
+ *
+ * Converging on `children` rather than declaring both: one composition key, not
+ * two de-facto contracts (Prime Directive #12). `footer` is a genuinely
+ * distinct slot and is untouched. The renderer keeps its `body ??` fallback for
+ * stored documents — that is objectui's to retire on its own schedule, exactly
+ * as {@link pageHeaderSubtitleAlias} left the kebab `page-header` registration
+ * alone.
+ */
+const pageCardBodyToChildren: MetadataConversion = {
+  id: 'page-card-body-to-children',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'page.component.page:card.body',
+  summary:
+    "page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'page:card') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const renamed = renameKey(properties, 'body', 'children');
+      if (!renamed) return component;
+      emit({ from: 'body', to: 'children', path: `${path}.properties.children` });
+      return { ...component, properties: renamed };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'my_work',
+          regions: [
+            {
+              name: 'sidebar',
+              components: [
+                {
+                  type: 'page:card',
+                  properties: { title: 'Shortcuts', body: [{ type: 'element:text' }], footer: [{ type: 'element:text' }] },
+                },
+                // Both spellings, DIFFERENT content: kept, so the author picks
+                // which body the card should have.
+                {
+                  type: 'page:card',
+                  properties: { children: [{ type: 'element:text' }], body: [{ type: 'element:image' }] },
+                },
+                // `body` on a component that is not a card — not this entry's key.
+                { type: 'record:alert', properties: { body: 'Confirm the work before marking it done.' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'my_work',
+          regions: [
+            {
+              name: 'sidebar',
+              components: [
+                {
+                  type: 'page:card',
+                  properties: { title: 'Shortcuts', children: [{ type: 'element:text' }], footer: [{ type: 'element:text' }] },
+                },
+                {
+                  type: 'page:card',
+                  properties: { children: [{ type: 'element:text' }], body: [{ type: 'element:image' }] },
+                },
+                { type: 'record:alert', properties: { body: 'Confirm the work before marking it done.' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -4572,6 +4842,9 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     themeInertTokenScalesRemoved,
     pageHeaderSubtitleAlias,
     objectIndexTypePartialRemoved,
+    recordPickerDisplayFieldToLabelField,
+    recordPickerInertKeysRemoved,
+    pageCardBodyToChildren,
   ],
 };
 

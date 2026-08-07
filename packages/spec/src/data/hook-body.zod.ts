@@ -58,7 +58,7 @@ export const HookBodyCapability = z.enum([
   // lists the legal tokens. (The `managedBy: 'system'` precedent, object.zod.ts.)
   error: (issue) => (issue.input === 'crypto.hash' ? CRYPTO_HASH_RETIRED : undefined),
 });
-export type HookBodyCapability = z.infer<typeof HookBodyCapability>;
+export type HookBodyCapability = z.input<typeof HookBodyCapability>;
 
 /*
  * ── Unknown-key strictness (#4001 data step) ────────────────────────────────
@@ -144,7 +144,7 @@ export const ExpressionBodySchema = z.object({
   /** Formula-engine expression. Pure, side-effect-free. */
   source: z.string().min(1).describe('Formula expression source'),
 }, { error: expressionBodyUnknownKeyError }).strict().describe('L1 expression body — pure formula, no IO');
-export type ExpressionBody = z.infer<typeof ExpressionBodySchema>;
+export type ExpressionBody = z.input<typeof ExpressionBodySchema>;
 
 /**
  * L2 — Sandboxed JavaScript source.
@@ -222,7 +222,7 @@ export const ScriptBodySchema = z.object({
    */
   memoryMb: z.number().int().positive().max(256).optional().describe('Per-invocation memory cap (MB)'),
 }, { error: scriptBodyUnknownKeyError }).strict().describe('L2 sandboxed JS body — runs inside an isolated VM with declared capabilities');
-export type ScriptBody = z.infer<typeof ScriptBodySchema>;
+export type ScriptBody = z.input<typeof ScriptBodySchema>;
 /** Post-parse shape of {@link ScriptBody} — defaults applied, transforms run (ADR-0122). */
 export type ScriptBodyParsed = z.infer<typeof ScriptBodySchema>;
 
@@ -243,6 +243,6 @@ export const HookBodySchema = z.discriminatedUnion('language', [
   ExpressionBodySchema,
   ScriptBodySchema,
 ]).describe('Hook/Action body — expression (L1) or sandboxed JS (L2)');
-export type HookBody = z.infer<typeof HookBodySchema>;
+export type HookBody = z.input<typeof HookBodySchema>;
 /** Post-parse shape of {@link HookBody} — defaults applied, transforms run (ADR-0122). */
 export type HookBodyParsed = z.infer<typeof HookBodySchema>;

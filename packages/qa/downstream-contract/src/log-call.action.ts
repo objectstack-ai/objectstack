@@ -4,9 +4,9 @@
 // party on an older spec did (#2035). No author-time `.parse()` runs here; only
 // the contract test's schema parse validates it. DO NOT migrate this to the
 // factory — that would hide the backward-compat break this file exists to catch.
-import type { ActionInput } from '@objectstack/spec/ui';
+import type { Action } from '@objectstack/spec/ui';
 
-export const LogCallAction: ActionInput = {
+export const LogCallAction: Action = {
   name: 'dc_log_call',
   label: 'Log Call',
   objectName: 'dc_account',

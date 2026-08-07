@@ -93,6 +93,8 @@ This repo ships **backend only**. All Studio/Console UI work happens in `../obje
 
 Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. ⚠️ Never hand-edit `packages/console/dist/` or `.cache/objectui-*/` — regenerated.
 
+**Moving the pin has a second half: `pnpm sdui:manifest`.** ADR-0082 D4's spec↔registry declaration-parity ratchet reads objectui's `sdui.manifest.json`, which changes only when `.objectui-sha` moves — so the pin bump is the ratchet's trigger, and its only one. It is an **on-demand gate by decision** (#5960), never a CI job; `objectui:bump` and `objectui:refresh` both print the reminder. Needs Playwright chromium. Full procedure: `docs/releases-maintenance.md` → "After the pin moves".
+
 **Fast iteration on `../objectui` src (no commit/refresh loop):** run objectui's own console dev server — `cd ../objectui && pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets `DEV_PROXY_TARGET || http://localhost:3000`, so **run the backend you're testing on :3000** (`PORT=3000 pnpm dev` for showcase) and browse `:5180`. Note `:3001/_console` (or whatever the backend serves) is the **published** console, not your `../objectui` src — only `:5180` reflects local UI edits. See `../objectui/AGENTS.md` for the app-id / localStorage / auth gotchas.
 
 ---
@@ -555,9 +557,16 @@ unavailable` and **exited 0**, so no path existed on which this gate could go re
 **exits 1** when it has no usable manifest, because "could not run" is a failure, not a
 skip (Route & surface ownership §3, *Absence must be loud*). Run it the one way that
 works: `pnpm sdui:manifest` (or `OBJECTUI_ROOT=../objectui pnpm objectui:build` first),
-which dumps the manifest and runs the ratchet against it. Where the manifest *should* come
-from in CI is an open provenance question, tracked separately — do not "fix" the red by
-re-adding a skip.
+which dumps the manifest and runs the ratchet against it. Where the manifest comes from is
+**settled** (#5960, maintainer ruling 2026-08-07): **not from CI**. It is an on-demand
+gate whose trigger is the **objectui pin bump** — `.objectui-sha` is the only thing that
+moves the manifest, so `scripts/bump-objectui.sh` and `scripts/build-console.sh` print the
+`pnpm sdui:manifest` step and `docs/releases-maintenance.md` carries the procedure.
+Producing it here was rejected outright: the sole producer drives Playwright chromium over
+objectui's built console, so a CI-side dump means a full objectui build plus a browser
+download on every matching PR. So: do not "fix" the red by re-adding a skip, and do not
+"fix" it by wiring the gate into a workflow either — run it where it belongs, at the pin
+bump.
 
 `check:exported-any` is the one of those that also reads the built `dist/*.d.ts`, so the
 stale-`dist` caveat above applies to it too. It asks the other half of the
@@ -839,6 +848,14 @@ it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    isn't green yet). A finished task = a merged PR, not a dirty working tree.
 3. **Add a changeset for feature work.** When the change is a feature or functional improvement, run `pnpm changeset` (or add a `.changeset/*.md` entry) describing it before committing. Pure bug fixes do **not** require a changeset.
    **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix — this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the tombstone error. Removing an authorable spec key also requires a tombstone so the rejection itself carries the prescription — `retiredKey()` (`packages/spec/src/shared/retired-key.ts`) on a non-strict schema, or an entry in the relevant `UNKNOWN_KEY_GUIDANCE` / `*_RETIRED_KEY_GUIDANCE` map (see `object.zod.ts`, `ai/tool.zod.ts`) when the schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes imply **opposite** liveness-ledger dispositions.
+   **A breaking changeset must also state its ADR-0087 disposition, in writing.** Add exactly one marker to the changeset body — `pnpm check:adr-0087-registration` enforces it, and the CI step is *Require an ADR-0087 disposition on a declared-breaking changeset*:
+   ```
+   <!-- adr-0087: registered SOME-MIGRATION-ID -->
+   <!-- adr-0087: not-required (unpublished) why -->
+   <!-- adr-0087: not-required (already-registered SOME-MIGRATION-ID) why -->
+   <!-- adr-0087: not-required (no-migration-prescription) why -->
+   ```
+   Why it is asked of you at all: the two ADR-0087 gates (`check:spec-changes`, `check:upgrade-guide`) pin ledger ↔ **artifact synchrony**, and the artifacts are a pure projection of the registry — so a retirement whose entry was **never written** leaves the two perfectly consistent and every gate in the repo green. PR #6048 removed `ctx.user.roles` that way and only a human comparing by eye caught it (#6011, backfilled by PR #6138). Ledger entries are the sole data source for `objectstack migrate meta`, `spec-changes.json` and the generated upgrade guide, and for a surface with **no spec schema** (`ctx.user` is only a runtime TS interface) there is no tombstone and no schema rejection either — the ledger entry is the *only* channel that reaches an upgrader. Measured: roughly **1 declared-breaking change in 7** needs an entry, so `not-required` is the ordinary answer and costs one line. Three of the four dispositions are re-verified mechanically on every run, and the fourth is refused when the changeset's own body carries a FROM → TO prescription — a changeset that ships migration instructions cannot also claim nobody must migrate (#6148).
 4. **Added or removed a `packages/spec` export? Run `pnpm --filter @objectstack/spec gen:api-surface` and commit the result.** The `TypeScript Type Check` job diffs spec's built export surface against `api-surface/` (one shard per entry point since #5837); a new export makes the snapshot stale and turns the job red. It reads the **built `dist` declarations**, so `OS_SKIP_DTS=1` — the flag you reach for to make local builds fast — skips exactly the artifact the gate inspects, and the check passes locally while failing in CI. Same shape for the other generated-artifact gates in that job (`check:docs`, `check:skill-refs`, `check:react-blocks`), which read `src/` and so do reproduce locally.
 5. Update `CHANGELOG.md` / `ROADMAP.md` if user-facing or architectural.
 6. **Delete temporary artifacts** — screenshots, traces, scratch logs, `.playwright-mcp/`, throwaway `tmp*.ts`, ad-hoc scripts. Repo must look identical to before, minus intended changes.

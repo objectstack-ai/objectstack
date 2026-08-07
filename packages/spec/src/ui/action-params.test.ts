@@ -94,6 +94,145 @@ describe('validateActionParams (ADR-0104 D2)', () => {
 });
 
 /**
+ * [#5622] A rejected key one leading underscore away from a built-in NAMES
+ * that built-in. Message copy only — the verdict does not move.
+ *
+ * ## What the cost was, and why a message is the whole fix
+ *
+ * `Unknown action param "selectedIds" — not declared on this action` is a true
+ * sentence whose only actionable reading is false: the reader's next step is
+ * to declare `selectedIds` on the action, and `_selectedIds` is precisely the
+ * key that CANNOT be declared — the aggregate bulk dispatch injects it
+ * (objectui#3139). #5568's reporter walked that road to its end, concluded
+ * from the dead end that REST carried no legal shape for a selection at all,
+ * and opened a platform issue; `params._selectedIds` had been live the whole
+ * time. The hint ends that at the first call.
+ *
+ * ## The pins below assert the MESSAGE, not the failure
+ *
+ * "Validation failed" is one bit and this defect has two — the key is rejected
+ * both before and after this change, so a test asserting only rejection is
+ * green on the unfixed validator. Every case therefore pins `code` AND the
+ * message content, and the negative case pins the message BYTE FOR BYTE.
+ *
+ * ## Reverse verification — directions predicted BEFORE running
+ *
+ *  - Make `builtinNearMissHint` return `''` unconditionally (i.e. restore
+ *    today's behaviour) → the three hint cases and the accuracy case go RED on
+ *    their message assertions; every `codes(...)` assertion in this file stays
+ *    green, which is the point: the verdict never moved.
+ *  - ⚠️ HONEST NOTE — "an ordinary typo keeps today's message" is a COMPANION,
+ *    not a pin of this change (the #5722 distinction). It asserts the message
+ *    the UNFIXED validator already produced, so it is green on both sides of
+ *    the revert by construction. It is kept because it is the assertion that
+ *    goes red if the hint ever starts firing on distant keys — a fuzzy matcher
+ *    creeping in later is exactly the regression it guards, and that one this
+ *    file cannot otherwise see.
+ *  - Widen the match to fuzzy/Levenshtein → the two "no hint" cases go RED.
+ */
+describe('#5622 — near-miss built-in hint on unknown_field', () => {
+  const declaresFormat: ResolvedActionParam[] = [{ name: 'format', type: 'text' }];
+
+  it('names `_selectedIds` when the caller sent `selectedIds` (the #5568 road)', () => {
+    const issues = validateActionParams(declaresFormat, { format: 'png', selectedIds: ['dev_1', 'dev_2'] });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('unknown_field');
+    expect(issues[0].param).toBe('selectedIds');
+    expect(issues[0].message).toContain('Unknown action param "selectedIds" — not declared on this action');
+    expect(issues[0].message).toContain('Did you mean the built-in "_selectedIds"?');
+    // The mechanism half — what makes the hint actionable rather than a
+    // spelling suggestion: it says the key is never declared, and where the
+    // value comes from instead.
+    expect(issues[0].message).toContain('Built-in params are never declared on an action');
+    expect(issues[0].message).toContain('aggregate bulk dispatch');
+    expect(issues[0].message).toContain('ctx.params._selectedIds');
+  });
+
+  it('names `recordId` when the caller sent `_recordId` (the reverse direction)', () => {
+    const issues = validateActionParams(declaresFormat, { format: 'png', _recordId: 'rec_1' });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('unknown_field');
+    expect(issues[0].param).toBe('_recordId');
+    expect(issues[0].message).toContain('Did you mean the built-in "recordId"?');
+    expect(issues[0].message).toContain('ctx.params.recordId');
+  });
+
+  it('gives each of the THREE built-ins its own true origin sentence', () => {
+    // The issue proposed one sentence — "injected by an aggregate bulk
+    // dispatch" — which is true of `_selectedIds` and false of the other two:
+    // those are merged in SERVER-side by the dispatcher. Wrong-mechanism copy
+    // is worse than none, so the sentence is per-key.
+    const messageFor = (key: string) => {
+      const issues = validateActionParams(declaresFormat, { format: 'png', [key]: 'v' });
+      expect(issues).toHaveLength(1);
+      return issues[0].message;
+    };
+
+    expect(messageFor('_recordId')).toContain('the dispatcher merges it in from the record-scoped route');
+    expect(messageFor('_objectName')).toContain('the dispatcher merges in the name of the object the action dispatched on');
+    expect(messageFor('selectedIds')).toContain('injects every selected record id under it');
+
+    // ...and no message claims another key's mechanism.
+    expect(messageFor('_recordId')).not.toContain('aggregate bulk dispatch');
+    expect(messageFor('selectedIds')).not.toContain('record-scoped route');
+  });
+
+  it('leaves an ordinary unknown key\'s message EXACTLY as it is today', () => {
+    const issues = validateActionParams(declaresFormat, { format: 'png', bogus: 1 });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('unknown_field');
+    // Byte for byte — a hint that leaks onto keys nowhere near a built-in is
+    // noise, and noise is how a reader learns to skip the line that mattered.
+    expect(issues[0].message).toBe('Unknown action param "bogus" — not declared on this action');
+    expect(issues[0].message).not.toContain('Did you mean');
+  });
+
+  it('does NOT fire on keys that are merely NEARBY — the match is one leading underscore, not a similarity score', () => {
+    for (const key of ['selected_ids', 'selectedIDs', 'selectedId', 'recordID', 'record_id', 'objectname']) {
+      const issues = validateActionParams(declaresFormat, { format: 'png', [key]: 'v' });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe('unknown_field');
+      expect(issues[0].message).toBe(`Unknown action param "${key}" — not declared on this action`);
+    }
+  });
+
+  it('hints a custom `builtinKeys` entry with the GENERIC origin, never another key\'s mechanism', () => {
+    // The override's members are built-ins by the option's own definition, so
+    // the "never declared" half holds; their producer is unknown to this
+    // module, so the sentence claims nothing more than that.
+    const issues = validateActionParams(
+      declaresFormat,
+      { format: 'png', _ctxToken: 'z' },
+      { builtinKeys: ['ctxToken'] },
+    );
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('unknown_field');
+    expect(issues[0].message).toContain('Did you mean the built-in "ctxToken"?');
+    expect(issues[0].message).toContain('the dispatcher supplies it.');
+    expect(issues[0].message).not.toContain('ctx.params');
+  });
+
+  it('moves the ACCEPTED SET by nothing — the near-miss is still rejected, the built-in still accepted', () => {
+    // The ruling that scopes this change: a hint, not a second channel. If
+    // `selectedIds` ever starts being accepted, the platform grows a synonym
+    // for a contract that has exactly one spelling.
+    expect(validateActionParams(declaresFormat, { format: 'png', _selectedIds: ['a', 'b'] })).toEqual([]);
+    expect(codes(validateActionParams(declaresFormat, { format: 'png', selectedIds: ['a', 'b'] })))
+      .toEqual(['unknown_field']);
+
+    // And the built-ins themselves are still allowed under their own names —
+    // the hint reads the same `allow` set the verdict does, so a bug there
+    // would show up as a built-in being flagged.
+    expect(validateActionParams(declaresFormat, { format: 'png', recordId: 'r1', objectName: 'o' })).toEqual([]);
+    expect(ACTION_PARAM_BUILTIN_KEYS).toEqual(['recordId', 'objectName', '_selectedIds']);
+  });
+});
+
+/**
  * [#5779] `ActionSession` gains the canonical `positions` key and demotes
  * `roles` to a deprecated alias — the SPEC half of #5613 phase 2, under the
  * maintainer's "C skeleton + A semantics" ruling.

@@ -8,25 +8,18 @@ description: Branded Types protocol schemas
 Branded Types for ObjectStack Identifiers
 
 Branded types provide compile-time safety by preventing accidental mixing
-
 of different identifier kinds. For example, you cannot pass an ObjectName
-
 where a FieldName is expected, even though both are strings at runtime.
 
 @example
-
 ```ts
-
-import \{ ObjectNameSchema, FieldNameSchema \} from '@objectstack/spec';
+import { ObjectNameSchema, FieldNameSchema } from '@objectstack/spec';
 
 const objName = ObjectNameSchema.parse('project_task');   // ObjectName
-
 const fieldName = FieldNameSchema.parse('task_name');     // FieldName
 
 // TypeScript will catch this at compile time:
-
 // const fn: FieldName = objName; // Error!
-
 ```
 
 <Callout type="info">

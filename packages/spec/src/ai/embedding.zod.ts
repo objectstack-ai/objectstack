@@ -81,6 +81,6 @@ export const VectorStoreSchema = lazySchema(() => z.object({
   dimensions: z.number().int().positive().optional(),
 }));
 
-export type VectorStoreProvider = z.infer<typeof VectorStoreProviderSchema>;
-export type EmbeddingModel = z.infer<typeof EmbeddingModelSchema>;
-export type VectorStore = z.infer<typeof VectorStoreSchema>;
+export type VectorStoreProvider = z.input<typeof VectorStoreProviderSchema>;
+export type EmbeddingModel = z.input<typeof EmbeddingModelSchema>;
+export type VectorStore = z.input<typeof VectorStoreSchema>;

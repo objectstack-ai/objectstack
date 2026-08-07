@@ -112,11 +112,9 @@ async function makeProtocol() {
     const { driver } = makeMemoryDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(sysMetadataObject as any);
+    engine.registry.registerObject(sysMetadataObject as any, 'test-package');
     return new ObjectStackProtocolImplementation(engine);
 }
-
-const LOG = (...a: any[]) => appendFileSync(OUT, a.join(' ') + '\n');
 
 const viewBody = (label: string) => ({ name: 'cases', type: 'grid', label, columns: ['id'] });
 

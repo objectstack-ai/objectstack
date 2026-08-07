@@ -18,9 +18,16 @@ import { z } from 'zod';
  *
  * | dialect | engine | use |
  * |:---|:---|:---|
- * | `cel`   | `@objectstack/formula` (cel-js + ObjectStack stdlib) | formulas, predicates, seed dynamic values |
- * | `js`    | sandboxed L2 hook bodies (`isolated-vm` / `quickjs`) | mapping, hook bodies |
- * | `cron`  | `cron-parser` | job schedules |
+ * | `cel`      | `@objectstack/formula` (cel-js + ObjectStack stdlib) | formulas, predicates, seed dynamic values |
+ * | `cron`     | `cron-parser` | job schedules |
+ * | `template` | `{{var}}` interpolation at evaluate time (same variable scope as CEL) | notification subjects/bodies, `titleFormat`, prompt templates |
+ *
+ * Those three are the whole list — it is exactly the `ExpressionDialect` enum
+ * below. Procedural JavaScript is **not** a dialect: it is the L2 authoring
+ * surface, the sandboxed, capability-gated `ScriptBody { language: 'js' }` in
+ * hook/action bodies. A `js` row stood in this table long after the dialect was
+ * retired in #3278 (ADR-0058 addendum); `ExpressionSchema` rejects
+ * `dialect: 'js'`.
  *
  * SQL fragments (analytics joins, partial indexes) are intentionally **not**
  * routed through this schema — they stay driver-native because their security
@@ -40,7 +47,7 @@ import { z } from 'zod';
  * dialect. Retired in #3278; see ADR-0058 addendum.
  */
 export const ExpressionDialect = z.enum(['cel', 'cron', 'template']);
-export type ExpressionDialect = z.infer<typeof ExpressionDialect>;
+export type ExpressionDialect = z.input<typeof ExpressionDialect>;
 
 /**
  * Authorship metadata for an expression. Optional but encouraged for AI-
@@ -52,7 +59,7 @@ export const ExpressionMetaSchema = z.object({
   /** Identifier of the agent / tool that produced this expression. */
   generatedBy: z.string().optional(),
 });
-export type ExpressionMeta = z.infer<typeof ExpressionMetaSchema>;
+export type ExpressionMeta = z.input<typeof ExpressionMetaSchema>;
 
 /**
  * Canonical Expression envelope.
@@ -80,7 +87,7 @@ export const ExpressionSchema = z.object({
 }).refine(e => e.source !== undefined || e.ast !== undefined, {
   message: 'Expression requires at least one of `source` or `ast`',
 });
-export type Expression = z.infer<typeof ExpressionSchema>;
+export type Expression = z.input<typeof ExpressionSchema>;
 
 /**
  * Author-time input shape: a bare string is shorthand for `{ dialect: 'cel',
@@ -123,7 +130,7 @@ export type TemplateExpressionInput = z.input<typeof TemplateExpressionInputSche
  * intent documentation and future runtime type-check wiring.
  */
 export const PredicateSchema = ExpressionSchema;
-export type Predicate = z.infer<typeof PredicateSchema>;
+export type Predicate = z.input<typeof PredicateSchema>;
 
 export const PredicateInputSchema = ExpressionInputSchema;
 export type PredicateInput = z.input<typeof PredicateInputSchema>;

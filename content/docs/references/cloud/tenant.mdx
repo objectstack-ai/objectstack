@@ -8,17 +8,12 @@ description: Tenant protocol schemas
 Multi-Tenant Architecture Schema
 
 Defines the schema for managing multi-tenant architecture with:
-
 - Global control plane: Single database for auth, org management, tenant registry
-
 - Tenant data plane: Isolated databases per organization (UUID-based naming)
 
 Design decisions:
-
 - Database naming: \{uuid\}.turso.io (not org-slug, since slugs can be modified)
-
 - Each tenant has its own Turso database for complete data isolation
-
 - Global database stores user auth, organizations, and tenant metadata
 
 <Callout type="info">

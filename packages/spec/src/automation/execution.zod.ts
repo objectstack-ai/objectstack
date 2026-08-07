@@ -32,7 +32,7 @@ export const ExecutionStatus = z.enum([
   'timed_out',   // Exceeded max execution time
   'retrying',    // Failed and retrying
 ]);
-export type ExecutionStatus = z.infer<typeof ExecutionStatus>;
+export type ExecutionStatus = z.input<typeof ExecutionStatus>;
 
 // ==========================================
 // 2. Execution Log
@@ -77,7 +77,7 @@ export const ExecutionStepMetricsSchema = lazySchema(() => z.object({
   unmeasuredEffect: z.boolean().optional()
     .describe('This execution may have caused an effect the platform cannot count (an external write through a connector). NOT interchangeable with `acted: 0` — it says the count is unknown, not that it is zero.'),
 }));
-export type ExecutionStepMetrics = z.infer<typeof ExecutionStepMetricsSchema>;
+export type ExecutionStepMetrics = z.input<typeof ExecutionStepMetricsSchema>;
 
 /**
  * The gate that kept a step from running — recorded on a `skipped` step so the
@@ -92,7 +92,7 @@ export const ExecutionStepSkipReasonSchema = lazySchema(() => z.object({
   edgeId: z.string().optional().describe('Edge whose condition evaluated false'),
   label: z.string().optional().describe('Edge label, when the flow names its branches'),
 }));
-export type ExecutionStepSkipReason = z.infer<typeof ExecutionStepSkipReasonSchema>;
+export type ExecutionStepSkipReason = z.input<typeof ExecutionStepSkipReasonSchema>;
 
 /**
  * Execution Step Log Entry
@@ -128,7 +128,7 @@ export const ExecutionStepLogSchema = lazySchema(() => z.object({
   skippedBy: ExecutionStepSkipReasonSchema.optional()
     .describe('The gate that closed, when `status` is `skipped`'),
 }));
-export type ExecutionStepLog = z.infer<typeof ExecutionStepLogSchema>;
+export type ExecutionStepLog = z.input<typeof ExecutionStepLogSchema>;
 
 // ==========================================
 // 2b. Flow Run Summary (#4354)
@@ -151,7 +151,7 @@ export const FlowRunNodeSummarySchema = lazySchema(() => z.object({
   acted: z.number().int().min(0).optional().describe('Records written / effects dispatched across every execution — omitted for a node that writes none'),
   unmeasured: z.number().int().min(0).optional().describe('Executions that may have caused an effect the platform cannot count (see ExecutionStepMetrics.unmeasuredEffect)'),
 }));
-export type FlowRunNodeSummary = z.infer<typeof FlowRunNodeSummarySchema>;
+export type FlowRunNodeSummary = z.input<typeof FlowRunNodeSummarySchema>;
 
 /** A gate that closed during the run, and how often. */
 export const FlowRunGateSummarySchema = lazySchema(() => z.object({
@@ -161,7 +161,7 @@ export const FlowRunGateSummarySchema = lazySchema(() => z.object({
   label: z.string().optional().describe('Edge label, when the flow names its branches'),
   skipped: z.number().int().min(1).describe('Times this gate evaluated false (once per loop iteration)'),
 }));
-export type FlowRunGateSummary = z.infer<typeof FlowRunGateSummarySchema>;
+export type FlowRunGateSummary = z.input<typeof FlowRunGateSummarySchema>;
 
 /**
  * Per-run rollup of what a flow execution actually *did* (#4354).
@@ -200,7 +200,7 @@ export const FlowRunSummarySchema = lazySchema(() => z.object({
   detailOmitted: z.boolean().optional()
     .describe('Set when persistence dropped `nodes`/`gates` to keep the stored row bounded — the totals are still exact. Declared so empty arrays are never mistaken for "nothing ran".'),
 }));
-export type FlowRunSummary = z.infer<typeof FlowRunSummarySchema>;
+export type FlowRunSummary = z.input<typeof FlowRunSummarySchema>;
 
 /**
  * Execution Log Schema
@@ -266,7 +266,7 @@ export const ExecutionLogSchema = lazySchema(() => z.object({
   runAs: z.enum(['system', 'user']).optional().describe('Execution context identity'),
   tenantId: z.string().optional().describe('Tenant ID for multi-tenant isolation'),
 }));
-export type ExecutionLog = z.infer<typeof ExecutionLogSchema>;
+export type ExecutionLog = z.input<typeof ExecutionLogSchema>;
 
 // ==========================================
 // 3. Execution Error Tracking & Diagnostics
@@ -280,7 +280,7 @@ export const ExecutionErrorSeverity = z.enum([
   'error',      // Node-level failure (may be retried)
   'critical',   // Flow-level failure (execution terminated)
 ]);
-export type ExecutionErrorSeverity = z.infer<typeof ExecutionErrorSeverity>;
+export type ExecutionErrorSeverity = z.input<typeof ExecutionErrorSeverity>;
 
 /**
  * Execution Error Schema
@@ -300,7 +300,7 @@ export const ExecutionErrorSchema = lazySchema(() => z.object({
   retryable: z.boolean().default(false).describe('Whether this error can be retried'),
   resolvedAt: z.string().datetime().optional().describe('When the error was resolved (e.g., after successful retry)'),
 }));
-export type ExecutionError = z.infer<typeof ExecutionErrorSchema>;
+export type ExecutionError = z.input<typeof ExecutionErrorSchema>;
 
 // ==========================================
 // 4. Checkpointing / Resume
@@ -333,7 +333,7 @@ export const CheckpointSchema = lazySchema(() => z.object({
   reason: z.enum(['wait', 'screen_input', 'approval', 'error', 'manual_pause', 'parallel_join', 'boundary_event'])
     .describe('Why the execution was checkpointed'),
 }));
-export type Checkpoint = z.infer<typeof CheckpointSchema>;
+export type Checkpoint = z.input<typeof CheckpointSchema>;
 
 // ==========================================
 // 5. Concurrency Control
@@ -364,7 +364,7 @@ export const ConcurrencyPolicySchema = lazySchema(() => z.object({
   queueTimeoutMs: z.number().int().min(0).optional()
     .describe('Maximum time to wait in queue before timing out (ms)'),
 }));
-export type ConcurrencyPolicy = z.infer<typeof ConcurrencyPolicySchema>;
+export type ConcurrencyPolicy = z.input<typeof ConcurrencyPolicySchema>;
 
 // ==========================================
 // 6. Scheduled Execution Persistence
@@ -410,7 +410,7 @@ export const ScheduleStateSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().optional().describe('Last update timestamp'),
   createdBy: z.string().optional().describe('User who created the schedule'),
 }));
-export type ScheduleState = z.infer<typeof ScheduleStateSchema>;
+export type ScheduleState = z.input<typeof ScheduleStateSchema>;
 
 // ==========================================
 // Type Exports

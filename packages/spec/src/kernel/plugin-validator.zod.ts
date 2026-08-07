@@ -45,7 +45,7 @@ export const ValidationErrorSchema = lazySchema(() => z.object({
   code: z.string().optional().describe('Machine-readable error code'),
 }));
 
-export type ValidationError = z.infer<typeof ValidationErrorSchema>;
+export type ValidationError = z.input<typeof ValidationErrorSchema>;
 
 /**
  * Validation Warning Schema
@@ -75,7 +75,7 @@ export const ValidationWarningSchema = lazySchema(() => z.object({
   code: z.string().optional().describe('Machine-readable warning code'),
 }));
 
-export type ValidationWarning = z.infer<typeof ValidationWarningSchema>;
+export type ValidationWarning = z.input<typeof ValidationWarningSchema>;
 
 /**
  * Validation Result Schema
@@ -113,7 +113,7 @@ export const ValidationResultSchema = lazySchema(() => z.object({
   warnings: z.array(ValidationWarningSchema).optional().describe('Validation warnings'),
 }));
 
-export type ValidationResult = z.infer<typeof ValidationResultSchema>;
+export type ValidationResult = z.input<typeof ValidationResultSchema>;
 
 // ============================================================================
 // Plugin Metadata Schema
@@ -182,4 +182,4 @@ export const PluginMetadataSchema = lazySchema(() => z.object({
    */
 }).passthrough().describe('Plugin metadata for validation'));
 
-export type PluginMetadata = z.infer<typeof PluginMetadataSchema>;
+export type PluginMetadata = z.input<typeof PluginMetadataSchema>;

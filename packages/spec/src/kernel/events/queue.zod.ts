@@ -54,7 +54,7 @@ export const EventQueueConfigSchema = lazySchema(() => z.object({
   priorityEnabled: z.boolean().default(true).describe('Process events based on priority'),
 }));
 
-export type EventQueueConfig = z.infer<typeof EventQueueConfigSchema>;
+export type EventQueueConfig = z.input<typeof EventQueueConfigSchema>;
 /** Post-parse shape of {@link EventQueueConfig} — defaults applied, transforms run (ADR-0122). */
 export type EventQueueConfigParsed = z.infer<typeof EventQueueConfigSchema>;
 
@@ -106,7 +106,7 @@ export const EventReplayConfigSchema = lazySchema(() => z.object({
   targetHandlers: z.array(z.string()).optional().describe('Handler IDs to execute (empty = all)'),
 }));
 
-export type EventReplayConfig = z.infer<typeof EventReplayConfigSchema>;
+export type EventReplayConfig = z.input<typeof EventReplayConfigSchema>;
 /** Post-parse shape of {@link EventReplayConfig} — defaults applied, transforms run (ADR-0122). */
 export type EventReplayConfigParsed = z.infer<typeof EventReplayConfigSchema>;
 
@@ -168,6 +168,6 @@ export const EventSourcingConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Event store configuration'),
 }));
 
-export type EventSourcingConfig = z.infer<typeof EventSourcingConfigSchema>;
+export type EventSourcingConfig = z.input<typeof EventSourcingConfigSchema>;
 /** Post-parse shape of {@link EventSourcingConfig} — defaults applied, transforms run (ADR-0122). */
 export type EventSourcingConfigParsed = z.infer<typeof EventSourcingConfigSchema>;

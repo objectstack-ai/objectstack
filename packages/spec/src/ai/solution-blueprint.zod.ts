@@ -37,7 +37,7 @@ export const BlueprintConditionSchema = lazySchema(() => z.object({
   op: z.enum(['lt', 'lte', 'gt', 'gte', 'eq', 'ne']).describe('Comparison operator'),
   value: z.union([z.number(), z.string(), z.boolean()]).describe('Comparison value — for a select field use its option VALUE, never its label (e.g. "completed", not "已完成")'),
 }));
-export type BlueprintCondition = z.infer<typeof BlueprintConditionSchema>;
+export type BlueprintCondition = z.input<typeof BlueprintConditionSchema>;
 
 /**
  * A roll-up (`summary` field) declared IN the blueprint — the aggregation of
@@ -70,7 +70,7 @@ export const BlueprintSummaryOperationsSchema = lazySchema(() => z.object({
   filter: FilterConditionSchema.optional()
     .describe('The same predicate as a canonical query filter map (e.g. { status: "completed" }, { status: { $in: ["received", "partial"] } }). Use it when hand-authoring a blueprint; the structured design path uses `conditions` instead. Wins over `conditions` when both are given.'),
 }));
-export type BlueprintSummaryOperations = z.infer<typeof BlueprintSummaryOperationsSchema>;
+export type BlueprintSummaryOperations = z.input<typeof BlueprintSummaryOperationsSchema>;
 
 /**
  * A proposed field on a blueprint object. `reference` carries the target
@@ -93,7 +93,7 @@ export const BlueprintFieldSchema = lazySchema(() => z.object({
   expression: z.string().optional()
     .describe('REQUIRED when `type` is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer" for a composed title. A "formula" field without it materializes runtime-dead: the engine builds its formula plan only from fields that HAVE an expression, so the field reads null everywhere, forever. Same failure shape as a "summary" with no `summaryOperations`. Note `nameField` on the object recommends a formula for numbered entities (invoice/ticket) — that formula needs THIS key, or the record title is blank on every card, lookup chip and breadcrumb.'),
 }));
-export type BlueprintField = z.infer<typeof BlueprintFieldSchema>;
+export type BlueprintField = z.input<typeof BlueprintFieldSchema>;
 
 /** A proposed business object (table) with its fields. */
 export const BlueprintObjectSchema = lazySchema(() => z.object({
@@ -104,7 +104,7 @@ export const BlueprintObjectSchema = lazySchema(() => z.object({
   nameField: z.string().regex(SNAKE_CASE).optional()
     .describe('The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079). Set it to the object\'s text label field (e.g. "product_name"). For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "{order_no} · {customer}"). Omitting it lets the platform auto-pick a text field, but declaring it is strongly preferred.'),
 }));
-export type BlueprintObject = z.infer<typeof BlueprintObjectSchema>;
+export type BlueprintObject = z.input<typeof BlueprintObjectSchema>;
 
 /** A proposed list/form/kanban/calendar/gallery/gantt view over an object. */
 export const BlueprintViewSchema = lazySchema(() => z.object({
@@ -118,7 +118,7 @@ export const BlueprintViewSchema = lazySchema(() => z.object({
   groupBy: z.string().regex(SNAKE_CASE).optional()
     .describe('REQUIRED for kanban views: the select/status field whose options become the board columns (e.g. "stage", "status"). Without it a kanban renders as a plain list. Optional for gantt (groups leaf tasks into summary rows).'),
 }));
-export type BlueprintView = z.infer<typeof BlueprintViewSchema>;
+export type BlueprintView = z.input<typeof BlueprintViewSchema>;
 /** Post-parse shape of {@link BlueprintView} — defaults applied, transforms run (ADR-0122). */
 export type BlueprintViewParsed = z.infer<typeof BlueprintViewSchema>;
 
@@ -133,7 +133,7 @@ export type BlueprintViewParsed = z.infer<typeof BlueprintViewSchema>;
  * sites that name it.
  */
 export const BlueprintWidgetConditionSchema = BlueprintConditionSchema;
-export type BlueprintWidgetCondition = z.infer<typeof BlueprintWidgetConditionSchema>;
+export type BlueprintWidgetCondition = z.input<typeof BlueprintWidgetConditionSchema>;
 
 /** A proposed dashboard with a few widgets (kept intentionally light). */
 export const BlueprintDashboardSchema = lazySchema(() => z.object({
@@ -152,7 +152,7 @@ export const BlueprintDashboardSchema = lazySchema(() => z.object({
       .describe('Restrict WHICH records the widget counts/aggregates when its title implies a threshold or status (e.g. "stock below 10" → {field:"stock_quantity", op:"lt", value:10}; "open tickets" → {field:"status", op:"eq", value:"open"}). Without it the widget covers ALL records — so a "低于10的备件预警" / "overdue" card would wrongly count everything. Omit when the widget genuinely spans every record.'),
   })).optional().describe('Widgets to place on the dashboard'),
 }));
-export type BlueprintDashboard = z.infer<typeof BlueprintDashboardSchema>;
+export type BlueprintDashboard = z.input<typeof BlueprintDashboardSchema>;
 
 /**
  * A proposed navigation item in the blueprint app — points at one of the
@@ -165,7 +165,7 @@ export const BlueprintNavItemSchema = lazySchema(() => z.object({
   label: z.string().optional().describe('Nav entry label (defaults to the target label/name)'),
   icon: z.string().optional().describe('Lucide icon name for the nav entry'),
 }));
-export type BlueprintNavItem = z.infer<typeof BlueprintNavItemSchema>;
+export type BlueprintNavItem = z.input<typeof BlueprintNavItemSchema>;
 /** Post-parse shape of {@link BlueprintNavItem} — defaults applied, transforms run (ADR-0122). */
 export type BlueprintNavItemParsed = z.infer<typeof BlueprintNavItemSchema>;
 
@@ -181,7 +181,7 @@ export const BlueprintAppSchema = lazySchema(() => z.object({
   nav: z.array(BlueprintNavItemSchema).optional()
     .describe('Navigation entries; omit to auto-surface every created object and dashboard'),
 }));
-export type BlueprintApp = z.infer<typeof BlueprintAppSchema>;
+export type BlueprintApp = z.input<typeof BlueprintAppSchema>;
 /** Post-parse shape of {@link BlueprintApp} — defaults applied, transforms run (ADR-0122). */
 export type BlueprintAppParsed = z.infer<typeof BlueprintAppSchema>;
 
@@ -195,7 +195,7 @@ export const BlueprintSeedSchema = lazySchema(() => z.object({
   object: z.string().regex(SNAKE_CASE).describe('Target object name (snake_case)'),
   records: z.array(z.record(z.string(), z.unknown())).describe('Rows to seed'),
 }));
-export type BlueprintSeed = z.infer<typeof BlueprintSeedSchema>;
+export type BlueprintSeed = z.input<typeof BlueprintSeedSchema>;
 
 /**
  * The full plan-first blueprint. `assumptions` state the design choices the
@@ -223,7 +223,7 @@ export const SolutionBlueprintSchema = lazySchema(() => z.object({
   seedData: z.array(BlueprintSeedSchema).optional()
     .describe('Suggested seed data (reported, not auto-applied in Phase C)'),
 }));
-export type SolutionBlueprint = z.infer<typeof SolutionBlueprintSchema>;
+export type SolutionBlueprint = z.input<typeof SolutionBlueprintSchema>;
 /** Post-parse shape of {@link SolutionBlueprint} — defaults applied, transforms run (ADR-0122). */
 export type SolutionBlueprintParsed = z.infer<typeof SolutionBlueprintSchema>;
 
@@ -231,7 +231,7 @@ export type SolutionBlueprintParsed = z.infer<typeof SolutionBlueprintSchema>;
  * Factory mirroring `defineAgent` / `defineTool` / `defineSkill`: validates a
  * blueprint literal at authoring time and returns the parsed value.
  */
-export function defineSolutionBlueprint(config: z.input<typeof SolutionBlueprintSchema>): SolutionBlueprint {
+export function defineSolutionBlueprint(config: z.input<typeof SolutionBlueprintSchema>): SolutionBlueprintParsed {
   return SolutionBlueprintSchema.parse(config);
 }
 
@@ -353,4 +353,4 @@ export const SolutionBlueprintStrictSchema = z.object({
   app: StrictApp.nullable()
     .describe('The navigation shell (app) that surfaces the created objects/dashboards, or null'),
 });
-export type SolutionBlueprintStrict = z.infer<typeof SolutionBlueprintStrictSchema>;
+export type SolutionBlueprintStrict = z.input<typeof SolutionBlueprintStrictSchema>;

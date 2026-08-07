@@ -113,10 +113,9 @@ export const RouteHandlerMetadataSchema = lazySchema(() => z.object({
   }).optional(),
 }));
 
-export type RouteHandlerMetadata = z.infer<typeof RouteHandlerMetadataSchema>;
+export type RouteHandlerMetadata = z.input<typeof RouteHandlerMetadataSchema>;
 /** Post-parse shape of {@link RouteHandlerMetadata} — defaults applied, transforms run (ADR-0122). */
 export type RouteHandlerMetadataParsed = z.infer<typeof RouteHandlerMetadataSchema>;
-export type RouteHandlerMetadataInput = z.input<typeof RouteHandlerMetadataSchema>;
 
 // ==========================================
 // Middleware Configuration
@@ -135,7 +134,7 @@ export const MiddlewareType = z.enum([
   'custom',         // Custom middleware
 ]);
 
-export type MiddlewareType = z.infer<typeof MiddlewareType>;
+export type MiddlewareType = z.input<typeof MiddlewareType>;
 
 /**
  * Middleware Configuration Schema
@@ -188,10 +187,9 @@ export const MiddlewareConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Path filtering'),
 }));
 
-export type MiddlewareConfig = z.infer<typeof MiddlewareConfigSchema>;
+export type MiddlewareConfig = z.input<typeof MiddlewareConfigSchema>;
 /** Post-parse shape of {@link MiddlewareConfig} — defaults applied, transforms run (ADR-0122). */
 export type MiddlewareConfigParsed = z.infer<typeof MiddlewareConfigSchema>;
-export type MiddlewareConfigInput = z.input<typeof MiddlewareConfigSchema>;
 
 // ==========================================
 // Server Lifecycle Events
@@ -210,7 +208,7 @@ export const ServerEventType = z.enum([
   'error',         // Error occurred
 ]);
 
-export type ServerEventType = z.infer<typeof ServerEventType>;
+export type ServerEventType = z.input<typeof ServerEventType>;
 
 /**
  * Server Event Schema
@@ -233,7 +231,7 @@ export const ServerEventSchema = lazySchema(() => z.object({
   data: z.record(z.string(), z.unknown()).optional().describe('Event-specific data'),
 }));
 
-export type ServerEvent = z.infer<typeof ServerEventSchema>;
+export type ServerEvent = z.input<typeof ServerEventSchema>;
 
 // ==========================================
 // Server Capability Declaration
@@ -285,10 +283,9 @@ export const ServerCapabilitiesSchema = lazySchema(() => z.object({
   compression: z.boolean().default(true).describe('Built-in compression support'),
 }));
 
-export type ServerCapabilities = z.infer<typeof ServerCapabilitiesSchema>;
+export type ServerCapabilities = z.input<typeof ServerCapabilitiesSchema>;
 /** Post-parse shape of {@link ServerCapabilities} — defaults applied, transforms run (ADR-0122). */
 export type ServerCapabilitiesParsed = z.infer<typeof ServerCapabilitiesSchema>;
-export type ServerCapabilitiesInput = z.input<typeof ServerCapabilitiesSchema>;
 
 // ==========================================
 // Server Status & Metrics
@@ -336,7 +333,7 @@ export const ServerStatusSchema = lazySchema(() => z.object({
   }).optional(),
 }));
 
-export type ServerStatus = z.infer<typeof ServerStatusSchema>;
+export type ServerStatus = z.input<typeof ServerStatusSchema>;
 
 // ==========================================
 // Helper Functions

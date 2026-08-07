@@ -169,10 +169,10 @@ declarative and the logic in the automation surface that already runs it.
 
 <!-- os:check -->
 ```typescript
-import type { ApiEndpointInput } from '@objectstack/spec/api';
+import type { ApiEndpoint } from '@objectstack/spec/api';
 
 // The stack declares `manifest: { namespace: 'acme', … }` — required, see below.
-export const leadFeed: ApiEndpointInput = {
+export const leadFeed: ApiEndpoint = {
   name: 'acme_lead_feed',
   path: '/api/v1/apps/acme/leads',      // /api/v1/apps/<namespace>/<subpath>
   method: 'GET',

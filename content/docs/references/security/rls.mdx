@@ -8,137 +8,91 @@ description: Rls protocol schemas
 # Row-Level Security (RLS) Protocol
 
 Implements fine-grained record-level access control inspired by PostgreSQL RLS
-
 and Salesforce Criteria-Based Sharing Rules.
 
 ## Overview
 
 Row-Level Security (RLS) allows you to control which rows users can access
-
 in database tables based on their identity and positions. Unlike
-
 object-level permissions (CRUD), RLS provides record-level filtering.
 
 ## Use Cases
 
 1. **Multi-Tenant Data Isolation**
-
-- Users only see records from their organization
-
-- `using: "organization_id == current_user.organization_id"`
+   - Users only see records from their organization
+   - `using: "organization_id == current_user.organization_id"`
 
 2. **Ownership-Based Access**
-
-- Users only see records they own
-
-- `using: "owner_id == current_user.id"`
+   - Users only see records they own
+   - `using: "owner_id == current_user.id"`
 
 3. **Organization Member Visibility**
-
-- Users see fellow members of their active organization
-
-- `using: "id in current_user.org_user_ids"`
-
-(`org_user_ids` is pre-resolved by the runtime)
+   - Users see fellow members of their active organization
+   - `using: "id in current_user.org_user_ids"`
+     (`org_user_ids` is pre-resolved by the runtime)
 
 4. **Territory / Regional Access (§7.3.1 dynamic membership)**
-
-- Sales reps only see accounts in their assigned territories
-
-- `using: "account_id in current_user.territory_account_ids"`
-
-(the runtime stages `territory_account_ids` in `ExecutionContext.rlsMembership`)
+   - Sales reps only see accounts in their assigned territories
+   - `using: "account_id in current_user.territory_account_ids"`
+     (the runtime stages `territory_account_ids` in `ExecutionContext.rlsMembership`)
 
 5. **Manager / Hierarchy Access (§7.3.1 dynamic membership)**
-
-- Managers see records assigned to anyone they manage
-
-- `using: "assigned_to_id in current_user.team_member_ids"`
-
-(the runtime pre-resolves `team_member_ids`, no subquery needed)
+   - Managers see records assigned to anyone they manage
+   - `using: "assigned_to_id in current_user.team_member_ids"`
+     (the runtime pre-resolves `team_member_ids`, no subquery needed)
 
 ## PostgreSQL RLS Comparison
 
 PostgreSQL RLS Example:
-
 ```sql
-
 CREATE POLICY tenant_isolation ON accounts
-
-FOR SELECT
-
-USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+  FOR SELECT
+  USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
 
 CREATE POLICY account_insert ON accounts
-
-FOR INSERT
-
-WITH CHECK (tenant_id = current_setting('app.current_tenant_id')::uuid);
-
+  FOR INSERT
+  WITH CHECK (tenant_id = current_setting('app.current_tenant_id')::uuid);
 ```
 
 ObjectStack RLS Equivalent:
-
 ```typescript
-
-\{
-
-name: 'tenant_isolation',
-
-object: 'account',
-
-operation: 'select',
-
-using: 'organization_id == current_user.organization_id'
-
-\}
-
+{
+  name: 'tenant_isolation',
+  object: 'account',
+  operation: 'select',
+  using: 'organization_id == current_user.organization_id'
+}
 ```
 
 ## Salesforce Sharing Rules Comparison
 
 Salesforce uses "Sharing Rules" and a visibility hierarchy for record-level
-
 access (our equivalent hierarchy is the business-unit tree, ADR-0090 D3).
-
 ObjectStack RLS provides similar functionality with more flexibility.
 
 Salesforce:
-
 - Criteria-Based Sharing: Share records matching criteria with users/groups
-
 - Owner-Based Sharing: Share records based on who owns them
-
 - Manual Sharing: Individual record sharing
 
 ObjectStack RLS:
-
 - A small, fixed expression grammar (equality, set-membership, always-true)
-
 - Subquery-shaped needs are pre-resolved by the runtime (§7.3.1)
-
 - Multiple policies OR-combine for union (any-match-allows) semantics
 
 ## Best Practices
 
 1. **Always Define SELECT Policy**: Control what users can view
-
 2. **Define INSERT/UPDATE CHECK Policies**: Prevent data leakage
-
 3. **Use Position-Scoped Policies**: Apply different rules to different positions
-
 4. **Test Thoroughly**: RLS can have complex interactions
-
 5. **Monitor Performance**: Complex RLS policies can impact query performance
 
 ## Security Considerations
 
 1. **Defense in Depth**: RLS is one layer; use with object permissions
-
 2. **Default Deny**: If no policy matches, access is denied
-
 3. **Policy Precedence**: More permissive policy wins (OR logic)
-
 4. **Context Variables**: Ensure current_user context is always set
 
 See also: https://www.postgresql.org/docs/current/ddl-rowsecurity.html

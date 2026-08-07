@@ -3,9 +3,9 @@
 // FROZEN bare-literal fixture (see log-call.action.ts). Pages were one of the
 // 16 domains with no factory before #2035, so real third parties authored them
 // exactly like this.
-import type { PageInput } from '@objectstack/spec/ui';
+import type { Page } from '@objectstack/spec/ui';
 
-export const WelcomePage: PageInput = {
+export const WelcomePage: Page = {
   name: 'dc_welcome',
   label: 'Welcome',
   type: 'home',

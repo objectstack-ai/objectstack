@@ -8,19 +8,14 @@ description: Websocket protocol schemas
 WebSocket Event Protocol
 
 Defines the schema for WebSocket-based real-time communication in ObjectStack.
-
 Supports event subscriptions, filtering, presence tracking, and collaborative editing.
 
 Industry alignment: Firebase Realtime Database, Socket.IO, Pusher
 
 ⚠️ NOT YET SERVED — this protocol is declared but no WebSocket server is
-
 mounted anywhere in the runtime (#2462, #3197): `IRealtimeService.handleUpgrade`
-
 is deliberately unimplemented and discovery advertises `websockets: false`.
-
 These schemas define the future wire contract; nothing consumes them at
-
 runtime today.
 
 <Callout type="info">

@@ -69,7 +69,7 @@ export const ConnectorAuthConfigSchema = lazySchema(() => z.discriminatedUnion('
   ConnectorNoAuthSchema,
 ]));
 
-export type ConnectorAuthConfig = z.infer<typeof ConnectorAuthConfigSchema>;
+export type ConnectorAuthConfig = z.input<typeof ConnectorAuthConfigSchema>;
 /** Post-parse shape of {@link ConnectorAuthConfig} — defaults applied, transforms run (ADR-0122). */
 export type ConnectorAuthConfigParsed = z.infer<typeof ConnectorAuthConfigSchema>;
 
@@ -143,4 +143,4 @@ export const ConnectorInstanceAuthSchema = lazySchema(() => z.discriminatedUnion
   ConnectorInstanceBasicAuthSchema,
 ]));
 
-export type ConnectorInstanceAuth = z.infer<typeof ConnectorInstanceAuthSchema>;
+export type ConnectorInstanceAuth = z.input<typeof ConnectorInstanceAuthSchema>;

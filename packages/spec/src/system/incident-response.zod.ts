@@ -107,7 +107,7 @@ export const IncidentResponsePhaseSchema = lazySchema(() => z.object({
   notes: z.string().optional().describe('Phase notes and findings'),
 }).describe('Incident response phase with timing and assignment'));
 
-export type IncidentResponsePhase = z.infer<typeof IncidentResponsePhaseSchema>;
+export type IncidentResponsePhase = z.input<typeof IncidentResponsePhaseSchema>;
 
 /**
  * Notification Rule Schema
@@ -154,7 +154,7 @@ export const IncidentNotificationRuleSchema = lazySchema(() => z.object({
     .describe('Regulatory notification deadline in hours'),
 }).describe('Incident notification rule per severity level'));
 
-export type IncidentNotificationRule = z.infer<typeof IncidentNotificationRuleSchema>;
+export type IncidentNotificationRule = z.input<typeof IncidentNotificationRuleSchema>;
 /** Post-parse shape of {@link IncidentNotificationRule} — defaults applied, transforms run (ADR-0122). */
 export type IncidentNotificationRuleParsed = z.infer<typeof IncidentNotificationRuleSchema>;
 
@@ -183,7 +183,7 @@ export const IncidentNotificationMatrixSchema = lazySchema(() => z.object({
     .describe('Ordered escalation chain of roles'),
 }).describe('Incident notification matrix with escalation policies'));
 
-export type IncidentNotificationMatrix = z.infer<typeof IncidentNotificationMatrixSchema>;
+export type IncidentNotificationMatrix = z.input<typeof IncidentNotificationMatrixSchema>;
 /** Post-parse shape of {@link IncidentNotificationMatrix} — defaults applied, transforms run (ADR-0122). */
 export type IncidentNotificationMatrixParsed = z.infer<typeof IncidentNotificationMatrixSchema>;
 
@@ -365,10 +365,10 @@ export const IncidentResponsePolicySchema = lazySchema(() => z.object({
 }).describe('Organization-level incident response policy per ISO 27001:2022'));
 
 // Type exports
-export type IncidentSeverity = z.infer<typeof IncidentSeveritySchema>;
-export type IncidentCategory = z.infer<typeof IncidentCategorySchema>;
-export type IncidentStatus = z.infer<typeof IncidentStatusSchema>;
-export type Incident = z.infer<typeof IncidentSchema>;
-export type IncidentResponsePolicy = z.infer<typeof IncidentResponsePolicySchema>;
+export type IncidentSeverity = z.input<typeof IncidentSeveritySchema>;
+export type IncidentCategory = z.input<typeof IncidentCategorySchema>;
+export type IncidentStatus = z.input<typeof IncidentStatusSchema>;
+export type Incident = z.input<typeof IncidentSchema>;
+export type IncidentResponsePolicy = z.input<typeof IncidentResponsePolicySchema>;
 /** Post-parse shape of {@link IncidentResponsePolicy} — defaults applied, transforms run (ADR-0122). */
 export type IncidentResponsePolicyParsed = z.infer<typeof IncidentResponsePolicySchema>;

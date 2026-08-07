@@ -72,6 +72,10 @@ something this audit measured.)* So:
    **frontend-only** props (e.g. `object-form` formType/drawer*/modal*) to the
    spec so the protocol covers what the component accepts; and run this check in
    CI (with a console manifest dump) as a ratchet so new divergence is caught.
+   *(⚠️ The last clause was **rejected** on 2026-08-07, #5960: a console manifest dump
+   in this repo's CI means a full objectui build plus Playwright/chromium on every
+   matching PR. The ratchet is on-demand, triggered by the objectui pin bump — see
+   the correction under "Ratchet (implemented)" below.)*
 3. The `record:*` blocks declaring **zero inputs** means the visual designer can't
    configure them — likely a real gap to close.
 
@@ -85,10 +89,22 @@ MANIFEST=/path/to/sdui.manifest.json pnpm --filter @objectstack/spec check:react
 
 ## Ratchet (implemented)
 
-Running this on every framework PR isn't worth it — the manifest only exists at
-console-build time. So the conformance check is wired in as a **baseline ratchet**
-at the one place the manifest is produced for free: `scripts/build-console.sh`,
-right after it dumps `sdui.manifest.json` from the freshly-built console registry.
+Running this on every framework PR isn't worth it — the manifest only exists once a
+real browser has enumerated the built console registry. So the conformance check is
+wired in as a **baseline ratchet** at the one place the manifest is produced for free:
+`scripts/gen-sdui-manifest.sh` (`pnpm sdui:manifest`), right after it dumps
+`sdui.manifest.json` from the freshly-built console registry.
+
+> **Corrected 2026-08-07 (#5960).** This paragraph named `scripts/build-console.sh`,
+> which is where the ratchet shipped and, since #4472, no longer where it lives —
+> `build-console.sh` deliberately dumps no manifest, because the console build must not
+> drag in a browser dependency. ADR-0082 carried the same stale pointer and is corrected
+> with it. #5960 also settled *when* the ratchet runs: it is an **on-demand gate**, and
+> its trigger is the **objectui pin bump** (`scripts/bump-objectui.sh` prints the step;
+> `docs/releases-maintenance.md` carries the procedure). Producing the manifest in this
+> repo's CI was rejected — a full objectui build plus a Playwright/chromium download on
+> every matching PR — and since #4690 a missing manifest exits 1 rather than skipping, so
+> the residual risk is "unrun", never "falsely green". See ADR-0082 addendum 2.
 
 - The accepted state lives in `packages/spec/react-declaration-parity.baseline.json`
   (per block: the registry-only input set + whether the block is missing).

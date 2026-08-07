@@ -3,7 +3,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { QueryAST, HookContext, ServiceObject } from '@objectstack/spec/data';
 import {
-  EngineQueryOptions,
+  EngineQueryOptionsParsed,
   DataEngineInsertOptions,
   EngineUpdateOptions,
   EngineDeleteOptions,
@@ -28,8 +28,12 @@ import {
   VALUE_SHAPES_MIGRATION_ID,
   isDataMigrationFlagVerified,
 } from '@objectstack/spec/system';
-import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from '@objectstack/spec/kernel';
+import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
+// Imported from spec directly rather than through `@objectstack/core`'s
+// re-export block: that block is labelled backward-compatibility, and this
+// contract is new (#5945).
+import type { IScopedContext, IScopedObjectRepository } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
@@ -602,7 +606,7 @@ function planFormulaProjection(
 function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
-  execCtx?: ExecutionContextInput,
+  execCtx?: ExecutionContext,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -658,7 +662,7 @@ function applyFormulaPlan(
 function hydrateWriteFormulas(
   schema: any,
   results: unknown[],
-  execCtx?: ExecutionContextInput,
+  execCtx?: ExecutionContext,
 ): void {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
@@ -728,7 +732,7 @@ export interface OperationContext {
   ast?: QueryAST;
   data?: any;
   options?: any;
-  context?: ExecutionContextInput;
+  context?: ExecutionContext;
   result?: any;
 }
 
@@ -747,14 +751,14 @@ export interface OperationContext {
  * are given, `options.context` wins (it is the explicit channel).
  */
 export interface EngineReadOptions {
-  context?: ExecutionContextInput;
+  context?: ExecutionContext;
 }
 
 /** Merge read-path execution context from the query and the trailing options. */
 function mergeReadContext(
-  fromQuery?: ExecutionContextInput,
-  fromOptions?: ExecutionContextInput,
-): ExecutionContextInput | undefined {
+  fromQuery?: ExecutionContext,
+  fromOptions?: ExecutionContext,
+): ExecutionContext | undefined {
   if (fromOptions == null) return fromQuery;
   if (fromQuery == null) return fromOptions;
   return { ...fromQuery, ...fromOptions };
@@ -768,7 +772,7 @@ function mergeReadContext(
  * for a "historical" import) turns it off. Both are server-set, never
  * client-supplied.
  */
-function shouldSkipStateMachine(ctx?: ExecutionContextInput): boolean {
+function shouldSkipStateMachine(ctx?: ExecutionContext): boolean {
   return ctx?.seedReplay === true || ctx?.skipStateMachine === true;
 }
 
@@ -904,7 +908,7 @@ function eventRecordBody(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** `DataEvent.userId` — the acting user, when the execution context names one. */
-function eventUserId(execCtx?: ExecutionContextInput): string | undefined {
+function eventUserId(execCtx?: ExecutionContext): string | undefined {
   const userId = execCtx?.userId;
   if (userId == null) return undefined;
   const asString = String(userId);
@@ -1644,7 +1648,7 @@ export class ObjectQL implements IObjectQLEngine {
    * `positions` into the context, so an anonymous HTTP request still yields a
    * session and stays gated.
    */
-  private buildSession(execCtx?: ExecutionContextInput): HookContext['session'] {
+  private buildSession(execCtx?: ExecutionContext): HookContext['session'] {
     if (!execCtx) return undefined;
     const session = {
       userId: execCtx.userId,
@@ -1704,7 +1708,7 @@ export class ObjectQL implements IObjectQLEngine {
    * where every caller-gating hook would read them as the caller. Attribution
    * here, authorization in `session`/`isSystem`, never the two mixed.
    */
-  private buildProvenance(execCtx?: ExecutionContextInput): HookContext['provenance'] {
+  private buildProvenance(execCtx?: ExecutionContext): HookContext['provenance'] {
     const flowRunId = (execCtx as any)?.flowRunId;
     const attributedUserId = (execCtx as any)?.attributedUserId;
     if (!flowRunId && !attributedUserId) return undefined;
@@ -1721,7 +1725,7 @@ export class ObjectQL implements IObjectQLEngine {
    * system / unauthenticated writes, where membership predicates then fail-open.
    */
   private buildEvalUser(
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): { id: string; positions: string[]; organizationId: string | null } | undefined {
     if (!execCtx || execCtx.userId == null) return undefined;
     return {
@@ -1742,7 +1746,7 @@ export class ObjectQL implements IObjectQLEngine {
    * hooks that need an org regardless of a resolved user read
    * `ctx.session.organizationId`, which is populated whenever a session is.
    */
-  private buildUser(execCtx?: ExecutionContextInput): HookContext['user'] {
+  private buildUser(execCtx?: ExecutionContext): HookContext['user'] {
     if (!execCtx || execCtx.userId == null) return undefined;
     return {
       id: String(execCtx.userId),
@@ -1774,7 +1778,7 @@ export class ObjectQL implements IObjectQLEngine {
    * `tenantId` themselves on the resulting object; this helper does not
    * mask the system path.
    */
-  private buildDriverOptions(object: string, execCtx?: ExecutionContextInput, base?: any): any {
+  private buildDriverOptions(object: string, execCtx?: ExecutionContext, base?: any): any {
     // The open transaction may arrive explicitly via the context, or ambiently
     // via txStore when an internal query runs during a transactional write
     // (ADR-0034). Explicit wins; ambient is the safety net.
@@ -1928,8 +1932,8 @@ export class ObjectQL implements IObjectQLEngine {
    * Falls back to a system-elevated empty context when no execCtx
    * is supplied (e.g. system-triggered hooks).
    */
-  private buildHookApi(execCtx?: ExecutionContextInput): ScopedContext {
-    const safeCtx: ExecutionContextInput = execCtx ?? ({ isSystem: true } as any);
+  private buildHookApi(execCtx?: ExecutionContext): ScopedContext {
+    const safeCtx: ExecutionContext = execCtx ?? ({ isSystem: true } as any);
     return new ScopedContext(safeCtx, this as unknown as IDataEngine);
   }
 
@@ -1959,7 +1963,7 @@ export class ObjectQL implements IObjectQLEngine {
   private applyFieldDefaults(
     object: string,
     record: Record<string, unknown>,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
     nowSnapshot?: Date,
   ): Record<string, unknown> {
     const schema = this.getSchema(object);
@@ -2073,7 +2077,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async applyAutonumbers(
     object: string,
     record: Record<string, unknown>,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
     driverOwnsAutonumber?: boolean,
   ): Promise<void> {
     if (driverOwnsAutonumber) return; // driver generates persistently in create()
@@ -2127,7 +2131,7 @@ export class ObjectQL implements IObjectQLEngine {
     object: string,
     field: string,
     prefix: string,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<number> {
     try {
       // Canonical `fields`, not the wire spelling `select` — this call sat on
@@ -2713,7 +2717,7 @@ export class ObjectQL implements IObjectQLEngine {
       recordId: unknown;
       changes?: unknown;
       after?: unknown;
-      context?: ExecutionContextInput;
+      context?: ExecutionContext;
     },
   ): Promise<void> {
     if (!this.realtimeService) return;
@@ -2789,7 +2793,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async publishBulkDataEvent(
     action: 'updated' | 'deleted',
     object: string,
-    input: { matched: unknown; context?: ExecutionContextInput },
+    input: { matched: unknown; context?: ExecutionContext },
   ): Promise<void> {
     if (!this.realtimeService) return;
 
@@ -3219,7 +3223,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async encryptSecretFields(
     object: string,
     row: Record<string, unknown>,
-    context: ExecutionContextInput | undefined,
+    context: ExecutionContext | undefined,
     driverOptions: unknown,
   ): Promise<void> {
     if (!row || typeof row !== 'object') return;
@@ -3952,7 +3956,7 @@ export class ObjectQL implements IObjectQLEngine {
       const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
         where: { id: migrationId },
         limit: 1,
-        context: { isSystem: true } as ExecutionContextInput,
+        context: { isSystem: true } as ExecutionContext,
       });
       const row: any = rows?.[0];
       if (!row || row.id !== migrationId) return { verified: false, conclusive: true };
@@ -4090,7 +4094,7 @@ export class ObjectQL implements IObjectQLEngine {
         const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
           where: { id: migrationId },
           limit: 1,
-          context: { isSystem: true } as ExecutionContextInput,
+          context: { isSystem: true } as ExecutionContext,
         });
         const row: any = rows?.[0];
         if (!row || row.id !== migrationId) return; // nothing certified — nothing to revoke
@@ -4120,7 +4124,7 @@ export class ObjectQL implements IObjectQLEngine {
             }),
             updated_at: now,
           },
-          { context: { isSystem: true } as ExecutionContextInput },
+          { context: { isSystem: true } as ExecutionContext },
         );
         this.invalidateDataMigrationFlags();
         this.logger.warn(
@@ -4488,7 +4492,7 @@ export class ObjectQL implements IObjectQLEngine {
     childObject: string,
     records: any,
     previous: any,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<SummaryRecomputeFailure[]> {
     const descriptors = this.getSummaryDescriptors(childObject);
     if (descriptors.length === 0) return [];
@@ -4545,7 +4549,7 @@ export class ObjectQL implements IObjectQLEngine {
     records: any[],
     expand: Record<string, QueryAST>,
     depth: number = 0,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<any[]> {
     if (!records || records.length === 0) return records;
     if (depth >= ObjectQL.MAX_EXPAND_DEPTH) return records;
@@ -4663,7 +4667,7 @@ export class ObjectQL implements IObjectQLEngine {
             where,
             ...(nestedAST.fields ? { fields: nestedAST.fields as any } : {}),
             ...(nestedAST.orderBy ? { orderBy: nestedAST.orderBy as any } : {}),
-            context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContextInput,
+            context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContext,
           },
         ) ?? [];
 
@@ -4735,7 +4739,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async resolveFileReferences(
     objectName: string,
     records: any[],
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<any[]> {
     if (!records || records.length === 0) return records;
     // A caller whose subject is the STORED form — the ADR-0104 backfill /
@@ -4784,7 +4788,7 @@ export class ObjectQL implements IObjectQLEngine {
     try {
       fileRows = (await this.find(
         'sys_file',
-        { where: { id: { $in: uniqueIds } }, context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContextInput },
+        { where: { id: { $in: uniqueIds } }, context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContext },
       )) ?? [];
     } catch {
       return records; // sys_file unregistered / unreadable — leave ids as-is
@@ -4846,7 +4850,7 @@ export class ObjectQL implements IObjectQLEngine {
    * An unresolvable placeholder throws (see the resolver's module doc) — the one
    * outcome an author can act on.
    */
-  private resolveWhereTokens(ast: QueryAST | undefined, execCtx?: ExecutionContextInput): void {
+  private resolveWhereTokens(ast: QueryAST | undefined, execCtx?: ExecutionContext): void {
     if (!ast || ast.where == null) return;
     ast.where = resolveFilterTokens(ast.where, filterTokenContextFrom(execCtx));
   }
@@ -4862,7 +4866,7 @@ export class ObjectQL implements IObjectQLEngine {
    * writing back would bake one request's user id into a filter object the
    * caller may reuse (view metadata and flow node config both get reused).
    */
-  private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContextInput } | undefined>(
+  private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContext } | undefined>(
     options: T,
   ): T {
     if (!options || options.where == null) return options;
@@ -4970,7 +4974,7 @@ export class ObjectQL implements IObjectQLEngine {
     );
   }
 
-  async find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
+  async find(object: string, query?: EngineQueryOptionsParsed, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     // Normalize the alias spellings (`filter`→`where`, `top`→`limit`) by the
     // spec's slot table — the driver AST only understands the canonical keys,
@@ -4989,9 +4993,12 @@ export class ObjectQL implements IObjectQLEngine {
     // stray `query.object` overwrite it, splitting the AST's object from the
     // table actually queried (#4371 option-2 survey) — every middleware and
     // hook reading `ast.object` would have been lied to.
-    const ast: QueryAST = { ...query, object };
-    // Remove context from the AST — it's not a driver concern
-    delete (ast as any).context;
+    // `context` is dropped HERE rather than `delete`d from the built AST: since
+    // ADR-0122 the caller-supplied `context` is the AUTHOR state (every key
+    // optional) while `QueryAST` carries the parsed one, so spreading it in and
+    // removing it a line later would type the AST with a context it never holds.
+    const { context: _findContext, ...findQuery } = query ?? {};
+    const ast: QueryAST = { ...findQuery, object };
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
     // names and inject their dependencies, so the driver returns the raw
@@ -5117,7 +5124,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Fires the same `beforeFind`/`afterFind` hooks as `find` (#3195).
    */
-  async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any> {
+  async findOne(objectName: string, query?: EngineQueryOptionsParsed, options?: EngineReadOptions): Promise<any> {
     objectName = this.resolveObjectName(objectName);
     // Same alias fold as find() (#4346). Without it, `findOne({ filter })`
     // matched the first row of the WHOLE table rather than the predicate.
@@ -5132,9 +5139,10 @@ export class ObjectQL implements IObjectQLEngine {
     const driver = this.getDriver(objectName);
     // `object` after the spread for the same reason as find(); `limit: 1`
     // last — findOne is single-row by contract.
-    const ast: QueryAST = { ...query, object: objectName, limit: 1 };
-    // Remove context from the AST — it's not a driver concern
-    delete (ast as any).context;
+    // Same reason as find(): the caller's `context` is the author state and the
+    // AST carries the parsed one, so it leaves before the AST is typed.
+    const { context: _findOneContext, ...findOneQuery } = query ?? {};
+    const ast: QueryAST = { ...findOneQuery, object: objectName, limit: 1 };
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
@@ -5690,13 +5698,28 @@ export class ObjectQL implements IObjectQLEngine {
        opCtx.ast = { object, ...(options?.where !== undefined ? { where: options.where } : {}) } as QueryAST;
      }
 
-     // [#2948] Snapshot the keys the CALLER supplied, BEFORE any middleware /
+     // [#2948] Snapshot what the CALLER supplied, BEFORE any middleware /
      // beforeUpdate hook stamps server-managed columns (owner/tenant stamp,
      // `updated_by`/`updated_at`). The static-`readonly` strip below drops only
      // caller-supplied read-only writes, so hook/middleware stamps survive.
-     const suppliedKeys: ReadonlySet<string> = new Set(
-       Object.keys((opCtx.data ?? {}) as Record<string, unknown>),
-     );
+     //
+     // [#5591] KEYS ARE NOT ENOUGH — this snapshot carries the VALUES too, and
+     // it must be a COPY. Hooks mutate `opCtx.data` IN PLACE
+     // (`ctx.input.data.x = …` — `hookContext.input.data` starts as this very
+     // reference), so a snapshot that aliased it would track those mutations
+     // and answer every question about "what the caller sent" with the
+     // post-hook payload. A key-only snapshot was already immune to that; a
+     // value snapshot only stays immune because of the spread.
+     //
+     // Why values: the strip runs AFTER the hooks (below), so "this key is
+     // caller-supplied" and "this key still holds the caller's value" are
+     // different facts, and only the second one licenses a delete. Reading the
+     // first as the second deleted hook-written timestamps whenever the caller
+     // had echoed the key back — see `stripReadonlyFields` for the measured
+     // downstream row (`status = published`, `published_at = null`).
+     const suppliedValues: Readonly<Record<string, unknown>> = {
+       ...((opCtx.data ?? {}) as Record<string, unknown>),
+     };
 
      // [#3407] Structured strip observability. The readonly/readonlyWhen strips
      // below are LEGAL semantics (the write still succeeds without the locked
@@ -5921,11 +5944,13 @@ export class ObjectQL implements IObjectQLEngine {
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
                // columns and are exempt). Runs AFTER hooks/middleware stamped
-               // their columns; `suppliedKeys` ensures only caller-forged
-               // read-only writes are dropped, never the server stamps.
+               // their columns; `suppliedValues` ensures only caller-forged
+               // read-only writes are dropped, never the server stamps — and
+               // (#5591) never a stamp a hook wrote OVER a key the caller
+               // happened to echo back.
                if (!opCtx.context?.isSystem) {
                    const preRo = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedKeys, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Both strip passes are done; refuse now if the caller
@@ -5942,6 +5967,57 @@ export class ObjectQL implements IObjectQLEngine {
                );
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
+               // [#6262] A bulk SET clause must not carry `id`. Reaching this
+               // branch AT ALL means `resolveEngineUpdateDispatch` returned
+               // `multi`, i.e. it found no scalar truthy id in EITHER source —
+               // so whatever sits in `data.id` here (an operator object, an
+               // array, `null`, a falsy scalar) is a value the engine has
+               // already RULED is not a primary key. Leaving it in the payload
+               // then asks the driver to write that ruled-not-an-id value into
+               // the primary-key column of every matched row: the measured
+               // probe was `updateMany({object}, { id: { $in: ['a','b'] },
+               // title: 'x' })`, i.e. a serialized operator object as the new
+               // primary key of N rows. Five backends would each answer that
+               // differently (#5240 / #4434), and on the ones that accept it
+               // the matched rows lose their identity irreversibly.
+               //
+               // This is the SAME answer to the SAME question, applied one
+               // layer on — not a second opinion. #5748 / PR #5919 ruled that a
+               // non-scalar `data.id` is not an id and therefore stops
+               // shadowing the dispatch ladder; the declared bulk intent is
+               // honoured (`ENGINE_UPDATE_DISPATCH_CASES` says `'multi'`, and
+               // this change leaves every verdict in that set untouched). The
+               // strip is that ruling's other half: a value that is not the
+               // primary key does not get to sit in the primary-key column
+               // either. Rejecting the call instead (#6262's route B) would
+               // reverse a verdict the case-set states today, which is a fresh
+               // maintainer decision rather than this fix.
+               //
+               // No reachable shape loses a legitimate write: a truthy scalar
+               // `data.id` outranks both `where` and `multi` and never gets
+               // here, and N rows cannot share one primary key anyway.
+               //
+               // Deliberately NOT reported through `reportDroppedFields`:
+               // `DroppedFieldsEvent.reason` is a closed enum over the two
+               // READ-ONLY strips (`readonly` / `readonly_when`, #3407/#3042),
+               // and this drop is neither. Widening that vocabulary is a
+               // `packages/spec` change with its own consumers (batch + REST
+               // protocol responses), not a rider on an engine fix. The `warn`
+               // is the #4632 duty in the meantime: name the consequence and
+               // the remedy, since the caller is told the write succeeded.
+               const preIdMulti = hookContext.input.data as Record<string, unknown> | null | undefined;
+               if (preIdMulti && typeof preIdMulti === 'object' && Object.prototype.hasOwnProperty.call(preIdMulti, 'id')) {
+                   const { id: notAnId, ...withoutId } = preIdMulti;
+                   hookContext.input.data = withoutId as any;
+                   this.logger.warn(
+                     `Bulk update on '${object}': dropped 'id' from the write payload. A multi:true update ` +
+                       `targets rows through its predicate, and the engine has already ruled this value is not a ` +
+                       `primary key (${JSON.stringify(notAnId) ?? String(notAnId)}) — writing it would have ` +
+                       `overwritten the primary-key column of every matched row. To update ONE row by id, pass a ` +
+                       `scalar id (\`update(object, { id, ...fields })\` or \`{ where: { id } }\`) instead of ` +
+                       `options.multi; to SELECT rows by an id set, put it in \`where\` (\`{ where: { id: { $in: [...] } }, multi: true }\`).`,
+                   );
+               }
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
                validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
@@ -6017,7 +6093,7 @@ export class ObjectQL implements IObjectQLEngine {
                // rejected upstream by the tenant write wall, #2946).
                if (!opCtx.context?.isSystem) {
                    const preRoMulti = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedKeys, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Same refusal on the predicate path. A bulk strip is
@@ -6174,7 +6250,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async cascadeDeleteRelations(
     object: string,
     id: string | number,
-    context?: ExecutionContextInput,
+    context?: ExecutionContext,
     depth = 0,
   ): Promise<void> {
     if (id == null || depth >= ObjectQL.MAX_CASCADE_DEPTH) return;
@@ -6259,7 +6335,7 @@ export class ObjectQL implements IObjectQLEngine {
             // rides a server-DERIVED context (set here, never from client input
             // — same trust model as `__expandRead`), so it cannot be forged from
             // a request to bypass the guard on an ordinary write.
-            const referentialCtx = { ...(context ?? {}), __referentialFieldClear: true } as ExecutionContextInput;
+            const referentialCtx = { ...(context ?? {}), __referentialFieldClear: true } as ExecutionContext;
             await this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx } as any);
           }
         }
@@ -7320,10 +7396,24 @@ export class ObjectQL implements IObjectQLEngine {
  * and convenience aliases (create, updateById, deleteById) matching
  * the @objectql/core ObjectRepository API.
  */
-export class ObjectRepository {
+/**
+ * A repository bound to one object and one execution context — what
+ * `ScopedContext.object(name)` returns, and what a hook reaches as
+ * `ctx.api.object(name)`.
+ *
+ * `implements IScopedObjectRepository` (#5945): the six members that contract
+ * declares are the ones the documentation corpus is measured to CALL, and the
+ * `implements` clause is what keeps the two from drifting — before it, the
+ * only descriptions of this face were the private slices each consumer
+ * hand-rolled (`type CrossObjectApi = …`), which nothing checked. The class
+ * stays WIDER than the contract on purpose (`create`, `delete`, `deleteById`,
+ * `aggregate`, `execute`); `implements` allows that, and those members join the
+ * contract when a call site turns up to justify them.
+ */
+export class ObjectRepository implements IScopedObjectRepository {
   constructor(
     private objectName: string,
-    private context: ExecutionContextInput,
+    private context: ExecutionContext,
     private engine: IDataEngine & { executeAction?: (o: string, a: string, c: any) => Promise<any> }
   ) {}
 
@@ -7413,14 +7503,20 @@ export class ObjectRepository {
 
 /**
  * Scoped execution context with object() accessor.
- * 
+ *
  * Provides identity (userId, tenantId/spaceId, roles),
  * repository access via object(), privilege escalation via sudo(),
  * and transactional execution via transaction().
+ *
+ * `implements IScopedContext` (#5945) — this class IS `HookContext.api`, built
+ * per dispatch by {@link ObjectQL.buildHookApi}. The contract declares the two
+ * members hooks reach (`object`, `transaction`); `sudo()`, the discrete
+ * begin/commit/rollback trio and the identity getters stay off it, so this
+ * class is deliberately wider than what it implements.
  */
-export class ScopedContext {
+export class ScopedContext implements IScopedContext {
   constructor(
-    private executionContext: ExecutionContextInput,
+    private executionContext: ExecutionContext,
     private engine: IDataEngine
   ) {}
 
@@ -7450,22 +7546,83 @@ export class ScopedContext {
    * Carries BOTH of `ObjectQL.transaction`'s declared caveats (ADR-0119 D1) —
    * default-datasource-only, and a silent degrade when that driver has no
    * `beginTransaction` — because it is a second implementation of the same
-   * thing, reached from `ctx.api.transaction(fn)` in sandboxed hook and action
-   * bodies. Behaviour is unchanged, and so is the split: since #4619 both
-   * caveats report through the SAME engine-side helpers the engine's own
-   * `transaction()` uses, so the sandbox surface is no quieter than the direct
-   * one and "say it once" holds across both.
+   * thing, reached from `ctx.api.transaction(fn)` in hook and action bodies.
+   * Behaviour is unchanged, and so is the split: since #4619 both caveats
+   * report through the SAME engine-side helpers the engine's own
+   * `transaction()` uses, so this surface is no quieter than the direct one and
+   * "say it once" holds across both.
    *
    * `opts.require` and the callback's `owned` argument (#5696) are honoured
    * here for the same reason: a second implementation of one primitive must not
    * become a second DIALECT of it. A hook body that fails closed through
    * `ctx.api.transaction` gets the same refusal the engine's own surface gives.
+   *
+   * And so, since #6168, is the **ADR-0067 D2 join** — the first thing this
+   * method does, exactly as on the engine surface. It was the one point where
+   * the second implementation still diverged, and it diverged in the direction
+   * that costs the most: a hook triggered from inside an `engine.transaction()`
+   * that called `ctx.api.transaction(fn)` opened a SECOND driver transaction,
+   * which (a) takes a second connection — the deadlock D2 exists to avoid on a
+   * single-connection pool like SQLite's — and (b) committed itself, so its
+   * writes SURVIVED the outer rollback. D2's whole point is that the outermost
+   * caller owns the one-and-only commit/rollback for every write made through
+   * nested helpers. The `owned` signal was already honest about this
+   * (`true` every time, because this surface really did always open); what was
+   * wrong is the behaviour it was honestly describing.
+   *
+   * DECLARED LIMIT, so the next reader does not mistake it for the same
+   * oversight: the join reads the engine's ambient `txStore` only. The discrete
+   * `beginTransaction`/`commit`/`rollback` trio below deliberately does not
+   * populate that store (its handle is threaded explicitly across
+   * `setImmediate` boundaries where AsyncLocalStorage does not survive), so a
+   * trio-held handle is invisible here and is NOT joined — which is what keeps
+   * this branch from mistaking an explicitly-threaded handle for an ambient
+   * one. The QuickJS sandbox drives `ctx.api.transaction(fn)` through that trio
+   * rather than through this method, so a VM-side body is outside this join;
+   * unattributable handles are the same surface #6167 tracks, and closing that
+   * needs handle ownership to become discoverable on `IDataDriver`.
    */
   async transaction(
     callback: (trxCtx: ScopedContext, info: EngineTransactionInfo) => Promise<any>,
     opts?: EngineTransactionOptions,
   ): Promise<any> {
     const engine = this.engine as any;
+    // The engine's ambient transaction store (ADR-0034), reached the `as any`
+    // way this whole class reaches engine internals. One accessor serves both
+    // readers below: the D2 join, and the `run` that publishes a transaction
+    // this call opens.
+    const txStore = engine?.txStore as
+      | {
+          getStore(): { transaction: unknown } | undefined;
+          run<R>(s: { transaction: unknown; scope?: unknown }, fn: () => R): R;
+        }
+      | undefined;
+
+    // ADR-0067 D2 — JOIN an already-open ambient transaction instead of opening
+    // a nested driver one (#6168). Same first move, same reasons and the same
+    // shape as `ObjectQL.transaction`: a nested begin would take a second
+    // connection AND would not be covered by the outer rollback, so the outer
+    // caller would stop owning the one-and-only commit/rollback.
+    //
+    // BEFORE the driver/`require` handling on purpose, mirroring the engine:
+    // when there is an ambient transaction there IS a transaction, so
+    // `require: true` is satisfied by joining it and the degrade is not
+    // reachable.
+    const ambient = txStore?.getStore();
+    if (ambient?.transaction) {
+      // The handle is threaded EXPLICITLY into the child context, not left to
+      // the ambient store, for the same reason the engine surface threads it:
+      // `buildDriverOptions` prefers the explicit handle, and it survives async
+      // boundaries the store does not. It is identity-equal to the store's
+      // handle, so `transactionCoversDriverFor` still attributes it to the
+      // OUTER owner and the #5351 same-origin gate judges it unchanged.
+      const joinedCtx = new ScopedContext(
+        { ...this.executionContext, transaction: ambient.transaction },
+        this.engine
+      );
+      // JOINED, not owned: the outer caller decides commit vs rollback (#5696).
+      return callback(joinedCtx, { owned: false });
+    }
 
     // Find the default driver for transaction support
     const driver = engine.defaultDriver
@@ -7490,21 +7647,19 @@ export class ScopedContext {
       { ...this.executionContext, transaction: trx },
       this.engine
     );
-    // Share the engine's ambient transaction store so internal queries during
-    // writes reuse this transaction's connection (ADR-0034). The store entry
-    // also carries WHICH driver owns the transaction (#4619) so the write path
-    // can report a write routed off it; `newTransactionScope` is the engine's,
+    // Publish this transaction into the engine's ambient store so internal
+    // queries during writes reuse its connection (ADR-0034) — and so a nested
+    // `transaction()` on either surface can JOIN it. The store entry also
+    // carries WHICH driver owns the transaction (#4619) so the write path can
+    // report a write routed off it; `newTransactionScope` is the engine's,
     // reached the same `as any` way as `txStore` itself.
-    const txStore = (this.engine as any)?.txStore as
-      | { run<R>(s: { transaction: unknown; scope?: unknown }, fn: () => R): R }
-      | undefined;
     const scope = engine.newTransactionScope?.(driver);
     const runIn = <R>(fn: () => Promise<R>): Promise<R> =>
       txStore ? txStore.run({ transaction: trx, scope }, fn) : fn();
 
     try {
-      // This surface always OPENS (it has no ADR-0067 D2 join branch of its
-      // own), so a callback that reaches here owns the outcome.
+      // Reached only with no ambient transaction to join, so this call really
+      // did open one and the callback owns the outcome (#5696 / #6168).
       const result = await runIn(() => callback(trxCtx, { owned: true }));
       if (driver.commit) await driver.commit(trx);
       else if (driver.commitTransaction) await driver.commitTransaction(trx);

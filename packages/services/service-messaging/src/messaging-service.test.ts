@@ -592,3 +592,204 @@ describe('MessagingService — inbox read API (ADR-0030)', () => {
         expect(await svc.listInbox('')).toEqual({ notifications: [], unreadCount: 0 });
     });
 });
+
+/**
+ * `n` inbox rows for one user, oldest first. `created_at` carries a padded
+ * millisecond index so the fake engine's lexicographic `desc` sort is the real
+ * newest-first order for any `n` — the window tests below all depend on
+ * knowing exactly WHICH rows a truncated window holds.
+ */
+function seedInbox(
+    userId: string,
+    n: number,
+    topicAt: (i: number) => string = () => 'task.assigned',
+): Array<Record<string, unknown>> {
+    return Array.from({ length: n }, (_, i) => ({
+        id: `m${i + 1}`,
+        user_id: userId,
+        notification_id: `n${i + 1}`,
+        topic: topicAt(i),
+        title: `Notification ${i + 1}`,
+        body_md: 'body',
+        created_at: `2026-01-01T00:00:00.${String(i).padStart(3, '0')}Z`,
+    }));
+}
+
+/** An inbox receipt in a read state, for the message `seedInbox` numbered `i`. */
+function readReceipt(userId: string, i: number): Record<string, unknown> {
+    return { id: `r${i}`, notification_id: `n${i}`, user_id: userId, channel: 'inbox', state: 'read' };
+}
+
+/**
+ * Record every `find` an existing engine is asked to run, in order. Wraps the
+ * double rather than declaring another one: the cost claims below are about how
+ * many reads `listInbox` issues, which is only observable at the call site.
+ */
+function recordFinds(engine: any): Array<{ object: string; query: any }> {
+    const calls: Array<{ object: string; query: any }> = [];
+    const real = engine.find.bind(engine);
+    engine.find = async (object: string, query: any = {}) => {
+        calls.push({ object, query });
+        return real(object, query);
+    };
+    return calls;
+}
+
+/**
+ * [#6363] `ListNotificationsResponseSchema.unreadCount` is published into the
+ * API reference as "Total number of unread notifications". It was counted
+ * inside `rows.map(...)`, i.e. over the `limit`-truncated window, so the badge
+ * saturated at the window size forever: measured on a real stack with 60
+ * unread, the route answered `unreadCount: 50` unfiltered and `10` at
+ * `?limit=10`. Maintainer ruling (2026-08-07, Option A): make the declaration
+ * true — count the total — and leave the list itself windowed.
+ *
+ * The fixtures below are the issue's measured shape (60 unread, `limit=10`).
+ */
+describe('[#6363] listInbox — unreadCount is the TOTAL unread, not the fetched window', () => {
+    const logger = silentLogger();
+
+    it('counts every unread message when the window truncates the inbox', async () => {
+        const engine = inboxEngine({ inbox: seedInbox('u1', 60) });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        // No `limit`: the default clamp windows the LIST at 50 — unchanged.
+        const unfiltered = await svc.listInbox('u1');
+        expect(unfiltered.notifications).toHaveLength(50);
+        expect(unfiltered.unreadCount).toBe(60); // was 50 — the window's size
+
+        // `?limit=10`: the list shrinks with the window, the badge does not.
+        const windowed = await svc.listInbox('u1', { limit: 10 });
+        expect(windowed.notifications).toHaveLength(10);
+        expect(windowed.unreadCount).toBe(60); // was 10 — the window's size
+    });
+
+    it('subtracts read-state across the whole inbox, not just inside the window', async () => {
+        // The 20 read messages are the OLDEST, so none of them is inside a
+        // newest-first `limit=10` window: a window-scoped count cannot see
+        // them, and a total that ignored receipts would answer 60.
+        const engine = inboxEngine({
+            inbox: seedInbox('u1', 60),
+            receipts: Array.from({ length: 20 }, (_, i) => readReceipt('u1', i + 1)),
+        });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const res = await svc.listInbox('u1', { limit: 10 });
+        expect(res.notifications).toHaveLength(10);
+        expect(res.notifications.every((n) => n.read === false)).toBe(true); // window is all-unread
+        expect(res.unreadCount).toBe(40);
+    });
+
+    it('counts rows carrying no notification_id — never receipted, so never read', async () => {
+        const inbox = seedInbox('u1', 60);
+        // A synthetic/legacy row with no event id keys no receipt at all.
+        for (const row of inbox.slice(0, 5)) row.notification_id = null;
+        const engine = inboxEngine({ inbox });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect((await svc.listInbox('u1', { limit: 10 })).unreadCount).toBe(60);
+    });
+
+    it('answers the `type` filter it was asked, over the whole inbox', async () => {
+        // 60 messages alternating between two topics ⇒ 30 of each.
+        const engine = inboxEngine({
+            inbox: seedInbox('u1', 60, (i) => (i % 2 === 0 ? 'deal.won' : 'task.assigned')),
+        });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const res = await svc.listInbox('u1', { type: 'deal.won', limit: 10 });
+        expect(res.notifications).toHaveLength(10);
+        expect(res.notifications.every((n) => n.type === 'deal.won')).toBe(true);
+        expect(res.unreadCount).toBe(30);
+    });
+
+    it('counts only the addressed user, at any window size', async () => {
+        const engine = inboxEngine({ inbox: [...seedInbox('u1', 60), ...seedInbox('u2', 7)] });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect((await svc.listInbox('u1', { limit: 10 })).unreadCount).toBe(60);
+        expect((await svc.listInbox('u2', { limit: 10 })).unreadCount).toBe(7);
+    });
+
+    it('the `read` filter narrows the list and never the badge', async () => {
+        const engine = inboxEngine({
+            inbox: seedInbox('u1', 60),
+            receipts: Array.from({ length: 20 }, (_, i) => readReceipt('u1', i + 1)),
+        });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        // Asking for the READ half does not mean the unread badge is zero.
+        const readOnly = await svc.listInbox('u1', { read: true, limit: 10 });
+        expect(readOnly.notifications).toEqual([]); // the newest 10 are all unread
+        expect(readOnly.unreadCount).toBe(40);
+
+        const unreadOnly = await svc.listInbox('u1', { read: false, limit: 10 });
+        expect(unreadOnly.notifications).toHaveLength(10);
+        expect(unreadOnly.unreadCount).toBe(40);
+    });
+
+    it('a window that came back SHORT costs no second read', async () => {
+        // Nothing was truncated, so the window count already IS the total and
+        // the reverse join would re-read what the first `find` returned.
+        const engine = inboxEngine({ inbox: seedInbox('u1', 3) });
+        const calls = recordFinds(engine);
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const res = await svc.listInbox('u1');
+        expect(res.unreadCount).toBe(3);
+        expect(calls.filter((c) => c.object === 'sys_inbox_message')).toHaveLength(1);
+    });
+
+    it('the total read is one narrow projection, unwindowed, over the same predicate', async () => {
+        const engine = inboxEngine({ inbox: seedInbox('u1', 60) });
+        const calls = recordFinds(engine);
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        await svc.listInbox('u1', { type: 'task.assigned', limit: 10 });
+
+        const inboxReads = calls.filter((c) => c.object === 'sys_inbox_message');
+        expect(inboxReads).toHaveLength(2);
+        const [windowRead, totalRead] = inboxReads;
+        expect(windowRead.query.limit).toBe(10);
+        // Same predicate as the windowed read — the count answers the same
+        // question, minus the window — and one column, so the extra work stays
+        // the same order as the receipt scan `listInbox` already performs.
+        expect(totalRead.query.where).toEqual(windowRead.query.where);
+        expect(totalRead.query.limit).toBeUndefined();
+        expect(totalRead.query.fields).toEqual(['notification_id']);
+    });
+
+    it('a failing total read is NOT swallowed into a window-sized answer', async () => {
+        // The receipt read degrades (different object, may be absent from a
+        // minimal stack); this one re-reads the object whose `find` just
+        // succeeded, so a failure is a data-layer outage — not a licence to
+        // quietly re-tell the window-sized lie.
+        const engine = inboxEngine({ inbox: seedInbox('u1', 60) });
+        const real = engine.find.bind(engine);
+        engine.find = async (object: string, query: any = {}) => {
+            if (object === 'sys_inbox_message' && query.fields) throw new Error('connection lost');
+            return real(object, query);
+        };
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        await expect(svc.listInbox('u1', { limit: 10 })).rejects.toThrow('connection lost');
+    });
+
+    /* ------------------------------------------------------------------ */
+    /*  The other half of the ruling: the LIST window is unchanged.        */
+    /* ------------------------------------------------------------------ */
+
+    it('the list keeps its window: default 50, hard cap 200, floor 1, newest first', async () => {
+        const engine = inboxEngine({ inbox: seedInbox('u1', 250) });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const dflt = await svc.listInbox('u1');
+        expect(dflt.notifications).toHaveLength(50);
+        expect(dflt.notifications[0].id).toBe('n250'); // newest first, still
+        expect(dflt.unreadCount).toBe(250);
+
+        expect((await svc.listInbox('u1', { limit: 500 })).notifications).toHaveLength(200);
+        expect((await svc.listInbox('u1', { limit: 0 })).notifications).toHaveLength(1);
+        expect((await svc.listInbox('u1', { limit: 120 })).notifications).toHaveLength(120);
+    });
+});

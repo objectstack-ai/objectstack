@@ -40,7 +40,7 @@ import type {
   MetadataValidationResult,
   MetadataBulkResult,
   MetadataDependency,
-  MetadataTypeRegistryEntry,
+  MetadataTypeRegistryEntryParsed,
 } from '@objectstack/spec/kernel';
 import type { MetadataOverlay } from '@objectstack/spec/kernel';
 import { getMetadataTypeActions } from '@objectstack/spec/kernel';
@@ -279,7 +279,7 @@ export class MetadataManager implements IMetadataService {
   private overlays = new Map<string, MetadataOverlay>();
 
   // Type registry for metadata type info
-  private typeRegistry: MetadataTypeRegistryEntry[] = [];
+  private typeRegistry: MetadataTypeRegistryEntryParsed[] = [];
 
   // Dependency tracking: "type:name" -> dependencies
   private dependencies = new Map<string, MetadataDependency[]>();
@@ -512,7 +512,7 @@ export class MetadataManager implements IMetadataService {
   /**
    * Set the type registry for metadata type discovery.
    */
-  setTypeRegistry(entries: MetadataTypeRegistryEntry[]): void {
+  setTypeRegistry(entries: MetadataTypeRegistryEntryParsed[]): void {
     this.typeRegistry = entries;
   }
 

@@ -121,6 +121,15 @@ export interface InjectedSystemColumnPlan {
  * ownership tier inherits `owner_id` by accident, which for a unit-owned tier
  * is the exact inverse of what it means.
  *
+ * ⚠️ The `ownership: 'business_unit'` row is implemented here AHEAD of the
+ * acceptance surface: `ObjectSchema`'s `ownership` enum is still
+ * `'user' | 'org' | 'none'`, so that value cannot be authored today and is
+ * deliberately rejected (the enum member is #5678). The row exists so the tier's
+ * first appearance is judged by D1's table rather than by a deny-list default —
+ * it is not a claim that the tier is available. This function is deliberately
+ * typed on `string` rather than the enum for exactly that reason; see the
+ * `ownership` read below.
+ *
  * @param def An object definition, or any bare record shaped like one.
  */
 export function resolveInjectedSystemColumns(def: unknown): InjectedSystemColumnPlan {

@@ -2,7 +2,7 @@
 
 import type { 
   PluginHealthStatus, 
-  PluginHealthCheck, 
+  PluginHealthCheckParsed, 
   PluginHealthReport 
 } from '@objectstack/spec/kernel';
 import type { ObjectLogger } from './logger.js';
@@ -16,7 +16,7 @@ import type { Plugin } from './types.js';
  */
 export class PluginHealthMonitor {
   private logger: ObjectLogger;
-  private healthChecks = new Map<string, PluginHealthCheck>();
+  private healthChecks = new Map<string, PluginHealthCheckParsed>();
   private healthStatus = new Map<string, PluginHealthStatus>();
   private healthReports = new Map<string, PluginHealthReport>();
   private checkIntervals = new Map<string, NodeJS.Timeout>();
@@ -31,7 +31,7 @@ export class PluginHealthMonitor {
   /**
    * Register a plugin for health monitoring
    */
-  registerPlugin(pluginName: string, config: PluginHealthCheck): void {
+  registerPlugin(pluginName: string, config: PluginHealthCheckParsed): void {
     this.healthChecks.set(pluginName, config);
     this.healthStatus.set(pluginName, 'unknown');
     this.failureCounters.set(pluginName, 0);
@@ -97,7 +97,7 @@ export class PluginHealthMonitor {
   private async performHealthCheck(
     pluginName: string,
     plugin: Plugin,
-    config: PluginHealthCheck
+    config: PluginHealthCheckParsed
   ): Promise<void> {
     const startTime = Date.now();
     let status: PluginHealthStatus = 'healthy';
@@ -201,7 +201,7 @@ export class PluginHealthMonitor {
   private async attemptRestart(
     pluginName: string,
     plugin: Plugin,
-    config: PluginHealthCheck
+    config: PluginHealthCheckParsed
   ): Promise<void> {
     const attempts = this.restartAttempts.get(pluginName) || 0;
     

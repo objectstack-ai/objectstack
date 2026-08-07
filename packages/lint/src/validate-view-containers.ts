@@ -3,17 +3,34 @@
 // Build-time guardrail for the `defineView` container shape.
 //
 // A pure `(stack) => Finding[]` rule (ADR-0019), run from `os validate`. It
-// catches the "flat view object" authoring mistake the schema alone cannot
-// surface: `ViewSchema` is a container (`{ list, form, listViews, formViews }`)
-// whose slots are all optional, and Zod strips unknown keys — so a flat list
-// view (`{ name: 'all_tasks', label, type: 'grid', columns: [...] }`) parses
-// to an EMPTY container. The stack validates, the loader finds nothing to
+// catches the container that registers ZERO views: `ViewSchema` is a container
+// (`{ list, form, listViews, formViews }`) whose slots are all optional, so a
+// container with none of them set is schema-valid, the loader finds nothing to
 // expand, and the Console silently renders no view (no switcher entry). The
 // third-party 15.1 evaluation hit exactly this via the old docs.
 //
-// Runs PRE-parse (on the normalizeStackInput output, before the
-// ObjectStackDefinition parse): post-parse the flat keys are already stripped
-// and the mistake is indistinguishable from an intentionally empty container.
+// ## The flat-list-view arm is now the SCHEMA's verdict, not this rule's (#6073)
+//
+// This header used to say `ViewSchema` "strips unknown keys — so a flat list
+// view (`{ name: 'all_tasks', label, type: 'grid', columns: [...] }`) parses to
+// an EMPTY container", and that the rule therefore had to run pre-parse.
+// Measured false at #6073: `ViewSchema` went `.strict()` at #4001. `defineStack`
+// now THROWS on that shape, naming `type` / `data` / `columns` and printing the
+// wrap-it-in-defineView fix; `os lint` and `os validate` on an example app
+// carrying it both refuse the config at LOAD, before any rule runs. `defineView`
+// refuses it a step earlier still (`view.zod.ts:1951`, viewCount === 0).
+//
+// So `input: 'normalized'` in the registry means "this rule needs no PARSED
+// stack" — which is what lets `os lint` (which never parses) run it, and what
+// keeps its findings alive when an unrelated schema error stops the parse. It
+// does NOT mean the rule is the only thing standing between the author and the
+// flat-view mistake; the schema is, and it says it better.
+//
+// The `looksFlat` branch below is kept deliberately: it still fires on the
+// non-`defineStack` doors the strict parse never sees — `os lint` on a raw
+// object-literal config (measured: reports `view-container-shape` where
+// `os validate` stops at the schema step), `defineStack(x, { strict: false })`,
+// and direct API callers.
 //
 // Independent ViewItems (`viewKind` + `config`) are legal `views: []` entries
 // (the loader registers them as-is) and are not flagged.

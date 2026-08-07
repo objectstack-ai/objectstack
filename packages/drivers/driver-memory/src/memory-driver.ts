@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { QueryAST, QueryInput, DriverOptions } from '@objectstack/spec/data';
+import type { DriverOptions } from '@objectstack/spec/data';
 import { canonicalAstOperator } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
@@ -609,7 +609,7 @@ export class InMemoryDriver implements IDataDriver {
   /**
    * Get distinct values for a field, optionally filtered.
    */
-  async distinct(object: string, field: string, query?: QueryInput): Promise<any[]> {
+  async distinct(object: string, field: string, query?: DriverQuery): Promise<any[]> {
     let records = this.getTable(object);
     if (query?.where) {
       const mongoQuery = this.convertToMongoQuery(query.where, object);
@@ -650,16 +650,21 @@ export class InMemoryDriver implements IDataDriver {
    *   { $group: { _id: null, avgPrice: { $avg: '$price' } } }
    * ]);
    */
-  async aggregate(object: string, pipeline: Record<string, any>[] | QueryAST, options?: DriverOptions): Promise<any[]> {
+  async aggregate(object: string, pipeline: Record<string, any>[] | DriverQuery, options?: DriverOptions): Promise<any[]> {
     // ObjectQL's engine calls driver.aggregate(object, AST) with the SAME
-    // QueryAST shape find() consumes ({ where, groupBy, aggregations }) — not a
-    // MongoDB pipeline. Passing that object into Mingo's Aggregator crashed
+    // DriverQuery shape find() consumes ({ where, groupBy, aggregations }) — not
+    // a MongoDB pipeline. Passing that object into Mingo's Aggregator crashed
     // with "this[#pipeline].map is not a function" (the analytics fallback path
     // on in-memory environments). Detect the AST shape and serve it through the
     // SAME filtering + performAggregation path find() uses; a real pipeline
     // array keeps the Mingo behavior unchanged.
+    //
+    // BOTH arms of the union have live producers, so neither may be retired:
+    // the pipeline arm is fed by `memory-analytics.ts` (`this.driver.aggregate(
+    // tableName, pipeline)`), the AST arm by objectql's engine and
+    // `@objectstack/verify`'s date-bucket parity probe.
     if (!Array.isArray(pipeline)) {
-      const query = pipeline as QueryAST;
+      const query = pipeline;
       this.logger.debug('Aggregate operation (QueryAST)', {
         object,
         groupBy: (query as any).groupBy,
@@ -1035,7 +1040,7 @@ export class InMemoryDriver implements IDataDriver {
   // Aggregation Logic
   // ===================================
 
-  private performAggregation(records: any[], query: Omit<QueryInput, 'object'>): any[] {
+  private performAggregation(records: any[], query: DriverQuery): any[] {
     const { groupBy, aggregations } = query;
     const groups: Map<string, any[]> = new Map();
 

@@ -472,26 +472,26 @@ export const AdvancedPluginLifecycleConfigSchema = lazySchema(() => z.object({
 }));
 
 // Export types
-export type PluginHealthStatus = z.infer<typeof PluginHealthStatusSchema>;
-export type PluginHealthCheck = z.infer<typeof PluginHealthCheckSchema>;
+export type PluginHealthStatus = z.input<typeof PluginHealthStatusSchema>;
+export type PluginHealthCheck = z.input<typeof PluginHealthCheckSchema>;
 /** Post-parse shape of {@link PluginHealthCheck} — defaults applied, transforms run (ADR-0122). */
 export type PluginHealthCheckParsed = z.infer<typeof PluginHealthCheckSchema>;
-export type PluginHealthReport = z.infer<typeof PluginHealthReportSchema>;
-export type DistributedStateConfig = z.infer<typeof DistributedStateConfigSchema>;
+export type PluginHealthReport = z.input<typeof PluginHealthReportSchema>;
+export type DistributedStateConfig = z.input<typeof DistributedStateConfigSchema>;
 /** Post-parse shape of {@link DistributedStateConfig} — defaults applied, transforms run (ADR-0122). */
 export type DistributedStateConfigParsed = z.infer<typeof DistributedStateConfigSchema>;
-export type HotReloadConfig = z.infer<typeof HotReloadConfigSchema>;
+export type HotReloadConfig = z.input<typeof HotReloadConfigSchema>;
 /** Post-parse shape of {@link HotReloadConfig} — defaults applied, transforms run (ADR-0122). */
 export type HotReloadConfigParsed = z.infer<typeof HotReloadConfigSchema>;
-export type GracefulDegradation = z.infer<typeof GracefulDegradationSchema>;
+export type GracefulDegradation = z.input<typeof GracefulDegradationSchema>;
 /** Post-parse shape of {@link GracefulDegradation} — defaults applied, transforms run (ADR-0122). */
 export type GracefulDegradationParsed = z.infer<typeof GracefulDegradationSchema>;
-export type PluginUpdateStrategy = z.infer<typeof PluginUpdateStrategySchema>;
+export type PluginUpdateStrategy = z.input<typeof PluginUpdateStrategySchema>;
 /** Post-parse shape of {@link PluginUpdateStrategy} — defaults applied, transforms run (ADR-0122). */
 export type PluginUpdateStrategyParsed = z.infer<typeof PluginUpdateStrategySchema>;
-export type PluginStateSnapshot = z.infer<typeof PluginStateSnapshotSchema>;
+export type PluginStateSnapshot = z.input<typeof PluginStateSnapshotSchema>;
 /** Post-parse shape of {@link PluginStateSnapshot} — defaults applied, transforms run (ADR-0122). */
 export type PluginStateSnapshotParsed = z.infer<typeof PluginStateSnapshotSchema>;
-export type AdvancedPluginLifecycleConfig = z.infer<typeof AdvancedPluginLifecycleConfigSchema>;
+export type AdvancedPluginLifecycleConfig = z.input<typeof AdvancedPluginLifecycleConfigSchema>;
 /** Post-parse shape of {@link AdvancedPluginLifecycleConfig} — defaults applied, transforms run (ADR-0122). */
 export type AdvancedPluginLifecycleConfigParsed = z.infer<typeof AdvancedPluginLifecycleConfigSchema>;

@@ -289,32 +289,90 @@ const stampedFields = {
 
 describe('stripReadonlyFields (#2948)', () => {
   it('drops a caller-supplied write to a static readonly field', () => {
-    const supplied = new Set(['title', 'created_by']);
-    const out = stripReadonlyFields(stampedFields, { title: 'x', created_by: 'attacker' }, supplied);
+    const supplied = { title: 'x', created_by: 'attacker' };
+    const out = stripReadonlyFields(stampedFields, { ...supplied }, supplied);
     expect(out).toEqual({ title: 'x' });
   });
 
   it('KEEPS a readonly field the caller did NOT supply (server stamp survives)', () => {
     // `updated_by` was written into `data` by the audit-stamp hook, not the
     // caller — it must not be stripped.
-    const supplied = new Set(['title']);
+    const supplied = { title: 'x' };
     const out = stripReadonlyFields(stampedFields, { title: 'x', updated_by: 'u1' }, supplied);
     expect(out).toEqual({ title: 'x', updated_by: 'u1' });
   });
 
   it('returns the SAME object when nothing is stripped', () => {
     const d = { title: 'x' };
-    expect(stripReadonlyFields(stampedFields, d, new Set(['title']))).toBe(d);
+    expect(stripReadonlyFields(stampedFields, d, { title: 'x' })).toBe(d);
   });
 
   it('drops a caller-forged readonly field even when it also carries a server stamp key', () => {
-    const supplied = new Set(['title', 'created_by']);
+    const supplied = { title: 'x', created_by: 'attacker' };
     const out = stripReadonlyFields(
       stampedFields,
       { title: 'x', created_by: 'attacker', updated_by: 'u1' },
       supplied,
     );
     expect(out).toEqual({ title: 'x', updated_by: 'u1' });
+  });
+});
+
+// #5591 — the strip must delete the value the CALLER SUBMITTED, never the value
+// that happens to sit on the key when the strip runs. The strip executes after
+// `beforeUpdate`, so those two differ exactly when a hook overwrote a key the
+// caller had also named — which is what silently deleted hook-written publish
+// timestamps on whole-record write-backs (hotcrm#788).
+describe('stripReadonlyFields — supplied VALUE identity, not just key presence (#5591)', () => {
+  it('KEEPS a readonly key a hook OVERWROTE, even though the caller supplied it', () => {
+    // The caller echoed `created_by` back; a beforeUpdate hook then wrote its
+    // own value over it. What is on the key now is a PLATFORM write.
+    const supplied = { title: 'x', created_by: 'attacker' };
+    const afterHooks = { title: 'x', created_by: 'hook-resolved-owner' };
+    const out = stripReadonlyFields(stampedFields, afterHooks, supplied);
+    expect(out).toEqual({ title: 'x', created_by: 'hook-resolved-owner' });
+    expect(out).toBe(afterHooks); // nothing dropped ⇒ same reference
+  });
+
+  it('STILL drops it when the hook wrote the caller value back unchanged', () => {
+    // Identity is the whole test: an unchanged value is indistinguishable from
+    // "no hook touched it", and the fail-safe direction is to strip.
+    const supplied = { created_by: 'attacker' };
+    const out = stripReadonlyFields(stampedFields, { created_by: 'attacker' }, supplied);
+    expect(out).toEqual({});
+  });
+
+  it('drops a caller-forged NaN — `Object.is`, not `===`', () => {
+    // `===` reports NaN !== NaN, which would read a forged NaN as "a hook
+    // rewrote this" and KEEP it. The one input where the loose operator
+    // inverts the verdict, so it is pinned rather than left to a reviewer.
+    const numeric = { fields: { score: { type: 'number', readonly: true } } };
+    const supplied = { score: Number.NaN };
+    const out = stripReadonlyFields(numeric, { score: Number.NaN }, supplied);
+    expect(out).toEqual({});
+  });
+
+  it('does not read an inherited `Object.prototype` key as caller-supplied', () => {
+    // `constructor` matches the machine-name regex, so it is a legal field
+    // name; `name in supplied` would be TRUE for it on any plain object and
+    // would strip a hook stamp. Own-property check, pinned.
+    const oddly = { fields: { constructor: { type: 'text', readonly: true } } };
+    const out = stripReadonlyFields(oddly, { constructor: 'hook-stamp' }, {});
+    expect(out).toEqual({ constructor: 'hook-stamp' });
+  });
+
+  it('KNOWN LIMIT: a hook that mutates a caller-supplied object IN PLACE is still stripped', () => {
+    // The snapshot is shallow, so an in-place mutation leaves identity
+    // unchanged and is invisible to any comparison short of a deep clone —
+    // which this path will not pay for on every write. Documented and pinned
+    // so the limit is a decision, not a surprise: a hook meaning to write a
+    // read-only column should ASSIGN to it.
+    const jsonish = { fields: { payload: { type: 'json', readonly: true } } };
+    const shared: Record<string, unknown> = { a: 1 };
+    const supplied = { payload: shared };
+    shared.a = 2; // the "hook" mutates in place — same reference
+    const out = stripReadonlyFields(jsonish, { payload: shared }, supplied);
+    expect(out).toEqual({});
   });
 });
 
@@ -337,22 +395,21 @@ const historicalFields = {
 
 describe('stripReadonlyFields — preserveAudit whitelist (#3493)', () => {
   it('KEEPS the caller-supplied audit/timestamp family under preserveAudit', () => {
-    const supplied = new Set(['created_at', 'created_by', 'updated_at', 'updated_by']);
     const data = {
       created_at: '2020-01-01T00:00:00Z',
       created_by: 'u_creator',
       updated_at: '2021-03-01T00:00:00Z',
       updated_by: 'u_old',
     };
-    const out = stripReadonlyFields(historicalFields, { ...data }, supplied, undefined, { preserveAudit: true });
+    const out = stripReadonlyFields(historicalFields, { ...data }, data, undefined, { preserveAudit: true });
     expect(out).toEqual(data);
   });
 
   it('KEEPS an author-declared business readonly field (closed_at) under preserveAudit', () => {
-    const supplied = new Set(['closed_at']);
+    const supplied = { closed_at: '2021-03-01T00:00:00Z' };
     const out = stripReadonlyFields(
       historicalFields,
-      { closed_at: '2021-03-01T00:00:00Z' },
+      { ...supplied },
       supplied,
       undefined,
       { preserveAudit: true },
@@ -361,10 +418,10 @@ describe('stripReadonlyFields — preserveAudit whitelist (#3493)', () => {
   });
 
   it('STILL strips a non-audit system column (organization_id) under preserveAudit — no tenancy backdoor', () => {
-    const supplied = new Set(['organization_id', 'closed_at']);
+    const supplied = { organization_id: 'org_forged', closed_at: '2021-03-01T00:00:00Z' };
     const out = stripReadonlyFields(
       historicalFields,
-      { organization_id: 'org_forged', closed_at: '2021-03-01T00:00:00Z' },
+      { ...supplied },
       supplied,
       undefined,
       { preserveAudit: true },
@@ -373,13 +430,12 @@ describe('stripReadonlyFields — preserveAudit whitelist (#3493)', () => {
   });
 
   it('strips the whole family as before when preserveAudit is NOT set (regression)', () => {
-    const supplied = new Set(['updated_at', 'closed_at', 'organization_id']);
-    const out = stripReadonlyFields(historicalFields, {
-      title: 'x',
+    const supplied = {
       updated_at: '2021-03-01T00:00:00Z',
       closed_at: '2021-03-01T00:00:00Z',
       organization_id: 'o1',
-    }, supplied);
+    };
+    const out = stripReadonlyFields(historicalFields, { title: 'x', ...supplied }, supplied);
     expect(out).toEqual({ title: 'x' });
   });
 });
@@ -414,31 +470,41 @@ describe('isRuntimeOwnedField (#5503)', () => {
 
 describe('stripReadonlyFields — implicit readonly on autonumber (#5503)', () => {
   it('drops a caller-supplied record number even with no `readonly: true` flag', () => {
-    const supplied = new Set(['title', 'account_number']);
-    const out = stripReadonlyFields(numberedFields, { title: 'x', account_number: 'ACC-888888' }, supplied);
+    const supplied = { title: 'x', account_number: 'ACC-888888' };
+    const out = stripReadonlyFields(numberedFields, { ...supplied }, supplied);
     expect(out).toEqual({ title: 'x' });
   });
 
   it('KEEPS a hook-stamped record number the caller did not supply', () => {
-    const supplied = new Set(['title']);
+    const supplied = { title: 'x' };
+    const out = stripReadonlyFields(numberedFields, { title: 'x', account_number: 'HOOK-1' }, supplied);
+    expect(out).toEqual({ title: 'x', account_number: 'HOOK-1' });
+  });
+
+  it('KEEPS a hook-REWRITTEN record number the caller DID supply (#5591)', () => {
+    // The #5503 limb read through the same key-only guard #5591 replaced, so
+    // it inherited the same defect: a hook that re-issues the record number
+    // lost its value to a caller that had echoed the old one back.
+    const supplied = { title: 'x', account_number: 'ACC-888888' };
     const out = stripReadonlyFields(numberedFields, { title: 'x', account_number: 'HOOK-1' }, supplied);
     expect(out).toEqual({ title: 'x', account_number: 'HOOK-1' });
   });
 
   it('KEEPS it under preserveAudit — a migration reinstates legacy record numbers', () => {
-    const supplied = new Set(['account_number']);
+    const supplied = { account_number: 'LEGACY-7' };
     const out = stripReadonlyFields(
-      numberedFields, { account_number: 'LEGACY-7' }, supplied, undefined, { preserveAudit: true },
+      numberedFields, { ...supplied }, supplied, undefined, { preserveAudit: true },
     );
     expect(out).toEqual({ account_number: 'LEGACY-7' });
   });
 
   it('logs the runtime-owned message, not the author-declared readonly one', () => {
     const warns: string[] = [];
+    const supplied = { account_number: 'ACC-888888', closed_at: '2021-01-01T00:00:00Z' };
     stripReadonlyFields(
       numberedFields,
-      { account_number: 'ACC-888888', closed_at: '2021-01-01T00:00:00Z' },
-      new Set(['account_number', 'closed_at']),
+      { ...supplied },
+      supplied,
       { warn: (m: string) => warns.push(m) } as any,
     );
     expect(warns).toHaveLength(2);

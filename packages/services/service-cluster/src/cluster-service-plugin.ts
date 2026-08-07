@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { IClusterService } from '@objectstack/spec/contracts';
-import type { ClusterCapabilityConfigInput } from '@objectstack/spec/kernel';
+import type { ClusterCapabilityConfig } from '@objectstack/spec/kernel';
 import { defineCluster } from './cluster.js';
 import { assertClusterDriverSafeForTopology } from './split-brain-guard.js';
 
@@ -18,7 +18,7 @@ export interface ClusterServicePluginOptions {
     /** Pre-built cluster service. Wins over `config` when both provided. */
     cluster?: IClusterService;
     /** Config forwarded to `defineCluster()` when `cluster` is absent. */
-    config?: ClusterCapabilityConfigInput;
+    config?: ClusterCapabilityConfig;
 }
 
 /**

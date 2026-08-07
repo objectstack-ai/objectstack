@@ -59,6 +59,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { mapDataError, RestServer } from './rest-server';
 
 const META_ITEM = '/api/v1/meta/:type/:name';
+const OBJ_BATCH = '/api/v1/data/:object/batch';
 
 /** The driver line a missing `sys_metadata` produces on each dialect. */
 const SQLITE_NO_TABLE = 'SQLITE_ERROR: no such table: sys_metadata';
@@ -409,25 +410,50 @@ describe('[#5462] a real unknown object is still 404 OBJECT_NOT_FOUND, still sil
 // `rest-4xx-message-truncation.test.ts`.
 
 describe('[#5462] the declared-status band is untouched', () => {
-    it('a declared 500 whose text says "no such table" keeps its 500 and its code', async () => {
+    // The specimen used to be `saveMetaItem`'s `OVERLAY_PERSISTENCE_FAILED`
+    // 500. #5264 deleted that producer and #5783 unregistered the code, so the
+    // case was pinning a `code` nothing could emit — a #4984-family phantom.
+    // Re-coded onto `batchData`'s atomic refusal, which is live
+    // (`metadata-protocol`'s `batchData`: `status = 501`, `code =
+    // 'NOT_IMPLEMENTED'`) and exercises this ordering harder than the old one
+    // did: it does not merely CONTAIN a heuristic trigger, it is re-labelled by
+    // the same last limb this file was written about — the message quotes the
+    // request's own object name and says "cannot", so `looksLikeUnknownObject`
+    // claims it. The `mapDataError` call below is that claim, measured, and it
+    // is what makes the route assertion non-vacuous.
+    it('a declared 5xx that the heuristic WOULD claim keeps its status and its code', async () => {
         const err = Object.assign(
-            new Error(`Failed to persist customization overlay to sys_metadata: ${SQLITE_NO_TABLE}.`),
-            { code: 'OVERLAY_PERSISTENCE_FAILED', status: 500 },
+            new Error(
+                `Atomic batch on 'showcase_account' requires engine transaction support; this runtime cannot roll back. `
+                + `Retry without options.atomic, or probe capabilities.transactionalBatch on /discovery first.`,
+            ),
+            { code: 'NOT_IMPLEMENTED', status: 501 },
         );
+
+        // Direction, established first: strip the declared status and this text
+        // IS an unknown-object verdict to `mapDataError`. That is the answer
+        // `resolveErrorResponse` has to get in front of.
+        const { status, code, ...rest501 } = err as any;
+        const fallThrough = mapDataError(Object.assign(new Error(err.message), rest501), 'showcase_account');
+        expect(fallThrough.status).toBe(404);
+        expect(fallThrough.body.code).toBe('OBJECT_NOT_FOUND');
+
         const rest = mountRest({
             getDiscovery: vi.fn().mockResolvedValue({
                 version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' },
             }),
             getMetaTypes: vi.fn().mockResolvedValue([]),
-            saveMetaItem: vi.fn().mockRejectedValue(err),
+            getMetaItems: vi.fn().mockResolvedValue([{ name: 'showcase_account' }]),
+            batchData: vi.fn().mockRejectedValue(err),
         });
 
-        const res = await callRoute(rest, 'PUT', META_ITEM, {
-            params: { type: 'object', name: 'showcase_account' }, body: { name: 'showcase_account' },
+        const res = await callRoute(rest, 'POST', OBJ_BATCH, {
+            params: { object: 'showcase_account' },
+            body: { operation: 'update', records: [{ id: 'r1', data: { name: 'r1' } }] },
         });
 
-        expect(res.statusCode).toBe(500);
-        expect(res.body.code).toBe('OVERLAY_PERSISTENCE_FAILED');
+        expect(res.statusCode).toBe(501);
+        expect(res.body.code).toBe('NOT_IMPLEMENTED');
         expect(res.body.error).toBe('Internal server error');
     }, 60_000);
 

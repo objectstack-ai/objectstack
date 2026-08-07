@@ -151,7 +151,7 @@ export const DocSchema = lazySchema(() => strictObject({
   // strict (#4001 findings log, entry 2).
   ...MetadataProtectionFields,
 }));
-export type Doc = z.infer<typeof DocSchema>;
+export type Doc = z.input<typeof DocSchema>;
 export type DocTranslation = NonNullable<Doc['translations']>[string];
 
 /**

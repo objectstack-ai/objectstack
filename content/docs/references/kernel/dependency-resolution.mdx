@@ -8,35 +8,22 @@ description: Dependency Resolution protocol schemas
 # Dependency Resolution Protocol
 
 Defines schemas for runtime dependency resolution when installing,
-
 upgrading, or managing packages. Provides a standardized way to
-
 express dependency conflicts, resolution results, and installation order.
 
 ## Architecture Alignment
-
 - **npm**: Dependency tree resolution with conflict detection
-
 - **Helm**: Dependency management with version constraints
-
 - **Salesforce**: Package dependency validation at install time
 
 ## Resolution Flow
-
 ```
-
 1. Parse manifest.dependencies (SemVer ranges)
-
 2. Check installed packages registry
-
 3. Resolve each dependency → satisfied | needs_install | needs_upgrade | conflict
-
 4. Detect circular dependencies
-
 5. Compute topological install order
-
 6. Return resolution result with required actions
-
 ```
 
 <Callout type="info">

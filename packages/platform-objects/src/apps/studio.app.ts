@@ -25,9 +25,9 @@
  * the box whenever the auth/security trio is loaded.
  */
 
-import type { AppInput } from '@objectstack/spec/ui';
+import type { App } from '@objectstack/spec/ui';
 
-export const STUDIO_APP: AppInput = {
+export const STUDIO_APP: App = {
   name: 'studio',
   label: 'Studio',
   description: 'Metadata workbench for developers, analysts, and implementers',

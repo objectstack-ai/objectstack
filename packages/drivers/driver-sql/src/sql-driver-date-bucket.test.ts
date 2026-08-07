@@ -140,13 +140,36 @@ describe('SqlDriver date bucket (dateGranularity)', () => {
   );
 
   describe('unsupported granularity', () => {
-    it('throws a loud error for week on SQLite (so engine routes to in-memory)', async () => {
-      await expect(
-        driver.aggregate('events', {
+    /**
+     * [#6212] The subject is unchanged — week is not bucketed in SQL on SQLite,
+     * so the engine must be pushed back to in-memory bucketing — but the refusal
+     * now carries a wire identity, so the assertion moved with it. It used to be
+     * `rejects.toThrow(/dateGranularity 'week' not supported/)`: a bare `Error`
+     * with `code`/`status` both `undefined`, which `mapDataError` served as an
+     * opaque 500 for a named capability gap. `code` and `status` are asserted
+     * here for the #6144 reason — the un-fixed driver threw for this input too,
+     * so a `toThrow()` alone was green before and after and could never see the
+     * defect. The remote face's twin, and the parity between them, live in
+     * driver-turso's `remote-transport-groupby-node.test.ts`.
+     */
+    it('refuses week on SQLite with NOT_IMPLEMENTED / 501 (so engine routes to in-memory)', async () => {
+      const err = await driver
+        .aggregate('events', {
           groupBy: [{ field: 'ts', dateGranularity: 'week' }],
           aggregations: [{ function: 'count', alias: 'n' }],
-        }),
-      ).rejects.toThrow(/dateGranularity 'week' not supported/);
+        })
+        .then(
+          () => { throw new Error('expected the driver to refuse week on SQLite'); },
+          (e) => e as Error & { code?: string; status?: number },
+        );
+
+      expect(err.code).toBe('NOT_IMPLEMENTED');
+      expect(err.status).toBe(501);
+      expect(err.message.startsWith("Date bucketing by 'week' is not supported by this backend.")).toBe(true);
+      // The message names what this dialect DOES bucket, so a reader is told
+      // where the boundary is rather than only that they crossed it.
+      expect(err.message).toContain('Bucketed here: day, month, quarter, year');
+      expect(err.message).toContain('supports.queryDateGranularity');
     });
   });
 

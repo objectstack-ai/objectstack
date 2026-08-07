@@ -31,6 +31,10 @@ import {
     SysMetadataAuditObject,
     SysViewDefinitionObject,
 } from '@objectstack/metadata-core';
+import {
+    ensureViewDefinitionActiveIndex,
+    resolveIndexExec,
+} from './migrations/view-definition-active-index.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 export interface MetadataProtocolPluginOptions {
@@ -126,6 +130,46 @@ export function assembleMetadataProtocol(
             );
             ctx.registerService('protocol', protocolShim);
             ctx.logger.info('Protocol service registered (MetadataProtocolPlugin)');
+
+            // #5839 — `sys_view_definition`'s "unique among ACTIVE rows" was
+            // never delivered by anything: the declaration's `partial` key was
+            // DDL-inert (and is now retired, #5248 / #4943), and unlike
+            // `sys_metadata` this table had no runtime migration behind it, so
+            // an archived view kept occupying its (name, organization_id,
+            // owner) slot and the user could not re-create a view they had
+            // just thrown away. Same paradigm as the protocol's own
+            // `ensureOverlayIndex`, armed from THIS assembly because this is
+            // the one seam both mounts share (MetadataProtocolPlugin's
+            // delegated mode AND ObjectQLPlugin's built-in
+            // `registerProtocol !== false` convenience mode) — a hook on the
+            // delegated plugin alone would miss the default mount entirely.
+            //
+            // Gated on `environmentId === undefined` for exactly the reason the
+            // registerApp block above is: per-project (cloud) kernels do not
+            // provision these tables locally, so there is no index of ours to
+            // tighten there.
+            //
+            // Deferred to `kernel:ready` because the table has to EXIST first —
+            // ObjectQLPlugin creates it in `start()` via `syncRegisteredSchemas`,
+            // which runs after every plugin's `init()`.
+            //
+            // Wrapped so it can NEVER fail a bootstrap: `kernel:ready` handlers
+            // propagate, and an index we could not tighten is not a reason to
+            // refuse to boot. (`ensureOverlayIndex` gets this by wrapping its
+            // whole body in a swallow-everything try/catch; the same guarantee,
+            // stated once here, keeps the migration itself readable.)
+            if (environmentId === undefined) {
+                (ctx as any)?.hook?.('kernel:ready', async () => {
+                    try {
+                        await ensureViewDefinitionActiveIndex(resolveIndexExec(ql), ctx.logger);
+                    } catch (e: unknown) {
+                        ctx.logger.warn(
+                            '[metadata-protocol] sys_view_definition active-row index migration skipped (#5839)',
+                            { error: e instanceof Error ? e.message : String(e) },
+                        );
+                    }
+                });
+            }
 
             // NO `analytics` fallback rides here anymore (#3891 / #3878). The
             // degraded shim this assembly used to register dropped the request's
