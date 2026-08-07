@@ -322,7 +322,11 @@ export function lowerRequiresFeature<T extends WithRequiresFeature>(
   if (requiresFeature === undefined) return rest as Omit<T, 'requiresFeature'>;
 
   const gate = featureGatePredicate(requiresFeature);
-  const existing = rest.visible;
+  // Annotated rather than inferred: `rest` is a generic `Omit<T, …>`, so
+  // `rest.visible` is a deferred indexed access that control flow cannot narrow
+  // — the `=== true` / `=== false` guards below would not strip the boolean arm
+  // off it, and the envelope spread at the end would not compile.
+  const existing: WithRequiresFeature['visible'] = rest.visible;
   // `true` is the explicit spelling of "no gate of my own" — same lowering as an
   // absent key. `false` can never be gated into visibility, so it is refused.
   if (existing === undefined || existing === true) {

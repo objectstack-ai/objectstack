@@ -370,7 +370,8 @@ describe('ActionSchema — visible/disabled unified condition shape', () => {
     // The authoring door the Studio form and `GET /api/v1/meta` go through —
     // a widening that stopped at the bare export would not reach an author.
     const schema = getMetadataTypeSchema('action');
-    expect(schema.safeParse({ ...base, visible: true, disabled: false }).success).toBe(true);
+    expect(schema, "the 'action' metadata type must resolve to a schema").toBeDefined();
+    expect(schema!.safeParse({ ...base, visible: true, disabled: false }).success).toBe(true);
   });
 });
 
