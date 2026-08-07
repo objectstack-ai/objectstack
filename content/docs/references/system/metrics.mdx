@@ -115,12 +115,35 @@ Metric definition
 | **name** | `string` | ✅ | Metric name (snake_case) |
 | **label** | `string` | optional | Display label |
 | **type** | `Enum<'counter' \| 'gauge' \| 'histogram' \| 'summary'>` | ✅ | Metric type |
-| **unit** | `Enum<'nanoseconds' \| 'microseconds' \| 'milliseconds' \| 'seconds' \| 'minutes' \| 'hours' \| 'days' \| 'bytes' \| 'kilobytes' \| 'megabytes' \| 'gigabytes' \| 'terabytes' \| 'requests_per_second' \| 'events_per_second' \| 'bytes_per_second' \| 'percent' \| 'ratio' \| 'count' \| 'operations' \| 'custom'>` | optional | Metric unit |
+| **unit** | `Enum<'nanoseconds' \| 'microseconds' \| 'milliseconds' \| 'seconds' \| 'minutes' \| 'hours' \| 'days' \| 'bytes' \| 'kilobytes' \| 'megabytes' \| 'gigabytes' \| 'terabytes' \| … +8 more>` | optional | Metric unit |
 | **description** | `string` | optional | Metric description |
 | **labelNames** | `string[]` | ✅ | Label names |
 | **histogram** | `{ type: Enum<'linear' \| 'exponential' \| 'explicit'>; linear?: object; exponential?: object; explicit?: object }` | optional | Histogram bucket configuration |
 | **summary** | `{ quantiles: number[]; maxAge: integer; ageBuckets: integer }` | optional |  |
 | **enabled** | `boolean` | ✅ |  |
+
+### Allowed Values: `MetricDefinition.unit`
+
+* `nanoseconds`
+* `microseconds`
+* `milliseconds`
+* `seconds`
+* `minutes`
+* `hours`
+* `days`
+* `bytes`
+* `kilobytes`
+* `megabytes`
+* `gigabytes`
+* `terabytes`
+* `requests_per_second`
+* `events_per_second`
+* `bytes_per_second`
+* `percent`
+* `ratio`
+* `count`
+* `operations`
+* `custom`
 
 
 ---

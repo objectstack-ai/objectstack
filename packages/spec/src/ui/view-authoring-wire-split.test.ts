@@ -263,6 +263,32 @@ describe('#5074 — the wire door accepts what the platform itself writes', () =
     // nested under a member that is itself strict.
     accept(ViewMetadataSchema, body);
   });
+
+  // ── #5599: the identity precondition sits in FRONT of this whole door ────
+  // It runs in the same `z.preprocess` stage as `stripViewConsoleDecorations`,
+  // so it is the first thing every body above meets. These pin that it is inert
+  // on the wire — the failure mode of a precondition is 422-ing our own writes.
+  it('#5599 — the precondition does not disturb the decoration strip it shares a stage with', () => {
+    // The strip runs only AFTER the identity check passes; a decorated body
+    // must still arrive at the union stripped, not rejected.
+    accept(ViewMetadataSchema, { ...OVERLAY_BASE, sort: [CONSOLE_SORT_ROW], filter: [CONSOLE_FILTER_ROW] });
+  });
+
+  it('#5599 — a body carrying ONLY an aux round-trip key still reaches the union', () => {
+    // `updateView` PUTs `{ ...current, ...partial }`; when there is no stored
+    // item to merge, `current` is empty and the body is the bare partial.
+    // `isPinned`/`sortOrder` are declared on member 1, so they are vocabulary.
+    accept(ViewMetadataSchema, { isPinned: true });
+    accept(ViewMetadataSchema, { sortOrder: 3 });
+  });
+
+  it('#5599 — …but a body speaking NO view key is stopped before any member runs', () => {
+    const r = ViewMetadataSchema.safeParse({ nope: 1 });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.issues).toHaveLength(1);
+    expect(r.error.issues[0]!.code).toBe('custom');
+  });
 });
 
 // ===========================================================================
@@ -354,6 +380,28 @@ describe('#5074 — landmine 1: `/api/v1/meta/types/view` must still get an `any
     const json = JSON.stringify(z.toJSONSchema(ViewItemSchema, { unrepresentable: 'any' }));
     expect(json).toContain('"operator"');
     expect(json).not.toContain('"console row key"');
+  });
+
+  it('#5599 — the identity precondition is invisible to the emitted contract', () => {
+    // This is WHY the check reports through the existing preprocess's `ctx`
+    // rather than as an extra pipe stage. `z.unknown().superRefine(…).pipe(union)`
+    // would satisfy the output-direction assertion above and silently degrade
+    // the INPUT direction to `{}` — Studio's SchemaForm would render nothing,
+    // and no `anyOf`-length pin would have caught it. Reporting through `ctx`
+    // changes no types, so both directions are unchanged from before #5599.
+    // (Verified out-of-band as byte-identical to `origin/main` for both
+    // directions; asserted here on the properties that make the form work.)
+    for (const io of ['output', 'input'] as const) {
+      const json = z.toJSONSchema(getMetadataTypeSchema('view')!, { unrepresentable: 'any', io }) as Record<string, unknown>;
+      const members = json.anyOf as Array<Record<string, unknown>>;
+      expect(members).toHaveLength(4);
+      // Member 1 is the discriminated ViewItem record (a nested union); members
+      // 2-4 are plain objects. A degraded emission loses exactly this shape.
+      expect(Array.isArray(members[0]!.oneOf ?? members[0]!.anyOf)).toBe(true);
+      for (const member of members.slice(1)) expect(member.type).toBe('object');
+      // The form needs real property sets, not an empty permissive schema.
+      expect(Object.keys((members[3]!.properties ?? {}) as object).length).toBeGreaterThan(10);
+    }
   });
 });
 

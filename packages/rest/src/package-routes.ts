@@ -4,6 +4,7 @@ import { IHttpServer } from '@objectstack/core';
 import type { PackageService } from '@objectstack/service-package';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
+import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
 
 /**
  * Options for package route registration.
@@ -33,6 +34,13 @@ export interface PackageRoutesOptions {
  * Register package management API routes
  *
  * Provides endpoints for publishing, retrieving, and managing packages.
+ *
+ * Returns the routes it mounted, so the caller can record them on the
+ * `RestServer` that owns the surface (#5822) — the returned array IS the array
+ * that was iterated to mount, never a second, hand-kept table. A boot without a
+ * `package` service never calls this registrar, so nothing is mounted and
+ * nothing is reported; see `direct-mount.ts`.
+ *
  * Routes:
  * - POST /api/v1/packages/publish - Publish a package to the marketplace registry
  * - GET /api/v1/packages - List all packages (merges registry + database)
@@ -78,11 +86,22 @@ export function registerPackageRoutes(
   packageService: PackageService,
   basePath: string = '/api/v1',
   options: PackageRoutesOptions = {},
-) {
+): readonly DirectMountedRoute[] {
   const packagesPath = `${basePath}/packages`;
 
+  /**
+   * ONE declaration of this registrar's surface (#5822): the array below is
+   * what gets mounted on the host server AND what is handed back as the
+   * description of what was mounted. There is no second table to keep in sync —
+   * see `direct-mount.ts` for why that identity is the whole point.
+   */
+  const routes: readonly DirectMountedRoute[] = [
   // POST /api/v1/packages/publish - Publish a package to the marketplace
-  server.post(`${packagesPath}/publish`, async (req, res) => {
+  {
+    method: 'POST',
+    path: `${packagesPath}/publish`,
+    metadata: { summary: 'Publish a package to the marketplace registry', tags: ['packages'] },
+    handler: async (req, res) => {
     try {
       const { manifest, metadata } = req.body || {};
 
@@ -113,10 +132,15 @@ export function registerPackageRoutes(
     } catch (error) {
       sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
-  });
+    },
+  },
 
   // GET /api/v1/packages - List all packages (merges registry + database)
-  server.get(packagesPath, async (_req, res) => {
+  {
+    method: 'GET',
+    path: packagesPath,
+    metadata: { summary: 'List packages (registry + published)', tags: ['packages'] },
+    handler: async (_req, res) => {
     try {
       // Merge two sources:
       // 1. Registry packages (in-memory, loaded at boot via defineStack/AppPlugin)
@@ -166,10 +190,15 @@ export function registerPackageRoutes(
     } catch (error) {
       sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
-  });
+    },
+  },
 
   // GET /api/v1/packages/:id - Get a specific package
-  server.get(`${packagesPath}/:id`, async (req, res) => {
+  {
+    method: 'GET',
+    path: `${packagesPath}/:id`,
+    metadata: { summary: 'Get a package by id', tags: ['packages'] },
+    handler: async (req, res) => {
     try {
       const packageId = req.params.id;
       const version = req.query?.version || 'latest';
@@ -201,10 +230,15 @@ export function registerPackageRoutes(
     } catch (error) {
       sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
-  });
+    },
+  },
 
   // DELETE /api/v1/packages/:id - Delete a package
-  server.delete(`${packagesPath}/:id`, async (req, res) => {
+  {
+    method: 'DELETE',
+    path: `${packagesPath}/:id`,
+    metadata: { summary: 'Delete a package', tags: ['packages'] },
+    handler: async (req, res) => {
     try {
       const packageId = req.params.id;
       const version = req.query?.version;
@@ -261,5 +295,9 @@ export function registerPackageRoutes(
     } catch (error) {
       sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
     }
-  });
+    },
+  },
+  ];
+
+  return mountDirectRoutes(server, routes);
 }

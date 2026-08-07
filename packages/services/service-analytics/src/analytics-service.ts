@@ -111,6 +111,36 @@ function hasDeclaredErrorEnvelope(err: unknown): boolean {
 }
 
 /**
+ * [#6035] Postgres's MISSING COLUMN wording — the one driver phrase that is a
+ * missing-SOURCE phrase by substring while meaning the opposite.
+ *
+ *   `column "label" of relation "acct" does not exist`   (SQLSTATE 42703)
+ *
+ * `relation "acct" does not exist` sits inside it verbatim, so both
+ * {@link isMissingSourceError} and {@link missingSourceRelation} read it as
+ * "the table `acct` is gone" — which would degrade the widget to an empty grid
+ * (when `acct` is the dataset's own object) or report a cross-datasource
+ * topology error (when it is a joined one). Neither is true: `acct` is right
+ * there and a COLUMN NAME IS MISPELLED — precisely the class both docblocks
+ * promise to leave as a hard failure.
+ *
+ * Subtracting it first is the shape `rest-server.ts`'s `mapDataError` has used
+ * since #5352 (its `unknownColumn` probe extracts this same phrase ahead of the
+ * unknown-object branch, so the REST face answers `400 INVALID_FIELD` rather
+ * than `404`; the case is pinned in `rest.test.ts`). This is deliberately that
+ * regex rather than a second dialect of it — the two faces must not disagree
+ * about what counts as postgres saying "column".
+ *
+ * Both quotes are required because postgres always emits them here (its errmsg
+ * template is `column "%s" of relation "%s" does not exist`), and requiring
+ * them is the safe direction of error: a wording this misses merely keeps
+ * today's verdict, while one it over-matches would turn a genuinely missing
+ * table into a hard failure and regress #5033's deliberate leniency.
+ */
+const MISSING_COLUMN_OF_RELATION =
+  /column\s+["'`]([a-z0-9_]+)["'`]\s+of relation\s+\S+\s+does not exist/i;
+
+/**
  * Detect the "backing object/table isn't present in this kernel" class of
  * error so a dataset query can degrade to an empty result instead of failing
  * the widget with a 500. Matches the missing-relation signatures across the
@@ -142,15 +172,19 @@ function hasDeclaredErrorEnvelope(err: unknown): boolean {
  * wording changes, which is what makes this a narrowing rather than a
  * behaviour change for #5033's leniency.
  *
- * Known residue, filed as #6035 rather than widened into here: postgres spells
- * a missing COLUMN on the write path as `column "c" of relation "t" does not
- * exist`, which carries a whole missing-relation phrase inside it and so is a
- * hit both before and after this anchor. Dormant on a read-only face (a SELECT
- * says `column "c" does not exist`, no `relation`), but it is the one case
- * where this predicate is still wider than the paragraph above it.
+ * [#6035] The residue #5717 left and named here is now closed by
+ * {@link MISSING_COLUMN_OF_RELATION}, subtracted BEFORE any limb below runs.
+ * The anchor above cannot do it alone, for a reason worth stating plainly: the
+ * missing-COLUMN wording literally CONTAINS a well-formed missing-relation
+ * wording, so no tightening of "does this say a relation is missing" can ever
+ * exclude it — only asking the more specific question FIRST can. That makes the
+ * ORDER the fix, not the pattern.
  */
 function isMissingSourceError(err: unknown): boolean {
   const raw = String((err as { message?: unknown })?.message ?? err ?? '');
+  // [#6035] Missing COLUMN is not missing SOURCE — the paragraph above promises
+  // column errors stay hard failures, and this is where that promise is kept.
+  if (MISSING_COLUMN_OF_RELATION.test(raw)) return false;
   const msg = raw.toLowerCase();
   return (
     msg.includes('no such table') ||      // sqlite / libsql
@@ -178,9 +212,22 @@ function isMissingSourceError(err: unknown): boolean {
  * table name, so the result is comparable to a dataset's `object`), or
  * `undefined` when the driver's phrasing carries no name. Unparseable ⇒ the
  * caller keeps today's degradation, never a louder guess.
+ *
+ * [#6035] It subtracts {@link MISSING_COLUMN_OF_RELATION} for the same reason
+ * its sibling does, and the reason is CONSISTENCY rather than a second bug:
+ * measured on `origin/main`, the column wording made this function answer
+ * `sys_team`, so fixing only "is something missing" would leave the pair
+ * DISAGREEING — one saying nothing is missing, the other naming a table. That
+ * disagreement is the exact defect #5717 closed on the postgres limb, and
+ * re-opening it here would re-arm the same mine one edit away: today this
+ * function is only ever called behind a true `isMissingSourceError`, so the
+ * guard is unreachable, but "unreachable" is a property of the CALL ORDER at
+ * one call site, not of this function. Guarding both keeps the two answers
+ * derivable from the wording alone.
  */
 function missingSourceRelation(err: unknown): string | undefined {
   const msg = String((err as { message?: unknown })?.message ?? err ?? '');
+  if (MISSING_COLUMN_OF_RELATION.test(msg)) return undefined;
   const patterns = [
     /no such table:\s*[`"'[]?([A-Za-z0-9_$.]+)/i,                        // sqlite / libsql
     /relation\s+[`"']?([A-Za-z0-9_$.]+)[`"']?\s+does not exist/i,        // postgres

@@ -132,6 +132,8 @@
     "IRlsMembershipResolver (interface)",
     "ISchemaDiffService (interface)",
     "ISchemaDriver (interface)",
+    "IScopedContext (interface)",
+    "IScopedObjectRepository (interface)",
     "ISearchService (interface)",
     "ISecurityService (interface)",
     "ISeedLoaderService (interface)",

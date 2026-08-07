@@ -16,13 +16,17 @@
  * Auto-detects the appropriate driver from the database URL scheme:
  *   - `memory://*`              → InMemoryDriver
  *   - `postgres[ql]://`, `pg://` → SqlDriver (pg)
+ *   - `mysql[2]://`             → SqlDriver (mysql2)
  *   - `mongodb[+srv]://`        → MongoDBDriver (optional `@objectstack/driver-mongodb`)
  *   - `libsql://`, `http(s)://*.turso.*` → TursoDriver (optional `@objectstack/driver-turso`)
  *   - `file:` / no scheme       → SqlDriver (better-sqlite3)
  *
  * Unknown URL schemes throw — we never silently fall back to sqlite, since
  * that historically created bogus directories on disk (e.g. `mongodb:/`)
- * when an unsupported URL was treated as a file path.
+ * when an unsupported URL was treated as a file path. The SAME refusal now
+ * covers an unknown `OS_DATABASE_DRIVER` value (#6265): that env var used to be
+ * a bare `as` cast, so a typo — or `mysql` before this stack could dispatch it
+ * — fell through the driver chain's trailing `else` into SQLite without a word.
  *
  * NOTE: `libsql://` / Turso support comes from `@objectstack/driver-turso`,
  * which lives in THIS repository (`packages/drivers/driver-turso`) since #4645
@@ -36,6 +40,16 @@
  * under (#5602 / PR #5819); before #5820 the two disagreed, and one
  * `OS_DATABASE_URL=libsql://…` booted under `os start` while `os migrate` — which
  * comes through here — refused it as an unsupported scheme.
+ *
+ * NOTE: `mysql://` is the same family with none of the optional-package weight
+ * (#6265). The CLI has classified it as `mysql` since forever
+ * (`inferDriverTypeFromUrl`), the SHARED factory has always been able to build
+ * it (`kind === 'mysql'` → SqlDriver on `mysql2`), and only this file was
+ * missing the arm — so one `OS_DATABASE_URL=mysql://…` booted under `os start`
+ * and died under `os migrate` with `Unsupported database URL scheme`, exactly
+ * the #5820 split with a different scheme. Nothing lazy is needed here: the
+ * definition goes straight to `DefaultDatasourcePlugin` and the shared factory
+ * builds it like postgres.
  */
 
 import { resolve as resolvePath } from 'node:path';
@@ -69,6 +83,24 @@ export function resolveObjectStackHome(): string {
     return resolvePath(homedir(), '.objectstack');
 }
 
+/**
+ * The driver kinds a standalone boot can dispatch — the ONE list, and the only
+ * one (#6265).
+ *
+ * Three consumers read it and every one of them used to carry its own answer:
+ * the `databaseDriver` config key (a zod enum that rejected loudly), the
+ * `OS_DATABASE_DRIVER` env var (a bare `as` cast that validated nothing, so an
+ * unknown value fell through the dispatch chain's trailing `else` into SQLite),
+ * and the `ResolvedDriverKind` union (a hand-written third copy). They are now
+ * one declaration: the union is `z.infer`red from it, the env value is parsed
+ * through it, and the refusal message enumerates `.options` rather than
+ * repeating them — a kind added here cannot leave a stale legal-values list
+ * behind.
+ */
+export const StandaloneDatabaseDriverSchema = z.enum([
+    'sqlite', 'sqlite-wasm', 'memory', 'postgres', 'mysql', 'mongodb', 'turso',
+]);
+
 export const StandaloneStackConfigSchema = z.object({
     databaseUrl: z.string().optional(),
     /**
@@ -78,7 +110,7 @@ export const StandaloneStackConfigSchema = z.object({
      * reads, and the same pair `--database-auth-token` forwards into).
      */
     databaseAuthToken: z.string().optional(),
-    databaseDriver: z.enum(['sqlite', 'sqlite-wasm', 'memory', 'postgres', 'mongodb', 'turso']).optional(),
+    databaseDriver: StandaloneDatabaseDriverSchema.optional(),
     environmentId: z.string().optional(),
     artifactPath: z.string().optional(),
     /**
@@ -159,11 +191,19 @@ export interface StandaloneStackResult {
     positions?: any[];
 }
 
-type ResolvedDriverKind = 'memory' | 'postgres' | 'mongodb' | 'turso' | 'sqlite' | 'sqlite-wasm';
+type ResolvedDriverKind = z.infer<typeof StandaloneDatabaseDriverSchema>;
 
 function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     if (/^memory:\/\//i.test(dbUrl)) return 'memory';
     if (/^(postgres(ql)?|pg):\/\//i.test(dbUrl)) return 'postgres';
+    // MySQL / MariaDB (#6265). Character-for-character the regex the CLI uses
+    // (`utils/storage-driver.ts` `inferDriverTypeFromUrl`), for the same reason
+    // the turso arm below copies its spellings: the two functions answer the
+    // same question about the same `OS_DATABASE_URL`, so any divergence IS the
+    // bug — `os start` booting a URL `os migrate` refuses. Unlike turso this
+    // needs no optional package: the shared factory's `mysql` arm builds a
+    // SqlDriver on `mysql2`, which `@objectstack/driver-sql` already ships.
+    if (/^mysql2?:\/\//i.test(dbUrl)) return 'mysql';
     if (/^mongodb(\+srv)?:\/\//i.test(dbUrl)) return 'mongodb';
     // libSQL / Turso (#5820). The same two spellings the CLI classifies as
     // `turso` (`utils/storage-driver.ts` `inferDriverTypeFromUrl`, #5602) — kept
@@ -182,8 +222,49 @@ function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(dbUrl)) return 'sqlite';
     throw new Error(
         `[StandaloneStack] Unsupported database URL scheme: ${dbUrl}. ` +
-        `Supported schemes: memory://, postgres://, pg://, mongodb://, mongodb+srv://, ` +
+        `Supported schemes: memory://, postgres://, pg://, mysql://, mysql2://, ` +
+        `mongodb://, mongodb+srv://, ` +
         `libsql:// (optional @objectstack/driver-turso), file:`
+    );
+}
+
+/**
+ * The explicit driver selection for this boot, or `undefined` when none was made.
+ *
+ * Two sources, ONE vocabulary (#6265). `cfg.databaseDriver` has always been
+ * parsed by {@link StandaloneDatabaseDriverSchema}; `OS_DATABASE_DRIVER` was
+ * `process.env.OS_DATABASE_DRIVER?.trim() as ResolvedDriverKind` — an assertion,
+ * which checks nothing at runtime. An unknown value therefore reached the
+ * dispatch chain in `createStandaloneStack`, matched no arm, and landed in the
+ * trailing `else`: SQLite, silently. `OS_DATABASE_DRIVER=mysql` (a value the
+ * CLI advertises and `content/docs/deployment/environment-variables.mdx` lists)
+ * with no URL set therefore created a local `standalone.db` while the operator
+ * believed they were talking to MySQL — the #3276 class exactly, and with a URL
+ * set it surfaced as the doubly-misleading "sqlite driver was selected but the
+ * URL does not look like a file path" for an operator who never selected sqlite.
+ *
+ * So the env value is parsed by the same schema and an unrecognised one is
+ * refused LOUDLY, naming the legal values. The value is lower-cased first, for
+ * the same reason the regexes above are copied verbatim from the CLI: the CLI's
+ * reader of this very variable does `(explicitDriver ?? '').toLowerCase().trim()`,
+ * and a case-sensitive reader here would re-open the divergence this issue is
+ * about, one notch narrower. The accepted VOCABULARY is unchanged either way —
+ * it is the enum, and nothing else.
+ */
+function resolveExplicitDriver(
+    cfg: z.output<typeof StandaloneStackConfigSchema>,
+): ResolvedDriverKind | undefined {
+    if (cfg.databaseDriver) return cfg.databaseDriver;
+    const raw = process.env.OS_DATABASE_DRIVER?.trim();
+    if (!raw) return undefined;
+    const parsed = StandaloneDatabaseDriverSchema.safeParse(raw.toLowerCase());
+    if (parsed.success) return parsed.data;
+    throw new Error(
+        `[StandaloneStack] Unsupported OS_DATABASE_DRIVER value: "${raw}". ` +
+        `Supported drivers: ${StandaloneDatabaseDriverSchema.options.join(', ')}. ` +
+        `Booting on the SQLite default instead would silently ignore the driver you asked for ` +
+        `and write into a local database (#3276). Fix the value, or unset OS_DATABASE_DRIVER ` +
+        `to let the OS_DATABASE_URL scheme select the driver.`
     );
 }
 
@@ -229,12 +310,16 @@ export interface ResolvedStandaloneDatabase {
  * URL was read here and then rejected by `detectDriverFromUrl` as an unsupported
  * scheme, so a host that set it got a hard failure rather than a libSQL
  * connection. Reading a source you cannot dispatch is worse than not reading it.
+ *
+ * Throws on a selection this stack cannot dispatch — an unknown URL scheme
+ * (`detectDriverFromUrl`) or, since #6265, an unknown `OS_DATABASE_DRIVER` value
+ * ({@link resolveExplicitDriver}). Both refusals happen HERE rather than at boot
+ * so `os migrate`'s pre-boot probe reads the same verdict the boot would.
  */
 export function resolveStandaloneDatabase(config?: StandaloneStackConfig): ResolvedStandaloneDatabase {
     const cfg = StandaloneStackConfigSchema.parse(config ?? {});
     const url = resolveDatabaseUrl(cfg);
-    const explicitDriver = cfg.databaseDriver
-        ?? (process.env.OS_DATABASE_DRIVER?.trim() as ResolvedDriverKind | undefined);
+    const explicitDriver = resolveExplicitDriver(cfg);
     const driver: ResolvedDriverKind = explicitDriver || detectDriverFromUrl(url);
     const isSqlite = driver === 'sqlite' || driver === 'sqlite-wasm';
     const filename = isSqlite ? sqliteFilenameFromUrl(url, driver) : null;
@@ -335,6 +420,15 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         // Factory applies the pg pool default ({ min: 0, max: 5 }) internally.
         driverId = 'postgres';
         driverConfig = { url: dbUrl };
+    } else if (dbDriver === 'mysql') {
+        // MySQL / MariaDB (#6265). Nothing special: the shared factory's `mysql`
+        // arm builds a SqlDriver on the `mysql2` client from exactly this
+        // config (`MysqlConfigSchema.url` — "passed to mysql2 as-is"), and the
+        // CLI's own `mysql` branch produces the same `{ driverId: 'mysql',
+        // config: { url } }`. The only thing that was missing was this arm, and
+        // the detection arm above it.
+        driverId = 'mysql';
+        driverConfig = { url: dbUrl };
     } else if (dbDriver === 'mongodb') {
         // A missing @objectstack/driver-mongodb peer dep surfaces at boot via
         // the connection service's fail-fast (the factory's "not installed"
@@ -364,12 +458,26 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             mkdirSync(resolvePath(filename, '..'), { recursive: true });
         }
         driverConfig = { filename };
-    } else {
+    } else if (dbDriver === 'sqlite') {
         // sqlite (better-sqlite3)
         driverId = 'sqlite';
         const filename = sqliteFilenameFromUrl(dbUrl, 'sqlite');
         mkdirSync(resolvePath(filename, '..'), { recursive: true });
         driverConfig = { filename };
+    } else {
+        // Unreachable by construction — and making it unreachable is half the
+        // fix (#6265). This used to be a bare `else` meaning "sqlite", so every
+        // kind without an arm above became SQLite in silence: an unvalidated
+        // `OS_DATABASE_DRIVER` value landed here, and so would the NEXT kind
+        // added to the enum without a dispatch arm. `dbDriver` is now narrowed
+        // to `never` here, so that omission is a compile error instead of a
+        // wrong database.
+        const unreachable: never = dbDriver;
+        throw new Error(
+            `[StandaloneStack] No dispatch arm for database driver kind: ${String(unreachable)}. ` +
+            `Every kind in StandaloneDatabaseDriverSchema needs one — falling through to SQLite ` +
+            `is the #3276 defect.`
+        );
     }
     const defaultDatasourcePlugin = new DefaultDatasourcePlugin(
         { driver: driverId, config: driverConfig },

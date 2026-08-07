@@ -11,7 +11,8 @@ import {
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
-import { RouteManager } from './route-manager.js';
+import { RouteManager, type RouteEntry } from './route-manager.js';
+import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import type { FieldErrorCode } from '@objectstack/spec/api';
@@ -1612,10 +1613,33 @@ export interface RestRequestEnvResolver {
     resolveRequestEnvironmentId(req: unknown): Promise<string | undefined>;
 }
 
+/**
+ * One route this server knows is mounted, and how it got there (#5822).
+ *
+ * `RouteEntry` plus `source`: `route-manager` for the routes this server
+ * registered itself, `direct-mount` for the ones a bypassing registrar mounted
+ * on the same host server and reported through
+ * {@link RestServer.recordDirectMountedRoutes}. Both are equally mounted and
+ * equally documented; the column exists because the route ledger audits them
+ * per source, and because a debugging reader deserves to know which registrar
+ * to look in.
+ */
+export interface MountedRoute extends RouteEntry {
+    readonly source: MountedRouteSource;
+}
+
 export class RestServer {
     private protocol: RestProtocol;
     private config: NormalizedRestServerConfig;
     private routeManager: RouteManager;
+    /**
+     * Routes mounted on the SAME host server by a registrar that bypasses
+     * `RouteManager`, as reported by the composition step that called it
+     * (#5822). Facts, not intentions: a registrar the boot never called
+     * contributes nothing here, so `getRoutes()` and the OpenAPI document stay
+     * silent about it. See `direct-mount.ts`.
+     */
+    private readonly directMountedRoutes: MountedRoute[] = [];
     private kernelManager?: RestKernelManager;
     private envRegistry?: RestEnvRegistry;
     /**
@@ -2227,6 +2251,15 @@ export class RestServer {
      * back to a caller who does not hold the set, and an `org` book came back to
      * an anonymous reader on a publicly-served deployment. Same route, gate
      * enforced on one spelling of it.
+     *
+     * Calling this at each gate is NOT the durable form — #6241 proved it.
+     * Eight days after #3984, the single-item read's cache-branch condition
+     * still excluded `doc`/`book` by literal comparison, so the plural read
+     * skipped the branch that holds the gate and the same authorization hole
+     * came back on the same route. The handlers therefore normalize ONCE at
+     * the top (`const metaType = RestServer.metaTypeSingular(req.params.type)`)
+     * and every gate reads that local: a gate added later has no raw param in
+     * scope to compare against.
      */
     private static metaTypeSingular(type: unknown): string {
         const t = typeof type === 'string' ? type : '';
@@ -3298,11 +3331,13 @@ export class RestServer {
                 //    route the router will match: same table, read at request
                 //    time, so the prefix follows `apiPath`, the verbs are the
                 //    registered ones, and a route that is not mounted cannot be
-                //    described. `routeManager.getAll()` is the whole surface —
-                //    the filtering to THIS base (and away from the project-
+                //    described. `getRoutes()` is the whole surface — since
+                //    #5822 that includes the direct-mount registrars' routes,
+                //    but only the ones this boot actually mounted and reported.
+                //    The filtering to THIS base (and away from the project-
                 //    scoped mirror, which gets its own document) is
                 //    `buildBuiltinPaths`'s.
-                const builtin = buildBuiltinPaths(this.routeManager.getAll(), basePath);
+                const builtin = buildBuiltinPaths(this.getRoutes(), basePath);
                 enriched.paths = builtin.paths;
                 // The tag list describes that same section, so it is produced
                 // with it rather than inherited from the artifact — otherwise a
@@ -4193,6 +4228,33 @@ export class RestServer {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
 
+                        // [#3984 / #6241] Normalize the `:type` segment ONCE,
+                        // here at the top, and let every gate below read THIS
+                        // value. The route serves both spellings and Prime
+                        // Directive #3 makes the plural one canonical
+                        // (`/meta/books/:name`), so any gate comparing the raw
+                        // param is a gate the canonical spelling walks past.
+                        //
+                        // #3984 ruled this shape for exactly that reason ("每个
+                        // handler 顶部归一一次,后续所有闸门都用归一后的值"), and
+                        // #6241 is why the ruling is written into the code
+                        // rather than trusted to memory: eight days after
+                        // #3984 landed, the cache-branch condition below still
+                        // excluded `doc`/`book` by LITERAL comparison, so
+                        // `GET /meta/books/:name` took the cached branch and
+                        // the §6.7 audience gate — which lives in the uncached
+                        // branch — never ran at all. Measured on the real
+                        // server, one `{ permissionSet }`-gated book, one
+                        // signed-in caller holding no set:
+                        //
+                        //     singular "book"  :: cachedCalls=0 status=[403]
+                        //     plural   "books" :: cachedCalls=1 status=[]  ← full body served
+                        //
+                        // A new per-type gate added below inherits the
+                        // normalization by default now; there is no raw param
+                        // in scope for it to compare against by accident.
+                        const metaType = RestServer.metaTypeSingular(req.params.type);
+
                         // Phase 3a-layered-get: opt-in 3-state view when client
                         // asks for `?layers=true` (or any non-empty value).
                         // Skips the cache path entirely — layered view is a
@@ -4234,7 +4296,7 @@ export class RestServer {
                         // viewers of the same app schema. Drafts also
                         // bypass cache: the cache is keyed on the
                         // published checksum and drafts are out-of-band.
-                        const isAppType = RestServer.metaTypeSingular(req.params.type) === 'app';
+                        const isAppType = metaType === 'app';
                         const isDraftRead = typeof req.query?.state === 'string'
                             && req.query.state.toLowerCase() === 'draft';
                         // ADR-0033/0037 — `?preview=draft` overlays a pending
@@ -4257,6 +4319,21 @@ export class RestServer {
                         // `doc` and `book` bypass the shared cache: their §6.7
                         // audience gate is per-caller, and a shared ETag would
                         // leak gated content across viewers.
+                        //
+                        // [#6241] That sentence was already here while the
+                        // exclusion beneath it compared the RAW param against
+                        // the literals `'doc'` / `'book'`, so the canonical
+                        // plural spelling took the cached branch and shipped
+                        // the gated body. The exclusion is not incidental
+                        // tidying — it is the stated security invariant above,
+                        // and it now reads the normalized `metaType`.
+                        //
+                        // The predicate is ONE named value shared with the §6.7
+                        // gate in the uncached branch (`isAudienceGatedType`),
+                        // so "which types bypass the cache" and "which types
+                        // are audience-gated" can no longer drift apart: the
+                        // bypass exists only to make that gate reachable, and a
+                        // future third gated type joins both sites at once.
                         //
                         // [#5881] `dashboard` bypasses it too, and the reason is
                         // NOT the one above — worth writing down, because the
@@ -4290,15 +4367,19 @@ export class RestServer {
                         // so the server does identical work either way and only
                         // the 304's saved body bytes are given up.
                         //
-                        // Compared on the NORMALIZED type, like `isAppType` and
-                        // unlike the two literals at the end of this condition
-                        // (`/meta/dashboards/x` is the canonical plural spelling
-                        // under Prime Directive #3, and an exclusion it could be
-                        // spelled around would not be an exclusion). The `doc` /
-                        // `book` literals have exactly that hole — measured and
-                        // filed as #6241, deliberately not fixed here.
-                        const isDashboardType = RestServer.metaTypeSingular(req.params.type) === 'dashboard';
-                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && req.params.type !== 'doc' && req.params.type !== 'book') {
+                        // Compared on the NORMALIZED type, like every other
+                        // exclusion in this condition (`/meta/dashboards/x` is
+                        // the canonical plural spelling under Prime Directive
+                        // #3, and an exclusion it could be spelled around would
+                        // not be an exclusion). The `doc` / `book` literals
+                        // that stood at the end of this condition had exactly
+                        // that hole; #6241 closed it.
+                        const isDashboardType = metaType === 'dashboard';
+                        // ADR-0046 §6.7 — the two audience-gated types. Read by
+                        // the cache exclusion here AND by the gate itself in
+                        // the uncached branch below; one predicate, two sites.
+                        const isAudienceGatedType = metaType === 'book' || metaType === 'doc';
+                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && !isAudienceGatedType) {
                             const cacheRequest = {
                                 ifNoneMatch: req.headers['if-none-match'] as string,
                                 ifModifiedSince: req.headers['if-modified-since'] as string,
@@ -4368,7 +4449,7 @@ export class RestServer {
                             // and never consulted the lock resolver; a caller that
                             // needs the ADR-0008 OCC carriers reads the uncached path.
                             const cachedEnvelope = {
-                                type: RestServer.metaTypeSingular(req.params.type),
+                                type: metaType,
                                 name: req.params.name,
                             };
                             res.json(await this.translateMetaEnvelope(
@@ -4443,8 +4524,7 @@ export class RestServer {
                             // it, unclaimed → org). 401 for anonymous, 403 for an
                             // authenticated non-holder; fail closed when holdings
                             // cannot be resolved (ADR-0049).
-                            const audienceGatedType = RestServer.metaTypeSingular(req.params.type);
-                            if ((audienceGatedType === 'book' || audienceGatedType === 'doc') && visible) {
+                            if (isAudienceGatedType && visible) {
                                 const { audienceAllows, docAudienceAllows, resolveDocAudiences } =
                                     await import('@objectstack/spec/system');
                                 // The document under audience test. [#5563] This
@@ -4457,7 +4537,7 @@ export class RestServer {
                                 const target = visible;
                                 let caller: { authenticated: boolean; permissionSets?: string[] };
                                 let allowed: boolean;
-                                if (audienceGatedType === 'book') {
+                                if (metaType === 'book') {
                                     caller = await this.resolveAudienceCaller(environmentId, req, {
                                         needPermissionSets: RestServer.anyPermissionSetAudience([target]),
                                     });
@@ -4499,7 +4579,7 @@ export class RestServer {
                             // ADR-0046 i18n: collapse the doc to the request
                             // locale (label/description/content) and drop the
                             // `translations` map so consumers get one body.
-                            if (audienceGatedType === 'doc' && visible) {
+                            if (metaType === 'doc' && visible) {
                                 const locale = this.extractLocale(req);
                                 const { resolveDocLocale } = await import('@objectstack/spec/system');
                                 visible = resolveDocLocale(visible as any, locale);
@@ -8694,11 +8774,38 @@ export class RestServer {
     getRouteManager(): RouteManager {
         return this.routeManager;
     }
-    
+
     /**
-     * Get all registered routes
+     * Record routes a bypassing registrar mounted on this server's host
+     * `IHttpServer` (#5822).
+     *
+     * Called by the composition step that invoked the registrar
+     * (`mountAndRecordDirectRoutes`), with the array the registrar returned —
+     * which is the array it iterated to mount, so this records what happened
+     * rather than what was intended. Nothing here re-derives, re-checks or
+     * re-orders that fact; a registrar that was never called reports nothing,
+     * which is how "not mounted ⇒ not enumerable" survives.
      */
-    getRoutes() {
-        return this.routeManager.getAll();
+    recordDirectMountedRoutes(routes: readonly DirectMountedRoute[]): void {
+        for (const route of routes) {
+            this.directMountedRoutes.push({ ...route, source: 'direct-mount' });
+        }
+    }
+
+    /**
+     * Get all routes mounted for this boot — the whole surface this server
+     * knows about, RouteManager's table and the recorded direct mounts alike.
+     *
+     * This is the introspection seam: the OpenAPI built-in section
+     * (`buildBuiltinPaths`), the route-ledger conformance guard and every
+     * debugging reader ask exactly this one question. Before #5822 it answered
+     * only for `routeManager`, so nine mounted routes — eight of them SDK
+     * capabilities — were invisible to all three.
+     */
+    getRoutes(): MountedRoute[] {
+        return [
+            ...this.routeManager.getAll().map((route): MountedRoute => ({ ...route, source: 'route-manager' })),
+            ...this.directMountedRoutes,
+        ];
     }
 }

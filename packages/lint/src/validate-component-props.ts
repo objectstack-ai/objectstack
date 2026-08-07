@@ -55,12 +55,18 @@
  * violations that are open contract questions, not authoring mistakes:
  * `I18nLabelSchema` is a plain `z.string()` while three published platform
  * pages author inline `{ en, 'zh-CN', … }` maps that objectui resolves
- * (#5728), and the record picker declares a required `displayField` that no
+ * (#5728), and the record picker declared a required `displayField` that no
  * renderer reads while honouring an undeclared `labelField` (#5775). Gating
  * those would fail the platform's own pages to enforce declarations the
  * platform does not itself keep. So every finding here is advisory, the
  * warning-period inventory is the acceptance baseline for the error upgrade,
  * and the upgrade is its own step once the inventory is empty.
+ *
+ * #5775 has since settled the spec side of that inventory — the keys the
+ * renderers honour are declared, and the four nothing read are tombstoned with
+ * ADR-0087 conversions. What stands between this rule and `error` is now #5728
+ * and two page rewrites (`page:card.visible` → the ADR-0089 component-level
+ * `visibleWhen`; #5776's tab `key` → `value`), not the props map.
  *
  * ## Unregistered types are SKIPPED — a required semantic, not leniency
  *

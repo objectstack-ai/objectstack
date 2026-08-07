@@ -335,12 +335,27 @@ Execute an analytics query.
 ```json
 {
   "cube": "account",
-  "measures": ["revenue.sum", "count"],
+  "measures": ["revenue_sum", "count"],
   "dimensions": ["industry"],
   "where": { "status": "active" },
   "limit": 100
 }
 ```
+
+<Callout type="info">
+**How to spell a measure.** A `measures` entry is either a measure the Cube **declares**,
+or one of the inferred spellings: the bare `count` (`COUNT(*)`), or one of the object's
+**own** field names plus an aggregation suffix — `_sum`, `_avg`, `_min`, `_max`,
+`_count_distinct`. So "the sum of `revenue`" is `revenue_sum`.
+
+A dot is legal **only** as the `<cube>.` qualifier: `account.revenue_sum` resolves to the
+same measure as `revenue_sum` (the response column keeps whichever of the two you sent).
+Any other dotted spelling — `revenue.sum`, `owner.amount_sum` — is refused with
+`400 INVALID_FIELD` naming the spelling you sent, and nothing is executed: measures do not
+traverse relationships, only dimensions do, so there is no related column for a dotted
+measure to aggregate. To aggregate a related column, declare a Cube whose measure names it
+in its own `sql`.
+</Callout>
 
 <Callout type="info">
 Filtering uses the canonical Query DSL `where` object (the same MongoDB-style `FilterCondition` accepted by `find()`), not a `filters` array.
@@ -352,12 +367,12 @@ Filtering uses the canonical Query DSL `where` object (the same MongoDB-style `F
   "success": true,
   "data": {
     "rows": [
-      { "industry": "Technology", "revenue.sum": 150000, "count": 5 },
-      { "industry": "Healthcare", "revenue.sum": 80000, "count": 3 }
+      { "industry": "Technology", "revenue_sum": 150000, "count": 5 },
+      { "industry": "Healthcare", "revenue_sum": 80000, "count": 3 }
     ],
     "fields": [
       { "name": "industry", "type": "string", "label": "Industry" },
-      { "name": "revenue.sum", "type": "number", "label": "Revenue Sum", "format": "$0,0" },
+      { "name": "revenue_sum", "type": "number", "label": "Revenue Sum", "format": "$0,0" },
       { "name": "count", "type": "number", "label": "Count" }
     ],
     "sql": "SELECT ..."

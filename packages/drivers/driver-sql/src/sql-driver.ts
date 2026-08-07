@@ -541,10 +541,14 @@ const DECLARED_AGGREGATE_FUNCTIONS: readonly string[] = AggregationFunction.opti
  *
  * Judged against the declared enum CASE-SENSITIVELY, which is what the enum is:
  * `COUNT_DISTINCT` is not `count_distinct`, and answering "declared but not
- * implemented" for it would be false. It also keeps the two faces in step —
- * this driver reads the name raw while the remote transport lowercases it
- * before its own lookup, so classifying on each face's post-normalisation name
- * would hand `COUNT_DISTINCT` a 400 here and a 501 there for one query.
+ * implemented" for it would be false. When this was written the remote transport
+ * still lowercased the name before its own lookup while this driver read it raw,
+ * so classifying on each face's post-normalisation name would have handed
+ * `COUNT_DISTINCT` a 400 here and a 501 there for one query. #6203 has since
+ * removed that lowercasing, so the two faces now normalise alike — but the
+ * case-sensitive judgement here is not merely a survivor of that fork: the enum
+ * IS case-sensitive (`AggregationFunction.parse('COUNT')` throws), so this is
+ * what "declared" means, whatever any transport does before asking.
  */
 function undeclaredAggregateFunctionError(func: string): Error {
   const err = new Error(
@@ -1683,6 +1687,63 @@ export interface IntrospectedTable {
 export interface IntrospectedSchema {
   tables: Record<string, IntrospectedTable>;
 }
+
+// ── Window Function Types (driver-private, #6212) ────────────────────────────
+
+/**
+ * One entry of {@link SqlWindowFunctionQuery.windowFunctions} — the flat shape
+ * {@link SqlDriver.findWithWindowFunctions} actually reads.
+ *
+ * This type lives HERE, not in `packages/spec`, deliberately. #4286 retired the
+ * spec's window cluster (`WindowFunctionNodeSchema` and friends) precisely
+ * because it declared `field` / `over` / `frame` members this door never read —
+ * a vocabulary describing an input no executor accepts. Re-adding a window
+ * vocabulary to the spec would undo that judgement; window functions are a
+ * SQL-driver-private capability (the door is not on `IDataDriver`), so the
+ * driver declares its own shape at the layer that owns it. The spec's own
+ * removal note names this shape verbatim — `{ function, alias, partitionBy?,
+ * orderBy? }`, `packages/spec/src/data/query.zod.ts` — as does the published
+ * migration prescription (`query-window-functions-retired` in
+ * `packages/spec/src/migrations/registry.ts`), which points embedders at this
+ * door. Those two texts and this type must keep saying the same thing.
+ *
+ * Every member is what {@link SqlDriver.buildWindowFunction} consumes and
+ * nothing else:
+ * - `function` is emitted as `FUNC()` — uppercased, ARGUMENT-LESS. `lag(revenue)`
+ *   renders as `LAG()`; the builder has no argument slot, which is why there is
+ *   no `field` member to declare (the skills' aggregation rules say the same).
+ * - `orderBy`'s `order` is optional here even though a `DriverQuery`'s top-level
+ *   `SortNode` requires it: the builder reads `s.order || 'asc'`, so absence is
+ *   a spelling this door genuinely accepts. Declaring it required would reject
+ *   input that works.
+ */
+export interface SqlWindowFunctionSpec {
+  /** Window function name, emitted argument-less and uppercased (`rank` → `RANK()`). */
+  function: string;
+  /** Column alias the computed value is projected as. */
+  alias: string;
+  /** `PARTITION BY` targets, mapped through the driver's storage-name mapping. */
+  partitionBy?: string[];
+  /** `ORDER BY` inside the `OVER (…)` clause; `order` defaults to `asc`. */
+  orderBy?: { field: string; order?: 'asc' | 'desc' }[];
+}
+
+/**
+ * The query {@link SqlDriver.findWithWindowFunctions} takes: a
+ * {@link DriverQuery} — the contract shape, minus the redundant `object` the
+ * first argument already carries (#5181) — carrying this driver's private
+ * `windowFunctions` array.
+ *
+ * `windowFunctions` is `Omit`ed off `DriverQuery` before being re-declared
+ * because the spec key is a `retiredKey()` TOMBSTONE: `QueryAST['windowFunctions']`
+ * resolves to `undefined`, so a plain intersection would leave the property
+ * unwritable and this door's own documented payload would not compile. The
+ * tombstone is correct — the REQUEST surface really has no window functions —
+ * and this type is what keeps the driver-level door open without reopening it.
+ */
+export type SqlWindowFunctionQuery = Omit<DriverQuery, 'windowFunctions'> & {
+  windowFunctions?: SqlWindowFunctionSpec[];
+};
 
 // ── Configuration Types ──────────────────────────────────────────────────────
 
@@ -3650,7 +3711,15 @@ export class SqlDriver implements IDataDriver {
   // Window Functions
   // ===================================
 
-  async findWithWindowFunctions(object: string, query: any, options?: DriverOptions): Promise<any[]> {
+  /**
+   * The one live window-function door (#4286): not on `IDataDriver`, callable
+   * directly on a SQL driver instance. Takes {@link SqlWindowFunctionQuery} —
+   * the contract query shape plus this driver's private `windowFunctions`
+   * array — so `where` / `orderBy` / `limit` / `offset` are checked here
+   * exactly as they are on `find()`, instead of being erased along with the
+   * driver-private part (#6212).
+   */
+  async findWithWindowFunctions(object: string, query: SqlWindowFunctionQuery, options?: DriverOptions): Promise<any[]> {
     const builder = this.getBuilder(object, options);
 
     builder.select('*');
@@ -3687,7 +3756,13 @@ export class SqlDriver implements IDataDriver {
     return this.analyzeQuery(object, query, options);
   }
 
-  async analyzeQuery(object: string, query: any, options?: DriverOptions): Promise<any> {
+  /**
+   * `explain()`'s implementation, and the only other caller of it. It reads
+   * `fields` / `where` / `orderBy` / `limit` / `offset` — every one of them a
+   * `DriverQuery` member — so it takes `DriverQuery`, which is what `explain()`
+   * already declared and forwarded here (#6212).
+   */
+  async analyzeQuery(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     const builder = this.getBuilder(object, options);
 
     if (query.fields) {
@@ -7365,7 +7440,7 @@ export class SqlDriver implements IDataDriver {
 
   // ── Window function builder ─────────────────────────────────────────────────
 
-  protected buildWindowFunction(spec: any): string {
+  protected buildWindowFunction(spec: SqlWindowFunctionSpec): string {
     const func = spec.function.toUpperCase();
     let sql = `${func}()`;
 
@@ -7378,7 +7453,7 @@ export class SqlDriver implements IDataDriver {
 
     if (spec.orderBy && Array.isArray(spec.orderBy) && spec.orderBy.length > 0) {
       const orderFields = spec.orderBy
-        .map((s: any) => {
+        .map((s) => {
           const field = this.mapSortField(s.field);
           const order = (s.order || 'asc').toUpperCase();
           return `${field} ${order}`;

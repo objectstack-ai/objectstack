@@ -89,18 +89,21 @@ describe('SystemFieldName', () => {
     expect(SystemFieldName.OWNING_BUSINESS_UNIT_ID).toBe('owning_business_unit_id');
   });
 
-  // [#4611 / ADR-0117 D1] The BU ownership stamp's canonical spelling is
-  // reserved here BEFORE open-core injects it, so consumers stop inventing
+  // [#4611 / ADR-0117 D1] The BU ownership stamp's canonical spelling was
+  // reserved here BEFORE open-core injected it, so consumers stop inventing
   // `business_unit_id` / `bu_id` / `dept_id` — the same drift that put
   // `tenant_id`/`org_id`/`space` into three hand-copied lists (cloud#982).
   //
-  // This table is a NAME registry, not the injected set, so a reserved-but-not-
-  // injected entry is a legitimate row (tenant_id / user_id / deleted_at are the
-  // precedents). The gate that keeps the classification honest lives in objectql
-  // (`system-managed-fields-conformance.test.ts`): it pins the public-form
-  // denylist to exactly (actively-injected ∪ documented-reserved), and this name
-  // is currently in the RESERVED half.
-  it('reserves the ADR-0117 business-unit ownership stamp without claiming injection (#4611)', () => {
+  // The name has since MOVED out of the reserved half: #5677 landed D1's
+  // injection, so `system-managed-fields-conformance.test.ts` (objectql) now
+  // derives it into Group A — the actively-injected side of the public-form
+  // partition — and the constant's JSDoc says INJECTED. What has NOT moved is
+  // the acceptance surface: `ObjectSchema`'s `ownership` enum is still
+  // `'user' | 'org' | 'none'`, so D1's fourth tier `ownership: 'business_unit'`
+  // remains unauthorable (#5678), pinned in `../../data/object.test.ts`. Both
+  // halves of that state are asserted below, because reading either one alone
+  // gets the contract wrong in a different direction.
+  it('registers the ADR-0117 business-unit ownership stamp, distinct from the user attribute (#4611)', () => {
     expect(SystemFieldName.OWNING_BUSINESS_UNIT_ID).toBe('owning_business_unit_id');
     // Guard the naming discipline ADR-0117 D10 spells out: the record stamp must
     // NOT be confused with `sys_user.primary_business_unit_id`, which is a USER
@@ -109,6 +112,13 @@ describe('SystemFieldName', () => {
     const names: readonly string[] = Object.values(SystemFieldName);
     expect(names).not.toContain('primary_business_unit_id');
   });
+
+  // Fact 2 of the pair — `ownership: 'business_unit'` still being unauthorable —
+  // is pinned ONCE, by `../../data/object.test.ts`, which asserts the rejection
+  // and its message. Deliberately not re-asserted here: a second copy of that
+  // fact is the drift mode this whole file exists to prevent. That pin's comment
+  // names this constant's JSDoc as a co-update target, so #5678 cannot flip the
+  // enum and leave "still deliberately REJECTED" standing in a doc comment.
 
   it('should be readonly (const assertion)', () => {
     const names: readonly string[] = Object.values(SystemFieldName);
@@ -135,6 +145,11 @@ describe('SystemFieldName', () => {
       'updated_at',
       'updated_by',
       'owner_id',
+      // [ADR-0117 D1 / #5677] Injected since the `wantOwner` allow-list landed,
+      // on the same objects `owner_id` is (default / `ownership: 'user'`). It
+      // belongs in THIS list, not in the reserved half — that reclassification
+      // is what the constant's JSDoc flip records.
+      'owning_business_unit_id',
     ]) {
       expect(names, injected).toContain(injected);
     }

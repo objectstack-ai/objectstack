@@ -10469,6 +10469,20 @@ export class ObjectStackProtocolImplementation implements
         }
 
         const singularTypeForRepo = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // #5927 — the fact the four delete receipts below have to tell the
+        // truth about, hoisted to method scope because it is read by BOTH
+        // delete paths (repository and legacy raw-engine) and by `intent`.
+        //
+        // It is the SAME fact the repo path already computed inline for
+        // `intent: 'override-artifact' | 'runtime-only'` — this binding
+        // replaces that call rather than adding one, so the receipt split
+        // costs zero new registry reads. (The two-tier authorization block
+        // above computes it a second time under `request.type`; that one is
+        // block-scoped to `environmentId !== undefined` and cannot be reused
+        // here. Both spellings agree: `canonicalizeMetaRequestType` already
+        // folded `request.type` to singular at the top of this method, which
+        // makes `singularTypeForRepo` a no-op re-fold — see #4432.)
+        const artifactBacked = this.isArtifactBacked(singularTypeForRepo, request.name);
         const overlayAllowedForRepoDel = ObjectStackProtocolImplementation.isOverlayAllowed(singularTypeForRepo);
         const runtimeCreateAllowedForRepoDel = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularTypeForRepo);
         const useRepoPath = overlayAllowedForRepoDel || runtimeCreateAllowedForRepoDel;
@@ -10505,9 +10519,18 @@ export class ObjectStackProtocolImplementation implements
                     return {
                         success: true,
                         reset: false,
+                        // #5927 — "already at artifact default" presumes an
+                        // artifact default EXISTS to be at. When nothing is
+                        // shipped under this (type, name), the absent overlay
+                        // row is the absence of the whole item, and the miss
+                        // says that instead of naming a baseline that was
+                        // never there. The draft leg claimed neither and is
+                        // unchanged, verbatim.
                         message: targetState === 'draft'
                             ? `No pending draft for ${request.type}/${request.name}.`
-                            : `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`,
+                            : artifactBacked
+                                ? `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`
+                                : `No ${singularTypeForRepo} '${request.name}' found — nothing to delete.`,
                     };
                 }
 
@@ -10523,7 +10546,10 @@ export class ObjectStackProtocolImplementation implements
                     // #4556 — NULL, not 'system', for an actor-less delete.
                     actor: request.actor ?? null,
                     source: 'protocol.deleteMetaItem',
-                    intent: this.isArtifactBacked(singularTypeForRepo, request.name)
+                    // #5927 — was an inline `this.isArtifactBacked(...)` call
+                    // with these exact arguments; now reads the method-scoped
+                    // binding the receipts share. Same fact, one call fewer.
+                    intent: artifactBacked
                         ? 'override-artifact'
                         : 'runtime-only',
                     state: targetState,
@@ -10578,9 +10604,30 @@ export class ObjectStackProtocolImplementation implements
                     reset: true,
                     seq: result.seq,
                     ...(deleteProjection ? { projectionApplied: deleteProjection } : {}),
+                    // #5927 — the same split #5265/PR #5926 made on the save
+                    // side, on the reset path. `artifactBacked` is exactly the
+                    // difference between the two things a delete can be:
+                    //
+                    //   • override-artifact — a code-shipped artifact sits
+                    //     under this (type, name). Removing the row really
+                    //     does lift a customization layer and really does
+                    //     leave the packaged default in force; the sentence is
+                    //     literally true and is unchanged, byte for byte.
+                    //   • runtime-only — nothing is underneath. The row WAS
+                    //     the item, and after this delete it does not exist in
+                    //     any layer. Telling an admin who just deleted an
+                    //     `object`/`flow`/`hook` they created that it was
+                    //     "reset to artifact default" points them at a
+                    //     baseline that has never existed.
+                    //
+                    // The draft leg discards a pending draft and never claimed
+                    // a reset, so it is unchanged. `[seq=…]` stays on every
+                    // branch — HMR cursors read it.
                     message: (request.state === 'draft')
                         ? `Draft discarded — ${request.type}/${request.name}. [seq=${result.seq}]`
-                        : `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`,
+                        : artifactBacked
+                            ? `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`
+                            : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists. [seq=${result.seq}]`,
                 };
             } catch (err: any) {
                 if (err instanceof ConflictError) {
@@ -10637,7 +10684,10 @@ export class ObjectStackProtocolImplementation implements
                 return {
                     success: true,
                     reset: false,
-                    message: `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`,
+                    // #5927 — same split as the repository path's miss above.
+                    message: artifactBacked
+                        ? `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`
+                        : `No ${singularTypeForRepo} '${request.name}' found — nothing to delete.`,
                 };
             }
             await this.engine.delete('sys_metadata', { where: { id: existing.id } });
@@ -10657,7 +10707,14 @@ export class ObjectStackProtocolImplementation implements
             return {
                 success: true,
                 reset: true,
-                message: `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default.`,
+                // #5927 — same split as the repository path's success above.
+                // This branch carries no `[seq=…]`: it writes no history row
+                // and emits no watch event (see the block comment opening this
+                // path), so there is no cursor to report. That asymmetry is
+                // pre-existing and deliberate — the split does not touch it.
+                message: artifactBacked
+                    ? `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default.`
+                    : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists.`,
             };
         } catch (err: any) {
             const e = new Error(`Failed to delete customization overlay: ${err.message}`);
