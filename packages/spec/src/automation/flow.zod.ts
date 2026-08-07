@@ -23,6 +23,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
+import { parseFlowNodeRegions } from './control-flow.zod';
 export const FlowNodeAction = z.enum([
   'start',              // Trigger
   'end',                // Return/Stop
@@ -179,7 +180,60 @@ const flowNodeUnknownKeyError = strictUnknownKeyError({
     'config shipped as a step that quietly ignored it.',
 });
 
-export const FlowNodeSchema = lazySchema(() => z.object({
+/**
+ * A flow node — **including** whatever ADR-0031 region its `config` holds (#4415).
+ *
+ * The `.transform()` is the point of this schema, not decoration. `config` is a
+ * deliberately open `z.record` (ADR-0018), so a container's nested sub-graph —
+ * `loop.config.body`, `parallel.config.branches[]`, `try_catch.config.try` /
+ * `.catch` — used to sail through the parse untouched: the *same* bare-string
+ * predicate came back as the canonical `{ dialect: 'cel', source }` envelope on a
+ * top-level edge and stayed a raw string one level down, a stored shape that
+ * depended on graph depth. #4381 closed that with a post-parse pass every caller
+ * had to remember to run (`normalizeControlFlowRegions`), which is an unwritten
+ * rule — exactly the #4347 defect generator: a new consumer takes `FlowParsed`
+ * and uses it, half-parsed and looking finished.
+ *
+ * Now the schema does it, so "parsed" means parsed at every depth (Prime
+ * Directive #1). Nesting needs no manual recursion: a region's `nodes` are
+ * `z.array(FlowNodeSchema)`, so Zod re-enters this transform on the way down.
+ *
+ * ## Two mechanical traps this shape carries — read before editing
+ *
+ * **1. It is a `ZodPipe`, not a `ZodObject`.** `.strict().transform(…)` is the
+ * ADR-0089 D3a shape that once crashed `z.toJSONSchema`'s `seen` table, and
+ * `FlowNodeSchema` is reached lazily from three directions (`FlowSchema.nodes`,
+ * `FlowRegionSchema.nodes`, `ParallelBranchSchema.nodes`). It works because
+ * `lazy-schema.ts`'s `_zod` facade aliases the Proxy's `seen` entry onto the real
+ * instance, and because the generators read a pipe's **authorable side** —
+ * `pipeAuthorableSide` in `scripts/lib/zod-graph.ts` returns `def.in` for an
+ * `a.transform(fn)` pipe. Measured on this schema (#4415): `gen:schema` emits
+ * `automation/FlowNode.json (input shape)` with the same key set as before.
+ * There is no `.shape` on this export any more — reach for {@link flowNodeObject}
+ * if you need the object half.
+ *
+ * **2. `control-flow.zod.ts` and this module are a deliberate import CYCLE.**
+ * The recursion is genuinely mutual (a node holds a region, a region holds
+ * nodes), so the region schemas back-reference `FlowNodeSchema`/`FlowEdgeSchema`
+ * through `z.lazy(() => …)`, and the object half below is a **hoisted `function`
+ * declaration**. Both are load-bearing under `OS_EAGER_SCHEMAS=1` (which
+ * `gen:schema` sets, bypassing the `lazySchema` Proxy): without them module
+ * evaluation reads a `const` still in its TDZ and dies with
+ * `ReferenceError: Cannot access 'FlowNodeSchema' before initialization` before
+ * any test runs. `flow-region-cycle.test.ts` pins both import orders in eager
+ * mode so that failure can never come back silently.
+ */
+export const FlowNodeSchema = lazySchema(() => flowNodeObject().transform(parseFlowNodeRegions));
+
+/**
+ * The plain `ZodObject` half of {@link FlowNodeSchema} — its declared keys,
+ * before the region transform turns the export into a `ZodPipe`.
+ *
+ * A hoisted `function` on purpose (see trap 2 above): under `OS_EAGER_SCHEMAS=1`
+ * the `lazySchema` factory runs at module-evaluation time, and a `const` arrow
+ * declared after it would still be in its temporal dead zone.
+ */
+function flowNodeObject() { return z.object({
   id: z.string().describe('Node unique ID'),
   type: z.string().min(1).describe(
     'Action type — a built-in FlowNodeAction id or a plugin-registered node type. ' +
@@ -402,7 +456,7 @@ export const FlowNodeSchema = lazySchema(() => z.object({
     /** Signal name — only for signal boundary events */
     signalName: z.string().optional().describe('Named signal to catch'),
   }).optional().describe('Configuration for boundary events attached to host nodes'),
-}, { error: flowNodeUnknownKeyError }).strict());
+}, { error: flowNodeUnknownKeyError }).strict(); }
 
 /** Keys {@link FlowEdgeSchema} declares (drift-guarded by flow.test.ts). */
 const FLOW_EDGE_KEYS = ['id', 'source', 'target', 'condition', 'type', 'label', 'isDefault'] as const;

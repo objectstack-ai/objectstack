@@ -18,7 +18,7 @@ import {
     type ScreenFieldVisibility,
 } from './screen-input-contract.js';
 import type { Logger } from '@objectstack/spec/contracts';
-import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, normalizeControlFlowRegions, collectFlowGraphs, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
+import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs, findRegionEntry, defineActionDescriptor } from '@objectstack/spec/automation';
 import { resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 import { applyConversionsToFlow, type ConversionNotice, type ConversionConflictNotice } from '@objectstack/spec';
 import type { FlowRegionParsed } from '@objectstack/spec/automation';
@@ -1038,11 +1038,11 @@ export interface SuspendedRunStore {
  * the author never wrote pins that row to today's value forever — so the graft
  * is deliberately narrow: it copies the lowered `condition`, nothing more.
  *
- * Structural alignment is by position, which is sound because neither the parse
- * nor `normalizeControlFlowRegions` reorders or drops array members — both are
- * copy-on-write maps. Where the two sides disagree in shape (a caller passed a
- * mismatched pair), the converted side is returned untouched: this only ever
- * lifts a value it can positively match.
+ * Structural alignment is by position, which is sound because the parse — region
+ * transform included (#4415) — never reorders or drops array members: every step
+ * of it is a copy-on-write map. Where the two sides disagree in shape (a caller
+ * passed a mismatched pair), the converted side is returned untouched: this only
+ * ever lifts a value it can positively match.
  *
  * Node `config.condition` (e.g. a start node's record-change predicate) is
  * left alone by construction — `FlowNodeSchema.config` is an open `z.record`,
@@ -2077,25 +2077,23 @@ export class AutomationEngine implements IAutomationService {
                 this.logger.warn(`[flow '${name}'] ${c.code}: ${c.message}`);
             },
         });
-        const flowShell = FlowSchema.parse(converted);
+        // #4347 / #4415 — one call, canonical at every depth. `FlowNodeSchema`
+        // parses its own ADR-0031 regions (`FlowNodeSchema.transform` →
+        // `parseFlowNodeRegions`), so what comes back here is already normalized
+        // inside `loop.config.body`, `parallel.config.branches[]` and
+        // `try_catch.config.try`/`.catch` — recursively. Until #4415 that needed
+        // a second, separately-remembered call to `normalizeControlFlowRegions`
+        // right here, and every consumer that took a `FlowParsed` without making
+        // it held a half-parsed flow that looked finished.
+        const parsed = FlowSchema.parse(converted);
 
         // DAG cycle detection
-        this.detectCycles(flowShell);
+        this.detectCycles(parsed);
 
         // ADR-0031 — validate structured control-flow constructs (loop bodies,
         // parallel branches, try/catch regions) are well-formed (single-entry/
         // single-exit, acyclic). Reject the malformed before it can run.
-        validateControlFlow(flowShell);
-
-        // #4347 — then canonicalize what lives INSIDE those regions. A region
-        // sits in `FlowNodeSchema.config`, which is an open `z.record`, so the
-        // parse above stopped at the container: a bare-string `condition` on a
-        // top-level edge came back as the canonical `{ dialect: 'cel', source }`
-        // envelope while the identical predicate on a loop-body edge stayed a
-        // bare string. Same flow, same call, different stored shape by nesting
-        // depth. Runs after `validateControlFlow` so a malformed region is
-        // still reported by the validator that owns that message.
-        const parsed = normalizeControlFlowRegions(flowShell);
+        validateControlFlow(parsed);
 
         return {
             parsed,
