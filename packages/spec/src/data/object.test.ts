@@ -1521,6 +1521,73 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
   });
 });
 
+/**
+ * Message ORDER on `strictTenancyError` (#6416, applying #5955's ruling).
+ *
+ * A hand-written `$ZodErrorMap`: it never calls `strictUnknownKeyError`, so
+ * #5955's reorder of the shared template did not reach it, and it is not one of
+ * the 44 direct call sites #5593 migrates to `strictObject` either. Its
+ * explanatory sentence is the standing two-modes explainer, and its FIX channel
+ * is the per-key `  • ` bullets built just above it — the tombstone that tells
+ * an upgrading author what to write instead. Those bullets used to sit BEHIND
+ * ~160 characters of standing background, which is past the front of the
+ * single-line renders several consumers use (`os validate`'s `• where: message`,
+ * CI logs).
+ *
+ * ORDER pins, not presence checks. Every `toContain` in the block above stays
+ * green under either order — that is exactly why they cannot carry this fact.
+ */
+describe('strictTenancyError message order — bullets before the explainer (#6416)', () => {
+  const EXPLAINER =
+    'The two supported tenancy modes are: database-per-tenant = environment-level ' +
+    'deployment (no object config); row-level isolation = `tenancy.enabled` + ' +
+    '`tenancy.tenantField`.';
+
+  const messageFor = (body: Record<string, unknown>) => {
+    const res = TenancyConfigSchema.safeParse({ enabled: true, ...body });
+    expect(res.success).toBe(false);
+    const unknown = res.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown).toBeDefined();
+    return unknown!.message;
+  };
+
+  it('names the wrong key first, then the tombstone bullet, then the explainer', () => {
+    const m = messageFor({ strategy: 'isolated' });
+    // 1. which key is wrong — and nothing before it
+    expect(m.startsWith('Unrecognized key(s) on `tenancy`: `strategy`.\n')).toBe(true);
+    // 2. the fix channel: the per-key bullet, on the line right after
+    expect(m).toContain('\n  • `tenancy.strategy` was removed from @objectstack/spec after v15.0');
+    // 3. the explainer, verbatim, last — moved, never dropped
+    expect(m.indexOf('Delete the key.')).toBeLessThan(m.indexOf(EXPLAINER));
+    expect(m.endsWith(` ${EXPLAINER}`)).toBe(true);
+  });
+
+  it('keeps EVERY per-key bullet ahead of the explainer, not just the first', () => {
+    // One issue names every offending key, so the explainer is a per-MESSAGE
+    // sentence: a reorder that put it after the first bullet would bury the rest.
+    const m = messageFor({ strategy: 'isolated', crossTenantAccess: true, tenantfield: 'org_id' });
+    for (const bullet of [
+      '`tenancy.strategy` was removed',
+      '`tenancy.crossTenantAccess` was removed',
+      '`tenantfield` is not a `tenancy` key.',
+    ]) {
+      expect(m).toContain(bullet);
+      expect(m.indexOf(bullet), bullet).toBeLessThan(m.indexOf(EXPLAINER));
+    }
+    expect(m.split(EXPLAINER)).toHaveLength(2);
+    expect(m.endsWith(` ${EXPLAINER}`)).toBe(true);
+  });
+
+  it('is a full-message pin for the plain unknown-key case', () => {
+    // Any stray separator, dropped newline or duplicated clause fails here.
+    expect(messageFor({ tenantfield: 'org_id' })).toBe(
+      'Unrecognized key(s) on `tenancy`: `tenantfield`.\n' +
+      '  • `tenantfield` is not a `tenancy` key. ' +
+      EXPLAINER,
+    );
+  });
+});
+
 describe('isTenancyDisabled — platform-global posture predicate (#3249, ADR-0066)', () => {
   it('is true only for an explicit tenancy.enabled === false', () => {
     expect(isTenancyDisabled({ name: 'sys_license', tenancy: { enabled: false } })).toBe(true);
