@@ -70,59 +70,44 @@
  * #5146 made `$not` NULL-safe and #5298 did the same for the non-negated
  * `$ne` / `$nin` / `$notContains`, so "the column has no value" now has ONE
  * cross-backend answer and belongs to the standard like any other. The
- * {@link FilterLogicRow.d} column carries it; see the `d`-column cases below,
- * and family 2 of the next section for the rows still waiting on a backend.
+ * {@link FilterLogicRow.d} column carries it, and the four `d`-column cases
+ * below enforce it on every backend.
  *
  * ## Case families that are RULED but not yet enrolled
  *
- * Both remaining families were ruled by the maintainer and are implemented in
- * some backends. Neither is in the table yet — a red row here does not enforce
- * a ruling, it just turns another lane's unfinished work into this table's
- * failure, and each family still has a blocker standing, named per family
- * below. Add the rows in the PR that closes the gap, not before.
+ * The one family left was ruled by the maintainer and is implemented in some
+ * backends. It is not in the table yet — a red row here does not enforce a
+ * ruling, it just turns another lane's unfinished work into this table's
+ * failure, and the family still has a blocker standing, named below. Add the
+ * rows in the PR that closes the gap, not before.
  *
- * (Family 1 of this note — the boolean identities of the empty combinators —
- * is GONE because it graduated: the #5322 ruling took the identity reduction,
- * both analytics compilers aligned, and its four rows now sit in
- * {@link FILTER_LOGIC_CASES} below, enrolled on every backend. The family
- * numbering of the two that remain is kept as their historical ids.)
+ * Two families have GRADUATED out of this note, and how they did is the note's
+ * own instruction manual. Family 1 — the boolean identities of the empty
+ * combinators — went first: the #5322 ruling took the identity reduction, both
+ * analytics compilers aligned, and its four rows moved into
+ * {@link FILTER_LOGIC_CASES}. Family 2 — NULL-safe negation, `$not` (#5146) and
+ * `$ne`/`$nin`/`$notContains` (#5298), one family and not two because the second
+ * ruling extended the first — followed it in #5903, and is worth a sentence
+ * because of the shape of its blocker list rather than its content. It stood at
+ * two backends: `service-analytics`'s `filter-normalizer` (the Cube face)
+ * answered `['2']` for `$ne` while already answering `$not` correctly, and
+ * `driver-turso` REMOTE answered `['2']` for both. #5977 cleared the first by
+ * emitting the guard as tree STRUCTURE, so all three compilers of that tree
+ * agreed; #5903 cleared the second, and the two rows enrolled with it.
  *
- * ### 2. NULL-safe negation — `$not` (#5146) and `$ne`/`$nin`/`$notContains` (#5298)
- *
- * A row whose column has no value does not satisfy the negated condition and IS
- * returned. One family, not two: #5298 ruled the non-negated operators the same
- * way #5146 ruled `$not`, so the rows land together or not at all.
- *
- * The FIXTURE half of this work is DONE (#5298): {@link FilterLogicRow.d} is
- * nullable, all eleven harnesses declare and seed it, and the `$null` partition
- * below proves they seeded it as NULL. What remains is ONE backend, measured
- * against this fixture on 2026-08-06 rather than assumed:
- *
- * | backend | `{d: {$ne: 'v1'}}` | `{$not: {d: 'v1'}}` | blocker |
- * |---|---|---|---|
- * | `driver-turso` REMOTE | `['2']` | `['2']` | #5903 |
- *
- * Everything else already answers `['2','3','4']` on both: `driver-sql`,
- * `driver-sqlite-wasm`, `driver-turso` LOCAL, `read-scope-sql`, `driver-memory`
- * (both surfaces), `driver-mongodb` and `formula`.
- *
- * `service-analytics`'s `filter-normalizer` (the Cube face) was the second row
- * of that table until #5977, answering `['2']` for `$ne` while already answering
- * `$not` correctly — the #5146 rewrite lived in the normalizer, the three
- * self-negating operators did not. It now emits the guard as tree STRUCTURE, so
- * all three compilers of that tree (raw SQL, the ObjectQL engine condition and
- * the display-SQL echo) answer `['2','3','4']`. That leaves `driver-turso`
- * remote as the sole blocker for BOTH rows, so `$ne` and `$not` now enrol
- * together, in #5903's PR.
- *
- * `driver-turso` remote is the interesting one and the reason the pre-#5298
+ * `driver-turso` remote is the one to remember, and the reason the pre-#5298
  * version of this note was WRONG where it said "every surface answers this
  * family the same way — no backend blocker remains". `TursoDriver` extends
  * `SqlDriver`, so local mode inherited #5146 for free; remote mode compiles
  * filters in `RemoteTransport.buildWhereSQL`, an independent emitter that
  * inherited none of it. One driver, two answers, chosen by connection mode —
  * exactly what this table exists to catch, and exactly what it could not see
- * while the fixture had no nullable column. #5903 carries the fix.
+ * while the fixture had no nullable column. The lesson generalises past this
+ * family: enrolment is what makes a ruling enforceable, and a "no blocker
+ * remains" written from a reading of the backend LIST rather than from a
+ * measurement is the sentence that hides the next one.
+ *
+ * The family numbering of the one that remains is kept as its historical id.
  *
  * ### 3. `{ field: {} }` — a field constrained by zero operators (#5240)
  *
@@ -316,23 +301,36 @@ export const FILTER_LOGIC_CASES: readonly FilterLogicCase[] = [
     note: '#5322: emitting nothing for it runs the query UNSCOPED — on an RLS lowering that is a permission bypass (#5297).',
   },
 
-  // ── NULL / no-value semantics (#5298) ─────────────────────────────────────
+  // ── NULL / no-value semantics (#5146, #5298) ──────────────────────────────
   //
-  // Rows 3 and 4 have no `d`, and these two cases are what makes that true of
-  // every harness: a fixture that quietly stored `''` instead of NULL, or a
-  // `NOT NULL` column that rejected the seed, fails HERE rather than by turning
-  // some later case green for the wrong reason. That is their first job — they
-  // are the control the `$ne` / `$not` rows will lean on when those land.
+  // Rows 3 and 4 have no `d`. The `$null` partition at the bottom of this
+  // section is what makes that true of every harness: a fixture that quietly
+  // stored `''` instead of NULL, or a `NOT NULL` column that rejected the seed,
+  // fails THERE rather than by turning one of the two cases here green for the
+  // wrong reason. Read the four together — a no-value row is either inside the
+  // negation or outside it, and the partition says which rows are which.
   //
-  // Only the `$null` partition is enrolled. The `$ne` and `$not` rows that
-  // belong beside it are written out in the module doc above, under "RULED but
-  // not yet enrolled" — two backends cannot answer them yet, and enrolling a
-  // row two lanes have to go fix is how this table stops meaning anything.
+  // The family completed here in #5903, the PR that made `driver-turso` REMOTE
+  // answer them: it was the last backend of eleven still returning `['2']`, and
+  // until it did, enrolling these two rows would have been a gate that reports a
+  // known red — which teaches every agent reading CI to discount the colour.
+  {
+    name: '$ne returns the rows with no value',
+    filter: { d: { $ne: 'v1' } },
+    expected: ['2', '3', '4'],
+    note: '#5298: "not v1" is true of a row whose d is absent. A three-valued `d <> ?` drops rows 3-4 — half the table, silently.',
+  },
+  {
+    name: '$not returns the rows with no value',
+    filter: { $not: { d: 'v1' } },
+    expected: ['2', '3', '4'],
+    note: '#5146: the same ruling reached through the combinator. `NOT (NULL = ?)` is UNKNOWN, so an unguarded negation drops rows 3-4 — and on a CEL `!expr` read scope that is one permission rule admitting different row sets per backend.',
+  },
   {
     name: '$null true selects exactly the no-value rows',
     filter: { d: { $null: true } },
     expected: ['3', '4'],
-    note: 'The control for the two above: it pins WHICH rows have no value, so a case that returns 3-4 cannot be passing because the seed lost a value it should have kept.',
+    note: 'The control for the two above: it pins WHICH rows have no value, so a case that returns 2-4 cannot be passing because the seed lost a value it should have kept.',
   },
   {
     name: '$null false selects exactly the valued rows',

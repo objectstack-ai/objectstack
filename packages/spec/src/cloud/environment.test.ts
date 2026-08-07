@@ -9,6 +9,7 @@ import {
   EnvironmentMemberSchema,
   EnvironmentRoleSchema,
   ProvisionEnvironmentRequestSchema,
+  ProvisionEnvironmentResponseSchema,
   ProvisionOrganizationRequestSchema,
 } from './environment.zod';
 describe('EnvironmentStatusSchema', () => {
@@ -160,6 +161,96 @@ describe('ProvisionEnvironmentRequestSchema', () => {
         createdBy: 'user_1',
       }),
     ).toThrow();
+  });
+});
+
+describe('ProvisionEnvironmentResponseSchema — hostnameAssignment', () => {
+  const environment = {
+    id: '550e8400-e29b-41d4-a716-446655440000',
+    organizationId: 'org_1',
+    displayName: 'Alice dev',
+    isDefault: false,
+    plan: 'pro' as const,
+    status: 'active' as const,
+    createdBy: 'user_1',
+    createdAt: '2026-04-19T00:00:00.000Z',
+    updatedAt: '2026-04-19T00:00:00.000Z',
+    hostname: 'alice-dev-9f3a.objectstack.app',
+  };
+  const credential = {
+    id: '550e8400-e29b-41d4-a716-446655440001',
+    environmentId: '550e8400-e29b-41d4-a716-446655440000',
+    secretCiphertext: 'ciphertext',
+    encryptionKeyId: 'kms-key-1',
+    createdAt: '2026-04-19T00:00:00.000Z',
+  };
+  const base = { environment, credential, durationMs: 1234 };
+
+  it('parses a response WITHOUT hostnameAssignment (no rename happened)', () => {
+    const parsed = ProvisionEnvironmentResponseSchema.parse(base);
+    expect(parsed.hostnameAssignment).toBeUndefined();
+  });
+
+  it('parses a response WITH hostnameAssignment and preserves both hostnames', () => {
+    const parsed = ProvisionEnvironmentResponseSchema.parse({
+      ...base,
+      hostnameAssignment: {
+        requestedHostname: 'alice-dev.objectstack.app',
+        assignedHostname: 'alice-dev-9f3a.objectstack.app',
+      },
+    });
+    expect(parsed.hostnameAssignment).toEqual({
+      requestedHostname: 'alice-dev.objectstack.app',
+      assignedHostname: 'alice-dev-9f3a.objectstack.app',
+    });
+  });
+
+  it('rejects hostnameAssignment missing assignedHostname', () => {
+    expect(() =>
+      ProvisionEnvironmentResponseSchema.parse({
+        ...base,
+        hostnameAssignment: { requestedHostname: 'alice-dev.objectstack.app' },
+      }),
+    ).toThrow();
+  });
+
+  it('rejects hostnameAssignment missing requestedHostname', () => {
+    expect(() =>
+      ProvisionEnvironmentResponseSchema.parse({
+        ...base,
+        hostnameAssignment: { assignedHostname: 'alice-dev-9f3a.objectstack.app' },
+      }),
+    ).toThrow();
+  });
+
+  it('rejects non-string hostnames inside hostnameAssignment', () => {
+    expect(() =>
+      ProvisionEnvironmentResponseSchema.parse({
+        ...base,
+        hostnameAssignment: { requestedHostname: 'a.objectstack.app', assignedHostname: 42 },
+      }),
+    ).toThrow();
+  });
+
+  it('rejects a non-object hostnameAssignment', () => {
+    expect(() =>
+      ProvisionEnvironmentResponseSchema.parse({
+        ...base,
+        hostnameAssignment: 'alice-dev-9f3a.objectstack.app',
+      }),
+    ).toThrow();
+  });
+
+  // Why the field has to be declared HERE and not extended on in the control
+  // plane: an undeclared sibling key is stripped by `z.object`, so a
+  // cloud-local rename receipt would silently evaporate on the way out.
+  it('strips an undeclared sibling key — the reason this field is declared in spec', () => {
+    const parsed = ProvisionEnvironmentResponseSchema.parse({
+      ...base,
+      renamedHostname: 'alice-dev-9f3a.objectstack.app',
+    });
+    expect((parsed as Record<string, unknown>).renamedHostname).toBeUndefined();
+    expect(Object.keys(parsed)).not.toContain('renamedHostname');
   });
 });
 

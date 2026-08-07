@@ -24,11 +24,9 @@ class FakeAdapter implements IStorageService {
     if (!b) throw new Error('not found');
     return { key, size: b.length, lastModified: new Date(), contentType: 'application/octet-stream' };
   }
-  async list(prefix: string): Promise<StorageFileInfo[]> {
-    return Array.from(this.store.keys())
-      .filter((k) => k.startsWith(prefix))
-      .map((k) => ({ key: k, size: this.store.get(k)!.length, lastModified: new Date() }));
-  }
+  // No `list(prefix)`: the contract dropped it in #5540 and the shipped adapters
+  // dropped their implementations in #5541, so a fake that still advertised one
+  // would model a surface no real adapter has.
 }
 
 /** Adapter that omits the optional methods to exercise the proxy's

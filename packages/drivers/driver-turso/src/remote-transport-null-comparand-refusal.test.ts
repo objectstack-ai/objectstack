@@ -251,24 +251,87 @@ describe('RemoteTransport $null comparand refusal (#1116)', () => {
     });
   });
 
-  describe('(d) the scope fence #1116 draws, pinned so it is not crossed by accident', () => {
-    it('leaves `$exists` reading a non-boolean exactly as it did', async () => {
-      // `$exists` carries the identical `=== false` bisection one arm below,
-      // and is deliberately NOT tightened: its divergence is on another axis
-      // (whether "exists" means key-present or has-value — objectstack#5299,
-      // reopened as #5369), so tightening it HERE alone would manufacture a
-      // local/remote fork rather than close one. framework left its twin alone
-      // for the same reason. When #5299 is ruled on, this test is the one to
-      // change — deliberately, not incidentally.
-      expect((await compile({ stage: { $exists: 'yes' } })).sql).toBe(
-        `${BARE_SCAN} WHERE "stage" IS NOT NULL`,
-      );
+  describe('(d) the fence #1116 drew around `$exists`, now TAKEN DOWN (#5369 / #5903)', () => {
+    // The block this replaces asserted the opposite, and named the condition
+    // for its own reversal: "`$exists` carries the identical `=== false`
+    // bisection one arm below, and is deliberately NOT tightened: its
+    // divergence is on another axis (whether 'exists' means key-present or
+    // has-value — objectstack#5299, reopened as #5369), so tightening it HERE
+    // alone would manufacture a local/remote fork rather than close one. When
+    // #5299 is ruled on, this test is the one to change — deliberately, not
+    // incidentally."
+    //
+    // Both conditions have now been met, so this is that deliberate change:
+    //
+    //  - #5298's four-point ruling (2026-08-06) settled `$exists` on **has a
+    //    value**, the reading this transport already compiled — so the "another
+    //    axis" the fence was protecting is closed, and `$exists` / `$null` are
+    //    strict mirrors.
+    //  - PR #5962 landed the refusal on `driver-sql`, which Turso LOCAL
+    //    inherits. Keeping the fence up stopped preventing a local/remote fork
+    //    and started BEING one: measured on `origin/main` against the shared
+    //    conformance fixture, `{ d: { $exists: 'yes' } }` threw `INVALID_FILTER`
+    //    locally and returned the valued rows remotely.
+    it('refuses a non-boolean `$exists` comparand, as `$null` does', async () => {
+      for (const value of ['yes', 1, 0, null, undefined, {}, 'false', [], 'true']) {
+        const err = await refusalOf({ stage: { $exists: value } });
+        expect(err.code, JSON.stringify(value) ?? 'undefined').toBe('INVALID_FILTER');
+        expect(err.status).toBe(400);
+        expect(err.message).toContain(
+          'Operator "$exists" on field "stage" requires a boolean comparand (true or false).',
+        );
+        // The location convention every other refusal in this file uses.
+        expect(err.message).toContain(`'deal.stage'.$exists`);
+      }
+    });
+
+    it('names the STRING `"false"` as the trap it is', async () => {
+      // The same trap the `$null` twin calls out: `'false'` is truthy, so the
+      // spelling most likely to arrive from a JSON round-trip or a template
+      // concatenation compiled to `IS NOT NULL` — the exact opposite of what
+      // its author meant.
+      const err = await refusalOf({ stage: { $exists: 'false' } });
+      expect(err.message).toContain('"false" the STRING is truthy');
+    });
+
+    it('still compiles the two booleans, unchanged', async () => {
+      // The guard adds no third answer: `$exists` keeps the mirror of `$null`
+      // it has always had.
       expect((await compile({ stage: { $exists: true } })).sql).toBe(
         `${BARE_SCAN} WHERE "stage" IS NOT NULL`,
       );
       expect((await compile({ stage: { $exists: false } })).sql).toBe(
         `${BARE_SCAN} WHERE "stage" IS NULL`,
       );
+    });
+
+    it('refuses at every depth, and executes no statement', async () => {
+      // Same depths the `$null` gate is pinned at — the arm runs inside the
+      // operator loop, so a nested spelling must not slip past it.
+      const { t, calls } = transportWithCapturingClient();
+      for (const where of [
+        { $and: [{ stage: { $exists: 'yes' } }] },
+        { $or: [{ stage: 'won' }, { stage: { $exists: 1 } }] },
+        { $not: { stage: { $exists: 'yes' } } },
+        { $or: [{}, { stage: { $exists: 'false' } }] },
+      ]) {
+        await expect(t.find('deal', { where } as unknown as QueryAST)).rejects.toThrow(
+          /Operator "\$exists" .* requires a boolean comparand/,
+        );
+      }
+      expect(calls).toEqual([]);
+    });
+
+    it('refuses on the writing entry points too — the direction that costs the most', async () => {
+      const { t, calls } = transportWithCapturingClient();
+      const where = { stage: { $exists: 'false' } };
+      await expect(t.deleteMany('deal', { where } as any)).rejects.toThrow(
+        /requires a boolean comparand/,
+      );
+      await expect(t.updateMany('deal', { where } as any, { stage: 'archived' })).rejects.toThrow(
+        /requires a boolean comparand/,
+      );
+      expect(calls).toEqual([]);
     });
 
     it('leaves the regex family taking a non-string comparand', async () => {
@@ -295,6 +358,7 @@ describe('RemoteTransport $null comparand refusal (#1116)', () => {
       ['a non-node `$not` operand (#1076)', { $not: 'won' }],
       ['a non-node top-level `where` (#1075)', [['stage', '=', 'won']]],
       ['a non-boolean `$null` comparand (#1116)', { stage: { $null: 'yes' } }],
+      ['a non-boolean `$exists` comparand (#5369/#5903)', { stage: { $exists: 'yes' } }],
     ];
 
     for (const [label, where] of FILTER_REFUSALS) {
