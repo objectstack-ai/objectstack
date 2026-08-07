@@ -791,9 +791,13 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
   //
   // FOR AGENTS, THE CODE IS THE RECORD — and that is the whole answer to
   // "where is this type's change log?" (#4507). Because the two flags above
-  // are false, `agent` is the one authorable type with NO governed write
-  // path: `saveMetaItem` would route it down the legacy raw-engine branch,
-  // and nothing calls it. The rows are written instead by the shipping
+  // are false, `agent` is code-only, and `saveMetaItem` REFUSES it outright
+  // on every kernel with a 403 (#5086): `NOT_OVERRIDABLE` when the name is
+  // already artifact-backed, `NOT_CREATABLE` otherwise. So the type has no
+  // governed write path at all — not a dormant one. (Until #5264 the refusal
+  // was followed by a legacy raw-engine branch that nothing reached; it has
+  // since been deleted, so there is no second door to describe.) The rows,
+  // being unwritable through the metadata API, are written by the shipping
   // plugin at boot — `AIStudioPlugin.registerMeta` → `metadataService
   // .register()` → `MetadataManager.register` → `DatabaseLoader.save` —
   // which writes `sys_metadata` directly with a fresh checksum and appends
