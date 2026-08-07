@@ -247,7 +247,7 @@ const READ_VERBS = 'find|query|select|count|aggregate';
 function readCallPattern(table) {
   return new RegExp(
     '[\\w$.]*(?:' + READ_VERBS + ')[\\w$]*\\s*\\(\\s*' + // callee + open paren
-    '[^)\'"`]{0,80}' +                                    // earlier plain arguments, if any
+    '[^()\'"`]{0,80}' +                                   // earlier plain arguments, if any
     '[\'"`]' + table + '[\'"`]',                          // the table, quoted
     'i',
   );
@@ -611,6 +611,35 @@ function selfTest() {
     // negative polarity.
     for (const t of GRANT_TABLES) {
       expect(`querying only ${t} is not a resolver`, queriesAllGrantTables(resolverFixtureBody([t])), false);
+    }
+
+    // --- The read-call spellings the criterion must recognise (POSITIVE polarity). ---
+    // These go red if READ_VERBS is narrowed or the argument pattern regresses — the
+    // recall side of the criterion, which no fixture above can reach because
+    // `resolverFixtureBody` only ever emits `ql.find`. The canonical resolver uses the
+    // `tryFind` HELPER spelling, so losing it would break the positive control itself.
+    const t0 = GRANT_TABLES[0];
+    for (const [label, src] of [
+      ['member call', `ql.find('${t0}', { where: {} })`],
+      ['helper call with a leading argument', `await tryFind(ql, '${t0}', { user_id }, 200)`],
+      ['double quotes', `ql.find("${t0}")`],
+      ['template literal', 'dataEngine.findOne(`' + t0 + '`)'],
+      ['argument on the next line', `this.ql.find(\n      '${t0}',\n      { limit: 1 })`],
+    ]) {
+      expect(`a read call is recognised — ${label}`, queriesGrantTable(src, t0), true);
+    }
+    // ...and the shapes that merely CONTAIN the name are not read calls (negative
+    // polarity, listed for the record). The nested-call case is the sharp one: the table
+    // must be an argument of the READ call, not of something nested inside it.
+    for (const [label, src] of [
+      ['a comment', `// we read ${t0} here`],
+      ['a constant list', `const NAMES = ['${t0}'];`],
+      ['an unquoted object key', `${t0}: { allowRead: true },`],
+      ['a Set literal', `new Set(['${t0}'])`],
+      ['page metadata', `objectName: '${t0}',`],
+      ['a nested call inside a read call', `find(wrap('${t0}'))`],
+    ]) {
+      expect(`not a read call — ${label}`, queriesGrantTable(src, t0), false);
     }
 
     // (1) — a second file reading rows from every grant table is a duplicate resolver.
