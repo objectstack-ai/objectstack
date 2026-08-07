@@ -2932,8 +2932,43 @@ export class AutomationEngine implements IAutomationService {
         try {
             return await this.loadSuspendedRunStrict(runId);
         } catch (err) {
+            // #6230 — the cause goes to `meta`, never into the message. It is
+            // the datasource DRIVER's own failure text and we do not control
+            // how many lines it has; `ObjectLogger.write()` adds one
+            // `<ts> <LEVEL>` head per call, so a newline in it turns this ONE
+            // record into several physical lines of which only the first is
+            // greppable — the family of #5048 / #5575 / #5636 / #5661 / #5737 /
+            // #5912, and cloud#971's shape.
+            //
+            // This seam is the `warn` half of that family and carries the extra
+            // harm the module docblock of ./thrown-cause-diagnostics.ts calls
+            // out: `ObjectLogger` routes `warn` to **stdout**, and `serve`'s
+            // boot-quiet window wraps `process.stdout.write`, where
+            // `BootLogCapture.offer()` retains a physical line only when
+            // `classifyBootLogLine` finds a level head on it. Continuation lines
+            // are therefore DROPPED outright, not merely misread — and this is
+            // live during boot: `plugin.ts` `start()` → `rearmSuspendedWaitTimers`
+            // → `engine.resume()` for an overdue run → the gate
+            // (`refuseGatedResume` → `resolveEffectiveSuspension`) → here.
+            //
+            // SECOND argument, per the `Logger` contract
+            // (`packages/spec/src/contracts/logger.ts`): `warn(message, meta?)`.
+            // Unlike `error(message, error?, meta?)` (#5912's seam, PR #6228)
+            // `warn` has no `Error` slot, so `meta` is the second parameter.
+            //
+            // Level stays `warn` on purpose. This is a deliberate FUNCTIONAL
+            // degradation — the loader's whole contract is "a best-effort answer
+            // for incidental readers" and `resumeInternal` uses the strict form
+            // when the difference matters — so #4632's durability rule does not
+            // apply and raising it to `error` would be that rule's mirror-image
+            // misuse, an alarm on every gate lookup during an outage.
             this.logger.warn(
-                `[automation] failed to load suspended run '${runId}' from durable store: ${(err as Error).message}`,
+                `[automation] durable suspended-run store unreadable for run '${runId}' — this read is best-effort ` +
+                    `and DEGRADES to null, so its caller (the resume gate, a screen fetch) sees exactly what it ` +
+                    `would see if no suspension existed under that id; the run itself is untouched and stays ` +
+                    `parked. Fix the store failure in this record's meta — a strict read reports it as ` +
+                    `STORE_UNAVAILABLE instead of degrading.`,
+                describeThrownForLog(err),
             );
             return null;
         }

@@ -3,6 +3,12 @@
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { likePattern, LIKE_ESCAPE_CHAR } from './like-pattern.js';
+import {
+  isBindableComparand,
+  isRenderableTextComparand,
+  unbindableListMemberMessage,
+  unrenderableTextComparandMessage,
+} from './comparand-shape.js';
 
 /**
  * Compile an RLS / tenant read-scope `FilterCondition` into a parameterized,
@@ -372,6 +378,38 @@ function nullSafeNegative(col: string, test: string): string {
   return `(${col} IS NULL OR ${test})`;
 }
 
+/**
+ * [#5234] The comparand-SHAPE gate for this door.
+ *
+ * `compileScopedFilterToSql` takes a `FilterCondition` that never passes through
+ * `filter-normalizer`'s `fieldLeaves`, so this module needs the two checks in
+ * its own right — same rule, stated once in `comparand-shape.ts`, wrapped in
+ * THIS module's envelope. The envelope difference is the point: a read scope is
+ * compiled from a policy, not authored by the caller, so an uncompilable
+ * comparand here is a 500 fail-closed refusal (see the header) rather than a 400.
+ *
+ * The direction matters more here than anywhere else this rule lands. A
+ * read-scope `{$nin: [{…}]}` compiled to `NOT IN ('[object Object]')`, which
+ * excludes NOTHING — the scope's exclusion silently did not happen, which is
+ * over-reach on a tenant/RLS predicate rather than a loose filter. That is the
+ * same reading #5347 / #5324 made on this very file, and the reason the #5234
+ * issue's "fail-closed, so lower risk" framing does not survive contact with the
+ * `$nin` / `$notContains` half.
+ */
+function assertCompilableMembers(op: string, field: string, members: unknown[]): void {
+  members.forEach((member, index) => {
+    if (!isBindableComparand(member)) {
+      throw readScopeCompileError(`[read-scope-sql] ${unbindableListMemberMessage(op, field, member, index)}`);
+    }
+  });
+}
+
+/** [#5234] See {@link assertCompilableMembers}; this is the LIKE-family half. */
+function assertRenderableText(op: string, field: string, val: unknown): void {
+  if (isRenderableTextComparand(val)) return;
+  throw readScopeCompileError(`[read-scope-sql] ${unrenderableTextComparandMessage(op, field, val)}`);
+}
+
 function compileOperator(col: string, op: string, val: unknown, field: string, params: unknown[]): string {
   switch (op) {
     case '$eq': return val === null ? `${col} IS NULL` : `${col} = ${bind(params, val)}`;
@@ -385,27 +423,32 @@ function compileOperator(col: string, op: string, val: unknown, field: string, p
     case '$in': {
       if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $in for "${field}" needs an array (fail-closed).`);
       if (val.length === 0) return FALSE_CLAUSE; // IN () matches nothing — safe
+      assertCompilableMembers(op, field, val);
       return `${col} IN (${val.map((v) => bind(params, v)).join(', ')})`;
     }
     case '$nin': {
       if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $nin for "${field}" needs an array (fail-closed).`);
       if (val.length === 0) return '1 = 1'; // NOT IN () excludes nothing
+      assertCompilableMembers(op, field, val);
       // [#5298] NULL-safe: "not among this list" holds vacuously for a value
       // that is not there.
       return nullSafeNegative(col, `${col} NOT IN (${val.map((v) => bind(params, v)).join(', ')})`);
     }
     case '$between': {
       if (!Array.isArray(val) || val.length !== 2) throw readScopeCompileError(`[read-scope-sql] $between for "${field}" needs [min,max] (fail-closed).`);
+      assertCompilableMembers(op, field, val);
       return `${col} BETWEEN ${bind(params, val[0])} AND ${bind(params, val[1])}`;
     }
     // [#5567] The comparand is a LITERAL, so it is escaped and the escape
     // character is bound with it. See {@link bindLike}.
-    case '$contains': return `${col} LIKE ${bindLike(params, likePattern('contains', val))}`;
+    // [#5234] …and it must be a value `String()` can render, which is asserted
+    // BEFORE `likePattern` sees it — see {@link assertRenderableText}.
+    case '$contains': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('contains', val))}`;
     // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and "does not
     // contain" is true of a value that is not there.
-    case '$notContains': return nullSafeNegative(col, `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`);
-    case '$startsWith': return `${col} LIKE ${bindLike(params, likePattern('starts', val))}`;
-    case '$endsWith': return `${col} LIKE ${bindLike(params, likePattern('ends', val))}`;
+    case '$notContains': assertRenderableText(op, field, val); return nullSafeNegative(col, `${col} NOT LIKE ${bindLike(params, likePattern('contains', val))}`);
+    case '$startsWith': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('starts', val))}`;
+    case '$endsWith': assertRenderableText(op, field, val); return `${col} LIKE ${bindLike(params, likePattern('ends', val))}`;
     case '$null': return val ? `${col} IS NULL` : `${col} IS NOT NULL`;
     case '$exists': return val ? `${col} IS NOT NULL` : `${col} IS NULL`;
     default:

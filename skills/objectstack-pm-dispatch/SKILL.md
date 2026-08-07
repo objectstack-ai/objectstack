@@ -439,13 +439,49 @@ Named non-escalation classes — act immediately:
 - **Sequencing and dependency ordering** between technical tasks.
 - **Verification strategy** — what regression pass a risky-but-decided change
   needs. That is scoping the work, not deciding it.
+- **A declaration silently dropped on a new arm, when a sibling arm already has
+  a ruling.** When a declared key is silently ignored on one arm of a component
+  and an earlier ruling already made that same key a **loud authoring error** on
+  a sibling arm, the new arm **joins the existing rejection set by default** —
+  reuse that ruling, queue it, dispatch it; do not spend a fresh decision on a
+  one-word extension of an answer you already have. Only a genuine **semantic
+  difference between the arms** reopens the question. **State the boundary in the
+  same breath as the default, or the shortcut gets over-applied:** what carries
+  over is the ruling **together with its rationale**, never the verdict alone.
+  When the original rationale was measured to be arm-specific — it held on the
+  face it was ruled on and is disproved on the new one, as a "refusing this would
+  reject usage that already works" argument does the moment the new arm has no
+  such working usage — the default does not apply and the new arm earns its own
+  decision. The test is mechanical: re-check the original rationale against the
+  new arm *before* reusing the verdict. Sharing a key name is not sharing a
+  reason.
+- **Two implementations of one operation.** When one operation has two
+  implementations and they disagree, the side that already carries the
+  **governance** — authorization gates, user consent, de-duplication, audit
+  trail — is the **default survivor**; the other is rebound onto it and deleted.
+  Not reconciled, not kept as a second writer. The ungoverned side wins only
+  when **product semantics explicitly demand** it, and that semantic goes into
+  the decision text rather than being supplied afterwards as justification.
+  Keeping both implementations keeps a path around the gates — exactly what
+  `declared = enforced` exists to close.
 - A developer agent's `needs_decision` that, on review, falls into the classes
   above: answer it yourself with the decision and rationale; do not relay it
   upward.
 
 When something *does* pass the bar:
 
-1. **The decision lives ON the issue it belongs to — never a new issue.** Post
+1. **Refresh the card's premises first — before writing it, and again before
+   re-escalating it.** Every premise a decision card states (an in-flight change
+   has not landed, a capability does not exist yet, a file still has this shape)
+   is a **reading with a shelf life**: an active main branch takes on the order
+   of a dozen or more merges a day, and cross-repository facts move on an hourly
+   scale. Re-check every premise immediately before posting the card — and again
+   before pushing an older card back in front of the maintainer — then rewrite or
+   withdraw whatever no longer holds. **A card that sat overnight untouched is a
+   card whose premises are unverified, not merely a card that is waiting.** An
+   expired premise is worse than no card: the maintainer rules on a world that no
+   longer exists, and nothing on the card shows that this happened.
+2. **The decision lives ON the issue it belongs to — never a new issue.** Post
    the analysis as a comment there, add `needs-user-decision`, drop the issue
    from the active queue. The label is the maintainer's inbox (filter
    `label:needs-user-decision`); when they answer, the label comes off and the
@@ -453,10 +489,10 @@ When something *does* pass the bar:
    `[Decision] <one line saying what must be decided>`, same label) ONLY when
    the decision has no natural anchor — it spans several issues, or arose with
    no issue of its own.
-2. Write the analysis with: background, the precise question, the options, your
+3. Write the analysis with: background, the precise question, the options, your
    recommendation, and the related issues / PRs / branches — **and analyze
    every option on the three fixed axes below.**
-3. If the session is interactive, additionally ask the maintainer directly; the
+4. If the session is interactive, additionally ask the maintainer directly; the
    labeled issue remains the durable record either way. **Never** answer a
    product or architecture question on the maintainer's behalf.
 

@@ -1069,6 +1069,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * string — `String(…)`, the same normalisation `like-pattern.ts` applies at the
    * two SQL emitters and `driver-sql`'s `applyLike` applies at the driver, so one
    * `$contains` means one thing on every face (#5567's invariant).
+   *
+   * [#5234] Those four `String(…)` calls now only ever see a value that renders
+   * faithfully: `fieldLeaves` refuses an object comparand on this family before a
+   * leaf exists. That ordering is load-bearing rather than incidental — this arm
+   * is a PRODUCER for the engine, so stringifying an object here would have
+   * laundered it into `'[object Object]'` and handed a driver a perfectly
+   * well-typed string. A strict driver downstream could never have seen the shape
+   * it was strict about, which is why the guard sits at the door and not here.
    */
   private convertFilter(operator: string, values?: unknown[]): unknown {
     if (operator === 'set') return { $ne: null };

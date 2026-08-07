@@ -710,9 +710,10 @@ function crossFieldComparisonError(field: string, op: string, ref: string, index
  *
  * The list-shaped operators (`$in` / `$nin` / `$between`) are deliberately
  * ABSENT: an array is their legitimate comparand, and they compile through
- * their own `whereIn` / `whereBetween` arms. Only their MEMBERS are inspected
- * (for `$field`), never their arity — the existing descriptive `$between`
- * refusal stays the one that answers a malformed range.
+ * their own `whereIn` / `whereBetween` arms. Only their MEMBERS are inspected —
+ * for `$field` (#5041) and, since #5234, for bindability — never their arity:
+ * the existing descriptive `$between` refusal stays the one that answers a
+ * malformed range. See {@link LIST_COMPARAND_OPERATORS}.
  */
 const SCALAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
@@ -735,6 +736,54 @@ function isBindableComparand(value: unknown): boolean {
 }
 
 /**
+ * [#5234] Operators whose comparand becomes the TEXT of a `LIKE` pattern, i.e.
+ * the ones {@link SqlDriver.applyLike} serves. Kept separate from
+ * {@link SCALAR_COMPARAND_OPERATORS} because the two ask different questions of
+ * the same value: a scalar operator needs a value a driver can BIND, a pattern
+ * operator needs one that has a faithful TEXT rendering. Every value in the
+ * first set except a binary buffer is also in the second, but the reason is not
+ * the same reason, and the messages a caller needs differ.
+ *
+ * `like` / `ilike` are absent on purpose: they arrive already carrying a
+ * pattern and compile through the scalar bind arm, which already refuses an
+ * object.
+ */
+const TEXT_PATTERN_OPERATORS: ReadonlySet<string> = new Set([
+  '$contains', '$notContains', '$startsWith', '$endsWith', '$regex',
+]);
+
+/**
+ * [#5234] Operators for which an ARRAY is the legitimate comparand, so it is
+ * each MEMBER that must be individually compilable.
+ *
+ * Scoping the member scan to these three is what keeps a scalar operator that
+ * received an array answering with its own message ("requires a single
+ * comparable value") instead of reporting the first bad member of a list it
+ * should never have been given.
+ */
+const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(['$in', '$nin', '$between']);
+
+/**
+ * [#5234] Does this value have a faithful rendering as the text of a LIKE
+ * pattern?
+ *
+ * An ALLOW-list, deliberately, and the same one `driver-turso`'s
+ * `RemoteTransport.serializeComparand` settled on for the identical question in
+ * remote mode (cloud#1004 / #1058): a deny-list silently re-admits whatever
+ * value form is invented next, which is exactly how that bug survived its first
+ * fix. `undefined` is inside the fence only because it is not authorable (JSON
+ * has no `undefined`) and the analytics door normalises it to `null` rather than
+ * refusing it (#5526) — refusing it HERE would invent a disagreement rather than
+ * close one. See {@link unrenderableTextComparandError} for the rest.
+ */
+function isRenderableTextComparand(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  const kind = typeof value;
+  if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
+  return value instanceof Date;
+}
+
+/**
  * [#5041] The one gate every comparison comparand passes before it becomes a
  * bind parameter, covering both halves of the gap the issue measured:
  *
@@ -752,24 +801,67 @@ function isBindableComparand(value: unknown): boolean {
  *    {@link SCALAR_COMPARAND_OPERATORS} so the legitimate array binds keep
  *    working untouched.
  *
- * Deliberately NOT extended to two neighbouring shapes, both of which return
- * zero rows today rather than failing to bind: a non-`$field` object MEMBER of
- * an `$in`/`$nin` list, and the `LIKE` family (`$contains`/`$startsWith`/…),
- * which stringifies its comparand to `[object Object]`. Those are a different
- * defect class — a filter applied nonsensically, not one that cannot be applied
- * — and their direction is fail-closed (they narrow the result set, so they are
- * not a filter bypass). Widening this guard to cover them would change the
- * behaviour of paths that do not throw today, beyond what #5041 measured; see
- * the #5041 PR discussion for the measurement.
+ * 3. **[#5234] The two shapes #5041 deliberately left out** — a non-`$field`
+ *    OBJECT member of an `$in`/`$nin` list, and an object comparand on the
+ *    `LIKE` family. #5041 read them as a lesser class ("a filter applied
+ *    nonsensically, not one that cannot be applied") whose direction was
+ *    fail-closed, and stopped. Both halves of that reading were measured wrong
+ *    on `main` before this change:
+ *
+ *    - The direction is not uniformly fail-closed. `{status: {$nin: [{…}]}}`
+ *      compiles to `NOT IN ('[object Object]')`, which excludes NOTHING — an
+ *      exclusion the caller wrote that silently does not happen. On a
+ *      read-scope lowering that is over-reach, the same direction #5347 / #5324
+ *      ruled on. `$notContains` does it too: it EXCLUDED the one fixture row
+ *      whose text happened to be `[object Object]`.
+ *    - The answers were never merely "zero rows". Against a row literally
+ *      named `[object Object]`, `{name: {$contains: {}}}` MATCHED it. That is
+ *      not a narrowed result set, it is a wrong one.
+ *
+ *    Two more measurements decided the exact fence:
+ *
+ *    - An ARRAY comparand on the LIKE family already forked INSIDE
+ *      `service-analytics`: `{name: {$contains: ['al','be']}}` binds `%al,be%`
+ *      through `read-scope-sql` (and here, via `String(array)`) but `%al%`
+ *      through the analytics `where` door, which reads `values[0]`. Refusing
+ *      the array closes a live split rather than opening one.
+ *    - `driver-turso`'s `RemoteTransport` has refused BOTH of these shapes
+ *      since cloud#1004 / #1058, with the reasoning written out: refusing an
+ *      uncompilable comparand "in one family while tolerating it in the other
+ *      would leave the failure mode alive at a different spelling." So local
+ *      SQLite and remote SQLite answered the same query differently. This
+ *      change is what converges them, and it copies that fix's ALLOW-list
+ *      shape (see {@link isRenderableTextComparand}) rather than inventing a
+ *      second policy.
+ *
+ *    What stays accepted is measured, not assumed: `{$contains: 5}` → `%5%`
+ *    and `{$contains: null}` → `%null%` agree across this driver,
+ *    `driver-memory` and both analytics faces today, and #5526 pinned the
+ *    `null` reading deliberately. Primitives are therefore untouched; only
+ *    objects — for which `String()` has no faithful answer — are refused.
  */
 function assertCompilableComparand(field: string, op: string, value: unknown): void {
   const ref = fieldReferenceOf(value);
   if (ref !== null) throw crossFieldComparisonError(field, op, ref);
 
+  // [#5234] The pattern family answers first: an array IS an object here, so
+  // the member scan below would otherwise report `{$contains: ['a', {}]}` as a
+  // bad LIST member — a message about a list the operator never takes.
+  if (TEXT_PATTERN_OPERATORS.has(op) && !isRenderableTextComparand(value)) {
+    throw unrenderableTextComparandError(field, op, value);
+  }
+
   if (Array.isArray(value)) {
     for (const [index, member] of value.entries()) {
       const memberRef = fieldReferenceOf(member);
       if (memberRef !== null) throw crossFieldComparisonError(field, op, memberRef, index);
+      // [#5234] Every member of a list operator's array is a comparand in its
+      // own right and gets the same bind test the whole comparand gets. Scoped
+      // to the operators for which an array is legitimate, so a scalar operator
+      // handed an array keeps answering with its own message below.
+      if (LIST_COMPARAND_OPERATORS.has(op) && !isBindableComparand(member)) {
+        throw unbindableListMemberError(field, op, member, index);
+      }
     }
     // An array IS the comparand for the list operators; only a scalar operator
     // is wrong to receive one, and that falls through to the check below.
@@ -782,6 +874,60 @@ function assertCompilableComparand(field: string, op: string, value: unknown): v
       `${Array.isArray(value) ? 'an array' : `an object (${safeShapePreview(value)})`}, which cannot be ` +
       `bound as a SQL parameter. Use a string, number, boolean, null, Date or binary value; ` +
       `for a list use $in/$nin, and for a range use $between.`,
+  );
+}
+
+/**
+ * [#5234] A member of an `$in` / `$nin` / `$between` list that cannot become a
+ * bind parameter.
+ *
+ * The list case is the one that hides. A scalar operator handed an object fails
+ * to bind and at least says so; a LIST simply loses the member — Knex binds it,
+ * the statement is valid, and the offending entry can never equal any stored
+ * value. So `{status: {$in: ['a', {…}]}}` answers exactly as if the author had
+ * written `{$in: ['a']}`, and `{status: {$nin: [{…}]}}` excludes nothing at all
+ * while claiming to exclude something. Neither is reported anywhere.
+ *
+ * The message names the INDEX because that is the only thing distinguishing the
+ * bad entry from its legitimate neighbours — the same reason
+ * {@link crossFieldComparisonError} takes one.
+ */
+function unbindableListMemberError(field: string, op: string, value: unknown, index: number): Error {
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" has a value at index ${index} of its list that cannot be ` +
+      `bound as a SQL parameter: ${safeShapePreview(value)}. Every member of an $in/$nin/$between ` +
+      `list is a comparand in its own right — use a string, number, boolean, null, Date or binary ` +
+      `value. Refusing rather than binding it: the member can equal no stored value, so the list ` +
+      `silently loses that entry (and a $nin loses the exclusion the caller wrote).`,
+  );
+}
+
+/**
+ * [#5234] An object where the `LIKE` family expects the text of a pattern.
+ *
+ * `applyLike` reaches the comparand through `String(value)`, and `String({})` is
+ * the literal `'[object Object]'`. The result is a syntactically perfect,
+ * parameterised `LIKE` against a string the author never wrote — and it is not
+ * merely always-false: a stored value that happens to READ `[object Object]`
+ * matches it, which is how this was measured. `$notContains` inverts that into
+ * excluding a real row for a reason nothing records.
+ *
+ * `filter.zod.ts`'s `StringOperatorSchema` declares every one of these
+ * comparands `z.string()`, so this refusal enforces a declaration that already
+ * exists rather than adding a rule (Prime Directive #12 — declared = enforced).
+ * It stops at OBJECTS on purpose: a number, boolean or `null` renders to text
+ * the same way on this driver, on `driver-memory` and on both `service-analytics`
+ * faces, and #5526 pinned `{$contains: null}` → `%null%` deliberately. Refusing
+ * those would break agreement instead of creating it.
+ */
+function unrenderableTextComparandError(field: string, op: string, value: unknown): Error {
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" matches against the TEXT of a pattern, but received ` +
+      `${Array.isArray(value) ? 'an array' : 'an object'} (${safeShapePreview(value)}). The spec ` +
+      `declares this comparand a string (filter.zod.ts StringOperatorSchema); a string, number, ` +
+      `boolean, null or Date is accepted. Refusing rather than stringifying it: String({}) is ` +
+      `"[object Object]", so the pattern that ran was one the caller never wrote — valid SQL, ` +
+      `and a row storing that literal text would have matched it.`,
   );
 }
 
@@ -6711,6 +6857,16 @@ export class SqlDriver implements IDataDriver {
    * for character, by `service-analytics`'s `like-metacharacter-escape.test.ts`.
    * A third hand-copy is the thing to refuse: import from one of the two, or add
    * a consumer to that test.
+   *
+   * **[#5234] `String(value)` is safe here because nothing unrenderable reaches
+   * it.** {@link assertCompilableComparand} refuses an object comparand on this
+   * family before any emitter runs, so the only values arriving are the ones
+   * {@link isRenderableTextComparand} admits — a string, number, bigint,
+   * boolean, `null`, `undefined` or `Date`, each of which `String()` renders
+   * faithfully. Do NOT add a second, tolerant reading of an object here: the
+   * `[object Object]` pattern this used to build was valid SQL matching a
+   * literal nobody wrote, and `service-analytics` refuses the same shape at its
+   * own two doors so one `$contains` still means one thing on every face.
    */
   private applyLike(
     builder: any,
