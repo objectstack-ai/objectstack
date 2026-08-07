@@ -39,7 +39,6 @@
     "ui/ElementFormProps:mode = \"create\"",
     "ui/ElementImageProps:fit = \"cover\"",
     "ui/ElementMetadataViewerProps:detail = \"business\"",
-    "ui/ElementRecordPickerProps:multiple = false",
     "ui/ElementTextInputProps:disabled = false",
     "ui/ElementTextInputProps:inputType = \"text\"",
     "ui/ElementTextInputProps:required = false",
