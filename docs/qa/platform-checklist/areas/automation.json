@@ -1,0 +1,101 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "automation",
+  "title": "Automation — flows, triggers, roll-ups",
+  "items": [
+    {
+      "id": "automation.flow-run-step-nesting",
+      "title": "Flow Runs render loop/region iterations as a nested execution tree",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["admin"],
+      "fixtures": { "app": "showcase", "requires": ["a loop flow runnable on demand (e.g. showcase_batch_reminders with a small list input)"] },
+      "steps": [
+        "run the loop flow with a 3-item input",
+        "open the FLOW DESIGNER's Runs panel for that run (not the developer Flow Runs page)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the run's steps carry parent/iteration/region tags and the designer Runs panel renders them as a nested tree (per-iteration children under the loop node), not a flat list",
+          "oracle": "api",
+          "verify": "the run detail API shows parent=loop node, iter=0..2, region=loop-body per body step; the panel screenshot shows the ITERATION-nested rendering",
+          "evidence": "run-detail API read + Runs panel screenshot"
+        }
+      ],
+      "traps": ["wrong-panel"],
+      "source": ["#3358 §2 — 'the developer Flow Runs page renders steps flat; looking there alone reads as a miss'"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358, encoding its wrong-panel lesson as a trap", "ref": "#3358" }]
+    },
+    {
+      "id": "automation.time-relative-trigger",
+      "title": "Time-relative flow triggers author first-class and fire per matching record",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin"],
+      "steps": [
+        "author a flow start node with timeRelative (offsetDays or withinDays) in the designer",
+        "confirm the boot banner binds it; where feasible, stage a record whose date matches and confirm the daily sweep fires"
+      ],
+      "acceptance": [
+        {
+          "clause": "the designer renders the first-class timeRelative panel (sweep object / date field / offset days as a numberList editor, not raw JSON)",
+          "oracle": "screenshot",
+          "verify": "designer panel screenshot shows the dedicated fields",
+          "evidence": "screenshot"
+        },
+        {
+          "clause": "the flow binds at boot and a matching record produces a run on the sweep",
+          "oracle": "log",
+          "verify": "Flows banner counts it bound as time_relative; a staged matching record yields a run row after the sweep",
+          "evidence": "banner line + run list read"
+        }
+      ],
+      "traps": ["seed-data-thin"],
+      "source": ["#3358 §2"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" }]
+    },
+    {
+      "id": "automation.rollup-summary-filter",
+      "title": "Filtered roll-up summaries recompute only through their own filter",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["a parent with several filtered roll-ups in different filter shapes (showcase_expense_report: equality / boolean / operator / unfiltered)"],
+        "knownGaps": ["the visual filter-editor half needs a summary field in a WRITABLE package — the showcase ships read-only, so Studio editing is not reachable on stock fixtures (#3358)"]
+      },
+      "steps": [
+        "flip one child row's filtered dimension over REST (e.g. status approved→rejected)",
+        "re-read every roll-up on the parent and independently recompute each from the child rows"
+      ],
+      "acceptance": [
+        {
+          "clause": "only the roll-ups whose filter the edit touched move; every value matches an independent recomputation from the child rows",
+          "oracle": "api",
+          "verify": "before/after parent reads: touched roll-ups change to the recomputed value; unfiltered and untouched-filter roll-ups stay exactly put (the part a naive recompute-everything gets wrong)",
+          "evidence": "before/after value table with the independent recomputation"
+        },
+        {
+          "clause": "the child-row filter is settable via the visual editor on a writable package",
+          "oracle": "screenshot",
+          "verify": "edit a summary field's filter in Studio on a writable package and confirm the persisted metadata",
+          "evidence": "editor screenshot + saved metadata read"
+        }
+      ],
+      "blocked": { "by": "fixture", "ref": "#3358 (editor half needs a writable-package summary field fixture)" },
+      "traps": ["seed-data-thin"],
+      "source": ["#3358 §2 (recompute half proven; editor half explicitly left unticked)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; clause 1 runnable today, clause 2 carries the fixture blocker", "ref": "#3358" }]
+    }
+  ]
+}

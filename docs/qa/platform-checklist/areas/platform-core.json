@@ -1,0 +1,107 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "platform-core",
+  "title": "Platform core — boot, health, console shell",
+  "items": [
+    {
+      "id": "platform-core.boot-health",
+      "title": "Showcase boots clean: health 200, no degraded startup banners",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "mixed",
+      "preconditions": [
+        "isolated run per dogfood-verification §0: own free port, own file DB (--seed-admin -d file:/tmp/<run>/data.db)"
+      ],
+      "steps": [
+        "boot examples/app-showcase via `objectstack dev --ui --seed-admin` on an isolated port",
+        "poll GET /api/v1/health until 200",
+        "read the full boot log"
+      ],
+      "acceptance": [
+        {
+          "clause": "GET /api/v1/health returns 200 within the boot window",
+          "oracle": "api",
+          "verify": "curl -s -o /dev/null -w '%{http_code}' http://localhost:<port>/api/v1/health → 200",
+          "evidence": "the curl output"
+        },
+        {
+          "clause": "the `Flows:` startup banner reports no ⚠ misauthored flows and no ERROR lines appear during boot",
+          "oracle": "log",
+          "verify": "grep the boot log for '⚠' in the Flows banner and for ERROR-level lines; seed rejections count as failures (see #3415 — SeedLoader rejections were silent)",
+          "evidence": "the grepped log excerpt"
+        },
+        {
+          "clause": "the console shell is served at /_console/ and the seeded app resolves",
+          "oracle": "api",
+          "verify": "GET /api/v1/meta/app?id=<showcase appId> returns the merged app/nav metadata",
+          "evidence": "response status + top-level keys"
+        }
+      ],
+      "traps": ["seed-data-thin"],
+      "source": ["dogfood-verification skill §0–§1", "#3415"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — standing P0 smoke distilled from the dogfood boot protocol", "ref": "#3358" }]
+    },
+    {
+      "id": "platform-core.console-login",
+      "title": "Seeded admin can sign in through the console login page",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "steps": [
+        "open /_console/ in the browser",
+        "sign in with the seeded admin credentials",
+        "reload the page"
+      ],
+      "acceptance": [
+        {
+          "clause": "login succeeds and lands in the console shell",
+          "oracle": "screenshot",
+          "verify": "post-login screenshot shows the app shell (nav + header), not the login form",
+          "evidence": "screenshot"
+        },
+        {
+          "clause": "the session survives a reload",
+          "oracle": "network",
+          "verify": "after reload, authed API calls return 200 (no redirect back to login)",
+          "evidence": "network trace of the first authed request after reload"
+        }
+      ],
+      "negative": [
+        "a wrong password is rejected with a visible error, not a silent no-op"
+      ],
+      "traps": ["automation-input"],
+      "source": ["dogfood-verification skill §4 (React controlled inputs)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial", "ref": "#3358" }]
+    },
+    {
+      "id": "platform-core.nav-surfaces-render",
+      "title": "Every showcase nav surface renders without page errors",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "browser",
+      "steps": [
+        "walk every nav destination in the showcase app (pages, list views, dashboards, reports, view gallery)",
+        "on each: wait for render, then check for pageerror / empty main / placeholder leaks"
+      ],
+      "acceptance": [
+        {
+          "clause": "no surface throws a pageerror, renders an empty <main>, or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG",
+          "oracle": "test",
+          "verify": "run the pinned suite: pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts)",
+          "evidence": "test run output"
+        }
+      ],
+      "automated": { "kind": "e2e", "ref": "examples/app-showcase/e2e/showcase-smoke.spec.ts" },
+      "traps": ["hydration-race", "single-datapoint"],
+      "source": ["examples/app-showcase/e2e/showcase-smoke.spec.ts", ".github/workflows/showcase-smoke.yml"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — wraps the existing automated smoke as a checklist row so runs report it alongside manual items", "ref": "#3358" }]
+    }
+  ]
+}

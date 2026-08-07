@@ -1,0 +1,64 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "i18n",
+  "title": "Internationalization",
+  "items": [
+    {
+      "id": "i18n.notification-localized-and-clears",
+      "title": "zh-CN notification is localized, deep-links localized, and mark-as-read clears",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["zh-CN workspace user receiving a collab.assignment notification"],
+      "steps": [
+        "trigger an assignment notification on a zh-CN workspace under os dev/standalone",
+        "open the bell, click through, mark as read",
+        "capture the mark-read request"
+      ],
+      "acceptance": [
+        {
+          "clause": "title and detail page render in the recipient locale",
+          "oracle": "screenshot",
+          "verify": "bell entry + detail page screenshots in zh-CN",
+          "evidence": "screenshots"
+        },
+        {
+          "clause": "mark-as-read actually clears the unread state — the notifications REST routes must be mounted on the server actually serving os dev (the #3362 dispatcher-only registration made the console 404 here while unit tests stayed green)",
+          "oracle": "network",
+          "verify": "POST /api/v1/notifications/read returns 2xx on the running server and a fresh unread-count read drops",
+          "evidence": "the network trace + before/after unread count"
+        }
+      ],
+      "traps": ["dispatcher-vs-hono-route"],
+      "source": ["#3358 §7", "#3362", "#3354"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; the #3362 route-seam regression is the reason the oracle is a live-server network trace, never a unit test", "ref": "#3358" }]
+    },
+    {
+      "id": "i18n.studio-follows-app-locale",
+      "title": "Studio follows the in-app locale switch — no mixed-language session",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["admin"],
+      "steps": [
+        "switch the in-app locale",
+        "navigate into Studio / metadata-admin surfaces"
+      ],
+      "acceptance": [
+        {
+          "clause": "Studio surfaces render in the switched locale (including relative dates); no mixed-language session",
+          "oracle": "screenshot",
+          "verify": "post-switch Studio screenshots show the target locale consistently",
+          "evidence": "screenshots"
+        }
+      ],
+      "traps": ["stale-console-bundle"],
+      "source": ["#3358 §7"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" }]
+    }
+  ]
+}

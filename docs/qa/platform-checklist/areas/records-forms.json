@@ -1,0 +1,177 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "records-forms",
+  "title": "Records, lists, detail pages, forms",
+  "items": [
+    {
+      "id": "records-forms.crud-roundtrip",
+      "title": "Create → read → update → delete a record through the console UI",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "browser",
+      "personas": ["admin"],
+      "steps": [
+        "on a seeded showcase object, create a record through the New form",
+        "open its detail page; edit a field; save",
+        "delete it from the row/detail actions",
+        "after each mutation, re-read the row over the data API"
+      ],
+      "acceptance": [
+        {
+          "clause": "each UI mutation is reflected in the server row (the API read is the oracle, not the grid repaint)",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/<object> after each step shows the created values, the edit, and finally the row gone",
+          "evidence": "the three API reads"
+        },
+        {
+          "clause": "the list view reflects the changes after refresh without stale rows",
+          "oracle": "screenshot",
+          "verify": "post-delete screenshot of the list shows the row absent",
+          "evidence": "screenshot"
+        }
+      ],
+      "traps": ["hydration-race", "automation-input"],
+      "source": ["dogfood-verification skill §3"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — standing P0 smoke", "ref": "#3358" }]
+    },
+    {
+      "id": "records-forms.master-detail-atomic-save",
+      "title": "Master + line items save as one atomic batch",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["admin"],
+      "fixtures": { "app": "showcase", "requires": ["a master-detail pair with an inline child grid (e.g. expense report + lines)"] },
+      "steps": [
+        "edit the master and several child lines in one form session, save once",
+        "repeat with one child line made deliberately invalid, save"
+      ],
+      "acceptance": [
+        {
+          "clause": "the happy-path save lands master + children in one batch request",
+          "oracle": "network",
+          "verify": "the save issues a single batch call (not N sequential writes); all rows readable afterwards",
+          "evidence": "network trace of the save"
+        },
+        {
+          "clause": "a failing child aborts the WHOLE save — no partial writes",
+          "oracle": "api",
+          "verify": "after the failed save, API reads show master and siblings unchanged",
+          "evidence": "API reads proving no row moved"
+        }
+      ],
+      "negative": ["the invalid-child case above IS the negative side — it must not partially commit"],
+      "traps": ["automation-input"],
+      "source": ["#3358 §4"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" }]
+    },
+    {
+      "id": "records-forms.related-list-server-pagination",
+      "title": "Related lists page on the server, never fetch every child row",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["admin"],
+      "fixtures": { "app": "showcase", "requires": ["a parent record with more children than one page (e.g. Northwind account with 26 contacts)"] },
+      "steps": [
+        "open the parent detail page's related list",
+        "click next-page; capture the data requests"
+      ],
+      "acceptance": [
+        {
+          "clause": "paging issues server-side $top/$skip requests scoped by the parent filter; the full child set is never fetched",
+          "oracle": "network",
+          "verify": "page 1 = top=N&filter=[parent]; next page = top=N&skip=N; no request without top",
+          "evidence": "the captured request URLs + the pager reading 'page 2 of M'"
+        }
+      ],
+      "traps": ["hydration-race"],
+      "automated": null,
+      "source": ["#3358 §4 (evidence run captured exactly this trace)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run", "ref": "#3358" }]
+    },
+    {
+      "id": "records-forms.action-param-widgets",
+      "title": "Action params render their real widgets, not text inputs",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["admin"],
+      "fixtures": { "app": "showcase", "requires": ["the Action Param Gallery action on the Field Zoo row menu"] },
+      "steps": [
+        "run the gallery action; wait for the dialog to render (screenshot first)",
+        "read each param's rendered control from the dialog DOM"
+      ],
+      "acceptance": [
+        {
+          "clause": "each param type maps to its real widget: date→input[type=date], color→input[type=color], richtext→editor, select→picker, file/image→input[type=file] with accept/multiple as declared, autonumber→read-only server-assigned",
+          "oracle": "dom",
+          "verify": "after screenshot confirms render, enumerate controls and match the declared param types; accept/multiple must be real DOM attributes",
+          "evidence": "screenshot + the param→control table"
+        }
+      ],
+      "negative": ["maxSize is enforced in JS, not as a DOM attribute — do NOT claim it from attribute absence; it needs an oversized-upload attempt to verify"],
+      "traps": ["hydration-race"],
+      "source": ["#3358 §4 (evidence table)", "#3393"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358, keeping its maxSize caveat as a negative-side note", "ref": "#3358" }]
+    },
+    {
+      "id": "records-forms.upload-guard-blocks-confirm",
+      "title": "Confirm stays disabled while a file param is still uploading",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["admin"],
+      "steps": [
+        "open an action dialog with a file param; start a real upload large/slow enough to catch mid-flight",
+        "attempt to confirm while the upload is in progress"
+      ],
+      "acceptance": [
+        {
+          "clause": "the Confirm control is actually disabled mid-upload and enables on completion — proven by catching a real upload in flight, not by reading the helper label",
+          "oracle": "dom",
+          "verify": "during the in-flight window the button carries disabled state and clicking issues no request; after completion the confirm succeeds",
+          "evidence": "mid-flight screenshot + network trace showing no premature submit"
+        }
+      ],
+      "traps": ["automation-input"],
+      "source": ["#3358 §4 ('leaving it unticked on the strength of a label')", "ADR-0059"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — codifies the #3358 refusal to tick from a label into the oracle itself", "ref": "#3358" }]
+    },
+    {
+      "id": "records-forms.import-wizard-encoding-and-hints",
+      "title": "CSV import: GBK decode, required-field hint, legacy-fallback notice",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "steps": [
+        "run the pinned unit suites (they feed real GBK bytes and assert the exact decode, the disabled-Next hint, and the visible degrade notice)",
+        "optionally spot-check the wizard visually past the native file picker"
+      ],
+      "acceptance": [
+        {
+          "clause": "all three clauses are pinned by targeted tests in objectui",
+          "oracle": "test",
+          "verify": "pnpm --filter @object-ui/plugin-grid exec vitest run src/importParsers.test.ts src/__tests__/importMissingRequiredHint.test.tsx src/__tests__/importLegacyReferenceGuard.test.tsx",
+          "evidence": "test run output"
+        }
+      ],
+      "automated": { "kind": "unit", "ref": "objectui: packages/plugin-grid/src/importParsers.test.ts (+ importMissingRequiredHint, importLegacyReferenceGuard)" },
+      "traps": ["automation-input"],
+      "source": ["#3358 §4 (ticked on test evidence — the native file picker hand-off is deliberately not automated)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358's test-evidence resolution", "ref": "#3358" }]
+    }
+  ]
+}

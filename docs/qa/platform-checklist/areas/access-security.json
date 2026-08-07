@@ -1,0 +1,120 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "access-security",
+  "title": "Access, permissions, RLS/FLS, write-path guards",
+  "items": [
+    {
+      "id": "access-security.rls-both-sides",
+      "title": "Row-level security: restricted member sees only their rows; admin sees all",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": ["admin", "restricted member on an OWD-private object"],
+      "steps": [
+        "as the restricted member, list an OWD-private object over the data API",
+        "as admin, list the same object",
+        "compare against the ground-truth row set"
+      ],
+      "acceptance": [
+        {
+          "clause": "member reads return only owned/shared rows; admin reads return the full set — BOTH sides verified, absence and presence",
+          "oracle": "api",
+          "verify": "row-set comparison per persona; the auto-derived RLS proofs in @objectstack/verify (runRlsProofs) cover this app-agnostically — rls-consistent verdict required, rls-hole is a FAIL",
+          "evidence": "the two listings + the verify run verdict"
+        }
+      ],
+      "automated": { "kind": "verify", "ref": "packages/verify/src/rls.ts (objectstack verify)" },
+      "source": ["packages/verify", "ADR-0057 D10"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — standing P0, delegating the systematic sweep to @objectstack/verify and keeping the persona spot-check manual", "ref": "#3358" }]
+    },
+    {
+      "id": "access-security.write-path-guards",
+      "title": "Write-path guards: readonly strip, owner_id forge/transfer denied, bulk validation",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": ["admin", "non-admin member (owner forge is only meaningful non-privileged)"],
+      "steps": [
+        "REST-INSERT and UPDATE a readonly:true field; re-read the row",
+        "as the non-admin, attempt an insert forging another user's owner_id and an update transferring it",
+        "bulk-update a set that violates a validation rule"
+      ],
+      "acceptance": [
+        {
+          "clause": "readonly fields are stripped on INSERT and UPDATE (value unchanged server-side)",
+          "oracle": "api",
+          "verify": "post-write reads show the readonly field untouched",
+          "evidence": "write payloads + post-write reads"
+        },
+        {
+          "clause": "owner_id forge and transfer are denied for non-privileged users; bulk inserts stamp the current user",
+          "oracle": "api",
+          "verify": "forge/transfer attempts rejected; empty-owner bulk insert rows land stamped with the caller",
+          "evidence": "the rejections + stamped rows"
+        },
+        {
+          "clause": "bulk update runs validation rules per row (the updateMany call-site gap of #3106 must not reproduce)",
+          "oracle": "api",
+          "verify": "a bulk update violating a rule is rejected/skipped per row, not silently applied",
+          "evidence": "the bulk response + row reads"
+        }
+      ],
+      "automated": { "kind": "dogfood", "ref": "packages/qa/dogfood/test/owner-anchor-and-bulk-writes.dogfood.test.ts (+ showcase-static-readonly)" },
+      "traps": ["wrong-persona"],
+      "source": ["#3358 §9", "release-15.1 plan §A", "#3106"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — merged from #3358 §9 and the 15.1 A-group rows these dogfood tests pin", "ref": "#3358" }]
+    },
+    {
+      "id": "access-security.record-access-explain",
+      "title": "Record-grained access explain shows per-layer attribution and a verdict",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["admin"],
+      "steps": [
+        "in the access explain panel, pick user + object + record",
+        "read the layered result"
+      ],
+      "acceptance": [
+        {
+          "clause": "the panel attributes access per layer (permission set → position → sharing → row rules) and renders a record.visible verdict naming the deciding layer",
+          "oracle": "screenshot",
+          "verify": "screenshot shows all layers with the verdict; spot-check the verdict against an actual read as that user (server truth)",
+          "evidence": "screenshot + the impersonated read"
+        }
+      ],
+      "traps": ["hydration-race"],
+      "source": ["#3358 §5"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358, adding the impersonated-read cross-check", "ref": "#3358" }]
+    },
+    {
+      "id": "access-security.readonly-package-locks-studio",
+      "title": "A read-only package actually locks Studio editing surfaces",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["admin"],
+      "steps": [
+        "open the permission matrix / object designer on a read-only package"
+      ],
+      "acceptance": [
+        {
+          "clause": "the read-only badge renders AND the controls are actually disabled — checkboxes/Save inert, edit affordances absent",
+          "oracle": "dom",
+          "verify": "after screenshot confirms render, assert disabled state on the controls (a badge alone is not a lock)",
+          "evidence": "screenshot + disabled-state DOM read"
+        }
+      ],
+      "source": ["#3358 §5"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" }]
+    }
+  ]
+}

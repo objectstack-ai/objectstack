@@ -1,0 +1,109 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "api-backend",
+  "title": "REST / batch / formula / build-time gates",
+  "items": [
+    {
+      "id": "api-backend.batch-transactional-discovery",
+      "title": "transactionalBatch capability bit matches the mounted /batch behavior",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "steps": [
+        "read client.capabilities.transactionalBatch (or the capabilities endpoint)",
+        "exercise /api/v1/batch: a well-formed atomic batch, then atomic:false"
+      ],
+      "acceptance": [
+        {
+          "clause": "the discovery bit is true exactly when /batch is mounted and transaction-capable; atomic:false answers 400 BATCH_NOT_ATOMIC",
+          "oracle": "api",
+          "verify": "capability read + the two batch calls with their status/error codes",
+          "evidence": "the three responses"
+        }
+      ],
+      "source": ["#3358 §9"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" }]
+    },
+    {
+      "id": "api-backend.formula-gates",
+      "title": "Formula runtime fixes hold and date-arithmetic fails at build time",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "build",
+      "steps": [
+        "evaluate the fixed runtime shapes against built @objectstack/formula: due_date == today(), cond ? x : null, floor/ceil",
+        "run os build on a config carrying date arithmetic (end - start + 1)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the runtime shapes evaluate correctly",
+          "oracle": "test",
+          "verify": "harness run against the BUILT package (not src) returns the expected values",
+          "evidence": "harness output"
+        },
+        {
+          "clause": "date arithmetic is a build-time ERROR in os build — not a runtime surprise",
+          "oracle": "build",
+          "verify": "os build exits non-zero with the located formula error",
+          "evidence": "build output"
+        }
+      ],
+      "traps": ["stale-dist"],
+      "source": ["#3358 §9"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" }]
+    },
+    {
+      "id": "api-backend.enforce-or-remove-authoring-gates",
+      "title": "Removed/retired authoring keys fail at parse/build with located guidance",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "build",
+      "steps": [
+        "author a config using a retired key (per the ADR-0087 registries / retiredKey tombstones)",
+        "parse/build it"
+      ],
+      "acceptance": [
+        {
+          "clause": "the parse/build rejects the retired key with located guidance naming the replacement — never a silent strip for tombstoned keys",
+          "oracle": "build",
+          "verify": "ObjectSchema.create / os build throws the located error for a sampled retired key",
+          "evidence": "the error text"
+        }
+      ],
+      "negative": ["also sample one key documented as silently-stripped-by-design (e.g. pure display annotations) to confirm the strip stays deliberate and documented, not accidental"],
+      "source": ["#3358 §9", "ADR-0049", "ADR-0087"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" }]
+    },
+    {
+      "id": "api-backend.server-timing-admin-gated",
+      "title": "Server-Timing spans emit for admins only — on the server os dev actually runs",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["admin", "non-admin"],
+      "steps": [
+        "with OS_SERVER_TIMING enabled, request any route as admin with X-OS-Debug-Timing",
+        "repeat as a non-admin"
+      ],
+      "acceptance": [
+        {
+          "clause": "admin responses carry auth/db/hooks/serialize spans; non-admin responses carry none — verified against the hono server os dev runs, because the #3361 regression lived exactly in the dispatcher-vs-hono seam while unit tests simulated the call and stayed green",
+          "oracle": "network",
+          "verify": "live response headers for both personas on the running dev server",
+          "evidence": "the two header dumps"
+        }
+      ],
+      "traps": ["dispatcher-vs-hono-route", "wrong-persona"],
+      "source": ["#3358 §9", "#3361"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; oracle pinned to the live server because of #3361", "ref": "#3358" }]
+    }
+  ]
+}

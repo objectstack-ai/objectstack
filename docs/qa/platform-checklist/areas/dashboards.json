@@ -1,0 +1,84 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "dashboards",
+  "title": "Dashboards, reports, analytics",
+  "items": [
+    {
+      "id": "dashboards.strict-widget-rejects-stray-keys",
+      "title": "A widget authored with a stray/legacy key fails loud, never renders blank",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["admin"],
+      "steps": [
+        "author a dashboard widget carrying a legacy key (e.g. categoryField) or a hallucinated key",
+        "load the dashboard / run the parse"
+      ],
+      "acceptance": [
+        {
+          "clause": "the parse rejects the widget with a loud error NAMING the offending key and pointing at the dataset shape — the old failure mode (silently renders nothing) must not reproduce",
+          "oracle": "log",
+          "verify": "the error names the key and cites the expected dataset+dimensions+values shape (ADR-0021)",
+          "evidence": "the error text"
+        }
+      ],
+      "negative": ["this item IS a negative test — its pass condition is the rejection; a blank-but-no-error render is a FAIL"],
+      "source": ["#3358 §3 (four stray-key variants all rejected with the named error)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" }]
+    },
+    {
+      "id": "dashboards.chart-first-paint",
+      "title": "Charts draw on first paint — no blank-until-resize",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "steps": [
+        "cold-load a dashboard with bar charts",
+        "screenshot immediately after render settles, WITHOUT resizing the window"
+      ],
+      "acceptance": [
+        {
+          "clause": "bars/axes are drawn on the first paint",
+          "oracle": "screenshot",
+          "verify": "the first-paint screenshot shows a real chart (recharts SVG with bars), not an empty plot area",
+          "evidence": "screenshot"
+        }
+      ],
+      "traps": ["single-datapoint", "hydration-race"],
+      "source": ["#3358 §3 — note its caveat: with thin seeds every widget draws one data point, so the tick 'says less than it looks'; prefer multi-bucket fixtures"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 with the thin-seed caveat attached", "ref": "#3358" }]
+    },
+    {
+      "id": "dashboards.drill-through-range",
+      "title": "Report drill-through scopes the drilled list to the exact bucket range",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["a date-bucketed report with MULTIPLE buckets to drill (blocked historically by #3415 — seed validation silently rejected 4 of 5 projects, leaving single-point charts)"]
+      },
+      "steps": [
+        "drill a date-bucket cell (e.g. a quarter)",
+        "capture the drilled list's query"
+      ],
+      "acceptance": [
+        {
+          "clause": "the drilled list is scoped to exactly that time range — not a superset",
+          "oracle": "network",
+          "verify": "the drill request carries the bucket's from/to bounds and the row count matches the bucket's aggregate",
+          "evidence": "the captured query + count comparison"
+        }
+      ],
+      "traps": ["seed-data-thin", "single-datapoint"],
+      "source": ["#3358 §3", "#3415"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; runnable once multi-bucket seeds exist", "ref": "#3358" }]
+    }
+  ]
+}

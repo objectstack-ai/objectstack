@@ -1,0 +1,184 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "approvals",
+  "title": "Approvals — quorum, per-group sign-off (会签), inbox",
+  "items": [
+    {
+      "id": "approvals.per-group-signoff",
+      "title": "Per-group sign-off (会签) needs one approval from EACH group",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["approver holding exactly one group (e.g. manager)", "second approver holding the other group (e.g. finance/auditor)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a launched per_group request whose two groups resolve to two DISTINCT users (showcase: ExpenseSignoffFlow on EXP-2001, Ada Auditor holds auditor — seeded since #3409)"
+        ]
+      },
+      "steps": [
+        "as the single-group approver, open the request in the approval inbox",
+        "record the pending slate and per-group progress from the drawer",
+        "approve, then re-read the request state over the API"
+      ],
+      "acceptance": [
+        {
+          "clause": "one group's approval satisfies that group and drops it from the pending slate, but the request stays pending on the remaining group",
+          "oracle": "api",
+          "verify": "before: status=pending, both groups 0/1; after the approve: status STILL pending, approver's group satisfied, other group's user still listed as pending",
+          "evidence": "before/after API reads of the request (status + pending approvers)"
+        },
+        {
+          "clause": "per-group progress is server-computed, not a client guess",
+          "oracle": "screenshot",
+          "verify": "the drawer renders per-group tick badges ('N of M groups', group chips with counts) that match the API state",
+          "evidence": "drawer screenshot alongside the API read"
+        }
+      ],
+      "negative": [
+        "contrast case: a request whose slots all resolve to ONE user finalizes on a single decision — confirm per_group did NOT (that contrast is the proof the behavior differs)"
+      ],
+      "traps": ["automation-input"],
+      "source": ["#3358 §1", "#3409", "#3411"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run (decisive oracle: group drops but request stays pending)", "ref": "#3358" }]
+    },
+    {
+      "id": "approvals.quorum-m-of-n",
+      "title": "M-of-N quorum approves at the threshold; one rejection vetoes",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["three DISTINCT users each holding one of the approver positions"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["a quorum (minApprovals: 2) request whose three position approvers resolve to three distinct users"],
+        "knownGaps": [
+          "showcase admin holds manager+finance+legal, so the slate collapses to one person and the runtime clamps 2-of-3 to 1-of-1 — M-of-N is not demonstrable on stock seeds (#3358); needs a dedicated fixture or seed change"
+        ]
+      },
+      "blocked": { "by": "fixture", "ref": "#3358 (quorum slate collapses onto the admin — showcase design call pending)" },
+      "steps": [
+        "as approver 1, approve — confirm the request stays pending (1 of 2)",
+        "as approver 2, approve — confirm the request finalizes and remaining tasks close",
+        "on a second request: as any approver, reject — confirm immediate veto"
+      ],
+      "acceptance": [
+        {
+          "clause": "the request approves exactly when minApprovals distinct approvals are recorded",
+          "oracle": "api",
+          "verify": "status transitions pending→pending→approved across the two approvals; approval action rows count 2 distinct actors",
+          "evidence": "API reads after each decision"
+        },
+        {
+          "clause": "a single rejection vetoes even with quorum-1 approvals already recorded",
+          "oracle": "api",
+          "verify": "status flips to rejected on the first reject; no further tasks remain actionable",
+          "evidence": "API read after the reject"
+        }
+      ],
+      "traps": ["seed-data-thin"],
+      "source": ["#3358 §1"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; carried the fixture blocker forward explicitly", "ref": "#3358" }]
+    },
+    {
+      "id": "approvals.inbox-metadata-actions",
+      "title": "Inbox actions are metadata-driven and gated by the viewer's relationship",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["approver who is NOT the submitter", "same user viewing a request they submitted"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["requests with a real (non-null) submitter — seeded since #3411 (invoice submitted by admin, others by a no-position persona)"]
+      },
+      "steps": [
+        "as the same viewer, open one request submitted by someone else and one they submitted themselves",
+        "record the rendered action set on each"
+      ],
+      "acceptance": [
+        {
+          "clause": "approver-side actions (approve/reject/reassign/send-back/request-info) render from declared metadata on the other-submitter request",
+          "oracle": "dom",
+          "verify": "after confirming render via screenshot, read the action buttons from the drawer DOM and match the declared action set",
+          "evidence": "screenshot + DOM action list"
+        },
+        {
+          "clause": "submitter-side actions (send-reminder, recall) appear ONLY on the viewer's own request",
+          "oracle": "dom",
+          "verify": "own-request drawer shows the two extra actions; other-submitter drawer does not",
+          "evidence": "side-by-side action lists for the two requests"
+        },
+        {
+          "clause": "each action executes its REST route (spot-check one: the decision commits)",
+          "oracle": "network",
+          "verify": "clicking an action issues its API call and the state change round-trips",
+          "evidence": "network trace of the action call"
+        }
+      ],
+      "traps": ["automation-input", "hydration-race"],
+      "source": ["#3358 §1", "#3411"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run (7-action table proven after #3411 stamped real submitters)", "ref": "#3358" }]
+    },
+    {
+      "id": "approvals.viewer-gating-submitter-side",
+      "title": "A submitter who is not an approver sees no approver buttons",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["submitter holding NO approver position on their own pending request"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["one pending request routed to a position its submitter does not hold"],
+        "knownGaps": ["stock seeds route every request to positions the admin holds, so the admin is an approver on all of them (#3358) — needs one request addressed away from the signed-in persona"]
+      },
+      "blocked": { "by": "fixture", "ref": "#3358 (needs a request routed to a position the viewing submitter does not hold)" },
+      "steps": [
+        "sign in as the no-position submitter",
+        "open their own pending request from the '我发起的' tab"
+      ],
+      "acceptance": [
+        {
+          "clause": "approve/reject buttons do not render for the submitter, and the gate is server-side, not a client heuristic",
+          "oracle": "api",
+          "verify": "the drawer omits approver actions AND a forged direct POST of the decision route as the submitter is rejected (test both sides of the gate)",
+          "evidence": "screenshot of the drawer + the rejected API call"
+        }
+      ],
+      "traps": ["hydration-race"],
+      "source": ["#3358 §1", "ADR-0057 D10 (server is the authoritative visibility gate)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; upgraded the oracle from DOM-only to both-sides (UI absence + server rejection)", "ref": "#3358" }]
+    },
+    {
+      "id": "approvals.notification-deep-link",
+      "title": "An approval notification deep-links straight into the request drawer",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["any pending approver"],
+      "steps": [
+        "click an approval bell notification (or open the ?request=<id> URL it carries) on a fresh page load"
+      ],
+      "acceptance": [
+        {
+          "clause": "the ?request= URL opens the request drawer directly on a cold load",
+          "oracle": "screenshot",
+          "verify": "fresh navigation to .../approvals?request=<id> renders the drawer for that exact request (verify twice on fresh loads)",
+          "evidence": "screenshot with the URL visible"
+        }
+      ],
+      "traps": ["hydration-race"],
+      "source": ["#3358 §1"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 (verified twice on fresh loads)", "ref": "#3358" }]
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "identity-auth",
+  "title": "Auth, login, identity",
+  "items": [
+    {
+      "id": "identity-auth.sso-enforced-first-paint",
+      "title": "ssoEnforced login honors SSO on first paint — no password-wall flash",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "fixtures": { "app": "any", "requires": ["an env with ssoEnforced configured, cold-started"] },
+      "steps": [
+        "cold-start the server with ssoEnforced, open the login page fresh",
+        "capture the FIRST paint (screenshot as early as render settles)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the first paint honors ssoEnforced — the password form never flashes before the SSO redirect/button",
+          "oracle": "screenshot",
+          "verify": "first-paint screenshot shows the SSO surface; the settings API confirms the flag the client is honoring",
+          "evidence": "screenshot + /api/settings read"
+        },
+        {
+          "clause": "a hung sign-in recovers via the watchdog rather than stranding the page",
+          "oracle": "screenshot",
+          "verify": "after the watchdog window, the page offers a retry path (not a spinner forever)",
+          "evidence": "post-window screenshot"
+        }
+      ],
+      "traps": ["hydration-race"],
+      "source": ["#3358 §6"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" }]
+    },
+    {
+      "id": "identity-auth.phone-signin-surfaces",
+      "title": "A phone-based user's number shows across the identity surfaces",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": ["a seeded phone persona (Mei Phone — the seed itself failed silently until #3408; if she is absent, that regression has returned)"]
+      },
+      "steps": [
+        "create (or locate the seeded) phone-based user",
+        "check the create-result dialog, the All Users list, and the record detail"
+      ],
+      "acceptance": [
+        {
+          "clause": "the phone number renders in all three surfaces",
+          "oracle": "screenshot",
+          "verify": "screenshots of dialog, list row, and detail highlights each showing the number",
+          "evidence": "the three screenshots"
+        }
+      ],
+      "negative": ["if the seeded persona is missing, verdict is FAIL on the seed (regression of #3408), not blocked — the boot log will carry the insert error"],
+      "traps": ["seed-data-thin"],
+      "source": ["#3358 §6", "#3408"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; encoded the #3408 silent-seed-failure as an explicit negative", "ref": "#3358" }]
+    }
+  ]
+}
