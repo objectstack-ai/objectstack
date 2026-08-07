@@ -147,6 +147,22 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     ],
   },
   {
+    id: 'cel-action-param-option-visible',
+    summary: "action param option-list per-option gating (params[].options[].visibleWhen, #5016)",
+    // Same key, same evaluator and same binding environment as the per-option
+    // `visibleWhen` on a FIELD's option list — which is why it is `cel`,
+    // `interpret` and `fail-soft-log` like `cel-field-rule` rather than
+    // fail-closed: `evalFieldPredicate` is called with `fallback: true`, so a
+    // broken predicate leaves the option OFFERED instead of silently deleting a
+    // choice the author never meant to remove. It is a SEPARATE row from
+    // `cel-ui` because the evaluator differs: `cel-ui`'s surfaces hide an
+    // element through the SchemaRenderer, this one narrows an option LIST
+    // inside the field widgets.
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement: 'console (objectui) ActionParamDialog → paramToField → SelectField / MultiSelectField / RadioField / CheckboxesField → useCascadingOptions → resolveCascadingOptions (core/evaluator/optionRules.ts) → evalFieldPredicate → @objectstack/formula celEngine (interpret), evaluated per OPTION against the live param bag + current_user; a value no longer offered is dropped from the param. UI gating only — `enforceActionParams` (ADR-0104 D2) validates the submitted value against the declared option VALUES and does not evaluate this predicate, so access-control gating must also be enforced by the action body / permissions',
+    covers: ['ui/action.zod.ts:visibleWhen'],
+  },
+  {
     id: 'cel-bulk-action-visible',
     summary: "selection-bar bulk action per-record eligibility (bulkActionDefs[].visible, objectui#3067)",
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',

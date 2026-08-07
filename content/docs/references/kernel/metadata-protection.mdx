@@ -8,43 +8,26 @@ description: Metadata Protection protocol schemas
 # Metadata Protection Model — Phase 1 (ADR-0010)
 
 Phase 1 introduces the **item-level lock** (`_lock`) and the
-
 provenance / package tags that drive it. Later phases extend this
-
 file with the path-level (`_frozenPaths`) and package-level
-
 (`metadataDefaults`) layers; the wire shapes here are forward-
-
 compatible with those additions.
 
 Wire / runtime contract:
-
-- `_lock`        — 4-state enum, controls overlay / delete actions.
-
-- `_lockReason`  — short, user-visible explanation surfaced in
-
-`403 ITEM_LOCKED` errors and on Studio tooltips.
-
-- `_lockSource`  — which layer set the lock (Phase 1 only emits
-
-`'artifact'`; `'package'` and `'env-forced'`
-
-are reserved for Phase 3/2 respectively).
-
-- `_provenance`  — `'package'` for loader-introduced items,
-
-`'org'` for tenant-authored, `'env-forced'`
-
-reserved for emergency overrides.
-
-- `_packageId` / `_packageVersion` — denormalised from the
-
-registry tag so consumers don't need a second
-
-round-trip to inspect provenance.
+ - `_lock`        — 4-state enum, controls overlay / delete actions.
+ - `_lockReason`  — short, user-visible explanation surfaced in
+                    `403 ITEM_LOCKED` errors and on Studio tooltips.
+ - `_lockSource`  — which layer set the lock (Phase 1 only emits
+                    `'artifact'`; `'package'` and `'env-forced'`
+                    are reserved for Phase 3/2 respectively).
+ - `_provenance`  — `'package'` for loader-introduced items,
+                    `'org'` for tenant-authored, `'env-forced'`
+                    reserved for emergency overrides.
+ - `_packageId` / `_packageVersion` — denormalised from the
+                    registry tag so consumers don't need a second
+                    round-trip to inspect provenance.
 
 See `docs/adr/0010-metadata-protection-model.md` for the full
-
 design (industry references, 4-layer model, audit trail).
 
 <Callout type="info">

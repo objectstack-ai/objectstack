@@ -8,22 +8,16 @@ description: Execution Context protocol schemas
 Execution Context Schema
 
 Defines the runtime context that flows from HTTP request → data operations.
-
 This is the "identity + environment" envelope that every data operation can carry.
 
 Design:
-
 - All fields are optional for backward compatibility
-
 - `isSystem` bypasses permission checks (for internal/migration operations)
-
 - `transaction` carries the database transaction handle for atomicity
-
 - `traceId` enables distributed tracing across microservices
 
 Usage:
-
-engine.find('account', \{ context: \{ userId: '...', tenantId: '...' \} \})
+  engine.find('account', \{ context: \{ userId: '...', tenantId: '...' \} \})
 
 <Callout type="info">
 **Source:** `packages/spec/src/kernel/execution-context.zod.ts`

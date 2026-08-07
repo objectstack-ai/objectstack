@@ -8,115 +8,71 @@ description: Validation protocol schemas
 # ObjectStack Validation Protocol
 
 This module defines the validation schema protocol for ObjectStack, providing a comprehensive
-
 type-safe validation system similar to Salesforce's validation rules but with enhanced capabilities.
 
 ## Overview
 
 Validation rules are applied at the data layer to ensure data integrity and enforce business logic.
-
 A validation rule is a **deterministic, synchronous, side-effect-free predicate over a single
-
 record** — it must be decidable from the incoming write (and, on update, the prior record) with
-
 no I/O. Everything advertised here runs on the write path (see
-
 `objectql/src/validation/rule-validator.ts`) — insert, single-id update, and multi-row
-
 (`multi: true`) update, where the evaluator runs once per matched row (#3106); nothing is a
-
 silent no-op. The `events` enum admits only `insert`/`update` for this reason — see the
-
 `delete` note under "Deliberately NOT validation rules" below.
 
 The system supports these validation types:
 
 1. **Script Validation**: Formula-based validation using a CEL predicate
-
 2. **State Machine Validation**: Control allowed state transitions
-
 3. **Format Validation**: Validate a field's value (email, URL, phone, JSON, regex)
-
 4. **Cross-Field Validation**: Validate relationships between multiple fields
-
 5. **JSON Schema Validation**: Validate a JSON field against a JSON Schema
-
 6. **Conditional Validation**: Apply a nested rule based on a CEL condition
 
 ## Deliberately NOT validation rules
 
 These were once declared here but never enforced. Because the contract above rules them out
-
 (they need I/O or are client-side concerns), they were removed rather than left as silent
-
 no-ops. Use the layer that already does each one correctly:
 
 - **Uniqueness** → a unique **index** whose scope is stated (`ObjectSchema.indexes`, with
-
-`unique: 'organization'` for one holder per organization or `unique: 'global'` for one
-
-across the whole installation — ADR-0120; `partial` for a scoped/conditional constraint),
-
-or field-level `unique`. A SELECT-then-INSERT "rule" is inherently racy (TOCTOU); a DB
-
-unique constraint is not.
-
+  `unique: 'organization'` for one holder per organization or `unique: 'global'` for one
+  across the whole installation — ADR-0120; `partial` for a scoped/conditional constraint),
+  or field-level `unique`. A SELECT-then-INSERT "rule" is inherently racy (TOCTOU); a DB
+  unique constraint is not.
 - **Async / remote validation** → a client-form concern (`debounce`/`validatorUrl` only mean
-
-anything against keystrokes) and an SSRF/latency hazard on the server write path. Keep it in
-
-the form layer, or enforce the underlying invariant with a `unique` index / lifecycle hook.
-
+  anything against keystrokes) and an SSRF/latency hazard on the server write path. Keep it in
+  the form layer, or enforce the underlying invariant with a `unique` index / lifecycle hook.
 - **Custom handler** → a `beforeInsert` / `beforeUpdate` lifecycle hook, the typed, supported
-
-extension point for arbitrary validation code.
-
+  extension point for arbitrary validation code.
 - **Delete-time guards** (`events: ['delete']`) → a `beforeDelete` lifecycle hook. The evaluator
-
-only runs on the insert/update write path (a delete carries no record payload to validate), so
-
-a `delete` event was a proven silent no-op — the enum value was removed rather than left
-
-advertised-but-unenforced (#3184; see docs/audits/2026-06-validationschema-property-liveness.md).
+  only runs on the insert/update write path (a delete carries no record payload to validate), so
+  a `delete` event was a proven silent no-op — the enum value was removed rather than left
+  advertised-but-unenforced (#3184; see docs/audits/2026-06-validationschema-property-liveness.md).
 
 ## Salesforce Comparison
 
 ObjectStack validation rules are inspired by Salesforce validation rules but enhanced:
-
 - Salesforce: Formula-based validation with `Error Condition Formula`
-
 - ObjectStack: Multiple validation types with composable rules
 
 Example Salesforce validation rule:
-
 ```
-
 Rule Name: Discount_Cannot_Exceed_40_Percent
-
 Error Condition Formula: Discount_Percent__c > 0.40
-
 Error Message: Discount cannot exceed 40%.
-
 ```
 
 Equivalent ObjectStack rule:
-
 ```typescript
-
-\{
-
-type: 'script',
-
-name: 'discount_cannot_exceed_40_percent',
-
-condition: 'discount_percent > 0.40',
-
-message: 'Discount cannot exceed 40%',
-
-severity: 'error'
-
-\}
-
+{
+  type: 'script',
+  name: 'discount_cannot_exceed_40_percent',
+  condition: 'discount_percent > 0.40',
+  message: 'Discount cannot exceed 40%',
+  severity: 'error'
+}
 ```
 
 <Callout type="info">

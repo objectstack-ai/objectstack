@@ -8,39 +8,24 @@ description: Metadata protocol schemas
 Metadata Service Protocol
 
 Defines the standard API contracts for the **@objectstack/metadata** package.
-
 This is the single authority for ALL metadata-related services and APIs across
-
 the entire platform, including Hono, Next.js, and NestJS adapters.
 
 ## Architecture
-
 ```
-
 ┌──────────────────────────────────────────────────────────────────┐
-
 │              @objectstack/metadata — API Contracts              │
-
 │                                                                  │
-
 │  CRUD        │ Query/Search │ Bulk Ops  │ Overlay   │ Watch     │
-
 │  Import/Export│ Validation   │ Type Reg  │ Deps      │           │
-
 ├──────────────────────────────────────────────────────────────────┤
-
 │  Hono Adapter │ Next.js Adapter │ NestJS Adapter │ CLI         │
-
 └──────────────────────────────────────────────────────────────────┘
-
 ```
 
 ## Alignment
-
 - **Salesforce**: Metadata API (deploy, retrieve, describe)
-
 - **ServiceNow**: System Dictionary + Metadata API
-
 - **Kubernetes**: API Server + CRD Registry
 
 <Callout type="info">

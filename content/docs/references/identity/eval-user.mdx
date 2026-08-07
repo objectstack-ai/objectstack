@@ -8,21 +8,14 @@ description: Eval User protocol schemas
 EvalUser — the one user-context contract (ADR-0068 D1).
 
 The signed-in user exposed to every predicate surface (server formula, server
-
 RLS, client UI gates) under the canonical variable name `current_user`
-
 (aliases `user`, `ctx.user`) with an **identical shape**. A predicate such as
-
 `current_user.positions.exists(p, p == 'org_admin')` (or
-
 `'org_admin' in current_user.positions`) therefore evaluates identically wherever
-
 it is written.
 
 `positions: string[]` is the **only canonical** membership field (renamed from
-
 `roles`, ADR-0090 D3). A singular field is NOT part of this contract — its legacy "overwritten to 'admin' on promotion"
-
 behavior is the footgun this eliminates.
 
 See also: docs/adr/0068-unified-user-context-and-built-in-identity-roles.md

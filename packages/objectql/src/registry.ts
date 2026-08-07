@@ -799,12 +799,10 @@ export class NamespaceConflictError extends Error {
  *
  * `_packageId !== 'sys_metadata'` alone cannot answer it. That sentinel marks
  * one thing only — an overlay row bound to no package. A row that IS bound to
- * one is keyed by its real package id on the save path (#4636 PR1) and by the
- * boot-time rehydration of `sys_metadata` (#4636 PR2 — the branch still reads a
- * camelCase key off a snake_case row, so today it falls back to the sentinel;
- * that half of this paragraph describes the contract, not yet the code). Either
- * way the key is `app.<slug>`, which is exactly what every code-shipped item
- * carries too, so the sentinel test cannot tell them apart. A tenant's own
+ * one is keyed by its real package id on BOTH sides that register it: the save
+ * path (#4636 PR1) and the boot-time rehydration of `sys_metadata` (#4636 PR2).
+ * Either way the key is `app.<slug>`, which is exactly what every code-shipped
+ * item carries too, so the sentinel test cannot tell them apart. A tenant's own
  * overlay came back from a kernel rebuild looking like a code
  * artifact, and the protocol's overlay gate refused the next write to it with
  * `not_overridable` — an app the user had just built through Studio/AI became

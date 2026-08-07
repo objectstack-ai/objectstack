@@ -8,52 +8,36 @@ description: Settings Client protocol schemas
 SettingsClient — reactive consumer contract for runtime settings.
 
 Background. Phase 0 introduced the cascade scope (`env > global >
-
 tenant > user > default`) and made `SettingsService.get()` resolve
-
 across the chain. Consumers (e.g. EmailServicePlugin, BrandingPlugin)
-
 still pull values once at boot, which means saved changes never take
-
 effect without a process restart.
 
 This module defines the contract that fixes that:
 
-const mail = ctx.settings.bind('mail', MailSettingsSchema);
+  const mail = ctx.settings.bind('mail', MailSettingsSchema);
+  mail.current.smtp_host;                 // current effective value
+  const off = mail.onChange(() => rebuild());
 
-mail.current.smtp_host;                 // current effective value
-
-const off = mail.onChange(() => rebuild());
-
-service.set('mail', 'smtp_host', '…')   //  ↳ fires settings:changed
-
-//    → handler runs → transport rebuilt
+  service.set('mail', 'smtp_host', '…')   //  ↳ fires settings:changed
+                                           //    → handler runs → transport rebuilt
 
 Design rules:
 
-1. **Spec-only.** This package emits types and Zod shapes. No runtime
+ 1. **Spec-only.** This package emits types and Zod shapes. No runtime
+    wiring (event bus, in-memory cache) lives here — that is
+    `@objectstack/service-settings`'s job. Keeping the contract pure
+    lets non-Node consumers (RN, edge workers) re-implement it.
 
-wiring (event bus, in-memory cache) lives here — that is
+ 2. **Snapshot semantics.** `current` is an immutable snapshot of the
+    namespace at the moment of the last refresh. After a change event
+    fires, the next read of `current` returns the new snapshot — old
+    references stay stable (good for React useSyncExternalStore).
 
-`@objectstack/service-settings`'s job. Keeping the contract pure
-
-lets non-Node consumers (RN, edge workers) re-implement it.
-
-2. **Snapshot semantics.** `current` is an immutable snapshot of the
-
-namespace at the moment of the last refresh. After a change event
-
-fires, the next read of `current` returns the new snapshot — old
-
-references stay stable (good for React useSyncExternalStore).
-
-3. **No fetching here.** A `SettingsClient` does not know how to fetch
-
-itself; it is constructed by an authority (the service) that owns
-
-the persistence layer. That keeps cycles out of the dependency
-
-graph and lets us mock the client trivially in tests.
+ 3. **No fetching here.** A `SettingsClient` does not know how to fetch
+    itself; it is constructed by an authority (the service) that owns
+    the persistence layer. That keeps cycles out of the dependency
+    graph and lets us mock the client trivially in tests.
 
 <Callout type="info">
 **Source:** `packages/spec/src/system/settings-client.zod.ts`

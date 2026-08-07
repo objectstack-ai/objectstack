@@ -53,7 +53,18 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
 
     const m = method.toUpperCase();
 
-    // 1. Custom Actions (query, batch)
+    // 1. Custom Actions (query)
+    //
+    // [#5856] `batch` was listed here too, and was the last trace of a wiring
+    // that never happened: no branch below routes it, and `callData`'s
+    // `action === 'batch'` arm (which answered a silent `{ results: [] }`) has
+    // been removed with it. Batching has ONE owner and it is not this domain
+    // (route-ownership rule 1): `@objectstack/rest`'s `registerBatchEndpoints`
+    // mounts both `POST /batch` (atomic, cross-object) and `POST
+    // /data/:object/batch` (per-object) — which is exactly why a host serving
+    // only this dispatcher reports `capabilities.transactionalBatch: false`
+    // (#5672). Re-adding `batch` HERE would be a second implementation of a
+    // path REST already serves, not the missing half of one.
     if (parts.length > 1) {
         const action = parts[1];
 

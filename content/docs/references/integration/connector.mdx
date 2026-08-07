@@ -8,29 +8,20 @@ description: Connector protocol schemas
 Connector Protocol - LEVEL 3: Enterprise Connector
 
 Defines the standard connector specification for external system integration.
-
 Connectors enable ObjectStack to sync data with SaaS apps, databases, file storage,
-
 and message queues through a unified protocol.
 
 **Positioning in the sync/integration layering** (L1 "Simple Sync" was
-
 retired in #4738 — narrative-only, zero consumers; see
-
 `packages/spec/docs/SYNC_ARCHITECTURE.md`):
-
 - **ETL Pipeline** (automation/etl.zod.ts) - Data engineers - Aggregate 10 sources to warehouse
-
 - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
 
 **SCOPE: Most comprehensive integration layer.**
-
 Includes authentication, webhooks, rate limiting, field mapping, bidirectional sync,
-
 retry policies, and complete lifecycle management.
 
 This protocol supports multiple authentication strategies, bidirectional sync,
-
 field mapping, webhooks, and comprehensive rate limiting.
 
 ## Runtime contract — descriptor vs. registered connector (#2612)
@@ -38,93 +29,57 @@ field mapping, webhooks, and comprehensive rate limiting.
 This schema serves TWO distinct consumers; do not conflate them:
 
 1. **Runtime registration (plugin-only).** The automation engine's connector
-
-registry — what `GET /connectors` lists and the `connector_action` flow
-
-node dispatches — is populated exclusively by plugins calling
-
-`engine.registerConnector(def, handlers)` with a handler per declared
-
-action (ADR-0018 §Addendum). The definition is validated against this
-
-schema at registration.
-
+   registry — what `GET /connectors` lists and the `connector_action` flow
+   node dispatches — is populated exclusively by plugins calling
+   `engine.registerConnector(def, handlers)` with a handler per declared
+   action (ADR-0018 §Addendum). The definition is validated against this
+   schema at registration.
 2. **Declarative `connectors:` stack entries (catalog descriptors).** Stack
-
-metadata validated against this schema is registered as kind 'connector'
-
-for discovery/documentation/marketplace purposes only — it never reaches
-
-the runtime registry, because an action here carries no execution binding
-
-(deliberately: ADR-0023 rejected re-inventing OpenAPI inside this schema).
-
-The automation service warns at boot about declared entries with `actions`
-
-that lack a same-name runtime registration; mark deliberate catalog-only
-
-entries with `enabled: false`. Provider-bound declarative instances that
-
-a generic executor (connector-openapi / connector-mcp) materializes at
-
-boot are tracked in #2977 (ADR-0097).
+   metadata validated against this schema is registered as kind 'connector'
+   for discovery/documentation/marketplace purposes only — it never reaches
+   the runtime registry, because an action here carries no execution binding
+   (deliberately: ADR-0023 rejected re-inventing OpenAPI inside this schema).
+   The automation service warns at boot about declared entries with `actions`
+   that lack a same-name runtime registration; mark deliberate catalog-only
+   entries with `enabled: false`. Provider-bound declarative instances that
+   a generic executor (connector-openapi / connector-mcp) materializes at
+   boot are tracked in #2977 (ADR-0097).
 
 Authentication is now imported from the canonical `auth/config.zod.ts`.
 
 ## When to Use This Layer
 
 **Use Enterprise Connector when:**
-
 - Building enterprise-grade connectors (e.g., Salesforce, SAP, Oracle)
-
 - Complex OAuth2/SAML authentication required
-
 - Bidirectional sync with field mapping and transformations
-
 - Webhook management and rate limiting required
-
 - Full CRUD operations and data synchronization
-
 - Need comprehensive retry strategies and error handling
 
 **Examples:**
-
 - Full Salesforce integration with webhooks
-
 - SAP ERP connector with CDC (Change Data Capture)
-
 - Microsoft Dynamics 365 connector
 
 **When to downgrade:**
-
 - Data transformation only → Use [ETL Pipeline](/docs/references/automation/etl)
 
-See also: [../[automation/etl.zod.ts](/docs/references/automation/etl)](/docs/references/automation/etl) for the ETL Pipeline layer (data engineering)
+See also: [../automation/etl.zod.ts](/docs/references/automation/etl) for the ETL Pipeline layer (data engineering)
 
 ## There is no "Trigger Registry" alternative
 
 This header used to carry a "When to use Integration Connector vs. Trigger
-
 Registry?" comparison, steering "lightweight" cases to
-
-`[automation/trigger-registry.zod.ts](/docs/references/automation/trigger-registry)`. That file was a third declaration of
-
+`automation/trigger-registry.zod.ts`. That file was a third declaration of
 the connector vocabulary with zero consumers — nothing registered, validated
-
 or executed against it — so the guidance pointed authors, with the
-
 platform's authority, at a dead end (#4499; removed alongside the #4480
-
 per-provider template cluster). The same defect class as the
-
 `capabilities.readOnly` prescription #4487 corrected: a signpost must land
-
 somewhere enforced. Lightweight cases are served HERE — a connector instance
-
-with simple `auth` — or by `[automation/etl.zod.ts](/docs/references/automation/etl)` for transformation
-
+with simple `auth` — or by `automation/etl.zod.ts` for transformation
 pipelines. (The automation-side L1 "Simple Sync" file was itself retired as
-
 a dead end of the same class in #4738.)
 
 <Callout type="info">

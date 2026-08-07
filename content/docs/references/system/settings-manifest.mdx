@@ -8,30 +8,21 @@ description: Settings Manifest protocol schemas
 Settings Manifest Protocol
 
 Declarative description of a single namespace of platform settings
-
 (e.g. `mail`, `branding`, `feature_flags`). Modelled on Apple's
-
 `Settings.bundle/Root.plist` PreferenceSpecifiers — a small, closed
-
 set of specifier types that the system-owned renderer turns into a
-
 uniform Settings page.
 
 Storage for values is the generic `sys_setting` K/V table; manifests
-
 themselves are NEVER persisted — they ship with plugin code.
 
 See ADR-0007 (Settings Manifest + K/V Store + Resolver).
 
 Resolution order (handled by `SettingsService.get`):
-
-1. process.env override   (source='env',     locked=true)
-
-2. sys_setting scope=tenant
-
-3. sys_setting scope=user
-
-4. manifest specifier.default
+  1. process.env override   (source='env',     locked=true)
+  2. sys_setting scope=tenant
+  3. sys_setting scope=user
+  4. manifest specifier.default
 
 <Callout type="info">
 **Source:** `packages/spec/src/system/settings-manifest.zod.ts`

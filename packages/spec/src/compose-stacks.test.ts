@@ -261,12 +261,22 @@ describe('composeStacks - manifest strategy', () => {
 // ─── i18n handling ──────────────────────────────────────────────────
 
 describe('composeStacks - i18n', () => {
-  it('should use last i18n config (last-wins)', () => {
+  // #5051 flipped this case: `i18n` used to be last-wins, so composing these
+  // two stacks silently produced `zh` and threw `s1`'s declaration away. It is
+  // now a single-valued key like `api` / `server` — a disagreement is an error.
+  it('should throw on conflicting i18n config rather than letting the last stack win', () => {
     const s1 = makeStack({ i18n: { defaultLocale: 'en', supportedLocales: ['en'] } });
     const s2 = makeStack({ i18n: { defaultLocale: 'zh', supportedLocales: ['zh', 'en'] } });
 
-    const result = composeStacks([s1, s2]);
-    expect(result.i18n?.defaultLocale).toBe('zh');
+    expect(() => composeStacks([s1, s2])).toThrow(/top-level key 'i18n'/);
+  });
+
+  it('should pass an identical i18n config through', () => {
+    const config = { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] };
+    const s1 = makeStack({ i18n: { ...config } });
+    const s2 = makeStack({ i18n: { ...config } });
+
+    expect(composeStacks([s1, s2]).i18n).toEqual(config);
   });
 
   it('should skip stacks without i18n', () => {

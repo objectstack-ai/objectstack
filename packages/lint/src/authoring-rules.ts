@@ -693,12 +693,20 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateSeedStateMachine(stack),
   },
-  // ADR-0089 D3b — deprecated visibility aliases and a mis-layered binding root.
-  // Pre-parse: the schema folds `visibleOn`/`visibility` into `visibleWhen`
-  // during parse, so the alias the author wrote is gone from `result.data`.
+  // ADR-0089 D3b — deprecated visibility aliases and a mis-layered binding root,
+  // plus (#6128) the bare-identifier gate. Pre-parse: the schema folds
+  // `visibleOn`/`visibility` into `visibleWhen` during parse, so the alias the
+  // author wrote is gone from `result.data`.
+  //
+  // `gating` since #6128: `visibility-bare-identifier` emits `error`. The two
+  // ADR-0089 rules stay advisory findings within it — the tier is a property of
+  // the RULE FUNCTION (can it emit `error`?), and the per-finding severity is
+  // what decides whether any given diagnostic gates, exactly as `lintFlowPatterns`
+  // has worked since #3760. The promotion follows the #5762 precedent: a family
+  // that gains an `error` finding moves its registry tier in the same edit.
   {
     name: 'validateVisibilityPredicates',
-    tier: 'advisory',
+    tier: 'gating',
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-visibility-predicates.ts',
