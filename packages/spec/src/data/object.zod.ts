@@ -1391,12 +1391,15 @@ const ObjectSchemaBase = z.object({
           // here. `ownership` is the real, enforced lever.
           owner:
             '`owner` is not a `systemFields` key — `owner_id` injection is governed by the ' +
-            "object-level `ownership` property (`ownership: 'none'` skips it; " +
-            "`'user'`/`'org'` choose the principal). `systemFields` controls only `tenant` " +
-            '(organization_id) and `audit` (created_at/created_by/updated_at/updated_by).',
+            "object-level `ownership` property: `'user'` (or omitted) injects it, while " +
+            "`'org'` and `'none'` BOTH skip it and no `owner_id` is injected at all — " +
+            "`'org'` for an org-wide catalog (Dataverse-style), `'none'` for a junction/link " +
+            'table. `systemFields` controls only `tenant` (organization_id) and `audit` ' +
+            '(created_at/created_by/updated_at/updated_by).',
           ownership:
             '`ownership` is a TOP-LEVEL object key, not a `systemFields` key — write it ' +
-            'beside `systemFields`. It, not this block, decides whether `owner_id` is injected.',
+            'beside `systemFields`. It, not this block, decides whether the ownership ' +
+            'anchors (`owner_id` and `owning_business_unit_id`) are injected.',
         },
       }, {
         tenant: z.boolean().optional().describe('Inject the organization_id column. Default true (the column is always provisioned; the multi-tenant flag governs only its index).'),
