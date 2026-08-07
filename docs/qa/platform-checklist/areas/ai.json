@@ -1,0 +1,187 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md. NOTE: AI is deliberately absent from the showcase app (ADR-0063 — platform-owned), so most items here carry explicit fixture requirements instead of assuming showcase seeds.",
+  "area": "ai",
+  "title": "AI — agents, tools, skills, MCP",
+  "items": [
+    {
+      "id": "ai.agent-tool-skill-metadata-roundtrip",
+      "title": "agent / tool / skill metadata kinds author, persist and list over the meta + REST surfaces",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "any",
+        "requires": ["a writable package to author into (AI artifacts are not seeded by the showcase — ADR-0063)"],
+        "knownGaps": ["no stock example app ships AI seeds; a minimal agent+tool+skill fixture config is needed for the full round-trip"]
+      },
+      "variants": ["agent", "tool", "skill"],
+      "steps": [
+        "author one metadata item per variant (defineAgent / defineTool / defineSkill shapes from @objectstack/spec src/ai/*.zod.ts) in a writable package",
+        "build/boot the app; capture the boot log for AI registration lines",
+        "GET /api/v1/meta/types/agent (and tool, skill) to confirm the kinds are served by the registry",
+        "list the authored items over the REST surface (routes under /api/v1/ai/** — e.g. GET /api/v1/ai/agents, the REST-plural example of AGENTS.md PD#3)",
+        "re-read one item and field-diff it against the authored source"
+      ],
+      "acceptance": [
+        {
+          "clause": "each of the three kinds parses against its Zod schema at build — an off-spec shape fails at authoring, not silently at runtime",
+          "oracle": "build",
+          "verify": "a deliberately broken variant (unknown key) is rejected with a located error; the valid ones build clean",
+          "evidence": "build output for both cases"
+        },
+        {
+          "clause": "the metadata registry serves all three kinds (they are registered metadata types, singular names per PD#3)",
+          "oracle": "api",
+          "verify": "GET /api/v1/meta/types/<kind> returns the kind's schema/registration for agent, tool, skill",
+          "evidence": "the three responses"
+        },
+        {
+          "clause": "authored items are listed and readable over /api/v1/ai/** and survive a field-diff against source",
+          "oracle": "api",
+          "verify": "list + get round-trip; every authored field present with the authored value",
+          "evidence": "list/get responses + diff"
+        }
+      ],
+      "negative": [
+        "an unauthenticated request to the /api/v1/ai/** list route → 401 (anonymous-deny holds on the AI family too)"
+      ],
+      "traps": ["stale-dist"],
+      "source": ["packages/spec/src/ai/agent.zod.ts (+tool/skill)", "packages/runtime/src/route-ledger.ts ('* /ai/**')", "packages/spec/liveness/agent.json"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — closes the AI hole in capability coverage (no area covered agent/tool/skill kinds)", "ref": "claude/platform-test-checklist-ocwugl" }]
+    },
+    {
+      "id": "ai.mcp-http-surface",
+      "title": "MCP HTTP transport and the public /mcp/skill endpoint behave per config",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "fixtures": {
+        "app": "any",
+        "requires": ["one boot with MCP HTTP enabled and one with it disabled (the #3358 sweep hit the disabled config and read 501)"]
+      },
+      "steps": [
+        "boot with MCP HTTP disabled; GET /mcp and /mcp/skill; record statuses",
+        "boot with MCP HTTP enabled; GET /mcp/skill unauthenticated",
+        "open an MCP Streamable HTTP session against /mcp and list tools"
+      ],
+      "acceptance": [
+        {
+          "clause": "disabled config answers a deliberate 501/refusal on /mcp — a clean 'off', not a hang or 500",
+          "oracle": "api",
+          "verify": "status + body of GET /mcp on the disabled boot",
+          "evidence": "the response"
+        },
+        {
+          "clause": "GET /mcp/skill serves the public SKILL.md for agents without auth (documented server-only surface)",
+          "oracle": "api",
+          "verify": "200 + markdown body on the enabled boot, unauthenticated",
+          "evidence": "the response head"
+        },
+        {
+          "clause": "an MCP client can complete the handshake and list tools on the enabled boot",
+          "oracle": "network",
+          "verify": "initialize + tools/list round-trip succeeds over Streamable HTTP",
+          "evidence": "the session trace"
+        }
+      ],
+      "negative": ["the enabled boot must still reject tool CALLS that need auth when the session carries none — transport up ≠ authz open"],
+      "traps": ["dispatcher-vs-hono-route"],
+      "source": ["packages/runtime/src/route-ledger.ts ('* /mcp/**', 'GET /mcp/skill')", "#3358 §9 (MCP HTTP 501 on the swept config)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — the #3358 sweep could not drive MCP because the config was off; both sides are now explicit", "ref": "claude/platform-test-checklist-ocwugl" }]
+    },
+    {
+      "id": "ai.mcp-stdio-fail-closed",
+      "title": "MCP stdio auto-start fails closed without an API key; with a key, reads honor RLS/FLS",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "cli",
+      "personas": ["restricted member API key (for the RLS half)"],
+      "steps": [
+        "attempt MCP stdio auto-start WITHOUT OS_MCP_STDIO_API_KEY set; capture the refusal",
+        "start it with a valid key bound to a restricted member; over MCP, read an OWD-private object",
+        "read the same object as an admin-keyed session; compare row sets"
+      ],
+      "acceptance": [
+        {
+          "clause": "stdio auto-start without the key refuses to serve (fail-closed), with a clear message naming the missing key",
+          "oracle": "log",
+          "verify": "the refusal line in the process output",
+          "evidence": "the log line"
+        },
+        {
+          "clause": "with a member-bound key, MCP reads return only RLS-visible rows and FLS-masked fields — identical to the same member over REST",
+          "oracle": "api",
+          "verify": "row-set + field-set comparison MCP-vs-REST for the same member; admin session shows the full set (both sides)",
+          "evidence": "the compared reads"
+        }
+      ],
+      "negative": ["an invalid/revoked key must be rejected, not fall back to an anonymous-but-serving session"],
+      "traps": ["wrong-persona"],
+      "source": ["#3358 §9 (verified PASS: fail-closed guard present, reads honor RLS/FLS)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 §9", "ref": "#3358" }]
+    },
+    {
+      "id": "ai.mcp-run-action-exposure-gate",
+      "title": "MCP run_action requires ai.exposed and audits the call",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "fixtures": { "app": "any", "requires": ["one action declared ai.exposed and one without, on the same object"] },
+      "steps": [
+        "over MCP, call run_action on the undeclared action; capture the refusal",
+        "call the ai.exposed action; capture result",
+        "read the audit log for the successful call"
+      ],
+      "acceptance": [
+        {
+          "clause": "the undeclared action is rejected fail-closed (declared ≠ exposed is the gate, PD#10 discipline)",
+          "oracle": "api",
+          "verify": "the MCP call errors with the exposure refusal; the action did NOT execute (verify by its side effect being absent)",
+          "evidence": "the refusal + absence check"
+        },
+        {
+          "clause": "the exposed action executes and lands in the audit log with the caller identity",
+          "oracle": "api",
+          "verify": "action side effect present + audit row for the call",
+          "evidence": "result + audit row"
+        }
+      ],
+      "negative": ["the refusal path must leave zero side effects — a rejected call that half-executed is a FAIL"],
+      "source": ["docs/plans/release-15.1-test-plan.md §A9 (#2964)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §A9", "ref": "claude/platform-test-checklist-ocwugl" }]
+    },
+    {
+      "id": "ai.mcp-validate-expression",
+      "title": "MCP validate_expression returns errors/warnings/inferred type against an object schema",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "fixtures": { "app": "any", "requires": ["MCP HTTP enabled (see ai.mcp-http-surface)"] },
+      "steps": [
+        "over MCP, validate a correct formula against a seeded object schema",
+        "validate a formula with a type error (e.g. date arithmetic) and one referencing a nonexistent field"
+      ],
+      "acceptance": [
+        {
+          "clause": "the valid expression returns ok with an inferred type; the invalid ones return located errors naming the problem (bad arithmetic, unknown field)",
+          "oracle": "api",
+          "verify": "three calls, three verdicts matching the formula gates the build enforces (api-backend.formula-gates)",
+          "evidence": "the three responses"
+        }
+      ],
+      "source": ["#3358 §9 (underlying validateExpression works; MCP path was blocked on the disabled transport)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 §9", "ref": "#3358" }]
+    }
+  ]
+}

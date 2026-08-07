@@ -1,0 +1,283 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "integration-system",
+  "title": "Integration & system services — connectors, webhooks, jobs, email templates",
+  "items": [
+    {
+      "id": "integration-system.connector-declarative-boot",
+      "title": "A declarative provider-bound connector materializes at boot",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "fixtures": { "app": "showcase", "requires": ["the live provider:'mcp' demo connector instance shipped with the showcase (#2994/#3062)"] },
+      "steps": [
+        "boot the showcase; read the boot log for connector materialization",
+        "GET /api/v1/automation/connectors (route ledger: automation.listConnectors)",
+        "locate the declarative instance in the listing and read its descriptor"
+      ],
+      "acceptance": [
+        {
+          "clause": "the declarative instance appears in the connector listing with origin:'declarative' and a healthy state",
+          "oracle": "api",
+          "verify": "GET /automation/connectors contains the instance with origin:'declarative'",
+          "evidence": "the listing"
+        },
+        {
+          "clause": "its declared actions are enumerable from the descriptor (the instance is usable, not just listed)",
+          "oracle": "api",
+          "verify": "the descriptor carries the action set the declaration authored",
+          "evidence": "the descriptor read"
+        }
+      ],
+      "negative": ["deleting/disabling the declaration and rebooting must remove/disable the instance — materialization tracks the metadata, it does not fossilize"],
+      "traps": ["stale-dist"],
+      "source": ["docs/plans/release-15.1-test-plan.md §B1 (#2994/#3062)", "packages/runtime/src/route-ledger.ts (GET /automation/connectors)", "packages/spec/src/integration/connector.zod.ts"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §B — connectors had no checklist coverage", "ref": "claude/platform-test-checklist-ocwugl" }]
+    },
+    {
+      "id": "integration-system.connector-degraded-recovery",
+      "title": "Unreachable connector upstream degrades gracefully and recovers atomically",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "steps": [
+        "point a declarative connector at an upstream, boot, confirm healthy",
+        "kill the upstream; restart the app server",
+        "read boot outcome + the instance descriptor; wait through a backoff cycle",
+        "restore the upstream; confirm recovery without another restart"
+      ],
+      "acceptance": [
+        {
+          "clause": "boot does NOT hang or crash on the dead upstream — the instance lands as a degraded husk (descriptor state:'degraded')",
+          "oracle": "api",
+          "verify": "boot completes; GET /automation/connectors shows state:'degraded' for the instance",
+          "evidence": "boot log + descriptor"
+        },
+        {
+          "clause": "retries back off (no hot loop) and recovery swaps the live instance in atomically",
+          "oracle": "log",
+          "verify": "retry lines show increasing intervals; after upstream restore the descriptor flips healthy without a server restart",
+          "evidence": "log excerpt + post-recovery descriptor"
+        }
+      ],
+      "negative": ["while degraded, invoking one of its actions must fail with a clear connector-unavailable error — not a timeout hang"],
+      "source": ["docs/plans/release-15.1-test-plan.md §B3 (#3049)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §B3", "ref": "claude/platform-test-checklist-ocwugl" }]
+    },
+    {
+      "id": "integration-system.connector-stdio-default-deny",
+      "title": "Declarative stdio connectors are denied unless the host allowlists them",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "steps": [
+        "author a declarative stdio connector WITHOUT host allowlist opt-in; boot",
+        "add the allowlist opt-in; boot again"
+      ],
+      "acceptance": [
+        {
+          "clause": "the non-opted-in stdio instance is refused (boot fatal or reload skip, per the documented behavior) with a message naming the allowlist",
+          "oracle": "log",
+          "verify": "boot output for the deny case",
+          "evidence": "the refusal line"
+        },
+        {
+          "clause": "the allowlisted boot materializes the instance normally",
+          "oracle": "api",
+          "verify": "GET /automation/connectors lists it healthy",
+          "evidence": "the listing"
+        }
+      ],
+      "negative": ["the deny must be default — absence of any allowlist config means refused, never silently spawned processes"],
+      "source": ["docs/plans/release-15.1-test-plan.md §B4 (#3059)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §B4", "ref": "claude/platform-test-checklist-ocwugl" }]
+    },
+    {
+      "id": "integration-system.connector-spec-path-no-escape",
+      "title": "Connector openapi spec paths resolve package-relative and reject escapes",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "build",
+      "steps": [
+        "author providerConfig.spec: './openapi.json' inside the package; build/boot",
+        "author providerConfig.spec: '../outside.json'; build/boot"
+      ],
+      "acceptance": [
+        {
+          "clause": "the package-relative path resolves and the connector's actions derive from the spec",
+          "oracle": "api",
+          "verify": "descriptor carries the spec-derived actions",
+          "evidence": "descriptor read"
+        },
+        {
+          "clause": "the '../' escape is rejected with a located error — path traversal out of the package is not a supported shape",
+          "oracle": "build",
+          "verify": "build/boot refuses the escaping path",
+          "evidence": "the error"
+        }
+      ],
+      "source": ["docs/plans/release-15.1-test-plan.md §B5 (#3024)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §B5", "ref": "claude/platform-test-checklist-ocwugl" }]
+    },
+    {
+      "id": "integration-system.connector-descriptor-audit",
+      "title": "Descriptor-only connector contracts are audited at boot",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "cli",
+      "steps": [
+        "declare connector actions that have no runtime registration; boot and read the audit",
+        "set enabled:false on the declaration; boot again"
+      ],
+      "acceptance": [
+        {
+          "clause": "actions without runtime registration produce a boot warning naming the gap (declared ≠ delivered surfaces loudly, PD#10)",
+          "oracle": "log",
+          "verify": "the warning line names the connector + missing actions",
+          "evidence": "log excerpt"
+        },
+        {
+          "clause": "enabled:false silences the audit for that declaration — the opt-out is deliberate and quiet",
+          "oracle": "log",
+          "verify": "no warning on the disabled boot",
+          "evidence": "log excerpt"
+        }
+      ],
+      "source": ["docs/plans/release-15.1-test-plan.md §B6 (#2985)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §B6", "ref": "claude/platform-test-checklist-ocwugl" }]
+    },
+    {
+      "id": "integration-system.flow-connector-picker",
+      "title": "The flow designer's connector picker lists instances and marks declarative ones",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["admin"],
+      "steps": [
+        "in the flow designer, add a connector_action node",
+        "open the connector picker; screenshot; compare with GET /automation/connectors"
+      ],
+      "acceptance": [
+        {
+          "clause": "the picker lists the same instances the API reports, with declarative instances annotated",
+          "oracle": "screenshot",
+          "verify": "picker screenshot cross-checked against the connector listing",
+          "evidence": "screenshot + API read"
+        }
+      ],
+      "traps": ["stale-console-bundle", "hydration-race"],
+      "source": ["docs/plans/release-15.1-test-plan.md §B2 (objectui#2563)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §B2", "ref": "claude/platform-test-checklist-ocwugl" }]
+    },
+    {
+      "id": "integration-system.webhook-lifecycle",
+      "title": "Webhooks: live trigger events register and fire; retired trigger kinds are rejected",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "fixtures": { "app": "any", "requires": ["a reachable webhook receiver (local echo server on the run's own port range)"] },
+      "steps": [
+        "author a webhook on a live record event (per the trigger set packages/spec/liveness/webhook.json documents as live); boot",
+        "mutate a matching record; capture the delivery at the receiver",
+        "author a webhook using a RETIRED trigger kind (the enforce-or-remove sweep removed undelete/api); build"
+      ],
+      "acceptance": [
+        {
+          "clause": "the live-event webhook delivers to the receiver with the event payload on the matching mutation",
+          "oracle": "network",
+          "verify": "receiver logs the POST with the record event",
+          "evidence": "the received request"
+        },
+        {
+          "clause": "a retired trigger kind fails at parse/build with located guidance — never registers silently dead",
+          "oracle": "build",
+          "verify": "authoring the retired kind errors (same gate the #3358 enforce-or-remove sweep verified)",
+          "evidence": "the build error"
+        }
+      ],
+      "negative": ["an unreachable receiver must surface delivery failure observably (log/status), not drop silently"],
+      "source": ["packages/spec/liveness/webhook.json", "#3358 §9 (webhook undelete/api trigger removal gate)"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — webhook kind had no checklist coverage", "ref": "claude/platform-test-checklist-ocwugl" }]
+    },
+    {
+      "id": "integration-system.job-scheduled-run",
+      "title": "A job metadata item schedules, executes, and records its run",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "fixtures": { "app": "any", "requires": ["a job authored with a near-term schedule (or a manually-runnable job) — packages/spec/src/system/job.zod.ts is the shape"] },
+      "steps": [
+        "author a job per the spec shape in a writable package; boot",
+        "confirm registration (meta read / boot log), then let it fire or trigger it manually",
+        "read the run evidence (log lines / run records) and the job's side effect"
+      ],
+      "acceptance": [
+        {
+          "clause": "the job registers at boot and its execution is observable (run record or timestamped log) with the side effect present",
+          "oracle": "log",
+          "verify": "boot registration line + execution line + the side effect verified over the data API",
+          "evidence": "log excerpts + API read"
+        },
+        {
+          "clause": "a failing job surfaces an ERROR with the failure cause — not a silent skip",
+          "oracle": "log",
+          "verify": "a deliberately-throwing job body produces the ERROR line",
+          "evidence": "log excerpt"
+        }
+      ],
+      "source": ["packages/spec/src/system/job.zod.ts", "packages/spec/liveness/job.json"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — job kind had no checklist coverage", "ref": "claude/platform-test-checklist-ocwugl" }]
+    },
+    {
+      "id": "integration-system.email-template-render",
+      "title": "Email templates resolve variables and dispatch through the configured channel",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "fixtures": {
+        "app": "any",
+        "requires": ["an email_template authored per packages/spec/src/system/email-template.zod.ts + a capturable email channel (dev transport / log capture — no real SMTP needed)"],
+        "knownGaps": ["no stock example exercises an email template end-to-end; needs a small fixture flow with a notify/email step"]
+      },
+      "steps": [
+        "author an email_template with variables; reference it from a flow notify/email step",
+        "run the flow with known variable values",
+        "capture the rendered output at the dev transport / log"
+      ],
+      "acceptance": [
+        {
+          "clause": "the rendered subject/body substitute every variable with the run's values — no {{placeholder}} residue",
+          "oracle": "log",
+          "verify": "captured output contains the substituted values and zero unresolved placeholders",
+          "evidence": "the captured render"
+        },
+        {
+          "clause": "a template referencing an undefined variable surfaces a located authoring/run error, not a silently-empty substitution",
+          "oracle": "log",
+          "verify": "the undefined-variable case errors visibly",
+          "evidence": "the error"
+        }
+      ],
+      "source": ["packages/spec/src/system/email-template.zod.ts", "packages/spec/liveness/email_template.json"],
+      "history": [{ "revision": 1, "date": "2026-08-07", "change": "initial — email_template kind had no checklist coverage", "ref": "claude/platform-test-checklist-ocwugl" }]
+    }
+  ]
+}
