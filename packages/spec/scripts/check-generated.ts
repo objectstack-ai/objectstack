@@ -84,13 +84,13 @@ const GATED: ReadonlyArray<{
   {
     check: 'check:authorable-surface',
     gen: 'gen:schema',
-    artifact: 'authorable-surface.json (+ its .base.json anchor) + JSON schemas',
+    artifact: 'authorable-surface/ (+ its .base.json anchor) + JSON schemas',
   },
   // Reads the BUILT `dist/*.d.ts`, not the source. On a stale dist it reports
   // every export added since the last build as a "breaking removal" — a phantom
   // that has cost real triage time (AGENTS.md records the trap). Flagged so the
   // failure explains itself instead of sending the next reader after a ghost.
-  { check: 'check:api-surface', gen: 'gen:api-surface', artifact: 'api-surface.json', readsDist: true },
+  { check: 'check:api-surface', gen: 'gen:api-surface', artifact: 'api-surface/', readsDist: true },
   {
     check: 'check:docs',
     gen: 'gen:docs',

@@ -3659,3 +3659,194 @@ describe('getPublicConfig devSeedAdmin (dev-only login hint)', () => {
     expect((manager.getPublicConfig() as any).devSeedAdmin).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// [#5942] `isOrgOrPlatformAdmin` — the ADR-0024 `/sso/register` admin gate's
+// criterion — asks "does this membership administer the org" through the ONE
+// grade ladder (`isOrgAdminGrade`, `invitation-role-cap.ts`), not a hand-copied
+// `role === 'owner' || role === 'admin'`.
+//
+// The hand-copy it replaces did `.split(',').map(trim).some(=== 'owner' ||
+// === 'admin')` — case-SENSITIVE, and blind to the array spelling. The grade
+// ladder additionally `.toLowerCase()`s and joins arrays, so the two answered
+// differently on `Owner` / `ADMIN` / `['owner']`: this gate refused a real
+// administrator (false negative) while the break-glass ban guard
+// (`last-admin-ban-guard.ts`, same ladder) counted the same row AS an
+// administrator. Two spellings of one security question, diverging silently.
+//
+// Direction of the change, measured (see the PR body): every difference is a
+// WIDENING, and only over values the old spelling judged wrongly. There is no
+// value that was admin before and is not admin now — the closed ADR-0108
+// vocabulary (all lowercase) answers identically on both sides, which is why
+// no user could hit this today.
+//
+// NOTE on `' admin '`: it is a regression pin, NOT a before-red case. The
+// hand-copy already trimmed, so it answered `true` before the change too. Only
+// the CASE and ARRAY spellings actually move.
+//
+// The platform-admin half of this method is deliberately untouched (#5942 is
+// scoped to the org ruler); the platform-admin cases below pin that.
+// ---------------------------------------------------------------------------
+describe('isOrgOrPlatformAdmin – one grade ruler for "is this membership an admin" (#5942)', () => {
+  const SECRET = 'test-secret-at-least-32-chars-long';
+
+  /**
+   * Read-only engine stub: `members` are the `sys_member` rows, `platformAdmin`
+   * controls the org-less `admin_full_access` link. `find` honours the `where`
+   * the gate actually passes (`user_id`, and `organization_id` when an active
+   * org is set) so the org-scoping half is the product's, not the fixture's.
+   */
+  const makeEngine = (opts: { members?: any[]; platformAdmin?: boolean; throws?: boolean } = {}) => ({
+    find: vi.fn(async (object: string, query?: any) => {
+      if (opts.throws) throw new Error('db down');
+      if (object === 'sys_user_permission_set') {
+        return opts.platformAdmin
+          ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', organization_id: null }]
+          : [];
+      }
+      if (object === 'sys_permission_set') return [{ id: 'ps-admin', name: 'admin_full_access' }];
+      if (object === 'sys_member') {
+        const where = query?.where ?? {};
+        return (opts.members ?? []).filter((row) =>
+          Object.entries(where).every(([k, v]) => row[k] === v),
+        );
+      }
+      return [];
+    }),
+    findOne: vi.fn(),
+  });
+
+  /** The gate's criterion, invoked exactly as the `/sso/register` hook does. */
+  const judge = async (
+    engine: any,
+    activeOrgId?: string,
+    userId = 'u-1',
+  ): Promise<boolean> => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: 'http://localhost:3000',
+      dataEngine: engine,
+    });
+    warn.mockRestore();
+    return (manager as any).isOrgOrPlatformAdmin(userId, activeOrgId);
+  };
+
+  const memberRow = (role: unknown) => ({
+    id: 'm-1',
+    user_id: 'u-1',
+    organization_id: 'org-1',
+    role,
+  });
+
+  // -- (1) the fix itself: values the hand-copy refused, the ladder admits ----
+  describe('case-insensitive + array spellings (before: refused, after: admitted)', () => {
+    it.each([
+      ['Owner', 'better-auth owner, capitalized by an import'],
+      ['ADMIN', 'shout-cased by a hand-written SQL insert'],
+      [' Admin ', 'padded AND capitalized'],
+      ['OWNER', 'shout-cased owner'],
+      ['member,Owner', 'comma-joined with one capitalized administrative role'],
+    ])('grades %j as an administrator (%s)', async (role) => {
+      expect(await judge(makeEngine({ members: [memberRow(role)] }), 'org-1')).toBe(true);
+    });
+
+    it('grades the ARRAY spelling ["owner"] as an administrator', async () => {
+      // The hand-copy read `typeof m.role === 'string' ? m.role : ''`, so any
+      // array-valued role graded as nothing at all.
+      expect(await judge(makeEngine({ members: [memberRow(['owner'])] }), 'org-1')).toBe(true);
+    });
+
+    it('grades the ARRAY spelling ["member","Admin"] as an administrator', async () => {
+      expect(
+        await judge(makeEngine({ members: [memberRow(['member', 'Admin'])] }), 'org-1'),
+      ).toBe(true);
+    });
+  });
+
+  // -- (2) regression: the closed ADR-0108 vocabulary answers identically -----
+  describe('closed membership vocabulary (ADR-0108) — unchanged by the new ruler', () => {
+    it.each([
+      ['owner', true],
+      ['admin', true],
+      ['delegated_admin', false],
+      ['member', false],
+    ] as const)('grades the built-in %j as admin=%s', async (role, expected) => {
+      expect(await judge(makeEngine({ members: [memberRow(role)] }), 'org-1')).toBe(expected);
+    });
+
+    it.each([
+      ['owner,member', true],
+      ['member,admin', true],
+      [' admin ', true],
+      ['member,delegated_admin', false],
+    ] as const)(
+      'grades the comma/whitespace spelling %j as admin=%s (already true before #5942)',
+      async (role, expected) => {
+        expect(await judge(makeEngine({ members: [memberRow(role)] }), 'org-1')).toBe(expected);
+      },
+    );
+  });
+
+  // -- (3) non-administrative values still refused (no widening past admin) ---
+  describe('fail-closed floor — nothing else is admitted', () => {
+    it.each([
+      ['manager', 'an app-registered name that is not an administrative grade'],
+      ['administrator', 'a near-miss that is not the vocabulary'],
+      ['adminx', 'a prefix collision'],
+      ['', 'an empty role'],
+    ])('refuses %j (%s)', async (role) => {
+      expect(await judge(makeEngine({ members: [memberRow(role)] }), 'org-1')).toBe(false);
+    });
+
+    it.each([
+      [null, 'null'],
+      [undefined, 'undefined'],
+      [42, 'a number'],
+      [{ role: 'owner' }, 'an object that merely mentions owner'],
+    ])('refuses a non-string role (%s: %s)', async (role) => {
+      expect(await judge(makeEngine({ members: [memberRow(role)] }), 'org-1')).toBe(false);
+    });
+
+    it('refuses when the user has no membership row at all', async () => {
+      expect(await judge(makeEngine({ members: [] }), 'org-1')).toBe(false);
+    });
+
+    it('refuses when the engine read throws (fail CLOSED — ADR-0024)', async () => {
+      expect(await judge(makeEngine({ throws: true }), 'org-1')).toBe(false);
+    });
+  });
+
+  // -- (4) org scoping and the untouched platform-admin half -----------------
+  describe('scoping and the platform-admin half (untouched by #5942)', () => {
+    it('judges only the ACTIVE org when one is set', async () => {
+      const engine = makeEngine({
+        members: [
+          { id: 'm-1', user_id: 'u-1', organization_id: 'org-other', role: 'Owner' },
+          { id: 'm-2', user_id: 'u-1', organization_id: 'org-1', role: 'member' },
+        ],
+      });
+      // Administrative elsewhere, plain member here → refused for org-1 …
+      expect(await judge(engine, 'org-1')).toBe(false);
+      // … and admitted when that other org is the active one.
+      expect(await judge(engine, 'org-other')).toBe(true);
+    });
+
+    it('accepts an administrative membership in ANY org when no active org is set', async () => {
+      const engine = makeEngine({
+        members: [{ id: 'm-1', user_id: 'u-1', organization_id: 'org-other', role: 'ADMIN' }],
+      });
+      expect(await judge(engine, undefined)).toBe(true);
+    });
+
+    it('still admits a platform admin whose membership is a plain member', async () => {
+      const engine = makeEngine({ platformAdmin: true, members: [memberRow('member')] });
+      expect(await judge(engine, 'org-1')).toBe(true);
+    });
+
+    it('still refuses a non-platform-admin with no administrative membership', async () => {
+      const engine = makeEngine({ platformAdmin: false, members: [memberRow('member')] });
+      expect(await judge(engine, 'org-1')).toBe(false);
+    });
+  });
+});

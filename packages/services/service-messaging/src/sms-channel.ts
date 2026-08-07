@@ -53,6 +53,22 @@ const PHONE_SHAPE = (s: string): string | undefined => {
 };
 
 /**
+ * The code `@objectstack/service-sms` prefixes onto `SendSmsResult.error` when
+ * the deployment's daily send quota is exhausted (`SMS_QUOTA_EXCEEDED_CODE`,
+ * #2814). Spelled locally for the SAME reason as `PHONE_SHAPE` above — this
+ * package deliberately takes no dependency on service-sms and resolves whatever
+ * is registered under the `sms` service — and pinned from both ends: the
+ * producer exports the constant, and `sms-channel.test.ts` asserts this literal
+ * still classifies as `rate_limited`.
+ *
+ * It matters that this is not classified `retryable`: an exhausted daily budget
+ * is not a transient transport hiccup, and the outbox's retry ladder should
+ * back off rather than burn attempts against a wall that only opens at 00:00
+ * UTC.
+ */
+const SMS_QUOTA_EXCEEDED_CODE = 'TOO_MANY_REQUESTS';
+
+/**
  * The `sms` channel (#2780) — delivers a notification by SMS.
  *
  * Mirrors the email channel (ADR-0022 "channel delegates transport to a
@@ -139,7 +155,12 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
             }
         },
 
-        classifyError(_err: unknown): ErrorClass {
+        classifyError(err: unknown): ErrorClass {
+            // The dispatcher hands this `SendResult.error` — the string built
+            // above — not a thrown Error, so the quota refusal arrives as
+            // `sms send failed: TOO_MANY_REQUESTS: …`.
+            const text = err instanceof Error ? err.message : String(err ?? '');
+            if (text.includes(SMS_QUOTA_EXCEEDED_CODE)) return 'rate_limited';
             return 'retryable';
         },
     };

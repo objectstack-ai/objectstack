@@ -52,14 +52,54 @@
  * step in CI — alongside `check:api-surface` / the example-app typecheck, its
  * fellow "real consumer" gates — not before it like `check:skill-refs`.
  *
+ * ── The third anti-idle assertion: no bare `any` in a marked block (#5943) ───
+ * A marker is the author's claim "this block compiles", and the two guards above
+ * (orphan marker, zero blocks) exist because a gate that checks nothing must not
+ * report success. A bare `any` inside a marked block is the same failure wearing
+ * a green badge: every property access on an `any` is unchecked, so `tsc` proves
+ * exactly nothing about the lines a reader copies.
+ *
+ * #5720 is the measured specimen. Two marked hook examples were written
+ * `export async function beforeUpdate(ctx: any)` and read `ctx.services`, which
+ * a hook context does not have (the engine builds nine keys by name, the sandbox
+ * ten, neither of them `services`) — so the copied hook short-circuits on the
+ * optional chain and throws `PERMISSION_DENIED` on every write. This gate was
+ * green throughout. Re-annotate the identical function bodies with the honest
+ * `HookContext` and both report the same line:
+ *
+ *     error TS2339: Property 'services' does not exist on type
+ *     '{ object: string; event: …; input: Record<string, unknown>; … }'
+ *
+ * The same `any` also hid #5605's `ctx.session?.positions`. One `any`, two
+ * defects, zero diagnostics.
+ *
+ * SCOPE — the annotation must BE `any`, in a position where it erases checking
+ * wholesale: a parameter, a variable/property/return annotation, a type alias,
+ * or an `as any` / `satisfies any` / angle-bracket assertion. `any` NESTED inside a
+ * larger type (`Record<string, any>`, `any[]`, `Promise<any>`) is deliberately
+ * NOT flagged — the same line `check-exported-any.ts` draws for the same reason:
+ * a nested `any` is a much broader question, and holding the gate at zero false
+ * positives is what keeps red meaning broken.
+ *
+ * Casts and locals are in scope, and not for symmetry: a parameter-only rule is
+ * defeated by exactly the edit an author reaches for when it goes red — move the
+ * `any` one line down (`const c: any = ctx`) or into the access
+ * (`(ctx as any).services`) — which would leave the gate green over an unchanged
+ * defect. Measured at the time of writing, the whole 208-block corpus contained
+ * three bare `any` annotations, all in one block, so the wider scope cost nothing
+ * to adopt and there is no ratchet file: the baseline is zero and stays zero.
+ *
  * Usage:
  *   tsx scripts/check-skill-examples.ts            # extract + type-check (CI)
+ *   tsx scripts/check-skill-examples.ts --self-test  # pin the `any` detector, both directions
  *   tsx scripts/check-skill-examples.ts --keep     # also leave the build dir for inspection
  */
 
 import { spawnSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import ts from 'typescript';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -111,6 +151,7 @@ const SOURCE_ROOTS: Array<{
 const ALL_MARKERS = ['<!-- os:check -->', '{/* os:check */}'];
 
 const KEEP = process.argv.includes('--keep');
+const SELF_TEST = process.argv.includes('--self-test');
 
 const rel = (p: string) => path.relative(REPO_ROOT, p);
 
@@ -203,6 +244,74 @@ function extractFromFile(
     if (ALL_MARKERS.includes(lines[i].trim()) && !claimed.has(i)) orphans.push(i + 1); // 1-based
   }
   return { examples, orphans };
+}
+
+// ── Bare-`any` guard (#5943) ─────────────────────────────────────────────────
+
+interface AnyFinding {
+  /** 1-based line WITHIN the block body (body[0] is line 1). */
+  line: number;
+  /** 1-based column. */
+  col: number;
+  /** Human-readable position, e.g. "parameter `ctx`" — the prescription's subject. */
+  where: string;
+}
+
+/**
+ * Every position in which a bare `any` erases checking wholesale, keyed by the
+ * PARENT node kind. The check is `parent.type === node` (or the assertion's own
+ * type slot), so an `any` nested in a larger type — `Record<string, any>`,
+ * `any[]`, `Promise<any>` — has a TypeReference/ArrayType parent and is not a
+ * finding. That boundary is the gate's zero-false-positive line; widening it is
+ * a different question with a different (much larger) baseline.
+ */
+function describeAnyPosition(node: ts.Node): string | null {
+  const parent = node.parent;
+  if (!parent) return null;
+
+  const named = (name: ts.BindingName | ts.PropertyName | undefined): string =>
+    name && ts.isIdentifier(name) ? ` \`${name.text}\`` : '';
+
+  if (ts.isParameter(parent) && parent.type === node) return `parameter${named(parent.name)}`;
+  if (ts.isVariableDeclaration(parent) && parent.type === node) return `variable${named(parent.name)}`;
+  if ((ts.isPropertyDeclaration(parent) || ts.isPropertySignature(parent)) && parent.type === node)
+    return `property${named(parent.name)}`;
+  if (ts.isTypeAliasDeclaration(parent) && parent.type === node) return `type alias \`${parent.name.text}\``;
+  if (ts.isAsExpression(parent) && parent.type === node) return '`as any` assertion';
+  if (ts.isSatisfiesExpression(parent) && parent.type === node) return '`satisfies any` assertion';
+  if (ts.isTypeAssertionExpression(parent) && parent.type === node) return '`< any >` type assertion';
+  // Return annotations: functions, methods, arrows, getters, signatures.
+  if (ts.isFunctionLike(parent) && parent.type === node) return 'return type';
+  return null;
+}
+
+/**
+ * Parse ONE marked block and report every bare `any` annotation in it.
+ *
+ * Parsing (not regex) because the corpus is prose: `'any'` appears in string
+ * literal unions, in JSDoc, and in ordinary English inside comments — a
+ * line-wise regex reported three such lines on this repo's own corpus and none
+ * of them was a type annotation. `createSourceFile` never throws on malformed
+ * input; a block too broken to parse yields no findings here and is caught by
+ * the `tsc` pass that follows, which is the right division of labour.
+ */
+function findBareAny(code: string, fileName: string): AnyFinding[] {
+  const sf = ts.createSourceFile(fileName, code, ts.ScriptTarget.ES2020, /* setParentNodes */ true, ts.ScriptKind.TS);
+  const findings: AnyFinding[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (node.kind === ts.SyntaxKind.AnyKeyword) {
+      const where = describeAnyPosition(node);
+      if (where) {
+        const { line, character } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+        findings.push({ line: line + 1, col: character + 1, where });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sf, visit);
+
+  return findings;
 }
 
 // ── Module resolution derived from the spec's own `exports` ──────────────────
@@ -331,7 +440,177 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+// ── Self-test ────────────────────────────────────────────────────────────────
+
+/**
+ * Pin the bare-`any` detector on BOTH edges, over the real `extractFromFile`.
+ *
+ * A false negative makes the assertion dormant — green forever, which is
+ * indistinguishable from a clean corpus and is the exact state #5720 shipped in.
+ * A false positive is just as costly the other way: the three shapes below
+ * (`Record<string, any>`, `any[]`, a `'any'` string-literal union member, the
+ * word "any" in prose) all occur in the real corpus, and flagging any of them
+ * would force a corpus-wide rewrite for no defect.
+ *
+ * Line numbers are asserted literally, not recomputed, because the block-line →
+ * page-line arithmetic (`bodyStartLine + line - 1`) is the part that silently
+ * drifts: a diagnostic pointing at the wrong line is worse than none.
+ */
+function selfTest(): never {
+  const failures: string[] = [];
+  const check = (cond: boolean, msg: string): void => {
+    if (!cond) failures.push(msg);
+  };
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-examples-selftest-'));
+  try {
+    const docsRoot = { dir, ext: '.mdx', label: 'docs', marker: '{/* os:check */}' };
+    const skillsRoot = { dir, ext: '.md', label: 'skills', marker: '<!-- os:check -->' };
+
+    // ── RED, docs: the #5720 shape, verbatim. `any` on line 9 of the page. ───
+    const redDocs = path.join(dir, 'red.mdx');
+    fs.writeFileSync(
+      redDocs,
+      [
+        '# Fixture page', // 1
+        '', // 2
+        'Prose above the marked block.', // 3
+        '', // 4
+        '{/* os:check */}', // 5
+        '```ts', // 6
+        `import type { HookContext } from '@objectstack/spec';`, // 7
+        '', // 8
+        'export async function beforeUpdate(ctx: any): Promise<void> {', // 9  ← the defect
+        '  void ctx;', // 10
+        '}', // 11
+        '```', // 12
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const red = extractFromFile(redDocs, docsRoot);
+    check(red.examples.length === 1, `red fixture: extracted ${red.examples.length} block(s), expected 1`);
+    check(red.orphans.length === 0, `red fixture: reported ${red.orphans.length} orphan marker(s), expected 0`);
+    if (red.examples.length === 1) {
+      const hits = findBareAny(red.examples[0].code, 'red.ts');
+      check(hits.length === 1, `red fixture: found ${hits.length} bare \`any\`, expected 1 — the guard is DORMANT`);
+      if (hits.length === 1) {
+        const pageLine = red.examples[0].bodyStartLine + hits[0].line - 1;
+        check(pageLine === 9, `red fixture: reported page line ${pageLine}, expected 9 — line mapping is wrong`);
+        check(
+          hits[0].where === 'parameter `ctx`',
+          `red fixture: described the position as "${hits[0].where}", expected "parameter \`ctx\`"`,
+        );
+        const expectedCol =
+          'export async function beforeUpdate(ctx: any): Promise<void> {'.indexOf(': any') + 3;
+        check(hits[0].col === expectedCol, `red fixture: reported column ${hits[0].col}, expected ${expectedCol}`);
+      }
+    }
+
+    // ── RED, skills: the four NON-parameter positions, all in one block. ─────
+    const redSkill = path.join(dir, 'red.md');
+    fs.writeFileSync(
+      redSkill,
+      [
+        '# Skill fixture', // 1
+        '', // 2
+        '<!-- os:check -->', // 3
+        '```ts', // 4
+        'const api = ({} as unknown) as any;', // 5
+        'const loose: any = 1;', // 6
+        'type Loose = any;', // 7
+        'function widen(): any {', // 8
+        '  return 1;', // 9
+        '}', // 10
+        '```', // 11
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const skill = extractFromFile(redSkill, skillsRoot);
+    check(skill.examples.length === 1, `skills fixture: extracted ${skill.examples.length} block(s), expected 1`);
+    if (skill.examples.length === 1) {
+      const ex = skill.examples[0];
+      const got = findBareAny(ex.code, 'red-skill.ts')
+        .map((h) => `${ex.bodyStartLine + h.line - 1}:${h.where}`)
+        .sort();
+      const want = [
+        '5:`as any` assertion',
+        '6:variable `loose`',
+        '7:type alias `Loose`',
+        '8:return type',
+      ].sort();
+      check(
+        JSON.stringify(got) === JSON.stringify(want),
+        `skills fixture: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)} — a bare-\`any\` position is unguarded, ` +
+          `and moving the \`any\` there is exactly the edit a red parameter invites`,
+      );
+    }
+
+    // ── GREEN: the same function honestly typed, plus every shape that must
+    //    NOT be flagged, plus an UNMARKED block that must not be read at all. ─
+    const green = path.join(dir, 'green.mdx');
+    fs.writeFileSync(
+      green,
+      [
+        '# Green fixture', // 1
+        '', // 2
+        '{/* os:check */}', // 3
+        '```ts', // 4
+        `import type { HookContext } from '@objectstack/spec';`, // 5
+        '', // 6
+        `type Kind = 'string' | 'number' | 'any';`, // 7  string literal, not a type
+        '', // 8
+        '/** Prose mentioning any old thing, and Record<string, any> in a comment. */', // 9
+        'export async function beforeUpdate(ctx: HookContext): Promise<void> {', // 10
+        '  const bag: Record<string, any> = {};', // 11 nested — out of scope by design
+        '  const rows: any[] = [];', // 12 nested
+        `  const kind: Kind = 'any';`, // 13 string literal
+        '  void ctx; void bag; void rows; void kind;', // 14
+        '}', // 15
+        '```', // 16
+        '', // 17
+        'An UNMARKED block — the gate judges only what the author marked:', // 18
+        '', // 19
+        '```ts', // 20
+        'export function unchecked(ctx: any) { void ctx; }', // 21
+        '```', // 22
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const ok = extractFromFile(green, docsRoot);
+    check(
+      ok.examples.length === 1,
+      `green fixture: extracted ${ok.examples.length} block(s), expected 1 — the UNMARKED block must not be read`,
+    );
+    if (ok.examples.length >= 1) {
+      const hits = findBareAny(ok.examples[0].code, 'green.ts');
+      check(
+        hits.length === 0,
+        `green fixture: ${hits.length} false positive(s) — ${hits.map((h) => `line ${h.line} (${h.where})`).join(', ')}. ` +
+          `Nested \`any\`, \`'any'\` string literals and the word "any" in prose all occur in the real corpus.`,
+      );
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  if (failures.length > 0) {
+    for (const f of failures) console.error(`✗ self-test: ${f}`);
+    console.error(`\ncheck-skill-examples --self-test: ${failures.length} failure(s).\n`);
+    process.exit(1);
+  }
+  console.log(
+    '✅  self-test: flags a bare `any` parameter / variable / property / return / alias / cast in a\n' +
+      '    marked block at the right page line, and flags nothing in an honestly typed one.',
+  );
+  process.exit(0);
+}
+
 function main() {
+  if (SELF_TEST) selfTest();
+
   console.log('🧪 Type-checking prose TypeScript examples (skills + docs)...\n');
 
   const files = sourceFiles();
@@ -366,6 +645,34 @@ function main() {
         SOURCE_ROOTS.map((r) => `    ${r.marker}   (in ${rel(r.dir)}/**/*${r.ext})`).join('\n') + `\n\n` +
         `  on the line directly above its \`\`\`ts fence in ${SOURCE_ROOTS.map((r) => `${rel(r.dir)}/**/*${r.ext}`).join(' or ')}.\n` +
         `  (If you just removed the last marker, that is almost certainly a mistake.)`,
+    );
+  }
+
+  // Third anti-idle assertion (#5943): a marked block that annotates anything
+  // `any` compiles by definition and proves nothing about it. Runs BEFORE the
+  // build dir is written, so the author reads one crisp verdict instead of a
+  // clean `tsc` run that silently covered nothing.
+  const anyHits: string[] = [];
+  for (const ex of examples) {
+    for (const f of findBareAny(ex.code, ex.fileName)) {
+      anyHits.push(`  ${rel(ex.source)}:${ex.bodyStartLine + f.line - 1}:${f.col}  ${f.where}`);
+    }
+  }
+  if (anyHits.length > 0) {
+    fail(
+      `os:check block(s) annotate ${anyHits.length === 1 ? 'a value' : 'values'} \`any\` — the marker claims\n` +
+        `"this compiles" while every property access on that value goes unchecked:\n\n` +
+        anyHits.join('\n') +
+        `\n\n  Fix it one of two ways:\n` +
+        `    1. Annotate the real type (import it from @objectstack/spec) — that is the\n` +
+        `       whole point of marking the block, and it is what catches the drift:\n` +
+        `       \`(ctx: any)\` hid a hook example reading a \`ctx.services\` that no hook\n` +
+        `       context has (#5720), and a \`ctx.session?.positions\` before it (#5605).\n` +
+        `    2. Remove the os:check marker if the block is an illustrative fragment\n` +
+        `       that cannot be typed against the spec (generated third-party code, a\n` +
+        `       partial subtree). An unmarked block is honest; a marked \`any\` is not.\n\n` +
+        `  Nested \`any\` (\`Record<string, any>\`, \`any[]\`, \`Promise<any>\`) is NOT flagged\n` +
+        `  — only an annotation, cast or alias that IS \`any\`.`,
     );
   }
 

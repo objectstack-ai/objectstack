@@ -61,11 +61,51 @@ import {
   RETIRED_DEFS_BY_MAJOR,
   RETIRED_KEYS_BY_MAJOR,
 } from '../src/migrations/registry';
+import {
+  AUTHORABLE_SURFACE_DIR_NAME,
+  SCHEMA_MANIFEST_DIR_NAME,
+  aggregateCategoryShards,
+  authorableSurfaceShardTexts,
+  schemaManifestShardTexts,
+  writeShards,
+} from './lib/sharded-artifacts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
 const TSX = path.join(PKG, 'node_modules', '.bin', 'tsx');
-const REAL_MANIFEST = path.join(PKG, 'json-schema.manifest.json');
+
+/**
+ * Both ratchets are DIRECTORIES since #5837 (one shard per category), so every
+ * fixture here writes a shard set and every "the file was not touched"
+ * assertion compares the whole set's bytes. That is the same assertion it always
+ * was: the gate reads the directory as one set, so "these exact bytes, still"
+ * means the same thing it meant about one file.
+ */
+function shardBytes(dir: string): string {
+  if (!fs.existsSync(dir)) return '';
+  return fs
+    .readdirSync(dir)
+    .sort()
+    .map((f) => `=== ${f} ===\n${fs.readFileSync(path.join(dir, f), 'utf8')}`)
+    .join('');
+}
+
+/** Write a key set as canonical authorable-surface shards; returns the bytes. */
+function writeSurfaceShards(dir: string, keys: readonly string[]): string {
+  writeShards(dir, authorableSurfaceShardTexts([...keys].sort()));
+  return shardBytes(dir);
+}
+
+/** Write a def-key set as canonical manifest shards; returns the bytes. */
+function writeManifestShards(dir: string, schemas: readonly string[]): string {
+  writeShards(dir, schemaManifestShardTexts([...schemas].sort()));
+  return shardBytes(dir);
+}
+
+/** Aggregate a shard directory back into its sorted key set. */
+function readShardKeys(dir: string, field: 'keys' | 'schemas'): string[] {
+  return aggregateCategoryShards(dir, field)?.entries ?? [];
+}
 
 /**
  * Every run loads the entire spec surface and emits ~1700 JSON Schemas (~7s
@@ -84,11 +124,11 @@ const PHANTOM_KEY = 'ui/ZzzNeverEmittedByAnyBuild';
 
 let sandbox: string;
 let script: string;
-let manifestPath: string;
-let surfacePath: string;
+let manifestDir: string;
+let surfaceDir: string;
 let surfaceBasePath: string;
-let pristine: string;
-let pristineSurface: string;
+let pristine: string[];
+let pristineSurface: string[];
 /** The generator's own description line for the in-tree anchor, so fixtures
  *  written here are byte-canonical exactly the way `gen:schema` writes it —
  *  a hand-rolled string would trip the anchor's own hand-edit check (#5235). */
@@ -114,7 +154,7 @@ function git(...args: string[]): string {
  * file — so fixtures must go through here rather than patching bytes.
  */
 function seedSurfaceBase(baseRev: string, mutate: (keys: string[]) => string[]): string {
-  const keys = mutate((JSON.parse(pristineSurface) as { keys: string[] }).keys);
+  const keys = mutate([...pristineSurface]);
   const text = JSON.stringify({ description: surfaceBaseDescription, baseRev, keys }, null, 2) + '\n';
   fs.writeFileSync(surfaceBasePath, text);
   return text;
@@ -123,8 +163,10 @@ function seedSurfaceBase(baseRev: string, mutate: (keys: string[]) => string[]):
 const readSurfaceBase = () => fs.readFileSync(surfaceBasePath, 'utf8');
 
 beforeAll(() => {
-  pristine = fs.readFileSync(REAL_MANIFEST, 'utf8');
-  pristineSurface = fs.readFileSync(path.join(PKG, 'authorable-surface.json'), 'utf8');
+  pristine = readShardKeys(path.join(PKG, SCHEMA_MANIFEST_DIR_NAME), 'schemas');
+  pristineSurface = readShardKeys(path.join(PKG, AUTHORABLE_SURFACE_DIR_NAME), 'keys');
+  expect(pristine.length, `${SCHEMA_MANIFEST_DIR_NAME}/ is empty — it is a committed artifact`).toBeGreaterThan(0);
+  expect(pristineSurface.length, `${AUTHORABLE_SURFACE_DIR_NAME}/ is empty — it is a committed artifact`).toBeGreaterThan(0);
   const realBase = path.join(PKG, 'authorable-surface.base.json');
   if (!fs.existsSync(realBase)) {
     throw new Error(
@@ -139,22 +181,19 @@ beforeAll(() => {
   for (const entry of ['src', 'node_modules', 'package.json']) {
     fs.symlinkSync(path.join(PKG, entry), path.join(sandbox, entry));
   }
+  script = path.join(sandbox, 'scripts', 'build-schemas.ts');
+  manifestDir = path.join(sandbox, SCHEMA_MANIFEST_DIR_NAME);
+  surfaceDir = path.join(sandbox, AUTHORABLE_SURFACE_DIR_NAME);
+  surfaceBasePath = path.join(sandbox, 'authorable-surface.base.json');
   // The authorable-surface ratchet runs after the manifest one; give it the
   // committed snapshot so a check that gets that far judges the same contract.
-  fs.copyFileSync(
-    path.join(PKG, 'authorable-surface.json'),
-    path.join(sandbox, 'authorable-surface.json'),
-  );
-  script = path.join(sandbox, 'scripts', 'build-schemas.ts');
-  manifestPath = path.join(sandbox, 'json-schema.manifest.json');
-  surfacePath = path.join(sandbox, 'authorable-surface.json');
-  surfaceBasePath = path.join(sandbox, 'authorable-surface.base.json');
+  writeSurfaceShards(surfaceDir, pristineSurface);
   // Anchor for the #4650 deletion check: a git repo whose origin/main holds the
   // committed baseline. Only the baseline is tracked — src/node_modules stay
   // symlinked, untracked reads the same as any dirty worktree.
   git('init', '-q', '-b', 'main', '.');
-  git('add', 'authorable-surface.json');
-  git('commit', '-q', '-m', 'baseline: committed authorable-surface.json');
+  git('add', AUTHORABLE_SURFACE_DIR_NAME);
+  git('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
   // The in-tree anchor (#5235), authentic by construction: it mirrors the
   // baseline at the commit just made, which stays reachable from origin/main for
   // every fixture below (this repo's history is linear).
@@ -178,30 +217,27 @@ function run(args: string[] = []): { status: number; output: string } {
   return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 
-/** Seed the sandbox manifest from the committed one; returns the exact bytes written. */
+/** Seed the sandbox manifest shards from the committed set; returns the bytes. */
 function seedManifest(mutate: (schemas: string[]) => string[]): string {
-  const doc = JSON.parse(pristine) as { description?: string; schemas: string[] };
-  doc.schemas = mutate(doc.schemas);
-  const text = JSON.stringify(doc, null, 2) + '\n';
-  fs.writeFileSync(manifestPath, text);
-  return text;
+  return writeManifestShards(manifestDir, mutate([...pristine]));
 }
 
-const readManifest = () => fs.readFileSync(manifestPath, 'utf8');
+const readManifest = () => shardBytes(manifestDir);
+const readManifestKeys = () => readShardKeys(manifestDir, 'schemas');
 
 describe('build-schemas.ts --check — a check reports, it does not write (#4711)', () => {
   it(
     'fails on a manifest behind on additions, and leaves the file byte-identical',
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
-      expect(JSON.parse(pristine).schemas).toContain(KNOWN_KEY);
+      expect(pristine).toContain(KNOWN_KEY);
       const stale = seedManifest((s) => s.filter((k) => k !== KNOWN_KEY));
 
       const { status, output } = run(['--check']);
 
       // The exit code is half the fix: before #4711 this branch exited 0.
       expect(status).toBe(1);
-      expect(output).toMatch(/json-schema\.manifest\.json is out of date \(1 schema\(s\) not recorded\)/);
+      expect(output).toMatch(/json-schema\.manifest\/ is out of date \(1 schema\(s\) not recorded\)/);
       expect(output).toContain(`+ json-schema/${KNOWN_KEY}.json`);
       // The remedy must be the generator, exactly as the other seven artifacts say.
       expect(output).toMatch(/gen:schema/);
@@ -231,7 +267,7 @@ describe('build-schemas.ts --check — a check reports, it does not write (#4711
 
       expect(status).toBe(1);
       expect(output).toMatch(
-        /json-schema\.manifest\.json is out of date .*1 renamed-away key\(s\) still listed/,
+        /json-schema\.manifest\/ is out of date .*1 renamed-away key\(s\) still listed/,
       );
       expect(output).toContain(`- json-schema/${renamedSource}.json  (renamed away)`);
       expect(readManifest()).toBe(withStaleRename);
@@ -262,9 +298,9 @@ describe('build-schemas.ts --check — a check reports, it does not write (#4711
       const { status, output } = run([]);
 
       expect(status).toBe(0);
-      expect(output).toContain('📒 json-schema.manifest.json updated (+1 schema(s))');
+      expect(output).toContain('📒 json-schema.manifest/ updated (+1 schema(s) across 1 shard(s))');
       expect(readManifest()).not.toBe(stale);
-      expect(JSON.parse(readManifest()).schemas).toContain(KNOWN_KEY);
+      expect(readManifestKeys()).toContain(KNOWN_KEY);
     },
   );
 
@@ -282,7 +318,7 @@ describe('build-schemas.ts --check — a check reports, it does not write (#4711
 
       const { status, output } = run(['--check']);
 
-      expect(output).not.toMatch(/json-schema\.manifest\.json is out of date/);
+      expect(output).not.toMatch(/json-schema\.manifest\/ is out of date/);
       expect(output).not.toContain('📒');
       expect(readManifest()).toBe(current);
       expect(status).toBe(0);
@@ -307,21 +343,17 @@ describe('build-schemas.ts --check — a check reports, it does not write (#4711
 // The live end-to-end shape — delete a prop from src AND its baseline line —
 // is exercised in the PR's recorded sabotage evidence instead.
 
-const readSurface = () => fs.readFileSync(surfacePath, 'utf8');
+const readSurface = () => shardBytes(surfaceDir);
 
 /** Write a mutated baseline to the sandbox worktree; returns the exact bytes. */
 function seedSurface(mutate: (keys: string[]) => string[]): string {
-  const doc = JSON.parse(pristineSurface) as { description: string; keys: string[] };
-  doc.keys = mutate(doc.keys);
-  const text = JSON.stringify(doc, null, 2) + '\n';
-  fs.writeFileSync(surfacePath, text);
-  return text;
+  return writeSurfaceShards(surfaceDir, mutate([...pristineSurface]));
 }
 
 /** Commit a BASE variant of the baseline and point origin/main at it. */
 function seedBase(mutate: (keys: string[]) => string[]): string {
   seedSurface(mutate);
-  git('add', 'authorable-surface.json');
+  git('add', AUTHORABLE_SURFACE_DIR_NAME);
   git('commit', '-q', '--allow-empty', '-m', 'base variant');
   const sha = git('rev-parse', 'HEAD');
   git('update-ref', 'refs/remotes/origin/main', sha);
@@ -384,7 +416,7 @@ const DELETED_BY_RENAME = `${DELETED_BY_RENAME_SOURCE_DEF}:source`;
 describe('build-schemas.ts — deleted baseline lines must prove themselves (#4650)', () => {
   beforeAll(() => {
     // Fixture validity, asserted loudly instead of silently going stale.
-    const keys = (JSON.parse(pristineSurface) as { keys: string[] }).keys;
+    const keys = pristineSurface;
     for (const injected of [
       DELETED_LIVE,
       DELETED_UNREGISTERED,
@@ -448,7 +480,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       // Commit the sabotaged (canonical-minus-line, relative to base) file so
       // the worktree is CLEAN — the state CI checks out. A `git show HEAD:`
       // anchor would now compare the commit to itself and never fire.
-      git('add', 'authorable-surface.json');
+      git('add', AUTHORABLE_SURFACE_DIR_NAME);
       git('commit', '-q', '-m', 'PR commit deleting a baseline line');
 
       const check = run(['--check']);
@@ -483,7 +515,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(output).toContain('not a license to change the schema');
       // Whole-def removal is the manifest ratchet's jurisdiction.
       expect(output).toContain('identity/Session:* (2 line(s))');
-      expect(output).toContain('json-schema.manifest.json (#2978)');
+      expect(output).toContain('json-schema.manifest/ (#2978)');
       // Aged-out tombstone names its registration major.
       expect(output).toMatch(/data\/Object:compactLayout — \[RETIRED\] at [0-9a-f]+ and registered at major 11/);
       expect(output).toContain('tombstone aged out');
@@ -515,21 +547,31 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
     { timeout: SPAWN_TIMEOUT_MS * 2 },
     () => {
       seedBase((s) => s);
-      const handEdited = seedSurface((s) => s).replace(
-        'Ratchet of every AUTHORABLE key',
-        'Ratchet  of every AUTHORABLE key',
+      const canonical = seedSurface((s) => s);
+      // One SHARD is hand-edited, not the whole set — the sharded shape of the
+      // #4662 fixture, and a strictly narrower one: the gate has to name the
+      // shard rather than notice the aggregate moved.
+      const editedShard = path.join(surfaceDir, 'data.json');
+      fs.writeFileSync(
+        editedShard,
+        fs
+          .readFileSync(editedShard, 'utf8')
+          .replace('Ratchet of every AUTHORABLE key', 'Ratchet  of every AUTHORABLE key'),
       );
-      fs.writeFileSync(surfacePath, handEdited);
+      const handEdited = readSurface();
+      expect(handEdited).not.toBe(canonical);
 
       const check = run(['--check']);
       expect(check.status).toBe(1);
       expect(check.output).toContain('does not match its generated form');
+      expect(check.output).toContain('~ authorable-surface/data.json  (stale)');
       expect(readSurface()).toBe(handEdited);
 
       const write = run([]);
       expect(write.status).toBe(0);
-      expect(write.output).toContain('🔑 authorable-surface.json updated');
-      expect(readSurface()).toBe(pristineSurface);
+      expect(write.output).toContain('🔑 authorable-surface/ updated');
+      expect(write.output).toContain('touched: data.json');
+      expect(readSurface()).toBe(canonical);
     },
   );
 
@@ -568,7 +610,7 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(Object.keys(RENAMED_DEFS)).toContain(DELETED_BY_RENAME_SOURCE_DEF);
       // The carried key must actually land under the NEW def, or this asserts
       // nothing — a rename entry whose target lost the key is check (a0)'s case.
-      expect((JSON.parse(pristineSurface) as { keys: string[] }).keys).toContain(
+      expect(pristineSurface).toContain(
         `${RENAMED_DEFS[DELETED_BY_RENAME_SOURCE_DEF]}:source`,
       );
       seedBase((s) => [...s, DELETED_BY_RENAME].sort());
@@ -699,7 +741,7 @@ describe('build-schemas.ts — an in-tree anchor carries the deletion gate offli
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
       expect(
-        (JSON.parse(pristineSurface) as { keys: string[] }).keys,
+        pristineSurface,
         `${SHED_FROM_ANCHOR} is no longer in the baseline — pick another live key`,
       ).toContain(SHED_FROM_ANCHOR);
       // The bypass this file exists to prevent, moved one file over: drop the
@@ -816,7 +858,7 @@ describe('build-schemas.ts — an in-tree anchor carries the deletion gate offli
       const doc = JSON.parse(readSurfaceBase()) as { baseRev: string; keys: string[] };
       // Written from the git-resolved baseline — the merge base, not this tree.
       expect(doc.baseRev).toBe(head);
-      expect(doc.keys).toEqual((JSON.parse(pristineSurface) as { keys: string[] }).keys);
+      expect(doc.keys).toEqual(pristineSurface);
     },
   );
 });
@@ -930,7 +972,7 @@ describe('build-schemas.ts — only --update-base moves the in-tree anchor (#535
       const doc = JSON.parse(readSurfaceBase()) as { baseRev: string; keys: string[] };
       // From the merge base, never from this build's own emitted surface (#5235).
       expect(doc.baseRev).toBe(tip);
-      expect(doc.keys).toEqual((JSON.parse(pristineSurface) as { keys: string[] }).keys);
+      expect(doc.keys).toEqual(pristineSurface);
       expect(doc.keys).toContain(LAGGING_KEY);
       // Restore the fixture for the sibling cases — beforeEach re-commits anyway,
       // but a dirty tree between tests would make a failure here read as a failure
@@ -1058,7 +1100,7 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
     path.resolve(sandbox, git('rev-parse', '--git-path', 'MERGE_HEAD'));
 
   beforeAll(() => {
-    const keys = (JSON.parse(pristineSurface) as { keys: string[] }).keys;
+    const keys = pristineSurface;
     for (const k of [FORKED_KEY, LANDED_KEY]) {
       expect(keys, `${k} is no longer in the baseline — pick another live key`).toContain(k);
     }
@@ -1075,7 +1117,7 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
     seedBase((s) => s);
     seedSurface((s) => s);
     anchorAtTip = seedSurfaceBase(tip, (k) => k.filter((x) => x !== LANDED_KEY));
-    git('add', 'authorable-surface.json', 'authorable-surface.base.json');
+    git('add', AUTHORABLE_SURFACE_DIR_NAME, 'authorable-surface.base.json');
     git('commit', '-q', '-m', 'fixture: anchor at the middle upstream commit');
     mainTip = git('rev-parse', 'HEAD');
     git('update-ref', 'refs/remotes/origin/main', mainTip);
@@ -1088,7 +1130,7 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
     git('checkout', '-q', '-B', 'issue-5370-fork', older);
     seedSurface((s) => s);
     seedSurfaceBase(tip, (k) => k.filter((x) => x !== LANDED_KEY));
-    git('add', 'authorable-surface.json', 'authorable-surface.base.json');
+    git('add', AUTHORABLE_SURFACE_DIR_NAME, 'authorable-surface.base.json');
     git('commit', '-q', '-m', 'fixture: branch work, forked before the anchor advanced');
     expect(git('status', '--porcelain', '-uno')).toBe('');
     expect(git('merge-base', 'HEAD', mainTip)).toBe(older);
@@ -1141,7 +1183,7 @@ describe('build-schemas.ts — --update-base moves the anchor forward or not at 
       const doc = JSON.parse(readSurfaceBase()) as { baseRev: string; keys: string[] };
       expect(doc.baseRev).toBe(mainTip);
       expect(doc.keys).toContain(LANDED_KEY);
-      expect(doc.keys).toEqual((JSON.parse(pristineSurface) as { keys: string[] }).keys);
+      expect(doc.keys).toEqual(pristineSurface);
     },
   );
 
@@ -1295,7 +1337,7 @@ function clausesMatchingLeafOf(key: string): string[] {
 describe('build-schemas.ts — check (b) matches the exact retired key, not its leaf (#4659)', () => {
   let box: string;
   let boxScript: string;
-  let boxSurface: string;
+  let boxSurfaceDir: string;
   let boxRegistry: string;
   let pristineRegistry: string;
 
@@ -1321,9 +1363,10 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
 
   /** Untombstone keys in the sandbox baseline: the gate then sees live → retired. */
   const untombstone = (...keys: string[]): void => {
-    const doc = JSON.parse(pristineSurface) as { description: string; keys: string[] };
-    doc.keys = doc.keys.map((e) => (keys.includes(e.replace(RETIRED_MARK, '')) ? e.replace(RETIRED_MARK, '') : e));
-    fs.writeFileSync(boxSurface, JSON.stringify(doc, null, 2) + '\n');
+    writeSurfaceShards(
+      boxSurfaceDir,
+      pristineSurface.map((e) => (keys.includes(e.replace(RETIRED_MARK, '')) ? e.replace(RETIRED_MARK, '') : e)),
+    );
   };
 
   /** Substitute RETIRED_KEYS_BY_MAJOR in the sandbox's own copy of the registry. */
@@ -1357,7 +1400,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     for (const k of [LEAF_COLLIDER_A, LEAF_COLLIDER_B]) {
       expect(declared, `${k} is now registered for real — pick an unregistered fixture`).not.toContain(k);
     }
-    const baselineKeys = (JSON.parse(pristineSurface) as { keys: string[] }).keys;
+    const baselineKeys = pristineSurface;
     for (const k of [LEAF_COLLIDER_A, LEAF_COLLIDER_B]) {
       expect(baselineKeys, `${k} is no longer tombstoned — re-pick`).toContain(k + RETIRED_MARK);
     }
@@ -1370,23 +1413,23 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
-    fs.writeFileSync(path.join(box, 'json-schema.manifest.json'), pristine);
-    fs.writeFileSync(path.join(box, 'authorable-surface.json'), pristineSurface);
+    writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
+    boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
+    writeSurfaceShards(boxSurfaceDir, pristineSurface);
     boxScript = path.join(box, 'scripts', 'build-schemas.ts');
-    boxSurface = path.join(box, 'authorable-surface.json');
     boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
     pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
 
     boxGit('init', '-q', '-b', 'main', '.');
-    boxGit('add', 'authorable-surface.json');
-    boxGit('commit', '-q', '-m', 'baseline: committed authorable-surface.json');
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
     fs.writeFileSync(
       path.join(box, 'authorable-surface.base.json'),
       JSON.stringify(
         {
           description: surfaceBaseDescription,
           baseRev: boxGit('rev-parse', 'HEAD'),
-          keys: (JSON.parse(pristineSurface) as { keys: string[] }).keys,
+          keys: pristineSurface,
         },
         null,
         2,
@@ -1463,7 +1506,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
       // transition IS a baseline that has not been regenerated yet, so the run
       // still owes `gen:schema`. Asserted rather than papered over.
       expect(status).toBe(1);
-      expect(output).toContain('authorable-surface.json is out of date (2 key(s) not recorded)');
+      expect(output).toContain('authorable-surface/ is out of date (2 key(s) not recorded)');
       expect(output).toContain(`+ ${LEAF_COLLIDER_A}${RETIRED_MARK}`);
     },
   );
@@ -1577,8 +1620,8 @@ const UNPUBLISHED_FAMILY = [
 describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)', () => {
   let box: string;
   let boxScript: string;
-  let boxManifest: string;
-  let boxSurface: string;
+  let boxManifestDir: string;
+  let boxSurfaceDir: string;
   let boxRegistry: string;
   let boxBarrel: string;
   let pristineRegistry: string;
@@ -1605,11 +1648,9 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
     return { status: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
 
-  /** Write the box's worktree manifest from the committed one. */
+  /** Write the box's worktree manifest shards from the committed set. */
   const writeManifest = (mutate: (schemas: string[]) => string[]): void => {
-    const doc = JSON.parse(pristine) as { description?: string; schemas: string[] };
-    doc.schemas = mutate(doc.schemas);
-    fs.writeFileSync(boxManifest, JSON.stringify(doc, null, 2) + '\n');
+    writeManifestShards(boxManifestDir, mutate([...pristine]));
   };
 
   /**
@@ -1620,7 +1661,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
    */
   const seedBaseManifest = (mutate: (schemas: string[]) => string[]): void => {
     writeManifest(mutate);
-    boxGit('add', 'json-schema.manifest.json');
+    boxGit('add', SCHEMA_MANIFEST_DIR_NAME);
     boxGit('commit', '-q', '--allow-empty', '-m', 'base manifest variant');
     head = boxGit('rev-parse', 'HEAD');
     boxGit('update-ref', 'refs/remotes/origin/main', head);
@@ -1650,7 +1691,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
 
   beforeAll(() => {
     // Fixture validity, loud rather than silently stale.
-    const manifestKeys = (JSON.parse(pristine) as { schemas: string[] }).schemas;
+    const manifestKeys = pristine;
     for (const def of [REMOVED_DEF, REMOVED_DEF_2]) {
       expect(manifestKeys, `${def} is a real published def — pick a phantom`).not.toContain(def);
     }
@@ -1672,8 +1713,8 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
     boxScript = path.join(box, 'scripts', 'build-schemas.ts');
-    boxManifest = path.join(box, 'json-schema.manifest.json');
-    boxSurface = path.join(box, 'authorable-surface.json');
+    boxManifestDir = path.join(box, SCHEMA_MANIFEST_DIR_NAME);
+    boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
     boxBarrel = path.join(box, 'src', 'data', 'index.ts');
     pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
@@ -1683,12 +1724,12 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
       'src/data/index.ts no longer re-exports ./validation.zod — the end-to-end repro needs a new family',
     ).toBe(true);
 
-    fs.writeFileSync(boxManifest, pristine);
-    fs.writeFileSync(boxSurface, pristineSurface);
+    writeManifestShards(boxManifestDir, pristine);
+    writeSurfaceShards(boxSurfaceDir, pristineSurface);
     boxGit('init', '-q', '-b', 'main', '.');
     // BOTH artifacts tracked here: the merge-base manifest is what this gate
     // reads, and the surface baseline keeps the #4650 gate honest alongside it.
-    boxGit('add', 'json-schema.manifest.json', 'authorable-surface.json');
+    boxGit('add', SCHEMA_MANIFEST_DIR_NAME, AUTHORABLE_SURFACE_DIR_NAME);
     boxGit('commit', '-q', '-m', 'baseline: committed manifest + authorable surface');
     fs.writeFileSync(
       path.join(box, 'authorable-surface.base.json'),
@@ -1696,7 +1737,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
         {
           description: surfaceBaseDescription,
           baseRev: boxGit('rev-parse', 'HEAD'),
-          keys: (JSON.parse(pristineSurface) as { keys: string[] }).keys,
+          keys: pristineSurface,
         },
         null,
         2,
@@ -1713,7 +1754,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
     // which each fixture below mutates and which would otherwise leak the
     // previous case's planted removal into the next one's count.
     seedRetiredDefs({});
-    fs.writeFileSync(boxSurface, pristineSurface);
+    writeSurfaceShards(boxSurfaceDir, pristineSurface);
     fs.writeFileSync(boxBarrel, pristineBarrel);
     seedBaseManifest((s) => s);
   });
@@ -1769,14 +1810,14 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
     { timeout: SPAWN_TIMEOUT_MS },
     () => {
       seedBaseManifest((s) => [...s, REMOVED_DEF].sort());
-      const before = fs.readFileSync(boxManifest, 'utf8');
+      const before = shardBytes(boxManifestDir);
 
       const { status, output } = runBox([]);
 
       expect(status).toBe(1);
       expect(output).toContain(NO_REGISTERED_REMOVAL);
       expect(output).toContain(REMOVED_DEF);
-      expect(fs.readFileSync(boxManifest, 'utf8')).toBe(before);
+      expect(shardBytes(boxManifestDir)).toBe(before);
     },
   );
 
@@ -1874,7 +1915,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
       try {
         const skipped = runBox(['--check']);
         expect(skipped.status).toBe(0);
-        expect(skipped.output).toContain('json-schema.manifest.json removal check');
+        expect(skipped.output).toContain('json-schema.manifest/ removal check');
         expect(skipped.output).toContain('no git-resolved baseline');
         expect(skipped.output).not.toContain(NO_REGISTERED_REMOVAL);
 
@@ -1902,16 +1943,14 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
       // lines (without which check (a) fires first).
       fs.writeFileSync(boxBarrel, pristineBarrel.replace(BARREL_LINE, ''));
       writeManifest((s) => s.filter((k) => !UNPUBLISHED_FAMILY.includes(k)));
-      const surface = JSON.parse(pristineSurface) as { description: string; keys: string[] };
-      const kept = surface.keys.filter(
+      const kept = pristineSurface.filter(
         (k) => !UNPUBLISHED_FAMILY.some((d) => k.startsWith(d + ':')),
       );
       expect(
-        surface.keys.length - kept.length,
+        pristineSurface.length - kept.length,
         'the family stopped carrying authorable keys — re-measure the repro',
       ).toBeGreaterThan(0);
-      surface.keys = kept;
-      fs.writeFileSync(boxSurface, JSON.stringify(surface, null, 2) + '\n');
+      writeSurfaceShards(boxSurfaceDir, kept);
 
       const { status, output } = runBox(['--check']);
 

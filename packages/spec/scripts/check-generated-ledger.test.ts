@@ -123,8 +123,8 @@ describe('check:generated --reconcile-only', () => {
   // `turbo run test` leaves this package in — see root-index.test.ts).
   //
   // `check:docs` was `pnpm gen:schema && tsx scripts/build-docs.ts --check`. The
-  // first half is a GENERATOR: on a stale tree it rewrites `json-schema.manifest.json`
-  // and `authorable-surface.json`, both TRACKED. So running the gate edited the
+  // first half is a GENERATOR: on a stale tree it rewrites `json-schema.manifest/`
+  // and `authorable-surface/`, both TRACKED. So running the gate edited the
   // working tree of whoever ran it, and — because `check:generated` runs
   // `check:authorable-surface` first and does not stop on failure — a single
   // aggregate run produced a red report about a manifest that the gate two lines
