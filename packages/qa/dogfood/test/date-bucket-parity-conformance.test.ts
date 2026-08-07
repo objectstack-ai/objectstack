@@ -46,7 +46,7 @@ const DRIVERS = [
 
 describe.each(DRIVERS)('date-bucket parity conformance: $name', ({ make }) => {
   it('buckets identically pushed-down and in-memory, on both storage forms', async () => {
-    const problems = await checkDateBucketParity(make() as never, {
+    const problems = await checkDateBucketParity(make(), {
       createOptions: { bypassTenantAudit: true },
     });
     expect(problems).toEqual([]);
@@ -87,7 +87,7 @@ describe('checkDateBucketParity detects a driver whose SQL bucketing is wrong', 
   }
 
   it('flags every advertised granularity on both columns', async () => {
-    const problems = await checkDateBucketParity(brokenDriver() as never);
+    const problems = await checkDateBucketParity(brokenDriver());
     // 4 advertised granularities × 2 storage forms = 8 disagreements, and the
     // cross-column pass stays quiet because both columns are broken the same way.
     expect(problems).toHaveLength(8);
@@ -102,7 +102,7 @@ describe('checkDateBucketParity detects a driver whose SQL bucketing is wrong', 
         async aggregate() {
           throw new Error("dateGranularity 'month' not supported on dialect");
         },
-      }) as never,
+      })
     );
     expect(problems.join('\n')).toMatch(/advertises this granularity but aggregate\(\) threw/);
   });
@@ -124,7 +124,7 @@ describe('checkDateBucketParity detects a driver whose SQL bucketing is wrong', 
           return [{ at: null, n: 8 }];
         },
         supports: { queryDateGranularity: { year: true } },
-      }) as never,
+      })
     );
     expect(problems.join('\n')).toMatch(/Field\.datetime 'at' @ year/);
     expect(problems.join('\n')).toMatch(
@@ -153,7 +153,7 @@ describe('checkDateBucketParity detects a driver whose SQL bucketing is wrong', 
           ];
         },
         supports: { queryDateGranularity: { year: true } },
-      }) as never,
+      })
     );
     expect(problems.join('\n')).toMatch(/pushed-down SQL and in-memory bucketing disagree/);
     expect(problems.join('\n')).toContain(sentinel);
@@ -161,7 +161,7 @@ describe('checkDateBucketParity detects a driver whose SQL bucketing is wrong', 
 
   it('stays quiet on a driver that advertises nothing', async () => {
     const problems = await checkDateBucketParity(
-      brokenDriver({ supports: { queryDateGranularity: {} } }) as never,
+      brokenDriver({ supports: { queryDateGranularity: {} } })
     );
     // Nothing advertised ⇒ the engine buckets everything in-memory ⇒ nothing to
     // disagree about. A driver is never faulted for declining.
