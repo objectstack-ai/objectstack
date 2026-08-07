@@ -76,7 +76,6 @@ describe('[#5347] $null requires a boolean comparand, on both filter faces', () 
 
   const findIds = async (where: unknown): Promise<string[]> => {
     const rows = await driver.find('deal', {
-      object: 'deal',
       fields: ['id'],
       where: where as FilterCondition,
     });

@@ -76,7 +76,7 @@ describe('TursoDriver — filter logic conformance (local mode)', () => {
    * seed failed must not read as a case that correctly excluded everything.
    */
   it('the fixture really is all four rows', async () => {
-    const rows = await driver.find('conformance', { object: 'conformance' });
+    const rows = await driver.find('conformance', {});
     expect(ids(rows)).toEqual(['1', '2', '3', '4']);
   });
 
@@ -84,7 +84,7 @@ describe('TursoDriver — filter logic conformance (local mode)', () => {
     it(c.name, async () => {
       const rows = await driver.find(
         'conformance',
-        { object: 'conformance', where: c.filter },
+        { where: c.filter },
         { bypassTenantAudit: true },
       );
       expect(ids(rows), c.note).toEqual([...c.expected]);

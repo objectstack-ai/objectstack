@@ -26,7 +26,31 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import type {
+  EngineAggregateOptions,
+  EngineCountOptions,
+  EngineQueryOptions,
+} from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
+
+/**
+ * [#4918] `FilterArray` on `where` is off-contract BY DECLARATION, and these
+ * tests exist to drive it: `EngineQueryOptions.where` is a `FilterCondition` /
+ * `Record< string, unknown >`, which an array is not assignable to, because
+ * `FilterArray` is INPUT-ONLY authoring sugar the spec deliberately excludes
+ * (#5285). So a test that hands the engine one has to say so, and
+ * `as unknown as EngineQueryOptions` is how: it names the contract being
+ * bypassed, keeps the rest of the call type-checked, and greps as an
+ * intentional act — none of which a bare `as any` does.
+ *
+ * Deliberately NOT used for the malformed-COMPARAND cases below
+ * (`{ stage: { $nin: 'won' } }`). Those are ordinary objects that `tsc`
+ * accepts, because `where` is declared loosely on purpose — which is the whole
+ * reason the runtime gate this file pins has to exist. Erasing them would hide
+ * that they are type-legal, which is the point.
+ */
+const asFilterArrayQuery = (where: unknown): EngineQueryOptions =>
+  ({ where }) as unknown as EngineQueryOptions;
 
 const deal = {
   name: 'deal',
@@ -302,6 +326,203 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
   it('a refused filter runs NOTHING — no driver read is attempted', async () => {
     await expect(engine.find('deal', { where: [42] } as any)).rejects.toThrow();
     expect(reads).toHaveLength(0);
+  });
+
+  // ── #5869: the list-shaped operators' comparands ──────────────────────
+  //
+  // `isFilterAST` vouches for the OPERATOR and nothing else, and
+  // `parseFilterAST` lowers whatever comparand it is handed. So the shapes
+  // below passed both, reached the driver, and — on driver-sql, via
+  // `whereIn(field, scalar)` — came back as `500 DATABASE_ERROR`: a
+  // server-fault code for a filter the caller can fix, naming neither the
+  // operator nor the field. Same collection point, same envelope as the
+  // refusals above.
+
+  it.each([
+    ['not_in', [['stage', 'not_in', 'won']]],
+    ['nin', [['stage', 'nin', 'won']]],
+    ['notin', [['stage', 'notin', 'won']]],
+    ['in', [['stage', 'in', 'won']]],
+  ])('refuses a scalar comparand on the collection operator %s', async (_op, where) => {
+    await expect(engine.find('deal', asFilterArrayQuery(where)))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    // Nothing ran: a refused filter must not reach the driver at all, or the
+    // 400 would be describing a query that already returned rows.
+    expect(reads).toHaveLength(0);
+  });
+
+  it('the refusal NAMES the operator, the field and the expected shape (#5346/#5348 wording)', async () => {
+    const err = await engine.find('deal', asFilterArrayQuery([['stage', 'not_in', 'won']]))
+      .then(() => null, (e: any) => e);
+
+    expect(err).not.toBeNull();
+    // The entry point that refused, matching the sibling refusals above.
+    expect(err.message).toMatch(/^find\('deal'\): /);
+    // The operator, in the lowered spelling…
+    expect(err.message).toMatch(/Operator "\$nin"/);
+    // …and in the spellings an author actually types on a ViewFilterRule —
+    // nobody writes `$nin` into metadata, so a refusal naming only the lowered
+    // form sends them looking for a key their file does not contain.
+    expect(err.message).toMatch(/not_in/);
+    // The member.
+    expect(err.message).toMatch(/field "stage"/);
+    // What was received, and where.
+    expect(err.message).toMatch(/Received string \("won"\)/);
+    expect(err.message).toMatch(/where\.stage\.\$nin/);
+    // The expected shape, as a value the caller can paste.
+    expect(err.message).toMatch(/\["won"\]/);
+    // The alternative, for the caller who meant a scalar comparison.
+    expect(err.message).toMatch(/"!=" \(\$ne\)/);
+    // And the part a status code cannot carry.
+    expect(err.message).toMatch(/NOT applied/);
+    expect(err.message).toMatch(/UNFILTERED result set/);
+  });
+
+  it('the whole refusal survives the REST boundary — it fits under CLIENT_MESSAGE_MAX', async () => {
+    // `rest-server.ts` truncates a declared-4xx message at 500 chars before it
+    // reaches the client (#5423 made it a truncation rather than a swap). The
+    // "NOT applied" sentence is the part a caller cannot infer from a status
+    // code, and it sits at the END — so a message that overflows loses exactly
+    // the sentence the refusal exists to deliver. Pinned here rather than
+    // trusted, because the bound lives in another package.
+    const CLIENT_MESSAGE_MAX = 500;
+    for (const where of [
+      [['stage', 'not_in', 'won']],
+      [['stage', 'in', 'won']],
+      [['amount', 'between', 5]],
+    ]) {
+      const err = await engine.find('deal', asFilterArrayQuery(where))
+        .then(() => null, (e: any) => e);
+      expect(err.message.length, JSON.stringify(where)).toBeLessThan(CLIENT_MESSAGE_MAX);
+      expect(err.message, JSON.stringify(where)).toMatch(/UNFILTERED result set/);
+    }
+  });
+
+  it('refuses through the OBJECT door too — the door #5869 was measured through', async () => {
+    // The protocol/HTTP face runs its own `isFilterAST` → `parseFilterAST` and
+    // hands the engine an already-lowered FilterCondition, so the array branch
+    // above never sees a wire query. This is that shape, arriving as an object.
+    // NOT erased: `where` is declared `Record< string, unknown >`, so `tsc`
+    // accepts a malformed comparand. That it type-checks and still has to be
+    // refused at runtime is exactly why this gate exists.
+    await expect(engine.find('deal', { where: { stage: { $nin: 'won' } } }))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.find('deal', { where: { stage: { $in: 'won' } } }))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+  });
+
+  it.each([
+    ['null', { stage: { $in: null } }],
+    ['a number', { amount: { $in: 10 } }],
+    ['an object', { stage: { $in: { a: 1 } } }],
+  ])('refuses a comparand that is %s — every non-list, not just strings', async (_l, where) => {
+    await expect(engine.find('deal', { where }))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+  });
+
+  it('walks into $and / $or / $not — a nested scalar is refused with its own path', async () => {
+    const err = await engine.find(
+      'deal',
+      asFilterArrayQuery(['and', ['amount', '>', 5], ['stage', 'not_in', 'won']]),
+    ).then(() => null, (e: any) => e);
+    expect(err?.status).toBe(400);
+    expect(err.message).toMatch(/where\.\$and\[1\]\.stage\.\$nin/);
+
+    await expect(engine.find('deal', { where: { $not: { stage: { $in: 'won' } } } }))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+  });
+
+  it('every engine entry point refuses it, not just find()', async () => {
+    const where = [['stage', 'not_in', 'won']];
+    await expect(engine.findOne('deal', asFilterArrayQuery(where)))
+      .rejects.toMatchObject({ status: 400 });
+    await expect(engine.count('deal', { where } as unknown as EngineCountOptions))
+      .rejects.toMatchObject({ status: 400 });
+    await expect(engine.aggregate('deal', {
+      where, groupBy: ['stage'], aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
+    } as unknown as EngineAggregateOptions)).rejects.toMatchObject({ status: 400 });
+    await expect(engine.update('deal', { amount: 1 }, { where, multi: true } as any))
+      .rejects.toMatchObject({ status: 400 });
+    await expect(engine.delete('deal', { where, multi: true } as any))
+      .rejects.toMatchObject({ status: 400 });
+    // Refused before any of them touched the store.
+    expect(reads).toHaveLength(0);
+    expect(writes).toHaveLength(0);
+    expect(await engine.count('deal')).toBe(3);
+  });
+
+  // `$between`'s arity, hoisted to the same seam. driver-sql and driver-memory
+  // each already refuse this (#5328); driver-mongodb's arm falls through
+  // without emitting a range predicate. Checking here is what makes the three
+  // agree — the same reason the collection point exists.
+  it.each([
+    ['a scalar', [['amount', 'between', 5]]],
+    ['a 1-tuple', [['amount', 'between', [1]]]],
+    ['a 3-tuple', [['amount', 'between', [1, 2, 3]]]],
+  ])('refuses a $between comparand that is %s', async (_l, where) => {
+    await expect(engine.find('deal', asFilterArrayQuery(where)))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+  });
+
+  it('the $between refusal keeps the platform-wide wording and names the field', async () => {
+    const err = await engine.find('deal', asFilterArrayQuery([['amount', 'between', 5]]))
+      .then(() => null, (e: any) => e);
+    // Verbatim leading sentence from driver-sql / driver-memory: one condition,
+    // one wording, wherever the caller meets it.
+    expect(err.message).toMatch(
+      /Operator "\$between" on field "amount" requires a \[min, max\] value array\./,
+    );
+    expect(err.message).toMatch(/where\.amount\.\$between/);
+  });
+
+  // ── what must KEEP working: the declared list shapes ───────────────────
+
+  it('a proper list comparand still reaches the driver untouched', async () => {
+    await engine.find('deal', asFilterArrayQuery([['stage', 'in', ['won', 'lost']]]));
+    expect(lastWhere()).toEqual({ stage: { $in: ['won', 'lost'] } });
+
+    await engine.find('deal', asFilterArrayQuery([['stage', 'not_in', ['lost']]]));
+    expect(lastWhere()).toEqual({ stage: { $nin: ['lost'] } });
+
+    await engine.find('deal', asFilterArrayQuery([['amount', 'between', [5, 25]]]));
+    expect(lastWhere()).toEqual({ amount: { $between: [5, 25] } });
+  });
+
+  it('an EMPTY list is a declared predicate, not a malformed one', async () => {
+    // `$in: []` matches nothing and `$nin: []` matches everything — both
+    // drivers say so in as many words. Arity is not this gate's business.
+    await engine.find('deal', { where: { stage: { $in: [] } } });
+    expect(lastWhere()).toEqual({ stage: { $in: [] } });
+    await engine.find('deal', { where: { stage: { $nin: [] } } });
+    expect(lastWhere()).toEqual({ stage: { $nin: [] } });
+  });
+
+  it('the gate does not re-judge list MEMBERS — that is #5234, on another face', async () => {
+    // A `$field` reference and a plain object are both legitimate members here;
+    // this gate asks only whether the comparand is a list at all.
+    const where = { stage: { $in: [{ $field: 'other' }, 'won'] } };
+    await engine.find('deal', { where });
+    expect(lastWhere()).toEqual(where);
+  });
+
+  it('does not descend into a deep-equality comparand that merely LOOKS like an operator map', async () => {
+    // `{ $eq: {...} }` holds DATA. A gate that walked into it would refuse a
+    // stored document whose own key happens to be `$in` — a stricter contract
+    // than any backend applies.
+    const where = { stage: { $eq: { $in: 'not-an-operator-here' } } };
+    await engine.find('deal', { where });
+    expect(lastWhere()).toEqual(where);
+  });
+
+  it('a scalar on a NON-collection operator is untouched', async () => {
+    await engine.find('deal', asFilterArrayQuery([['stage', '!=', 'won']]));
+    expect(lastWhere()).toEqual({ stage: { $ne: 'won' } });
+    // String bounds on a range comparison stay legal — `FieldOperatorsSchema`
+    // declares `$gt` as number|Date|FieldReference, but ISO strings are what the
+    // showcase apps send and every backend accepts. This gate enforces the
+    // three list declarations, not the whole schema.
+    await engine.find('deal', asFilterArrayQuery([['stage', '>', '2026-01-01']]));
+    expect(lastWhere()).toEqual({ stage: { $gt: '2026-01-01' } });
   });
 
   // ── the object form is untouched ──────────────────────────────────────

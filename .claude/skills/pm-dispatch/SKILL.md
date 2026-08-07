@@ -1195,6 +1195,28 @@ prompt:
 实现面逐层收口」这类工作上,没有第二个实现面的活(纯 UI、文档、单面脚本)这条无处可
 绑,该省掉而不是改写它。
 
+**拒收类用例的最低断言集是 `code` + `status`,不是「它抛了」—— 派发令的标准条款。**
+适用判据:本单会**新增或改写拒收 / 错误类用例**(验收点里出现「应当被拒收」的活)。
+满足时派发令带这一句(原话):
+
+> 拒收类用例最低断言**错误的 `code` 与 `status`**(ADR-0112 信封)。
+> `expect(...).toThrow()` / `rejects.toThrow()` 单独使用**不构成**拒收测试;措辞本身
+> 是契约时(#5240「一个条件一种措辞」),首句断言**加在** `code`+`status` **之上**,
+> 而不是代替它。本条约束你**新写或改写**的用例 —— 顺手回填存量套件不在本单范围内。
+
+出处是 #6142(#6050)的反向验证实测。两种失明机制方向相反,同一个洞:
+
+- **裸 `Error` ⇒ 恒绿。** 删掉拒收闸后 `driver-sql` 28 例红 22,**多数红在抛出 knex 的
+  裸 `Undefined binding(s)`** —— 一个 `code` / `status` 均为 `undefined` 的 Error。未修的
+  驱动本来就抛,缺的只是信封:只断言「它抛了」的用例,**在本单所针对的那个驱动上保持
+  绿色**。
+- **从不抛的 transport ⇒ 红,但红得不指向缺陷。** 同一次删闸,`driver-turso` remote
+  29 例红 20,**20 个全部**红在「本该拒收却编译出了 SQL」—— 该 transport 从不抛。只断言
+  抛出的用例在这里报的是「promise 没有 reject」,说的是**没抛**而不是**没信封**,分不开
+  「拒收了但信封错」与「根本没拒收」—— 而这正是这一族的两个缺陷。
+
+一句话:**一个在缺信封的实现上无法转红的拒收用例,读起来是覆盖,实际不是。**
+
 **Issue 正文是线索,不是规格 —— and the dispatch wording is what makes an
 honest "the premise is dead" cheap to return.** Step 1's stale-premise check
 is the PM's sample; the dev's verification is the real thing, so the prompt
@@ -1478,6 +1500,12 @@ against the report's own claims:
   genuinely invalid shapes are still there (step 5's two lines). #5365 slipped
   through exactly this review layer and was caught by CI instead: CI does catch
   it, at the price of one extra lap.
+- **拒收类用例的绿,是不是「它抛了」的绿?** 判据:本单验收点含「应当被拒收」。抽查
+  diff 里的拒收用例有没有断言 `code` 与 `status`(ADR-0112 信封)—— 只写 `toThrow()` /
+  `rejects.toThrow()` 的用例,在**未修实现本来就抛裸 Error** 的那一族上恒绿(#6142
+  实测:`driver-sql` 删闸后 22 红中多数是裸 knex Error,`code` / `status` 均
+  `undefined`),于是「28 例全绿」这种报告读起来是覆盖、实际证不了拒收。缺断言判
+  REWORK 补齐,而不是接受绿色输出。本条是 step 5 那条标准条款在复核侧的对账。
 - **Did the dev verify the issue's premise?** The report's
   `premise_still_valid` field makes the answer explicit — a `false` there
   reopens triage rather than failing review. A report that falsifies the

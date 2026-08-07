@@ -7,7 +7,7 @@
  * Supports PostgreSQL, MySQL, SQLite, and other SQL databases.
  */
 
-import type { QueryAST, DriverOptions, SchemaMode } from '@objectstack/spec/data';
+import type { DriverOptions, SchemaMode } from '@objectstack/spec/data';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
@@ -19,7 +19,7 @@ import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERI
 // so the engine and this driver can never disagree about what may become a
 // physical column DEFAULT.
 import { isNowDefaultToken, isRuntimeDefaultToken } from '@objectstack/spec/data';
-import type { IDataDriver } from '@objectstack/spec/contracts';
+import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
@@ -2574,7 +2574,7 @@ export class SqlDriver implements IDataDriver {
   // CRUD — IDataDriver core
   // ===================================
 
-  async find(object: string, query: QueryAST, options?: DriverOptions): Promise<any[]> {
+  async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<any[]> {
     return this.findRows(object, query, options);
   }
 
@@ -2607,7 +2607,7 @@ export class SqlDriver implements IDataDriver {
    */
   private async findRows(
     object: string,
-    query: QueryAST,
+    query: DriverQuery,
     options?: DriverOptions,
     singleRowLookup = false,
   ): Promise<any[]> {
@@ -2734,7 +2734,7 @@ export class SqlDriver implements IDataDriver {
    * `singleRowLookup` ORDER BY decision).
    * Spell an id lookup as what it is: `{ object, where: { id } }`.
    */
-  async findOne(object: string, query: QueryAST, options?: DriverOptions): Promise<any> {
+  async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     if (!query || typeof query !== 'object') return null;
     const results = await this.findRows(object, { ...query, limit: 1 }, options, true);
     return results[0] || null;
@@ -3308,7 +3308,7 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
-  async updateMany(object: string, query: QueryAST, data: any, options?: DriverOptions): Promise<number> {
+  async updateMany(object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
     this.auditMissingTenant(object, 'updateMany', options);
     let total = 0;
     for (const target of this.rotationShardsOf(object) ?? [object]) {
@@ -3320,7 +3320,7 @@ export class SqlDriver implements IDataDriver {
     return total;
   }
 
-  async deleteMany(object: string, query: QueryAST, options?: DriverOptions): Promise<number> {
+  async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
     this.auditMissingTenant(object, 'deleteMany', options);
     let total = 0;
     for (const target of this.rotationShardsOf(object) ?? [object]) {
@@ -3359,7 +3359,7 @@ export class SqlDriver implements IDataDriver {
     return null;
   }
 
-  async count(object: string, query?: QueryAST, options?: DriverOptions): Promise<number> {
+  async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 
@@ -3683,7 +3683,7 @@ export class SqlDriver implements IDataDriver {
   // ===================================
 
   /** IDataDriver standard: analyze query performance */
-  async explain(object: string, query: any, options?: DriverOptions): Promise<any> {
+  async explain(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     return this.analyzeQuery(object, query, options);
   }
 
@@ -7281,7 +7281,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected orderKeysFor(
     object: string,
-    query: QueryAST,
+    query: DriverQuery,
     opts?: { singleRowLookup?: boolean },
   ): Array<{ field: string; direction: 'asc' | 'desc' }> {
     const keys: Array<{ field: string; direction: 'asc' | 'desc' }> = [];
