@@ -1,18 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { z } from 'zod';
-
-import { lazySchema } from '../../shared/lazy-schema';
-import { strictUnknownKeyError } from '../../shared/suggestions.zod';
-import {
-  driverConfigJsonSchema,
-  DriverSslToggleSchema,
-  READ_ONLY_BELONGS_ON_DATASOURCE,
-  SCHEMA_MODE_BELONGS_ON_DATASOURCE,
-  SqlAutoMigrateSchema,
-  SSL_DETAIL_BELONGS_ON_DATASOURCE,
-} from './common.zod';
-
 /**
  * MySQL / MariaDB driver configuration — the `config` slot of a `datasource`
  * whose `driver` resolves to `mysql` (`mysql2`).
@@ -27,6 +14,20 @@ import {
  * `mysql2` has no `application_name` and no `statement_timeout`, so declaring
  * them would advertise settings the client drops.
  */
+
+import { z } from 'zod';
+
+import { lazySchema } from '../../shared/lazy-schema';
+import { strictUnknownKeyError } from '../../shared/suggestions.zod';
+import {
+  driverConfigJsonSchema,
+  DriverSslToggleSchema,
+  READ_ONLY_BELONGS_ON_DATASOURCE,
+  SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+  SqlAutoMigrateSchema,
+  SSL_DETAIL_BELONGS_ON_DATASOURCE,
+} from './common.zod';
+
 const MYSQL_CONFIG_KEYS = [
   'url', 'host', 'port', 'database', 'username', 'password', 'ssl', 'autoMigrate',
 ] as const;

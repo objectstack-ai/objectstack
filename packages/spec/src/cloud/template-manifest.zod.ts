@@ -1,7 +1,4 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
-import { z } from 'zod';
-import { lazySchema } from '../shared/lazy-schema';
-import { CreatePackageRequestSchema } from './package.zod';
 
 /**
  * `objectstack.manifest.json` — on-disk descriptor for a template / package
@@ -9,6 +6,11 @@ import { CreatePackageRequestSchema } from './package.zod';
  * managed fields excluded) plus scaffold-time extras (name slug,
  * specVersion, skills, preview, scaffold, readmePath).
  */
+
+import { z } from 'zod';
+import { lazySchema } from '../shared/lazy-schema';
+import { CreatePackageRequestSchema } from './package.zod';
+
 export const TemplateManifestSchema = lazySchema(() =>
   CreatePackageRequestSchema
     .omit({ ownerOrgId: true, createdBy: true })

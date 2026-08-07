@@ -1,8 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { z } from 'zod';
-import { StandardErrorCode } from './errors.zod';
-
 /**
  * Error-Code Ledger (ADR-0112 D3).
  *
@@ -49,6 +46,10 @@ import { StandardErrorCode } from './errors.zod';
  * Field-level codes (`FieldErrorSchema.code`, the `fields[]` array) are a
  * SEPARATE vocabulary and do not belong here — see #3977 (ADR-0112 D6).
  */
+
+import { z } from 'zod';
+import { StandardErrorCode } from './errors.zod';
+
 export const ERROR_CODE_LEDGER = {
   '@objectstack/rest': [
     'ALREADY_REVERTED',

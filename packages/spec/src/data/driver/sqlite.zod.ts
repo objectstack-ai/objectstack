@@ -1,16 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { z } from 'zod';
-
-import { lazySchema } from '../../shared/lazy-schema';
-import { strictUnknownKeyError } from '../../shared/suggestions.zod';
-import {
-  driverConfigJsonSchema,
-  READ_ONLY_BELONGS_ON_DATASOURCE,
-  SCHEMA_MODE_BELONGS_ON_DATASOURCE,
-  SqlAutoMigrateSchema,
-} from './common.zod';
-
 /**
  * SQLite driver configuration — the `config` slot of a `datasource` whose
  * `driver` resolves to `sqlite` (native `better-sqlite3`, with the dev-only
@@ -27,6 +16,18 @@ import {
  * rows are rewritten to `filename` at load, the factory reads one spelling,
  * and authoring rejects both with the rename hint below.
  */
+
+import { z } from 'zod';
+
+import { lazySchema } from '../../shared/lazy-schema';
+import { strictUnknownKeyError } from '../../shared/suggestions.zod';
+import {
+  driverConfigJsonSchema,
+  READ_ONLY_BELONGS_ON_DATASOURCE,
+  SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+  SqlAutoMigrateSchema,
+} from './common.zod';
+
 const SQLITE_CONFIG_KEYS = ['filename', 'autoMigrate'] as const;
 
 const FILENAME_ALIASES = {
