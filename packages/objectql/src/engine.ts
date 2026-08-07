@@ -4796,8 +4796,42 @@ export class ObjectQL implements IObjectQLEngine {
         'sys_file',
         { where: { id: { $in: uniqueIds } }, context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContext },
       )) ?? [];
-    } catch {
-      return records; // sys_file unregistered / unreadable — leave ids as-is
+    } catch (error) {
+      // [#6116] Fail-open is deliberate and UNCHANGED — a file-metadata read
+      // that fails must not take down the record read that asked for it, so the
+      // ids pass through un-hydrated on BOTH branches below. What changes is
+      // that the two reasons stop being the same silence.
+      //
+      // Benign: `sys_file` is registered but its TABLE was never provisioned
+      // (storage plugin present, schema sync not run yet). There are genuinely
+      // no committed rows, so "leave the ids as-is" IS the truth and there is
+      // nothing to report. Discriminated through the shared `isMissingTableError`
+      // predicate (`@objectstack/metadata/errors`, #4825) — never a hand-rolled
+      // `code === '42P01'` copy — the same call `seedAutonumber` makes above.
+      //
+      // Everything else (connection drop, timeout, permission denial, query
+      // error) means the rows may well exist and simply were not seen. The
+      // consumer then receives a bare id where `{ id, name, size, mimeType,
+      // url }` was due, and UI/export renders it as "this record has no
+      // attachment": a fault wearing the appearance of legitimate absent data,
+      // indistinguishable from a record that truly holds no file (ADR-0110 D3).
+      // One `warn`, not `error`, per AGENTS "Degradation log levels" — the loss
+      // is FUNCTIONAL and scoped to this response (the answer is visibly
+      // smaller, and the next read repairs it); nothing on this path claims to
+      // have persisted anything.
+      if (!isMissingTableError(error)) {
+        this.logger.warn(
+          'sys_file lookup failed; file fields keep their raw ids and will render as "no file" for this read — '
+            + 'check storage/database availability, then re-read to hydrate',
+          {
+            object: objectName,
+            fields: fileFields,
+            unresolvedIds: uniqueIds.length,
+            error: (error as Error)?.message,
+          },
+        );
+      }
+      return records; // fail-open: leave ids as-is
     }
 
     const fileMap = new Map<string, any>();
