@@ -21,6 +21,28 @@ onlyBuiltDependencies:
 # Transitive-dependency version pins. pnpm v10 reads `overrides` from THIS file
 # — the `pnpm.overrides` block in package.json is silently ignored — so all
 # pins must live here (previously orphaned in package.json: minimatch, tar).
+#
+# ⛔ SELECTOR SHAPE — the one rule every OSV pin below now follows (#6095).
+# An OSV pin states a FLOOR ("nothing below the patched line"), so its selector
+# must cover the whole major it guards and its target must be a range that
+# floats up inside that major. Concretely:
+#     'pkg@>=<affected floor> <next major above the target>': '^<patched>'
+# Never write the selector's exclusive upper bound AT the target's own version
+# line (`pkg@<X.Y.Z` -> `^X.Y.Z`). That shape self-invalidates the day X.Y.Z
+# itself gets an advisory: you lift the target and the selector silently stops
+# covering the very versions you need to rewrite — the live specimen is
+# `undici@>=7.23.0 <7.28.0` on the day 7.28.0 was flagged (#4961, #5032).
+# With the bound at the major boundary, ONLY the target moves from now on.
+# Equally never let the bound sit BELOW the target floor: the old
+# `@hono/node-server@<2.0.5` -> `^2.0.10` left the whole 2.0.5 .. 2.0.10 band
+# covered by nobody at all (#6095 fixed it).
+# For a 0.x line the "major boundary" is the caret boundary (0.35.x -> <0.36.0),
+# because that is where semver's compatibility break actually falls.
+# `scripts/check-override-consistency.mjs` reports (never fails on) any entry
+# that drifts back into the old shape. Two carve-outs deliberately keep it:
+# the better-auth pre-release family (a compat pin, not an OSV floor — it is
+# retired wholesale when 1.7.0 stable ships) and the three zero-consumer pins
+# awaiting a #5835-style ruling (@tootallnate/once, react-router, @sveltejs/kit).
 #   - esbuild: GHSA-gv7w-rqvm-qjhr (high). tsup/tsx/vite pulled 0.27.7 / 0.28.0
 #     (< 0.28.1); force the patched line everywhere.
 #   - form-data: GHSA-hmw2-7cc7-3qxx (high) — CRLF injection via unescaped
@@ -39,18 +61,21 @@ onlyBuiltDependencies:
 #     Then five more advisories landed on 7.28.0 itself — the version this pin
 #     had settled on (GHSA-4cwx-7wf7-3272 7.4 high, GHSA-jr45-8vmc-qm54 5.9,
 #     GHSA-8xcm-r25x-g524 / GHSA-v3r7-h72x-cjcm 4.8, GHSA-m8rv-5g2x-5cg5 4.2) —
-#     so the bound moves to <7.29.0 / ^7.29.0 (#5032). NOTE the recurring trap:
-#     an exclusive upper bound stops covering the very version it pinned once
-#     that version is itself flagged, so the selector AND the target must move
-#     together — same shape as the brace-expansion 5.0.8 → 5.0.9 lift (#4945).
+#     so the target moves to ^7.29.0 (#5032). NOTE the recurring trap this
+#     specimen taught: an exclusive upper bound stops covering the very version
+#     it pinned once that version is itself flagged — same shape as the
+#     brace-expansion 5.0.8 → 5.0.9 lift (#4945). That is why the selector is
+#     now `>=7.23.0 <8.0.0` (#6095): the bound sits at the major boundary, so a
+#     future lift moves the TARGET alone and the pin never silently misfires.
 #     CONSUMER GONE (#5825): cheerio came in only through @vscode/vsce, which
-#     left with packages/vscode-objectstack. The two undici copies that remain —
-#     @ai-sdk/provider-utils' 7.29.0 and jsdom's 8.9.0 — are both OUTSIDE this
-#     selector's `<7.29.0` bound, so it now matches nothing. Kept as
+#     left with packages/vscode-objectstack. The two undici copies that remain
+#     are @ai-sdk/provider-utils' 7.29.0 and jsdom's 8.9.0. Under the old
+#     `<7.29.0` bound BOTH sat outside the selector and it matched nothing;
+#     under the `<8.0.0` bound of #6095 the 7.29.0 copy is back in scope (it
+#     already satisfies the ^7.29.0 target, so nothing moved — measured), which
+#     is exactly the point: the next 7.x advisory will now catch it. jsdom's
+#     8.9.0 is a different major and stays outside, unaffected. Kept as
 #     defense-in-depth on the same reasoning as form-data above.
-#     Still transitive-only via cheerio; @ai-sdk/provider-utils already resolves
-#     7.29.0, so the two dedupe. jsdom's undici 8.9.0 is outside the selector
-#     and unaffected.
 #   - @better-auth/scim: GHSA-j8v8-g9cx-5qf4 (high) — account/provider
 #     takeover. The advisory is patched only in >=1.7.0-beta.4 — there is NO
 #     stable patched release yet (npm `latest` is still on the 1.6.x line), so
@@ -102,10 +127,10 @@ onlyBuiltDependencies:
 #     legacy agent chain; force the patched 2.0.1 line.
 overrides:
   esbuild: '>=0.28.1'
-  'minimatch@<10.2.3': '10.2.3'
-  'tar@>=2.0.0 <7.5.11': '^7.5.11'
-  'form-data@<4.0.6': '>=4.0.6'
-  'undici@>=7.23.0 <7.29.0': '^7.29.0'
+  'minimatch@<11.0.0': '^10.2.3'
+  'tar@>=2.0.0 <8.0.0': '^7.5.11'
+  'form-data@<5.0.0': '>=4.0.6'
+  'undici@>=7.23.0 <8.0.0': '^7.29.0'
   # better-auth family — kept on one line (see @better-auth/oauth-provider note).
   'better-auth@<1.7.0-rc.2': '1.7.0-rc.2'
   '@better-auth/core@<1.7.0-rc.2': '1.7.0-rc.2'
@@ -121,15 +146,16 @@ overrides:
   '@better-auth/mongo-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
   '@better-auth/prisma-adapter@<1.7.0-rc.2': '1.7.0-rc.2'
   '@better-auth/telemetry@<1.7.0-rc.2': '1.7.0-rc.2'
-  'uuid@<11.1.1': '^11.1.1'
-  'postcss@<8.5.10': '^8.5.10'
-  'cookie@<0.7.0': '0.7.0'
+  'uuid@<12.0.0': '^11.1.1'
+  'postcss@<9.0.0': '^8.5.10'
+  'cookie@<0.8.0': '^0.7.0'
   svelte: '^5.55.7'
   '@tootallnate/once@<2.0.1': '2.0.1'
   # OSV batch 2026-07 — transitive-only fixes (no publishable package declares these):
   # brace-expansion GHSA-mh99-v99m-4gvg (via minimatch@10.x), then GHSA-rgw5-rvv9-x895
   # (7.5 high) which affects 5.0.8 itself — the version the first pin landed on — so the
-  # bound moves to <5.0.9. Still transitive-only through minimatch (ts-morph, eslint,
+  # target moves to ^5.0.9 — the selector keeps its <6.0.0 major boundary (#6095), which is
+  # what makes this a target-only lift. Still transitive-only through minimatch (ts-morph, eslint,
   # @typescript-eslint, glob, archiver — @vscode/vsce left with #5825's retirement,
   # the rest still pull it, so this pin stays live); sharp GHSA-f88m-g3jw-g9cj
   # (next optionalDep ^0.34.5 excludes the fix); react-router GHSA-qwww-vcr4-c8h2 has no
@@ -137,11 +163,16 @@ overrides:
   # @sveltejs/kit GHSA-866w-xmhq-wj7x/GHSA-wqjv-9729-c5q2 (better-auth optional peer);
   # @hono/node-server GHSA-frvp-7c67-39w9 has no 1.x fix — @modelcontextprotocol/sdk
   # declares ^1.19.9 and only imports getRequestListener, which 2.x still exports.
-  'brace-expansion@>=5.0.0 <5.0.9': '^5.0.9'
-  'sharp@>=0.34.0 <0.35.0': '^0.35.0'
+  # ⚠️ @hono/node-server is the exception to this block's "transitive-only" heading:
+  # plugin-hono-server declares it directly (^2.0.12). Under the <3.0.0 bound that
+  # declaration is now in the selector's scope and the lockfile records ^2.0.10 as its
+  # specifier — the resolved version is unchanged at 2.0.12, because the ^2.0.10 target
+  # floats to the newest 2.x (measured, #6095).
+  'brace-expansion@>=5.0.0 <6.0.0': '^5.0.9'
+  'sharp@>=0.34.0 <0.36.0': '^0.35.0'
   'react-router@<8.3.0': '^8.3.0'
   '@sveltejs/kit@<2.69.1': '^2.69.1'
-  '@hono/node-server@<2.0.5': '^2.0.10'
+  '@hono/node-server@<3.0.0': '^2.0.10'
   # OSV batch 2026-08 (#5032) — all three name a fixed version, so they are
   # upgrades, not exemptions (the osv-scanner.toml route #4965 defines is for
   # advisories with NO fix and does not apply here):
@@ -159,5 +190,5 @@ overrides:
   #     peer states what host hono we work against, and a host that pins an old
   #     hono owns that copy; narrowing it fixes nothing here and only breaks
   #     compatibility. check-override-consistency.mjs covers both forms.
-  'fast-uri@<3.1.5': '^3.1.5'
-  'hono@<4.12.34': '^4.12.34'
+  'fast-uri@<4.0.0': '^3.1.5'
+  'hono@<5.0.0': '^4.12.34'
