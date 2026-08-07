@@ -68,7 +68,13 @@ import {
   authorableSurfaceShardTexts,
   schemaManifestShardTexts,
   writeShards,
+  type ShardArrayField,
 } from './lib/sharded-artifacts';
+import {
+  AUTHORABLE_DEFAULTS_DIR_NAME,
+  authorableDefaultsShardTexts,
+  parseDefaultEntries,
+} from './lib/authorable-defaults';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
@@ -103,8 +109,23 @@ function writeManifestShards(dir: string, schemas: readonly string[]): string {
 }
 
 /** Aggregate a shard directory back into its sorted key set. */
-function readShardKeys(dir: string, field: 'keys' | 'schemas'): string[] {
+function readShardKeys(dir: string, field: ShardArrayField): string[] {
   return aggregateCategoryShards(dir, field)?.entries ?? [];
+}
+
+/**
+ * Write the recorded default fingerprints as canonical authorable-defaults
+ * shards (#4666).
+ *
+ * The sandbox has to carry this artifact for the same reason it carries the
+ * authorable-surface one: the default-value ratchet runs on every invocation,
+ * so a fixture tree without it is not a smaller version of a real tree — it is
+ * a tree whose generated record is missing, which `--check` reports as such.
+ * Seeding it keeps every fixture below judging the contract it means to judge.
+ */
+function writeDefaultsShards(dir: string, entries: readonly string[]): string {
+  writeShards(dir, authorableDefaultsShardTexts(parseDefaultEntries([...entries].sort())));
+  return shardBytes(dir);
 }
 
 /**
@@ -126,9 +147,11 @@ let sandbox: string;
 let script: string;
 let manifestDir: string;
 let surfaceDir: string;
+let defaultsDir: string;
 let surfaceBasePath: string;
 let pristine: string[];
 let pristineSurface: string[];
+let pristineDefaults: string[];
 /** The generator's own description line for the in-tree anchor, so fixtures
  *  written here are byte-canonical exactly the way `gen:schema` writes it —
  *  a hand-rolled string would trip the anchor's own hand-edit check (#5235). */
@@ -165,8 +188,13 @@ const readSurfaceBase = () => fs.readFileSync(surfaceBasePath, 'utf8');
 beforeAll(() => {
   pristine = readShardKeys(path.join(PKG, SCHEMA_MANIFEST_DIR_NAME), 'schemas');
   pristineSurface = readShardKeys(path.join(PKG, AUTHORABLE_SURFACE_DIR_NAME), 'keys');
+  pristineDefaults = readShardKeys(path.join(PKG, AUTHORABLE_DEFAULTS_DIR_NAME), 'defaults');
   expect(pristine.length, `${SCHEMA_MANIFEST_DIR_NAME}/ is empty — it is a committed artifact`).toBeGreaterThan(0);
   expect(pristineSurface.length, `${AUTHORABLE_SURFACE_DIR_NAME}/ is empty — it is a committed artifact`).toBeGreaterThan(0);
+  expect(
+    pristineDefaults.length,
+    `${AUTHORABLE_DEFAULTS_DIR_NAME}/ is empty — it is a committed artifact (#4666)`,
+  ).toBeGreaterThan(0);
   const realBase = path.join(PKG, 'authorable-surface.base.json');
   if (!fs.existsSync(realBase)) {
     throw new Error(
@@ -184,15 +212,20 @@ beforeAll(() => {
   script = path.join(sandbox, 'scripts', 'build-schemas.ts');
   manifestDir = path.join(sandbox, SCHEMA_MANIFEST_DIR_NAME);
   surfaceDir = path.join(sandbox, AUTHORABLE_SURFACE_DIR_NAME);
+  defaultsDir = path.join(sandbox, AUTHORABLE_DEFAULTS_DIR_NAME);
   surfaceBasePath = path.join(sandbox, 'authorable-surface.base.json');
   // The authorable-surface ratchet runs after the manifest one; give it the
   // committed snapshot so a check that gets that far judges the same contract.
   writeSurfaceShards(surfaceDir, pristineSurface);
+  // Same for the default-value ratchet (#4666), which runs after both: without
+  // its committed record every fixture would fail on a missing artifact rather
+  // than on the thing it is testing.
+  writeDefaultsShards(defaultsDir, pristineDefaults);
   // Anchor for the #4650 deletion check: a git repo whose origin/main holds the
   // committed baseline. Only the baseline is tracked — src/node_modules stay
   // symlinked, untracked reads the same as any dirty worktree.
   git('init', '-q', '-b', 'main', '.');
-  git('add', AUTHORABLE_SURFACE_DIR_NAME);
+  git('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
   git('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
   // The in-tree anchor (#5235), authentic by construction: it mirrors the
   // baseline at the commit just made, which stays reachable from origin/main for
@@ -1827,12 +1860,16 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    // The #4666 default ratchet runs on every invocation, so every box needs its
+    // committed record too — otherwise a fixture fails on a missing artifact
+    // instead of on the removal/rename it is actually testing.
+    writeDefaultsShards(path.join(box, AUTHORABLE_DEFAULTS_DIR_NAME), pristineDefaults);
     boxScript = path.join(box, 'scripts', 'build-schemas.ts');
     boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
     pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
 
     boxGit('init', '-q', '-b', 'main', '.');
-    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
     boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
     fs.writeFileSync(
       path.join(box, 'authorable-surface.base.json'),
@@ -2137,10 +2174,11 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
 
     writeManifestShards(boxManifestDir, pristine);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    writeDefaultsShards(path.join(box, AUTHORABLE_DEFAULTS_DIR_NAME), pristineDefaults);
     boxGit('init', '-q', '-b', 'main', '.');
     // BOTH artifacts tracked here: the merge-base manifest is what this gate
     // reads, and the surface baseline keeps the #4650 gate honest alongside it.
-    boxGit('add', SCHEMA_MANIFEST_DIR_NAME, AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('add', SCHEMA_MANIFEST_DIR_NAME, AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
     boxGit('commit', '-q', '-m', 'baseline: committed manifest + authorable surface');
     fs.writeFileSync(
       path.join(box, 'authorable-surface.base.json'),
@@ -2466,7 +2504,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
    *  so those lines read as deleted by this build (the main sandbox's shape). */
   const seedBoxBase = (...extra: string[]): void => {
     writeSurfaceShards(boxSurfaceDir, [...pristineSurface, ...extra].sort());
-    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
     boxGit('commit', '-q', '--allow-empty', '-m', 'base variant');
     boxGit('update-ref', 'refs/remotes/origin/main', boxGit('rev-parse', 'HEAD'));
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
@@ -2495,12 +2533,16 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    // The #4666 default ratchet runs on every invocation, so every box needs its
+    // committed record too — otherwise a fixture fails on a missing artifact
+    // instead of on the removal/rename it is actually testing.
+    writeDefaultsShards(path.join(box, AUTHORABLE_DEFAULTS_DIR_NAME), pristineDefaults);
     boxScript = path.join(box, 'scripts', 'build-schemas.ts');
     boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
     pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
 
     boxGit('init', '-q', '-b', 'main', '.');
-    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
     boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
     fs.writeFileSync(
       path.join(box, 'authorable-surface.base.json'),
