@@ -390,7 +390,10 @@ describe("[#5997] `before*` reads the CALLER's options bag, predicate included",
     expect(seen[0]!.id).toBeUndefined();
     // The write really did run as a batch through that predicate — so the
     // assertions above describe a live path, not an inert options bag.
-    expect(await engine.count('task', {} as any)).toBe(1);
+    // No `as any` on this one: `count(object, query?)` infers the empty query,
+    // and erasing it would add a site to the #4918 ratchet for nothing (the
+    // positive control at the top of this file carries the same note).
+    expect(await engine.count('task', {})).toBe(1);
   });
 });
 
