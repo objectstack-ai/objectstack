@@ -1,5 +1,19 @@
 # @objectstack/http-conformance
 
+## 0.0.6-rc.3
+
+### Patch Changes
+
+- Updated dependencies [29c6c9d]
+- Updated dependencies [b746aa0]
+- Updated dependencies [eb3e650]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [46365ab]
+- Updated dependencies [c5adfe1]
+  - @objectstack/core@17.0.0-rc.4
+
 ## 0.0.6-rc.2
 
 ### Patch Changes

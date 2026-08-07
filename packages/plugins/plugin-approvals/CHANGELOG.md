@@ -1,5 +1,287 @@
 # @objectstack/plugin-approvals
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- ddc2527: fix(approvals): the ADR-0044 revise window is a service-owned node type, not a bare `wait` (#3823)
+
+  #3801 gated `POST /api/v1/automation/:name/runs/:runId/resume` on the **node type**
+  that produced the suspension: an `approval` pause declares
+  `resumeAuthority: 'service'`, so it continues only through `ApprovalService`.
+  ADR-0044's **revise window** was the same trust boundary in a shape that key
+  could not see. Send-back parked the run on an ordinary `wait` node the flow
+  author placed — correctly `resumeAuthority: 'any'`, because a signal wait is
+  _meant_ to be resumable by an external producer — and `ApprovalService.resubmit`
+  was the only thing that checked anything about continuing it.
+
+  Demonstrated (not reasoned) against the real engine: a raw `resume(runId)` with
+  an **empty body**, from any caller, walked the `resubmit` back-edge into the
+  approval node and opened round N+1 with **no submitter check and no `resubmit`
+  audit row** (`['submit','revise']` — no third row, ever). Worse, when another
+  request was already pending on the record — the exact case `resubmit` refuses
+  with `DUPLICATE_REQUEST` _specifically to keep the run alive_ — the raw resume
+  went around that guard: the approval node's re-entry failed **after** the engine
+  consumed the suspension, and the run was **permanently destroyed** with its
+  round-N request stuck `returned` and no resubmit able to reach it.
+
+  The revise pause is therefore its own node type:
+
+  - **`approval_revise`** (`APPROVAL_REVISE_NODE_TYPE`), registered by
+    `@objectstack/plugin-approvals` alongside the `approval` node, declaring
+    `resumeAuthority: 'service'`. It stays a first-class box on the canvas, in the
+    run log and in the suspended-run store — only the _reuse_ of `wait` was wrong.
+    It takes **no config**: the window ends on the submitter's explicit resubmit,
+    never on a signal or timer. The `resumeAuthority` gate itself is unchanged.
+  - `sendBack` refuses a `revise` edge whose target is not an `approval_revise`
+    node, **before any mutation** (like the existing missing-`revise`-edge check),
+    so no run can be parked in a window something else can advance.
+  - New gating lint `flow-approval-revise-target-not-service-owned`
+    (severity `error`, on `os build` / `os validate` / `os lint` and the runtime
+    metadata publish gate) rejects the old shape at authoring time.
+
+  **Upgrading a flow authored against the original ADR-0044 D3.** One token:
+
+  - **FROM:** `{ id: 'wait_revision', type: 'wait', waitEventConfig: { eventType: 'signal', … } }`
+  - **TO:** `{ id: 'wait_revision', type: 'approval_revise' }` — drop
+    `waitEventConfig` / any `config`; the window has no event to wait on.
+
+  Until you do, such a flow keeps registering and running and its approvals stay
+  decidable (`approve` / `reject` / `recall` / `reassign` are untouched), but
+  **send-back is refused** with a message naming the node and this fix, and
+  re-publishing it reports the lint error. A run _already parked_ in a legacy
+  revise window keeps its recorded node type (a republish never re-types a live
+  pause) and is drained by `resubmit` or `recall` as usual.
+
+  ADR-0044's 2026-07-28 amendment records the reversal of its D3 and of its
+  `Alternatives` rejection of a service-owned revise pause, with the evidence
+  above; the implementation section there records what shipped, why the approval
+  node does not re-suspend itself instead, and why no ADR-0087 conversion was
+  added for the old shape.
+
+### Patch Changes
+
+- 7e5ac28: fix(approvals): 删除两处读 `session.roles` 的 admin 豁免 —— 记录锁与委托守卫回到单一权限词汇 (#4839)
+
+  `plugin-approvals` 的 `lifecycle-hooks.ts` 里有两处 admin 豁免,都读
+  `ctx.session.roles`:审批**记录锁**的 `bindApprovalLockHook`,以及
+  `sys_approval_delegation` 的 `bindDelegationWriteGuard`。两处都已删除。
+
+  **这不是行为变更。** `session.roles` 在整个平台没有生产者 —— ObjectQL 的
+  `buildSession()` 逐字段构造 session,从不写 `roles` —— 所以两个分支在任何真实引擎
+  路径上都是死代码,记录锁一直就对 admin 生效,委托一直就只能本人管理。删除让代码
+  说出运行时本来就在做的事(spec 的 `HookContext` 声明了 `roles`,消费方在读,生产方
+  从不写:典型的 declared ≠ enforced)。
+
+  **为什么不是「改用正确判据」而是删除。** `roles.includes('admin')` 还是第二套权限
+  方言:本仓库的权限一律由 ADR-0095 词汇裁决(能力授予 `permissions`、任职
+  `positions`、由其派生的 posture),ADR-0090 D3 更是直接禁掉 `role` 这个拼法。同包的
+  `ApprovalService.isOverrideActor` 已经这么做了。维护者裁定两处都取「删除」而非改判据:
+
+  - **记录锁**:admin 释放锁定记录的正规路径已经存在(#3424 —— `recall` /
+    `decideNode` 驳回 / `reassign`,全部由 `isOverrideActor` 把关并留痕
+    `via_override`)。让审批终结来释放锁,记录就永远不会在审批在途时被改写 —— 这正是
+    合规场景购买记录锁所要的保证。
+  - **委托**:最终语义确定为**仅本人管理**(`delegator_id` 必须等于写入者;只有 system
+    上下文旁路)。审批人临时不可用时,替他处置**在途**审批用的是
+    `reassign`(把该审批人的名额交给替代人,连 per_group 分组归属一起带过去)/
+    `recall` / 驳回。反过来,「替别人建一条委托」本来也做不到这件事:委托只在请求
+    **开启**时(`resolveApproverSpec` 内的 `applyOooDelegation`)被查询,对已经挂在该
+    审批人名下的在途审批毫无作用。
+
+  新增 `admin-exemption-retired.test.ts`,把上述证据变成可执行断言,并加了一道源码级
+  pin:本包非测试源码中不得再出现 `roles` 标识符或与字符串 `'admin'` 的比较。
+
+  spec 侧 `session.roles` 的退役(至此零消费方)按 ADR-0049 enforce-or-remove 另立协议
+  单处理,不在本次改动内。
+
+- 19e1a8f: fix(approvals): an approval decision can no longer strand a flow run silently when no automation engine is attached (#4420)
+
+  #4420's fix closed every path by which a decision could be recorded while its
+  flow stayed parked — except one, and it is the one where none of the new guards
+  could run. Every guard it added (`assertRunResumable`'s pre-flight, the
+  `RESUME_TARGET_LOST` refusal, the `RESUME_FAILED` throw) hangs off the
+  automation engine. In a process where **no engine is attached**, all of them
+  were skipped by the same `typeof this.automation?.resume === 'function'`
+  condition that wrapped the resume itself — so the decision was written, the
+  mirrored status field advanced, and the call answered HTTP 200 with
+  `resumed: false` and **nothing logged at all**. That is #4420's reported
+  symptom exactly, reproduced in the one composition its fix could not see.
+
+  The composition is reachable the same way the original bug was: a flow parks at
+  an `approval` node in a process that has the automation service, and the
+  decision arrives in one that does not (the plugin failed to init, or the host
+  was recomposed between releases). The request row still carries a
+  `flow_run_id` — which is the row's own declaration that a run is parked on this
+  decision.
+
+  **What changes.** The decision still stands. Rolling it back is not on the
+  table (a human really decided, and the row is durable by then), and refusing
+  every such call would break the standalone approvals compositions the
+  pre-flight deliberately protects — so `finalized` and `resumed` are unchanged
+  for every existing caller. What changes is that the gap is no longer silent:
+
+  - it is logged at **`error`**, per the durability rule in `AGENTS.md` —
+    persisted state and runtime state disagree while nothing looks broken from
+    the outside, which is the class that rule exists for;
+  - the response carries **`resumeError`**, so `resumed: false` arrives with its
+    reason and the stranded run's id instead of leaving the caller to guess
+    whether a resume was even attempted.
+
+  It reuses the already-registered `RESUME_FAILED` code and the existing resume
+  message shape rather than introducing a new vocabulary — the fact being
+  reported (an outcome recorded whose run did not advance) is the same one.
+
+  Applied at all five sites that resume a recorded outcome: `decide`, the
+  revision-limit auto-rejection, `sendBack`, `resubmit`, and both branches of
+  `recall` (whose revise-window path needs `cancelRun` rather than `resume`).
+
+  A request that names **no** run is unaffected and stays quiet — there is
+  nothing parked on it, and reporting one there would be the mirror-image
+  failure that trains operators to skim `error`.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [0f17114]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [db0d53c]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [58f3220]
+- Updated dependencies [07f1822]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [bf1edef]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [51a587d]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [946a131]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+  - @objectstack/formula@17.0.0-rc.4
+  - @objectstack/metadata-core@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

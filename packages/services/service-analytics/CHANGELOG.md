@@ -1,5 +1,1544 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- d17df80: **BREAKING — `dashboard.widgets[].compareTo` converges on the analytics executor's contract (#5011).**
+
+  The widget declared three period-over-period arms with confident TSDoc. The analytics
+  executor implements one shape, and it was never the same one — so on the ADR-0021 dataset
+  path (the spec's own "single author-facing analytics shape") **all three arms were
+  broken**, in two different ways:
+
+  - `compareTo: 'previousPeriod'` / `'previousYear'` were **silently DROPPED** by the dataset
+    renderer. The widget rendered its base numbers and the comparison the author asked for
+    simply was not there.
+  - `compareTo: { offset: '7d' }` was forwarded into `DatasetSelection.compareTo`, whose
+    contract is `{ kind, dimension }` and has no `offset` in it — so the executor threw
+    `compareTo requires a timeDimension "undefined"` and the whole widget errored out.
+
+  All three worked on the legacy inline chart path. Same key, two fates, and the failing one
+  was the path the spec calls canonical.
+
+  `compareTo` is now a thin projection of the contract that is actually implemented:
+
+  ```ts
+  compareTo?: { kind: 'previousPeriod' | 'previousYear'; dimension?: string }
+  ```
+
+  There is no widget-side vocabulary left to drift from the executor's, so `declared =
+enforced` holds by construction rather than by review.
+
+  ## FROM → TO
+
+  | v16                                        | v17                                     | Fix                                                                                                                                   |
+  | :----------------------------------------- | :-------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------ |
+  | `compareTo: 'previousPeriod'`              | `compareTo: { kind: 'previousPeriod' }` | `os migrate meta --from 16` rewrites it                                                                                               |
+  | `compareTo: 'previousYear'`                | `compareTo: { kind: 'previousYear' }`   | `os migrate meta --from 16` rewrites it                                                                                               |
+  | `compareTo: { offset: '1y' }`              | `compareTo: { kind: 'previousYear' }`   | `os migrate meta --from 16` rewrites it — `1y` **is** `previousYear`                                                                  |
+  | `compareTo: { offset: '7d' \| '1M' \| … }` | **no faithful target**                  | State the window on the widget's own `filter` and compare with `{ kind: 'previousPeriod' }`, which shifts by that window's own length |
+
+  The last row is deliberately _not_ rewritten. `previousPeriod` shifts by the length of
+  whatever window the filter resolves to, which equals `7d` only when that window happens to
+  be seven days — a mechanical rewrite would silently change which rows the comparison
+  column counts, turning a loud failure into a wrong number. It is registered as the
+  `dashboard-widget-compareto-offset` semantic migration; the schema rejects the key with the
+  prescription in hand.
+
+  Retired at the schema, so every old spelling is a parse error carrying its own upgrade —
+  including the bare strings, which are dispatched by value so a _typo_ is still told it is a
+  typo rather than told it "was removed".
+
+  ## `dimension` is optional — resolved by the executor, not by a renderer
+
+  Omit it and `dataset-executor.ts` resolves it, by its own long-standing criterion (a
+  `timeDimensions` entry carrying a `dateRange`):
+
+  - exactly one candidate → that one is shifted;
+  - **zero** → a loud error: a comparison is only defined against a bounded window;
+  - **two or more** → a loud error **listing the candidates by name**, never a silent
+    first-wins. Picking `created_at` when the author meant `close_date` produces a comparison
+    that is _wrong_ rather than _missing_, which is the failure nobody audits.
+
+  This is a producer-side resolution rule, not consumer-side tolerance (Prime Directive
+  #12): every caller — dashboard widget, report, raw `queryDataset` — gets the same dimension
+  or the same error, and no renderer is ever in a position to guess one.
+
+  ## Notes
+
+  - `DatasetCompareTo.dimension` is now optional. Callers that always passed it are
+    unaffected; callers that relied on the old "must be present" typing get a wider type.
+  - The converged slot is **union-free**. That is not cosmetic: zod collapses a failed union
+    into one bare `Invalid input`, so curated guidance written inside a union arm never
+    reaches the author (#5014). This slot's prescriptions are top-level and do.
+  - objectui's legacy inline chart path adapts separately (objectui#3337), which also deletes
+    the `DatasetWidget` string-drop workaround this change makes unnecessary.
+
+### Minor Changes
+
+- 1792384: fix(service-analytics)!: 分析查询的 `where` —— `$not` 变 NULL-safe、`{$not:{}}` 变零行、`$or` 的 `{}` 析取项不再被丢 (#5325)
+
+  `filter-normalizer.ts` 的 `buildNode` 是这个包里**第二份**同缺陷拷贝:第一份
+  (`read-scope-sql.ts` 的 `compileNode`,RLS 读作用域)已由 #5297 修好,而这一份编译的是
+  **作者自己写的 `where`** —— dashboard widget / dataset 的筛选器。两者是各自独立的函数,
+  所以那一单合入后这三条仍然在。以 `driver-sql` 同一份 fixture 实测(4 行,行 3、4 的
+  `stage` 为 NULL,行 3 的 `amount` 为 NULL,行 4 的 `owner` 为 NULL):
+
+  | widget 的 `where`                                 | 改前取到的行 | 改后(= driver-memory / formula / #5296 后的 driver-sql) |
+  | ------------------------------------------------- | ------------ | ------------------------------------------------------- |
+  | `{ $not: { stage: 'won' } }`                      | `2`          | `2,3,4`                                                 |
+  | `{ $not: { stage: { $in: ['won'] } } }`           | `2`          | `2,3,4`                                                 |
+  | `{ $not: {} }`                                    | **全表**     | **零行**                                                |
+  | `{ $or: [{ stage: 'won' }, {}] }`                 | `1`          | 全表                                                    |
+  | `{ $not: { $or: [{stage:'won'},{owner:'u1'}] } }` | `2`          | `2,4`                                                   |
+
+  **这是可观察的行为变更,不是内部重构 —— 已有的图表数值会变:**
+
+  - **`{$not: {}}` 的 widget 此前画的是整个数据集,现在是零行。** `buildNode({})` 返回
+    `null`(= 无约束 = TRUE),`$not` 分支的 `if (inner)` 因此为假,整条 `$not` 消失,
+    WHERE 一个字都不发 —— 一条意思是「什么都不显示」的筛选器显示了全部。`NOT TRUE ≡ FALSE`,
+    现在它编译成 `1 = 0`。
+  - **`$not` 下 NULL 行的去留变了,所以图上的数字会变。** SQL 是三值逻辑而 `WHERE` 只保留
+    TRUE,裸 `NOT (stage = ?)` 把 `stage` 为 NULL 的行全部丢掉;`driver-memory`、`formula`
+    和(#5296 之后的)`driver-sql` 都把它们算进来。同一条 widget filter,在分析查询和普通
+    `find()` 上给出不同的行集,取决于哪个后端接住它。#5146 已拍板 JS 家族的答案为准,本次
+    按同一口径把守卫**下推到叶子**(`{col: {$null: false}}` / `{$or: [{col:{$null:true}}, …]}`,
+    极性逐算子决定)。**受影响的图表数值会上升**(负向筛选现在包含空值行)。
+  - **`$or` 里的 `{}` 析取项不再被丢。** TRUE 是 AND 的单位元但**吸收** OR,所以
+    `{$or: [{stage:'won'}, {}]}` 整条为 TRUE;此前它被 `.filter(n => n !== null)` 丢掉,
+    查询被静默**收紧**成剩余分支。
+  - **空集合是布尔常量,不再是「没有谓词」。** `{stage: {$in: []}}` 此前编译成空子句
+    → 无约束 → 画全表,现在是零行(`1 = 0`);`{$nin: []}` 不排除任何行。
+  - **两处新的响亮拒收(此前静默放宽):** `$not` / `$or` / `$and` 的**非对象**操作数
+    (`{$not: null}` 曾整条消失 → 等于不筛),以及**零个操作符的字段约束** `{a: {}}`
+    —— 后者按 #5240 的拍板拒收,与 driver-sql / driver-memory / formula 一致;不这么做的话,
+    「TRUE 吸收 OR」会把 `{$or: [{a: {}}, {b: 2}]}` 从 `b = 2` 放宽成全表。
+
+  实现落在 normalizer 而不是某个 strategy:守卫在这一层是**结构**(多一个 `$null` 合取项),
+  经 `filterNodeToCondition` 交给 ObjectQL 引擎后在**任何驱动上都成立**,包括本身不 NULL-safe
+  的那些;只加在 raw-SQL 那条路径,等于说「分析查询的 `$not` 是什么意思取决于哪个驱动接住它」。
+  代价是引擎路径会**双重加守卫**,已实测幂等(`NOT (c IS NOT NULL AND (c IS NOT NULL AND c = v))`
+  与单层等价),只是 SQL 多一层冗余谓词。
+
+  `NormalizedFilterNode` 因此新增布尔常量 kind —— 该联合此前只有 `leaf | and | or | not`,
+  没有 FALSE 的表示法,这正是 `{$not:{}}` 只能编译成「什么都不发」的根本原因。三个编译器
+  (`native-sql-strategy.compileFilterNode`、`objectql-strategy.filterNodeToCondition`、
+  回显给浏览器的 `renderFilterNodeSql`)各自实现它;引擎路径用的是 `{$not: {}}`,即
+  driver-sql / formula / driver-memory 参考匹配器早已钉住的零行写法(#5134),没有另造第二种。
+
+  `$and: []` / `$or: []` 的空组合子**不在本次范围**,仍然 fail-closed 抛错(独立裁定见 #5322),
+  并已加用例钉在抛错这一侧。
+
+- 1f0e7cb: fix(service-analytics): reject a dataset's cross-datasource JOIN when it is compiled, not when it is queried (#5115)
+
+  #5033 routed a dataset's raw SQL to its base object's own datasource, which
+  turned a JOIN whose target lives in another database into a **loud query-time
+  failure** — correct, but late: the dataset can still be saved, published and
+  put on a dashboard, and the failure lands in front of whoever opens that
+  dashboard, usually in another environment on another day. It is a pure metadata
+  error, decidable the moment the dataset is compiled: the whole dataset is
+  lowered into ONE statement on the base object's datasource, so a join target
+  bound elsewhere is simply not there.
+
+  `compileDataset` now decides it. `AnalyticsService.registerDataset` — the single
+  door every dataset passes through, whether pre-registered at boot, saved, or
+  previewed as a Studio draft — hands the compiler the datasource and federation
+  probes that already existed on `AnalyticsServiceConfig`, and a proven conflict
+  is rejected before any SQL is built. The message names both objects, both
+  datasources, the offending `include` path, and the two ways out (bind both
+  objects to the same datasource, or drop the relationship), in the same wording
+  family as the #5033 query-time diagnostic so the two never read as two bugs.
+
+  **Who is affected.** This is a tightening: a dataset that used to compile and
+  then fail (or, before #5033, silently read the wrong database) now fails at
+  registration. It fires only where the metadata _proves_ the conflict — the base
+  object and a join target each declare an explicit `object.datasource` and the
+  two names differ. A dataset registered at boot is skipped with a WARN naming the
+  conflict, as before; the rest of the host's datasets still register.
+
+  **What is deliberately not rejected** ("cannot answer, do not block", the same
+  tiering as `isRegisteredObject` / `getObjectFieldNames`):
+
+  - a host that wires no datasource probe at all (no data engine) — compiles
+    exactly as it did before;
+  - either side leaving `datasource` at its default. `'default'` is the schema's
+    default _value_, not a routing decision: `ObjectQL.getDriver` short-circuits
+    only on an explicit non-`'default'` name, then falls through to
+    `datasourceMapping` rules, the ADR-0057 §3.6 lifecycle split
+    (audit/telemetry/event) and the owning package's `defaultDatasource` — none of
+    which are visible to the compiler. Treating `'default'` as "the primary DB"
+    would reject datasets whose objects a mapping rule in fact lands on the _same_
+    database;
+  - a federated (external) participant on either side. `NativeSQLStrategy` already
+    declines such a cube (ADR-0062 D6), so the query is served by the ObjectQL
+    FK-expand path, which crosses datasources by construction.
+
+  Everything not proven here keeps failing loudly at query time via #5033.
+  Making cross-datasource dashboards actually _work_ (declining in
+  `NativeSQLStrategy` and serving the join with two reads) is separate and not
+  part of this change.
+
+### Patch Changes
+
+- c637387: fix(service-analytics): only a canonical numeric spelling is recovered as a number, so `'007'` / `'1.50'` stay strings (#5528)
+
+  An analytics `where` round-trips every comparand through the internal
+  `values: string[]` form — `stringifyForCube` on the way out, and
+  `coerceFilterValueForSql` / `coerceFilterValueForObjectQL` on the way back. The
+  decoder decided "this is a number" from the string's **shape** alone
+  (`/^-?\d+(\.\d+)?$/`), which cannot distinguish a number that was stringified on
+  the way out from a string the author actually wrote.
+
+  Measured before the fix, on cube `orders` / TEXT column `code`:
+
+  | author's `where`        | leaf `values` | SQL bind | engine comparand |
+  | ----------------------- | ------------- | -------- | ---------------- |
+  | `{code: {$eq: '007'}}`  | `["007"]`     | `7`      | `7`              |
+  | `{code: {$eq: '0912'}}` | `["0912"]`    | `912`    | `912`            |
+  | `{code: {$eq: '1.50'}}` | `["1.50"]`    | `1.5`    | `1.5`            |
+
+  Both consumers were affected: the raw-SQL bind in `NativeSQLStrategy` and the
+  comparand handed to the ObjectQL aggregate engine.
+
+  The failure was **silent and mis-targeted, not empty**. Against a text column
+  SQLite applies the column's affinity to the integer bind, so a widget filtered on
+  order number `'007'` returned the row storing `'7'` — a different row, with no
+  error to read; on Postgres the same query is a `text = integer` type error, and on
+  the engine path the strict comparison simply matched nothing (measured: 0 rows).
+  Zero-padded and trailing-zero strings are ordinary business shapes — order
+  numbers, work orders, SKUs, dialling codes, postcodes, `'1.50'` prices.
+
+  Recovery is now limited to a number's **own canonical spelling**
+  (`String(Number(s)) === s`):
+
+  - a comparand that really was a number is `String(n)` by construction, so it
+    still round-trips — `7` → `'7'` → `7`, `1.5` → `'1.5'` → `1.5`, `-3` → `-3`;
+  - a string `Number()` would rewrite — `'007'`, `'0912'`, `'1.50'`, `'1.0'`,
+    `'-0'`, or more digits than a double holds — cannot have come from a number, so
+    it stays the string the author wrote.
+
+  The narrowing can only ever **remove** recoveries: the shape regex still runs
+  first, so `'1e3'`, `'1e+21'`, `'+7'`, `' 7'`, `'0x10'`, `'Infinity'` and `'NaN'`
+  were strings before this change and are strings after it. This also aligns with
+  ADR-0053 D-A2, which demoted this textual type re-derivation to a last resort
+  behind the driver-backed `coerceTemporalFilterValue` hook.
+
+  **Stopgap, and named as one.** `values: string[]` still has no escape, so the
+  author strings `'null'` / `'true'` / `'false'` still collide with the tokens the
+  encoder writes for the real `null` and booleans. Making the round trip lossless —
+  tagged values, or an `unknown[]` internal representation — is #5526; the
+  collision is pinned as unchanged in
+  `src/__tests__/filter-value-canonical-number.test.ts` so it is not mistaken for
+  fixed.
+
+- c113690: fix(service-analytics): `contains` 以规范算子 `$contains` 送进引擎,比较值不再落进正则位置(#5557)
+
+  `ObjectQLStrategy.convertFilter` 在同一个 `switch` 里处理 LIKE 家族的四个算子。
+  其中三个(`notContains` / `startsWith` / `endsWith`)自 #4128 起就是规范 spec 算子,
+  只有 `contains` 是 `{ $regex: values[0] }` —— 比较值**原样**放进一个正则位置,不转义。
+
+  实测(修复前 → 修复后,引擎收到的 filter):
+
+  | `where`                          | 修复前                           | 修复后                        |
+  | -------------------------------- | -------------------------------- | ----------------------------- |
+  | `{stage: {$contains: 'a.b'}}`    | `{stage: {$regex: 'a.b'}}`       | `{stage: {$contains: 'a.b'}}` |
+  | `{stage: {$notContains: 'a.b'}}` | `{stage: {$notContains: 'a.b'}}` | 不变                          |
+  | `{stage: {$startsWith: 'a.b'}}`  | `{stage: {$startsWith: 'a.b'}}`  | 不变                          |
+  | `{stage: {$endsWith: 'a.b'}}`    | `{stage: {$endsWith: 'a.b'}}`    | 不变                          |
+
+  三条后果,都是作者没有要求过的行为,且都不依赖 #4706 对 `$regex` 语义的裁决:
+
+  1. **`$regex` 不在契约里。** `filter.zod.ts` 的 `FILTER_OPERATORS` 声明 15 个算子,
+     没有 `$regex` —— 这是**生产方**在发送 schema 未声明的算子。按 Prime Directive #12
+     修生产方(一个 `case` 标签),而不是给消费方加宽容。
+  2. **同一棵过滤树在同包两个消费方之间不通。** `read-scope-sql.ts` 的
+     `compileScopedFilterToSql` 也是一个 `FilterCondition` 消费方,`compileOperator`
+     的 `default` 是 fail-closed,于是它对本策略产出的 filter 直接抛
+     `unsupported operator "$regex" … (fail-closed)`。
+  3. **行结果取决于哪个驱动来答。** 把 `$regex` 当真正则求值的后端(driver-memory 的
+     `memory-matcher.ts` 就是,而且是有意为之 —— 服务 plugin-auth 的 ObjectQL adapter)
+     把 `a.b` 读成「a、任意一个字符、b」,于是 `axb` 也被匹配上;而 `50% (+)` 作为正则
+     根本编译不过(`Nothing to repeat`),`catch` 之后 `return false` —— 一个**有匹配行**
+     的筛选器静默返回零行,作者那边只看到「无数据」。同一个 `$contains` widget 在
+     `driver-sql` 上则被编译成子串 LIKE:同一张 dashboard,不同驱动,不同行集。
+
+  `filter-normalizer.ts` 的 `MONGO_TO_CUBE_OP` 只把 `$contains` 映到 `contains`,
+  别无来源,所以这里回送 `$contains` 就是作者自己那个 key 的往返。
+
+  **测试**(`objectql-contains-canonical-operator.test.ts`,新增):引擎 filter 的算子键
+  逐个对 `filter.zod.ts` 的 `ALL_OPERATORS` 校验(取自 spec 而非手抄一份);行结果跑在一个
+  复刻 `memory-matcher.ts` 各 arm 的求值面上 —— `a.b` 只命中字面行、`50% (+)` 命中它该
+  命中的那一行且**恰好**只有那一行(修复前分别是多一行和空集);同一个 filter 再送进
+  `compileScopedFilterToSql` 确认它现在编译得过。只断言 filter/SQL 字符串会漏掉「不转义」
+  这一半,所以两半都断言。
+
+  顺带删掉 #5558(PR for #5333)在 `objectql-echo-operator-coverage.test.ts` 的替身引擎里
+  留下的那处 `$regex` → `$contains` 翻译:它存在的理由就是本单,现在没有了。那也是本修复
+  最直接的反向证据 —— 把 `case 'contains'` 退回 `$regex`,该文件的 `$contains` 行会以
+  上面第 2 条的 fail-closed 报错红掉。
+
+- 705efeb: fix(analytics): a dataset refusal that declares an ADR-0112 envelope is never degraded to an empty result (#5717)
+
+  `queryDataset` wraps execution in a catch that exists for one deliberate reason
+  (#5033): a widget whose backing object is not mounted in this kernel renders
+  "no data" instead of failing with a 500. The criterion for "not mounted" was
+  `isMissingSourceError` — a substring match over the error MESSAGE. So the
+  leniency was available to any error that happened to phrase itself like a
+  driver, and #5352 / #5367's finding on the REST face — "the wire shape of an
+  error family must not be a property of its wording" — applied here one level
+  worse: the outcome was not a wrong status code but a **silent empty result**.
+  No exception, no 4xx, no 5xx; one `warn` line and a confident empty chart, which
+  is the "populated table, Total Spend: 0" symptom #5033 was filed about.
+
+  One refusal already matched. `dataset-compiler.ts` refuses an `include` naming a
+  relationship the object graph does not have with
+
+  > `[dataset-compiler] dataset "X" includes relationship "R" which does not exist on object "O".`
+
+  which carries both `relation` (inside "relationship") and `does not exist` — and
+  that conjunction was the postgres limb. It has never gone off for one reason:
+  `queryDataset` compiles **before** the try, so that throw has never been inside
+  the catch's reach. A mine, wired and unarmed.
+
+  **Two independent defences, so the disarming does not depend on either one.**
+
+  - **The criterion (main change).** An error carrying an ADR-0112 envelope —
+    numeric `status` + non-empty `code`, the same structural fact
+    `rest-server.ts`'s `/analytics/dataset/query` catch reads — is re-thrown
+    untouched, ahead of any message inspection. Its producer already answered the
+    classification question. The status RANGE is deliberately not part of the
+    test: a `DATASET_INVALID` / 400 rendered as an empty grid is the loud case,
+    but a declared 5xx (`READ_SCOPE_COMPILE_FAILED` — an RLS lowering that failed
+    closed) is if anything worse to swallow, since nobody is told at all.
+  - **The sniffer.** Its postgres limb is now anchored to postgres's actual
+    wording (`relation "x" does not exist`) instead of "any sentence containing
+    both words" — the same pattern the sibling `missingSourceRelation` already
+    used, so "is something missing" and "what is missing" can no longer disagree.
+
+  **Observable behaviour change — read this if you alert on empty widgets.** The
+  guarantee is new, not the status of any shipped message: measured over the 13
+  real wordings this repo carries (three driver families including sql-prefixed
+  and schema-qualified forms, the framework's not-registered signals, and this
+  package's own refusals), exactly one verdict moves — the compiler refusal above,
+  which reaches callers as `400 DATASET_INVALID` either way because its throw site
+  sits outside the try. What changes is that a caller-shaped refusal raised
+  **during execution** can no longer become `{rows: [], fields: [], totals: []}`
+  by phrasing alone: it now propagates and the route answers its declared code
+  (4xx as itself, declared 5xx through `ANALYTICS_QUERY_FAILED`). A dashboard that
+  silently rendered an empty chart for such a refusal will now surface the error.
+
+  **#5033's leniency is untouched, and that is asserted rather than claimed.** A
+  bare driver error is still classified by its words and still degrades: `no such
+table` (sqlite/libsql), postgres's real `relation "x" does not exist`, mysql's
+  `doesn't exist`, the framework's not-registered signals — and a bare error
+  naming a JOINED table still fails loudly as a cross-datasource dataset. Those
+  cases are green in all four states of the reverse verification
+  (`dataset-degradation-envelope.test.ts`), including with both defences reverted.
+
+  The compile point deliberately stays outside the try. Moving it in would newly
+  expose the compiler's own bare invariants and the host-supplied relationship
+  resolver to this degradation path — widening leniency in the opposite direction
+  from the fix.
+
+- 978fed2: fix(analytics,rest): five dataset refusals declare `DATASET_INVALID` / 400 themselves, and the route's message-sniffing list shrinks to one entry (#5367)
+
+  `POST /analytics/dataset/query` answered `400 DATASET_INVALID` for six error
+  families because the route recognised their **prose**, not because the errors
+  said anything about themselves. #5352 gave the catch an ADR-0112 envelope branch
+  (`error.code` + a 4xx `error.status`, read first) and had to leave a hardcoded
+  list of message substrings behind it, since all six producers were still bare
+  `throw new Error(…)`:
+
+  ```
+  /not declared in the dataset|not backed by a declared relationship|
+   not supported by the v1 dataset runtime|read-scope-sql|
+   not a selected dimension or measure|is not a subset of the selected dimensions/
+  ```
+
+  That made the HTTP status of six families a property of their wording.
+  Rephrasing `dataset-compiler`'s "is not declared in the dataset's `include`" —
+  no logic change — moved that refusal from 400 to 500, i.e. re-opened #5352 for a
+  different family, and no test and no gate would have gone red. Prime Directive
+  #12 permits an accommodation like that only while it is declared, loud, tested
+  **and removable on a schedule**; #5366 delivered the first three and nothing
+  carried the fourth.
+
+  **Five producers now declare their own verdict.** A new
+  `dataset-refusal.ts` in `@objectstack/service-analytics` exports
+  `datasetInvalidError` — the same shape as that package's existing
+  `invalidFilterError` (`INVALID_FILTER` / 400) and `assertDimensionFields`
+  (`INVALID_FIELD` / 400) — and five sites throw through it:
+
+  - `dataset-compiler.ts` — a measure whose aggregate the v1 runtime cannot lower;
+    a dimension/measure traversing a relationship path the dataset never declared
+    in `include`;
+  - `dataset-executor.ts` — an `order` key that is not a selected dimension or
+    measure; a `totals` grouping that is not a subset of the selected dimensions;
+  - `native-sql-strategy.ts` — a join outside the dataset's declared allowlist.
+
+  Their five entries are gone from the route's list, which is now a single
+  `read-scope-sql` test.
+
+  **`read-scope-sql` deliberately stays.** Its ten fail-closed refusals are RLS
+  read-scope lowering failures whose inputs are an admin-authored policy and a
+  compiler-generated join alias — not caller input — so `DATASET_INVALID` ("your
+  request is invalid") may well be the wrong verdict and choosing the right one is
+  a separate judgement, still tracked by #5367. Deleting the entry before that
+  judgement lands would regress those ten from `400 DATASET_INVALID` to 500.
+
+  **No outward behaviour change for the five.** They answered
+  `400 DATASET_INVALID` before and answer `400 DATASET_INVALID` now, with the same
+  message; what changed is the mechanism, from message-matching to the producer's
+  own declaration. The one visible difference is for a bare `Error` that merely
+  _resembles_ one of those messages: it is no longer promoted to a 400. That is the
+  point — a phrase is no longer a classification.
+
+  `DATASET_INVALID` is registered in `ERROR_CODE_LEDGER` under
+  `@objectstack/service-analytics` as well as `@objectstack/rest` (provenance, per
+  ADR-0112 D3; the code itself is unchanged and the union does not grow), and the
+  constructor types it as `RegisteredErrorCode` so an unregistered code is a
+  compile error rather than a body some route rejects at runtime.
+
+  Coverage: `dataset-refusal-envelope.test.ts` (service-analytics) pins each of the
+  five refusals against its real producer — the refusal SET first, green before and
+  after, then the envelope; `analytics-dataset-refusal-envelope.test.ts` (rest)
+  drives all five end-to-end through a real `AnalyticsService` with positive
+  controls on both the aggregate and raw-SQL paths; and
+  `analytics-filter-refusal-envelope.test.ts` pins the deletion in both directions
+  — the five messages answer 400 when enveloped and 500 when bare, so re-adding a
+  regex entry turns it red.
+
+- c36abfe: fix(service-analytics,rest): an analytics dimension over a missing field answers 400 INVALID_FIELD, not a driver 500 (#5520)
+
+  #4437 gave a **measure** over a non-existent field a `400 INVALID_FIELD` naming
+  the field, because a driver error class must never be the caller's `error.code`
+  for a caller-shaped mistake (ADR-0112). It covered the measure half only, so the
+  identical typo one request key over still reached the driver as a `GROUP BY`
+  column:
+
+  ```
+  POST /analytics/query {"cube":"account_metrics","measures":["account_count"],"dimensions":["bogus_dim"]}
+  → 500 {"code":"SQLITE_ERROR","message":"Internal server error"}
+
+  # the control group on the same route, already fixed by #4437
+  POST /analytics/query {"cube":"account_metrics","measures":["bogus_measure"]}
+  → 400 {"code":"INVALID_FIELD","message":"Measure 'bogus_measure' … Valid measures: …"}
+  ```
+
+  **The gate.** `ensureCube` now runs `assertDimensionFields` alongside
+  `assertMeasureFields` on every path, so a dimension whose source column the
+  backing object does not have is refused **before** any SQL is built, with the
+  same envelope the measure gate uses: `INVALID_FIELD` / 400 plus
+  `field` / `object` / `param`, a message naming the field, the valid dimensions,
+  and the object's known field list. `query`, `generateSql` and `queryDataset` are
+  all covered, and a rejected query leaves nothing behind in the cube registry.
+  `timeDimensions` are covered too — they resolve through the same
+  `cube.dimensions` bag and produced the same 500 — with `param` reporting which
+  request key carried the bad name.
+
+  **What deliberately did not change:** grouping by a REAL field the cube never
+  declared as a dimension (`dimensions: ["phone"]`) still works. The gate asks
+  "does the _object_ have this field", never "did the cube declare this
+  dimension". A cube whose `sql` is an expression, a dotted relation dimension,
+  and a host that wires no field-name probe are all stood down on, exactly as the
+  measure gate stands down.
+
+  **The SQL echo, same request.** `POST /analytics/dataset/query` composed its own
+  5xx body and echoed the error message verbatim. Knex prefixes the offending
+  statement to its message, so the caller received the generated SQL — physical
+  table and column names included:
+
+  ```
+  500 {"code":"ANALYTICS_QUERY_FAILED",
+       "error":"SELECT bogus_dim AS \"bogus_dim\", COUNT(*) AS \"account_count\"
+                 FROM \"crm_account\" GROUP BY bogus_dim - no such column: bogus_dim"}
+  ```
+
+  The sibling face never leaked it: `/analytics/query` exits through the
+  dispatcher, which has applied the shared `looksLikeInternalErrorLeak` predicate
+  to every >= 500 message since #3867. That same predicate now guards this route's
+  500 body. Classification is untouched — the status stays 500, the code stays
+  `ANALYTICS_QUERY_FAILED`, the ADR-0112 envelope branch and the transitional
+  message list are unchanged — and the full text still reaches server logs. A 500
+  whose message does not look like driver output keeps its prose.
+
+- 9ecdca9: fix(service-analytics): `/analytics/sql` 回显补上 `$startsWith` / `$endsWith` 谓词(#5333)
+
+  `ObjectQLStrategy.generateSql` 是同一棵过滤树的**第三个**编译器 —— 输出给浏览器的
+  展示 SQL。它的 `buildFilterClauseSql` 显式处理 `set`/`notSet`/`in`/`notIn`/
+  `contains`/`notContains`,其余落到只有六个条目的 `SCALAR_SQL_OPS` 查表;
+  `startsWith` / `endsWith` 两处都不在,于是走到 `return null`,而**这棵树的每个编译器
+  都把 `null` 读成「本节点没有约束」**。结果:
+
+  | `where`                       | 实际执行(`NativeSQLStrategy`)    | 修复前的回显                    | 修复后的回显                     |
+  | ----------------------------- | -------------------------------- | ------------------------------- | -------------------------------- |
+  | `{stage: {$startsWith: 'w'}}` | `WHERE stage LIKE $1` / `['w%']` | **没有 WHERE**,`params` 为空    | `WHERE stage LIKE $1` / `['w%']` |
+  | `{stage: {$endsWith: 'n'}}`   | `WHERE stage LIKE $1` / `['%n']` | **没有 WHERE**,`params` 为空    | `WHERE stage LIKE $1` / `['%n']` |
+  | `{stage: {$contains: 'w'}}`   | `WHERE stage LIKE $1`            | `WHERE stage LIKE $1`(本来就对) | 不变                             |
+
+  回显比实际执行的查询**更宽**。这个字符串存在的唯一理由就是复现执行 —— 文件自己在渲染
+  块顶上写着 “a rendering that contradicts execution is worse than no rendering” ——
+  所以一个带着「为什么这张图少了几行」来看回显的作者,拿到的是一条**没有该筛选条件**的
+  语句:跑一遍返回更多行,于是结论是「筛选器没生效」,而实际执行是生效的。与
+  #3601 / #3602 / #3650 同一类「回显与执行不一致」,只是这次是从**算子表**这一侧到达的。
+
+  不涉及越权或错行:该字符串从不执行(`execute()` 的 echo 会丢弃 `params`),损害限于
+  可调试性。
+
+  **两处修改:**
+
+  1. **LIKE 家族收进一张表。** 新增 `LIKE_SQL_OPS`,四个算子(`contains` /
+     `notContains` / `startsWith` / `endsWith`)的 SQL 拼写与 pattern 并排放在一起,
+     与 `NativeSQLStrategy.buildFilterClause` 的 `opMap` / `likePattern` 逐条对应 ——
+     回显描述的正是那个编译器产出的语句,两张表并列摆着,漂移才看得见。
+     `contains` / `notContains` 的产物一字未变。
+
+  2. **「渲染不了就静默丢」的出口改为 THROW。** `return null` 在这里与「无约束」同形,
+     所以下一个新增算子会以同样的方式再丢一次。之所以**可以**抛错:上游算子词汇表是
+     **封闭**的 —— `filter-normalizer.ts` 的 `fieldLeaves` 是叶节点的唯一生产者,它对
+     `MONGO_TO_CUBE_OP` 之外的算子在建叶之前就以 `INVALID_FILTER` / 400 拒绝。因此任何
+     调用方写出的过滤器都到不了这个出口;真到了,只能意味着 normalizer 的表新增了这里
+     没有分支的算子,那是我们自己两张表漂移,而对此**唯一不能给的答案就是悄悄放宽作者的
+     查询**。与 `convertFilter` 的 `default:` 分支在 #4128 做出的是同一个选择;刻意**不**用
+     `invalidFilterError` 的 400 信封 —— 这不是调用方形状的错误。
+
+  **该 throw 出口今天从公共入口不可达,这一点是测过的、也是刻意报告的**:把它改回
+  `return null`(保留第 1 项修改)只会让它自己那一条断言变红,枚举断言和回显对照表
+  全部保持绿色。它是一个漂移探针,不是行为修复 —— 行为修复是第 1 项。
+
+  新增 `objectql-echo-operator-coverage.test.ts`:issue 那张对照表按**行结果**钉住
+  (回显语句在同一份 fixture 上真的被执行,行 id 与查询实际返回的行 id 比对 —— 丢掉的
+  谓词藏不住,它返回的正是筛选器排除掉的行),再按 `filter.zod.ts` 的
+  `FILTER_OPERATORS` 枚举全部 15 个可编写算子,逐个断言回显渲染出谓词、且
+  placeholder 与 `params` 对齐。只断言 SQL 字符串会放过下一个未映射的算子 —— #4128 里
+  `$between` 就藏在 `$startsWith` 后面。
+
+- cfc293f: fix(service-analytics): 空 `$and` / `$or` 按布尔单位元归约,两个编译器与五后端对齐 (#5322)
+
+  同一个仓库对空组合子曾有两个对立答案:五个 `FILTER_LOGIC_CASES` 后端
+  (`driver-sql` #5134/PR #5243、`driver-memory`、`formula`、`driver-sqlite-wasm`、
+  `driver-mongodb` #5239)把 `{ $and: [] }` / `{ $or: [] }` 归约成布尔单位元,而
+  service-analytics 的两个编译器 —— `read-scope-sql.ts` 的 `compileNode` 与
+  `filter-normalizer.ts` 的 `buildNode` —— 成文地 fail-closed 抛错("An empty
+  combinator has no defensible reading…"),并有 pin 测试钉住。2026-08-04 维护者拍板
+  (#5322)取单位元,本次把两处对齐:
+
+  - `{ $and: [] }` = TRUE(全部行,AND 单位元);`{ $or: [] }` = FALSE(零行,OR
+    单位元)。嵌套可归约:空组合子作 `$or` 分支时按 TRUE 吸收/FALSE 退出析取,作
+    `$not` 操作数时取反(`{$not: {$and: []}}` = 零行、`{$not: {$or: []}}` = 全部
+    行)。`{}` = TRUE 与 `{ $not: {} }` = 零行两格已由 #5297(read-scope)/#5325
+    (normalizer)先行落地,本次连同这四格由同一张一致性表钉住。
+  - **迁移含义**:过去发出空组合子的调用方收到的是抛错(REST 面上是一次失败的请
+    求);现在按上表求值。`{ $or: [] }` 在 RLS/图表场景是 fail-closed 的 —— 析取列
+    表循环出零项时隐藏全部行,而不是放行全表。写作期对字面量空组合子的响亮拒收另立
+    #5330(publish/lint),不在运行期。
+  - **没有放宽的部分**:非数组的 `$and`/`$or`、非对象的分支、非对象的 `$not` 操作数
+    仍然抛错(#5325 的形状拒收原样保留)。归约让「无约束」成为有意义的裁决,静默把
+    畸形分支读成 TRUE 会让垃圾析取项吸收 `$or` 而放宽查询,所以畸形形状保持响亮。
+  - 归约与 #5146/#5325 的 NULL-safe `$not` 重写的组合语义是「先归约、后 NULL-safe」
+    —— 常量归约出的单位元不受重写影响,幸存的叶子照常加守卫,有测试钉住。
+  - `packages/spec`:`FILTER_LOGIC_CASES` 补四条布尔单位元行(空 `$and`、空 `$or`、
+    `{}` 析取项吸收、`{$not: {}}`),两个 analytics conformance suite 与五后端从此
+    被同一张表钉住这四格。
+
+- de70b42: analytics: `$ne` / `$nin` / `$notContains` in a dashboard `where` keep the rows that have no value
+
+  Second batch of the #5298 ruling, after PR #5962 landed it on `driver-sql`,
+  `read-scope-sql` and `formula`. An analytics filter meaning "not this" now
+  returns the rows whose column is empty, the same answer every other backend
+  gives — a `stage != 'won'` widget shows the deals with no stage set.
+
+  The Cube face was the last surface still splitting on it, and it split three
+  ways for one filter. Measured on the package's own fixture before the change,
+  for `{stage: {$ne: 'won'}}` with rows 3-4 carrying a NULL `stage`:
+
+  | compiler                            | was     | now     |
+  | ----------------------------------- | ------- | ------- |
+  | `NativeSQLStrategy` raw SQL         | `2`     | `2,3,4` |
+  | `ObjectQLStrategy` display-SQL echo | `2`     | `2,3,4` |
+  | `ObjectQLStrategy` engine condition | `2,3,4` | `2,3,4` |
+
+  The engine column was already right — because `driver-sql` guards for itself
+  since #5962, not because the analytics layer did — so which rows a widget drew
+  depended on which compiler downstream caught the leaf, and the `/analytics/sql`
+  echo described a narrower query than the one that ran.
+
+  `filter-normalizer` now emits the guard as tree STRUCTURE (an `or` of the null
+  predicate with the comparison) rather than as a SQL trick in one strategy, so
+  all three compilers of that tree produce one predicate and none of them needs
+  to know the rule. Which operators are guarded is decided by the polarity table
+  the `$not` rewrite already consults, not by a second list of operator names:
+  positive comparisons (`$eq`, `$in`, `$contains`, the ordering family) compile
+  byte-identically to before, `$ne: null` stays `IS NOT NULL`, an empty `$nin`
+  stays the TRUE constant, and `{$not: {stage: {$ne: 'won'}}}` still means
+  "stage is won" rather than widening.
+
+  `FILTER_LOGIC_CASES` is unchanged: the `$ne` and `$not` null rows enrol in
+  #5903's PR, which clears the last backend (`driver-turso` remote). The spec
+  table's measured blocker matrix drops the Cube row it no longer describes.
+
+- 2f6516e: fix(analytics,rest): an analytics filter refusal reaches the caller as `400 INVALID_FILTER`, not `500 ANALYTICS_QUERY_FAILED` (#5352)
+
+  Misspell an operator in a dashboard widget's filter and analytics refuses it —
+  correctly, and loudly, which is the posture #3948 / #5240 / #5325 / #5334 each
+  argued for one refusal at a time: dropping a predicate the compiler cannot
+  express does not narrow the query, it **widens** it to rows the author excluded,
+  and a chart drawn over the whole dataset looks like a working chart.
+
+  The refusal never reached the author. It landed as `500 ANALYTICS_QUERY_FAILED`
+  — read as "the platform is broken" rather than "your filter has a typo", and
+  counted by ops alerting as a 5xx. The identical mistake on `find()` has answered
+  `400 INVALID_FILTER` since #3948, so one authoring error had two wire shapes,
+  chosen by which face happened to catch it.
+
+  **One defect, two halves — either alone leaves it unfixed.**
+
+  - **Producer** (`filter-normalizer.ts`): seven of its nine refusals were bare
+    `throw new Error(…)` carrying no `code`/`status`. All nine now go through the
+    `invalidFilterError` helper #5334 introduced (`INVALID_FILTER` / 400), which
+    becomes the module's only way to refuse.
+  - **Consumer** (`rest-server.ts`, `POST /analytics/dataset/query`): the catch
+    discarded `error.code` / `error.status` and re-derived the classification from
+    a hardcoded list of message substrings — so a producer that took ADR-0112
+    seriously was punished for it. It now reads the envelope **first**; the
+    substring list is demoted to a fallback for the families that still carry no
+    envelope.
+
+  **Observable behaviour change — read this if you alert or retry on status.**
+  The same request that returned `500 ANALYTICS_QUERY_FAILED` now returns
+  `400 INVALID_FILTER` (and, for two neighbouring conditions whose producers
+  already declared an envelope this route was discarding, `400 INVALID_FIELD` for
+  a measure over a field the object does not have, `404 CUBE_NOT_FOUND` for an
+  unregistered cube). Monitoring that counted these as server faults will see the
+  5xx rate drop and a 4xx rate appear; a client that retries on 5xx will stop
+  retrying a request that could only ever fail the same way. Both are the intended
+  correction — the condition was always the caller's mistake — but they are
+  visible, so they are stated rather than buried.
+
+  **Which inputs are refused did not change.** This changes the SHAPE of the
+  error and nothing about the judgement that produced it: no refusal condition
+  was touched, no input that used to compile now refuses, and no input that used
+  to refuse now compiles. That claim is pinned input-by-input (refusals _and_
+  accepted inputs with their compiled trees) in
+  `filter-refusal-envelope.test.ts`, which is green both before and after the
+  change — only the envelope assertions move.
+
+  The message-substring list survives on purpose. All six of its entries were
+  re-verified as bare `Error`s (`dataset-compiler.ts`, `native-sql-strategy.ts`,
+  `dataset-executor.ts`, `read-scope-sql.ts`), so deleting it would regress those
+  families from `400 DATASET_INVALID` to 500. It is a placeholder for their
+  enveloping, not a second classification mechanism, and it is now documented as
+  such: a new refusal should carry a `code`/`status` and be served by the
+  envelope branch for free. The passthrough is deliberately **4xx-only** and
+  requires **both** `code` and `status`, so an internal fault can never be
+  re-labelled as the caller's fault, and this route never invents a code a
+  producer failed to supply.
+
+- e6b1bb0: fix(service-analytics): 过滤值不再被降级成字符串 —— `{code: {$eq: '007'}}` / `'null'` / `'true'` 按作者写的字面值绑定 (#5526)
+
+  analytics 的 `filter-normalizer` 内部把每个比较数(comparand)压成 `values: string[]`
+  再由消费方**猜**回类型:出口是 `stringifyForCube`,入口是 `recoverNumber` 与
+  `coerceFilterValueForSql` / `coerceFilterValueForObjectQL`。字母表是"全体字符串"、
+  解码规则是"这串看起来像不像数字/布尔/null"的编码没有任何转义机制,于是作者写的字符串
+  和编码器为其他类型写下的 token 撞车。`{code: {$eq: v}}` 在 `main` 上实测:
+
+  | 作者的 `v` | SQL 绑定          | 引擎绑定          |
+  | ---------- | ----------------- | ----------------- |
+  | `'007'`    | `7`(#5528 已修)   | `7`(#5528 已修)   |
+  | `'1.50'`   | `1.5`(#5528 已修) | `1.5`(#5528 已修) |
+  | `'null'`   | 真 NULL           | 真 `null`         |
+  | `'true'`   | `1`               | `true`            |
+
+  每一行都是一个缺陷:存着作者那种写法的 TEXT 列不再匹配。`'007'` 在 SQLite 上是
+  整数与 TEXT 列的跨类型比较、恒不相等,在 Postgres 上 `text = integer` 直接报类型错;
+  `'null'` 那一行比"空"更糟 —— 与真 NULL 的比较对任何行都是 UNKNOWN,图表永远画不出东西。
+  零填充串、当枚举码用的 `'true'`/`'false'`、当字面标签用的 `'null'` 都是真实业务形状
+  (订单号、SKU、邮编、国际长途区号)。
+
+  **修法**:`NormalizedFilterNode` 的 leaf `values` 由 `string[]` 改为 `unknown[]`,
+  作者写的值原样穿过整棵树,不再有任何东西去解码它。仅在边界真正要求时才转换:
+
+  - `toSqlBindValue`(唯一留下的转换,且是**单向**的:值 → 它的 SQL 绑定形态,不是解码器)
+    ——只处理驱动绑不了的 JS 类型:`boolean` → `1`/`0`(better-sqlite3 拒绝 JS 布尔)、
+    `Date` → ISO 文本、其他对象 → JSON 文本。它不检查任何字符串。
+  - LIKE 族的比较数被 `filter.zod.ts` 声明为 `z.string()`,所以在发射点字符串化 ——
+    与 `driver-sql` 的 `applyLike` 同一个 `String(value)`,两个面上 `$contains` 仍是一件事。
+
+  ObjectQL 引擎路径现在不需要任何转换:引擎按**存储**的运行时类型比较,而它拿到的就是
+  作者写的值。`stringifyForCube` / `recoverNumber` / `coerceFilterValueForSql` /
+  `coerceFilterValueForObjectQL` 一并删除。
+
+  两处读法作为直接后果改变了,方向都是 fail-closed:
+
+  - `{name: {$contains: null}}` 原先编译成 `LIKE '%%'` —— 匹配**每一个**非 NULL 行,
+    因为 `stringifyForCube(null)` 是 `''`;现在是 `LIKE '%null%'`,与 `driver-sql`
+    一直以来的编译结果一致。
+  - `{amount: {$gt: null}}` 原先编译成 `amount > ''`(一次针对空字符串的真实比较);
+    现在绑定 NULL,谓词为 UNKNOWN、图表画不出行 —— 无序比较数的诚实答案,也是
+    `driver-memory` / `formula` 给出的答案。(#5332 明确指出这个比较数位置没有任何裁决
+    覆盖、`''` 只是占位符;删掉编码器就按构造把它定了。)
+
+  `timeDimensions[].dateRange` 的两个边界现在按 spec 声明的类型(`string[]`)原样传递:
+  原先它们也过 `coerceFilterValueForObjectQL`,其文档宣称"epoch-ms 边界会还原成数字"——
+  那是消费方在宽容地兜一个契约并未声明的形状,和把 `'007'` 读成 `7` 是同一个猜测
+  (Prime Directive #12:epoch-ms 窗口要么在生产者、要么在 spec 里声明,不在这里猜)。
+
+  `{stage: null}` / `{$eq: null}` / `{$ne: null}` / `{$null:}` / `{$exists:}` 的空值
+  谓词语义(#5332 / #5525)不变:真 `null` 比较数编译成 `notSet` / `set`,从不进入
+  `values`。#5567 的 LIKE 转义契约不变。
+
+- a7b854f: fix(service-analytics): the three SQL compilers compare LIKE values literally (#5567)
+
+  `$contains` / `$notContains` / `$startsWith` / `$endsWith` build a `LIKE` pattern
+  around the comparand the author wrote. All three of this package's SQL compilers
+  concatenated that comparand straight into a wildcard position — no escaping, no
+  `ESCAPE` clause — so `_` (LIKE's single-character wildcard) and `%` (its
+  multi-character one) stopped being literals. Measured on real SQLite, over the
+  rows `x_admin` / `xyadmin` / `off 50% now` / `off 5012 now`:
+
+  | `where`                         | returned    | correct |
+  | ------------------------------- | ----------- | ------- |
+  | `{name: {$contains: '_admin'}}` | `['1','2']` | `['1']` |
+  | `{name: {$contains: '50%'}}`    | `['3','4']` | `['3']` |
+  | `{name: {$startsWith: 'x_'}}`   | `['1','2']` | `['1']` |
+  | `{name: {$endsWith: '0% now'}}` | `['3','4']` | `['3']` |
+
+  Every row is a **widening** — rows the author excluded came back — and
+  `$notContains` is the mirror image, excluding rows the author kept. One of the
+  three call sites is the ADR-0021 D-C read-scope (tenant + RLS) lowering, where a
+  wider predicate is over-reach rather than a loose filter (the #5347 / #5324
+  ruling on that same file). Prime Directive #3 forces machine names to
+  `snake_case`, so essentially every machine-name comparand carries a `_` and hit
+  this silently.
+
+  All three compilers now escape the comparand and bind an explicit
+  `ESCAPE` argument, matching what `driver-sql`'s `applyLike` has always done — so
+  the same filter selects the same rows whichever strategy answers, and the
+  `/analytics/sql` echo describes the statement that ran instead of a wider one.
+
+  **No authoring change.** A comparand with no `_`, `%` or `\` binds exactly the
+  pattern it bound before; only its meaning when it _does_ carry one changes, from
+  wildcard to literal. If you were relying on a comparand acting as a wildcard,
+  that was never a declared capability of these operators — the spec describes them
+  as substring / prefix / suffix matches — and `driver-sql` already read it
+  literally, so the reading you got depended on which strategy served the query.
+
+- f56ebea: fix(service-analytics): a `null` comparand in an analytics `where` is a null predicate, not `= ''` (#5332)
+
+  `{stage: null}` compiled to `stage IS NULL`, while `{stage: {$eq: null}}` — the
+  same predicate — compiled to `stage = $1` binding the empty **string**. One
+  meaning had two answers inside one file: the bare-`null` spelling took
+  `fieldLeaves`' `raw === null` branch, the operator spelling fell through to the
+  `MONGO_TO_CUBE_OP` map, and `stringifyForCube(null)` handed it `''`.
+
+  Measured before the fix, on cube `deals` / column `stage`:
+
+  | `where`                  | WHERE           | bindings |
+  | ------------------------ | --------------- | -------- |
+  | `{stage: null}`          | `stage IS NULL` | `[]`     |
+  | `{stage: {$eq: null}}`   | `stage = $1`    | `['']`   |
+  | `{stage: {$ne: null}}`   | `stage != $1`   | `['']`   |
+  | `{stage: {$null: true}}` | `stage IS NULL` | `[]`     |
+
+  The failure was **silent, not loud**: an "is empty" dashboard widget drew zero
+  rows — never an error — because a real value can never equal a NULL column, and
+  the author saw "no data" rather than anything to debug. On a text column the
+  `$ne` direction was worse than empty: in SQLite / MySQL `''` is a value rows
+  genuinely store, so "stage is not empty" compiled to `stage != ''` and excluded
+  exactly the rows it was asked to keep, while "stage is empty" returned the one
+  row that is emphatically not null.
+
+  `$eq: null` and `$null: true` are not near-synonyms to be reconciled by taste —
+  `driver-mongodb`'s translator **rewrites** the latter into the former, so they
+  are one predicate in the contract, and `read-scope-sql.ts` (this package's other
+  SQL compiler), `driver-sql`, `driver-memory` and `formula` all compile them
+  alike. This module was the one dissenting half of one package; `fieldLeaves` now
+  emits the same `notSet` / `set` leaves for all three spellings, so both
+  strategies, the ObjectQL engine filter and the `/analytics/sql` display echo
+  follow with no new cases.
+
+  The #5146 NULL-safe `$not` guard table moved in the **same** commit, because it
+  describes this file's emitter rather than a sibling's: while `$eq: null` was a
+  value comparison the guard correctly classified it as one, and left alone it
+  would have wrapped `stage IS NOT NULL AND stage IS NULL` — an always-false
+  conjunction — and negated it to **every** row for a filter meaning "stage is not
+  empty". `nullValueSatisfiesOperator` and `operatorIsNullTotal` now carry the
+  `value === null` arms their `read-scope-sql` counterparts have, and
+  `{$not: {stage: {$eq: null}}}` returns the rows the other three backends already
+  return for it.
+
+  Scoped deliberately to the two spellings `filter.zod.ts` gives a null _meaning_.
+  `stringifyForCube`'s `v == null` arm is untouched: it still serves comparand
+  positions no ruling covers (`$gt: null`, `$in: [null]`), where `''` is a
+  placeholder rather than an answer. An empty-string comparand also stays a value
+  comparison — `{stage: {$eq: ''}}` still binds `''` — since reading `''` as null
+  would be the same defect with its sign flipped.
+
+  Authoring is unchanged; only the compiled predicate is. A widget that worked
+  around the old behaviour by filtering on the literal empty string (`{$eq: ''}`)
+  keeps working and still means the empty string; one that wrote `{$eq: null}` and
+  saw nothing now gets its rows.
+
+- f522e95: fix(service-analytics): the dataset raw-SQL bridge routes by object, so datasets over non-default datasources stop reading `0` (#5033)
+
+  `AnalyticsServicePlugin`'s `executeRawSql` auto-bridge received the object name
+  and threw it away: `engine.execute(knexSql, { args: params })`. `ObjectQL.execute()`
+  picks its driver in the order `options.object` → `getDriver(object)`, then
+  `options.datasource`, then the default driver — so rule 1 could never fire and
+  **every dataset raw-SQL read landed on the default datasource**. Any object routed
+  elsewhere (the ADR-0057 §3.6 telemetry split for `lifecycle.class ∈ {audit,
+telemetry, event}`, an explicit `object.datasource`, a `datasourceMapping` rule)
+  raised `no such table`, which the widget-level graceful degradation then turned
+  into an empty result — a confident `0` over live rows, on a green dashboard.
+  Measured: `sys_audit_log` returned 49 records through the object-routed read and
+  `{"rows":[]}` through the dataset raw-SQL read, on the same running kernel.
+
+  The bridge now passes `{ args: params, object: objectName }`, matching the
+  `executeAggregate` bridge beside it (`engine.aggregate(objectName, …)`), so both
+  dataset execution paths give **one** answer to "which datasource is this object in".
+  No configuration change is needed; misrouted dashboards start reading real data.
+
+  **Behaviour change worth knowing about.** A dataset whose SQL `LEFT JOIN`s (what
+  `NativeSQLStrategy` emits for a dotted dimension such as `account.industry`) across
+  two datasources previously ran against the default datasource and silently read the
+  wrong database. It now runs on the base object's own datasource, where the joined
+  table genuinely is not — and **fails loudly** instead of degrading, because the base
+  table resolved fine and reporting it as "unavailable" would keep the confident `0`
+  alive under a new cause. The error names the actual cause and the remedy:
+
+  ```
+  [Analytics] dataset "audit_by_actor" cannot be executed as one statement:
+  table "account" is not on datasource "telemetry", which is where its base object
+  "sys_audit_log" lives — "account" is registered on the default datasource.
+  A dataset JOIN cannot cross datasources. Fix it by binding both objects to the
+  same datasource, or by dropping the cross-datasource relationship from the
+  dataset's `include`/dimensions.
+  ```
+
+  Graceful degradation is unchanged for genuine absence: a dataset whose own backing
+  object (or a joined object that this kernel never registered) has no table still
+  renders as "no data" with the existing server-side `warn`, rather than failing the
+  widget. `AnalyticsServiceConfig` gains one optional, diagnostics-only hook —
+  `getObjectDatasource(objectName)` — used solely to name the datasources in that
+  message; it never selects a driver.
+
+- fb3d99b: fix(analytics,rest)!: an RLS read-scope lowering failure is a `500`, not the caller's `400` — and its policy detail no longer reaches the response (#5367)
+
+  **Observable behaviour change — read this if you alert, retry, or assert on status.**
+  A request whose dataset carries an RLS read scope that `read-scope-sql.ts` cannot
+  lower used to answer `400 DATASET_INVALID` with the refusal message echoed
+  verbatim. It now answers `500 ANALYTICS_QUERY_FAILED` with the message withheld
+  (`"Internal server error"`); the full text goes to the server log. Monitoring that
+  counted these as client errors will see a 4xx disappear and a 5xx appear, and a
+  client retrying on 5xx will now retry a request that cannot succeed until an
+  administrator fixes the policy. Both follow from the correction below and are
+  stated rather than buried.
+
+  ## What was wrong
+
+  These ten fail-closed refusals were the last family `/analytics/dataset/query`
+  classified by **prose** — the final entry of the hardcoded message-substring list
+  #5352 introduced, which #5367's first PR had already shrunk from six entries to
+  one. Two defects in one verdict:
+
+  - **Misattribution.** `compileScopedFilterToSql(filter, alias)` receives an RLS
+    `FilterCondition` the security service compiled from an **administrator's**
+    sharing rule / permission set, and a join alias the **dataset compiler**
+    generated. Neither is caller input — the caller's own predicate goes through
+    `filter-normalizer.ts` and has answered `INVALID_FILTER` / 400 since #5352. So
+    what can arrive here is a broken policy, or drift between two of our own
+    components (#5557's `$regex` was literally the second case). For this request's
+    caller both are a **server** fault; `400` told them to fix a request that was
+    never wrong and kept the real fault out of 5xx alerting.
+  - **Disclosure.** A 400 echoed the message, so
+    `unsafe field identifier "secret_policy_field"` and
+    `unsupported operator "$regex" on "owner_email"` handed a tenant the field names
+    and comparands of the RLS policy governing them.
+
+  The maintainer ruled on 2026-08-06 (option B on #5367's decision card; option A
+  was `READ_SCOPE_INVALID` / 422, rejected because no consumer reads a code on this
+  path, a 4xx misreports a condition the client cannot fix, and 422 would have left
+  the disclosure question to be re-decided message by message).
+
+  ## What changed
+
+  - `read-scope-sql.ts` gains a module-local `readScopeCompileError` — the twin of
+    `filter-normalizer.ts`'s `invalidFilterError`, and likewise **the only way the
+    module refuses**. All ten sites carry `READ_SCOPE_COMPILE_FAILED` / **500**.
+    `:104`'s alias-vs-field split (option C on the card) collapses under B: both
+    branches answer the same verdict, pinned so the collapse is a recorded decision.
+  - `rest-server.ts` loses branch ② entirely. **The message-sniffing mechanism is
+    fully retired** — nothing in this catch reads prose any more, and #5367's
+    Prime-Directive-#12 retirement schedule ("declared, loud, tested AND removable
+    on a schedule") is paid off.
+  - The route's 5xx branch now withholds the message of any producer that
+    **declares** a server fault (`status >= 500` with a `code`). This was needed
+    rather than inherited: `looksLikeInternalErrorLeak` (#3867/#5520) is a heuristic
+    over SQL/driver _phrasing_, and measured, every read-scope message returns
+    `false` from it — so retiring the list alone would have moved the policy content
+    from a 400 body into a 500 body instead of out of the response. Teaching that
+    heuristic to recognise `[read-scope-sql]` would have been _more_ message
+    sniffing, so the rule keys on the ADR-0112 envelope instead. **Undeclared** 5xx
+    errors keep #5667's tiering, so a self-authored fault ("no strategy can handle
+    query …") stays readable.
+  - `READ_SCOPE_COMPILE_FAILED` is registered in `ERROR_CODE_LEDGER` under
+    `@objectstack/service-analytics` (ADR-0112 D3) and typed as
+    `RegisteredErrorCode` at the constructor, so an unregistered code is a compile
+    error. It is legible on the wire through the sibling `/analytics/query` exit,
+    which puts a thrown `err.code` in `error.details.code` (#3842).
+
+  **Which inputs are refused did not change.** No refusal condition moved: nothing
+  that used to lower now throws, and nothing that used to throw now lowers. That is
+  pinned input-by-input — refusals _and_ accepted read scopes with their compiled
+  SQL and bind params — in `read-scope-refusal-envelope.test.ts`, which is green both
+  before and after; only the envelope assertions move.
+
+  Coverage: `read-scope-refusal-envelope.test.ts` (service-analytics) drives all ten
+  sites through the real compiler; `analytics-read-scope-refusal-envelope.test.ts`
+  (rest) drives five policy shapes end-to-end through a real `AnalyticsService`,
+  asserting the 500, that the body contains no policy detail, and that the withheld
+  text is present in the log — plus a positive control and both sides of the
+  declared-vs-undeclared withhold.
+
+- 628b028: fix(service-analytics): thirteen caller-shaped analytics refusals answer 4xx from their own envelope instead of `500` (#5716)
+
+  **Observable behaviour change — read this if you alert, retry, or assert on status.**
+  Thirteen refusal conditions in `service-analytics` (twelve `throw` sites — the
+  cross-object measure and filter share one) used to reach the caller as
+  `500 {"code":"ANALYTICS_QUERY_FAILED"}` on `POST /analytics/dataset/query`, and as
+  `500 {"code":"INTERNAL_ERROR"}` on `POST /analytics/query`. They now answer **400** —
+  `DATASET_INVALID` for the seven that are a verdict about the dataset or the whole
+  selection, `INVALID_FIELD` for the six that name one member of the request:
+
+  | refusal                                                          | now                     |
+  | ---------------------------------------------------------------- | ----------------------- |
+  | dataset JOIN crosses datasources (#5115)                         | `DATASET_INVALID` / 400 |
+  | `include` names a relationship the object does not have          | `DATASET_INVALID` / 400 |
+  | `include` path past the 3-hop limit                              | `DATASET_INVALID` / 400 |
+  | a `dateRange` bound that is not a date                           | `DATASET_INVALID` / 400 |
+  | `compareTo` names a timeDimension with no `dateRange`            | `DATASET_INVALID` / 400 |
+  | `compareTo` with no dated window to shift                        | `DATASET_INVALID` / 400 |
+  | `compareTo` ambiguous between two dated windows                  | `DATASET_INVALID` / 400 |
+  | cube declares no such measure (#4157)                            | `INVALID_FIELD` / 400   |
+  | ObjectQL: cross-object time-dimension bucket                     | `INVALID_FIELD` / 400   |
+  | ObjectQL: cross-object measure                                   | `INVALID_FIELD` / 400   |
+  | ObjectQL: cross-object filter                                    | `INVALID_FIELD` / 400   |
+  | ObjectQL: multi-hop cross-object dimension                       | `INVALID_FIELD` / 400   |
+  | ObjectQL: non-recombinable measure over a cross-object dimension | `INVALID_FIELD` / 400   |
+
+  Monitoring that counted these as server errors will see a 5xx disappear and a 4xx
+  appear, and a client retrying on 5xx will stop retrying a request that cannot
+  succeed until the request or the dataset changes. **No refusal condition moved and
+  no message was reworded** — the same inputs are refused, in the same words; only
+  the envelope is new. (The messages are load-bearing beyond readability: #5923's
+  tests assert the `planCrossObject` wording, and #5717 tracks one compiler message
+  for colliding with a downstream sniffer.)
+
+  ## What was wrong
+
+  #5352 gave the dataset route a list of message SUBSTRINGS so six refusal families
+  could answer 400, and #5367 retired five of those entries by giving their
+  producers an ADR-0112 envelope. Both rounds worked from that list — and the list
+  was only ever the refusals someone had already hit. Reading every `throw` in the
+  package afterwards found thirteen more of exactly the same kind, which had never
+  been on it: a typo in `compareTo`, a `dateRange` the dashboard sent, a dataset
+  whose `include` names a relationship that does not exist. Each answered "the
+  platform is broken" for a mistake the caller or the author could fix, on both
+  analytics faces.
+
+  **Both faces move, measured.** `/analytics/dataset/query` reads the envelope in
+  its catch (#5352); `/analytics/query` exits through
+  `dispatcher-plugin.errorResponseBase`, which already adopts a thrown `status` and
+  carries the `code` (#3867/#3842) — so the cross-object refusals go from
+  `500 INTERNAL_ERROR` to `400 INVALID_FIELD` there as well, without touching that
+  route. The open question #5811 tracks on that face is about _withholding the
+  message of a declared 5xx_, which none of these are.
+
+  ## Why two codes
+
+  `dataset-refusal.ts` gains a second constructor, `invalidMemberError`
+  (`INVALID_FIELD` / 400 + `member`/`param`/`cube`), beside `datasetInvalidError`.
+  The split is by what the refusal is a verdict ABOUT: the dataset/selection as a
+  whole, or one member the request named. The member family is `INVALID_FIELD`
+  because the three shipped analytics gates already answer exactly that for the
+  NEIGHBOURING member-level mistakes on the same request keys — `measures` (#4437),
+  `dimensions`/`timeDimensions` (#5520), `where` (#5669) — so one class of mistake
+  keeps one wire shape; and because these six fire on `/analytics/query` too, where
+  there is no dataset for `DATASET_INVALID` to be about. No new code is registered:
+  both are already in the ADR-0112 vocabulary.
+
+  ## What deliberately did NOT change
+
+  `native-sql-strategy`'s "measure … has unrecognised type" stays a bare `Error`
+  (an undeclared 500) although #5716 listed it as author-shaped. Measured:
+  `Metric.type` is the closed `AggregationMetricType` enum, `metric-type-coverage.test.ts`
+  pins that the strategy handles every member of it, the dataset compiler writes
+  only `SUPPORTED_AGGREGATES` into a cube, and `inferMeasure` mints six known types
+  — so no spec-valid cube can reach it. An arrival is our own drift or a host
+  registering an unparsed cube, and blaming the caller would hide a platform fault
+  from 5xx alerting. The two "Cube not found" guards and the two operator-drift
+  throws stay bare for the same reason.
+
+  Coverage: `unlisted-refusal-envelope.test.ts` (service-analytics) drives all
+  thirteen refusals through the real producers — one block pinning that the refusal
+  SET and its wording are unchanged, one pinning the envelope, one pinning the
+  verdicts that stay 500; `analytics-dataset-unlisted-refusal-envelope.test.ts`
+  (rest) drives eleven of them end-to-end through the route with a real
+  `AnalyticsService`, plus three positive controls and the two sites that route
+  cannot reach (with the measurement that explains why).
+
+- b857356: fix(service-analytics): a `where` written as a `FilterArray` is lowered instead of silently dropped (#5334)
+
+  **Observable behaviour change.** An analytics query whose `where` arrived as an
+  ARRAY had its filter **deleted**: `normalizeAnalyticsFilterTree` answered every
+  array with `return null`, so no predicate was compiled, no error was raised, and
+  the widget charted the **entire dataset**. The compiled SQL stayed perfectly
+  valid — just broader than the author asked for — which is why it was invisible
+  to every test that asserts a SQL string. The issue's own measurement:
+  `generateSql({cube:'deals', measures:['total'], dimensions:['id'], where:
+[['stage','=','won']]})` emitted `SELECT id AS "id", COUNT(*) AS "total" FROM
+"deal" GROUP BY id` with an empty `params`. It now emits the bound `WHERE` and
+  returns the two won deals.
+
+  `FilterArray` (`['stage','=','won']`, `['and', […], […]]`, `[[…], […]]`) is
+  INPUT-ONLY authoring sugar (#5285), and #5158's ruling C says every door into
+  the runtime lowers it through the single `parseFilterAST` sink before anything
+  downstream sees a filter. #5329 closed ObjectQL's six entry points that way and
+  deleted the four drivers' private array dialects. Analytics is the **fifth
+  door**: it compiles `where` itself — to SQL (`NativeSQLStrategy`) or to a
+  `FilterCondition` for the engine (`ObjectQLStrategy`) — so nothing upstream
+  lowers for it. It now gives the same three answers the engine door gives:
+
+  - `[]` — "no filter", not a failed filter: no predicate, no error (unchanged).
+  - A well-formed `FilterArray` — **lowered** through `parseFilterAST`, so both
+    spellings of one filter select the same rows on both strategies.
+  - Any other non-empty array — **refused** with `INVALID_FILTER` / 400
+    (ADR-0112), the envelope the drivers' `filterArrayReachedDriverError` uses.
+    This is where the undeclared INFIX form (`[condA, 'or', condB]`) lands, and
+    where a list of `FilterCondition` objects (`[{stage:'won'}]`) lands — neither
+    is a `FilterArray`, `parseFilterAST` has no lowering for either, and dropping
+    them is what returned the unfiltered dataset.
+
+  Lowering rather than refusing keeps one dashboard's metadata meaning one thing:
+  the same `where` on a plain `find()` already lowers at the engine door, so
+  refusing it here would have forked the product by which face read the metadata.
+
+- fce4c73: fix(service-analytics): an analytics `where` over a missing field answers 400 INVALID_FIELD, not a driver 500 (#5669)
+
+  `ensureCube` carried two source-field gates — `assertMeasureFields` (#4437,
+  `param: 'measures'`) and `assertDimensionFields` (#5520,
+  `param: 'dimensions' | 'timeDimensions'`) — and none for the filter face, the
+  request key most likely to carry a hand-typed field name. A `where` naming a
+  field the object does not have compiled straight into the statement and came
+  back as a driver error with no envelope:
+
+  ```
+  POST /analytics/query {"cube":"crm_account","measures":["count"],"where":{"bogus_col":"x"}}
+  → SELECT COUNT(*) AS "count" FROM "crm_account" WHERE bogus_col = $1
+  → 500 {"code":"SQLITE_ERROR","message":"Internal server error"}
+
+  # the control group on the same route, already fixed by #4437 / #5520
+  POST /analytics/query {"cube":"crm_account","measures":["count"],"dimensions":["bogus_dim"]}
+  → 400 {"code":"INVALID_FIELD","message":"Dimension 'bogus_dim' … "}
+  ```
+
+  A driver error class as the caller's `error.code` for a caller-shaped mistake is
+  the ADR-0112 fault #4437 was filed about; the `/data` route has answered the same
+  typo with a field-naming 400 since #4315/#4254.
+
+  **The gate.** `ensureCube` now runs `assertWhereFields` after the other two on
+  every path, so a filter whose source column the backing object does not have is
+  refused **before** any SQL is built, with the same envelope its two siblings
+  use: `INVALID_FIELD` / 400 plus `field` / `object` / `param: 'where'`, and a
+  message naming the field, the valid filter members and the object's known field
+  list. `query`, `generateSql` and `queryDataset` (both `runtimeFilter` and a
+  dataset's own declared `filter`) are covered, and a rejected query leaves
+  nothing behind in the cube registry. `/analytics/dataset/query` needed no
+  change: #5352's envelope branch already carries a coded 4xx through, which the
+  new REST-face test pins end to end.
+
+  **Field names come from the SQL producer's own reader.** The members are
+  collected through `normalizeAnalyticsFilterTree` + `collectFilterLeaves` — the
+  same pair both strategies call to build the predicate — rather than by walking
+  the raw `where` object. So `$and`/`$or`/`$not` nesting, `$`-prefixed operator
+  keys, `$between` lowering, the `{owner: {region: 'NA'}}` → `owner.region`
+  flattening and the #5334 array spelling are all read exactly as they will be
+  compiled, in one place, instead of in a second walker that could drift from it.
+
+  **What deliberately did not change:**
+
+  - Filtering on a REAL field the cube never declared (`where: {phone: '555'}`)
+    still works — the gate asks "does the _object_ have this field", never "did the
+    cube declare it".
+  - A filter member resolves through `cube.dimensions` **and** `cube.measures`,
+    which is what the strategies do: a cube declaring
+    `measures.revenue = {sql: 'annual_revenue'}` still answers
+    `where: {revenue: {$gt: 100}}` as `annual_revenue > ?`.
+  - A declared member is followed to its real column, so a dimension `assessed`
+    over column `assessed_at` is not judged by its own name.
+  - `id` / `created_at` / `updated_at` stay admitted unconditionally, matching the
+    data path's `resolveQueryFields`.
+  - An expression `sql` (on the cube or on a member), a dotted relation traversal,
+    and a host that wires no field-name probe are all stood down on, exactly as the
+    measure and dimension gates stand down.
+  - The `INVALID_FILTER` family is untouched. A `where` the normalizer refuses
+    outright — an unknown operator, a zero-operator field constraint, an
+    unlowerable filter array — is _not_ judged here: the gate stands down and the
+    refusal stays where it already happens (#5352 / #5367's geography). A field
+    gate that cannot read the tree has nothing to say about it, and pulling those
+    refusals forward would also have newly refused them on the draft-preview path,
+    whose matcher never consults the normalizer.
+
+- f6385c7: fix(service-analytics): a `timeDimensions` entry used only as a date WINDOW no longer buckets the grid (#5688)
+
+  **Observable behaviour change — read this if you render, page, or assert on
+  dataset responses.** A selection that used a date dimension only as a window —
+  `timeDimensions: [{ dimension, dateRange }]` with no `granularity`, and the
+  dimension NOT listed in `selection.dimensions` — used to have the dataset
+  dimension's declared `dateGranularity` filled in anyway. That made the entry a
+  `GROUP BY` item, so the response grew a time column nobody selected and every
+  row split per bucket. "Count by Owner" plus a dashboard date-range filter came
+  back as "by Owner × month":
+
+  ```
+  before  fields  [owner, close_date, opp_count]
+          rows    [{owner:'u1', close_date:'2026-01', opp_count:1},
+                   {owner:'u1', close_date:'2026-02', opp_count:1},
+                   {owner:'u2', close_date:'2026-01', opp_count:1}]
+
+  after   fields  [owner, opp_count]
+          rows    [{owner:'u1', opp_count:2},
+                   {owner:'u2', opp_count:1}]
+  ```
+
+  Both the **row count and the column set** change for such a selection: the extra
+  month column disappears and rows that were split per bucket collapse back into
+  one row per selected dimension tuple. A KPI single-value card that was reading
+  the first of several month rows now reads the only row. Consumers that pinned
+  the previous shape (a snapshot of `fields`, a row count, a hard-coded column
+  index) need updating; consumers that render the response's own `fields` do not.
+
+  Three conditions had to hold together to be affected, so a selection outside
+  them is byte-identical: the dataset dimension declares an explicit
+  `dateGranularity`, the `timeDimensions` entry states no `granularity`, and
+  `selection.dateGranularity` is unset.
+
+  **What still buckets, unchanged.** An entry is bucketed when the request says
+  that date is being bucketed: the dimension is one of the selection's own
+  `dimensions`, the entry carries its own `granularity` (#4033 — still projected
+  as a column even when not selected), or `selection.dateGranularity` is set. The
+  granularity _precedence_ chain is untouched. A dataset dimension's
+  `dateGranularity` says how that date renders **when** grouped — it is no longer
+  read as a request to group by it.
+
+  **`compareTo` alignment (#3588/#4870) holds by construction.** The comparison
+  pass re-enters the same query builder with the same grid dimensions, differing
+  only in the shifted `dateRange`, so both passes bucket an entry alike or not at
+  all — never one of each, which was the state that left every `__compare` column
+  empty. For a window-only anchor this **repairs** the comparison rather than
+  preserving it: the merge has always keyed on `selection.dimensions` alone, so
+  the backfilled bucket column sat outside the merge key, and with several
+  month-split rows per group the comparison value landed on whichever row the
+  index held last while the others read a confident `0`.
+
+  Also fixed, same root cause: a time column that IS projected via
+  `timeDimensions` (an entry carrying its own `granularity`, never listed under
+  `dimensions`) now carries its dataset `label` in `fields` instead of a bare
+  `type` — the label enrichment walked `selection.dimensions` only.
+
+- 8dbd2a8: fix(service-analytics): dataset 响应的 `fields` 在「度量全部自带 filter」的路径上也描述维度列 (#5537)
+
+  一个 dataset 查询,只要它的**基础度量全部带有自身的 `filter`**(或它选中的 derived
+  度量的依赖全部如此),响应里的 `fields` 就只剩度量列,被选中的维度**完全没有描述符**。
+  维度值一直都在 `rows` 里(它就是合并键),但读取列元数据的消费者拿不到维度列的
+  `label` 与 `type`,只能退回去 humanize 原始行键。
+
+  HotCRM「Sales Performance」上肉眼可见:同一个声明了 `label: 'Owner'` 的 `owner` 维度,
+  "Open Pipeline by Owner"(度量无 filter)表头是 `Owner`,而 "Win / Loss by Rep"
+  (`won_count`/`lost_count` 各带 filter、`win_rate` 是 ratio)表头是小写 `owner`。
+  换成字符串维度 `lead_source` 看起来正常纯属巧合 —— humanize 后恰好等于真 label;
+  两种维度的描述符其实都丢了。
+
+  根因在网格装配处,不在渲染端:`DatasetExecutor.runMeasurePass` 只有在存在**无 filter**
+  度量时才发那条主查询;当每个基础度量都自带 filter 时,它从 `{ rows: [], fields: [] }`
+  起步,而随后每个补充子查询只追加一个**度量**描述符。现在这种情况下,维度描述符取自
+  **第一个补充子查询自己的结果** —— 它 group by 的维度与整个网格完全一致 —— 因此两条路径
+  的 `fields` 形状(维度在前、顺序、`type`)按构造收敛,而不是靠 executor 再抄一份
+  「哪些维度被投影」的规则(该规则的单一事实源在各 strategy 的 `buildFieldMeta`,#4033)。
+
+  `compareTo`、`totals` 与 derived 度量都经由同一条 pass,所以一并修好。
+
+  已知的相邻缺口**不在**本次修复范围,单独立了 #5688:一个只带 `dateRange` 的
+  `timeDimensions` 条目会被补上 dataset 的默认粒度,于是「窗口」变成第二层 GROUP BY,
+  网格被按月拆分、并多出一个没人选过的时间列(该列在 `fields` 里也拿不到 `label`)。
+  它在两条路径上表现一致(本次修复前后皆然),且修它会改变响应形状,故不搭车。
+
+- 88a6bed: fix(service-analytics): an ad-hoc cube's dimensions no longer depend on how the `where` was spelled (#5353)
+
+  `inferCubeFromQuery` mints a Cube for a free-form analytics query that names no
+  registered cube, seeding `dimensions` from the fields the query mentions — its
+  `measures`, `dimensions`, `timeDimensions`, and its `where`. The `where` arm was
+  guarded by `!Array.isArray(query.where)`, written when an array `where` was not a
+  filter. #5334 made it one, so from then on one filter minted two different cubes
+  depending on its spelling:
+
+  ```
+  where: {stage: 'won'}          → dimensions: {stage}   ← seeded
+  where: [['stage','=','won']]   → dimensions: {}        ← skipped
+  ```
+
+  The `where` is now LOWERED to its canonical `FilterCondition` before its keys are
+  read, so the spelling stops mattering. The lowering is the same one the
+  strategies already use (#5334's `parseFilterAST` call, extracted from
+  `normalizeAnalyticsFilterTree` as `lowerAnalyticsWhere` so there is still exactly
+  one of it), and the keys are read through `conjunctFieldKeys`, which descends
+  `$and` — necessarily, because the lowering itself introduces `$and` where the
+  object spelling has none: `[[a,…],[b,…]]` lowers to `{$and: [{a…},{b…}]}`. As a
+  result an explicit `{$and: […]}` object `where` now also seeds its conjuncts'
+  keys, which it never did.
+
+  `$or` / `$not` are not descended, and contribute no key on either spelling, as
+  before.
+
+  **No compiled statement, bound value or gate verdict changes.** Both spellings
+  already compiled a byte-identical predicate (which is why this shipped as an
+  observation rather than a defect): `resolveFieldSql` falls back to the bare
+  column name for an undeclared member, and `qualifyAndRegisterJoin` leaves bare
+  columns bare on a cube with no `joins` — which an inferred cube never has. So the
+  newly-declared dimensions move those members from the undeclared branch to the
+  declared one and both yield the same column. What does change is the suggestion
+  list in a rejection: `Valid filter members:` / `Valid dimensions:` now read the
+  same for both spellings of one filter, and `getMeta` reports the same dimension
+  vocabulary for both.
+
+  **Still spelling-dependent: a DOTTED `where` key.** `{'owner.region': 'NA'}`
+  seeds the stripped tail `region` as a base-table dimension; the array spelling
+  `[['owner.region','=','NA']]` seeds nothing and compiles the relation traversal.
+  Unifying them is #5739's call, not this change's — propagating the mint to the
+  array spelling turns a working traversal into a base-column filter over different
+  rows (and a `400 INVALID_FIELD` where the base table has no such column), while
+  withdrawing it from the object spelling would split a verdict #5740 deliberately
+  shares with the `dimensions` request key. Dotted keys therefore keep today's
+  per-spelling answer, pinned by tests, until #5739 rules.
+
+- a6b3ee7: fix(service-analytics): 即席推断的 Cube 把 `owner.region` 当成关系穿越,不再铸成基表列 `region` (#5739)
+
+  `inferCubeFromQuery` 为「没有注册 Cube 的自由查询」即席合成一个 Cube,并从查询提
+  到的字段里播种 `dimensions`。每个铸造点都先把成员过一遍 `stripPrefix` —— 一个把
+  **任何**点号名的首段剥掉的判定。对 `<cube>.` 限定符(`crm_account.industry` →
+  `industry`)这是对的;对**关系穿越**则不是:`owner.region` 被铸成
+  `dimensions.region = { sql: 'region' }`,一个**基表列**。下游 `lookupMember` 的
+  「plain second-segment」那一档随即命中它,**赶在**「synthetic relation traversal」
+  那一档把点号路径交给 JOIN 机制之前就返回了 —— 关系穿越被基表列遮蔽。
+
+  危害分两档,而更糟的是安静的那一档。当基表**恰好有同名列**时(`crm_account` 自己
+  就有 `region`),四个组合全部静默通过、无任何拒收:
+
+  ```
+  ① ObjectQL,  where: {'owner.region':'NA'} → executeAggregate 收到 {"region":"NA"}
+  ② NativeSQL, where: {'owner.region':'NA'} → … FROM "crm_account" WHERE region = $1
+  ③ ObjectQL,  dimensions: ['owner.region'] → groupBy: ["region"]
+  ④ NativeSQL, dimensions: ['owner.region'] → SELECT region AS "owner.region" … GROUP BY region
+  ```
+
+  行数与图表都是错的,而没有任何错误可读 —— ④ 尤甚:响应列名标着 `owner.region`,值
+  却来自基表,读者无法从结果里看出来。基表**没有**同名列时则落到 `400 INVALID_FIELD`
+  且点名 `region`,而调用方写的是 `owner.region`。
+
+  维护者 2026-08-06 裁定(issue #5739):即席路径**支持**关系穿越。铸造改为**原样**
+  (`dimensions['owner.region'] = { sql: 'owner.region' }`),真正的 `<cube>.` 限定
+  前缀(首段 == cube 名)仍然剥。这同时收敛了一处早有的分叉:同一个过滤器写成数组
+  (`[['owner.region','=','NA']]`)时铸不出 dimension,于是一直走 synthetic 档、一直
+  编出正确的 JOIN —— 两种写法现在逐字生成同一条语句。
+
+  **Observable behaviour change —— 若你按状态码告警/重试,或消费即席 cube 的元数据,
+  请读这一段。**
+
+  - **对象写法的点号 member 从「静默错列」/「`INVALID_FIELD` 指错名」变为 JOIN 穿越。**
+    NativeSQL 上 `where: {'owner.region': 'NA'}` 与
+    `dimensions: ['owner.region']` 现在编出
+    `LEFT JOIN "owner" ON "crm_account"."owner" = "owner"."id"` 并按 `"owner"."region"`
+    筛选/分组;此前它们筛/分组的是基表 `region`(有同名列时),或以
+    `400 INVALID_FIELD "constrains field 'region'"` 被拒(无同名列时)。**同一个请求
+    现在返回的行可能与此前不同 —— 此前那些行是错的。**
+  - **ObjectQL 上同一个 member 改为响亮拒收或正确穿越,不再有第三种更安静的答案。**
+    `where` 得到 `cannot evaluate a cross-object filter ("owner.region")` —— 与**已
+    注册 cube** 上的既有答案逐字一致;`dimensions` 走 FK-expand 正确穿越,返回关联对象
+    的值。带 `granularity` 的跨对象 `timeDimensions` 得到
+    `cannot bucket a cross-object time dimension`。
+  - **即席 cube 的 `dimensions` 词汇表里现在出现点号键**(`getMeta` 上是
+    `crm_account.owner.region`)。此前该穿越要么以剥掉的尾段出现(`crm_account.region`),
+    要么(数组写法)完全不出现。
+  - **不变的部分**:真正的 `<cube>.` 限定符照旧剥除;裸列名照旧是基表列(基表自己的
+    `region` 仍可作为 `region` 分组);#4437 / #5520 / #5669 三道源字段闸门的代码一行未
+    动,它们对裸名拼错的 `400 INVALID_FIELD` 拒收原样保留;点号 **measure**(如
+    `total.sum`)仍按 #4437 的 `400 INVALID_FIELD` 拒收 —— `lookupMember` 的 synthetic
+    穿越档是 dimension-only,dotted measure 没有可收敛的穿越答案。
+
+- ff39e63: fix(service-analytics): 维度合并键不再把「未分配」并进「空白」,并改为长度前缀消歧 (#4821)
+
+  `mergeByDimensions` 是每一份多查询 dataset 结果的装配缝:主查询与每个带 `filter`
+  的 measure 的补充子查询在这里对齐,`compareTo` 窗口自 #4870 起也按 measure 扇出后
+  经由同一个缝合并回来。这里一次键碰撞不会报错 —— 一个分组静默吸走另一个分组的数字,
+  网格仍然保持看起来合理的行数和列数。
+
+  **#4821 报告的机制与实际的缺陷不完全一致,先把这一点说清楚。** 原键是
+  `String(row[d] ?? '')` 以一个**直接写进源码的裸 U+0001 字节**相连。裸控制字符渲染
+  为空,所以 issue 正文读到的是 `join('')`,其头号复现(`['ab','c']` 与 `['a','bc']`
+  同键为 `"abc"`)其实并不成立 —— 分隔符一直在,只是看不见。真正咬人的是另外两条:
+
+  - `?? ''` 让**真正为 null** 的维度与**空字符串**维度键成同一个值。于是「未分配」被
+    并进「空白」:一行吞掉另一行的 measure,另一行的列则整个缺失 —— 而 #4708 的空组
+    填充随后会给它填上一个理直气壮的 `0`。一个真实计数为 3 的分组因此显示为 0。
+  - 单字符分隔符只在「没有任何维度**值**包含该字符」时才无歧义。维度值是用户数据
+    (文本字段、导入记录),所以那是一个假设而非保证,且一旦不成立同样静默。
+
+  **改法:长度前缀 + 显式空值哨兵。** 每段编码为 `<长度>:<值>`,`2:ab1:c` 与
+  `1:a2:bc` 对任意输入都不同,不再保留任何字符、也不再有看不见的字节留给下一个读者
+  误读(本 issue 正是这样被误读出来的)。null/undefined 单独走一个哨兵段,与消歧这件
+  事解耦。
+
+  **逐段的 `String()` 强制被刻意保留**,这与一文件之隔的 `cross-object-rebucket.ts`
+  的 JSON 键不是同一笔交易:后者重新分桶的是**同一个查询**的行,一列只有一种类型,
+  JSON 在那里免费且能换来真实的区分(空桶 `null` vs 字面量字符串 `"null"`)。本函数
+  做的是相反的事 —— 跨**不同查询**对齐行,而驱动确实会对同一个分组返回不同的 JS 类型
+  (本文件 `compareValues` 的注释即记着 "numeric strings, which is how some drivers
+  return SUM results")。改用 `JSON.stringify` 会把 `1` 与 `"1"` 渲染成两个键,让今天
+  能正确合并的行不再合并 —— 用一个新的静默缺陷换掉旧的,不算修好。该行为已有回归钉
+  测试锁住。
+
+  仅影响内部合并键,响应中的任何值都不改变。
+
+- 2cca98b: fix(service-analytics): 分析查询的 RLS read scope 不再被 `{ $not: {} }` 整表放行,`$not` 改为 NULL-safe
+
+  **这是一次安全相关的行为变更,涉及分析查询的可见行集合。请读完再升级。**
+
+  ### 变更一(要害):`{ $not: {} }` 的 read scope 以前**完全不加 WHERE**,整表可见;现在是零行
+
+  `read-scope-sql.ts` 是 RLS / 租户 read scope 降解成 SQL 的**唯一**通道(ADR-0021 D-C),
+  被 `NativeSQLStrategy.applyReadScope` 与 `ObjectQLStrategy` 用来给分析查询加可见性约束。
+  它以空字符串表示「无约束」(布尔常量 TRUE)。`compileNode({})` 返回空串,于是:
+
+  ```
+  compileNode({}) → ''  →  if (inner) 为假  →  $not 不产出任何子句
+                        →  compileScopedFilterToSql 返回 ''
+                        →  applyReadScope 的 `if (!sql) return;` 接手
+                        →  生成的 SQL 里没有 WHERE
+  ```
+
+  一条语义为 `NOT TRUE ≡ FALSE`(**什么都不给看**)的 read scope,实际效果是**整张表都给看**。
+  同一段循环里 `$and` / `$or` 的空数组一直是 fail-closed 抛错的,只漏了 `$not` 这一格。
+
+  修复后 `{ $not: {} }` 编译为恒假子句 `1 = 0`,`applyReadScope` 照常拼进 WHERE,返回零行 ——
+  与 driver-sql 在 #5134 / PR #5243 上的口径一致。
+
+  **升级影响:** 如果你的 RLS 策略(或 `cel-to-filter.ts` 降解出的 CEL 规则)在某条路径上
+  产出过 `{ $not: {} }`,该对象的分析查询此前是**无边界**的,现在会返回零行。行数从「全部」
+  掉到「零」不是本次引入的收紧,而是那条策略本来就该有的答案 —— 请核对策略本身。
+
+  同源、方向相反的一处一并修正:`$or` 的空析取项 `{}` 以前被 `.filter(s => s.length > 0)`
+  丢掉,`{ $or: [{}, { a: 1 }] }` 收紧成 `a = 1`。`{}` 是 TRUE 析取项,TRUE 吸收整个析取,
+  所以现在整条 `$or` 为 TRUE(无约束)。被丢弃分支的绑定值同时被丢弃 —— 否则 `params` 里
+  会留下没有 `?` 消费的值,把后面每一个占位符都错位到别人的值上。
+
+  ### 变更二:`$not` 改为 NULL-safe
+
+  SQL 是三值逻辑,`WHERE` 只保留 TRUE,所以裸 `NOT ("t"."stage" = ?)` 会把 `stage IS NULL`
+  的行整批丢掉;`driver-memory`、`formula` 以及 #5296 之后的 `driver-sql` 都**返回**这些行。
+  同一条 read scope,普通查询与分析查询给出不同的可见集合。#5146 已由维护者判定以 JS 家族的
+  答案为准,本次把这个编译器对齐过去 —— 它是仓内最后一个按三值逻辑回答 `$not` 的 SQL 家族实现。
+
+  `$not` 的操作数在取反前先被改写成**全域(total)谓词**:
+
+  ```sql
+  -- 之前
+  NOT ("t"."stage" = ?)
+  -- 现在
+  NOT (("t"."stage" IS NOT NULL AND "t"."stage" = ?))
+  ```
+
+  守卫**下推到每个叶子**而不是挂在 `NOT` 旁边:操作数一旦嵌套(`$not` 里套 `$or`),顶层的
+  `OR col IS NULL` 会把 JS 家族排除的行重新放进来。守卫方向**逐算子**判定,不是一刀切 ——
+  `{ $not: { a: { $ne: 5 } } }` 语义是「a 就是 5」,无条件加 `OR a IS NULL` 会把 scope 排除的
+  行交回去,正是本次要避免的静默放松。所以 `$ne` / `$nin` / `$notContains` 用
+  `col IS NULL OR (…)`,`$eq` / `$in` / `$gt` / `$between` / `$contains` 一族用
+  `col IS NOT NULL AND (…)`,而 `$null` / `$exists` / `$eq: null` / `$ne: null` 本就是全域谓词,
+  一个字节都不加。
+
+  **升级影响:** 形如 `{ $not: { stage: 'won' } }` 的 read scope,以前**不返回** `stage` 为
+  NULL 的行,现在**返回**它们 —— 分析查询的行数与图表数值会随之变化。这是把分析侧对齐到其余
+  后端,不是新增的放宽。
+
+  ### 不变的部分
+
+  `$not` 路径以外一个字符都没动:普通比较仍然编译成原样的 SQL。fail-closed 的全部保证原封不动
+  ——未知算子、嵌套关系值、裸数组、不安全标识符、非 filter 节点的 `$not` 操作数,以及
+  `$and: []` / `$or: []` 的空组合子(那一格是 #5322 的独立裁定)统统照旧抛错。
+
+- 07f1822: fix(service-analytics): read scope 的 `$ne` / `$nin` / `$notContains` 改为 NULL-safe,与写侧 `check` 对齐
+
+  **这是一次安全相关的行为变更,涉及分析查询的可见行集合。**
+  read scope 里的 `{ stage: { $ne: 'won' } }` 以前**不返回** `stage IS NULL` 的行,
+  现在**返回**它们。`$nin` / `$notContains` 同理。
+
+  `read-scope-sql.ts` 是 RLS / 租户 read scope 降解成 SQL 的唯一通道(ADR-0021 D-C)。
+  它此前把这三个算子编译成裸的 `col <> ?` / `col NOT IN (…)` / `col NOT LIKE ?`,
+  而 SQL 是三值逻辑:被比较列为 NULL 时谓词是 UNKNOWN,`WHERE` 只保留 TRUE,于是
+  「该列没有值」的行被整批丢掉。
+
+  **为什么必须与 `driver-sql` 同一个 PR 落地,而不是排到下一批。** 同一条 RLS 规则被
+  写一次、在**两侧**求值:读路径由本文件降解成 SQL,写路径由 `formula` 的
+  `matchesFilterCondition` 逐记录求值。`formula` 一直用两值 JS(`undefined !== 'won'`
+  为真)返回这些行。只对齐其中一侧,得到的不是「更小的修复」,而正是那个缺陷本身 ——
+  一条权限规则准入两个不同的行集,写侧允许的记录读侧看不见。
+
+  ```sql
+  -- 之前
+  "t"."stage" <> ?
+  "t"."stage" NOT IN (?)
+  "t"."stage" NOT LIKE ? ESCAPE ?
+  -- 现在
+  ("t"."stage" IS NULL OR "t"."stage" <> ?)
+  ("t"."stage" IS NULL OR "t"."stage" NOT IN (?))
+  ("t"."stage" IS NULL OR "t"."stage" NOT LIKE ? ESCAPE ?)
+  ```
+
+  括号不是排版:`compileField` 用裸 `AND` 连接同一字段的多个算子,不加括号的
+  `col IS NULL OR …` 会比那个 AND 结合得更松,从而**静默放宽整条 scope**。
+
+  与 `driver-sql` 一样统一用 OR 展开而非方言等价物(`NOT LIKE` 没有对应形式;SQLite
+  写法依赖本仓不锁定的引擎版本;实测执行计划相同)。正向比较逐字符不变,
+  `$ne: null` 仍是 `IS NOT NULL`(空值谓词,不是比较)。
+
+  `$not` 路径的逐叶守卫(#5146 / #5326)按原样保留,两条路径读同一张极性表。
+  `filter-normalizer`(Cube 面)不在本次范围内,归本裁决第二批。
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Major Changes

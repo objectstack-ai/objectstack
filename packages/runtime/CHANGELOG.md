@@ -1,5 +1,1567 @@
 # @objectstack/runtime
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- 739f496: feat(runtime)!: action body `ctx.session` emits `positions` (canonical) alongside the deprecated `roles` (#5613)
+
+  `buildActionSession()` — the one producer of the action-body `ctx.session` — now
+  emits the caller's position names under **both** `positions` (canonical) and
+  `roles` (deprecated alias), with the same array under both names. This is the
+  **runtime half** of #5613 phase 2 under the maintainer's contract-first ruling
+  ("C skeleton + A semantics"); the spec half (#5779) declared the shape this now
+  produces, and phase 1 (#5697) declared the shape it produced before.
+
+  **What was wrong.** The builder copied `ExecutionContext.positions` into a key
+  spelled `roles` — the one spelling ADR-0090 D3 bans — while its own docblock
+  claimed it "mirrors the hook `ctx.session` shape". That sentence stopped being
+  true at #5050, which retired `HookContext.session.roles` outright: a body author
+  met two different answers to one key name on one platform, and the comment
+  pointed at the wrong one. The key set reached no schema and no gate until #5697,
+  so nothing could see it drift.
+
+  **Migration prescription — do this now.**
+
+  - Read `ctx.session.positions`. It carries exactly the array `ctx.session.roles`
+    carried (`ExecutionContext.positions` — the rename is a rename, not a semantic
+    change), and it is the spelling the platform now uses everywhere: the
+    execution context, the sharing service, `ctx.user.positions`, and the hook
+    `ctx.session.positions` (#5605).
+  - `ctx.session.roles` still resolves for the length of the deprecation window
+    announced by the ADR-0087 semantic migration
+    `action-session-roles-to-positions`, and is then removed on the path
+    `session.tenantId` already walked (#3280 deprecated → #3290 removed in v11). A
+    body still reading it at that point sees `undefined` with nothing to catch the
+    change — which is why the read moves **inside** the window, not at its close.
+  - Do **not** migrate an access check by renaming it. `roles.includes('admin')`
+    rewritten as `positions.includes('admin')` migrates the defect: neither array
+    is an authorization input. Privilege is judged by the security service, which
+    evaluates capability grants, placements and the derived posture (ADR-0095).
+  - Presence semantics are unchanged: a context with no positions (or a non-array
+    `positions`) yields **neither** key — `'positions' in ctx.session` answers
+    `false` exactly when `'roles' in ctx.session` does — and a call with no
+    identity envelope still yields no session at all rather than `{}` (#3712).
+
+  **Also breaking, for TypeScript consumers of the sandbox seam.**
+  `ScriptContext.session` (`@objectstack/runtime`, `sandbox/script-runner.ts`) was
+  `unknown` and is now the exported union `ScriptSession = ActionSession |
+HookContext['session']` — the two declared producer shapes this one seam
+  actually carries. Code that read an arbitrary property off it must now
+  discriminate the body kind (or read one of the keys both shapes declare:
+  `userId`, `organizationId`, `positions`). It is deliberately **not** narrowed to
+  `ActionSession` alone: the seam really does carry hook sessions, and declaring
+  otherwise would re-create the "one key, two realities" defect this change
+  closes.
+
+  The consistency between what the producer builds and what `ActionSessionSchema`
+  declares stays pinned in
+  `packages/runtime/src/action-session-shape-contract.test.ts`, and the observed
+  shape is verified through a real dispatch in `http-dispatcher.test.ts`.
+
+- 29c6c9d: feat(spec,core,runtime)!: declarative `apis:` refuses loudly instead of parsing into silence; the `ApiRegistry` family retires (#4936, #4939)
+
+  The declarative API-endpoint surface was **zero-execution end to end**, and said nothing
+  about it. Metadata loading worked perfectly — a stack declared `apis:`, `defineStack`
+  accepted it, and `GET /api/v1/meta/api` returned every endpoint with every key intact.
+  The execution side never fired once. On a real boot (showcase, 47 plugins) both declared
+  paths answered a bare `404 {"error":"Not found"}` — not even the dispatcher's semantic
+  404, because **no route was ever mounted** for a declared path, so the request died at
+  Hono's `notFound`. Behind that, the dispatcher's `handleApiEndpoint` branch resolved the
+  metadata service and called `matchEndpoint` on it — a method **no implementation in the
+  repo has ever provided**. The branch returned "not handled" on every request ever served.
+
+  So every key on `ApiEndpointSchema` was declared ≠ enforced: `path`/`method` (never
+  mounted), `type`/`target`/`objectParams` (never executed), `cacheTtl`,
+  `inputMapping`/`outputMapping`, `rateLimit`, `summary`/`description` — and
+  **`authRequired`**, a security semantic that parsed green and gated nothing at all. That
+  is false compliance, the failure ADR-0049 exists to stop, not debt.
+
+  ## BREAKING — a non-empty `apis:` is now rejected
+
+  Metadata that parsed cleanly before is now **refused at publish/validate**, with the
+  prescription in the rejection itself:
+
+  ```
+  apis: `apis:` (declarative ApiEndpoint) is DECLARED BUT NOT EXECUTABLE in this runtime,
+  so a non-empty array is rejected instead of silently accepted (#4936). …
+  ```
+
+  **FROM → TO.** `apis: [ …endpoints… ]` → `apis: []` (or delete the key; both are still
+  accepted, and an empty array is not a special case). To actually serve the route today,
+  mount it **in code** — a plugin manifest `contributes.routes` entry, or an `http.server`
+  route. That is now the only honest path, and the one `examples/app-showcase` uses
+  (`src/system/server/recalc-endpoint.ts`).
+
+  The refusal lives on `ObjectStackDefinitionSchema` itself, which is the single choke
+  point every path runs through — `defineStack`, the metadata plugin's artifact ingestion,
+  `os validate`, the lint scorer and `EnvironmentArtifactSchema`. There is no path that
+  forgot to check.
+
+  **The `ApiEndpoint` vocabulary is deliberately KEPT.** Retiring it was considered and
+  rejected: endpoint shapes are an industry-stable form, so a retirement would only mean
+  re-introducing the identical schema later. Your endpoint definitions stay valid TypeScript
+  and stay in the spec; only _authoring them into a stack_ is refused, and only until the
+  executor lands. Keep them commented next to your stack — that is what the showcase does.
+  The executor (route mounting + endpoint matching + per-key wiring for
+  `authRequired`/`cacheTtl`/`inputMapping`/`outputMapping`/`rateLimit`) is tracked by
+  **#5040**, which replaces this rejection with real execution.
+
+  ## BREAKING — the `ApiRegistry` / `ApiEndpointRegistration` family is removed (#4939)
+
+  The repo carried a **second**, unrelated declaration shape for "an API endpoint":
+  `ApiEndpointRegistrationSchema` and the ~500-line `ApiRegistry` service that
+  `createApiRegistryPlugin()` registered under `api-registry`. Nothing composed it — every
+  assembly site lived in `packages/core/examples/`, with no registration in
+  `packages/runtime`, `packages/cli` or any `examples/app-*`, and a real boot carried no
+  such service. The whole family was therefore inert, including
+  `ApiEndpointRegistration.requiredPermissions`, whose docs promised **in the present tense**
+  that "the gateway layer automatically validates these permissions" while no gateway read
+  it. Two declaration shapes, both dead; this retirement converges them on one.
+
+  Removed from `@objectstack/spec/api`: `ApiEndpointRegistration(Schema)`,
+  `ApiRegistry(Schema)`, `ApiRegistryEntry(Schema)`, `ApiMetadataSchema`,
+  `ApiParameterSchema`, `ApiResponseSchema`, `ApiDiscoveryQuerySchema`,
+  `ApiDiscoveryResponseSchema`, `ApiProtocolType`, `HttpStatusCode`,
+  `ObjectQLReferenceSchema`, `SchemaDefinition` (12 JSON-Schema defs, 67 authorable keys).
+  Removed from `@objectstack/core`: `ApiRegistry`, `createApiRegistryPlugin`.
+  Removed from `@objectstack/plugin-hono-server`: the `useApiRegistry` option — it was
+  defaulted to `true` and read by nothing, configuring a service that was never composed.
+
+  **FROM → TO.** There is no replacement shape to migrate to, because nothing executed the
+  old one: delete the registration objects. If you were assembling an `ApiRegistryEntry`,
+  you were building a value only your own code read — keep it as your own type. Declarative
+  endpoints have one vocabulary now, `ApiEndpointSchema`.
+
+  `ConflictResolutionStrategy` **survives** the removal and moved to
+  `@objectstack/spec/api`'s `router.zod` — same name, same four values
+  (`error`/`priority`/`first-wins`/`last-wins`), same import path. It is pinned there by two
+  independent ratchets and is not part of the retired surface.
+
+  ## Also in this change
+
+  - **BREAKING (`@objectstack/runtime`):** `HttpDispatcher.handleApiEndpoint()` is deleted,
+    along with its now-orphaned private `callData` delegate, and `/__api-endpoint` leaves
+    `LEGACY_CHAIN_PREFIXES` and the route ledger. The method was public, so this is an API
+    removal — but it returned `{ handled: false }` for every call it ever received, so no
+    caller can observe a behaviour change beyond the missing symbol. Delete the call.
+    Absence is now loud (ADR-0076): the surface is refused at authoring rather than 404ing
+    at runtime with dead code behind it.
+  - `examples/app-showcase` no longer declares endpoints, and its coverage manifest no
+    longer claims the capability is `demonstrated` — that entry read "executed by the runtime
+    dispatcher (handleApiEndpoint)", which was exactly the advertise-what-you-don't-deliver
+    claim Prime Directive #10 forbids.
+  - The endpoint-level `rateLimit` tracking pointers left by #4910/#5006 now name **#5040**,
+    the live executor card, instead of #4936, which closes with this change.
+
+- d9cac60: **BREAKING** — `GET /meta/:type/:name` now answers exactly one body shape: the
+  `GetMetaItemResponseSchema` envelope `{ type, name, item, … }` that
+  `packages/spec` has always declared for it. On the default configuration this
+  endpoint used to answer the **bare metadata document** instead (#5563).
+
+  ### What changed, and why it is breaking
+
+  The route had two mutually exclusive branches with different response
+  structures. The cached branch — reached whenever `metadata.enableCache` is on,
+  which is the **default** (`enableCache: z.boolean().default(true)`) — served
+  `getMetaItemCached`'s `result.data`, and that value has the envelope already
+  stripped. The uncached branch served `getMetaItem`'s envelope. So the one shape
+  the spec declared was the one a default deployment could not obtain, and the
+  envelope surfaced only when the cache was off or when the read structurally
+  bypassed it (`app`, `doc`, `book`, `?state=draft`, `?preview=draft`,
+  `?package=`). Consumers had no correct static type — they sniffed at runtime or
+  reached for `as any` (#5545 was blocked on exactly this).
+
+  The dispatcher's `/meta` domain had the same split one layer down: the protocol
+  resolver answered the envelope while the ObjectQL-registry and MetadataService
+  fallbacks answered bare documents. Both fallbacks now wrap what they found,
+  taking `type`/`name` from the request.
+
+  ### Migration
+
+  `GET /api/v1/meta/object/customer`, default configuration:
+
+  ```jsonc
+  // before — the bare document
+  { "name": "customer", "label": "Customer", "fields": { /* … */ } }
+
+  // after — the declared envelope; the document is verbatim under `item`
+  {
+    "type": "object",
+    "name": "customer",
+    "item": { "name": "customer", "label": "Customer", "fields": { /* … */ } }
+  }
+  ```
+
+  - **Reading the body directly** (`fetch`, `client.meta.getItem`,
+    `client.meta.getCached().data`): read the document at `.item`. Nothing inside
+    it changed. `type` is the canonical singular metadata type name, so
+    `/meta/objects/customer` and `/meta/object/customer` answer the same `type`.
+  - **`useObject` / `useFields` (`@objectstack/client-react`)**: `useObject().data`
+    is now the envelope — `data.item.label`, `data.item.fields`, where it used to
+    be `data.label` / `data.fields`. `useFields()` is unchanged (it already
+    returns the flattened field list) and is the shorter path when fields are all
+    you need.
+  - **`isMetaEnvelope`, exported from `@objectstack/rest`, is REMOVED.** It
+    existed only to tell the two shapes apart. There is one shape now, so the
+    replacement for `isMetaEnvelope(r) ? r.item : r` is `r.item`.
+  - **Not converged, deliberately**: `?layers=true` still answers the layered
+    diagnostic projection `{ type, name, code, overlay, overlayScope, effective,
+validation }`. Collapsing three layers into one `item` would delete the
+    diagnostic. Unaffected unless you pass that flag.
+
+- 0cd08d5: refactor(runtime)!: retire the exported `HttpServer` delegating wrapper — it declared `implements IHttpServer` and forwarded none of the contract's optional members (#5122)
+
+  **BREAKING.** `@objectstack/runtime` no longer exports `HttpServer`, and
+  `packages/runtime/src/http-server.ts` is deleted.
+
+  ## What it was, and why it could not stay
+
+  The class took an `IHttpServer` in its constructor and forwarded that server's
+  **required** members — `get` / `post` / `put` / `delete` / `patch` / `use` /
+  `listen` / `close` — while declaring `implements IHttpServer`. It forwarded not
+  one of the contract's **optional** members:
+
+  | Optional member         | What wrapping it cost                                                                                                                        |
+  | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `getPort?()`            | the real bound port after `listen(0)`; harnesses and `@objectstack/http-conformance` address the server through it                           |
+  | `getRawApp?()`          | the framework-native escape hatch four consumers feature-detect (cloud-connection ×2, metadata's HMR routes, cloud's serverless node server) |
+  | `setFallbackHandler?()` | since #5111, the **only** entry path there is for declarative `apis:` endpoints                                                              |
+
+  `packages/spec/src/contracts/http-server.ts` tells consumers to feature-detect
+  those members with `typeof server.X === 'function'` and to degrade when they are
+  absent. Wrapping a capable adapter therefore made every probe answer **false**
+  and the capability disappear — with the adapter underneath providing it the
+  whole time. Write this row down before reaching for a wrapper of the same shape:
+  **a host that wrapped `HonoHttpServer` and registered the wrapper as
+  `http.server` would answer 404 to every endpoint its metadata declared**,
+  because the seam those endpoints mount through was never forwarded. The dispatcher's
+  own #5409 declaration — the seam's absence announced at `warn`, welded by
+  `packages/runtime/src/dispatcher-plugin.fallback-absence-warn.test.ts` — remains
+  the runtime-side backstop and still fires here, but it can only name the missing
+  seam; it cannot name the wrapper that swallowed it.
+
+  ## Migration
+
+  **Register an `IHttpServer` adapter INSTANCE, don't wrap one.** Every real host
+  in this repository already does; `new HttpServer(` had zero occurrences in the
+  repository, examples included, which is why this retirement carries no rollback
+  risk and why it is cheaper to take now than later.
+
+  | Wrote                                                                  | Write instead                                                                                                                                                                                  |
+  | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `new HttpServer(new HonoHttpServer(port))` registered as `http.server` | register the `HonoHttpServer` (or your own adapter) directly — `HonoServerPlugin` already does                                                                                                 |
+  | a wrapper of your own to add cross-cutting behaviour                   | forward **every** member you did not deliberately drop, optional ones included, and re-probe with `typeof` after wrapping; a delegator that narrows the contract silently removes capabilities |
+  | `import { HttpServer } from '@objectstack/runtime'`                    | remove it — `tsc` reports this one, the symbol is simply gone                                                                                                                                  |
+
+  Unlike a method quietly dropped from a class, this break is visible to the
+  compiler: the export does not exist, so nothing type-checks past it. Its absence
+  from the barrel is additionally pinned at runtime by
+  `packages/runtime/src/http-server-retirement.test.ts`.
+
+  ## Why retirement rather than conditional forwarding
+
+  Growing a forwarding surface nobody composes would have to be maintained forever
+  and re-audited every time `IHttpServer` gains an optional member — it gained one
+  as recently as #5080. The 2026-08-06 maintainer ruling took the #4939
+  (`ApiRegistry`) precedent instead — retiring a part that was never assembled
+  beats repairing it — under ADR-0049's remove side.
+
+- dca5bd3: **BREAKING**: `ctx.user.roles` 已移除 —— action body / AI 路由处理器上的调用者位置(positions)只保留一个拼法 `ctx.user.positions`(#6011)
+
+  `ActorUser`(action body 的 `ctx.user`、AI 路由处理器的 `req.user`)过去同时发出两个键,值完全相同(`roles` 是 `positions` 的逐字副本)。`roles` 是 ADR-0090 D3 明令保留并禁用的词,且没有关闭日期 —— 维护者 2026-08-06 裁定**立即退役**,不设弃用窗口、不双发。
+
+  ### 迁移:FROM → TO
+
+  ```js
+  // FROM — v17 起该键不再存在,读到的是 undefined
+  const positions = ctx.user.roles;
+  if (ctx.user.roles.includes('sales_rep')) { … }
+
+  // TO — 权威拼法,值逐字不变
+  const positions = ctx.user.positions;
+  if (ctx.user.positions.includes('sales_rep')) { … }
+  ```
+
+  一行修复:把 body / 路由处理器里的 `ctx.user.roles` 改写成 `ctx.user.positions`(`req.user.roles` → `req.user.positions`)。**值不变** —— 两个键此前由同一次赋值产生,所以这是一次纯粹的改键,不是改语义。`positions` 数组恒存在,空时是 `[]` 而非 `undefined`,无需 `?? []`。
+
+  ### ⚠️ 改键不等于修好了权限判断
+
+  `positions` 与此前的 `roles` 一样,**都不是授权输入**。权限由 security service 判定(capability 授予、placement、ADR-0095 推导出的 posture),不由名字字符串比较判定。因此:
+
+  ```js
+  // 这不是迁移,这是把缺陷换了个拼法
+  if (ctx.user.roles.includes('admin')) { … }      // 旧的错
+  if (ctx.user.positions.includes('admin')) { … }  // 一样错,只是改了键名
+  ```
+
+  把 `roles.includes('admin')` 改写成 `positions.includes('admin')` 迁移的是**缺陷本身**,不是那次读取。这类判断应改为向 security service 询问能力,而不是比对位置名。(与 #5991 的 `ctx.session` 更名同一告诫。)
+
+  ### 不受影响的面
+
+  - **`ctx.session.roles` 不在本次范围内**,仍按 #5613 的弃用窗口双发 `positions` + `roles`,由 ADR-0087 语义迁移 `action-session-roles-to-positions` 约定其关闭时点。两个面同名不同物,请勿混为一谈。
+  - better-auth 会话上的 `user.roles`、`/api/v1/auth/me/permissions` 返回体的 `roles`、CEL/formula 的 `current_user.*`,都是各自独立的生产者,均未改动。
+
+### Minor Changes
+
+- 64cd010: fix(runtime,types)!: `/analytics/query` no longer echoes RLS policy field names — the declared-server-fault withhold is shared by both HTTP boundaries (#5811)
+
+  **Observable behaviour change — read this if you read, log, or assert on
+  `error.message` from a dispatcher-plugin route.** An error that **declares a
+  server fault** in the ADR-0112 envelope (`status >= 500` _and_ a non-empty
+  `code`) now leaves `dispatcher-plugin.errorResponseBase` with its message
+  replaced by `"Internal server error"`. It previously reached the caller verbatim
+  unless it happened to _sound_ like a SQL/driver dump. This applies to every route
+  that plugin mounts — `/analytics`, `/packages`, `/i18n`, `/automation`, `/auth`,
+  `/notifications`, `/mcp`, … — not only the one that motivated it. Nothing a
+  machine reads changed: the producer's `code` still arrives in the response
+  (`error.code`, promoted there from `details` by the shared envelope builder,
+  #3842), the status is untouched, and the full original text still goes to the
+  server log and `errorReporter` via `__obsRecordedError`.
+
+  ## What was wrong
+
+  #5367 (maintainer ruling 2026-08-06) made `read-scope-sql.ts`'s ten fail-closed
+  RLS lowering refusals `READ_SCOPE_COMPILE_FAILED` / 500 and taught
+  `POST /analytics/dataset/query` to withhold their message, because those messages
+  name the field names and comparands of an **administrator's** sharing rule:
+
+  ```
+  [read-scope-sql] unsafe field identifier "secret_policy_field" — refusing to
+  build read scope (fail-closed).
+  ```
+
+  The caller never wrote that field name and must not be able to read it out of an
+  error body. But the **sibling** analytics face was never closed.
+  `compileScopedFilterToSql` runs on both `NativeSQLStrategy.applyReadScope` and
+  `ObjectQLStrategy`'s echoed SQL, both of which serve `POST /analytics/query`,
+  which exits through `dispatcher-plugin.errorResponseBase`. That exit's only
+  message guard was `looksLikeInternalErrorLeak` — a heuristic over SQL/driver
+  _phrasing_ — and all eleven read-scope message shapes return `false` from it.
+  Measured at that boundary: **11 of 11 echoed verbatim**, at 500, with the policy
+  content in `error.message`. A real reachable disclosure, not a theoretical one.
+
+  ## What changed
+
+  - **`@objectstack/types` gains `declaresServerFault(err)`**, exported from
+    `error-leak.ts` beside `looksLikeInternalErrorLeak`. The heuristic asks whether
+    a message _sounds_ internal; the declaration asks whether the producer _said
+    so_. `error-leak.ts`'s own file header already states the principle — "do not
+    ship driver internals to clients" is a property of the HTTP boundary, not of
+    one router — and this is the second predicate that principle asks for.
+  - **Both boundaries read it.** `dispatcher-plugin.errorResponseBase` gains the
+    withhold (the fix); `rest-server.ts`'s `/analytics/dataset/query` catch drops
+    its in-line copy of the same test in favour of the shared one. #5808 wrote that
+    rule in-line on purpose — promoting a rule with one consumer is a speculative
+    surface — and this is the second consumer, so it was promoted rather than
+    duplicated (`#3843`/`#3867` paid for the two-implementations shape twice).
+    The REST face's verdict is unchanged in every case: same `status >= 500` plus
+    non-empty `code` test, over the same two fields.
+
+  ## What deliberately did NOT change
+
+  - ⛔ **This is not "withhold every 5xx".** #5667 kept **undeclared** 5xx errors
+    legible on purpose: a bare `Error` from our own code ("no strategy can handle
+    query …") is the operator's own bug report, names nothing tenant-sensitive, and
+    still falls to `looksLikeInternalErrorLeak` alone. A 5xx carrying only half an
+    envelope (a status with no code) is likewise still readable — inventing the
+    withhold for it would be the consumer-side leniency Prime Directive #12 removes.
+  - **4xx is untouched.** `declaresServerFault` requires `status >= 500`, so a
+    deliberate business/validation answer can never be swallowed by it.
+  - **`statusCode` is not accepted as a substitute for `status`.** `status` is the
+    channel ADR-0112 declares; making a disclosure rule depend on which spelling a
+    producer reached for would be the same leniency in a different place.
+  - **The heuristic was not taught to recognise `[read-scope-sql]`.** That would be
+    more prose sniffing — the mechanism #5352/#5367 exist to remove — and would only
+    ever cover the family someone remembered to add.
+
+  Coverage: `analytics-query-read-scope-withhold.test.ts` (runtime) drives six RLS
+  policy shapes end-to-end through a **real** `AnalyticsService` on the real
+  native-SQL path and the real mounted route, asserting the 500, that the whole
+  serialized body contains no policy detail, that `error.code` still carries
+  `READ_SCOPE_COMPILE_FAILED`, and that the full text is still on the
+  `__obsRecordedError` side-channel — plus a positive control and both sides of the
+  declared-vs-undeclared tiering. `error-leak.test.ts` (types) pins the predicate
+  directly, including that all eleven read-scope shapes stay invisible to the
+  heuristic. The REST face's existing `analytics-read-scope-refusal-envelope.test.ts`
+  is green before and after, unchanged, which is the pin on the refactor.
+
+- db9c331: fix(runtime,cli): 未设置 `NODE_ENV` 时 `/discovery` 不再自称 `development`,统一按 `production` 解读 (#5673)
+
+  同一个「宿主没有设置 `NODE_ENV`」的事实,仓里原本有两套相反的默认:`os start` 未设时强制
+  `NODE_ENV='production'`(`start.ts:248`),`os serve` 与 `os doctor` 按
+  `NODE_ENV || 'production'` 解析 `.env*` 级联,而 `/discovery` 的 `environment` 字段
+  直接把缺省读成 `development`。
+
+  **为什么这个方向的错报是危险的那个。** `environment` 是**机器可读面**上的字段,客户端
+  拿它回答「我在不在生产环境」,并可能据此不显示生产警示、放宽破坏性操作的二次确认。一个
+  忘记设 `NODE_ENV` 的真实生产部署,过去会拿到 `development` —— 两种错法里代价更高的那种。
+  按 maintainer 2026-08-06 裁定,缺省统一收敛到保守值 `production`。
+
+  **迁移说明(行为变更,请对照自己的部署方式读)**
+
+  - **生产部署忘设 `NODE_ENV`**:`/discovery` 的 `environment` 由 `development` 变为
+    `production`。这正是本次修复的目标 —— 报的是实情,不需要任何动作。
+  - **本地开发**:不受影响。`os dev` 会 spawn `serve --dev`,而 `serve` 在 `--dev` 且
+    `NODE_ENV` 未设时就地设 `NODE_ENV='development'`(`serve.ts:490-491`),所以
+    `pnpm dev` / `pnpm dev:showcase` / `dev:crm` / `dev:todo` 链路上 `NODE_ENV` 早已是
+    显式的 `development`,`/discovery` 仍报 `development`。没有任何脚本因此改动。
+  - **需要 `development` 却不走 `os dev` 的场景**(裸 `os serve`、以库形式内嵌运行时、
+    自建容器入口):现在必须显式 `NODE_ENV=development`。这是本次唯一需要动手的一类。
+  - **已设置的合法拼法一律不变**:`production`/`prod` → `production`,
+    `staging`/`sandbox` → `sandbox`,`development`/`dev`/`test` → `development`。
+  - **无法识别的拼法处置不回退**:`qa`、`preview`、`uat` 这类**设了但认不出**的值仍然
+    降级为 `development`,#4828 的「绝不凭猜测宣称 production」保持原样。缺省不是猜测,
+    是宿主选择不说 —— 两条是不同的规则,本次只动前者。
+
+  **`os doctor` 新增一行提示。** `NODE_ENV` 未设时报
+  `NODE_ENV  Not set — this environment is being treated as production`(warning,不影响
+  退出码),`--verbose` 展开显式设置的两条命令。已设置的环境完全没有这一行,报告与从前
+  逐字一致。统一默认让缺省变得**安全**,但也让「疏忽」和「有意的生产部署」变得无法区分;
+  这一行是唯一能把两者分开的地方。
+
+  **已知残留(已另开 #5936 跟进,本次不动)。** `/discovery` 有两个生产者。本次改的是
+  `@objectstack/runtime` 的 `HttpDispatcher.getDiscoveryInfo()`;经 `@objectstack/rest`
+  暴露的 `MetadataProtocol.getDiscovery()`(`packages/metadata-protocol`)把真实缺省原样
+  递给共享映射函数,该函数对缺省仍返回 `development`。裁定把落点限定在 runtime 侧、把
+  `packages/metadata-protocol` 标为跨域文件面,所以此处如实记录而非顺手绕过。
+
+- 77022a9: feat(spec,runtime,metadata-protocol)!: one schema for both discovery producers — `capabilities` canonical, `features`/`endpoints` retired, `scoping` declared (#4828)
+
+  `/discovery` is a machine-readable surface, but nothing compared what the two
+  producers emit against what `packages/spec` declares. The only schema the
+  protocol layer referenced was `GetDiscoveryResponseSchema` —
+  `DiscoverySchema.partial().required({version}).extend({apiName})` — so
+  `.partial()` hid every missing REQUIRED key while zod's default unknown-key
+  strip hid every UNDECLARED emitted one. The two producers then drifted in
+  opposite directions through the same blind spot.
+
+  `DiscoverySchema` is now authoritative for producers, and each producer package
+  carries a `discovery-schema-conformance.test.ts` that parses its LIVE shape
+  against it and checks its emitted key set against the protocol schema's shape.
+
+  **Breaking for anyone reading the dispatcher's `/.well-known/objectstack` body:**
+
+  - `features` → **`capabilities`**, the name `DiscoverySchema` has always
+    declared, in the declared `{ enabled }` shape. The same flags survive. This
+    fixes a real defect: the SDK's `client.capabilities` getter reads
+    `discoveryInfo.capabilities`, so against a dispatcher-served host it returned
+    `undefined` for every flag while the answers sat one key away under `features`.
+  - `endpoints` — **removed**. It duplicated `routes` verbatim as a
+    "backward compatibility" alias; a consumer census across `objectstack`,
+    `objectui` and `cloud` found no reader. Use `routes`.
+  - `environment` is now **mapped** into its declared enum instead of passing
+    `NODE_ENV` through raw (`test` → `development`, `staging` → `sandbox`,
+    unrecognized → `development`, never `production` on a guess). `NODE_ENV=test`
+    and `staging` previously advertised values outside the declared enum.
+
+  **Additive elsewhere:**
+
+  - `DiscoverySchema` declares `scoping` (optional) — the environment-scoping
+    posture the REST endpoint has always emitted and `packages/client` has always
+    consumed, now part of the contract instead of an undeclared extra.
+  - The REST `/discovery` body gains the required `name` / `environment` /
+    `locale`, so it can satisfy `DiscoverySchema` at all. `locale` is derived from
+    the registered i18n service, the same way the dispatcher derives it.
+  - `name` is canonical on both producers. `apiName` remains as a deprecated alias
+    carrying the identical value and is **scheduled for removal in protocol 18**.
+  - New exports: `DiscoveryEnvironmentSchema`, `DiscoveryEnvironment`,
+    `resolveDiscoveryEnvironment`.
+
+- fd8521f: fix(runtime): the HTTP dispatcher serves each request from its OWN resolved kernel — two tenants can no longer swap data sources under each other (#5155)
+
+  A host constructs exactly **one** `HttpDispatcher` (`dispatcher-plugin.ts`
+  `start()`), and every route it serves shares that instance. The kernel a request
+  resolves to, however, is per request: on a multi-tenant host the injected
+  `kernelResolver` (ADR-0006) picks a different one per environment.
+
+  That per-request answer was being stored on a dispatcher **instance field**,
+  `this.kernel`, written once per request by `resolveRequestScope()` and then read
+  by `resolveService()` / `getService()` / `getObjectQL()` /
+  `getRequestKernelService()` / `announceKernelEvent()` / `getRegisteredAiRoutes()`
+  — every one of them behind at least one `await`. Node's single thread is no
+  protection here: what it protects is code that does **not** hold mutable shared
+  state across an `await`, and this held it across several.
+
+  So two interleaved requests on two environments produced this:
+
+  1. request A resolves, `this.kernel` = env-1's kernel;
+  2. A yields at an `await` (session lookup, driver query);
+  3. request B resolves, `this.kernel` = env-2's kernel;
+  4. A resumes and resolves `objectql` / `metadata` / `automation` off **env-2**.
+
+  One tenant's request reading another tenant's data source — a correctness and
+  isolation defect, not a performance one. Single-environment deployments were
+  never affected (`this.kernel === defaultKernel` always, so the write was
+  idempotent), which is exactly why no local run or CI job ever showed it. It is
+  now covered by a deterministic interleaving regression test
+  (`http-dispatcher.multi-tenant-concurrency.test.ts`), which fails on the old
+  code with request A being served env-2's data.
+
+  **The fix: the resolved kernel travels on the request, and every facility that
+  reads a kernel takes the request explicitly.** `HttpProtocolContext` gains a
+  `kernel` field, written by `resolveRequestScope()` alongside the
+  `environmentId` / `dataDriver` / `executionContext` it already writes there.
+  There is no longer any `this.kernel` to rewrite. An `AsyncLocalStorage` carrier
+  was deliberately **not** used: it would have reintroduced implicit mutable
+  ambient context, which is the shape of this bug in a new costume.
+
+  Three host-level readers moved to the host kernel explicitly, where they had
+  been reading whichever tenant resolved most recently: `/ready` (readiness is a
+  property of the replica), its driver-health probe, and the memoized
+  single-environment `default-project` lookup.
+
+  **Migration — `DomainHandlerDeps` and `ActionExecutionDeps`.** Every
+  kernel-reading member now takes the request as its **first** parameter. If you
+  implement or call either contract (both are exported from
+  `@objectstack/runtime`; nothing in this monorepo or the sibling distributions
+  did):
+
+  - `deps.resolveService(name, envId)` becomes `deps.resolveService(context, name, envId)`
+  - `deps.getService(name)` becomes `deps.getService(context, name)`
+  - `deps.getObjectQL(envId)` becomes `deps.getObjectQL(context, envId)`
+  - `deps.getRequestKernelService(name)` becomes `deps.getRequestKernelService(context, name)`
+  - `deps.announceKernelEvent(event, payload)` becomes `deps.announceKernelEvent(context, event, payload)`
+  - `deps.getRegisteredAiRoutes()` becomes `deps.getRegisteredAiRoutes(context)`
+
+  `context` is the `HttpProtocolContext` the domain handler already receives. The
+  same rule applies to the `action-execution` helpers, which take it right after
+  `deps`: `callData`, `resolveAutomationService`, `dispatchFlowAction`,
+  `invokeBusinessAction`, `resolveRouteActionDeclaration`.
+
+  `HttpDispatcher.getDiscoveryInfo(prefix)` gains an **optional** second argument,
+  the request context. Callers that serve `/discovery` straight off the host (the
+  adapters, the dispatcher plugin) need no change and now describe the host kernel
+  deterministically instead of whichever tenant asked last.
+
+  `resolveProjectKernelObjectQL(context)` keeps its direct-caller kernel swap;
+  the swap is now written onto that context, so it stays visible to the rest of
+  that request and to nothing else.
+
+- 81e2744: 端点链接线:声明式 `apis:` 端点的派发步现在跑完整条链 —— 匹配 → 策略(`authRequired` / `rateLimit` / `cacheTtl`)→ 目标执行(`object_operation` 走 `/data` 同一个 `callData`,`flow` 走 automation 服务)。
+
+  兜底器(`dispatcher-plugin`)补齐三根一直缺的线:把完整的 `EndpointPolicyContext`(请求头、`remoteAddress`、与 server 级限流器同一个会话查询、每端点限流注册表、`trustProxy`)喂给派发步;把 `answer.headers` **写到线上**(此前 429 的 `Retry-After` 会被丢掉,客户端拿到一个不知道何时重试的 429);并在匹配前解析本请求的环境 / 身份(与 `dispatch()` 同一个 `HttpDispatcher.resolveRequestScope`),使委派调用带着调用方的 `ExecutionContext` 运行,而不是以 system 身份绕过 RLS。
+
+  `cacheTtl` 的 `Cache-Control` 只挂在**成功**答复上,任何错误答复都不带它。多租户 host 若无法把请求解析到某个环境,该步**弃权**(不写任何东西,保留传输层原本的 404),而不是拿默认 kernel 的数据来回答。
+
+  现网行为零变更:publish / validate 对非空 `apis:` 仍然硬拒(#5040 E7 前不撤),因此本链结构性不可达。
+
+- 277eb36: **声明式端点的执行目标委派:`endpoint-executor` 纯模块(#5040 E5)**
+
+  命中的 `apis:` 端点按 `type` 委派到**既有**执行管线,零新执行语义 —— 这是 #5040 §4 的裁决:声明式端点是既有管线的「稳定 URL 别名 + 策略层」,不是第二套执行方言;同一操作经声明端点与经内建路由必须得到一致的答案。
+
+  - `type: object_operation` → `action-execution.callData`,参数形状逐条对齐 `/data`(`find`→`('query', {object, query})`、`get`→`('get', {object, id, select?, expand?})`、`create`→`('create', {object, data})`、`update`→`('update', {object, id, data})`、`delete`→`('delete', {object, id})`)。记录 id 取 `query.id`(词表未定义路径模板,执行器不发明一套);`object` **只**来自声明,请求改不动它。身份信封(`executionContext`)在五个操作上一律透传 —— #4936 摘除的死代码正是丢了这个参数,真跑起来会以 system 身份绕过 RLS。
+  - `type: flow` → `IAutomationService.execute(target, buildAutomationContext(body, ctx))`,复用 `/automation` 触发路由**同一个**上下文构造函数(该函数因此从 `domains/automation.ts` 导出):`{recordId, objectName, params}` 翻译与完整身份信封转发一并继承,`runAs:'user'` 的流程不会 fail-closed 被拒(#3760)或以他人身份运行(#1888)。automation 槽为空或自称非 handler 时答 501,携带 discovery 同款处方句(ADR-0076 D12)。
+  - `type: script` / `proxy`,以及缺 `objectParams` 的 `object_operation`:结构化 **501 NOT_IMPLEMENTED**(带处方),不猜语义。这个「不支持子集」在模块里只列一处,供 E7 的 publish 门直接照读。
+  - 失败一律走既有错误包络:状态优先级与 `details` 组装照抄 `HttpDispatcher.errorFromThrown`(`.status` → `.statusCode` → 校验失败 400 → 兜底 500),5xx 消息过 `looksLikeInternalErrorLeak` 消毒(#3867/#3918)。新模块已加入 `error-envelope.conformance.test.ts` 的源码扫描名单。
+
+  **本次落地不接线**:调度步(`api-endpoint-step.ts`)命中后仍答 501,把它换成「策略 → 执行」链是随后的小型接线单(等 E4 #5091 一并落地);叠加 publish 对非空 `apis:` 的硬拒(E7 前不撤),该模块结构性不可达,现网行为零变更。
+
+- 41e605e: **声明式端点的映射键:`inputMapping` / `outputMapping` 链内应用(#5040 E5c)**
+
+  两个键此前被 `ApiEndpointSchema` 声明、被 runtime 读取零次:作者写了、publish 放行、端点跑起来映射什么也不做 —— 正是 #5040 要消灭的「解析通过然后什么也不发生」中间态,也是 ADR-0049 `declared ≠ enforced` 的教科书形状(对 AI 写的元数据尤其糟:静默忽略的键不产生任何信号)。新纯模块 `api-mapping.ts` 是它们的唯一读者,语义**只**来自冻结词表的 describe 文本,取其最小忠实解读:
+
+  - **`inputMapping`(_Map Request Body to Internal Params_)**:`source` 按点路径读**请求体**,投影出目标入参;在策略链通过之后、委派之前应用,因此映射永远买不通 `authRequired` / `rateLimit`,而 `endpoint-executor` 保持纯委派、对映射无感知。词表只说 body,**query 不并入**(合并会凭空发明一条谁覆盖谁的优先级规则),query 照旧原样抵达管线。
+  - **`outputMapping`(_Map Internal Result to Response Body_)**:只作用于**成功**答案的载荷(`{success, data, meta}` 的 `data`),包络逐字保留 —— 声明改不动 `success`,也就无法把失败装扮成数据。401 / 429 / 400 / 501 一律不重映射。
+  - **映射是投影,不是合并**:结果只由声明的 `target` 组成,未声明的字段不随行。出站方向因此天然是一份 allow-list —— `apis` 是平台的对外面(ADR-0121 D3),默认泄漏内部字段不是可接受的缺省。
+  - **`source` 解析不到 ⇒ `target` 不写**(映射是投影不是校验器);**无声明 ⇒ 逐字节直通、按引用原样传递**,未声明映射的端点与 E5b 的行为完全一致。
+  - **无法服务的声明响亮拒绝**,不静默跳过、不半应用:`transform`(全仓无「transformation function name」注册表,发明它是沙箱裁决而非映射细节)、不可用路径(空串、空段 `a..b`、`__proto__` / `prototype` / `constructor`)、互撞的 `target`(同路径或一个写进另一个内部)—— 均为结构化 **501 NOT_IMPLEMENTED**(带处方,点名具体条目如 `inputMapping[1].transform`),与 `endpoint-executor` 的 `unsupported` 分支同类同形。`outputMapping` 的这道判定在**委派之前**做:投影坏掉的 `create` 不该先插入记录再拒绝作答。
+  - 新模块已加入 `error-envelope.conformance.test.ts` 的源码扫描名单。
+
+  **现网行为零变更**:非空 `apis:` 在 publish / validate 仍被硬拒(E7 #5111 前不撤),整条端点链结构性不可达。上述「不支持子集」应由 E7 的 publish 门在作者写应用时就拒掉,本模块是运行期兜底,不是主关口。
+
+- 2649ccb: feat(runtime,hono): 挂载 seam —— `setFallbackHandler` 实现 + 声明式端点派发步(#5040 E3, #5090)
+
+  给声明式 `apis:` 端点铺上**唯一一条**能进入处理器的通路,并且这条通路在构造上不可能遮蔽任何
+  已注册路由。执行器本身尚未落地,本次改动**零现网行为变更**:任何 stack 目前都无法发布非空
+  `apis:`(publish 硬拒,直到 #5040 E7 翻转),所以这里新增的一切在真实组合里结构性不可达。
+
+  **`@objectstack/plugin-hono-server` —— `IHttpServer.setFallbackHandler` 的实现**
+
+  契约(#5080 落在 `@objectstack/spec/contracts`)的四条保证逐条兑现:
+
+  - 映射到 Hono 的 `app.notFound` 钩子,**不是**通配路由。这是全部要点:通配路由要与之后注册
+    的每一条路由竞争,而 Hono 按先注册者赢裁决,归属就变成插件 `start()` 顺序的函数 ——
+    ADR-0076 D11 正是为此存在。兜底器只在全部显式路由未命中后运行,**零注册顺序依赖**。
+  - handler 拿到的 `req.body` **可读**(与 `use()` 中间件 seam 相反,后者的契约明确不填充
+    body),按 content-type 解析,与真实路由处理器走同一段代码。
+  - 重复安装即**替换**,不成链。
+  - handler 不写响应 → 适配器既有的未命中答案(404,或方法不匹配时 405 + `Allow`)原样保留。
+
+  配套的一处属主收敛:404/405 应答此前由 `HonoServerPlugin.start()` 直接写在
+  `getRawApp().notFound(...)` 上。`app.notFound` 是后调用者覆盖,兜底 seam 落在同一个钩子上,
+  两个写入方意味着幸存者由插件启动顺序决定 —— 应答本体因此移入 `HonoHttpServer`
+  (`installNotFoundSeam()` / `setFallbackHandler()` 在其中组合),一个钩子一个属主。行为
+  逐字节不变(`notfound-405.test.ts` 原样通过)。
+
+  顺带修好同一段代码上的两处不一致:适配器构造的 `IHttpRequest` 现在一律带
+  `remoteAddress`(此前只有中间件 seam 有,同一个契约有两种形状);处理器**同步**抛出与
+  异步 reject 现在报同一种结果(此前同步抛出会逃到 Hono 自己的错误页)。
+
+  **`@objectstack/runtime` —— dispatcher 端点派发步**
+
+  dispatcher-plugin 在 `start()` 中探测 `typeof server.setFallbackHandler === 'function'`
+  并注册兜底器。对落在 ADR-0121 D1 保留段 `<prefix>/apps/<命名空间>/<子路径>` 下的请求,
+  探测 `metadata` 服务的 `matchEndpoint`(#5089 的实现在并行开发,探测缺席即穿透):
+
+  - **命中** → `501 NOT_IMPLEMENTED`,包络说明执行器随 17.x 落地(#5040 E4–E5 接策略键与
+    执行目标);
+  - **未命中 / 无 matcher / 无 metadata 服务 / 路径不在挂载前缀下** → **不写任何响应**,
+    传输层既有的 404/405 答案原样成立(有回归测试逐字节钉住);
+  - `matchEndpoint` 抛错按 5xx 出口应答,不降级为 404 —— 故障不得伪装成「没有这条路由」。
+
+  派发步**不重入** `dispatch()`:那条管线会解析环境与 `executionContext`、跑匿名拒绝门、并以
+  语义 404 收尾,把全部未命中请求灌进去会改变今天未命中请求的答案。裸 404 与语义 404 的收口
+  是另一个决定,本次刻意不做。
+
+  `route-ledger.ts` 新增 `* /apps/**` 登记行与 `NON_DISPATCH_MOUNT_PREFIXES`(本包在
+  `dispatch()` 之外挂载的前缀),注记如实描述已接线的部分与**尚未**接线的执行部分;新增
+  一致性测试钉住 ADR-0121 D1 赖以成立的事实 —— `/apps` 不属于任何内建域。
+
+- a70cd0a: 声明式端点的策略键接线:`authRequired` / `rateLimit` / `cacheTtl`(#5040 E4)
+
+  新增 `packages/runtime/src/endpoint-policy.ts` —— `ApiEndpointSchema` 三个策略键的唯一读取方,并接入端点派发步(匹配命中 → 策略链 → 答复)。三个键全部复用既有原语,零发明:
+
+  - `authRequired`:复用 `shouldDenyAnonymous` 与 `ANONYMOUS_DENY_*` 常量,未认证得到与 `/meta`、`/ai`、`/security` 完全相同的 401 包络。默认值由 schema 物化(缺省即 `true`),执行器读不到「未声明」这个中间态;`authRequired: false` 是唯一的开门方式,且在 diff 中可见。
+  - `rateLimit`:复用 #5006 的 `deriveBucketConfig` / `resolveRateLimitKey` / `SharedTokenBucketLimiter`,桶键为 `apiep:<端点名>:<主体或 IP>` —— 与 server 级预算各自独立计量,互不侵蚀。超限答与 server 级限流器逐字节一致的 429 + `Retry-After`。
+  - `cacheTtl`:仅响应头语义(不实现服务端缓存,#5091 已裁)。正值 → `Cache-Control: private, max-age=<ttl>`(`private` 是安全规则:任何响应都可能是按主体裁剪过的);`0`/负值 → `no-store`;缺省 → 不发头;非 GET → 不发头并 warn 点名。
+
+  链序按 #5040 §3:**先限流、后鉴权**、再算缓存头 —— 凭据爆破本就是匿名流量,先答 401 会让扫号者完全绕开计量。
+
+  **结构性不可达、零现网行为变更**:非空 `apis:` 在 publish/validate 仍被硬拒(E7 翻转前),且派发步在未获得策略上下文时的答复与此前逐字节相同。
+
+- 55dbbba: feat(spec,runtime,hono): `server.security.rateLimit` — an authored budget that actually returns 429 (#4910, #4937)
+
+  Rate limiting in ObjectStack was three shapes with nothing between them. `packages/spec`
+  declared `RateLimitConfig` in three places and the whole repo had **zero readers** for any
+  of them, so an author wrote a budget, it parsed, and nothing happened (#4686).
+  `@objectstack/runtime` shipped a token bucket whose comments claimed, in the present tense,
+  that the dispatcher called it and short-circuited with 429 — it had **zero call sites**
+  outside its own unit test, and the `DispatcherPluginConfig.rateLimit` field it told you to
+  tune did not exist (#4937). Neither half was broken; they were simply never connected, and
+  both were documented as if they were.
+
+  They are connected now, along one narrow path.
+
+  ## What you write
+
+  ```ts
+  export default defineStack({
+    manifest: {
+      /* … */
+    },
+    server: {
+      security: {
+        rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 600 },
+      },
+      trustProxy: false,
+    },
+  });
+  ```
+
+  `server:` is a **new** top-level stack key. Nothing declared it before, so no existing
+  stack changes behaviour on upgrade — there is no configuration that was inert yesterday
+  and starts throttling today.
+
+  It is deliberately **narrow**: it carries `security.rateLimit` and `trustProxy` and
+  nothing else, because those are the two keys with a consumer. It is NOT the nine-key
+  `HttpServerConfigSchema` — the other seven have no reader and no authoring surface, and
+  mounting them here would have made seven dead keys writable in one move (their
+  enforce-or-remove fate stays with #4938). It is strict from birth (#4001), so a misspelled
+  budget is rejected with the correction rather than silently defaulted, and `maxRequests: 0`
+  is refused at `defineStack` rather than at 3am.
+
+  **No `server.port`.** The listening socket belongs to the deployment, not the artifact, and
+  `objectstack serve -p` already owns it. The precedence rule is recorded in the schema and
+  the docs in advance, so it cannot be re-litigated per caller: **CLI flag > `server:` >
+  built-in default.**
+
+  ## What happens
+
+  Every inbound request the server routes — REST, dispatcher, service routes, anything
+  mounted on that transport — consumes from a token bucket sized `capacity = maxRequests`,
+  refilling at `maxRequests / (windowMs / 1000)` per second. An empty bucket answers **429**
+  with a `Retry-After` computed from the bucket itself and the standard error envelope
+  (`code: "RATE_LIMIT_EXCEEDED"`). `OPTIONS` preflights are never metered.
+
+  The bucket is keyed by **resolved principal**, falling back to the caller's **IP** for
+  anonymous traffic — so one abusive session cannot spend another user's budget, and
+  credential-stuffing traffic (which has no principal yet) is still metered per source. That
+  IP comes from `X-Forwarded-For` / `X-Real-IP` **only when `trustProxy: true` is declared**;
+  otherwise it is the transport's own peer address. Undeclared, those headers are attacker
+  input: honouring them by default would hand anyone an unlimited supply of fresh buckets and
+  let them drain a chosen victim's.
+
+  Counters live in the kernel `cache` service when one is registered, so a multi-node
+  deployment enforces one budget instead of one per node (ADR-0069 D2), resolved lazily at
+  consume time so a cache plugin that registers later is still picked up (#4772). With no
+  cache service at all it falls back to a per-process store and says so once, naming the
+  consequence: the effective limit becomes the declared budget multiplied by the number of
+  nodes, and nothing about the deployment looks wrong.
+
+  ## Also in this change
+
+  - **`IHttpServer.use()` is a real middleware seam.** The Hono adapter's implementation
+    passed `{}` for both `req` and `res` and called `next()` unconditionally, so a registered
+    middleware could not read the request, write a response, or decline to continue — a
+    declared seam with no execution behind it, unnoticed because nothing called it. It now
+    delivers method/path/query/headers plus the transport peer address
+    (`IHttpRequest.remoteAddress`, new), and honours a short-circuit. Middleware must be
+    registered before the routes it guards; the kernel's two-phase boot makes that automatic
+    (`init()` before every `start()`).
+  - **`packages/runtime/src/security/rate-limit.ts` no longer describes an execution chain it
+    does not have** (#4937). The token-bucket arithmetic is extracted so the synchronous
+    in-process limiter and the new shared-store one cannot drift, and `DEFAULT_RATE_LIMITS` is
+    now labelled as the reference material it always was rather than as live defaults.
+
+  ## Explicitly NOT wired
+
+  `ApiEndpointSchema.rateLimit` and `ApiEndpointRegistrationSchema.rateLimit` remain
+  **known-unwired**. Declaring them still changes nothing. They are not retired here either:
+  the fate of the whole declarative `apis:` surface is undecided (#4936), and retiring one
+  key of a surface that may yet be implemented would only have to be undone. Tracked, not
+  silent.
+
+- ae490ef: feat(mcp): 开源发行版终于消费 skill —— `instructions` 半边投影为 MCP `prompts` 原语 (#3905)
+
+  `stack.zod.ts` 与 ADR-0063 §2 把 **skill 定为唯一第三方扩展原语**,而开源发行版
+  (BYO-AI,cloud ADR-0025)里零消费方:`SkillSchema` 可作者化、被两条 lint 规则认真
+  校验(`validateAiToolReferences` / `validateAiSurfaceAffinity`),却没有任何代码路径
+  读它 —— 作者写 skill → 校验通过 → lint 通过 → **永不运行且无人告知**。这正是本仓
+  ratchet 存在的意义所要消灭的 declared ≠ enforced 形状。
+
+  **skill 的两个半边,现在各自说清楚跑在哪。**
+
+  - **`instructions`(判断力)→ MCP `prompts` 原语,处处可用。** MCP 服务器补齐了
+    `prompts/list` / `prompts/get`:每个带 `instructions` 的已注册 skill 成为一个
+    MCP 客户端可以列出并取回的 prompt(prompt 名 = skill 机器名,`label` → `title`,
+    `description` 原样带上)。HTTP 与 stdio 两条传输都服务它。
+  - **`tools` / `surface` / `triggerConditions`(接线)→ 明确标注 cloud-runtime-only。**
+    绑工具与激活判定是 in-product agent 循环的属性;MCP 里模型在客户端、服务端只有
+    一张扁平工具表,AI 暴露的 Action 早已通过 `list_actions` / `run_action` 可达。
+    文档与 schema JSDoc 如实写明,不再装样子 —— 但两半边在两个发行版里都照旧接受
+    **校验**,所以开源里写的 skill 到 cloud 上语义完整,不必写两遍。
+
+  **协议合规。** `prompts` 能力按规范声明:只有当宿主能读到本环境的 skill 元数据时
+  才声明并注册处理器(能力协商如实,与 action 工具同一套优雅降级);无 skill 时
+  `prompts/list` 返回**空列表而非报错**;`prompts/get` 取不存在的名字返回
+  `-32602 InvalidParams`;没有 `instructions` 的 skill 与 `active: false` 的 skill
+  不投影。HTTP 面的投影从**本请求自己的 bridge** 读(与 `describeObject` 同一条
+  per-environment 通道),多租户宿主不会把一个环境的 skill 服务给另一个环境。
+
+  **同时修掉同仓重名。** `packages/mcp/src/skill.ts` 从来不是 skill 元数据类型,
+  而是 ADR-0036 Amendment C 的 `SKILL.md` 分发物 —— 在 `packages/mcp` 里 grep
+  `skill` 先找到的一直是它。现在按各自承载的产物命名:`skill-md.ts`(SKILL.md
+  分发物)与 `skill-prompts.ts`(skill 元数据 → prompts 投影),两侧模块头互指。
+  包的公开导出名(`renderSkillMarkdown` / `OBJECTSTACK_SKILL_NAME` /
+  `OBJECTSTACK_SKILL_DESCRIPTION` / `RenderSkillOptions`)一个未变。
+
+- aac90a5: feat(spec,runtime,metadata-protocol,client)!: one closed capability vocabulary — every discovery producer emits every key (#5672)
+
+  `#4828` renamed the runtime dispatcher's top-level `features` map to the
+  canonical `capabilities`, which collapsed the _spelling_ split between the two
+  discovery producers. It did not touch the deeper one: the two went on filling
+  **disjoint key sets**.
+
+  | producer                                                                             | keys it filled                                                                        |
+  | :----------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------ |
+  | `getDiscovery()` — `@objectstack/metadata-protocol`, upstream of REST `/discovery`   | `comments` `automation` `cron` `search` `export` `chunkedUpload` `transactionalBatch` |
+  | `getDiscoveryInfo()` — `@objectstack/runtime` dispatcher, `/.well-known/objectstack` | `search` `websockets` `files` `analytics` `ai` `notifications` `i18n`                 |
+
+  Only `search` overlapped. `DiscoverySchema.capabilities` was an open
+  `z.record`, so both shapes parsed clean and no gate could see the split — while
+  `packages/client`'s `capabilities` getter **asserted** the result was a
+  `WellKnownCapabilities`. Against a dispatcher-served host
+  `client.capabilities.transactionalBatch` was therefore statically `boolean` and
+  actually `undefined`, as were `comments`, `cron`, `export` and `chunkedUpload`.
+
+  Per the maintainer's 2026-08-06 ruling, the vocabulary is now closed and
+  mandatory.
+
+  **What a consumer sees.** Before: which capability flags exist depended on
+  which kind of host answered, and a flag you were typed to receive could simply
+  be missing. After: every discovery response carries **every** flag, always a
+  boolean. A capability the host does not deliver is `enabled: false` — never an
+  absent key — so a client can read a flag without knowing whether it reached a
+  dispatcher, the REST endpoint, or anything else. `client.capabilities` no longer
+  asserts its own return type: it enumerates the spec's key list, so the type is
+  true by construction, and it reads a key an older server omits as `false`
+  (fail-closed, matching the wire rule).
+
+  **`@objectstack/spec`.** `WellKnownCapabilitiesSchema` becomes the one
+  vocabulary and gains the six flags that were previously the dispatcher's alone
+  (`websockets`, `files`, `analytics`, `ai`, `notifications`, `i18n`) — all six
+  were already real answers on the wire, so this declares them rather than
+  inventing them. `DiscoverySchema.capabilities` changes from an optional open
+  record to a **required closed object** derived from that vocabulary, one entry
+  per key. New exports: `WELL_KNOWN_CAPABILITY_KEYS` (the key list, derived from
+  the schema so nothing can hand-list a fourth dialect) and
+  `CapabilityDescriptorSchema` / `CapabilityDescriptor` (the `enabled` +
+  optional `features` / `description` entry shape, previously inline).
+
+  Required, not optional, is the `scoping` precedent read the other way round:
+  `scoping` is optional because only one producer can honestly answer it, whereas
+  every producer can answer `capabilities` — and an optional block would leave a
+  consumer back at `undefined` for every flag.
+
+  **Producers.** Each answers all thirteen keys from its own facts, with the basis
+  recorded per key in the code. The dispatcher now measures `comments` off the
+  `sys_comment` object in the registry it already resolves for its `/data` domain,
+  and `automation` / `cron` / `export` / `chunkedUpload` off the same service
+  predicates that gate its route advertisements. Its one honest `false` is
+  `transactionalBatch`: the atomic cross-object `/batch` route is mounted by
+  `@objectstack/rest`, and this dispatcher has no batch branch at all, so claiming
+  the runtime's `transaction()` here would advertise an endpoint the host does not
+  serve. `getDiscovery()` answers the six new flags off the service registry it
+  already reads, gated on serveability so a self-declared stub does not advertise
+  a capability it cannot back.
+
+  **Gates.** The three `discovery-schema-conformance.test.ts` suites built by
+  `#5682` and extended to `routes` by `#5743` gain a fullness criterion — every
+  vocabulary key present, every `enabled` a real boolean, no key outside the
+  vocabulary — with the allowance derived from the schema rather than written out.
+
+  **Upgrading.** A producer or fixture that builds a `DiscoverySchema`-shaped
+  document must now include a complete `capabilities` block; build it from
+  `WELL_KNOWN_CAPABILITY_KEYS` rather than by hand. Consumers need no change:
+  they receive strictly more keys than before, and any flag they already read
+  keeps its meaning. The lenient wire wrapper `GetDiscoveryResponseSchema` still
+  allows the block to be absent, so a response from an older server still parses.
+
+### Patch Changes
+
+- 9fe9c1d: feat(spec): declare the action-body `ctx.session` contract (#5697)
+
+  An action body reads `ctx.session` on every dispatch, and until now **nothing
+  declared it**. `actionContext` is a bare `any` at both dispatch sites
+  (`domains/actions.ts`, `action-execution.ts`), the sandbox seam types
+  `ScriptContext.session` as `unknown`, and the one spec-side mention was an
+  inline literal on `ActionHandlerContext` carrying a `[k: string]: unknown`
+  catch-all. Declared-nowhere, produced-anyway: no schema, no gate, no generated
+  reference page, and nothing the liveness ledger could reach.
+
+  That is how the surface drifted without anyone noticing. Its `roles` key carries
+  `ExecutionContext.positions` — the ADR-0090 D3 vocabulary handed to authors under
+  the one spelling that ADR forbids — while the hook side retired its own
+  `session.roles` at #5050. One platform, one key name, two opposite answers.
+
+  **`ActionSessionSchema` (`@objectstack/spec/ui`) declares that shape as built.**
+
+  ```ts
+  { userId?: string; organizationId?: string; roles?: string[] }
+  ```
+
+  This release changes **nothing about what the runtime produces** — it is phase 1
+  of #5613's contract-first ruling, and declaring current reality is deliberately
+  not the same as endorsing it:
+
+  - `roles` is declared **deprecated** in its `.describe()` and its JSDoc. The
+    rename to `positions`, with a deprecation window and an ADR-0087 semantic
+    migration, is #5613 phase 2. There is deliberately **no `positions` key yet** —
+    minting one before the migration would ship two live spellings of one value.
+  - The schema is **not strict**, matching `HookContextSchema`: this is a runtime
+    shape the platform hands a body, never authored, and closing it would turn a
+    future engine-side enrichment into a parse failure for whoever parses a context
+    they were given.
+
+  Three facts the declaration now states, all of them previously discoverable only
+  by reading the builder:
+
+  - **Absent means the key is absent.** The builder uses conditional spreads, so
+    `'organizationId' in ctx.session` answers `false` — not "present and
+    `undefined`". The hook path's `input.id` on a bulk write is the opposite case
+    (#5668); an `in` test does not port between them.
+  - **No identity envelope yields no session at all** — `undefined`, never `{}`, so
+    a body can tell "no caller" from "an anonymous caller" (#3712). One consequence:
+    `roles` never appears on its own.
+  - **`organizationId` is the blessed name** for the caller's active org; the
+    v11-removed `session.tenantId` alias (#3280 / #3290) does not come back.
+
+  Type-only on the runtime side, no behaviour change: `buildActionSession()` now
+  declares `ActionSession | undefined` instead of `any | undefined`, and
+  `ActionHandlerContext.session` is the schema's inferred type rather than an
+  inline literal with a catch-all. A handler annotated with `ActionHandler` that
+  read an undeclared key off `ctx.session` now gets a compile error naming it —
+  that key was never produced. `ScriptContext.session` deliberately stays
+  `unknown`: it is one seam over both body kinds, and hook and action sessions are
+  different objects.
+
+  The declaration ships with the gate it needed —
+  `packages/runtime/src/action-session-shape-contract.test.ts` executes the real
+  producer and asserts a non-strict parse of the built object returns it
+  **unchanged**, so a key the builder starts producing without declaring here is
+  stripped and the pin goes red.
+
+- da5d1b4: fix(runtime): `ctx.user.name` is the acting user's display name, on every dispatch path (#5372)
+
+  An action body reading `ctx.user.name` got the raw user id back — a _declared_
+  key delivering a plausible **wrong value**, which is the failure mode
+  "declared = enforced" exists to prevent. Nothing downstream can detect it: the
+  value is a perfectly good string, so no `??` chain and no consumer-side guard
+  tells it apart from a real name. Apps that trusted the declaration wrote opaque
+  ids into user-facing surfaces (an activity timeline rendering
+  `usr_01j…` as its actor for every logged activity).
+
+  Three dispatchers built the caller's `user` object three different ways, and
+  all three landed on the id:
+
+  - **REST `/actions`** hardcoded `name: ec.userId`.
+  - **MCP `run_action`** read `ec.userName ?? ec.userDisplayName ?? ec.userId`.
+    Neither alias is declared on `ExecutionContextSchema` and nothing ever
+    assigned either, so the chain's only reachable arm was the id.
+  - **The AI routes** spelled the key `displayName` (same dead chain behind it)
+    and read the caller's address off `ec.userEmail` — the declared field is
+    `ec.email` — so `req.user.email` there was permanently `undefined`.
+
+  **What changes.** One shared producer builds the user envelope for all three
+  paths. `name` now carries `sys_user.name`, the platform's own profile
+  display-name column, resolved once per request (a memo keyed on the request's
+  ExecutionContext, so N action dispatches in one request cost one indexed read
+  — ~0.22 ms measured against real SQLite — and nothing is cached across
+  requests, so a rename takes effect on the user's next request).
+
+  Resolution is **quiet**: no `sys_user` row, no engine, a failing read or a blank
+  name falls back to the id. A missing display name never fails an action. So
+  `name === id` now means exactly one thing — _this user has no resolvable display
+  name_ — which is what makes the fix detectable from application code: any
+  workaround of the form "if `ctx.user.name` differs from `ctx.user.id`, trust
+  it; otherwise look the name up myself" **self-retires** the moment this lands,
+  with no coordinated deploy.
+
+  **One shape, and it is the spec's.** [ADR-0068 D1] declares `EvalUser` as the
+  one user-context contract, mounted under `current_user` / `user` / `ctx.user`
+  on the predicate surface — with `name` on it, meaning "display name". The
+  dispatch envelope's identity core is now built through that same
+  `createEvalUser` factory, so an action's `visible` predicate and its `body` —
+  both spelled `ctx.user` — see one object: `id`, `name`, `email`, `positions`,
+  `isPlatformAdmin`, `organizationId`. On top of that core the dispatch surfaces
+  keep publishing what they already published: `userId` and `displayName`
+  (aliases of `id` / `name`, same values), `roles` (the pre-ADR-0090 alias of
+  `positions`), and the two authority channels `permissions` (permission-set
+  names) and `systemPermissions` (capabilities), still side by side and never
+  merged. Additive for every existing reader; no key was removed.
+
+  The AI routes' second `req.user` producer (the concrete per-route mounts) is
+  built by the same function, so the two can no longer drift apart by hand. Its
+  display name comes from the session's own `user.name`, needing no extra read;
+  its former `?? user.email` middle arm is gone so that `name === id` means the
+  same thing on every producer — the address is still served under `email`.
+
+  `buildActionSandboxContext` is unchanged: it passed the user through verbatim
+  all along, and was never where the name was lost.
+
+- 9f747ee: fix(runtime): unknown `/auth` sub-paths answer a clean 404 instead of leaking an internal `TypeError` (#5085)
+
+  Measured on a real showcase boot:
+
+  ```
+  POST /api/v1/auth/login
+  → HTTP 500
+  {"success":false,"error":{"code":"INTERNAL_ERROR",
+    "message":"request.headers.get is not a function","httpStatus":500}}
+  ```
+
+  `/auth/login` is an obvious guess — it is the industry-habitual name — and any
+  integrator who tried it got a 500 naming an internal function call. The positive
+  control `POST /api/v1/auth/sign-in/email`, a real better-auth route reached
+  through the same forwarding layer on the same boot, answered 200 all along.
+
+  **The producer.** `createDispatcherPlugin` mounted one legacy explicit route,
+  `POST ${prefix}/auth/login`, and it was the only place in this repo that handed
+  better-auth a **non-Fetch** request. `IHttpServer` gives a handler the adapter's
+  internal `IHttpRequest`, whose `headers` is a plain object built from
+  `c.req.header()`; the `/auth` domain forwards `context.request` whole to
+  `IAuthService.handleRequest(request: Request)`, and better-auth's fetch-style
+  handler opens with `request.headers.get(…)`.
+
+  That route could not work for any caller: `/login` is not a better-auth endpoint
+  (it appears in neither `plugin-auth`'s route ledger nor the documented endpoint
+  list, which already stated "There is no `/auth/login` route"), and the domain
+  does not route on the sub-path at all. Its only effect over the `/auth/*`
+  wildcard the auth plugin mounts on the raw app was a 500 where the wildcard
+  yields better-auth's own clean 404. **It is deleted** — per Prime Directive #12
+  the fix belongs at the producer, not in a consumer-side conversion that would buy
+  nothing but a more expensive 404. Every unknown auth sub-path now falls to the
+  namespace owner exactly like every other one.
+
+  **The exit.** A **throw** out of `IAuthService.handleRequest` is unattributable
+  in the `/auth` domain: it never inspected the sub-path, never parsed the body,
+  and cannot tell a caller mistake from a handler bug. Its message used to reach
+  the client verbatim, because both dispatcher exits sanitise only on
+  `looksLikeInternalErrorLeak` — a SQL/driver-dump heuristic with nothing to say
+  about a `TypeError`. The message is now withheld **unconditionally**, following
+  the same discipline as `mapDataError`'s terminal `UNCLASSIFIED_FAULT` branch:
+  HTTP 500 with the catalog's `INTERNAL_ERROR` / `Internal server error`, and the
+  original error handed to the server log where an operator reads it.
+
+  Nothing changes for the honest paths. better-auth answers its own failures with a
+  `Response` rather than by throwing, so a real 401/403/404/422 is still returned
+  with its own body untouched, and `POST /auth/sign-in/email` still answers 200
+  with its `set-cookie`.
+
+- 43ca399: fix(runtime): `callData`'s ObjectQL fallback answers a missing record id with 404 `RECORD_NOT_FOUND` (#5138)
+
+  `callData` (the data bridge behind `/data`, the MCP bridge and the declarative
+  endpoint executor) is protocol-first with an ObjectQL fallback. The fallback
+  gave **three different answers to one fact** — that `id` names no row:
+
+  | verb     | before                                                      | on the wire             |
+  | -------- | ----------------------------------------------------------- | ----------------------- |
+  | `get`    | `return … : null`                                           | `200 { data: null }`    |
+  | `update` | `throw new Error('[ObjectStack] Not Found')` — no `.status` | **500**                 |
+  | `delete` | no existence check at all                                   | `200 { deleted: true }` |
+
+  The protocol path has answered `404 RECORD_NOT_FOUND` on all three verbs since
+  #4435 (re-asserted for the batch path by #5088), so the answer to the same
+  request depended on something no caller can see: whether the deployment
+  registered the `protocol` slot (`MetadataPlugin` / `@objectstack/metadata-protocol`).
+  All three fallback branches now throw the SAME envelope the protocol throws.
+
+  Two of these were actively harmful. `update` reported a caller mistake as an
+  internal fault — every dispatcher exit reads `.status` → `.statusCode` → 500, so
+  a 4xx fact entered error reporting and alerting as a 5xx. `delete` reported
+  success for a row that never existed, which is the hardest class to notice: an
+  integrator reading `200` records the cleanup as done.
+
+  The envelope is not re-spelled. `recordNotFoundError` is now exported from
+  `@objectstack/metadata-protocol` and imported by the fallback, so there is one
+  construction point and the two paths behind one `callData` cannot drift apart
+  again.
+
+  **Upgrade note.** If you run an assembly WITHOUT the metadata-protocol plugin
+  (lean hosts, and the MCP multi-env path that threads a raw driver), these three
+  calls change their answer for a missing id — from `200`/`200`/`500` to `404
+{ code: 'RECORD_NOT_FOUND', message: 'Record <id> not found in <object>' }`.
+  Deployments that DO register the protocol slot are unaffected: they already
+  answered `404` and this release does not touch that path. A client that
+  branched on `data === null` from `GET /data/:object/:id` should branch on the
+  `404` instead; a client that treated `DELETE` as idempotent should treat `404`
+  as "already gone". Declarative endpoints (`object_operation`) inherit the same
+  answer, since they reuse `/data`'s delegation.
+
+  `delete`'s existence check is a `find` probe, not a read of what `ql.delete`
+  returned: `IDataDriver.delete` declares `Promise< boolean >` and the protocol
+  can read it, but `IDataEngine.delete` declares `Promise< any >` and the engine
+  returns its driver's result through the hook chain — testing that for `false`
+  would be reading a signal the contract does not promise, and it fails in the
+  direction this fixes.
+
+- eda599e: fix(platform-objects): 超预算后台 seed 期间不再空库自证 —— 一次启动不再跑两套契约
+
+  #4769 已把 ADR-0104 的空库自证从 `kernel:ready` 挪到 `app:seeded`(本次启动自身数据的结算点),但保留 `kernel:ready` 作为「从不 seed 的内核」的兜底。剩下的窗口是这两个钩子**到达顺序可以颠倒**:`AppPlugin` 的 inline seed 超出软预算(`OS_INLINE_SEED_BUDGET_MS`,默认 8s)后转入后台,于是 `kernel:ready` 先到、兜底自证在 seed 仍在写的时候签发证书并把闸门翻到 strict——同一次 seed 运行的后半段撞上前半段从未见过的契约。showcase 冷启(`OS_INLINE_SEED_BUDGET_MS=1`)实测:自证发生在 +0.470s,seed 结算在 +3.617s,窗口 3.147s。
+
+  现在两个钩子都先问一句「本次启动自己的 seed 落定了吗」,任一处报告仍有未结算的 seed 源就不签发。`app:seeded` 同样受这道检查约束——多 config app 的 bundle 会每个 app 触发一次,第一次并不是本次启动的结算点。
+
+  新增 `seed-settlement` 契约(`@objectstack/spec/contracts`)承载这个信号,而不是让 platform-objects 去嗅 runtime 内部的 `seed-datasets` 服务:那个数组的存在只能说明「seed 源存在」,永远说明不了「已经落定」,而这两件事之间的差正是本 bug 的整个窗口。runtime 在选择分支之前先声明 seed 源,并在写入真正结束的同一刻结算它。
+
+  **multi-tenant 与 `skipSeedData` 的 ADR-0104 姿态(2026-08-06 裁定,#4795)**:这两种部署会注册 seed 数据但在启动时并不写入(前者按 org 在 `sys_organization` insert 时重放,后者是 `os migrate` 的只读规划启动,#3917),`app:seeded` 永不触发。它们的姿态是**启动时不自证,等 `os migrate … --apply` 在真实扫描的证据上落笔**——由同一个判据自然得出,不需要单独分支。这是答案而不是缺口:在启动那一刻断言一次尚未发生的 per-org 重放不含违规值,正是 #4769 的同一个错误、只是引信更长;而停在 warn-first 是可恢复的方向,随时可由 `os migrate value-shapes --apply` / `os migrate files-to-references --apply` 关闭。
+
+  `@objectstack/objectql` 侧只更新了 #4769 撤销机制的注释:「后台 seed 收尾晚于签发」不再是它要兜的场景(已在源头关闭),它对 `os dev` 热重载 seeder、运行期 marketplace 安装以及 lax 开关仍然有效。
+
+- 7bf3d1c: fix(runtime): `callData('delete', …)` 的 ObjectQL 兜底返回 spec 声明的 `{ object, id, success }`,与 protocol 路径同形 (#5581)
+
+  `callData` 是 protocol 优先 + ObjectQL 兜底,两条路径此前对「删除成功」给的是两种形状:
+
+  | 路径                   | 此前                            | 现在                            |
+  | ---------------------- | ------------------------------- | ------------------------------- |
+  | protocol(`deleteData`) | `{ object, id, success: true }` | 不变                            |
+  | ObjectQL 兜底          | `{ object, id, deleted: true }` | `{ object, id, success: true }` |
+
+  规范只有一个:`DeleteDataResponseSchema`(`packages/spec/src/api/protocol.zod.ts`)声明的是
+  `{ object, id, success }`,`deleted` 从未被任何 schema 声明;公开的 HTTP 文档
+  (`content/docs/protocol/kernel/http-protocol.mdx`)也一直写的是 `success`。所以兜底是唯一
+  的偏离方,protocol 路径与 spec、与文档都无需改动。
+
+  这是 #5138 同一族缺陷的成功侧:#5138 收敛的是「记录不存在」的答案,本次收敛的是「删除成功」
+  的答案 —— 后者是每一次正常请求都会走到的面,而非只在 id 写错时才碰到。此前按
+  `DeleteDataResponseSchema` 写的客户端,在**未注册 `protocol` 槽**的精简装配上会从一个 HTTP 200
+  里读到 `success === undefined`,即「删除到底成没成功」读不出来,而调用方无从分辨自己走的是哪条
+  路径。消费端各自兼容 `success ?? deleted` 两种拼写正是 contract-first 禁止的形状,所以修在
+  生产方,不在消费方。
+
+  ## ⚠️ 升级须知(行为变化)
+
+  **仅影响没有安装 `MetadataPlugin`(`@objectstack/metadata-protocol`,即注册 `protocol` 槽)的
+  精简装配。** 装了该插件的部署走 protocol 优先路径,本来就返回 `success`,不受影响。
+
+  在这类精简装配上,以下三个面的 `DELETE` 成功体键名由 `deleted` 改为 `success`:
+
+  - `DELETE /api/v1/data/:object/:id`
+  - MCP 的 `delete_record` 工具(`domains/mcp.ts` 的 `remove` 桥)
+  - 声明式端点(`objectParams.operation: 'delete'`,#5092)
+
+  若你的代码读的是 `response.data.deleted`,请改读 `response.data.success` —— 这也是 spec 与
+  公开文档自始至终声明的键。删除行为本身(含 #5138 落的「记录不存在则 404 `RECORD_NOT_FOUND`
+  且不发出写」)完全未变,变的只有成功体拼写这一个键。
+
+- 217b791: fix(runtime): an HTTP adapter without `setFallbackHandler` now warns that declarative endpoints are unreachable (#5400)
+
+  `setFallbackHandler` is the ONE seam by which a metadata-declared `apis:`
+  endpoint reaches a handler, and it is optional on `IHttpServer`. On an adapter
+  that omits it, every declared endpoint is permanently unservable and the caller
+  gets the transport's bare 404 — indistinguishable from a typo.
+
+  Until now the dispatcher announced that at `debug`, which the default
+  `level: 'info'` does not print at all, so operators had no signal whatsoever.
+  That level was correct only while a non-empty `apis:` was rejected wholesale at
+  publish (#4936): no deployment could be missing anything, because none could
+  declare anything. The #5040 E7 publish flip ended that premise — declarations
+  publish now and stacks ship them — so the line is raised to `warn` and carries
+  both halves AGENTS.md's "Absence must be loud" requires:
+
+  - **consequence** — every metadata-declared `apis:` endpoint is UNREACHABLE on
+    this transport and will answer a bare 404;
+  - **remedy** — compose an HTTP adapter that implements `setFallbackHandler`
+    (e.g. `@objectstack/plugin-hono-server`).
+
+  `warn` and deliberately not `error`: this is a functional degradation (a
+  capability is not mounted, and its next caller finds out), not a durability one
+  — nothing here claims to have persisted anything. The level is welded by
+  `packages/runtime/src/dispatcher-plugin.fallback-absence-warn.test.ts`, which
+  fails both on a slide back to `debug` and on escalation to `error`, and pins
+  that a conforming adapter stays silent.
+
+  Operator-visible only: no API, schema or routing change. A deployment already on
+  a conforming adapter (the default `@objectstack/plugin-hono-server`) sees
+  nothing new.
+
+- 18b8eaa: fix(runtime,tooling): `saveMetaItem` 进入持久性词表,包发布的可见性翻转不再静默丢写 (#4754)
+
+  #4632 立的「Degradation log levels」规则由 `pnpm check:durability-log-level` 机械执行,
+  但它只认 `DURABILITY_CRITICAL_CALLEES` 这张显式词表 —— 词表以外的持久性接缝它发现不了。
+  #4669 的事故正是这一类:`protocol.saveMetaItem()` 失败被吞掉,整条投影路径停摆却一个红灯
+  都没有,跨了一个发布周期才被偶然看见。本次把 `saveMetaItem` 加进词表,并把它照出来的
+  每一处逐个判过。
+
+  **真丢失的那一处已修好。** `POST /packages/:id/publish-drafts` 的 ADR-0045 可见性翻转
+  (`packages/runtime/src/domains/packages.ts`)是一次搭别人便车的元数据**写入**:草稿已经
+  发布,所以这个路由无论如何都答 200,而写失败只会在响应体里留下一个没人读的 `unhideError`。
+  症状因此是「我明明发布了,应用却没出现」,而且要很久以后才有人把它和这里联系起来 ——
+  正是 #4669 的形状。现在它按范本在 `error` 级别报告:点名是哪个包、其 app 仍然以
+  `hidden: true` 存着因而在启动器里不可见、发布却报告了成功,并给出修复动作(重跑
+  publish-drafts,幂等;或直接 `PUT /meta/app/<name>` 置 `hidden: false`),同时带上原始
+  错因。响应契约不变 —— 仍然是 200,仍然带 `unhideError`。
+
+  **闸门自身的两个精度缺陷一并修掉**(词表加一个条目就让它们暴露了,8 处命中里 4 处是误报):
+
+  - **同文件 concise-arrow 报告器看不见。** 闸门文档明说 `catch` 一侧会追同文件的 helper,
+    但遍历只访问子节点,而 `const logError = (...a) => console.error(...a)` 的函数体**就是**
+    那个调用表达式本身,于是 `rest-server.ts` 里最响的两处 `/meta` PUT 反被判成「完全静默」。
+  - **一处接缝被按嵌套层数重复指认。** 一个已被内层 `catch` 消化掉的调用,仍然算在每一层
+    外层 `catch` 头上 —— 而那些外层多半是正确的路由级错误处理器。`packages.ts` 里同一个
+    `saveMetaItem` 因此被报了三次。现在只有当内层 `catch` 每条路径都向外传播时,外层才被
+    判定为真正的守卫。
+
+  两个修复都在 `--self-test` 里双向钉住(改前必失败,改后才通过),自测用例由 CI 执行。
+
+  判定为「故障已答给调用方」的三处(`meta.ts` 的 4xx/422、`protocol.ts` 两处结构化逐项
+  失败报告)不是降级,记入 shrink-only 基线并附理由与关闭条件(#5241)。
+
+- 78adc2e: fix(runtime): disabled packages no longer come back enabled after an empty-env restart (#5047)
+
+  An operator who disables a package has that decision persisted to
+  `<OS_HOME>/package-state/<environmentId>.json`, and boot replays it by seeding
+  the registry's initial-disabled set **before** any package is registered — so
+  every registration path (boot-artifact decomposition, `sys_packages`
+  rehydration, HTTP install) installs those packages disabled.
+
+  That seed ran inside `AppPlugin.init` **after** the empty-env early return. An
+  empty environment is one whose artifact carries no app payload — which is
+  exactly the environment where every package arrives later, from
+  `PackageServicePlugin`'s Phase 2 replay of `sys_packages` or from an HTTP
+  install. So on precisely those DB-driven environments the initial-disabled set
+  stayed empty, and a package the administrator had disabled came back **enabled**
+  on every restart, with no error anywhere: the disable had persisted correctly,
+  it was simply never read.
+
+  The seed now runs before that return, alongside the default hook/action body
+  runners and the authored-translation sync, which are before it for the same
+  reason. Non-empty environments are unaffected — the seed still lands before the
+  manifest is decomposed — and the seed remains best-effort, degrading silently on
+  kernels with no engine.
+
+- 1203bb2: **声明式端点进 OpenAPI 文档;`/openapi.json` 的影子属主摘除(#5040 E6,并入 #5078)**
+
+  `GET {basePath}/openapi.json` 只有一个属主,而且实测坐实是 `packages/rest`(#5078:真实 boot 拿到 355KB 的 OpenAPI 3.1 文档,`servers[0]` 按 Host 注入、`{object}` 展开出 199 条 paths、两条 `x-template` —— 三个指纹全部是 rest-server 的行为)。因此 `apis:` 端点的文档面加入 **rest-server 既有的 enrichment 管线**(与 `{object}` 展开同根、同一次请求、同样 best-effort),而**不是**在某个 metadata service 上实现 `generateOpenApi` —— 那会造出 ADR-0076 第 1 条明令禁止的第二属主。E1 的契约成员因此已剔除。
+
+  每条声明贡献一个 path 条目:`path` 原样、`method` 小写作为 Operation 键、`operationId` = `name`,以及词表**真正带有**的两个文档字段 `summary` / `description`(缺省即缺省,不生成替身)。除此之外只写「执行器会怎么对待这条声明」的事实,逐条注明出处:`object_operation` 的 `get`/`update`/`delete` 记录 id 取 `query.id`(词表无路径模板语法)、`create` 答 201 其余 200、`script` / `proxy` 与缺 `objectParams` 的 `object_operation` 答 **501**。不编造任何 request/response schema —— 出厂文档的 `components.schemas` 是空的,凭空写 `$ref` 只会得到悬空引用。
+
+  `authRequired` 由 schema parse 物化(缺省即 `true`),为 true 的条目引用**从文档自身读出**的 security 方案(不在 rest 里硬写方案名,否则就是第二处需要保持正确的地方),为 false 的条目写显式 `security: []` —— 这是 review 时一眼能看见的那个形状。不满足 `ApiEndpointSchema` 的存量条目**响亮跳过**并点名(与端点匹配器的装载门同一姿态);同 `method+path` 撞车时按「`name` 字典序在前者胜」裁决,与匹配器**同一条规则**,否则文档会指认一个运行时并不执行的端点;撞上内建路径时内建保留,声明被略过并报错。
+
+  同时摘除 `http-dispatcher.ts` 里的 `generateOpenApi` 探测死分支:该方法在本仓与两个兄弟仓**零实现**,且 boot 实测**没有任何路由**把 `/openapi.json` 送进 `dispatch()` —— 双重死。`route-ledger.ts` 里对应的行与 `LEGACY_CHAIN_PREFIXES` 条目一并移除(原注记「falls through when metadata service lacks a generator」把「从来没有」写成了「有时没有」,正是 #5078 立单的失准点;把 prefix 留在一张自述为「if-chain 分支」的清单里,会在同一个 PR 里再造一次同样的谎)。该路由的唯一台账行在 `packages/rest/src/rest-route-ledger.ts`,一直是准的。
+
+  **现网行为零变更**:publish / validate 对非空 `apis:` 仍然硬拒(E7 前不撤),所以今天枚举出的是空集,enrichment 原样返回同一个文档对象 —— 服务出去的字节与本次改动前逐字节相同,并有测试钉住。
+
+- 2ddba89: fix(tenancy): eight sites answered "is this deployment multi-org?" with the demoted `OS_MULTI_ORG_ENABLED` (#5262)
+
+  ADR-0105 D1 made `OS_TENANCY_POSTURE` the authoritative knob and demoted
+  `OS_MULTI_ORG_ENABLED` to a back-compat _input_ of `resolveTenancyPosture()`.
+  A deployment configured the documented way — `OS_TENANCY_POSTURE=isolated` (or
+  `group`), legacy boolean unset — therefore reads `false` from
+  `resolveMultiOrgEnabled()` while running a fully mounted organization wall.
+  #5233 corrected two sites in `plugin-auth`; a census found eight more, all
+  written before that function's doc comment was corrected. Third recurrence of
+  the shape (cloud#1020, #5233).
+
+  Each site was judged separately for **which** posture answers its question —
+  what the operator REQUESTED, or what the `tenancy` service reports is actually
+  IN FORCE — rather than converted mechanically:
+
+  - `objectql` `SchemaRegistry` — the env-derived multi-tenant default. Reads the
+    REQUESTED posture (it is constructed below the kernel, with no service
+    registry to ask). The `organization_id` column was always provisioned; what
+    diverged is its INDEX, so a posture-only deployment ran the Layer 0 wall's
+    hottest predicate unindexed while SecurityPlugin compiled that same wall.
+  - `plugin-dev` — whether to load the enterprise `@objectstack/organizations`.
+    REQUESTED posture, mirroring `serve.ts`: this branch is what mounts the wall,
+    so asking whether the wall is up would be circular. A posture-only dev stack
+    previously never loaded the package at all and served traffic unwalled. Its
+    diagnostic now names the posture that was requested instead of asserting
+    `OS_MULTI_ORG_ENABLED=true` at an operator who never set it.
+  - `runtime` `AppPlugin` (inline seed + hot-reload seeder) — EFFECTIVE posture,
+    via the `tenancy` service. These ask "will the per-org replay run instead of
+    me?", and on an ADR-0093 D5 degraded boot that replay does not exist, so
+    keying on the request would defer to a replay that can never happen. Walled
+    deployments previously inline-seeded exactly the NULL-organization rows the
+    code's own comment exists to avoid.
+  - `cloud-connection` marketplace local install (install-time seed + rehydrate
+    heal) — EFFECTIVE posture, same reasoning. The install path is a write path:
+    a walled deployment wrote every sample row with no `organization_id`, landing
+    the app's data outside the wall its own reads apply.
+  - `driver-sql` `isMultiTenantMode()` — REQUESTED posture (a driver has no
+    kernel to ask, and a suppressed warning is the costlier error for a
+    diagnostic). It also no longer memoises into `_multiTenantMode`: that froze a
+    process-level fact into a per-instance verdict on whichever write landed
+    first. The gate now resolves live, which is affordable because
+    `auditMissingTenant` consults it only after the `tenantId` early-out.
+  - `cli` `os verify` — REQUESTED posture. This one produced a green verification
+    run over an unverified property: a posture-only deployment silently skipped
+    every multi-tenant proof and exited 0.
+
+  **No configuration change is needed anywhere.** Deployments setting only
+  `OS_MULTI_ORG_ENABLED=true` keep working unchanged — `resolveTenancyPosture()`
+  falls back to it — and the `OS_TENANCY_POSTURE=isolated` + `OS_MULTI_ORG_ENABLED=true`
+  belt-and-braces configuration stays valid. Deployments that set only
+  `OS_TENANCY_POSTURE` can now drop the redundant boolean. Single-org behaviour is
+  unchanged at every site; only the knob each one reads is corrected.
+
+- ef7845a: fix(runtime): 可见性翻转中途失败时,已落盘的 app 不再从响应里整批消失 (#5242)
+
+  `POST /packages/:id/publish-drafts` 的 ADR-0045 可见性翻转是一个**循环**:每个 app 一次
+  独立的 `saveMetaItem`,每次成功各自落盘。但 `unhidden` 数组声明在 `try` 之内、
+  `result.unhiddenApps` 又只在整个循环跑完之后才赋值 —— 5 个 app 里第 3 个抛异常时,前 2 个
+  **确实已经翻转并持久化**,却随栈一起被丢弃:响应里 `unhiddenApps` 压根不存在。
+
+  后果有两层,都指向同一个「机器可读面在撒谎」:
+
+  1. **响应少报了真实发生的事。** 调用方看到的是「翻转失败」,看不到「其中 2 个已经生效」。
+  2. **`metadata:reloaded` 对这 2 个 app 漏播。** 紧随其后的重绑定段读的正是 `unhiddenApps`,
+     字段缺失 → 这 2 个已经变可见的 app 不进 `changed` → boot-cached 的消费者(首当其冲是
+     automation engine)不重新同步它们,要等下一次重启。
+
+  修法按 PM 裁定取**增量累积**而非预校验:`unhidden` 与它的赋值一并提到 `try` 之外,名字只在
+  对应的 `saveMetaItem` **兑现之后**才 push,因此这个列表在任意时刻恰好等于「已经落盘的那些」。
+  赋值移到 `try/catch` 之后,成功与中途失败两条路径都会执行,并且仍在 announce 段之前 ——
+  部分失败时 `unhiddenApps` 与 `unhideError` **并存**:前者说什么翻成功了,后者说还有没翻完的。
+  `unhidden` 是每请求的局部量,不引入任何共享可变状态,符合 #5385 确立的显式传参姿态。
+
+  同时修掉那条 `error` 日志的措辞:它原先断言「其 app **全部**仍以 `hidden: true` 存着」,
+  一旦有翻转已落盘这句话就是假的。现在按两半如实点名 —— 哪些确实翻了(列出名字)、哪些仍然
+  是隐藏的,以及一如既往的后果与修复动作。
+
+  响应契约不变:仍然 200,字段还是原来那两个,只是部分失败时它们可以同时出现;重跑依旧幂等
+  (已翻转的 app `hidden !== true`,循环会跳过)。
+
+- 5aaa6fc: Deny anonymous callers on the `/actions` and `/automation` dispatch routes (#5519)
+
+  `@objectstack/rest`'s `/data` and the dispatcher's `/meta`, `/ai` and `/security`
+  have answered an unauthenticated caller 401 `UNAUTHENTICATED` since #3963 made
+  "anonymous access is always denied" a platform promise (the `api.requireAuth`
+  opt-out is a tombstone). The dispatcher's own `/actions/*` and `/automation/*`
+  routes — mounted by `dispatcher-plugin.ts` onto the host server, a different
+  registration path from the REST one — carried no anonymity check at all.
+
+  `/actions` was the expensive half: a `script` action's body executes with
+  `isSystem: true` forced on (`buildActionExecutionContext`), so an
+  unauthenticated POST bought an RLS/FLS-bypassing SYSTEM write. The only gate
+  ahead of it was ADR-0066 D4's `requiredPermissions`, which allows every action
+  that declares none — i.e. most authored actions. On `/automation`, anonymous
+  callers could trigger a flow run, list every flow, register one, and
+  unregister one.
+
+  Both domains now call the shared `shouldDenyAnonymous` decision before anything
+  dispatches, returning the same 401 envelope every other seam returns. Finer
+  authorization is unchanged and still runs for callers who clear the floor —
+  `requiredPermissions` (ADR-0066 D4), `ai.exposed`, the ADR-0104 param contract.
+
+  **What passes unchanged:** any authenticated caller (session, API key or OAuth
+  principal), and internal `isSystem` contexts. CORS preflight (`OPTIONS`) is
+  exempt as always. Internal dispatch paths never enter these HTTP handlers and
+  are untouched — the MCP `run_action` bridge, the declarative endpoint executor
+  (a `type: 'flow'` endpoint keeps its own `authRequired` gate, so an explicit
+  `authRequired: false` endpoint stays public), and engine-internal record-change
+  and schedule triggers.
+
+  **Behaviour change to expect:** an unauthenticated call that previously got 200
+  (or 403 on a `requiredPermissions` action, or 405/501) now gets 401. If a
+  deployment relied on unauthenticated action or flow invocation, the supported
+  replacement is a declared endpoint with `authRequired: false`, a public-form
+  grant, or a share-link token — never an anonymous `/actions` POST.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [f7df82c]
+- Updated dependencies [978fed2]
+- Updated dependencies [c36abfe]
+- Updated dependencies [cfc293f]
+- Updated dependencies [d085670]
+- Updated dependencies [de70b42]
+- Updated dependencies [2f6516e]
+- Updated dependencies [01c0bae]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [7a40b7a]
+- Updated dependencies [7cf1531]
+- Updated dependencies [586d6f7]
+- Updated dependencies [2d14b35]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [c497d26]
+- Updated dependencies [e96ad55]
+- Updated dependencies [bbdbf28]
+- Updated dependencies [93929c2]
+- Updated dependencies [2e284b2]
+- Updated dependencies [3905c00]
+- Updated dependencies [4335497]
+- Updated dependencies [75bb3af]
+- Updated dependencies [43ca399]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [533a0a4]
+- Updated dependencies [1f82d1e]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [846ed1f]
+- Updated dependencies [947d4f9]
+- Updated dependencies [d8f65fe]
+- Updated dependencies [58ffcab]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [3133cda]
+- Updated dependencies [99d7a93]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c794f78]
+- Updated dependencies [9ce0ca9]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [2b63a00]
+- Updated dependencies [06ba036]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [0f17114]
+- Updated dependencies [ecc61ab]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [96d3d4d]
+- Updated dependencies [db0d53c]
+- Updated dependencies [afa6aa5]
+- Updated dependencies [afb83d3]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [2b2175b]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [c7406b0]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [58f3220]
+- Updated dependencies [07f1822]
+- Updated dependencies [729a43a]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [d97f2a2]
+- Updated dependencies [d9cac60]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [290d944]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [5d3ced9]
+- Updated dependencies [9fa6bab]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [61dc08e]
+- Updated dependencies [8dcf607]
+- Updated dependencies [b691ba9]
+- Updated dependencies [65159ae]
+- Updated dependencies [1eadac0]
+- Updated dependencies [7c2f7dd]
+- Updated dependencies [9b26699]
+- Updated dependencies [95b4f0d]
+- Updated dependencies [877545c]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [444a07c]
+- Updated dependencies [288e5a4]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [60a7a2d]
+- Updated dependencies [1c625ca]
+- Updated dependencies [b5459bc]
+- Updated dependencies [1624f4a]
+- Updated dependencies [e6db317]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [1cae606]
+- Updated dependencies [4addd9d]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b9cc17d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [75f82f3]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [1203bb2]
+- Updated dependencies [7d27da0]
+- Updated dependencies [de113a4]
+- Updated dependencies [db8c285]
+- Updated dependencies [0d24078]
+- Updated dependencies [089767f]
+- Updated dependencies [5b8f95b]
+- Updated dependencies [da538b1]
+- Updated dependencies [2ddba89]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [79822b5]
+- Updated dependencies [15e61fb]
+- Updated dependencies [72bd873]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [dde9202]
+- Updated dependencies [37a8f2b]
+- Updated dependencies [441d79f]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [9c5abf4]
+- Updated dependencies [dc6abfd]
+- Updated dependencies [39396bd]
+- Updated dependencies [577cd27]
+- Updated dependencies [5897552]
+- Updated dependencies [91ec1ea]
+- Updated dependencies [2d25303]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [bf1edef]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5ab0842]
+- Updated dependencies [5c94f83]
+- Updated dependencies [d275c10]
+- Updated dependencies [f98fa65]
+- Updated dependencies [73e576f]
+- Updated dependencies [2680cd3]
+- Updated dependencies [1d29e6d]
+- Updated dependencies [c5a5996]
+- Updated dependencies [5ea8e1e]
+- Updated dependencies [cba7454]
+- Updated dependencies [b40f81c]
+- Updated dependencies [db2ea82]
+- Updated dependencies [51a587d]
+- Updated dependencies [ae490ef]
+- Updated dependencies [1216dcc]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [193cd5c]
+- Updated dependencies [5aae790]
+- Updated dependencies [07f1822]
+- Updated dependencies [ef8b1ff]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [d56bcdb]
+- Updated dependencies [dca25e1]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [488b66c]
+- Updated dependencies [c89d18c]
+- Updated dependencies [acf34e3]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [90fa077]
+- Updated dependencies [e92e2c3]
+- Updated dependencies [946a131]
+- Updated dependencies [909895d]
+- Updated dependencies [38f53a0]
+- Updated dependencies [c183a12]
+- Updated dependencies [69a89ce]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+- Updated dependencies [2b52bc8]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/driver-sql@17.0.0-rc.4
+  - @objectstack/driver-memory@17.0.0-rc.4
+  - @objectstack/rest@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/metadata-protocol@17.0.0-rc.4
+  - @objectstack/metadata@17.0.0-rc.4
+  - @objectstack/plugin-auth@17.0.0-rc.4
+  - @objectstack/objectql@17.0.0-rc.4
+  - @objectstack/plugin-security@17.0.0-rc.4
+  - @objectstack/service-datasource@17.0.0-rc.4
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.4
+  - @objectstack/formula@17.0.0-rc.4
+  - @objectstack/metadata-core@17.0.0-rc.4
+  - @objectstack/observability@17.0.0-rc.4
+  - @objectstack/service-cluster@17.0.0-rc.4
+  - @objectstack/service-i18n@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Major Changes

@@ -1,5 +1,1934 @@
 # @objectstack/lint
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- 28ad90e: feat(types,cloud-connection,lint,cli): ADR-0120 17.x 收尾 —— `isolated` 安装期姿态硬门(D5e)、D5c 重拼写 advisory、成文契约扫荡与三姿态 conformance (#5081)
+
+  ADR-0120 17.x 波的第三块,也是最后一块。前两块已在 main 上:#5212(driver 侧
+  D3+D4 —— `COALESCE(organization_id, '__global__')` 物化、drift 两侧同步、重复预检)
+  与 #5208(spec 词汇 `'organization'` + D5a/D5b lint)。本次补齐三件事:安装期的
+  姿态决策点、剩余的成文契约、以及把「一个 app 包跑遍三种姿态」从假设变成测试。
+
+  **D5e —— 装进 `isolated` 环境时的硬门。** 词汇本身是姿态无关的:作者说的是业务
+  边界(`'organization'` 一个组织一份 / `'global'` 整个安装一份),没有任何索引形状
+  读姿态。唯一的残留在一个方向上:`isolated` 下组织就是**不同客户**,此时 app 业务
+  对象上的 `'global'` 唯一既跨客户过度约束,又变成跨客户的存在性预言机(S10/S14)。
+  维护者裁定这是**硬门而非 advisory**:把带 `'global'` 唯一(非 `sys` 对象)的 app
+  装进 `isolated` 环境会**停下来并逐索引列出**,安装者(通常是 AI agent)要么确认它
+  确实是平台级的,要么改写为 `'organization'`;确认按 ADR-0104 attestation 风格
+  留痕在安装清单里(`InstalledManifestEntry.globalUniqueAttestation` —— 确认了什么、
+  谁确认的、何时、在哪个姿态下问的),**之后不复问**。
+
+  - 停下的安装**什么都不留**:先于 hot-register 和任何 ledger 写入,所以作者改完
+    元数据可以直接重试,不需要先卸载。
+  - 逐索引确认是有牙齿的:`confirmGlobalUniques` 收 `true` 或明确的 id 数组,只确认
+    其中一条仍会在剩下的那条上停住。
+  - 升级引入的**新**约束会被问,老的答案继续算数。
+  - 另一个姿态下给出的确认**不算同意** —— `isolated` 那个问题在 `single` 下从未被
+    问过,所以按「未确认」处理(唯一不会静默放行跨客户约束的方向)。
+  - ⛔ **永不做成启动期告警**(#4884 纪律)。boot 时的 rehydrate 不评估此门;门够不到
+    的两类存量 —— 门禁上线前的安装、装后姿态变更的环境 —— 由 `os doctor` 与
+    `os migrate plan` 的 advisory 形态覆盖。
+
+  判定里有三条是承重的,别「简化」掉:声明索引上的裸 `unique: true` **算**(D1 说它
+  就是 `'global'` 的位置式拼写,排除它等于让整个 17.x 可以靠拼写绕过);字段级
+  `true` **不算**(它是 `'organization'`,永久合法);`sys_`/`base_` 对象**不算**
+  (S5 那批引擎幂等键天然就是平台级的,每次安装都问一遍就是 #4884 的误报类)。
+
+  CLI: `os package install` 新增 `--confirm-global-uniques`,并把 409 渲染成可读的
+  逐条清单而不是一句 "Install failed (409)"。
+
+  **D5c —— 遗留手写组织复合索引的 advisory。** 新规则
+  `unique/legacy-organization-composite`:声明的唯一索引自己列出了组织列
+  (`{ fields: ['name','organization_id'], unique: true }`)—— 这是词汇出现之前手写
+  per-organization 的写法。它读起来像「每组织唯一」,物化出来却是普通复合索引,而
+  SQL UNIQUE 是 NULL-distinct 的:组织列为 NULL 的行上它**什么都不约束**(#5030),
+  在单组织部署上那就是每一行。改写成 `unique: 'organization'`(`fields` 原样保留,
+  driver 会把已列出的组织列**就地**变成 NULL-safe 形式)正是补上这个洞的动作。
+  **永远只是 advisory,永远不自动修**:老拼写永久合法、零强制 drift,而 opt-in 是
+  真实的物理收紧,要走 D4 的 `recreate_index` + 重复预检。
+
+  **D6 —— 成文契约扫荡。** `content/docs/data-modeling/indexing.mdx` 的
+  §Two ways to say "unique" 全节按新词汇重写(含 `os:check` 代码块);
+  `content/docs/protocol/objectql/schema.mdx` 的 §Uniqueness and tenancy 重写为
+  §Uniqueness and scope —— 其中那句「单租户部署不受影响,租户列是常量,复合索引
+  退化为单列索引」是 #5030 **证伪过的原话**,现已替换为 D3 的 NULL-safe 事实;
+  `content/docs/deployment/cli.mdx` 的 `replace_unique_index` / `recreate_index`
+  条目补上 NULL-safe 形状与重复预检;`content/docs/references/**` 经
+  `gen:schema && gen:docs` 再生成,未手改。
+
+  按 ADR-0120 Resolved #2 的非规范性引导(官方示例/脚手架/生成器在新代码中输出
+  显式拼写),`skills/objectstack-data/**` 的索引与校验规则整体扫过:声明索引一律
+  说清 scope,并新增一节完整讲 `'organization'` 的 NULL-safe 语义与「永远不写姿态」。
+  顺带修掉那里长期使用的 `tenant_id` —— 平台的列叫 `organization_id`。
+  `examples/**`、`create-objectstack` 模板与 `os generate` 经核查**根本没有声明任何
+  唯一约束**,故无可扫;这是核查结论,不是遗漏。
+
+  **三姿态 conformance(ADR §Acceptance tests)。** 同一个 fixture app 在
+  `single | group | isolated` 三姿态下启动,逐 S 行用**真实的违规插入**断言 enforcement
+  (S1/S2/S3/S4/S5/S6/S7/S8/S9/S11/S12),并逐姿态捕获物化出的索引键,断言三者
+  **逐字节相同** —— 「没有任何索引形状读姿态」这句话一旦有两者不同就是假的。相同性
+  断言配了一条正向断言(对着期望的键形状),这样「三次都什么都没建」不会读成「一致」。
+  外加 ADR 只要的那一条 transition smoke:在 `single` 下建库、`isolated` 下重新打开,
+  drift op 为零。
+
+  对既有部署的影响:除新增的安装期确认外,本次不改变任何已有物化行为。字段级
+  `unique: true` 一如既往合法。
+
+- ddc2527: fix(approvals): the ADR-0044 revise window is a service-owned node type, not a bare `wait` (#3823)
+
+  #3801 gated `POST /api/v1/automation/:name/runs/:runId/resume` on the **node type**
+  that produced the suspension: an `approval` pause declares
+  `resumeAuthority: 'service'`, so it continues only through `ApprovalService`.
+  ADR-0044's **revise window** was the same trust boundary in a shape that key
+  could not see. Send-back parked the run on an ordinary `wait` node the flow
+  author placed — correctly `resumeAuthority: 'any'`, because a signal wait is
+  _meant_ to be resumable by an external producer — and `ApprovalService.resubmit`
+  was the only thing that checked anything about continuing it.
+
+  Demonstrated (not reasoned) against the real engine: a raw `resume(runId)` with
+  an **empty body**, from any caller, walked the `resubmit` back-edge into the
+  approval node and opened round N+1 with **no submitter check and no `resubmit`
+  audit row** (`['submit','revise']` — no third row, ever). Worse, when another
+  request was already pending on the record — the exact case `resubmit` refuses
+  with `DUPLICATE_REQUEST` _specifically to keep the run alive_ — the raw resume
+  went around that guard: the approval node's re-entry failed **after** the engine
+  consumed the suspension, and the run was **permanently destroyed** with its
+  round-N request stuck `returned` and no resubmit able to reach it.
+
+  The revise pause is therefore its own node type:
+
+  - **`approval_revise`** (`APPROVAL_REVISE_NODE_TYPE`), registered by
+    `@objectstack/plugin-approvals` alongside the `approval` node, declaring
+    `resumeAuthority: 'service'`. It stays a first-class box on the canvas, in the
+    run log and in the suspended-run store — only the _reuse_ of `wait` was wrong.
+    It takes **no config**: the window ends on the submitter's explicit resubmit,
+    never on a signal or timer. The `resumeAuthority` gate itself is unchanged.
+  - `sendBack` refuses a `revise` edge whose target is not an `approval_revise`
+    node, **before any mutation** (like the existing missing-`revise`-edge check),
+    so no run can be parked in a window something else can advance.
+  - New gating lint `flow-approval-revise-target-not-service-owned`
+    (severity `error`, on `os build` / `os validate` / `os lint` and the runtime
+    metadata publish gate) rejects the old shape at authoring time.
+
+  **Upgrading a flow authored against the original ADR-0044 D3.** One token:
+
+  - **FROM:** `{ id: 'wait_revision', type: 'wait', waitEventConfig: { eventType: 'signal', … } }`
+  - **TO:** `{ id: 'wait_revision', type: 'approval_revise' }` — drop
+    `waitEventConfig` / any `config`; the window has no event to wait on.
+
+  Until you do, such a flow keeps registering and running and its approvals stay
+  decidable (`approve` / `reject` / `recall` / `reassign` are untouched), but
+  **send-back is refused** with a message naming the node and this fix, and
+  re-publishing it reports the lint error. A run _already parked_ in a legacy
+  revise window keeps its recorded node type (a republish never re-types a live
+  pause) and is drained by `resubmit` or `recall` as usual.
+
+  ADR-0044's 2026-07-28 amendment records the reversal of its D3 and of its
+  `Alternatives` rejection of a service-owned revise pause, with the evidence
+  above; the implementation section there records what shipped, why the approval
+  node does not re-suspend itself instead, and why no ADR-0087 conversion was
+  added for the old shape.
+
+- 0161c7f: feat(spec,lint): declare the chart segment drill — `ChartDrillDownSchema`, on the react tier where it is actually read (#5022)
+
+  `drillDown` has driven a real capability since long before this release: click a
+  bar or a slice on an `<ObjectChart>` and objectui opens the underlying records,
+  filtered by the clicked category, in a drawer. The protocol declared it
+  **nowhere**. objectui read it as `(schema as any).drillDown`, so every key inside
+  it — right, wrong, or misspelled — reached the renderer unchecked, and a typo was
+  simply ignored at click time. This is Prime Directive #10 inverted: not declared
+  without being delivered, but delivered without ever being declared.
+
+  It is declared now, as `ChartDrillDownSchema`, and it is **additive** — nothing
+  that parsed before stops parsing.
+
+  ## What you can write
+
+  `drillDown` is a prop on the react-tier `<ObjectChart>` block:
+
+  ```jsx
+  <ObjectChart
+    objectName="opportunity"
+    aggregate={{ function: "sum", field: "amount", groupBy: "stage" }}
+    drillDown={{ columns: ["name", "amount"], maxRows: 50 }}
+  />
+  ```
+
+  | key       | type                      | meaning                                                                                                                                            |
+  | --------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `enabled` | `boolean`                 | Only needed to force the drill OFF — the block being present already means on, so `drillDown={{}}` enables it                                      |
+  | `filter`  | `Record<string, unknown>` | Filter for the drilled list; values support `${event.*}`. Omit it and the filter is derived from `aggregate.groupBy` equal to the clicked category |
+  | `title`   | `string`                  | Drawer/dialog heading; supports `${event.*}`                                                                                                       |
+  | `target`  | `'drawer' \| 'dialog'`    | In-place side sheet (default), or a centered modal when the chart is already inside a drawer                                                       |
+  | `columns` | `string[]`                | Column whitelist for the drilled list                                                                                                              |
+  | `maxRows` | `number`                  | Rows per page in the drilled list                                                                                                                  |
+
+  Every one of those six is a key objectui's `ObjectChart` was measured to read.
+  The renderer's own drill type is wider — it is shared with the table / pivot /
+  metric widgets — and the extra keys are **deliberately not declared**, because a
+  chart reads none of them:
+
+  - **`mode`** (`'filter'`/`'record'`) is a table/pivot/metric key. A chart segment
+    is always an aggregate, so there is nothing to discriminate.
+  - **`report`** (drill into a report instead of a record list) is a metric/pivot
+    capability.
+  - **`view`** and **`sort`** are read by _no_ renderer at all (objectui#3354).
+  - **`target: 'navigate'`** is implemented for the other widgets but not for a
+    chart, which falls back to the drawer.
+
+  Writing any of them is now a loud rejection that says which surface owns it,
+  rather than a value that silently does nothing.
+
+  ## Where it is NOT declared, and why that is deliberate
+
+  **Not on `ChartConfigSchema`, and not a dashboard widget key.** A dashboard
+  widget has no per-widget drill configuration, by design: an ADR-0021
+  dataset-bound widget drills through the semantic layer, deriving the target
+  object and filter from the dataset row that was clicked. That is what
+  `content/docs/ui/dashboards.mdx` has said all along, and it is what the renderer
+  does — `DashboardRenderer` never reads `chartConfig`, and `DatasetWidget`
+  forwards exactly one key out of it (`showLegend`). Declaring the drill there
+  would have produced authorable metadata that parses clean and never reaches a
+  renderer — the failure this campaign removes elsewhere.
+
+  So the three places an author might reach for it now answer instead of shrugging:
+
+  - `widget.chartConfig.drillDown` → rejected, pointing at the react-tier prop.
+  - `widget.drillDown` / `widget.drilldown` → rejected, explaining that dashboard
+    drill-through is **automatic**, and naming both configurable drills.
+  - `report.drillDown` → rejected, pointing back at the chart prop.
+
+  ## `drillDown` is not `drilldown`
+
+  Two capabilities, one letter apart, and they are now disambiguated in both
+  directions at the schema gate:
+
+  |          | `drillDown`                | `drilldown`                                     |
+  | -------- | -------------------------- | ----------------------------------------------- |
+  | spelling | camelCase                  | all lowercase                                   |
+  | type     | configuration object       | boolean                                         |
+  | surface  | react `<ObjectChart>` prop | `ReportSchema` key (ADR-0021 D2, on by default) |
+
+  Edit distance alone gets this wrong — the two spellings are a distance of 1, so a
+  plain "did you mean" would happily send an author writing `drillDown` on a report
+  to `drilldown`, where their config object then fails a second time as a boolean.
+  Both gates name the **type** difference, not just the spelling.
+
+  ## Enforced, not just declared
+
+  `@objectstack/lint`'s react-page publish gate now **parses** the schema
+  (`react-chart-drilldown-invalid`) against a static `drillDown={{…}}` literal,
+  rather than re-deriving the rules. Unknown keys, the wrong `target`, and the
+  near-key spelling all fail the build with the schema's own prescription. A value
+  assembled from React state is skipped, unchanged: an unresolvable binding is not
+  a wrong one (ADR-0072 D1).
+
+- eaaf03c: refactor(spec,lint)!: retire the dashboard widget action trio + `aria` — and the build gate that enforced a button nobody renders (#5010, ADR-0049)
+
+  `DashboardWidgetSchema` let an author declare a per-widget action **button**
+  (`actionUrl` / `actionType` / `actionIcon`) and per-widget ARIA attributes
+  (`aria`). None of the four reached a renderer. Re-measured 2026-08-04 across both
+  repos on a closed call graph:
+
+  - **the action trio** — all 14 `actionUrl` reads in objectui's
+    `DashboardRenderer.tsx` are scoped to `schema.header.actions[]`, which is
+    `DashboardHeaderAction`, a _different_ schema. Nothing anywhere reads
+    `widget.actionUrl`. `actionIcon` is the starkest: zero references in either
+    repo outside its own declaration — not even the lint looked at it.
+  - **`aria`** — no consumer of `widget.aria` anywhere. The `aria-*` attributes in
+    `DashboardRenderer` / `DatasetWidget` are the renderer's own DOM attributes,
+    and objectui's single `.aria` read (`plugin-view/ObjectView.tsx:989`) is a
+    **view**'s. This is the dashboard-level `aria` that #3896 removed, one level
+    down — an accessibility guarantee an author could declare and nothing honoured.
+
+  These four survived the #3896 sweep for the same reason `widgets[].responsive`
+  did, and it is not "we looked and they were live": the liveness ledger declared
+  no `children` on `dashboard.widgets`, so **no widget-level key had ever been
+  classified**. #4956 fixed that instrument and gave all 22 keys their first per-key
+  verdicts; this change acts on four of the six it found dead.
+
+  ## The second-order cost this settles
+
+  `packages/lint`'s `validate-dashboard-action-refs` enforced **ERROR-severity**
+  reference integrity on `widgets[].actionUrl` — a dangling target failed the
+  build. Its docblock called the key _"the per-widget button"_ and claimed to
+  mirror the objectui runtime dispatch. It did not, because that button does not
+  exist. So an author could be blocked from shipping because a control that cannot
+  render pointed at an action that also did not.
+
+  A rule written to delete false affordances was sustaining one. That is why the
+  keys were retired rather than the check merely relaxed: the widget branch is
+  deleted, with a pin test asserting it stays silent and a second pin proving
+  header actions are still checked in the same stack.
+
+  FROM → TO:
+
+  | Removed                          | Replacement                                                                                            |
+  | :------------------------------- | :----------------------------------------------------------------------------------------------------- |
+  | `dashboard.widgets[].actionUrl`  | `dashboard.header.actions[].actionUrl`                                                                 |
+  | `dashboard.widgets[].actionType` | `dashboard.header.actions[].actionType`                                                                |
+  | `dashboard.widgets[].actionIcon` | `dashboard.header.actions[].icon` (the header spelling)                                                |
+  | `dashboard.widgets[].aria`       | **none** — delete it; author `title`/`description`, which the renderer really does label the card with |
+
+  For a per-**row** affordance, reach for a dataset-bound `table`/`pivot` widget:
+  its rows are clickable and drill through the semantic layer already (no
+  per-widget drill config exists, by design — #5022).
+
+  **The `AriaProps` shape is NOT removed — only this embed.** `AriaPropsSchema` /
+  `AriaProps` stay exported and stay live on `app.aria` and
+  `page.components[].aria`. Nothing importing the shape breaks.
+
+  The retirement kit:
+
+  - **Tombstones.** `retiredKey()` on all four, matching `responsive` in this same
+    schema. `DashboardWidgetSchema` _is_ `.strict()`, so a plain delete would still
+    be loud — but only as a generic "unrecognized key". The tombstone keeps the key
+    declared so the rejection carries the **prescription**, and types it `never` so
+    authoring it fails `tsc` first. Pins assert the message _is_ the prescription
+    and is _not_ `Unrecognized key`. The action trio shares one prescription that
+    names all three, so an author who deletes the one key they were told about does
+    not hit the same error twice more.
+  - **ADR-0087 D2 conversion + D3 chain step**
+    (`dashboard-widget-action-aria-removed`, `retiredFromLoadPath`):
+    `os migrate meta --from 16` strips the four from author sources, and stored
+    dashboards replay clean instead of meeting a tombstone at load. Lossless
+    deletes — none of the keys had an effect to lose. Its own entry rather than
+    more keys on `dashboard-inert-keys-removed`, whose identity is the #3896 sweep.
+  - **Liveness rows stay** (`status: dead`, `verifiedAt`, a REMOVED note) because
+    a tombstone keeps the key in the walked shape — the `rls.priority` precedent.
+    `authorWarn`/`authorHint` are dropped from all four: the parse owns them now.
+  - Baselines moved at KEY level only, as the shape's survival implies:
+    `authorable-surface.json` gains four `… [RETIRED]` lines;
+    `json-schema.manifest.json`, `api-surface.json` and
+    `api-surface-signatures.json` are unchanged by construction — no def stopped
+    being emitted and no export was removed.
+
+  No runtime behaviour changes — that impossibility is the reason for the removal.
+  The one behaviour that _does_ change is a build that used to fail and now does
+  not.
+
+  ## Not in this change
+
+  `widgets[].colorVariant`, the fifth dead key #5010 lists, is **deliberately
+  untouched**. The rewrite target its triage assumed — `options.colorVariant` —
+  measured dead as well: `options` only reaches a renderer through the inline
+  `componentSchema` path, and `dataset` is _required_ on this schema, so every
+  spec-authorable widget is dataset-bound and renders through `DatasetWidget`,
+  which has no colour affordance at all. Moving the key would relocate 16 authored
+  sites (7 in `platform-objects`, 9 in `app-showcase`) from one dead slot to
+  another and mint a second inert key. Returned for adjudication.
+
+- 06ffad3: fix(lint): 字段公式校验首次对 spec 合法元数据生效 —— `f.formula` 收敛为 `f.expression` (#5026)
+
+  `validate-expressions.ts` 的字段公式校验(`validateStackExpressions` 里的
+  field-formula pass)一直读 `f.formula`。`FieldSchema` 声明的是 `expression`,而
+  `formula` 恰是 `field.zod.ts:333` **按名拒绝**的别名之一
+  (`aliases: { formula: 'expression', calculation: 'expression', compute: 'expression' }`)。
+  该规则以 `input: 'parsed'` 注册,compile/build/validate 路径上看到的是
+  `ObjectStackSchema` 的解析产物,所以 `f.formula` 恒为 `undefined` ——
+  **整段检查对任何 spec 合法 stack 从未执行过一次**。
+
+  这不是删死代码,是**启用一条从未跑过的检查**。字段公式从此真正受
+  ADR-0032 §1a/1b 的三条判决管辖:CEL 语法、`record.<field>` 字段存在性、
+  以及 #1928 的裸引用 / 类型健全性。对 AI 生成的元数据这一条最要紧 ——
+  `amount * probability`(而不是 `record.amount * record.probability`)正是公式槽位
+  最常见的错法,它在 CEL 里静默求值为 null,过去没有任何门拦得住。
+
+  **覆盖面扩大,但对现有元数据零新红。** 激活后在仓库全部真实元数据上实测过:
+  `examples/app-showcase`(3 个 `expression` 槽)、`examples/app-crm`(5 个)、
+  `examples/app-todo`(0 个)全部 `ObjectStackSchema` 解析通过,新增判决 0 条;
+  `platform-objects`、`plugin-security` 的 default-permission-sets 不含公式字段;
+  `skills/` 里的公式样例全部已是 canonical 拼法。
+
+  **Authoring impact.** 之前拼 `formula:` 的字段本来就无法解析,schema 会按名拒绝
+  并给出 `Did you mean \`formula\` → \`expression\`?`——该行为不变,本规则不再对同一个键
+  给出第二套说法。诊断定位串同步改名以免继续传播错拼法:
+
+  ```
+  FROM  object 'X' · field 'Y' formula
+  TO    object 'X' · field 'Y' expression
+  ```
+
+  `validate-null-guards.ts` 的 surface ledger 相应把该行从 `Field.formula` 正名为
+  field `expression`(`Field.formula({ expression: … })` 写入的槽)。null-guard 判决
+  **仍然**排除该 surface(公式是 `value` 角色、天然可空,`guard ? value : null` 是祝福
+  写法),排除的只是 null-guard 这一条,语法 / 字段存在性 / 裸引用判决从此生效。
+
+  `validate-expressions.test.ts` 的 `TRACKED_UNDECLARED_READS` 记账随之清空 —— 这
+  份"只缩不长"的清单现在是零条,规则读的每一个键都是 spec 声明的键。
+
+- 123067c: fix(cli): the i18n walker collects `objects.<o>._sections` — section headings are gated and scaffolded like every other label (#5405)
+
+  An object's SECTION headings were the one declared, resolved, rendered
+  translation surface the shared i18n walker had no kind for.
+  `ExpectedEntry['source']` listed `object | field | option | view | action |
+globalAction | app | navigation | dashboard | widget | page` plus two
+  `metadataForm*` kinds — and those two cover **Studio metadata forms**
+  (`metadataForms.<type>.sections.*`, hidden behind `--include-platform`), not app
+  objects. So `objects.<o>._sections.<s>.label` was structurally unreachable in
+  both directions: `os i18n extract` never scaffolded a heading, and
+  `os lint` could not report one missing.
+
+  The surface itself was never in doubt. `ObjectTranslationDataSchema` declares
+  `_sections` (with `sections` as an authoring alias), and `@object-ui/i18n`'s
+  `sectionLabel` resolves it for `record:details`, for `ObjectForm`/`ModalForm`
+  and for the field-group designer. Only the walker disagreed — which is exactly
+  the drift `collectExpectedEntries` was consolidated to prevent (#3370).
+
+  Measured downstream before this landed: 85 sections across 15 objects, **2 of
+  85** translated in `ja-JP` and in `es-ES` — English headings on essentially
+  every record page and form — with `objectstack lint` reporting **zero** i18n
+  warnings for both locales.
+
+  **What is collected.** A `section` kind, from the two independent surfaces that
+  both resolve to the same key — a heading is expected if _either_ declares it,
+  and one heading is one expected key however many declare it:
+
+  - **`fieldGroups` × field `group`** — the fields decide which sections exist and
+    `fieldGroups[].label` supplies the source text. Membership is read through
+    `deriveFieldGroupLayout` (ADR-0085 §5), the same shared derivation the
+    renderers consume, so a group nothing visible references — or a `group:` no
+    `fieldGroups` entry declares — produces no heading and therefore no expected
+    key. The trailing ungrouped bucket renders without chrome and is skipped.
+  - **A named `sections[]`** on a form view (including a view container's default
+    `form`) or inside a record page's component tree.
+
+  A section with no `name` is skipped: every renderer guards the lookup on it
+  (`s?.name ? sectionLabel(…) : s?.label`), so it is untranslatable by
+  construction and demanding a bundle entry for it would be noise. A group that
+  declares no `label` still yields a scaffold key seeded from its own name, but no
+  coverage finding — nobody authored that text.
+
+  **What you get.** `os lint` gains an `i18n/missing-section` category — user
+  metadata, so it is reported without `--include-platform` — and `os i18n
+extract` scaffolds the headings for free, because the gate and the extractor
+  read the one walker. A project that declares no locales still reports nothing;
+  the gate stays opt-in.
+
+  **`@objectstack/lint`** now exports its shared page traversal
+  (`walkPageComponents`, `isSourceAuthoredPage`, `WalkedComponent`) so the CLI
+  consumes it instead of growing a private copy — that walk exists precisely
+  because duplicating it produced a dead rule once already (#3583). Reusing it is
+  also what makes the page half correct rather than merely present: it reaches
+  `slots.<slot>` and the untyped nesting a record page really uses
+  (`page:tabs` → `properties.items[].children[]` → `record:details`), skips
+  source-authored pages whose `regions` are a derived cache, and resolves each
+  component's OWN binding (`dataSource.object` → `properties.object` → the page's
+  `object`) — so a re-bound `record:details` keys its headings under the object it
+  actually shows.
+
+- 5582e18: never-fire 族三条 lint 规则 warning → error:声明了触发器却确定不会运行的 flow 现在被拒收
+
+  `validateFlowTriggerReadiness` 里的规则此前一律是 warning。族内复审(#5762)后按**一个**标准重新定级 ——
+  「仅凭这份 stack 是否已经足够断定这个 flow 不会运行」—— 三条规则答「是」,升为 `error`:
+
+  - **`flow-time-relative-descriptor-invalid`**(#5496)—— `config.timeRelative` 描述符
+    `TimeRelativeTriggerSchema` 判不过。判它的正是 trigger 在 bind 时 `safeParse` 的同一个 schema,
+    所以 schema 拒的描述符在运行时同样被拒:sweep 永不安装,flow 声明了 time-relative 触发器却永不运行。
+  - **`flow-time-relative-descriptor-unroutable`**(#5647)—— `config.timeRelative` 不是对象
+    (`timeRelative: 'daily'` 是典型)。判据就是引擎自己的路由谓词 `typeof … === 'object'`,
+    所以这个值不会被任何部署路由到 time-relative trigger —— 全族里最硬的判定,也是唯一连
+    bind 时那一行 warn 都没有的一条。
+  - **`flow-trigger-unknown-event`**(#3427/#3457/#3481)—— `record-*` token 落在文法之外
+    (`record-after-updated` 拼错、`record-change` 缺相位、数组形式)。引擎用硬编码前缀把任何
+    `record-` 开头的 token 路由给 record-change trigger(不查注册表,所以装任何包都无法声明新
+    `record-*` token),该 trigger 再用 `triggerTypeToHookEvents` 的封闭文法映射 —— 文法外就是零
+    hook event,即绑不上任何东西。
+
+  **两条对照规则维持 warning,这正是本次定级不是「整个文件都升 error」的原因:**
+
+  - `flow-trigger-unknown-object` —— 本 stack 没定义的对象名**可能由另一个已安装包提供**,
+    规则看不见那个包的对象。免责是真的,所以继续 advisory(它自己的 hint 就这么写)。
+  - `flow-draft-status-ambiguous` —— draft flow **确实会**触发,这是意图歧义而非死 flow。
+
+  ## 影响面:P1 运行时发布门(`surfaces: CLI_AND_RUNTIME`)
+
+  注册表 tier 同步 `advisory` → `gating`。除 `os validate` / `os build` / `os lint` 之外,本规则也跑在
+  元数据写入路径的 publish 门上,`error` 会让 `state: 'active'` 的写入被拒(422)。**边界值得写清,因为
+  直觉猜错的方向恰好对租户有利**:该门交给规则的快照里 `flows` 只装**正在写入的那一个** item
+  (`runtime-gate.ts`:`candidate = { objects, [stackKey]: [item] }`),并且会减掉 baseline 已产出的
+  finding。所以:
+
+  - 发布 flow A **不会**因为已存储的 flow B 是死 flow 而被拒;租户既有的死 flow 继续被读取和服务
+    (ADR-0087 读路径不对称);
+  - 被拒的是**死 flow 自己的发布**(含再次发布),以及 CLI 侧 —— stack 里含死 flow 的包
+    `os validate` / `os build` / `os lint` 转红;
+  - draft 保存从不过门(#4463 D1),只有发布才过。
+
+  ## 迁移
+
+  修死 flow,不要降级规则:
+
+  - 描述符判不过 → 按 finding 里 `TimeRelativeTriggerSchema` 的原文改(它会点名该写的键);
+    描述符要 `{ object, dateField, 且 withinDays | offsetDays 恰好其一 }`。
+  - `timeRelative` 写成了 `'daily'` 这类节奏值 → 节奏是**同级兄弟键** `config.schedule`
+    (默认每日 08:00 UTC,通常可省),`timeRelative` 只描述扫哪些记录。
+  - `record-*` token 落在文法外 → 用 `record-{before,after}-{create,insert,update,delete,write}`;
+    「创建或更新」用 `record-after-write` 一条 flow 覆盖(#3427);多事件数组仍未支持(#3457),
+    按事件各写一条 flow。
+
+  仓内三个示例 app(showcase / CRM / todo)`os validate` 升级前后输出逐字一致、均通过,
+  本次升级不需要修改任何示例。
+
+- 2f1e2a5: feat(lint): null-guard 闸门覆盖 `requiredWhen`,其余各面按"绑定是否全量"逐一定案 (#4811)
+
+  #4763 的 null-guard 闸门只接了两面(对象校验规则、生命周期 hook `condition`),
+  其余各面留作"待定"。本次把"待定"收敛成一条**可判定的判据**,并按它逐面定案 ——
+  一个只覆盖部分面、又没有任何东西说出这件事的闸门,正是这一族缺陷本身的形状。
+
+  ## 判据:记录绑定是否对已声明字段**全量**
+
+  这不是口味问题,也不是"这个谓词是不是 CEL"。实测 `@marcbachmann/cel-js`,两种绑定
+  下的语义**恰好相反**:
+
+  | 谓词                  | 全量绑定 `{a: null}`     | 稀疏绑定 `{}`          |
+  | :-------------------- | :----------------------- | :--------------------- |
+  | `has(record.a)`       | `true` ← 陷阱            | `false` ← 真守卫       |
+  | `record.a < record.b` | FAULT `no such overload` | FAULT `No such key: a` |
+  | `record.a != null`    | `false` ← **修法有效**   | FAULT `No such key: a` |
+
+  即:全量绑定下 `has()` 恒真而无用、`!= null` 是解药;稀疏绑定下 `has()` 恰恰是正确的
+  守卫,而 `!= null` **自身就会 fault**。把闸门指向一个稀疏绑定的面,等于判红正确的元数据、
+  并给出一个会把它改坏的"修法" —— 比不覆盖更糟。所以:**只有绑定全量的面才可以接入。**
+
+  ## 纳入:字段 `requiredWhen`
+
+  议题没有列出这一面,而它恰恰是唯一满足判据的:`evaluateValidationRules` 用与对象校验
+  规则**同一个** `materializeDeclaredFields` 合并记录来求值 `requiredWhen`。
+
+  它也是几个已覆盖面里失败得最安静的一个:`requiredWhen` 谓词 fault 时是 **fail-open** ——
+  `rule-validator.ts` 记一行 `failed to evaluate — skipped` 就跳过,字段于是**从未真正必填**,
+  写入照常通过。校验规则至少自 #4761 起是 fail-closed 的拒绝。因此报错文案按面区分后果:
+  "被跳过、字段从未必填"与"写入被 fail-closed 拒绝"是两个相反的故障,作者需要知道自己
+  碰到的是哪一个。
+
+  ## 排除,且各自留下可引用的理由
+
+  - **action `visible` / `disabled`**:谓词确实走真 CEL(裸串经 `ExpressionInputSchema`
+    规范成 `{dialect:'cel'}` 信封,渲染器保留它),fault 也确实 fail-closed —— 陷阱在这一面
+    是真的。但绑定是客户端已取到的那条记录(详情读取,或只带列表视图投影列的一行),
+    `objectui` 这条路径上不存在任何物化步骤。稀疏绑定下 `!= null` 是错的修法。要覆盖它,
+    得先决定是否把该绑定做成全量 —— 那是平台契约改动,不是 lint 改动。
+  - **flow / edge `condition`**:议题记的理由(扁平作用域下裸标识符可能是 flow 变量)对本
+    模块**不成立** —— 它只解析 `record.<f>` / `previous.<f>`,从不解析裸标识符,而引擎无
+    条件绑定这两个根。真正的阻碍还是全量性:`record-change-trigger.ts` 把记录播种为
+    `{ ...inputDoc, ...after }`,没有 `materializeDeclaredFields`,所以写入未提及的已声明列
+    是**缺键**而非 null,`!= null` 会和它本要守卫的比较一样 fault。
+  - **字段 `readonlyWhen`**:与 `requiredWhen` 同一个字段、相反的结论 —— 它由
+    `stripReadonlyWhenFields` 求值,那里合并的是 `{ ...previous, ...data }`,从不物化。
+  - **`Field.formula`**:按产品判断排除,而非按本判据。formula 是 `value` 角色、天然可空,
+    `guard ? value : null` 是被祝福的写法(#3306)。是否强制守卫会改变"作者被允许写什么",
+    该由维护者决定,不是一个接线缺口。
+
+  判据、实测表与逐面台账写在 `validate-null-guards.ts` 的模块注释里,每条排除在它对应的
+  调用点也留了注释,并各配一条断言钉住。
+
+  ## 顺带修正:`field '?'`
+
+  诊断的字段名此前走 `Object.values(fields)`,把**名字键**丢掉了 —— 而名字键正是
+  `Field.text({…})` 这种(最常见的)写法产生的形状,于是这类对象上的每条字段级诊断都定位在
+  `field '?'`。名字只出现在 `where` 里时还能忍;现在报错正文要告诉作者改哪个字段,就不能忍了。
+
+- af96af6: fix(lint): `validateOrgAxisRedLines` reads the sharing-rule keys the spec declares — the ADR-0105 D6 red lines fired on nothing before (#4984)
+
+  The two ADR-0105 D6 red lines are declared `error` and gate `os validate` /
+  `os build` / `os lint`. On the sharing-rule path neither of them could fire.
+
+  `validateOrgAxisRedLines` read `rule.criteria ?? rule.filter` and
+  `rule.sharedTo ?? rule.recipient`. `SharingRuleSchema` is `.strict()` and its
+  declared keys are `condition` and `sharedWith`; all four names it was reading
+  exist only as **rejected aliases** in `sharingRuleUnknownKeyError`, the
+  prescription attached to the refusal message. The rule runs on the post-parse
+  stack (`input: 'parsed'`), so for every spec-valid stack those four properties
+  were `undefined`, `JSON.stringify(undefined ?? '')` was `'""'`, and the
+  `parent_organization_id` test was constantly false.
+
+  **This is a behaviour change: the rule previously never triggered.** Both red
+  lines are now live on the sharing-rule path:
+
+  | Authored shape                                                               | Before | After                                                                     |
+  | :--------------------------------------------------------------------------- | :----- | :------------------------------------------------------------------------ |
+  | `condition` reading `parent_organization_id`                                 | passed | `error` `org-axis-permission-inheritance` at `sharingRules[i].condition`  |
+  | `sharedWith` reading `parent_organization_id`                                | passed | `error` `org-axis-permission-inheritance` at `sharingRules[i].sharedWith` |
+  | `sharedWith: { type: 'business_unit' }` on a `tenancy.enabled: false` object | passed | `error` `org-axis-cross-org-bu-grant` at `sharingRules[i].sharedWith`     |
+
+  A stack that ships today keeps building unless it contains one of those three —
+  the shapes D6 forbids and the gate was meant to have been refusing all along.
+  The rejected aliases are deliberately **not** read: a rule spelling `criteria`
+  or `sharedTo` is refused by the schema's own parse with the canonical key
+  named, and a consumer must not tolerate what the producer's contract rejects.
+
+  `condition` is an `ExpressionInput`, so all three of its shapes are scanned —
+  the authored bare string, the parsed `{ dialect, source }` envelope, and the
+  compiled `{ dialect, ast }` form.
+
+  The rule's own tests were the reason this survived review: their fixtures used
+  the same rejected aliases, so the suite was green while the gate was dead. Every
+  sharing-rule fixture now goes through `SharingRuleSchema` before the lint sees
+  it, and every object fixture through `ObjectSchema` — a fixture that drifts from
+  the spec surface fails at the fixture instead of silently exercising a shape no
+  author can write.
+
+- 5b8f95b: fix(objectql,lint): enforce parent-scoped `readonlyWhen` on the server (#4889)
+
+  `readonlyWhen: P\`parent.status == 'paid'\``— the documented "once the header
+invoice is Paid, its lines are frozen" lock — was enforced **only in the client
+grid**. The server-side strip bound`record`and`previous`and had no`parent`at all, so every parent-scoped predicate faulted, took the fail-open branch, and
+the write landed anyway. On the reference app that meant one`PATCH` rewrote the
+  quantity and unit price of a settled invoice's line: HTTP 200, value persisted,
+  the grid still drawing the cell read-only. ADR-0057 D10 puts enforcement on the
+  server and makes the client courtesy; here only the courtesy layer enforced.
+
+  **`parent` is now bound on the write path.** For a detail object — one declaring
+  exactly one `master_detail` relationship — the engine resolves the master record
+  and binds it as `parent` before the strip runs, on both the single-id and the
+  bulk (`multi: true`) update paths. A repointing write is judged against the
+  master it _lands on_, not the one it leaves. The read is gated on the payload
+  actually touching a parent-scoped predicate (decided from the parsed CEL AST, so
+  a field named `parent_id` costs nothing), and the bulk path batch-reads the
+  distinct headers in one query rather than one per row.
+
+  **An unbindable scope no longer waives the lock.** A `readonlyWhen` that names a
+  root the operation could not bind now resolves to **locked** — the field is
+  stripped — instead of "not locked". "The platform could not check this" must not
+  mean "allowed" on a field the author declared frozen. This is deliberately the
+  narrowest possible carve-out from the fail-open policy the strip has always had:
+  a predicate that is merely _broken_ on the record (undeclared key, `null`
+  ordering overload, parse error, engine throw) still fails open exactly as
+  before, and `requiredWhen` / option `visibleWhen` are untouched. Recorded as an
+  addendum to ADR-0058's D5 fail-policy matrix, alongside the same narrowing
+  already made for validation predicates (#4649) and hook conditions (#4775).
+
+  **And the runtime branch is a backstop, not the plan.** `objectstack compile`
+  now **rejects** a `parent`-scoped `readonlyWhen` on an object that declares no
+  `master_detail` relationship, or two of them (where the metadata does not say
+  which one is "the parent" and picking by declaration order would make a
+  data-integrity lock depend on field ordering). The common authoring mistake is
+  caught where it is cheap to fix, so it never reaches a runtime that has to judge
+  it — declared, not guessed.
+
+  No metadata changes are required: an app whose parent-scoped locks were already
+  correct simply starts having them enforced. If you authored one on an object
+  with no single master, the build now names it.
+
+- 73580e7: feat(lint): the react-page publish gate PARSES `ChartAggregateSchema` instead of re-deriving it (#5020)
+
+  `<ObjectChart aggregate={{…}}>` is judged at publish time by
+  `validate-react-page-props`. That gate used to RE-DERIVE the aggregate's
+  declaration: a local `CHART_FUNCTIONS` copy of the function vocabulary and a
+  hand-written twin of the schema's count/field refinement. Two implementations of
+  one contract, each free to drift — and, because unknown-key handling is a
+  property of a **parse** rather than of a list of `if`s, a gate with no
+  unknown-key check at all. The rule now calls `ChartAggregateSchema.safeParse()`
+  on a statically resolvable literal, exactly as #5022 did for
+  `ChartDrillDownSchema` beside it, and both hand-derived copies are deleted:
+  `@objectstack/spec` is the single source of the vocabulary and the refinement
+  again.
+
+  **Newly reported (all `error`, all previously silent).** These are shapes the
+  schema, the published react-blocks type and objectui's renderer already agreed
+  were wrong; the old gate simply could not see them:
+
+  | authored                                                            | before   | after                                                                                                            |
+  | ------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+  | `aggregate={{ field: 'total', groupBy: 'status' }}` (no `function`) | accepted | `aggregate.function: Invalid option: expected one of "count"\|"sum"\|"avg"\|"min"\|"max" (nothing is set there)` |
+  | `aggregate={{ field: 42, function: 'sum', groupBy: 'status' }}`     | accepted | `aggregate.field: Invalid input: expected string, received number`                                               |
+  | `aggregate={{ function: 'count', groupBy: 42 }}`                    | accepted | `aggregate.groupBy: Invalid input (received 42) — no accepted form matched: (1) … (2) …`                         |
+  | `aggregate="count"` / `aggregate={[]}`                              | accepted | `aggregate must be a configuration object, not string.`                                                          |
+
+  **Re-worded, same verdict.** Two messages now arrive from the schema rather than
+  from this rule's own copy. If you match on lint output, update the text:
+
+  - FROM `aggregate.function "median" is not an aggregation this chart can run.`
+    (hint: `Use one of: count, sum, avg, min, max.`)
+    TO `aggregate.function: Invalid option: expected one of "count"|"sum"|"avg"|"min"|"max" (received "median")`
+    — the vocabulary is the enum's own, and the author's value is echoed back from
+    the input (the one part zod does not put in the message).
+  - FROM `aggregate.function "sum" has no "field" to aggregate.`
+    TO `aggregate.field: aggregate.function "sum" needs a "field" to aggregate (only "count" may omit it).`
+    — verbatim from the schema's refinement.
+
+  The rule id (`react-chart-aggregate-invalid`) and the severity are unchanged for
+  both.
+
+  **`aggregate.groupBy` missing is a NEW `warning`, deliberately not an error.**
+  It is the one violation the platform does not agree with itself about:
+  `ChartAggregateSchema` and the published react-blocks type both declare `groupBy`
+  **required**, while objectui's `ObjectChart` honours its absence
+  (`schema.aggregate?.groupBy || schema.xAxisKey`) and this protocol's own
+  `chartAggregateCategoryKey` documents the ungrouped single-row result. Gating it
+  would break a working authoring shape to enforce a declaration the platform does
+  not keep, so the finding explains the situation and does not fail
+  `os lint`/`validate`/`compile`. Whether the schema loosens or the renderer
+  tightens is decided on #5583.
+
+  **What this does NOT fix yet.** `ChartAggregateSchema` and `ChartGroupBySchema`'s
+  object arm are still STRIP-posture, so the parse this gate now runs **drops** an
+  unknown key rather than reporting it: `groupby` for `groupBy` and
+  `dateGranularty` for `dateGranularity` still degrade a chart to one ungrouped
+  point with the build green. Wiring the parse is the precondition for closing
+  that, not the closing — `.strict()` is a property of a parse, and until now there
+  was no parse to make strict. The spec-side tightening is **#5583**; the tolerance
+  is pinned by name in this rule's tests so a wired gate cannot be mistaken for a
+  closed one (#4583).
+
+- bf1edef: feat(formula,lint): wire ADR-0056 D4's RLS authoring gate, from the runtime's own predicate (#4983)
+
+  `isSupportedRlsExpression` has carried the same docblock since ADR-0056 D4:
+  "exposed so an authoring-time gate (`objectstack compile`) can REJECT a
+  predicate the runtime would silently drop … A `false` here means 'this
+  predicate will never enforce'." It had **no non-test consumer anywhere** — the
+  function written to fix declared-but-never-read was itself declared and never
+  read. This lands the consumer, in two steps that had to happen in this order.
+
+  **1. `sqlPredicateToCel` and `isSupportedRlsExpression` move FROM
+  `@objectstack/plugin-security` (`src/rls-compiler.ts`) TO `@objectstack/formula`
+  (`src/rls-predicate.ts`), and are exported from its root.** Executable code
+  unchanged — a change of address, not of behaviour; `plugin-security` now imports
+  them from `@objectstack/formula` and keeps no copy, so there is still exactly
+  one definition. No import path outside the two packages changes: neither symbol
+  was ever exported from `@objectstack/plugin-security`'s entry point. The move is
+  what makes step 2 possible at all — `@objectstack/lint` may depend on
+  `@objectstack/spec` and never on a runtime, so with the predicate living in a
+  runtime the gate's only other door was copying the SQL→CEL bridge, whose
+  boundary conditions (quoted literals are never rewritten; canonical CEL passes
+  through unchanged) _are_ the gate's red/green line. A fork drifting by one
+  character rejects policies the runtime executes correctly — the false-positive
+  direction, which is worse than the gap. ADR-0058 D1 asks for a single canonical
+  shape gate; the bridge is part of that gate.
+
+  **2. New `@objectstack/lint` rule `validateRlsPredicateEnforceability`,
+  `error`, on all three authoring commands**, over
+  `permissions[].rowLevelSecurity[].using` and `.check`:
+
+  - **`rls-predicate-unenforceable`** — parses as CEL, outside the pushdown
+    subset: a function call (`size(...)`, `has(...)`), arithmetic, a ternary, a
+    cross-object path (`record.account.region`).
+  - **`rls-predicate-unparseable`** — does not parse as CEL even after the legacy
+    SQL bridge (`=` → `==`, `IN` → `in`): SQL `AND` / `OR` / `LIKE`, a subquery.
+    Its own id because the fix is different — write CEL (`&&`, `||`), not a
+    different shape.
+
+  What the gate prevents, measured through `plugin-security` rather than inferred:
+  `RLSCompiler` drops the policy and logs one request-time WARN. On the read path,
+  when it is the only applicable policy, `compileFilter` returns the
+  `RLS_DENY_FILTER` sentinel instead, which is AND-ed onto the where clause — so
+  every select / update / delete on the object matches **zero rows**. On the
+  ADR-0058 D4 write path the post-image `check` becomes that same sentinel, which
+  no record satisfies, so every insert / update fails with `PermissionDeniedError`.
+  The runtime fails closed, which is why this was survivable: the result is not a
+  hole but a policy that reads as an authorization and behaves as a blanket
+  refusal, with nothing at authoring time pointing at the line that caused it.
+
+  Fix a flagged predicate by rewriting it inside the lowerable subset — `==` `!=`
+  `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, and
+  `startsWith` / `endsWith` / `contains` over single-column field paths (ADR-0058
+  D2), against a literal or a `current_user.*` value. Two specific migrations:
+  `has(x)` / `size(x) > 0` → `x != null` (a function call is correct in an object
+  _validation_ rule, which is interpreted, and wrong here, where the predicate is
+  compiled to a filter); and a related record's field → denormalise it onto this
+  object (formula/rollup) and test that column, since RLS cannot join (ADR-0055).
+
+  Same construction as the sharing-rule gate (#4698): the rule does not model the
+  consumer or grep for it — it calls `isSupportedRlsExpression`, the exact
+  function `RLSCompiler.compileFilter` consults to decide whether a dropped policy
+  earns its warning, so the two verdicts are one boolean by construction, pinned
+  in both directions over a shared corpus. Measured before shipping: every RLS
+  predicate declared anywhere in this repo — the `plugin-security` platform seeds,
+  the examples, the dogfood fixtures, the authoring skill — is supported, so the
+  gate turns nothing red that works today. Unlike the sharing-rule gate, CEL
+  _syntax_ is reported here rather than deferred to `expression-invalid`:
+  `validateStackExpressions` does not walk `rowLevelSecurity` at all, and could not
+  judge this field correctly if it did, because `owner_id = current_user.id` is a
+  CEL syntax error and a working RLS predicate at the same time.
+
+- 73e576f: feat(lint,spec): SDUI 组件 props 接上解析闸门 —— `ComponentPropsMap` 不再是「声明了、从不被 parse」(#5068)
+
+  `PageComponent.properties` 是 `z.record(z.string(), z.unknown())` 这个开放口袋。
+  `PageComponentSchema` 自 ADR-0089 D3a 起是 `.strict()`,但**严格性不递归**:它守住
+  component 节点自己的键,`properties` 里面一个字都没人看。于是 `ComponentPropsMap`
+  里 31 个 typed props schema 从来没有被任何东西 parse 过(#4001 批 17 的 `no gate`
+  判定:载体活着、parse 缺席)。后果不是无害的 —— objectui 的 `SchemaRenderer` 会把
+  `properties` 整个 hoist 到节点上,再把 deny-list 之外的每个键 spread 成 React prop,
+  所以一个拼错的键既不被拒绝也不被丢弃:它一路走到渲染器,在那里被忽略,而作者拿到
+  的是一张成功回执。这正是 ADR-0078 要消灭的形状。
+
+  **新规则(两个诊断 id,均为 warning 级)**,落在 `@objectstack/lint`,按维护者对
+  #5068 的裁定走方向 A —— 在载体自己的授权门上分派解析,而不是改 `page` 协议的形状:
+
+  - **`component-props-unknown-key`** —— props schema 未声明的键,包括 props 包自身
+    这一层和它底下每一个 strip 姿态的对象。走的是 `lintUnknownKeysAgainstSchema`
+    (本次从 `@objectstack/spec` 导出,即 `lintUnknownAuthoringKeys` 用在每个 metadata
+    集合上的同一个 walker),所以 strip/strict/passthrough 的姿态规则与改名建议都是
+    单一实现,这里不重新推导一遍。
+  - **`component-props-invalid`** —— props schema 拒绝的值:类型不对、必填缺失、枚举
+    越界。
+
+  配套的一条契约细节:走到第二层。`readonly`(#5176)挂在 `RecordHighlightsField`
+  联合体的对象成员上,即 `fields[]` 数组项里面 —— authorable-surface walk 严格一层、
+  到不了那里(#5607 的更正)。本闸门到得了,并且两个方向都钉了测试:声明过的
+  `readonly` 必须静默,拼错的 `readOnly` 必须报出来并指名正确拼法。
+
+  **未注册 type 一律跳过**,这是必须语义而不是宽松:`PageComponentSchema.type` 是
+  `z.union([PageComponentType, z.string()])`,光是仓内 example 语料就授权了 10 种本
+  map 不承载的类型、共 87 个节点(`flex`、`grid`、`object-metric`、`object-chart`、
+  `record:line_items` …),它们的契约在 objectui 注册表和 ADR-0080 manifest 里。拿一个
+  不存在的 schema 去审判它们,只会把每一个都报成坏的。
+
+  **为什么本步只落 warning。**接上 parse 是执法的前置条件,不是执法本身(#5020 在隔壁
+  表面上的同一课)。闸门落在真实语料上会报 52 条:其中 34 条是三个已发布平台页把
+  `{ en, 'zh-CN' }` 内联多语言 map 写进了声明为纯 `z.string()` 的 `I18nLabelSchema`
+  (#5728,裁定中),另有 8 条是 `element:text.content` 上同一形状。今天就 gate 掉它们,
+  等于用平台自己都不遵守的声明去否掉平台自己的页面。warning 期的违例清单就是 error
+  升级的验收基线,升级本身是独立一步。
+
+  作者侧不变:`properties` 仍然照原样解析、原样保留,没有任何东西开始被拒绝 ——
+  `os validate` / `os build` / `os lint` 多了一类建议性诊断而已。存储路径(`saveMetaItem`
+  / REST `/meta`)仍然不校验 props 包,这一点被如实记录、未在本次修复。
+
+- ddd6650: feat(lint): reject a sharing-rule condition the runtime can only skip (#4698)
+
+  #4698 reported the same failure shape three times in one app in one day: a key
+  that is authored, is schema-valid, reads as meaningful — and is never consumed
+  by the runtime. Every check verifies that what is declared is _well-formed_,
+  never that it is _read_. The issue's third measured instance is a sharing rule
+  whose CEL `condition` uses `has(...)`: the seeder cannot lower it, skips the
+  rule, and the only signal is one WARN line at boot. The rule exists in
+  metadata, is absent from `sys_sharing_rule`, and grants nothing.
+
+  **New rules, both `error`, on all three authoring commands:**
+
+  - **`sharing-rule-unlowerable-condition`** — the condition is outside the
+    pushdown subset: a function call (`has(...)`, `size(...)`), arithmetic, a
+    ternary, or a cross-object path (`record.account.region`).
+  - **`sharing-rule-runtime-variable-condition`** — the condition reads
+    `current_user.*`. Criteria sharing rules are materialised (one static
+    `criteria_json` per rule, from which grants are written), so there is no
+    "current user" at compile time. The fix is a different mechanism, not a
+    different spelling, which is why it has its own id.
+
+  Fix each by rewriting the predicate inside the lowerable subset — `==` `!=`
+  `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, and
+  `startsWith` / `endsWith` / `contains` over single-column `record.<field>`
+  paths (ADR-0058 D2). Two specific migrations: `has(record.x)` → `record.x !=
+null` (`has()` is correct in an object _validation_ rule, which is
+  interpreted, and wrong here, where the condition is compiled); and a related
+  record's field → denormalise it onto this object (formula/rollup) and test
+  that column, or share the related object instead. For per-user access, use an
+  RLS policy (`rowLevelSecurity[].using`), where `current_user.*` _is_ resolved.
+
+  **Why this one surface and not "unread keys" in general.** "Is this key read?"
+  is only a lint question when the answer is computable from the authored
+  metadata alone, and usually it is not — a repo-wide grep for a reader is not
+  evidence of absence, and a consumer may live in another package, another repo,
+  or an uninstalled plugin. A sharing rule's `condition` is the case where the
+  predicate is exact: its one runtime consumer
+  (`bootstrapDeclaredSharingRules`) does exactly one thing with the key —
+  `compileCelToFilter(condition, { variables: {} })` — and a condition that does
+  not lower means the rule is skipped outright. So the lint calls that same
+  compiler, from the same package, with the same options, instead of modelling
+  the consumer; the verdict is identical to the seeder's by construction and is
+  pinned in both directions by a test over a shared corpus.
+
+  `error` rather than advisory, per the ADR-0078 claim `SharingRuleSchema`'s own
+  docblock makes ("the whole authorable surface is enforced — nothing here
+  validates and then silently does nothing"): there is no reading under which an
+  unlowerable condition does what it says. It fails closed, which is why it was
+  survivable, not why it was acceptable. Measured before shipping: every
+  sharing-rule condition declared anywhere in this repo lowers cleanly, so the
+  gate turns nothing red that works today.
+
+  CEL _syntax_ errors are deliberately left to `expression-invalid`, which
+  already gates this same field with a message written about syntax.
+
+- 1e6ab15: feat(lint): uniqueness-scope rules speak the ADR-0120 vocabulary (#4986, D5a/D5b)
+
+  - **New rule `unique/unscoped-declared-index`** (warning, advisory): a declared
+    index with bare `unique: true` — the spelling whose scope is unstated, the
+    #4986 trap. Fires on the spelling alone (no tenancy/posture inference —
+    `organization_id` is kernel-injected at registration, so an authoring-time
+    guess would be wrong half the time; see #4698). The fix names both words:
+    `'global'` (installation-wide — exactly today's behavior) or
+    `'organization'` (one holder per organization). Protocol 18 rejects the
+    spelling (#5082). Exported as `lintUnscopedDeclaredIndexes` +
+    `UNIQUE_UNSCOPED_DECLARED_INDEX`, registered as its own AUTHORING_RULES
+    entry (validate/build) and called by `lintDataModel` for `os lint`, so all
+    three commands report it — each finding exactly once.
+  - **R10 `unique/double-declaration` rewritten as the four-quadrant scope
+    matrix** (ADR-0120 D5b): field `true`/`'organization'` × declared `'global'`
+    (or bare `true`, its deprecated spelling) on the same single column =
+    CONTRADICTION (the installation-wide index wins physically; the
+    per-organization intent is silently dead) — and the mirror, field `'global'`
+    × declared `'organization'`, likewise; same scope on both sides = REDUNDANCY
+    (the same index declared twice). The old field-`'global'` exemption is gone
+    (now reported as redundancy), and the fix text replaces the hand-written
+    `fields: ['organization_id', …]` advice with the `'organization'` spelling —
+    the hand-written composite is not NULL-safe (#5030).
+
+### Patch Changes
+
+- c1e67e0: fix(lint): 扩 ADR-0105 D6 ② 的收件人词表至 ADR 原文范围 —— `unit_and_subordinates`
+  也判红
+
+  `org-axis-cross-org-bu-grant`(D6 ②)此前只对 `sharedWith.type ===
+'business_unit'` 判红,而授权面**更大**的另一个业务单元收件人
+  `unit_and_subordinates`(一个 BU **加上其全部后代单元**,ADR-0057 D5 子树扩张)
+  直接放行。两者的缺陷完全相同:平台级对象(`tenancy.enabled: false` /
+  `systemFields.tenant: false`)没有 organization 列可供 Layer 0 收口,BU 子树没有
+  任何 organization 可供解析,授权因而跨到库里每一个 organization —— 正是 ADR 拒绝
+  的"跨 org BU 巨树",从后门到达。
+
+  漏掉的恰恰是 ADR-0105 D6 ② 自己点名的那一个:
+
+  > Every BU mechanism — `unit_and_subordinates` sharing, `adminScope`
+  > delegation, depth scopes — operates within one organization. There is no
+  > cross-org tree.
+
+  判定改为收件人类型 ∈ `{ business_unit, unit_and_subordinates }`,诊断信息里点名
+  **实际写下的**类型并说明其触及范围(子树那一个额外写明 "AND every descendant
+  unit"),修复建议改为指向三个扁平收件人。
+
+  词表与 spec 枚举 `ShareRecipientType` 的差集不再是隐式的:规则里以表格逐条写明
+  拦截二者、放行 `user` / `team` / `position` 的理由(它们的运行时展开都不经
+  `BusinessUnitGraphService`,是 `tenancy.enabled: false` 平台级目录**被设计用来**
+  共享的方式),并附一条测试断言两半恰好划分 `ShareRecipientType` —— 将来枚举加成员
+  会在词表处失败,而不是无声地落进没人选过的那一桶。#4991 正是这条断言缺席的产物。
+
+  这是 error 级门禁的扩张,因此复核了真实元数据:`examples/app-showcase` /
+  `app-crm` 是仓库里仅有的已声明 sharing rule(共 11 条),全仓无任何对象关掉
+  tenancy,扩张后 org-axis 红线数为 **0** —— 不产生新红。
+
+- 641363a: fix(docs,lint): 修正两处裸引用公式样例,并给公式样例补一道 CEL 语义门 (#5116)
+
+  #5026 把字段公式校验从 `f.formula`(spec 按名拒绝的别名)收敛到声明的
+  `f.expression`,**激活了一条从未跑过的检查**。它的真实元数据扫描顺带发现文档和博客
+  里有两处公式样例写的是**裸引用**:
+
+  - `content/docs/data-modeling/fields.mdx` — `'quantity * price * (1 - discount / 100)'`
+  - `content/blog/context-window-is-the-constraint.mdx` — `` cel`amount * probability`  ``
+
+  裸引用在 CEL 里不报错,而是**静默求值为 null**:公式表达式把记录绑定在 `record`
+  命名空间下,顶层的 `quantity` 什么也解析不到。照这两行写出来的元数据,在 #5026
+  之后会被 `os build` / `os validate` 判红 —— 文档教的写法和平台的门直接矛盾。两处
+  都已改成 canonical 的 `record.` 前缀形式。
+
+  **新增 `@objectstack/lint` 的 `check:doc-formula-expressions`**,堵住让这两条长期
+  存活的那个洞。`check:doc-authoring` 看的是字面量的**形状**,`check:skill-examples`
+  对标记块跑 `tsc --noEmit` —— 两者之间,"能编译但 CEL 写错"的样例没有任何门:
+  `expression` 的类型就是 `string`,`'quantity * price'` 和
+  `'record.quantity * record.price'` 编译得一样好,而只有后者能用。
+
+  判决直接 import `@objectstack/formula` 的 `validateExpression` —— 和 `os build`
+  走的是同一个调用,不是仿制品。于是文档是被**规则本身**把关,而不是被规则的一种方言
+  把关(Prime Directive #12)。
+
+  门的难点不在判决而在**判据**:同一个 `expression:` 键在语料里承载至少三种互不相干的
+  契约 —— 记录作用域的 CEL 公式、flow 的扁平作用域谓词(那里裸引用是**对的**)、以及
+  `schedule` 下压根不是 CEL 的 cron 串。按键名匹配会把后两类全部误判为红。所以它只认
+  **解析后的结构**,且只认两种不可能有歧义的形状:`Field.*({ expression })`,以及
+  `type: 'formula'` 与 `expression` 并列的对象字面量。无法提取的块**报错而不是跳过**
+  ("absence must be loud")。
+
+  覆盖面是明说的,不含糊:只看 TS/TSX 代码块、只看能静态取出的表达式源、不做字段存在性
+  校验(文档片段没有对象声明)、flow / action / validation 谓词**刻意不在范围内**。
+
+- d4edb5d: fix(lint): the flow rule family now descends into `loop` bodies and every other nested region (#5383)
+
+  The flow anti-pattern rules read a flow's `nodes` / `edges` **flat off the top
+  level**, so every rule in the family was blind to anything authored inside an
+  ADR-0031 container — a `loop` body, a `parallel` branch, a `try_catch`
+  try/catch. Loop bodies are where a lot of real branching lives (a per-item gate
+  inside a sweep is the standard shape for a scheduled flow), so this was a large
+  share of authorable flow metadata that no flow rule inspected.
+
+  Measured in a real app: 8 `decision` nodes carried the inert singular
+  `config.condition` that `flow-inert-node-condition` exists to catch, all 8
+  inside a `loop` body, and `pnpm lint` reported none of them. The identical key
+  on a **top-level** decision in the same repo fired immediately — same key, same
+  node type, only the nesting depth differed. The blind spot also explains its own
+  survival: the gate visibly worked where it could see, so the top-level copies
+  got cleaned up while the nested ones read as approved.
+
+  Rules now reported at every depth: `flow-inert-node-condition`,
+  `flow-decision-unconditional-branch`, `flow-branch-label-unmatched`,
+  `flow-default-edge-with-condition`, `flow-multiple-default-edges`,
+  `flow-double-brace-interpolation`, `flow-bare-dollar-reference`,
+  `flow-date-equality-filter`, `flow-phantom-aggregation`,
+  `flow-error-label-not-fault`, and the `flow-approval-revise-*` family. Note the
+  severity asymmetry this closes: `flow-default-edge-with-condition` is a
+  build-stopping `error` that until now could not see a contradiction authored one
+  level down.
+
+  A finding inside a region carries the region scope in its `where`, so the
+  message still points at exactly one node — `flow 'x' · loop 'sweep' body ·
+node 'y' (decision)`, matching the scope vocabulary the engine's registration
+  pass already uses. Findings on a flow's own graph are unchanged, byte for byte.
+
+  Two details worth knowing if you consume these findings:
+
+  - Each region is scanned against **its own** `edges`. The branch-routing rules
+    reason about a node together with its out-edges, and a region is a
+    self-contained sub-graph, so a nested decision's out-edges live in the
+    region's own edge list.
+  - `flow-double-brace-interpolation` / `flow-bare-dollar-reference` scan a node's
+    config recursively, and a container's config physically contains its
+    descendants'. A nested hit was therefore already _visible_ before this change
+    — but attributed to the enclosing `loop` rather than the node carrying the
+    string. Such a finding now names the right node, and is still reported exactly
+    once.
+
+  `flow-runas-unscoped` deliberately keeps looking at top-level nodes only:
+  widening a build-gating rule is its own change with its own blast radius, and is
+  tracked separately.
+
+- eb26126: fix(lint): `flow-runas-unscoped` now sees data nodes nested in a `loop` body / `parallel` branch / `try_catch` region (#5633)
+
+  **This widens the coverage of a build-GATING rule.** `flow-runas-unscoped` is
+  `severity: 'error'`, so a flow it newly catches goes from a green build to a
+  failed one. That is the correct outcome — those flows cannot run at all — but it
+  is a real blast radius and the reason this shipped as its own change rather than
+  riding along with #5383.
+
+  **What was wrong.** #5383 gave the flow anti-pattern family a per-region walk and
+  deliberately left this one rule reading the flow's **top-level** `nodes` only. Its
+  data-node search is the rule's evidence that the flow _performs a data operation
+  at all_ — and a data node inside a `loop` body is exactly as unscoped as one at
+  the top level. So a scheduled flow that queried a set, looped it, and wrote per
+  item passed `os build` / `os validate` clean and was then **refused at run time**:
+  since #3760 a user-less run really does refuse the data operation rather than
+  running it unscoped. Passing the build and then being unable to run is precisely
+  what promoting this rule to `error` was for, and the shape it was missing —
+  query, loop, write per item — is _the_ standard shape for a scheduled flow, so
+  the write is almost always the nested node.
+
+  Measured, same flow with only the node's position changed:
+
+  ```
+  update_record at TOP level     -> 1 finding [error]
+  update_record INSIDE loop body -> 0 findings   (now: 1 finding [error])
+  ```
+
+  **What changed.** The data-node search runs across `collectFlowGraphs(flow)` —
+  every ADR-0031 region, at any depth — while the finding itself stays **flow-level**
+  exactly as before: one per flow, `where` = `flow 'x' · runAs`, because `runAs`
+  is a flow property and the region only supplies the evidence. The region is named
+  in the **message** so you can find the node:
+
+  ```
+  flow 'nightly_sweep' · runAs: schedule-triggered flow runs under `runAs:'user'`
+  (the default when none is declared), but a schedule run has no trigger user — so its
+  data node 'touch' (update_record), in loop 'loop_rows' body, has no identity to scope
+  to and will be REFUSED at run time.
+  ```
+
+  (The sentence's opening was re-worded by #5693 in this same release window; the
+  sample above is the wording that actually ships.)
+
+  **Nothing about the top-level case moved.** A flow whose evidence is a top-level
+  data node produces the same message with no region clause, and when a flow has
+  data nodes at both altitudes the top-level one is still the node cited —
+  `collectFlowGraphs` yields the flow's own graph before it descends. Both are
+  pinned by tests.
+
+  **If this newly fails your build:** the flow was already broken at run time. Add
+  `runAs: 'system'` to declare the elevation the sweep needs (a schedule /
+  time-relative / API run has no user to scope to — there is none). See ADR-0049,
+  ADR-0073 D5, #1888, #3760.
+
+  The repo's three example apps (`app-showcase`, `app-crm`, `app-todo`) are
+  unaffected — `os validate` output is line-for-line identical before and after.
+
+- be59695: fix(lint): `flow-runas-unscoped` stops telling an author they declared a `runAs` they never wrote (#5693)
+
+  The rule's message branched on whether `runAs` was **authored** or **defaulted**:
+
+  ```ts
+  typeof flow.runAs === "string" ? `runAs:'user'` : `the default runAs:'user'`;
+  ```
+
+  That distinction is real and useful — "you wrote something incoherent" is not
+  "you inherited a default that does not fit a user-less trigger" — but the rule
+  cannot observe it, and which arm an author got depended on the **surface** rather
+  than on their file.
+
+  **On the CLI, only the explicit arm was reachable.** `FlowSchema.runAs` carries
+  `.default('user')` and the registry wires this rule `input: 'parsed'`, so
+  `flow.runAs` is the string `'user'` whether the author wrote it or not. `os lint`
+  does not Zod-parse, and would have escaped that — except `defineStack` /
+  `defineFlow` parse at _definition_ time, so the config module hands even the
+  non-parsing command a stack with the default already filled in.
+
+  Measured on `examples/app-todo`, `overdue_escalation` with its `runAs` line
+  deleted — the author declared nothing:
+
+  ```
+  BEFORE — os validate
+    flow 'overdue_escalation' · runAs: schedule-triggered flow runs as `runAs:'user'`, but a
+    schedule run has no trigger user — so its data node 'get_overdue_tasks' (get_record) …
+
+  BEFORE — os lint
+    ✗ flow 'overdue_escalation' · runAs: schedule-triggered flow runs as `runAs:'user'`, but a
+    schedule run has no trigger user — so its data node 'get_overdue_tasks' (get_record) …
+  ```
+
+  Both commands told someone who had written no `runAs` that their flow "runs as
+  `runAs:'user'`" — which invites _"I never wrote that, the tool is confused"_ at
+  exactly the moment the tool is right and the fix is one line away.
+
+  Meanwhile the **runtime publish gate** (#4463) judges the verbatim authored body,
+  so it really did reach the other arm — the same flow was told two different
+  things by two shipped surfaces.
+
+  **What changed.** One sentence, true of both authoring inputs, on every surface:
+
+  ```
+  AFTER — os validate and os lint, identical
+    flow 'overdue_escalation' · runAs: schedule-triggered flow runs under `runAs:'user'`
+    (the default when none is declared), but a schedule run has no trigger user — so its
+    data node 'get_overdue_tasks' (get_record) has no identity to scope to and will be
+    REFUSED at run time.
+  ```
+
+  The parenthetical is a statement about the **value**, not an accusation about the
+  author, so it stays true for someone who did write `runAs:'user'`. This is the
+  house pattern rather than a new one: `flow-draft-status-ambiguous` says `has
+status 'draft' (the default when none is authored)` for the same reason, on the
+  same mechanism.
+
+  Only the wording moved: the same flows are flagged, with the same
+  `severity: 'error'`, the same `where`, the same `hint`, and the same region
+  clause when the evidence node is nested.
+
+- b2e1057: fix(lint): report a `config.timeRelative` descriptor the sweep will refuse, at authoring time (#5496)
+
+  A flow start node declaring `config.timeRelative` got **zero** authoring-time
+  diagnostics when its descriptor could not parse. The two rules that look at the
+  slot each looked at something else: `lint-flow-patterns` decides "this is a
+  time-relative flow" from `timeRelative != null` alone (never the shape), and
+  `validate-flow-trigger-readiness`'s existing check reads only
+  `timeRelative.object`, to compare it against the stack's objects. So
+
+  ```ts
+  config: { timeRelative: { object: 'task', field: 'due_at', offsetDays: -1 } }
+  ```
+
+  — three separate schema violations: `dateField` missing, `offsetDays` declared
+  as an int **array** and written as a scalar, and `field` an unrecognized key —
+  passed `os validate` silently. `TimeRelativeTriggerSchema` does reject it, but
+  the only place that schema ran was **bind time**, inside
+  `TimeRelativeTriggerPlugin.start()`, which warns and returns: the sweep is never
+  installed, the flow reports itself armed, and the author's sole feedback is one
+  line in a server log. For an AI author that line is outside the feedback loop
+  entirely; `os validate` is what it reads.
+
+  **New rule — `flow-time-relative-descriptor-invalid` (warning).** A start node
+  whose `config.timeRelative` is present runs that same schema at authoring time,
+  and a failure is reported naming `config.timeRelative` with the schema's own
+  issue list forwarded — so the diagnostic carries the missing key, the wrong type,
+  and, for an unrecognized key, the "did you mean" the schema already computes
+  (`field` → `dateField`) plus its wrong-layer guidance (a `schedule` written
+  _inside_ the descriptor is told it belongs beside it). The list is rendered
+  exactly as the bind-time warning renders it, so the two channels tell one story.
+
+  Nothing is shifted except **when** the schema runs. No shape knowledge is
+  re-implemented in the rule and no consumer-side tolerance is added: the verdict
+  and every word of its wording remain `TimeRelativeTriggerSchema`'s, so the rule
+  tracks the descriptor's contract as it evolves instead of drifting from a second
+  copy of it.
+
+  The rule and the existing object-name check decide different facts and cannot
+  report the same one twice — only the stack knows whether an object name exists,
+  and only the schema knows the descriptor's shape. A descriptor wrong in both ways
+  gets both findings, at their own paths. Canonical descriptors are unaffected:
+  every one shipped in the repo (the showcase `Task Due Reminder`, the
+  `content/docs` examples) parses, so this adds no diagnostic to existing apps.
+
+- ec6fad8: feat(lint): warn when a `multi: true` delete/update is bounded by nothing — the declared whole-object write (#5482)
+
+  A `delete_record` / `update_record` node that declares `multi: true` with no
+  `filter` (or an empty one) writes the **whole object**: the executor forwards
+  `where: {}` plus the bulk intent, the data engine classifies that as a legal
+  `multi` call, and it lands on `driver.deleteMany` / `driver.updateMany` with no
+  predicate. Every row, every run.
+
+  That path only became authorable with #5393, which gave these nodes a bulk
+  declaration at all — before it the executor never passed `options.multi`, so the
+  engine refused every predicate write (`Delete requires an ID or
+options.multi=true`) and "empty filter + bulk intent" was not a reachable shape.
+  Since then it has been reachable and **silent**: `filter` is optional, `multi` is
+  optional, nothing related the two, and the author's only feedback was the step's
+  `acted` row count — reported after the rows were gone. The common way to get
+  here is not malice but an omission: declaring the bulk intent and forgetting the
+  constraint.
+
+  `os validate` / `os build` now report `flow-multi-write-unfiltered` for it:
+
+  ```
+  flow 'nightly_purge' · node 'purge' (delete_record)
+    declares `multi: true` with no `filter` key — this is a WHOLE-OBJECT write,
+    by declaration: every row of 'lead' is deleted on every run. …
+  ```
+
+  **A warning, not a gate.** An explicit whole-object purge is something the
+  platform grants on purpose — the data engine's own dispatch case-set lists "bulk
+  intent with no predicate at all" as a valid call — so the shape has a legitimate
+  reading and the run-time path stays open. What was missing was only that the
+  author hears about it _before_ the rows go. For the same reason the fix is not a
+  schema `refine`: forbidding the shape would delete an intent the engine grants.
+
+  Two ways to satisfy the warning: write the constraint you mean into `filter`
+  (the bounded-bulk reference shape is app-showcase's `showcase_inquiry_purge`), or
+  confirm that emptying the object is the intent and keep it.
+
+  **It does not duplicate the #3810 run-time guard, which judges a different
+  fact.** That guard refuses a node when a condition the author _wrote_
+  interpolated to nothing (`{record.ownr}` — a typo — leaving `{}`), and it is
+  deliberately keyed on "a written condition is gone" rather than on "the filter is
+  empty", because losing one of two conditions also widens the blast radius. So:
+
+  | fact                          | judged by          | when      | verdict |
+  | ----------------------------- | ------------------ | --------- | ------- |
+  | a written condition vanished  | #3810 filter guard | run time  | refuse  |
+  | no condition was ever written | this rule          | authoring | warn    |
+
+  A node with `filter: { owner: '{record.ownr}' }` is silent for this rule (a
+  condition _is_ written) and refused by that one; a node with no `filter` at all
+  is warned about here and — correctly — allowed there. The diagnostic names the
+  run-time guard so the two are not mistaken for one check.
+
+  Reported at every nesting depth, which matters because a scheduled sweep whose
+  per-item work sits in a `loop` body is the standard janitor shape: a finding
+  inside a region carries the region scope (`flow 'x' · loop 'sweep' body · node
+'purge' (delete_record)`), on the traversal #5383/#5635 added to this family.
+
+  Deliberately out of range: an empty **combinator** array (`{ $and: [] }`,
+  `{ $or: [] }`). #5322/#5134 ruled those and every driver implements the ruling —
+  empty `$and` is TRUE (so it _is_ a whole-object write), empty `$or` is FALSE (so
+  it matches nothing and must never be warned about) — but telling them apart
+  requires the boolean-identity reduction, which already exists producer-side in
+  each driver. A hand-written fourth copy inside a linter is how a scan and a
+  validator come to answer with two different predicates, so that case is tracked
+  separately instead.
+
+- 7f1a635: fix(lint,spec,objectql): 编写期表达式与 `highlightFields` 校验识别注册表注入的系统列 (#5378)
+
+  平台在每个业务对象上注入 `owner_id` / `created_at` / `organization_id` 等系统列,
+  文档也把 `ownership: 'user'` 写作 "injects reassignable owner_id"。但编写期的两处
+  校验只读**作者声明的** `fields`,于是注入列一律当作不存在:
+
+  - `validate-expressions.ts` 的 `buildFieldIndex` 让 `has(record.owner_id)` 直接
+    报错 `unknown field owner_id`;
+  - `highlightFields` 存在性检查对 `['owner_id']` 发出 "is not a field on this
+    object — it is silently skipped by every consumer"。
+
+  也就是平台自己的 linter 否认平台自己的契约。结果是应用被迫**重声明系统列**才能通过
+  编写期校验:hotcrm#548 为此在全部 12 个业务对象上显式声明了 `owner_id`(6 个对象曾
+  报 `highlightFields` 警告,`contact_welcome` 触发器的 `has(record.owner_id)` 被硬
+  拒)。这正是本项目视为缺陷的形状:能力已声明(列确实注入且有文档),但执行层不认。
+
+  **权威来源只有一份。** 新增纯派生 `resolveInjectedSystemColumns()`
+  (`@objectstack/spec/data`)回答"这个对象带哪些系统列",并由 registry 的
+  `applySystemFields()` **消费**它——沿用 #3786 为审计字段族确立的分工:spec 声明
+  **有哪些**列,registry 拥有**每列长什么样**。lint 通过同一派生取答案,因此编写期
+  判断与运行时注入不可能不一致(`@objectstack/lint` 的包契约是"只依赖 spec,绝不依赖
+  运行时",此前它根本无法读到权威)。两个消费面共用同一判定,不各写一份。
+
+  **并入是按对象有条件的**,不是无条件放行整张系统列名单:`ownership: 'org' | 'none'`
+  的对象没有 `owner_id`,那里的 `record.owner_id` 仍然是真错误并继续报;
+  `tenancy.enabled: false` 无 `organization_id`;`systemFields: { audit: false }` 无
+  审计四列;`systemFields: false` / `managedBy: 'better-auth'` 什么都不注入(只剩驱动
+  提供的主键 `id`)。真正拼错的字段照旧被拒,并且注入列现在也进入 "did you mean?" 候选
+  (`record.ownerid` → 提示 `owner_id`)。
+
+  被解析的注入列在诊断与补全语义上与授权字段等同;类型健全性与 null-guard 两个索引
+  **刻意**仍只读声明字段,原因写在各自注释里:列的 `type` 与可空性属于 registry 的列
+  定义,在 lint 侧另立一份就是本次要消灭的第二份副本,而 null-guard 喂的是会中断构建的
+  判定,擅自并入会让今天能构建的 stack 变红。
+
+  注入行为本身零改动:`applySystemFields` 的输出在全条件矩阵上逐列不变(新增 parity
+  pin 用实跑注入代码比对)。已显式重声明系统列的应用不受影响——重声明仍然合法,
+  examples 三个 app 的 `os validate` 输出改动前后完全一致。
+
+- 5d3ced9: fix(objectql,lint)!: a `json_schema` validation rule's `format` keyword is now ENFORCED — records that passed before can start failing (#5029)
+
+  > **⚠️ BEHAVIOUR CHANGE ON DEPLOYED DATA — READ BEFORE UPGRADING.** A `format`
+  > keyword inside a `json_schema` validation rule used to enforce **nothing**.
+  > It now enforces. If any deployed object carries such a rule, writes that
+  > succeeded on the previous version can be **rejected** after this upgrade —
+  > including writes from flows, seeds, imports and integrations, not just the UI.
+  > Nothing about the metadata changed; the runtime simply started honouring what
+  > the metadata always said. See "Before you upgrade" below.
+
+  ## What was broken
+
+  `packages/objectql/src/validation/rule-validator.ts` built its shared ajv as
+  `new Ajv({ allErrors: true, strict: false })` and stopped there. In ajv 8 the
+  `format` keyword is **not built in** — it ships in the separate `ajv-formats`
+  package — and under `strict: false` an unregistered format is not an error: ajv
+  logs one line at compile time and **drops the keyword**.
+
+  So this rule:
+
+  ```ts
+  {
+    type: 'json_schema',
+    name: 'support_config_shape',
+    field: 'support_config',
+    message: 'Support config is invalid.',
+    schema: {
+      type: 'object',
+      properties: { email: { type: 'string', format: 'email' } },
+      required: ['email'],
+    },
+  }
+  ```
+
+  compiled fine, ran on **every** write, enforced `type` and `required` — and
+  enforced **nothing at all** for `format`. `{ email: 'not-an-email' }` was
+  accepted, for every record, forever. The only signal was a stderr line at
+  compile time naming no rule and no object.
+
+  This is the #4649 / #4762 family one level in, and the partial failure is what
+  made it nasty: the rule visibly rejects a bad `type` / missing `required`
+  payload in dev, so it reads as _working_ while the `format` half never fires.
+  `format` is also one of the most reached-for JSON Schema keywords (`email`,
+  `uri`, `uuid`, `date`, `date-time`, `ipv4`), so this was not an exotic corner —
+  and it is exactly the shape an AI writing metadata reaches for first.
+
+  ## What changed
+
+  - **`@objectstack/objectql`** now depends on `ajv-formats` and registers it on
+    the shared instance (`addFormats(ajv)`). The **default (full)** format set is
+    used deliberately: `fast` mode trades correctness for speed on precisely the
+    formats authors reach for most, and a format that "mostly" matches is the same
+    declared ≠ enforced defect with a smaller hole.
+  - **`@objectstack/lint`** — the #4762 publish gate
+    (`validate-rule-compilability.ts`) compiles every `json_schema` rule with the
+    SAME ajv environment the runtime uses, on purpose, so it registers the same
+    plugin. This is not cosmetic parity: `ajv-formats` also installs the
+    `formatMinimum` / `formatMaximum` keywords, so a gate without it treats them
+    as unknown keywords (`strict: false` ⇒ silently ignored) and would publish a
+    schema the runtime then refuses to compile — a rule that passes review and
+    enforces nothing, which is the failure that gate exists to prevent. The parity
+    test now reads the plugin registration out of the runtime's source, so the two
+    cannot drift apart silently.
+
+  **Authoring is unchanged.** `format` stays a legal, publishable JSON Schema
+  keyword; the publish gate does not refuse it (option 2 on #5029 was considered
+  and rejected — refusing standard JSON Schema would push authors into private
+  spellings). What changed is only that the declaration is now true.
+
+  ## Before you upgrade
+
+  1. Find the rules at risk: any `object.validations[]` entry with
+     `type: 'json_schema'` whose `schema` contains a `format` key, at any depth
+     (including inside `$defs` / `$ref` and a `conditional`'s `then` /
+     `otherwise` branch).
+  2. For each, audit the existing column against that format. Rows already stored
+     are **not** re-validated — nothing is rejected retroactively, and no
+     migration runs — but the **next write that touches the field** is checked,
+     which includes an unrelated PATCH that merely resends the JSON blob.
+  3. If a format was aspirational rather than real, remove that `format` key (or
+     relax it) _before_ upgrading. Deleting the keyword is now a meaningful,
+     visible act rather than a no-op.
+
+  ## Known limitation, recorded deliberately
+
+  A **misspelled** format name is still ignored. `format: 'emial'` compiles under
+  `strict: false` — ajv logs `unknown format "emial" ignored` and drops it — in
+  both the runtime and the publish gate, so a typo still enforces nothing. That
+  behaviour is unchanged here and pinned by test in both packages, so it is a
+  known boundary rather than an oversight; closing it is an authoring-time
+  decision of its own and is tracked separately.
+
+- 4b50be4: fix(lint): a MISSPELLED `format` in a `json_schema` validation rule is refused at publish time (#5178)
+
+  #5029 registered `ajv-formats` so a `json_schema` validation rule's `format`
+  keyword is really enforced. It did **not** close the other half, and said so:
+  under `strict: false` — which is load-bearing, because author-written schemas
+  legitimately carry vendor keywords — an **unrecognised** format name is a
+  non-event. ajv logs one line at compile time and **drops the keyword**:
+
+  ```
+  $ node -e "const Ajv=require('ajv'); const addFormats=require('ajv-formats');
+    const ajv=new Ajv({allErrors:true,strict:false}); addFormats(ajv);
+    const v=ajv.compile({type:'object',properties:{e:{type:'string',format:'emial'}}});
+    console.log('validates {e: zzz} =', v({e:'zzz'}));"
+  unknown format "emial" ignored in schema at path "#/properties/e"
+  validates {e: zzz} = true
+  ```
+
+  So an author who types `emial`, `e-mail`, `datetime` for `date-time`,
+  `urireference` for `uri-reference`, `ipv_4` for `ipv4` or `Email` for `email`
+  gets a rule that is declared, appears in the metadata, appears in every "what
+  protects this object" listing, runs on every write, enforces `type` and
+  `required` — and enforces nothing for the keyword they actually wrote. The
+  record is **accepted**, which is the silent direction: nothing in the metadata,
+  the UI or a test run says the constraint is inert. A typo is also the single
+  most likely mistake in a hand-written or AI-generated JSON Schema.
+
+  **New gate — `validateRuleSchemaFormats`**, a `gating` entry in
+  `AUTHORING_RULES`, so it runs on all three authoring commands (`os validate`,
+  `os build`, `os lint`) with no per-command wiring. One rule id:
+
+  | id                                           | fires when                                                                          |
+  | :------------------------------------------- | :---------------------------------------------------------------------------------- |
+  | `validation-rule-json-schema-unknown-format` | a `json_schema` rule's schema names a `format` the runtime's ajv has not registered |
+
+  Each finding names the rule, the object, the **RFC 6901 JSON Pointer** to the
+  offending keyword, and the **nearest registered name**:
+
+  ```
+  objects.account.validations.support_shape.schema#/properties/email/format
+    `json_schema` validation 'support_shape' on object 'account' names
+    `format: 'emial'` at `#/properties/email/format`, which is not a registered
+    format. … the schema compiles, the rule ships and runs on every write, its
+    `type`/`required` keywords are enforced, and this constraint is enforced on
+    no record, ever. The record is ACCEPTED, so nothing downstream reports the
+    gap either.
+    hint: Did you mean `format: 'email'`? The registered names are: binary, byte,
+    date, date-time, … — the default `ajv-formats` set, the one
+    `rule-validator.ts` registers (#5029).
+  ```
+
+  **The vocabulary is enumerated, never written down.** The registered set is read
+  off a live instance of the very ajv the publish gate builds to mirror the
+  runtime (`registeredFormatNames()`), not from a hardcoded list. A list would be
+  a third opinion that nobody updates: the day `ajv-formats` adds a name, it
+  starts refusing a format the write path enforces — a gate that turns working
+  metadata red gets switched off, and then protects nothing. Enumerating means the
+  gate follows the plugin across an upgrade with no edit at all.
+
+  **The walk is JSON-Schema-aware, because `format` is not a magic word.** Every
+  subschema position is visited — `properties`, `items` (both the 2020-12 schema
+  form and draft-07's tuple array), `anyOf`/`allOf`/`oneOf`/`prefixItems`,
+  `$defs`/`definitions`, `additionalProperties`, `patternProperties`,
+  `if`/`then`/`else`, `not`, `contains`, `propertyNames`, `dependentSchemas`,
+  draft-07 `dependencies` — at any depth, plus the rules nested in a
+  `conditional`'s `then`/`otherwise`. Positions that hold arbitrary **data** are
+  deliberately never read: a `format` inside `default`, `const`, `enum` or
+  `examples` enforces nothing and was never meant to, so reporting it would invent
+  a defect out of a legal document. A non-string `format` (`format: 42`) is left
+  to `validation-rule-json-schema-uncompilable`, which already refuses it in
+  ajv's own words.
+
+  **The runtime is untouched, and so is the #4762/#5029 compile parity.** Option 2
+  on #5178 (make an unknown format a runtime compile error) was rejected: it fires
+  at runtime and fail-**open**, since `checkJsonSchema` catches, logs and skips —
+  trading one silent gap for another. And this is a separate judgement laid
+  _beside_ the existing compile, never folded into it: `validateRuleCompilability`
+  still compiles each schema in the runtime's exact environment and still
+  **publishes** a typo'd format, because a typo'd format compiles there too. Its
+  `#5029` pin ("a MISSPELLED format name is published, not refused") passes
+  verbatim. Two questions, two rules — "does ajv accept this schema?" and "will
+  this `format` keyword do anything?" — sharing one traversal and one ajv
+  environment so they can never disagree about which rules exist or what
+  "registered" means.
+
+  `ajv` / `ajv-formats` stay **lazy**, and this rule is lazier than its neighbour:
+  the registered vocabulary is only fetched once a schema actually names a
+  `format`, so a `json_schema` rule that names none loads neither package. Pinned
+  by the package's `lazy-deps.test.ts` in all three of its layers.
+
+  **Upgrading:** if `os validate` / `os build` / `os lint` newly rejects a
+  `json_schema` validation rule, the format name in it was never being enforced —
+  fix the spelling to the name the finding suggests, or express the constraint
+  with `pattern`, which is enforced. No metadata that was working changes
+  behaviour.
+
+- 461ccda: fix(lint): 收敛 `validateStackExpressions` / `validateSecurityPosture` 里读 spec 不声明键的 `??` 别名链 (#5017)
+
+  两条规则都以 `input: 'parsed'` 注册,看到的是 `ObjectStackSchema` 解析后的产物。
+  #4984 → #5009 清掉了 sharing rule 字段层和 org-axis 规则里的同形读法;这一轮是同族
+  第三轮,落在另外两个文件。议题点名五条,全包 grep 又找出同形的两条,一并处置:
+
+  | 原读法                                                                      | spec 事实                                                                                           | 处置                           |
+  | :-------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------- | :----------------------------- |
+  | `rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula`(两处) | 四个别名全是 `validation.zod.ts` 的 `aliases: { …: 'condition' }` **按名拒绝**的键;canonical 排第三 | 收敛为 `rule.condition`        |
+  | `obj.validations ?? obj.validationRules`                                    | `ObjectSchema` 只声明 `validations`,strict 按名拒绝                                                 | 收敛为 `obj.validations`       |
+  | `rule.condition ?? rule.criteria ?? rule.predicate`                         | `criteria` 是运行时编译产物 `criteria_json` 的拼法(#3896),`predicate` 直接拒绝                      | 收敛为 `sharingRule.condition` |
+  | `def.reference ?? def.referenceTo`                                          | `field.zod.ts:331` 把 `referenceTo` 映射为 `reference`                                              | 收敛为 `def.reference`         |
+  | `action.objectName ?? action.object`                                        | canonical 是 `objectName`;`object` 按名拒绝                                                         | 收敛为 `action.objectName`     |
+  | `obj.sharingModel ?? (obj.security)?.sharingModel`                          | **`ObjectSchema` 根本没有 `security` 键** —— OWD 三个拨盘是平铺的,且 strict:嵌套写法被整包拒绝      | **删除整个 fallback**          |
+  | `def.reference ?? def.reference_to`                                         | 同 `referenceTo`                                                                                    | 收敛为 `def.reference`         |
+
+  对任何能解析的 stack,判定结果不变 —— 三个 example(crm / showcase / todo)与平台
+  default permission sets 上,改动前后两条规则的 findings 逐字相同。
+
+  **其中一条不是死代码,是活着的错。** `rule.expression ?? … ?? rule.condition ?? …`
+  把 canonical 的 `condition` 排在两个被拒别名之后,所以一条同时写了 `condition` 和
+  `expression` 的规则,lint 校验的是 schema 会拒绝的那个,而作者声明的那个**从头到尾
+  没被看过**:producer 和 consumer 对同一份元数据给出两套说法。测试里重建了旧链来演示
+  这个差异,而不是只描述它。
+
+  真正的代价从来不是漏报,而是误导 —— `object.security.sharingModel` 出现在**安全
+  linter**里,足以让下一位作者(人或 AI)相信对象级 `security` 信封是真实的授权面。
+
+  同时补上两层结构性 meta-guard(#4992 模式,#5018 形状),让下一条死读法在 review
+  前就红:
+
+  - **declared-key guard** —— 规则源码里从每个 surface 上读的键,必须出现在该 surface
+    自己的 Zod `.shape` 里。扫源码不是扫行为是刻意的:不可达分支没有行为可断言。
+  - **reachability guard** —— `validateSecurityPosture` 全部 15 个 `findings.push`
+    落点都必须被一条 schema **不报 `unrecognized_keys`** 的 fixture 触达。判据不是
+    #5018 的 `safeParse` 全绿,而这正是这条规则的特点:它被文档明确设计为也跑在
+    parse 前,好让 `os lint` 对 zod 会拒绝的**值**(`sharingModel: 'read'`)给出更
+    好的信息。被拒的**值**和被拒的**键**是两回事 —— 后者在 parsed 路径上压根到不了。
+
+  七条读法各自做过变异测试:任意一条加回去,都至少有一条测试转红。
+
+- 58f3220: null-guard 闸门改走 `@objectstack/formula` 的规范解析入口,并移除对 `@marcbachmann/cel-js`
+  的直接依赖(#4812)。
+
+  `validate-null-guards.ts` 此前自建了一个**不带 limits** 的 cel-js `Environment`,于是它会解析、
+  并进而判定平台自身拒绝的谓词 —— 超过 `maxAstNodes` (256) / `maxDepth` (32) /
+  `maxListElements` (64) 的表达式在 lint 侧照常出 finding,在 `compile()` 侧却是
+  `Exceeded max…`。两个解析入口,两个答案,而这个闸门握着更宽松的那个。
+
+  改走 `parseCelToAst` 后两者合一。超界表达式不再由本闸门二次判定,而是交还给同一批调用点上
+  本就在跑的 `validateExpression` —— 它以 blocking error 报告边界错误,措辞面向自纠;作者修好
+  边界问题后,null-guard 判定自然回来。规则判定本身没有变化:#3306 的三元重写对本 pass 是
+  verdict-neutral(重写仅在三元的某一支恰为 `null` 字面量时触发,而该支本就证明不出任何
+  guard),已加测试钉住。
+
+- f238970: fix(lint): 收敛 `validateRuleCompilability` 里读 spec 不声明键的 `??` 别名链 (#5096)
+
+  #4984 → #5009 → #5017/PR #5046 同族第八处,落在第三个文件
+  (`validate-rule-compilability.ts:239`):
+
+  | 原读法                                   | spec 事实(对 live `.shape` + `safeParse` 实测)                                                                                                                                                                  | 处置                     |
+  | :--------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------- |
+  | `obj.validations ?? obj.validationRules` | `ObjectSchema.shape` 只声明 `validations`,且 strict —— `validationRules` 被**按名拒绝**:`Unrecognized key(s) on this object: \`validationRules\`. … Did you mean \`validationRules\` → \`validations\`?`(#4001) | 收敛为 `obj.validations` |
+
+  该规则以 `input: 'parsed'` 注册,canonical 排首位,所以别名 limb 对任何能解析的
+  stack 都不可达 —— 三个 example(crm / showcase / todo,共 28 个对象、17 条验证规则)
+  上改动前后 findings **逐字相同**(两侧均 0 条)。
+
+  **代价从来不是漏报,而是误导。** 一个写在 consumer 里的别名 fallback,等于向后来的
+  读者、以及照着这份源码写元数据的 AI 宣称 `objects[].validationRules` 是一个真实的
+  authoring 面;它把 schema 一句指名道姓的拒绝,降级成一条静默失效的分支。别名容忍属于
+  producer 的拒绝面,不属于 consumer(Prime Directive #12)。
+
+  同时给本文件补上两层结构性 meta-guard(#4992 模式,#5017 形状),让下一条死读法在
+  review 前就红:
+
+  - **declared-key guard** —— 规则源码里从 `stack` / `obj` / `rule` 上读的每个键,必须
+    出现在对应 surface 自己的 Zod `.shape` 里,且 `expected` 精确匹配;另加一条 "covers
+    every receiver" 元测试,以及一条针对 `flattenRules` 里 `rule[branch]` **计算属性**
+    读法的专项断言(点号扫描看不见它,而 `then` / `otherwise` 恰是本规则最有意思的读法)。
+  - **reachability guard** —— 两个 `findings.push` 落点都必须被一条 `ObjectStackSchema`
+    **完整 parse 通过**的 fixture 触达。这里用的是 #5018 的 `safeParse` 全绿判据,比
+    `validate-security-posture` 只能要求"不报 `unrecognized_keys`"更严一档 —— 因为本规则
+    判的是"编译不过",而在 spec 眼里 `regex` 是任意字符串、`schema` 是任意 record,编不过
+    的产物依然完全 spec 合法:这条 gate 存在的理由正是 zod 看不见该缺陷,所以它永远不需要
+    一条 zod 会拒绝的 fixture。
+
+  原测试 `reads \`validationRules\` too` 断言的正是被删掉的那条 limb,实测确实产出 1 条
+  finding(不是空转),因此它被**替换**而不是改拼写:把 key 换成 canonical 只会留下一条
+  主题已不存在的绿测试。变异测试:别名 limb 加回去 → 2 条红;改成纯别名读 → 11 条红。
+
+- 06fc07a: `os validate` now reports a `config.timeRelative` that is not a descriptor object
+
+  A flow start node whose `config.timeRelative` held a scalar — `timeRelative: 'daily'`
+  is the natural mistake, from fusing the sweep's **cadence** with its **descriptor** —
+  was accepted in complete silence at every layer. The node `config` slot is open by
+  design (ADR-0018) so the schema parsed it; the engine routes a flow to the
+  time-relative sweep only when `config.timeRelative` is an object, so the flow fell
+  through that branch and, with no other trigger key on the node, bound to nothing and
+  never fired. Not one diagnostic was produced anywhere — not even the single bind-time
+  warn that an object-but-unparseable descriptor gets, because the trigger was never
+  handed the flow at all.
+
+  A new authoring rule, `flow-time-relative-descriptor-unroutable` (warning), reports it
+  at authoring time with the value, its type, and the consequence — and a hint that
+  separates the two fused concepts: the descriptor says WHICH records to sweep
+  (`{ object, dateField, and exactly one of withinDays | offsetDays }`), while HOW OFTEN
+  is the sibling key `config.schedule`.
+
+  Nothing is made tolerant: a scalar is still not a descriptor and the runtime's
+  behaviour is unchanged. The rule is a separate criterion from
+  `flow-time-relative-descriptor-invalid` (#5496) rather than a widening of it, and the
+  two partition the key along the engine's own routing predicate — a value the engine
+  routes gets the schema's verdict, a value it routes nowhere gets this one, and never
+  both. Arrays and `Date` are `typeof 'object'`, so they stay with the shape rule.
+
+- 61fde5e: lint: warn when a form section declares a `label` but no `name` — the heading no translation key can ever address
+
+  `_sections` is keyed by the section's `name`, and every renderer that draws a
+  section heading resolves it that way (`sectionLabel(objectName, section.name,
+authored)` — `plugin-form`'s `ObjectForm`/`ModalForm`, `plugin-detail`'s
+  `record:details`), falling back to the authored label when there is no name.
+  So a section authored with a `label` and no `name` is untranslatable **by
+  construction**, and every gate we own was structurally blind to it:
+
+  - the reference validator reports keys a bundle carries that nothing declares —
+    a nameless section produces no key, so there is no orphan to report;
+  - the i18n coverage walk (#5405) emits one expected key per `sections[].name` —
+    a section with no name contributes nothing to demand, so the report reads
+    100% while the heading renders in the source locale in every locale.
+
+  Measured on HotCRM: **70 of 70** form-view sections across all 14 view files are
+  in exactly that state, with four locales at full declared coverage and zero
+  warnings anywhere. It is also the real cause of the reported `Case / SLA /
+Resolution` English strip — that object's _detail page_ sections carry names and
+  translate, while its _form view_ sections carry none.
+
+  `validateTranslatableSections` (rule id `translation-section-name-missing`) joins
+  the reference-integrity suite, so it runs on `os validate`, `os lint` and
+  `os compile` at once. It reads exactly the anchors the two landed halves already
+  agree on: a view container's `sections`, its **default** `form.sections`, every
+  `listViews.*` / `formViews.*` sub-container, the same three on views embedded in
+  an object, and `record:details` sections nested anywhere in a page's component
+  tree. `fieldGroups`-derived sections are out of range by construction — their
+  heading is keyed by `fieldGroups[].key`, so they always have a name.
+
+  **Warning, and opt-in.** Nothing crashes and nothing is dead — one heading stays
+  in the source locale — so the severity matches its sibling rules (ADR-0072 D1)
+  and nothing that passed before starts failing. `os validate` over
+  `examples/app-showcase` now reports 14 of these (6 from form views, 8 from
+  `record:details` pages) and still exits 0. A section warns only when the
+  object it renders under carries some translation of its own, which keeps the
+  monolingual case silent exactly as the coverage gate already does.
+
+  The fix is a diagnostic at the **producer**, deliberately not tolerance at the
+  consumer: deriving a lookup key by slugifying the label would fossilize a second
+  de-facto contract next to the declared one, and would move the day anyone edits
+  the heading text. The `name` the hint suggests is a suggestion for the author to
+  write down, never a key anything resolves.
+
+- 471839d: fix(spec): classify the 22 dashboard widget keys and refuse undeclared container inheritance (#4956)
+
+  The spec liveness ledger's `dashboard.widgets` entry carried one blanket `live`
+  verdict plus a `note` asserting that the per-widget props were _"classified in
+  the DashboardWidgetSchema subtree"_. **No such subtree ever existed.** The gate's
+  walk drills one level and only through an explicit `children`, and `widgets`
+  declared none — so all 22 authorable keys of the strict `DashboardWidgetSchema`
+  were never classified, never counted as unclassified, and every run printed
+  "all governed-type properties are classified" anyway.
+
+  That gap — not evidence — is what carried `widgets[].responsive` through the
+  #3896 inert-key sweep that removed both its sibling `widgets[].performance` and
+  its literal namesake `view.responsive`. `view` is drilled through `children`, so
+  `list.responsive` got asked and went out; `widgets` was never asked. It was
+  finally retired in #4876 / PR #4995, by hand, four days late.
+
+  **What changed for authors**
+
+  The `objectstack build` / `objectstack lint` advisory now covers dashboards, so
+  five widget keys warn at build time (they never did before — `dashboard` was not
+  in the lint's type collections, because until now its ledger warned on nothing):
+
+  | Widget key               | Why it warns                                                                                                                   | What to do instead                                                                                               |
+  | :----------------------- | :----------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------- |
+  | `widgets[].colorVariant` | no render path reads the top-level key — only the authoring panels do                                                          | move it under `options` (the inline metric card reads it there); the dataset-bound path has no colour affordance |
+  | `widgets[].actionUrl`    | no renderer draws a per-widget action button; every `actionUrl` the dashboard renderer reads belongs to `header.actions[]`     | use `dashboard.header.actions[]`                                                                                 |
+  | `widgets[].actionType`   | pairs with the above                                                                                                           | as above                                                                                                         |
+  | `widgets[].actionIcon`   | zero readers in either repo                                                                                                    | as above                                                                                                         |
+  | `widgets[].aria`         | declared ARIA attributes never reach the DOM — the same false-compliance shape as the dashboard-level `aria` removed in 17.0.0 | delete it; the renderer emits its own `aria-*`                                                                   |
+
+  Advisory only — the build never fails on these. **Nothing is removed and no
+  runtime behaviour changes**: this records verdicts, it does not act on them.
+  Enforce-or-remove (ADR-0049) for the five is tracked separately.
+
+  Two verdicts worth knowing because they cut the other way: `requiresService` is
+  **live** — it reads as inert in the renderer repo but the REST layer strips
+  widgets whose service is unregistered (ADR-0057 D10) — and `compareTo` is live
+  on the inline chart path only; on the ADR-0021 dataset path the string arms are
+  dropped and `{ offset }` fails in the analytics executor.
+
+  **What changed for the gate**
+
+  `pnpm --filter @objectstack/spec check:liveness` gains a third direction. A
+  ledger entry sitting on a container property must now declare one of exactly
+  three dispositions, all of them data: **drilled** (`children`), **deferred** (a
+  `{ container, to }` row naming the coordinate that does classify the subtree),
+  or **recorded** (a row in the shrink-only
+  `scripts/liveness/undrilled-containers.baseline.json`). A container in none of
+  the three fails, and so does a baseline row whose container has since been
+  drilled.
+
+  A deferral is **resolved, not believed** — the target must exist (a governed
+  type root, or a drilled `type/prop` coordinate) and classify exactly the
+  container's child keys; a dangling or drifted target fails. That is the #4956
+  claim itself, made checkable: pointing a deferral at `DashboardWidgetSchema`
+  now produces a build failure naming it, where the same words in a `note` were
+  believed for a release.
+
+  Every run reports both populations (today: 58 containers / 292 child keys
+  classified nowhere, plus 6 resolved deferrals covering 248), `--undrilled`
+  prints the worklist, and the success line no longer claims a completeness it
+  does not have.
+
+- b821b29: fix(lint): 清除 `validateOrgAxisRedLines` 里 spec 合法 stack 永远到不了的四条分支 (#5009)
+
+  `validate-org-axis-red-lines.ts` 是 `input: 'parsed'` 规则 —— 它看到的是
+  `ObjectStackSchema` 解析后的产物。#4984 修掉了 sharing rule 字段那一层的 `??`
+  别名读法,但同一文件里还留着四条同形分支,每一条读的键 spec 都不声明:
+
+  | 原读法                                                          | spec 事实                                                                                                                                              | 处置                      |
+  | :-------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------ |
+  | `cfg.permissions ?? cfg.permissionSets`                         | stack 根 **strip** 未声明键,`permissionSets` 解析后必为 `undefined`                                                                                    | 收敛为 `cfg.permissions`  |
+  | `cfg.sharingRules ?? cfg.sharing`(两处)                         | 同上                                                                                                                                                   | 收敛为 `cfg.sharingRules` |
+  | `str(rule.object ?? rule.objectName)`                           | `SharingRuleSchema` 是 `.strict()`,按名拒绝 `objectName`;`object` 又是必填                                                                             | 收敛为 `rule.object`      |
+  | `asArray(object.rowLevelSecurity ?? object.rls)` 整段(约 20 行) | **`ObjectSchema` 两个键都不声明**,且 `.strict()` —— 带对象级 RLS 的 stack 在 `os validate` / `os build` 直接被拒("Unrecognized key(s) on this object") | **删除**                  |
+
+  对任何 spec 合法的 stack,判定结果不变:这些分支本来就永远不执行(反向验证 ——
+  新测试跑在改动前的实现上,29 条由 `safeParse` fixture 驱动的断言全绿)。真正的
+  代价从来不是漏报,而是误导:对象级 RLS **根本不是授权面**(`authorable-surface.json`
+  里只有 `security/PermissionSet:rowLevelSecurity` 一条),而那段死代码连
+  `objects[N].rowLevelSecurity[M].using` 的诊断 path 都写好了,足以让下一位作者
+  (人或 AI)相信它是真的并照着写更多代码 —— #5008 差点就这么做了。
+
+  行为上唯一的差别落在 `os lint`(不 parse,跑 normalized 层):把别名拼法写进
+  stack 的作者,不再从这条红线拿到诊断,而是从 schema 那里拿到一条指名道姓的
+  拒绝。别名容忍属于 producer 的拒绝,不属于 consumer(Prime Directive #12)。
+
+  同时补上一层结构性 meta-guard(#4992 模式),让下一条死分支在 review 前就红:
+
+  - **declared-key guard** —— 规则源码里从 stack / permission set / RLS policy /
+    object / sharing rule 上读的每一个键,都必须出现在对应 schema 自己的 `.shape`
+    里。扫源码而不是扫行为是刻意的:不可达分支根本没有行为可断言。
+  - **reachability guard** —— 每个 `findings.push` 调用点都必须被至少一条过
+    `safeParse` 的 fixture 触达;走不到的分支不允许存在。
+  - 规则 ① 的 fixture 现在也走 `PermissionSetSchema.safeParse`(此前只有 sharing
+    rule 和 object fixture 有这层保护)。
+
+  四条分支各自被变异测试验证过:把任意一条加回去,都至少有两条测试转红。
+
+- da1a64c: fix(lint): reject a validation rule whose regex or JSON Schema does not compile, at authoring time (#4762)
+
+  Two of the six object validation-rule types carry a **static artifact** that the
+  write path hands to a real compiler, inside a `try/catch` that logs and returns
+  `null`:
+
+  - `format` → `new RegExp(rule.regex)` → _"Validation rule '…' has an invalid regex — skipped"_
+  - `json_schema` → `ajv.compile(rule.schema)` → _"Validation rule '…' has an uncompilable JSON Schema — skipped"_
+
+  "Skipped" means the rule is declared, appears in the metadata, appears in every
+  "what protects this object" listing — and enforces nothing, on every record, for
+  as long as the metadata is deployed, with a WARN line in a log nobody reads as
+  the only signal. That is the shape #4649 was filed about one rule type over;
+  #4761 flipped the CEL predicates to fail closed and deliberately left these two,
+  because their blast radius differs (see below).
+
+  **New gate — `validateRuleCompilability`**, a `gating` entry in
+  `AUTHORING_RULES`, so it runs on all three authoring commands (`os validate`,
+  `os build`, `os lint`) with no per-command wiring. Two rule ids:
+
+  | id                                         | fires when                                                   |
+  | :----------------------------------------- | :----------------------------------------------------------- |
+  | `validation-rule-regex-uncompilable`       | a `format` rule's `regex` throws in `new RegExp(...)`        |
+  | `validation-rule-json-schema-uncompilable` | a `json_schema` rule's `schema` throws in `ajv.compile(...)` |
+
+  Each finding names the rule, the object and the config path, and carries the
+  **compiler's own error text verbatim** — an author cannot act on "invalid
+  regex", but can act on `Invalid regular expression: /([/: Unterminated character
+class`. Rules nested in a `conditional`'s `then` / `otherwise` are judged too
+  (`evaluateRule` recurses into them and reaches the very same checkers), and the
+  finding names the branch it is in.
+
+  **Detection is the real compilers, never a pattern that judges a pattern.** The
+  regex is compiled with `new RegExp(source)` — the exact call `checkFormat`
+  makes. The schema is compiled with ajv constructed with the **same options the
+  runtime's shared instance uses** (`{ allErrors: true, strict: false }`), read
+  back out of `rule-validator.ts`'s source by a parity test so the day those
+  options change, this gate is told rather than left quietly disagreeing.
+  `strict: false` is load-bearing in both directions: a gate running `strict: true`
+  would reject author-written schemas carrying vendor keywords that the write path
+  compiles happily — a gate that turns working metadata red gets switched off, and
+  then protects nothing.
+
+  `ajv` is a new dependency of `@objectstack/lint`, loaded **lazily**: only a
+  stack that actually declares a `json_schema` validation rule pays for it, pinned
+  by the package's `lazy-deps.test.ts` alongside `typescript` and `sucrase`. The
+  kernel boot path (`@objectstack/lint/runtime`) never loads it at all.
+
+  **The runtime half is deliberately unchanged.** `rule-validator.ts` still fails
+  open on both, and the `#4649 — unchanged neighbours` pins that record it stand
+  exactly as they are. A broken regex or schema is _static_ — decidable from the
+  metadata alone, with no record in hand — so the authoring door closes the class
+  outright without ever bricking a running deployment, whereas rejecting at write
+  time would reject **every** write touching that field for as long as the bad
+  metadata is deployed. Whether a runtime backstop is still wanted on top of a
+  closed authoring door stays open on #4762.
+
+- 5e3c83b: fix(lint): 七个规则 id 常量补进 barrel —— 消费者不必再对字面量,并加一条测试面门禁 (#5648)
+
+  规则把自己的 id 写进每条 finding 的 `f.rule`,而那个字符串就是 `os lint --json` / `os validate` 递到消费者手上的东西:Studio 的 finding 渲染、下游按规则过滤/抑制、以及被授权元数据里的 `suppressWarnings: ['<rule-id>']`。规则文件为此导出同名常量,消费者本该比对常量而不是重敲 slug。
+
+  但 `packages/lint` 的 `package.json#exports` 只开 `"."` 与 `"./runtime"`(`tsup.config.ts` 的 entry 也只有这两个),所以**没进 barrel 就不是「不好取」,而是完全取不到** —— 没有深路径可绕,消费者唯一的退路正是那个常量本来要消灭的字符串字面量。
+
+  #5648 报的是其中一个(`FLOW_TRIGGER_UNKNOWN_EVENT`,#3427/#3457/#3481 三条规则共用的 id)。它要求的全量清查又翻出**六个**,散在五个规则文件、成因都远早于它:`APPROVAL_APPROVER_TYPE_UNSUPPORTED`、`SECURITY_FLS_UNQUALIFIED_KEY`、`FIELD_GROUP_SHADOWED`、`WIDGET_LEGACY_ANALYTICS_SHAPE`、`WIDGET_LEGACY_ANALYTICS_UNRENDERABLE`、`REACT_CHART_DRILLDOWN_INVALID`。其中 `WIDGET_LEGACY_ANALYTICS_SHAPE` 最能说明代价:规则打给用户的提示原话就是 `Suppress with suppressWarnings: ['widget-legacy-analytics-shape']`,即它主动教消费者用这个 id,却不让消费者拿到承载它的常量。
+
+  漏项之所以能一路静默:规则照常工作,它自己的单测**从规则文件直接 import 常量**(不经 barrel),于是唯一会发现的时刻是有人从包外去消费它。同一种一行漏项独立发生七次,不是「下次记牢」能解决的记性问题,而是缺一条判定。
+
+  **因此判定权移进 `packages/lint` 测试面**(`src/rule-id-barrel-exports.test.ts`):新增规则时忘了 barrel 那行,会在新规则自己的测试转绿的同一次 run 里失败。分层理由是这条不变量完全是包内的 —— 没有别处定义 lint 规则 id —— 且它要**真的 import** barrel 来核验取值,vitest 天然给得到;换成 `scripts/` 门禁则要么自己写一个 ES 解析器,要么先构建 dist,还会把反馈挪到另一个 job。
+
+  门禁按两类假绿反向设计:发现面是对 `src/` 的**文件系统读取**而非手写清单(新规则文件一存在即被枚举),并对 id 条数压一条下限,避免将来改坏提取式后在空集上「全绿」;两个 entry 虽是静态列出(全动态 import 无法可靠打包),但另有一条用例从 `package.json#exports` 与 `tsup.config.ts` **各自独立**推导出同一集合并比对,新增第三个 entry 若不登记就会红,而不是悄悄不被检查。
+
+  分类按**取值形状**而非发射位置判定:早先一版靠「定义旁边有 `rule: NAME`」来认,结果漏掉了经辅助函数参数发射的四个 `REACT_CHART_*` —— 恰好包含本次真实漏项之一。
+
+  仅新增导出面,无行为变化:任何既有 `f.rule` 字符串都没有改动,原先对字面量的消费者继续可用。
+
+- 20963e7: fix(lint): `translation-target-unknown` reads a view container's DEFAULT `form.sections` (#5415)
+
+  `validate-translation-references` derives the `_sections` names an object may
+  legally be translated by from a list of anchors: `fieldGroups[].key`, the named
+  sections on `listViews.*` / `formViews.*`, the named sections on a page's
+  `record:details` component, and the view record's own `sections`. The list was
+  missing one: the view CONTAINER's **default form** — the `form` that
+  `defineView({ list, form, formViews })` declares and that `ObjectForm` renders
+  when no named form view is asked for.
+
+  `collectViewRecord` iterated `['listViews', 'formViews']`, and `view.form` is
+  neither of those nor the record's own `sections`, so `view.form.sections[].name`
+  contributed **nothing** to the fact set. The renderer resolves those headings
+  through exactly the same `sectionLabel(object, section.name, …)` convention as
+  any named form view, so a bundle that correctly translated one of them was
+  reported as keyed to a section "which nothing on object X declares", with a hint
+  advising the author to delete a translation that renders. On the in-repo
+  showcase contact surface — whose object declares `field.group` and no
+  `fieldGroups[]`, so the default form is its **only** section anchor — all four
+  headings were in that state, and the hint went as far as "declares no named
+  section at all".
+
+  The default form now feeds the same section collector as `formViews.*`, bound
+  by `bindingOf(view.form) ?? listBinding` — i.e. `form.data.object` first, then
+  the record-level object, then the list beside it — which is the resolution the
+  CLI i18n walker performs for the same surface, so the rule that DEMANDS a key
+  and the rule that ACCEPTS one agree on which object a heading belongs to. Each
+  anchor is now a call into one collector rather than its own copy of the loop.
+
+  Nothing tightens: an unnamed section is still untranslatable (it has no stable
+  key to look up), and a `_sections` key no anchor declares is still reported —
+  now with the real anchors enumerated in the hint.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [0f17114]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [58f3220]
+- Updated dependencies [07f1822]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [bf1edef]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/formula@17.0.0-rc.4
+  - @objectstack/sdui-parser@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

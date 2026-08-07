@@ -1,5 +1,241 @@
 # @objectstack/service-external-datasource
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- 99d7a93: fix(service-datasource): a `pool` block on a sqlite datasource is rejected, not dropped in silence (#5714)
+
+  `datasource.pool` is declared, strict and documented, and until now it reached a
+  driver only from the arms that build a pooled client: `postgres` / `mysql` hand
+  `buildSqlPool(spec)` to `SqlDriver`, `mongo` maps `min`/`max` onto the client's
+  `minPoolSize`/`maxPoolSize`. The `sqlite` and `sqlite-wasm` arms passed no pool
+  at all — `resolveSqliteDriver` has no such option and `SqliteWasmDriver` does
+  not take one — so an author who sized their pool got the driver's own single
+  connection and nothing said otherwise. Measured through the real factory:
+
+  ```text
+  sqlite   + pool{min:3,max:9}   knex.client.config.pool {"createTimeoutMillis":15000}   live {min:1,max:1}
+  postgres + pool{min:3,max:9}   knex config.pool {"min":3,"max":9}                      live {min:3,max:9}
+  ```
+
+  `examples/app-crm` was the live specimen: `CrmDatasource` asked for
+  `{ min: 1, max: 5 }` and ran on one connection.
+
+  **Wiring it through would be wrong, not merely more work.** Knex's
+  better-sqlite3 dialect pins `{min:1,max:1}` on purpose: every pool acquire runs
+  `new Database(filename)`, so two connections to `:memory:` are two separate,
+  mutually invisible databases. Honouring `max: 5` there would split one
+  datasource's data across five stores. Sizing a SQLite pool is not a knob the
+  platform can offer, so the declaration is rejected at authoring/publish instead
+  — Prime Directive #12: fix the metadata at the producer, reject it loudly, never
+  tolerate it in the consumer.
+
+  **Observable behaviour change — read this if any datasource declares `pool`.**
+  A `sqlite` / `sqlite-wasm` datasource carrying a `pool` block now **fails**
+  where it used to boot with the block ignored:
+
+  - **Boot** (`DatasourceConnectionService.connectDeclared`) refuses before a
+    single connection is attempted, naming every offending datasource in one
+    throw. Every _declared, active_ datasource is judged, including the ones the
+    ADR-0062 D2 gate leaves unconnected — a pool block on a datasource nobody
+    connects is exactly as dropped as a connected one's. `active: false` is
+    skipped, so switching a datasource off remains the way out.
+  - **Setup → Datasources** (`createDatasource` / `updateDatasource`) rejects the
+    draft before the record is stored. An update that touches neither `pool` nor
+    `driver` is not re-judged, so a record written before this gate stays editable
+    — including the `active: false` that takes it out of service.
+  - **The driver factory** (`createDefaultDatasourceDriverFactory`) rejects it as
+    the last door, for hosts that build drivers directly.
+
+  The fix is to delete the block: `pool` is a no-op on SQLite either way, so
+  removing it changes nothing about how the datasource runs.
+
+  ```diff
+   export const CrmDatasource = defineDatasource({
+     name: 'crm_primary',
+     driver: 'sqlite',
+     config: { filename: ':memory:' },
+  -  pool: { min: 1, max: 5 },
+     active: true,
+   });
+  ```
+
+  `pool` is unchanged and still honoured on `postgres` / `mysql` / `mongo`, and a
+  plugin-contributed driver id (`com.vendor.snowflake`) is not judged at all —
+  the same boundary the `datasource.config` gate draws in #4410: the platform
+  validates what it can construct.
+
+  This verdict is an **authoring** error, not a connect failure: it never goes
+  through the ADR-0062 D5 degradation path, so `OS_ALLOW_DRIVER_CONNECT_FAILURE`
+  does not apply to it and is not suggested. That hatch exists for a database that
+  is unreachable — a fact about the world that may resolve itself. A `pool` the
+  driver cannot read is a fact about the metadata.
+
+  Hosts that inject their own driver factory can hold the same contract with the
+  newly exported `assertDatasourcePoolSupported` / `driverReadsDeclaredPool` /
+  `unsupportedPoolIssue` / `POOL_UNSUPPORTED_DRIVER_IDS`.
+
+### Patch Changes
+
+- cba7454: fix(service-datasource): give this package's vitest run a 60s `testTimeout` — close the #4856 coverage hole that let the merge queue evict unrelated PRs (#6044)
+
+  `packages/services/service-datasource` had no `vitest.config.ts` at all, so
+  every case ran under vitest's **5000ms** default. #4856 fixed this class of
+  flake by setting per-package timeouts in each package's own `vitest.config.ts`
+  — a structure that cannot reach a package with no config file to carry it.
+
+  The cases that build a REAL driver pay a one-time `@objectstack/driver-sql`
+  (knex) import inside the first case that reaches it. In
+  `datasource-pool-support.test.ts` the pool rejections throw before that import,
+  so "sqlite WITHOUT a pool still builds exactly as before" is the first case
+  through it: measured idle it runs ~1.1s while its neighbours run 0-2ms (the
+  postgres/mysql cases ride the module cache at 31/82ms). ~4.6x headroom against
+  5000ms holds on a PR branch and not on a merge-queue runner building several
+  PRs' batches at once — the observed signature: intermittent reds only in queue
+  full builds, evicting PRs that never touched this package (#5999 twice, #5973
+  once, 2026-08-06).
+
+  `testTimeout: 60_000` reuses #4856's value rather than inventing a new number,
+  set at the config layer so future cases are covered on arrival. Isolation was
+  reviewed rather than assumed (the #6044 triage forbade a timeout-only closure):
+  the flaky case builds `:memory:`, unprobed on the production path, never opens
+  a connection or loads the native addon, and every factory-door case destroys
+  its knex handle; the boot and wizard doors run on per-case fakes. No temp
+  files, no ports, no shared mutable state across cases — the red was load
+  variance on a real one-time import, not a leak.
+
+  No runtime, schema or public API change — test configuration only.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

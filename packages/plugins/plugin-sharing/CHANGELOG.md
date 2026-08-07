@@ -1,5 +1,448 @@
 # @objectstack/plugin-sharing
 
+## 17.0.0-rc.4
+
+### Patch Changes
+
+- 7f955e5: fix(sharing): deleting a record now revokes every `sys_record_share` row on it, whatever the source (#5103)
+
+  A share row says "principal P has level L on (object O, record R)". Delete R and
+  the row describes nothing — yet until now it stayed in the table forever.
+
+  #4779 (PR #5102) bound an `afterDelete` for this, but inside the sharing-RULE
+  package, where two conditions fenced it in: it revokes only `source: 'rule'`
+  rows, and it binds only on objects that appear in `sys_sharing_rule`. So an
+  object that uses nothing but MANUAL shares — a `sharingModel: 'private'` object
+  with no rule ever configured — had no delete hook at all, and **manual share +
+  record delete = a permanent orphan**.
+
+  Today the harm is bounded, and only because record ids are never reused: the
+  `record_id IN (…)` predicate `buildReadFilter` emits matches nothing. Nothing
+  enforces that assumption. A custom primary key, an import that preserves ids, or
+  any future id recycling turns every one of those rows into a real privilege
+  escalation — a new record landing on a recycled id inherits the dead record's
+  recipients outright. Secondarily, `sys_record_share` grew without bound and
+  Setup's Record Shares list showed rows pointing at nothing.
+
+  **What changed**
+
+  - **A record-delete cascade on every sharing-capable object.** `plugin-sharing`
+    binds one `beforeDelete`/`afterDelete` pair with no object filter and judges
+    the object's sharing posture from its `sharingModel` metadata _per delete_.
+    Nothing is enumerated at boot, so nothing goes stale: an object that gains
+    `sharingModel` at runtime is covered on its very next delete, with no rebind.
+    Bounded deletes (a scalar id, an `$in` list, or a predicate matching at most
+    1000 rows) are revoked synchronously and set-based; an unbounded one queues an
+    object-scoped orphan sweep instead. System-context deletes cascade too.
+  - **A boot-time orphan sweep keyed on record existence.** On
+    `kernel:bootstrapped`, share rows whose RECORD no longer exists are revoked —
+    historical orphans, rows a failed hook missed, and the one posture the cascade
+    deliberately skips (an unmarked system object). This is a different question
+    from the existing `sweepOrphanedRuleGrants`, which asks whether the RULE row
+    still exists and therefore can never see a manual share. Bounded per boot:
+    keyset pages, one batched existence probe per object per page, and a scan cap
+    that reports when it stopped early. An object whose existence probe FAILS has
+    its rows left in place — "could not ask" is never read as "the record is gone".
+
+  **What did not change**
+
+  Rule _recompute_ still never touches a manual share. That boundary (#5102) is
+  the point: while the record exists, a manual grant is a human decision no rule
+  evaluation may overrule. Only the record's DELETION revokes it, and only because
+  there is no longer anything to have access to.
+
+  New exports for hosts that compose the plugin by hand:
+  `bindRecordShareCascade` / `unbindRecordShareCascade`,
+  `objectCanCarryRecordShares`, `SharingService.revokeSharesForDeletedRecords`,
+  `SharingService.sweepOrphanedRecordShares`, and `effectiveSharingModel`. Nothing
+  was removed or renamed; the standard `SharingServicePlugin` composition needs no
+  changes.
+
+- 6e66cbe: fix(plugin-sharing): a deleted record kills its share links — resolve fails closed, and the delete cascades (#5190)
+
+  `ShareLinkService.resolveToken` checked the token, `revoked_at`, `expires_at`,
+  the audience and the password — **but never whether the record the link points
+  at still exists**. Nothing revoked links on delete either: #5103's cascade
+  covers `sys_record_share` only. So a share link outlived its record, kept
+  resolving, and kept stamping `use_count` / `last_used_at`.
+
+  That is worse than the `sys_record_share` orphan #5103 fixed, and for a
+  structural reason: a share row names its beneficiaries, while a share link is an
+  identity-less **capability token** — holding the URL _is_ the authorisation. The
+  moment a record id is reused (custom primary keys, an import that preserves ids,
+  any future id recycling) a link that morally died with its record starts
+  authorising a brand-new record, for whoever kept it.
+
+  Both halves of the fix ship together, and the first does not depend on the
+  second having run:
+
+  - **`resolveToken` re-asks whether the record exists**, and returns `null`
+    through the _same_ branch as revoked / expired — no distinct code, no distinct
+    error, nothing an unauthorised holder can read "that record was deleted" out
+    of. The probe sits after the cheap in-memory gates (a revoked link still costs
+    no query) and _before_ the usage stamp, so a dead record no longer ticks
+    `use_count` / `last_used_at`. It fails **closed**: a probe that throws denies,
+    because "cannot ask" must not authorise.
+  - **Record deletes now cascade to `sys_share_link`**, on #5103's existing seam
+    rather than a parallel one — the same global `beforeDelete` row-set stash, the
+    same `afterDelete` set-based revoke, the same serialized sweep queue for
+    unbounded deletes, and the same `kernel:bootstrapped` orphan sweep (keyset
+    pages, a scan cap that reports itself, one batched existence probe per object
+    per page, and rows left strictly alone when that probe fails). The two halves
+    are isolated, so a driver error reclaiming grants cannot also skip the tokens.
+
+  The link half judges posture from `publicSharing`, which is _independent_ of
+  `sharingModel`: the object most likely to hold links is a platform object that
+  opted into link sharing, and that is exactly the object the record-share
+  predicate skips. `publicSharing` declared counts even when it is currently
+  `enabled: false` — links minted while it was on outlive the flip.
+
+  An orphaned link row is **deleted**, not stamped `revoked_at`: its subject is
+  gone, so there is no live link left to keep a revocation record of, and the
+  table would otherwise only grow (with Setup's link lists pointing at records
+  that no longer exist). Links an admin revokes keep their audit row exactly as
+  before.
+
+  No metadata, spec or API shape changes. Deployments see fewer rows in
+  `sys_share_link` after the next boot, and links whose record was already deleted
+  stop resolving immediately — which is the point.
+
+- f226605: fix(plugin-sharing): hierarchy resolver 拿到调用方真实的活动组织(权威 `organizationId`)(#5859)
+
+  `resolveOwnerScopeIds` 构造 `HierarchyScopeContext` 时读的是
+  `(context as any).organizationId` —— **仓内没有任何传输层写过这个键**。REST
+  (`rest-server.ts`)和 runtime dispatcher(`resolve-execution-context.ts`)都从同一个
+  授权解析器 `resolveAuthzContext` 组装执行上下文,活动组织落在 `tenantId`
+  (session 路径 = `session.activeOrganizationId`,API-key 路径 = `sys_api_key.organization_id`),
+  `ExecutionContext` 的字段注释写的也正是这句。所以这个读取**结构性恒为 `null`**:
+  自 ADR-0057 以来,每一次 DEPTH(`unit` / `unit_and_below` / `own_and_reports`)解析
+  都是在**没有组织约束**的前提下跑的,而企业版 resolver 只按 `organizationId` 收窄
+  自己的 owner 集合 —— 于是整条 DEPTH 租户隔离从未生效。
+
+  爆炸半径不止「共享管理」一路:同一个 owner 集合喂给 `matchesOwnerScope` →
+  `canEdit` / `canDelete`,以及批量写路径 `buildWriteFilter`。#5852 的实测里,
+  `group` 姿态下的普通成员对**兄弟组织**记录 `POST /data/:obj/:idB/shares` 得到
+  **201**;探针那个 app 的写路径另被 `member_default` 的 `owner_only_writes`
+  (keyed on `created_by`)挡下,所以只观测到共享管理一路 —— **不带这条 owner-only
+  RLS 的部署,跨组织 edit/delete 同样放行**。
+
+  本次修复(producer 半边,契约半边见 #5858 / PR #5973):
+
+  - 权威字段 `organizationId` 由执行上下文的活动组织填充;`tenantId` 作为
+    `@deprecated` 兼容别名原样继续携带(不是消费端 `?? tenantId` 兜底 —— 那正是
+    #5858 为 resolver 明令排除的宽容消费者形状)。同样的映射在
+    `@objectstack/plugin-security` 的 Layer-0 租户墙里早已在用
+    (`computeTenantLayer0Filter({ organizationId: context?.tenantId })`),两层
+    enforcement 现在按同一个字段的同一个值收窄。
+  - 无活动组织时如实传 `null`(契约类型即 `string | null`),空白字符串归一为
+    `null`,绝不让一个假的组织 id 混进 resolver 的查询与日志。
+  - resolver 抛错的静默回退改为**留声**(`logger.warn`):此前「resolver 炸了」和
+    「层级里确实没有别人」在外部完全同形,这也是本缺陷长期不可见的原因之一。
+
+  ## 姿态感知的组织门(user-visible 行为变化)
+
+  `SharingService` 新增一个 late-bound 的 `tenancy` 姿态探针(读法与 `SecurityPlugin`
+  为 Layer-0 墙读 `tenancy` 服务的完全一致,由 `SharingServicePlugin` 自动接线),
+  按 **ADR-0105 D1** 的既有分叉决定「没有活动组织」意味着什么 —— 与
+  `computeTenantLayer0Filter` 对同一问题给出的答案逐条同形:
+
+  - **`single`**(纯单租户,无组织):**行为不变**,DEPTH 照常 widened。此处「没有组织」
+    是那一个隐含租户,不是「所有组织」。
+  - **`group` / `isolated`**(有墙):权威组织缺失/空白 → **拒绝**,根本不咨询 resolver,
+    回落 owner-only 并打一条点名 ADR-0095 D1 / ADR-0105 D1 与 #5973 契约义务的 `warn`。
+    即:有墙部署里,缺组织的 owner-scope 解析从「按无租户约束展开」变为「拒绝展开」。
+  - **姿态解析不出**(未接线 / 探针抛错 / 词表外的值)→ 按**有墙**处理。未知姿态不是
+    `single` 的证据,否则恰恰在配置已经可疑的部署上恢复了展开。
+
+  对已有部署的影响:`single` 部署零变化;`group` / `isolated` 部署中,一个**没有活动
+  组织**的调用方将不再通过 DEPTH 拿到跨组织的 owner 集合(共享管理 / edit / delete /
+  批量写四条路径同时闭合)。
+
+- c272e48: fix(plugin-sharing): recompute sharing rules for predicate (`multi`) writes — stale `sys_record_share` grants no longer survive a bulk update (#4779)
+
+  `bindRuleHooks` located the rows to recompute from a single record id:
+
+  ```ts
+  const id = String(data?.id ?? ctx?.input?.id ?? "");
+  if (!id) return;
+  ```
+
+  `ObjectQL.update()` only populates `input.id` when `where.id` is a scalar. A
+  predicate write (`multi: true`) routes to `updateMany`, leaves `input.id`
+  undefined, and carries no id in its payload — so **every bulk write skipped
+  sharing-rule recompute entirely**.
+
+  The consequence is a fail-open on the authorization side. A criteria-based rule
+  materialises `sys_record_share` rows; an admin then bulk-updates those records
+  out of the criteria (`{ where: { region: 'east' }, multi: true, data: { region:
+'west' } }`); nothing recomputes, the grant rows stay in the table, and the
+  recipients keep the read/edit access the rule no longer implies. Same family as
+  #4757 (`sys_attachment`) and #4778 (approval locks), but better hidden — a stale
+  grant is indistinguishable from a legitimate one. The reverse direction (bulk
+  update **into** a rule's criteria never granting) was broken too.
+
+  **What changes**
+
+  The hooks now key off the write's ROW SET instead of one id. `beforeUpdate` /
+  `beforeDelete` resolve the affected rows from the predicate and stash them on
+  the shared hook context (the `before` hook is where it must happen — the write
+  is what makes those rows unfindable); the `after` hook acts on them:
+
+  - **Bounded set (≤ 1000 rows, `RULE_RECOMPUTE_ROW_CAP`)** — `evaluateAllForRecord`
+    per row, synchronously. Diff-based, so this covers both directions: rows moved
+    out of a rule's criteria are revoked, rows moved in are granted.
+  - **Unbounded set** (over the cap, `multi: true` with no `where` at all, or a
+    resolve that failed) — every `source: 'rule'` grant on the object is revoked
+    **synchronously** in one set-based statement, and the deserved grants are
+    restored **asynchronously** by reconciling the object's rules.
+
+  **The write is never refused.** Refusing would turn an internal recompute bound
+  into a business-visible limit on how many rows an admin may update, reported by
+  a subsystem they never configured. The asymmetry it trades on instead:
+  over-granting is a security incident, under-granting is an availability wobble.
+  So the safety half is always synchronous and complete, and only the expensive
+  restoration half is deferred.
+
+  **Operational note.** After a bulk write whose row set could not be bounded,
+  recipients may briefly lose access to records they still qualify for, until the
+  background re-grant finishes. It is logged with the object and the reason. The
+  re-grant is in-process; if it is lost to a crash, the plugin's existing
+  `kernel:bootstrapped` backfill re-runs the same idempotent reconcile on the next
+  start, and any subsequent `sys_sharing_rule` write reconciles too.
+
+  **Also fixed:** the rule hooks now bind `afterDelete` and retire the deleted
+  records' rule grants. Nothing else could: `evaluateRule` iterates records that
+  still exist, so a grant whose record is gone was unreachable by every reconcile
+  path and outlived restarts. Harmless only while record ids are never reused —
+  an assumption nothing in the platform enforces.
+
+  New on `SharingRuleService`: `revokeRuleGrantsForObject`,
+  `revokeRuleGrantsForRecords` and `evaluateAllRulesForObject`. Manual
+  (`source: 'manual'`) shares are never touched by any of them.
+
+- 69a89ce: fix(plugin-security,plugin-sharing): the write path consults the View/Modify All Data bypass — one predicate for `security/explain` and `/data` (#4647)
+
+  A **Modify All Data** holder, a `sharingModel: 'private'` object, and a record
+  whose `owner_id` is NULL got two opposite answers for one
+  (principal, record, operation) triple:
+
+  ```
+  POST /api/v1/security/explain  { object, operation: 'update', recordId }
+    → allowed: true, layers[vama_bypass]: "View/Modify All Data bypass held
+      via [admin_full_access] — ownership and sharing checks are skipped"
+  PATCH /api/v1/data/crm_contract/<id>
+    → 403 FORBIDDEN
+  ```
+
+  Filling `owner_id` in made the same PATCH succeed, so the write path really was
+  running the record-level ownership check the bypass layer said had been skipped.
+  `sys_attachment`'s `canEdit(parent)` gate agreed with the 403, not with explain.
+  Ownerless rows are not exotic: a system-context seed writes them by design (the
+  seed loader disables `owner_id` injection).
+
+  **The write path was the side that was wrong.** Modify All Data means an admin
+  edits any record regardless of ownership (the Salesforce reference frame this
+  platform's `modifyAllRecords` already follows, #1883), so:
+
+  - `SharingService.canEdit` / `canDelete` now consult the super-user write bypass
+    **after** ownership and shares have failed, through the existing late-bound
+    `ISecurityService.hasWriteBypass` probe. The `sys_attachment`
+    `canEdit(parent)` gate and the sharing-rule management gate reach the same
+    answer because they call the same function.
+  - The bypass they consult and the one `security/explain` reports are now **one
+    predicate** — `PermissionEvaluator.superuserBypassSets` — rather than two
+    independent readings of the permission sets. A cross-path test pins the triple
+    through both `explain` and the real write middleware chain and asserts they
+    agree, for update, delete and the attachment gate.
+
+  **The widening is exactly Modify-scoped.** `viewAllRecords` ("View All Data") is
+  a read power and never grants write: explain's `vama_bypass` layer is now
+  operation-aware, asking for the modify bit on a write and the view bit on a read,
+  and a view-only holder is refused on both paths. The probe still fails **closed**
+  — no `@objectstack/plugin-security`, a throwing probe, a principal-less or
+  on-behalf-of context all degrade to owner-only.
+
+  **Explain payload self-consistency.** For a record-grained request the top-level
+  `allowed` and the `record` verdict no longer contradict each other on this
+  triple: the row is `visible: true` with `decidedBy: 'vama_bypass'`, the
+  `vama_bypass` layer carries its own per-record attribution, and the `sharing`
+  layer credits the bypass instead of reporting "no ownership and no edit/full
+  share grants write" next to `allowed: true`. Where the bypass is not what
+  admitted the row (owner, or an admitting share) the previous `decidedBy` is
+  unchanged. Note that for a principal with **no** bypass, an object-level
+  `allowed: true` beside `record.visible: false` remains correct and intended —
+  `allowed` answers the object question, `record` answers the row question, and it
+  is the `record` verdict that the write path mirrors.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [c497d26]
+- Updated dependencies [bbdbf28]
+- Updated dependencies [2e284b2]
+- Updated dependencies [3905c00]
+- Updated dependencies [4335497]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [d8f65fe]
+- Updated dependencies [58ffcab]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [2b63a00]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [0f17114]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [afa6aa5]
+- Updated dependencies [afb83d3]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [c7406b0]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [58f3220]
+- Updated dependencies [07f1822]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [290d944]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [5d3ced9]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [1eadac0]
+- Updated dependencies [7c2f7dd]
+- Updated dependencies [9b26699]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [1cae606]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b9cc17d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [0d24078]
+- Updated dependencies [089767f]
+- Updated dependencies [5b8f95b]
+- Updated dependencies [2ddba89]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [37a8f2b]
+- Updated dependencies [441d79f]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [bf1edef]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [2680cd3]
+- Updated dependencies [c5a5996]
+- Updated dependencies [db2ea82]
+- Updated dependencies [51a587d]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [d56bcdb]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [488b66c]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [946a131]
+- Updated dependencies [909895d]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+- Updated dependencies [2b52bc8]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+  - @objectstack/objectql@17.0.0-rc.4
+  - @objectstack/formula@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Major Changes

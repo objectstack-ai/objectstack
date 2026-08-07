@@ -1,5 +1,288 @@
 # @objectstack/formula
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- 0f17114: fix(driver-sql,driver-memory,formula)!: `{ field: {} }` 一律拒收 —— 零个操作符的字段约束不再在四个后端有三个答案 (#5240)
+
+  `{ a: {} }`(一个字段,后面跟零个操作符)是 `FilterConditionSchema` 今天**声明合法**的形状,
+  而同一个 filter 在同仓四条路径上有三个答案:
+
+  | 路径                                | 改前                                                                                            | 改后                          |
+  | ----------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------- |
+  | `driver-sql`,顶层 plain map         | 抛 `INVALID_FILTER`(#5041 的比较数闸门)                                                         | 抛 `INVALID_FILTER`(专用消息) |
+  | `driver-sql`,`$and`/`$or`/`$not` 内 | 遍历零个操作符 → 不产出任何 SQL → **TRUE(匹配全表)**                                            | 抛 `INVALID_FILTER`           |
+  | `driver-memory`                     | 实时路径经 mingo 变成「字段深等于空文档」;参考匹配器落到 `JSON.stringify` 结构相等 → 顺带 FALSE | 抛 `INVALID_FILTER`           |
+  | `@objectstack/formula`              | `keys.length === 0` 显式 fail-closed → FALSE                                                    | 抛 `INVALID_FILTER`           |
+
+  于是 `{ $or: [ { a: {} }, { b: 2 } ] }` 在 SQL 上编译成 `(b = 2)` —— 既不是「零约束即 TRUE」
+  该给的全表,也不是两个 JS 后端给的 FALSE,而是**子句被 knex 连同空分组一起丢掉**的结果;
+  而 `driver-sql` 自己内部就不自洽:同一个 `{ a: {} }` 写在顶层被响亮拒收,包进一层 `$or`
+  就变成静默的 TRUE。
+
+  维护者拍板取**拒收**(不取 TRUE、不取 FALSE):这个形状几乎必然是编写期事故 ——
+  筛选器记下了字段却没记下操作符,或生成的元数据把操作符弄丢了 —— 让它在编写期就炸,
+  好过在某个后端上安静地多返回或少返回几行。与 #5041 已在 driver-sql 顶层建立的先例一致,
+  本次只是把同一道闸门补进组合子内部。四个后端(第四个是继承 `SqlDriver` 的
+  `driver-sqlite-wasm`)现在给出同一个 `INVALID_FILTER` / 400,消息里指名出事的位置
+  (如 `filter.$or[0].stage`)。
+
+  **⚠️ 可观察的行为变更 —— RLS `check` 求值路径。** `@objectstack/formula` 的
+  `matchesFilterCondition` 是 `plugin-security` 对 insert/update **后像**执行行级 `check`
+  的那条路径(没有查询可下推,这个求值器就是执行本身)。它改为抛出后,落在 #4775
+  「求不出值 = 该次操作失败」的既定姿态上。这不只是「拒绝得更响」——有一类结果直接翻转:
+
+  | `check` 策略                                    | 改前                                  | 改后                     |
+  | ----------------------------------------------- | ------------------------------------- | ------------------------ |
+  | `{ a: {} }`                                     | FALSE → 写入被拒(403)                 | 抛出 → 该次写入失败(400) |
+  | `{ $or: [ { a: {} }, { owner: '{userId}' } ] }` | FALSE 被另一析取项吸收 → 写入**放行** | 抛出 → 该次写入失败      |
+  | `{ $not: { a: {} } }`                           | `!false` → 写入**放行**               | 抛出 → 该次写入失败      |
+
+  后两行是**原本能成功、现在会失败**的写入。这是拍板的目的而非副作用:一条含
+  `{ field: {} }` 的权限规则,是一条作者弄丢了操作符的规则,它的含义不该取决于四个后端里
+  哪一个在求值。升级后请检查 `check`/`using` 策略里是否存在零操作符的字段约束——
+  错误消息会指名位置。
+
+  同一条改动也让 `@objectstack/driver-memory` 的两个过滤面(经 mingo 的实时查询路径,
+  与跨后端一致性套件所用的 `memory-matcher` 参考匹配器)第一次对这个形状给出同一个答案。
+
+  非空形状**逐字符不变**:普通比较、`$in`、`$or`/`$and` 组合、`$not` 的 #5146 NULL-safe 改写,
+  编译出的 SQL 文本与匹配结果都与改前相同;`{}`(零个键的**节点**,#5134 的布尔单位元)
+  与 `{ field: {} }` 是两个不同形状,前者的语义不受本次影响。
+
+  注:本次收紧的是**实现**。`packages/spec` 的 `FilterConditionSchema` 仍然声明这个形状合法
+  (非递归半边是 `z.record(z.string(), z.unknown())`),即实现现在比已声明的契约更严;
+  契约收窄与 `FILTER_LOGIC_CASES` 补条归 spec 车道另行处理。
+
+- 58f3220: 新增规范 parse-to-AST 入口 `parseCelToAst(source)`,并 re-export AST 节点类型 `CelAstNode`(#4812)。
+
+  `parseCelToAst` 与 `compile` / `evaluate` / `collectCelRootIdentifiers` 共用同一条前端链路
+  ——#3306 的 `rewriteNullableTernary` 重写、`DEFAULT_LIMITS` 边界、以及注册了 stdlib 的
+  `unlistedVariablesAreDyn: true` 环境 —— 因此全仓对「什么能解析」只有一个答案。此前消费方
+  若自建 `new Environment(...)`,拿到的是一份**不带 limits** 的答案:它会解析、并进而推理
+  `compile()` 直接拒绝的表达式。
+
+  `parseCelToAst` 只做 parse,不做 check(后者是 `compile()` 的职责):解析成功但类型检查失败的
+  表达式(大量 `dyn` 操作数的谓词即是)仍然会拿到 AST。解析失败返回 `null` 而不抛错。
+
+  `CelAstNode` 的 re-export 补上了一个既有缺口:`lowerCelAst` 一直接收 cel-js 的 `ASTNode`,
+  而该类型从未导出,消费方只能越过本包直接依赖 `@marcbachmann/cel-js` —— 这正是第二个解析入口
+  的成因。
+
+- bf1edef: feat(formula,lint): wire ADR-0056 D4's RLS authoring gate, from the runtime's own predicate (#4983)
+
+  `isSupportedRlsExpression` has carried the same docblock since ADR-0056 D4:
+  "exposed so an authoring-time gate (`objectstack compile`) can REJECT a
+  predicate the runtime would silently drop … A `false` here means 'this
+  predicate will never enforce'." It had **no non-test consumer anywhere** — the
+  function written to fix declared-but-never-read was itself declared and never
+  read. This lands the consumer, in two steps that had to happen in this order.
+
+  **1. `sqlPredicateToCel` and `isSupportedRlsExpression` move FROM
+  `@objectstack/plugin-security` (`src/rls-compiler.ts`) TO `@objectstack/formula`
+  (`src/rls-predicate.ts`), and are exported from its root.** Executable code
+  unchanged — a change of address, not of behaviour; `plugin-security` now imports
+  them from `@objectstack/formula` and keeps no copy, so there is still exactly
+  one definition. No import path outside the two packages changes: neither symbol
+  was ever exported from `@objectstack/plugin-security`'s entry point. The move is
+  what makes step 2 possible at all — `@objectstack/lint` may depend on
+  `@objectstack/spec` and never on a runtime, so with the predicate living in a
+  runtime the gate's only other door was copying the SQL→CEL bridge, whose
+  boundary conditions (quoted literals are never rewritten; canonical CEL passes
+  through unchanged) _are_ the gate's red/green line. A fork drifting by one
+  character rejects policies the runtime executes correctly — the false-positive
+  direction, which is worse than the gap. ADR-0058 D1 asks for a single canonical
+  shape gate; the bridge is part of that gate.
+
+  **2. New `@objectstack/lint` rule `validateRlsPredicateEnforceability`,
+  `error`, on all three authoring commands**, over
+  `permissions[].rowLevelSecurity[].using` and `.check`:
+
+  - **`rls-predicate-unenforceable`** — parses as CEL, outside the pushdown
+    subset: a function call (`size(...)`, `has(...)`), arithmetic, a ternary, a
+    cross-object path (`record.account.region`).
+  - **`rls-predicate-unparseable`** — does not parse as CEL even after the legacy
+    SQL bridge (`=` → `==`, `IN` → `in`): SQL `AND` / `OR` / `LIKE`, a subquery.
+    Its own id because the fix is different — write CEL (`&&`, `||`), not a
+    different shape.
+
+  What the gate prevents, measured through `plugin-security` rather than inferred:
+  `RLSCompiler` drops the policy and logs one request-time WARN. On the read path,
+  when it is the only applicable policy, `compileFilter` returns the
+  `RLS_DENY_FILTER` sentinel instead, which is AND-ed onto the where clause — so
+  every select / update / delete on the object matches **zero rows**. On the
+  ADR-0058 D4 write path the post-image `check` becomes that same sentinel, which
+  no record satisfies, so every insert / update fails with `PermissionDeniedError`.
+  The runtime fails closed, which is why this was survivable: the result is not a
+  hole but a policy that reads as an authorization and behaves as a blanket
+  refusal, with nothing at authoring time pointing at the line that caused it.
+
+  Fix a flagged predicate by rewriting it inside the lowerable subset — `==` `!=`
+  `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, and
+  `startsWith` / `endsWith` / `contains` over single-column field paths (ADR-0058
+  D2), against a literal or a `current_user.*` value. Two specific migrations:
+  `has(x)` / `size(x) > 0` → `x != null` (a function call is correct in an object
+  _validation_ rule, which is interpreted, and wrong here, where the predicate is
+  compiled to a filter); and a related record's field → denormalise it onto this
+  object (formula/rollup) and test that column, since RLS cannot join (ADR-0055).
+
+  Same construction as the sharing-rule gate (#4698): the rule does not model the
+  consumer or grep for it — it calls `isSupportedRlsExpression`, the exact
+  function `RLSCompiler.compileFilter` consults to decide whether a dropped policy
+  earns its warning, so the two verdicts are one boolean by construction, pinned
+  in both directions over a shared corpus. Measured before shipping: every RLS
+  predicate declared anywhere in this repo — the `plugin-security` platform seeds,
+  the examples, the dogfood fixtures, the authoring skill — is supported, so the
+  gate turns nothing red that works today. Unlike the sharing-rule gate, CEL
+  _syntax_ is reported here rather than deferred to `expression-invalid`:
+  `validateStackExpressions` does not walk `rowLevelSecurity` at all, and could not
+  judge this field correctly if it did, because `owner_id = current_user.id` is a
+  CEL syntax error and a working RLS predicate at the same time.
+
+### Patch Changes
+
+- 07f1822: fix(formula): `matchesFilterCondition` 的 `$exists` 改读「有值」,与 `$null` 成严格互补
+
+  **行为变更,影响 RLS 写侧 `check` 的判定。** `{ x: { $exists: true } }` 对
+  `{ x: null }` 以前答 `true`(键存在),现在答 `false`(没有值)。
+
+  `matchesFilterCondition` 是 RLS `check` 子句(insert/update 的 post-image)的求值器 ——
+  写路径上没有查询可以下推,只能逐记录判定。它此前把 `$exists` 读成「键是否存在」
+  (`actual !== undefined`),而 `driver-sql` 一直把同一个算子编译成 `IS NOT NULL`。
+  于是同一条规则里的 `$exists`,写侧放行的记录读侧看不见。
+
+  2026-08-06 裁定取「有值」,理由是另一种读法在最要紧的地方**无法兑现**:SQL 里列
+  **就是** schema,一行不可能「缺一个键」,所以 `driver-sql` 除了 `IS NOT NULL` 别无
+  可编译的东西。字段的存在性是 **schema** 的属性,不是**记录**的属性;spec 若声明
+  「键是否存在」,就是在承诺两个后端永远交付不了的语义。因此 `driver-sql` 的发射器
+  一字未动,移动的是本求值器。
+
+  对齐之后 `$exists` 与 `$null` 在每个后端上都是严格互补:
+  `$exists: true` ≡ `$null: false`,`$exists: false` ≡ `$null: true`。
+  「键缺失」与「值为 null」在这里是同一个事实 —— 这也正是 `getPath` 对两者本来就
+  返回同一个 `undefined` 的原因。
+
+  `$ne` / `$nin` / `$notContains` / `$null` 四个算子本来就是本次裁定的目标语义,
+  一字未改。
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Patch Changes

@@ -1,5 +1,429 @@
 # @objectstack/plugin-security
 
+## 17.0.0-rc.4
+
+### Patch Changes
+
+- 846ed1f: fix(security): `controlled_by_parent` 现在真的跟随主档访问 —— 折入主档的归属与共享授权 (#5386)
+
+  **这是一次安全收紧。** 升级后,此前被越权看到 / 写到的明细行会读不到、写不了 —— 那正是
+  声明本来就要求的边界。
+
+  ADR-0055 的 `controlled_by_parent` 对作者的承诺是「子记录跟随父记录的访问」。实现只兑现了
+  一半:派生用的主档 id 集来自 `computeRlsFilter(master, 'find')`,即只有 Layer 0(租户)与
+  Layer 1(`rowLevelSecurity` 策略)。归属(owner scope)与 `sys_record_share` 授权由**另一个
+  插件** `plugin-sharing` 的 `buildReadFilter` 贡献,而它对「有效共享模型不是 `private`」的对象
+  返回 `null` —— `controlled_by_parent` 在那边恰好映射为 `public`。于是记录级访问的两半在派生
+  对象上从未相遇。
+
+  后果比文档里那句「sharing grants 未折入」读起来严重得多:
+
+  - 主档上**没有写任何 `rowLevelSecurity`** 的应用,得到的是一个**不受限的主档 id 集**,派生
+    过滤器等于什么都没收窄 —— 只要持有对象级 read,全部明细行可读。行项目类对象(报价行、
+    发票行)是这个形状的常客,而它们携带逐行定价与折扣。
+  - 在主档上补写 RLS 也不是绕法:RLS 与 sharing 过滤器是 **AND**,补写会连同被共享进来的行
+    一起切掉。
+  - 写这半有同样的洞,而且是从另一侧来的:`assertControlledByParentWrite` 只在主档的写 RLS
+    编译出非空过滤器时才检查主档行,主档没写 RLS 时**整段跳过** —— 持有 `allowEdit` 的调用者
+    可以改自己根本看不到的父记录下的明细。
+
+  **修复**:主档可达性改走与「直接读 / 直接写主档」完全相同的路径,复用既有合成点,不在
+  plugin-security 里重刻一份 sharing 语义。
+
+  - 读:`computeControlledByParentFilter` 现在把主档的读 RLS 与 `resolveSharingReadFilter`
+    (`getReadFilter` 已经在用的那个 OWD/共享半边)AND 起来再解析主档 id 集。哪一半生效由
+    **主档自己的有效共享模型**决定,因此派生出的可见集与直接 find 主档逐点一致。
+  - 写:`assertControlledByParentWrite` 在原有的 CRUD `update` + 写 RLS 之外,**无条件**追问
+    plugin-sharing 的单记录写闸 `canEdit`(归属按写深度放宽、`edit` 级共享、
+    `modifyAllRecords` 旁路)—— 无条件,正因为写 RLS 那一半在常见情形下会被整段跳过。
+  - 两侧解析失败一律**fail closed**(主档 id 集为空 / 拒绝写),而不是悄悄放宽回全员可见。
+
+  未变更的部分:v1 的**单层**语义 —— 主档自身的 `controlled_by_parent` 仍不递归下钻;没有装
+  `plugin-sharing` 的部署行为不变(那种部署里主档本身也没有归属与共享可言,派生集依旧与直接
+  读主档相等);`read` 级共享仍然只开读不开写,与直接访问主档的逐动词答案一致。
+
+- 9ce0ca9: **An admin-authored capability's `label`/`description` survive the boot (#5876).**
+
+  `bootstrapSystemCapabilities` seeds `sys_capability` in two halves: the CURATED
+  platform capabilities, and the back-compat DERIVED defaults — one row per
+  capability string a bootstrap permission set grants via `systemPermissions[]`
+  that nothing declared. Its seed loop refreshed `label`/`description` on whatever
+  row it found for a name, without looking at `managed_by`, while the comment
+  directly above it claimed the opposite ("do NOT clobber admin edits"). What
+  #2909 T3 actually made seed-once is `scope`, and only `scope`.
+
+  For a derived name there is no authored copy to reconcile: `label` is
+  `humanize(name)` and `description` is `Capability <name>.`, both generated from
+  the granted string. So an existing row's authored display fields were rewritten
+  to a humanized placeholder on **every boot**, whoever wrote them — silent data
+  loss, invisible from the outside.
+
+  Reachable, narrowly, and it needs the admin row to pre-exist the grant: an admin
+  creates capability `X` in Setup (`managed_by:'admin'` — the only provenance the
+  ADR-0066 write-guard leaves admin-writable), an app whose bootstrap permission
+  set grants `X` is installed, and every boot from then on renames it. The reverse
+  order is not reachable: once the derivation has created the
+  `managed_by:'platform'` placeholder, the write-guard stops the admin editing it
+  at all.
+
+  **The derived half now reconciles display fields only on rows it owns** —
+  `managed_by:'platform'` on a non-curated name, which can only be its own
+  placeholder from an earlier boot. `admin` rows, `package` rows and rows whose
+  provenance is missing are left exactly as their author wrote them, and counted
+  in the new `skippedAuthored` field of the seeding result (reported in the boot
+  summary, not warned about: nothing is degraded, the capability resolves and the
+  authored copy is the better one).
+
+  **The curated half is unchanged.** Those definitions are authored by the
+  platform and a new version legitimately ships new copy, so a curated name still
+  refreshes the row it finds. `scope` stays seed-once on both halves.
+
+  No migration and no authoring change: a placeholder that was already
+  overwritten is not restored (the previous text is gone), but it stops being
+  overwritten again, and an admin's re-edit now sticks.
+
+- d97f2a2: fix(plugin-security): `getReadFilter` applies the `controlled_by_parent` derivation — the analytics read scope was missing the master half entirely
+
+  `getReadFilter` is the read-scope provider bound by the analytics / raw-SQL
+  path: the one read surface that bypasses the engine and therefore has no other
+  source of scope. Its contract is that it returns **the same filter the engine
+  middleware ANDs into every find**. That middleware injects three things — the
+  RLS filter, the ADR-0055 `controlled_by_parent` derivation (`masterFK IN
+(accessible master ids)`), and plugin-sharing's OWD / record-share filter.
+  `getReadFilter` composed only the first and third; `computeControlledByParentFilter`
+  was never called on that path at all.
+
+  For an object whose `sharingModel` is `controlled_by_parent` that is not a
+  partial gap but a total one, because the two layers it _did_ compose both stand
+  down on exactly that object by design: such an object carries no authored RLS
+  (the whole point of the model is that access is derived rather than authored),
+  and it maps to `public` in plugin-sharing's `effectiveSharingModel`, so
+  `buildReadFilter` returns `null`. Both halves returned `null`, the composition
+  returned `undefined`, and the analytics path ran with **no predicate**. A caller
+  who could not read a single master row through `/data` could still `COUNT(*)`
+  and `GROUP BY` its detail rows through `/analytics` — and line-item objects are
+  the usual shape here, so the grouped values are per-line prices and discounts.
+
+  The derivation is now composed into the same AND on that path, resolved from the
+  permission sets `getReadFilter` had already resolved (no second resolution), so
+  the two read surfaces enforce identical scoping — which is why
+  `computeControlledByParentFilter` was extracted and shared in the first place.
+  Failures deny: the derivation is internally fail-closed, and a throw propagates
+  to the method's existing fail-closed handler rather than widening the read. The
+  delegated (`onBehalfOf`) branch already denied outright on this path (#2852) and
+  is unchanged.
+
+  This is the same failure shape #4467 fixed for the OWD/sharing layer of this
+  method, one layer over; #5386 fixed _which inputs_ the derivation folds in, not
+  _whether it runs_ on this surface.
+
+  **Impact.** A deployment with `controlled_by_parent` objects and an analytics /
+  raw-SQL consumer will see those queries return fewer rows — the rows the caller
+  was never entitled to aggregate. No authoring change is required.
+
+- dc6abfd: fix(plugin-security): 被拒收的 capability 声明不再连派生占位一起压掉 (#4967 Part 1/3)
+
+  `SecurityPlugin` 分两遍种 `sys_capability`:第一遍落包声明的 capability
+  (`managed_by:'package'` + `package_id`),第二遍种平台 curated 集合 + 从
+  permission set 的 `systemPermissions[]` **派生**的 back-compat 占位,并**跳过**
+  第一遍报上来的名字,以免占位把已写好的声明覆盖掉。
+
+  问题在于第一遍报的是「读到的每个名字」,而不是「真正落了行的名字」:
+  `bootstrapDeclaredCapabilities` 在 upsert 作出任何决定**之前**就把
+  `cap.name` 推进了返回列表。而 upsert 有三条**拒收**路径,一行都不写。其中
+  「声明没有归属包」这一条既没写行、又占住了名字,于是派生占位也被跳过——
+  capability **在任何一行里都不存在**。净效果是:**写下这条声明,比不写还糟**
+  (不写至少还有派生占位)。这正是 showcase 的
+  `showcase.export_data` 只留下一条 `warn` 的成因。
+
+  修法是把「上报」与「读到」拆开:一个名字进入上报列表(现更名为
+  `materializedNames`)的条件,是本遍**确认它有行**——本遍写成了
+  (seeded / updated / claimed),或找到一行不能被覆盖的既有行(admin 自建、他包
+  所有、curated 平台名)。三条拒收路径按「派生是否会覆盖既有 authored 行」分别
+  处置,理由写在代码里:
+
+  - **curated 平台名**:仍然上报。curated 那一遍无条件种这些名字,行必然存在;
+    且派生路径本来就够不到 curated 名(它已在 curated 表里)。
+  - **他包所有 / admin 自建**:仍然上报。行存在且 label/description 是**作者写
+    的**,派生会把它们刷成 humanize 出来的占位——压掉派生正是这份列表的用途。
+  - **没有归属包**:仅当已存在一行时才上报。没有行时回落到派生占位,和「从未
+    写过这条声明」时一样。
+
+  同时补上这条路径此前缺失的计数器 `skippedUnowned`,于是每条具名声明恰好落在
+  一个计数器里,列表与计数器可以对账。
+
+  **行为变化(升级须知)**:一条被拒收(无归属包)且被某个 permission set 授权
+  的 capability,此前在 `sys_capability` 里**没有任何行**,现在会出现一行
+  `managed_by:'platform'` 的派生占位——即它在 Setup 的能力列表里可见、可解析、
+  带 humanize 出来的 label。注意这不改变**运行时判定**:权限求值一直是按
+  `systemPermissions[]` 里的字符串取并集的,从不查 `sys_capability`;恢复的是
+  注册表一侧的 declared = enforced(能力有定义记录、可见、可管理、有 provenance),
+  不是把一个原本不生效的授权变成生效。若某个部署依赖「那条能力在能力列表里查不
+  到」,升级后它会出现。
+
+  诊断消息同时按 #4632 改进(级别仍为 `warn` —— 功能性降级,非持久性失败):
+  拒收时点名**授权它的 permission set**,并写明真实后果,例如
+  `[security] declared capability "showcase.export_data" has no owning package (granted by showcase_ops): falls back to the back-compat derived placeholder …`。
+  无人授权、或已有行的情形各有对应措辞。
+
+- bf1edef: feat(formula,lint): wire ADR-0056 D4's RLS authoring gate, from the runtime's own predicate (#4983)
+
+  `isSupportedRlsExpression` has carried the same docblock since ADR-0056 D4:
+  "exposed so an authoring-time gate (`objectstack compile`) can REJECT a
+  predicate the runtime would silently drop … A `false` here means 'this
+  predicate will never enforce'." It had **no non-test consumer anywhere** — the
+  function written to fix declared-but-never-read was itself declared and never
+  read. This lands the consumer, in two steps that had to happen in this order.
+
+  **1. `sqlPredicateToCel` and `isSupportedRlsExpression` move FROM
+  `@objectstack/plugin-security` (`src/rls-compiler.ts`) TO `@objectstack/formula`
+  (`src/rls-predicate.ts`), and are exported from its root.** Executable code
+  unchanged — a change of address, not of behaviour; `plugin-security` now imports
+  them from `@objectstack/formula` and keeps no copy, so there is still exactly
+  one definition. No import path outside the two packages changes: neither symbol
+  was ever exported from `@objectstack/plugin-security`'s entry point. The move is
+  what makes step 2 possible at all — `@objectstack/lint` may depend on
+  `@objectstack/spec` and never on a runtime, so with the predicate living in a
+  runtime the gate's only other door was copying the SQL→CEL bridge, whose
+  boundary conditions (quoted literals are never rewritten; canonical CEL passes
+  through unchanged) _are_ the gate's red/green line. A fork drifting by one
+  character rejects policies the runtime executes correctly — the false-positive
+  direction, which is worse than the gap. ADR-0058 D1 asks for a single canonical
+  shape gate; the bridge is part of that gate.
+
+  **2. New `@objectstack/lint` rule `validateRlsPredicateEnforceability`,
+  `error`, on all three authoring commands**, over
+  `permissions[].rowLevelSecurity[].using` and `.check`:
+
+  - **`rls-predicate-unenforceable`** — parses as CEL, outside the pushdown
+    subset: a function call (`size(...)`, `has(...)`), arithmetic, a ternary, a
+    cross-object path (`record.account.region`).
+  - **`rls-predicate-unparseable`** — does not parse as CEL even after the legacy
+    SQL bridge (`=` → `==`, `IN` → `in`): SQL `AND` / `OR` / `LIKE`, a subquery.
+    Its own id because the fix is different — write CEL (`&&`, `||`), not a
+    different shape.
+
+  What the gate prevents, measured through `plugin-security` rather than inferred:
+  `RLSCompiler` drops the policy and logs one request-time WARN. On the read path,
+  when it is the only applicable policy, `compileFilter` returns the
+  `RLS_DENY_FILTER` sentinel instead, which is AND-ed onto the where clause — so
+  every select / update / delete on the object matches **zero rows**. On the
+  ADR-0058 D4 write path the post-image `check` becomes that same sentinel, which
+  no record satisfies, so every insert / update fails with `PermissionDeniedError`.
+  The runtime fails closed, which is why this was survivable: the result is not a
+  hole but a policy that reads as an authorization and behaves as a blanket
+  refusal, with nothing at authoring time pointing at the line that caused it.
+
+  Fix a flagged predicate by rewriting it inside the lowerable subset — `==` `!=`
+  `>` `<` `>=` `<=`, `in`, `&&` `||` `!`, `== null` / `!= null`, and
+  `startsWith` / `endsWith` / `contains` over single-column field paths (ADR-0058
+  D2), against a literal or a `current_user.*` value. Two specific migrations:
+  `has(x)` / `size(x) > 0` → `x != null` (a function call is correct in an object
+  _validation_ rule, which is interpreted, and wrong here, where the predicate is
+  compiled to a filter); and a related record's field → denormalise it onto this
+  object (formula/rollup) and test that column, since RLS cannot join (ADR-0055).
+
+  Same construction as the sharing-rule gate (#4698): the rule does not model the
+  consumer or grep for it — it calls `isSupportedRlsExpression`, the exact
+  function `RLSCompiler.compileFilter` consults to decide whether a dropped policy
+  earns its warning, so the two verdicts are one boolean by construction, pinned
+  in both directions over a shared corpus. Measured before shipping: every RLS
+  predicate declared anywhere in this repo — the `plugin-security` platform seeds,
+  the examples, the dogfood fixtures, the authoring skill — is supported, so the
+  gate turns nothing red that works today. Unlike the sharing-rule gate, CEL
+  _syntax_ is reported here rather than deferred to `expression-invalid`:
+  `validateStackExpressions` does not walk `rowLevelSecurity` at all, and could not
+  judge this field correctly if it did, because `owner_id = current_user.id` is a
+  CEL syntax error and a working RLS predicate at the same time.
+
+- 69a89ce: fix(plugin-security,plugin-sharing): the write path consults the View/Modify All Data bypass — one predicate for `security/explain` and `/data` (#4647)
+
+  A **Modify All Data** holder, a `sharingModel: 'private'` object, and a record
+  whose `owner_id` is NULL got two opposite answers for one
+  (principal, record, operation) triple:
+
+  ```
+  POST /api/v1/security/explain  { object, operation: 'update', recordId }
+    → allowed: true, layers[vama_bypass]: "View/Modify All Data bypass held
+      via [admin_full_access] — ownership and sharing checks are skipped"
+  PATCH /api/v1/data/crm_contract/<id>
+    → 403 FORBIDDEN
+  ```
+
+  Filling `owner_id` in made the same PATCH succeed, so the write path really was
+  running the record-level ownership check the bypass layer said had been skipped.
+  `sys_attachment`'s `canEdit(parent)` gate agreed with the 403, not with explain.
+  Ownerless rows are not exotic: a system-context seed writes them by design (the
+  seed loader disables `owner_id` injection).
+
+  **The write path was the side that was wrong.** Modify All Data means an admin
+  edits any record regardless of ownership (the Salesforce reference frame this
+  platform's `modifyAllRecords` already follows, #1883), so:
+
+  - `SharingService.canEdit` / `canDelete` now consult the super-user write bypass
+    **after** ownership and shares have failed, through the existing late-bound
+    `ISecurityService.hasWriteBypass` probe. The `sys_attachment`
+    `canEdit(parent)` gate and the sharing-rule management gate reach the same
+    answer because they call the same function.
+  - The bypass they consult and the one `security/explain` reports are now **one
+    predicate** — `PermissionEvaluator.superuserBypassSets` — rather than two
+    independent readings of the permission sets. A cross-path test pins the triple
+    through both `explain` and the real write middleware chain and asserts they
+    agree, for update, delete and the attachment gate.
+
+  **The widening is exactly Modify-scoped.** `viewAllRecords` ("View All Data") is
+  a read power and never grants write: explain's `vama_bypass` layer is now
+  operation-aware, asking for the modify bit on a write and the view bit on a read,
+  and a view-only holder is refused on both paths. The probe still fails **closed**
+  — no `@objectstack/plugin-security`, a throwing probe, a principal-less or
+  on-behalf-of context all degrade to owner-only.
+
+  **Explain payload self-consistency.** For a record-grained request the top-level
+  `allowed` and the `record` verdict no longer contradict each other on this
+  triple: the row is `visible: true` with `decidedBy: 'vama_bypass'`, the
+  `vama_bypass` layer carries its own per-record attribution, and the `sharing`
+  layer credits the bypass instead of reporting "no ownership and no edit/full
+  share grants write" next to `allowed: true`. Where the bypass is not what
+  admitted the row (owner, or an admitting share) the previous `decidedBy` is
+  unchanged. Note that for a principal with **no** bypass, an object-level
+  `allowed: true` beside `record.visible: false` remains correct and intended —
+  `allowed` answers the object question, `record` answers the row question, and it
+  is the `record` verdict that the write path mirrors.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [0f17114]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [58f3220]
+- Updated dependencies [07f1822]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [bf1edef]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+  - @objectstack/formula@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

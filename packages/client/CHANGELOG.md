@@ -1,5 +1,378 @@
 # @objectstack/client
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- aa25a81: fix(client)!: `DeleteDataResult` declares the schema it names — `success`, not `deleted` (#5638)
+
+  `DeleteDataResult` — the return type of `client.data.delete()` and of the
+  project-scoped `client.project(id).data.delete()` — carried the comment
+  `Spec: DeleteDataResponseSchema` above a declaration that contradicted it:
+
+  ```ts
+  /** Spec: DeleteDataResponseSchema */
+  export interface DeleteDataResult {
+    object: string;
+    id: string;
+    deleted: boolean; // ← the schema declares `success`
+  }
+  ```
+
+  `DeleteDataResponseSchema` (`packages/spec/src/api/protocol.zod.ts`) declares
+  `{ object, id, success }`. `deleted` has never been declared by any schema, and
+  no server path has ever returned it on `/data/:object/:id`.
+
+  **The old key was never readable at runtime — this rename reveals a defect, it
+  does not break working code.** Both `delete` surfaces are pure `unwrapResponse`
+  / `_unwrap` passthroughs: the SDK returns the server's body untouched, so this
+  interface is a _claim_ about the wire, never a rewrite of it. The claim was
+  false in the one direction that matters — the compiler endorsed the wrong
+  spelling:
+
+  ```ts
+  const r = await client.data.delete('task', id);
+  if (r.deleted) { … }   // compiled; `undefined` at runtime; branch never taken
+  if (r.success) { … }   // rejected by the compiler; correct on the wire
+  ```
+
+  ## What to change
+
+  `r.deleted` → `r.success`. That is the whole migration. Nothing about the
+  request, the route, the status codes or the error shapes changes, and no server
+  needs upgrading: the value you are now allowed to read is the one that was
+  already arriving.
+
+  ⛔ **Do not write `r.success ?? r.deleted`.** There is one producer shape, and a
+  consumer that accepts two spellings is the shape contract-first exists to
+  prevent — the same ruling #5581 applied on the producer side. No deprecated
+  `deleted?: boolean` transition key ships for the same reason; a transition
+  period is for keys that _worked_, and this one never did.
+
+  ## Why the type was wrong on every deployment, not just some
+
+  The protocol path (`deleteData`) has always answered `success`. #5581 / PR
+  #5641 brought the ObjectQL fallback — the path a slim assembly without
+  `MetadataPlugin` takes — to the same shape. So before that fix the declaration
+  was wrong on ordinary deployments and accidentally right on slim ones; after
+  it, both paths answer `{ object, id, success }` and the declaration was simply
+  wrong everywhere. The consumer-side correction had to follow the producer, not
+  lead it.
+
+  ## `os data delete` was reading the phantom key too
+
+  `packages/cli/src/commands/data/delete.ts` built its `--format json` / `--format
+yaml` payload with `deleted: result.deleted`. That evaluated to `undefined`, and
+  `JSON.stringify` drops undefined values — so the `deleted` key the command has
+  always declared **never appeared in a single run**. It now carries
+  `result.success`, the server's own verdict.
+
+  Observable change: `os data delete --format json` gains `deleted: true` (YAML
+  likewise) on a successful delete. The key name stays `deleted` deliberately —
+  it is the CLI's output key, not the protocol's, and the payload's top-level
+  `success` already means something different (the CLI envelope's "the command
+  completed"). Conflating the two is the hazard #5641 called out when it noted
+  that `body.success` and `body.data.success` are different facts. Scripts
+  reading `.deleted` from this command were reading `undefined` before and get a
+  boolean now; nothing that worked stops working.
+
+  ## Downstream
+
+  `objectui`'s `ObjectStackDataSource.delete()` is a live victim of the old
+  declaration — it guards `emitMutation` on `result.deleted`, so the delete
+  mutation event has never fired against a real server and the method returns
+  `undefined` where it declares `boolean`. Its own suite stayed green because the
+  fixture mocks `{ deleted: true }`, a body no server produces. Filed as
+  objectstack-ai/objectui#3412, which is blocked on this package publishing —
+  its fix is a type unblock, not a behaviour change, since `success` is already
+  what arrives.
+
+  ## Pins
+
+  `packages/client/src/data-delete-result-shape.test.ts` asserts mutual
+  assignability between `DeleteDataResult` and the spec's `DeleteDataResponse`,
+  so a rename on either side (or a re-added optional `deleted`) fails
+  `check:test-typecheck`. `client.hono.test.ts` gains the delete case this live
+  server suite never had: a real DELETE over HTTP whose body is read as
+  `deleted.success` and whose key set is asserted literally — `z.object` strips
+  unknown keys, so a passing parse alone cannot prove no stray `deleted` rode
+  along.
+
+### Patch Changes
+
+- 3a18e24: client SDK: `meta.getItem` / `meta.saveItem` declare their spec response types on both surfaces
+
+  `ObjectStackClient.meta` and `ScopedProjectClient.meta` each carried a `getItem`
+  and a `saveItem` with no return-type annotation, so `unwrapResponse` / `_unwrap`
+  resolved without a type argument and every caller received `unknown` — while the
+  `getItems` sitting one line above returned `GetMetaItemsResponse`. Two adjacent
+  methods on one surface, unequal typing (#5545).
+
+  Both now name the type `@objectstack/spec` already declares for their route, and
+  both types are re-exported from `@objectstack/client` so a caller can name what
+  it received:
+
+  - `getItem` → `Promise< GetMetaItemResponse >` — the `{ type, name, item }`
+    envelope. This became the only honest annotation with #5563: before it, the
+    route's default (cached) path answered the bare document and the non-cached
+    path the envelope, so no single type described both.
+  - `saveItem` → `Promise< SaveMetaItemResponse >` — including `version`, the
+    ADR-0008 optimistic-concurrency token a caller echoes back as `If-Match`.
+    Nameable only since #5745 completed that schema; against the older
+    `{ success, message }` declaration the annotation would have hidden the OCC
+    carrier.
+
+  `patch`, not `minor`: this only narrows `unknown` on existing public signatures.
+  `unknown` admits no property read and no assignment to a typed binding, so every
+  expression that compiled before still compiles — nothing is removed, and no new
+  method or option appears.
+
+- c001422: feat(spec): declare `routes.mcp` on `ApiRoutesSchema`, and extend the discovery conformance gate one level down (#5679)
+
+  `/discovery` advertises `routes.mcp`, `objectui` reads it, and
+  `ApiRoutesSchema` never declared it. This is #4828's defect one level down —
+  with the opposite disposition: `endpoints` was retired because a census found
+  no reader, while `mcp` has two real ones (`ConnectAgentWidget.tsx` and
+  `AgentConnectSection.tsx` both gate the Integrations connect card on it), and
+  it is in fact the only `routes.*` key anything in `objectui` reads. So it is
+  declared, not removed.
+
+  Why it was a defect and not tidiness: `ApiRoutesSchema` is a plain `z.object`,
+  which **strips** unknown keys. Any consumer parsing `/discovery` through the
+  spec dropped `routes.mcp` silently — the connect card would blank with no
+  error. Nothing broke yet only because those two readers happen to read raw
+  JSON.
+
+  - **`ApiRoutesSchema` declares `mcp: z.string().optional()`**, as measured off
+    both producers rather than guessed: a path string (`/api/v1/mcp`), always the
+    **unscoped** base — `/mcp` is mounted bare, so a scoped mount advertising
+    `/api/v1/environments/env_alpha/data` still advertises `/api/v1/mcp` — and
+    `optional`, not `nullable`: the key is absent (rest-server `delete`s it, the
+    dispatcher leaves it `undefined`) when MCP is disabled or unserveable.
+    Neither producer ever emits `null`.
+  - **`@objectstack/rest` drops the two `as any` casts** at the emit site. That is
+    type-only — the emitted body is byte-identical — but the cast's disappearance
+    is the structural proof: with the key undeclared, removing it produced two
+    `TS2339 Property 'mcp' does not exist`; with it declared, `tsc --noEmit`
+    returns to its ratcheted baseline.
+  - **The #4828 conformance gates now cover `routes` keys**, not just top-level
+    ones, in all three producer packages, deriving the allowance from
+    `ApiRoutesSchema` the same way the top-level check derives it from the
+    protocol schema. Extended one level, not recursed — full recursion stays out
+    of scope, and `capabilities` / `services` are `z.record`s whose keys are open
+    by design.
+
+  - **`@objectstack/client`'s conventional route table gains an `mcp` row.** That
+    table is `Record<keyof ApiRoutes, string>` — total by design — so a newly
+    declared route owes a convention, and the public `ApiRouteType` (`keyof
+ApiRoutes`) widens by one member. The path is `/api/v1/mcp`, which is what
+    both producers emit, so the fallback agrees with the discovered value instead
+    of competing with it. Resolution behaviour is unchanged: `getRoute()` still
+    prefers the discovered route, and the pre-existing catch-all already produced
+    the same string.
+
+  Corrects one detail of the issue's premise: the runtime dispatcher's
+  `getDiscoveryInfo()` **does** also emit `routes.mcp` (its routes literal always
+  carries the key, holding the path or `undefined`), so both producers were
+  affected, not just REST — and the new gate went red on both before the fix.
+
+- aac90a5: feat(spec,runtime,metadata-protocol,client)!: one closed capability vocabulary — every discovery producer emits every key (#5672)
+
+  `#4828` renamed the runtime dispatcher's top-level `features` map to the
+  canonical `capabilities`, which collapsed the _spelling_ split between the two
+  discovery producers. It did not touch the deeper one: the two went on filling
+  **disjoint key sets**.
+
+  | producer                                                                             | keys it filled                                                                        |
+  | :----------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------ |
+  | `getDiscovery()` — `@objectstack/metadata-protocol`, upstream of REST `/discovery`   | `comments` `automation` `cron` `search` `export` `chunkedUpload` `transactionalBatch` |
+  | `getDiscoveryInfo()` — `@objectstack/runtime` dispatcher, `/.well-known/objectstack` | `search` `websockets` `files` `analytics` `ai` `notifications` `i18n`                 |
+
+  Only `search` overlapped. `DiscoverySchema.capabilities` was an open
+  `z.record`, so both shapes parsed clean and no gate could see the split — while
+  `packages/client`'s `capabilities` getter **asserted** the result was a
+  `WellKnownCapabilities`. Against a dispatcher-served host
+  `client.capabilities.transactionalBatch` was therefore statically `boolean` and
+  actually `undefined`, as were `comments`, `cron`, `export` and `chunkedUpload`.
+
+  Per the maintainer's 2026-08-06 ruling, the vocabulary is now closed and
+  mandatory.
+
+  **What a consumer sees.** Before: which capability flags exist depended on
+  which kind of host answered, and a flag you were typed to receive could simply
+  be missing. After: every discovery response carries **every** flag, always a
+  boolean. A capability the host does not deliver is `enabled: false` — never an
+  absent key — so a client can read a flag without knowing whether it reached a
+  dispatcher, the REST endpoint, or anything else. `client.capabilities` no longer
+  asserts its own return type: it enumerates the spec's key list, so the type is
+  true by construction, and it reads a key an older server omits as `false`
+  (fail-closed, matching the wire rule).
+
+  **`@objectstack/spec`.** `WellKnownCapabilitiesSchema` becomes the one
+  vocabulary and gains the six flags that were previously the dispatcher's alone
+  (`websockets`, `files`, `analytics`, `ai`, `notifications`, `i18n`) — all six
+  were already real answers on the wire, so this declares them rather than
+  inventing them. `DiscoverySchema.capabilities` changes from an optional open
+  record to a **required closed object** derived from that vocabulary, one entry
+  per key. New exports: `WELL_KNOWN_CAPABILITY_KEYS` (the key list, derived from
+  the schema so nothing can hand-list a fourth dialect) and
+  `CapabilityDescriptorSchema` / `CapabilityDescriptor` (the `enabled` +
+  optional `features` / `description` entry shape, previously inline).
+
+  Required, not optional, is the `scoping` precedent read the other way round:
+  `scoping` is optional because only one producer can honestly answer it, whereas
+  every producer can answer `capabilities` — and an optional block would leave a
+  consumer back at `undefined` for every flag.
+
+  **Producers.** Each answers all thirteen keys from its own facts, with the basis
+  recorded per key in the code. The dispatcher now measures `comments` off the
+  `sys_comment` object in the registry it already resolves for its `/data` domain,
+  and `automation` / `cron` / `export` / `chunkedUpload` off the same service
+  predicates that gate its route advertisements. Its one honest `false` is
+  `transactionalBatch`: the atomic cross-object `/batch` route is mounted by
+  `@objectstack/rest`, and this dispatcher has no batch branch at all, so claiming
+  the runtime's `transaction()` here would advertise an endpoint the host does not
+  serve. `getDiscovery()` answers the six new flags off the service registry it
+  already reads, gated on serveability so a self-declared stub does not advertise
+  a capability it cannot back.
+
+  **Gates.** The three `discovery-schema-conformance.test.ts` suites built by
+  `#5682` and extended to `routes` by `#5743` gain a fullness criterion — every
+  vocabulary key present, every `enabled` a real boolean, no key outside the
+  vocabulary — with the allowance derived from the schema rather than written out.
+
+  **Upgrading.** A producer or fixture that builds a `DiscoverySchema`-shaped
+  document must now include a complete `capabilities` block; build it from
+  `WELL_KNOWN_CAPABILITY_KEYS` rather than by hand. Consumers need no change:
+  they receive strictly more keys than before, and any flag they already read
+  keeps its meaning. The lenient wire wrapper `GetDiscoveryResponseSchema` still
+  allows the block to be absent, so a response from an older server still parses.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Major Changes

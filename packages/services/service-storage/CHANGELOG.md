@@ -1,5 +1,256 @@
 # @objectstack/service-storage
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- 718b229: fix(service-storage)!: a `sys_file` / `sys_upload_session` write that never landed no longer reports success (#5216)
+
+  `StorageMetadataStore` wrapped **all eight** of its `IDataEngine` calls in
+  `try { … } catch { /* ignore */ }` — no logger, no rethrow, no degradation flag.
+  Because `if (this.engine)` had already separated "no data engine wired" out,
+  those catches could only ever fire on a **runtime** failure of an engine that is
+  wired: a constraint violation, a connection blip, an RLS refusal, a table that
+  was never migrated. Every one of them was swallowed, and the store returned the
+  record it had just put in a process-local `Map`.
+
+  The result on `sys_file` — mostly-permanent business truth with compliance value
+  (#5202) — was the shape AGENTS.md → "Degradation log levels" exists to forbid:
+  the bytes landed in the storage backend, the metadata row **never existed**, and
+  `POST /api/v1/storage/upload/presigned` answered `200 { success: true }` with a
+  `fileId` naming nothing. A read in the same process then found the Map shadow,
+  so even a self-check looked healthy — until the worker recycled and the
+  attachment became permanently unaddressable, with not one line of log pointing
+  at the cause. On `sys_upload_session` the same swallow made multi-worker chunked
+  uploads die as unexplained stalls instead of a diagnosable error.
+
+  **What changes.** With a data engine wired, the engine is now the only store:
+
+  - **Writes** (`createFile`, `updateFile`, `deleteFile`, `createSession`,
+    `updateSession`, `deleteSession`) propagate the failure as a new
+    `StorageMetadataStoreError` instead of returning a value. Nothing is mirrored
+    into the `Map`, so there is no in-process shadow left behind to make a lost
+    write look like a landed one.
+  - **Reads** (`getFile`, `getSession`) distinguish a **miss** from an **outage**.
+    `findOne` returning nothing is still a miss and still returns `null` (the REST
+    layer answers 404, unchanged). An engine that _throws_ now propagates:
+    substituting this process's `Map` for an unreachable engine would dress a
+    stale or empty local guess up as the persisted answer, which under multiple
+    workers is a different wrong answer per worker.
+  - The process-local `Map` is now exactly what the class doc always claimed —
+    the stand-in for deployments with **no** engine wired (tests, dev). Behaviour
+    of `new StorageMetadataStore(null)` is unchanged in every respect.
+
+  **Breaking, and where it shows.** No API signature changed; what changed is that
+  these calls can now reject. Requests that previously received `200` over a lost
+  write receive `500 INTERNAL` from the existing storage route handlers (they
+  already wrapped every handler in `catch → sendError(500, 'INTERNAL', …)`, so no
+  route needed editing), and a read attempted during an engine outage answers
+  `500` rather than a false `404 FILE_NOT_FOUND`. If you call
+  `StorageMetadataStore` directly, the six write methods and the two read methods
+  may now throw `StorageMetadataStoreError` — `error.objectName`
+  (`sys_file` / `sys_upload_session`), `error.operation`
+  (`insert` / `update` / `delete` / `findOne`) and `error.cause` (the engine's own
+  failure) identify it, and `error.message` states the consequence and the fix.
+
+  There is nothing to migrate: no deployment can have been _relying_ on the old
+  behaviour, because the old behaviour produced no signal to rely on. What a
+  deployment may newly _see_ is a 500 that was previously an undetected data loss.
+  `StorageMetadataStoreError` and the `StorageMetadataOperation` type are exported
+  from `@objectstack/service-storage` for callers that want to tell a metadata
+  outage apart from any other 500.
+
+### Patch Changes
+
+- 1f1edc0: refactor(service-storage): drop `list(prefix)` from the local and S3 adapters — the implementation half of the #5540 contract retirement (#5541)
+
+  `IStorageService.list?(prefix)` was removed from the contract in `@objectstack/spec` 5.x
+  (#5540, ADR-0049 enforce-or-remove; analysis #5266). This removes what it left behind:
+  the two shipped adapters' own implementations, the tests that pinned them, and the
+  `'list'` label in each adapter's metrics vocabulary.
+
+  **Nothing in this repository ever called them.** The only in-repo call site was the
+  `SwappableStorageService` pass-through, deleted with the contract member in #5540. After
+  that deletion the surviving references were the two adapter methods and their own tests —
+  four sites, all inside `@objectstack/service-storage`, all of them producers. REST, the
+  CLI, the storage routes, the attachment/file-reference lifecycles and the backfill
+  tooling never called `list` on either adapter, on the swappable proxy, or on the
+  `file-storage` service. #5172 came closest and walked away: it planned to reclaim email
+  attachments by listing `EMAIL_ATTACHMENT_KEY_PREFIX`, found the local adapter could not
+  see one level down, and switched to queue-driven deferred work instead.
+
+  **What the two implementations actually did**, which is why aligning them was rejected:
+
+  | Adapter               | Answered `list('a')` with                                                                                                                                                                                                      |
+  | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | `LocalStorageAdapter` | one level of `readdir` — a nested key `a/b/c` was invisible, you got `a/b` — and every subdirectory `stat` succeeded on was returned as if it were a file, so `size` was a directory inode and `download()` could not fetch it |
+  | `S3StorageAdapter`    | a recursive `ListObjectsV2` that read neither `IsTruncated` nor `ContinuationToken`, so past 1000 objects the "all files under this prefix" you got was the first page, indistinguishable from a complete answer               |
+
+  One contract method, two dialects, both silently incomplete, no signal on either.
+
+  **Migration.** Callers holding the contract type were already migrated by #5540 — the
+  member is gone from `IStorageService`, so `storage.list(...)` stops type-checking there.
+  This release also removes the method from the **concrete** classes, so a caller holding a
+  `LocalStorageAdapter` or `S3StorageAdapter` directly loses it too:
+
+  | Wrote                                                    | Write instead                                                                                                                                               |
+  | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `new LocalStorageAdapter(...).list('attachments/task/')` | query the records you wrote — `sys_file` / file-reference rows carry the storage key and page deterministically through ObjectQL                            |
+  | `new S3StorageAdapter(...).list(prefix)`                 | same; for a genuine bucket sweep, call `ListObjectsV2` through the AWS SDK yourself and handle `ContinuationToken`, which is the part the adapter never did |
+  | a custom adapter of your own with `list?(prefix)`        | nothing breaks — an extra method on a class is not a type error; delete it whenever it suits you                                                            |
+
+  Querying your own records is not a workaround for the missing method. It is the only form
+  that was ever correct on both backends and past 1000 objects: the bucket was never the
+  system of record for "which files exist" — the rows are.
+
+  **If enumeration ever comes back, it comes back cursor-shaped.** Not this signature. A
+  prefix listing that cannot paginate is the wrong shape to inherit, so a future
+  first-party need returns `list(prefix, { cursor, limit })` — a page plus a continuation
+  token — with adapter-conformance cases (nested keys, directory entries, more than 1000
+  objects) proving both backends agree _before_ either ships. Maintainer ruling 2026-08-05
+  on #5266 chose this over aligning the two adapters, which would have grown a conformance
+  surface nobody walks.
+
+  Patch rather than major: the contract break was #5540's and shipped there. `tsc` cannot
+  see this one — a class may carry members its interface does not declare, which is exactly
+  why the #5540 changeset told adapter authors that leaving an implementation in place
+  still compiles — so the absence is held by a runtime pin,
+  `storage-adapter-list-retirement.test.ts`, instead.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+  - @objectstack/observability@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Patch Changes

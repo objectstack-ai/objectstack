@@ -1,5 +1,1702 @@
 # @objectstack/objectql
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- 3905c00: feat(objectql)!: a predicate bulk write evaluates and fires after-hooks PER ROW (#5038)
+
+  The 2026-08-04 maintainer ruling on #4800 / #4862, recorded as ADR-0058's
+  bulk-write addendum: **a bulk write is N record changes**, so every record-scoped
+  declaration on it is evaluated per row — `record` = that row's state, `previous` =
+  that row's pre-write state. Validation predicates have worked this way since
+  #3106; hook `condition`s and the record-change flow triggers riding the same
+  lifecycle hooks now join them.
+
+  **What was broken.** A `multi: true` update reaches `driver.updateMany`, which
+  resolves an affected COUNT. The lifecycle hook fired **once**, `previous` was
+  never assigned (only the single-id branch fetched a prior row), and `record`
+  degraded to the write's bare payload. So the transition condition the docs, the
+  formula skill and ten showcase flows all teach —
+  `status == "done" && previous.status != "done"` — could not be evaluated on a
+  bulk write. Hook conditions rejected the write (#4775/#5037); record-change flow
+  triggers were **silent**, firing zero times or once for a record that did not
+  exist. A missing audit row is the one failure nobody goes looking for.
+
+  **What changed.** The engine's bulk `update` / `delete` branches now read the
+  matched row set **once** — the same `driver.find` #3106 already issues, with
+  "this object has after-hooks" added to its demand test — and dispatch
+  `afterUpdate` / `afterDelete` once per matched row, each on a context with the
+  **single-record shape**: `input.id` = the row, `previous` = its pre-image,
+  `result` = its state. That is #2922's batch-INSERT ruling restated, and it is why
+  this fix has no code in the consumers: `hook-wrappers`' `record`/`previous`
+  bindings, the record-change trigger's context builder and plugin-audit's diff all
+  read those same fields and became correct at the producer.
+
+  - **Per-row dispatch is uniform across after-hooks.** It is deliberately NOT
+    keyed on whether a condition mentions `previous` — the ruling rejected that as
+    a hidden rule that would make a hook's firing count depend on its condition
+    text.
+  - **`ctx.result` per row is the ROW**, composed as `row ⊕ payload` from the
+    pre-image already in hand, so the batch still costs one extra query, not one
+    per row. A bulk DELETE has no post-state: its per-row context sets no `result`,
+    and consumers fall back to `previous`.
+  - **`onError` needed no new meaning** — it governs a handler on a record-scoped
+    context, which is now what it always gets: `abort` fails the operation, `log`
+    swallows that row and the batch continues.
+  - **A ceiling, enforced as a refusal.** Past 10 000 matched rows a predicate
+    write against an object with after-hooks is rejected _before_ the driver call
+    (`ERR_BULK_PER_ROW_HOOK_LIMIT`), so nothing is written. It is never downgraded
+    to one dispatch for the batch — that would skip the hook for N-1 rows silently.
+
+  **Breaking for hook authors, in the direction the contract declares.** An
+  after-hook on an object that takes predicate writes now runs once per matched row
+  instead of once per batch: a notification hook sends N messages, a
+  cache-invalidation hook runs N times. Objects with no after-hooks are untouched
+  and pay for no extra read. The write's own contract is unchanged — a predicate
+  write still resolves the affected count and still publishes ONE aggregate
+  `data.records.updated` (#4639).
+
+  **`before*` hooks stay batch-scoped, and that is not a gap.** `beforeUpdate` /
+  `beforeDelete` fire once for the whole batch because they may still rewrite the
+  payload, and one `updateMany` carries one payload. #5037's `HookConditionError`
+  and its `limitation` discriminator therefore **survive, rescoped to that
+  dispatch** — with a message that no longer promises an expiry that has already
+  happened, names the phase as the reason, and points at the matching `after*`
+  event where the same condition evaluates per row as authored. It also now names a
+  record-change flow trigger as a real route: #5037 refused to, on measured
+  evidence that the trigger shared the same unbound `previous`; that fact changed.
+
+  Docs (`data-modeling/formulas.mdx`) and `skills/objectstack-formula` §5 are
+  updated to teach one transition shape for both write forms, with the `before*`
+  exception called out.
+
+- d8f65fe: feat(objectql): the dangling-reference audit stops skipping `readonly`
+  references and files them in their own `provenance` bucket (#4743)
+
+  `auditDanglingReferences` used to drop every `readonly` reference field before
+  reading a single row. That skip rested on two grounds, and #4556 removed one of
+  them: the platform no longer writes a NON-ID into a reference column
+  (`sys_metadata_history.recorded_by` stored the sentinel string `'system'`; it
+  stores `NULL` now). What the skip still covered afterwards was exactly one
+  family — the audit-provenance fields `created_by` / `updated_by` /
+  `organization_id` that `applySystemFields` injects, all `readonly: true`.
+
+  Those hold **genuine ids, and genuine ids dangle**: delete one user and every
+  row they ever created points `created_by` at a row that is gone. "Who did this"
+  failing to resolve is precisely the question an audit trail exists to answer,
+  so the remaining skip was blindness rather than economy. The audit now probes
+  them.
+
+  **They do not join `dangling`.** A deleted actor and a broken business foreign
+  key are different findings with different remedies (usually nothing to do vs.
+  re-seed the target or clear the link), and merging them would bury the second
+  under the first. Two new report keys carry the new class, mirroring the
+  unknown/absent split the report already makes everywhere else:
+
+  | Key                               | Means                                                                                     |
+  | :-------------------------------- | :---------------------------------------------------------------------------------------- |
+  | `provenance: DanglingReference[]` | a `readonly` provenance reference that resolves to nothing — same row shape as `dangling` |
+  | `provenanceUndetermined: number`  | a provenance reference whose target could not be probed at all                            |
+
+  Both are **additive and optional in the type**, exactly like `aborted`: an
+  existing consumer keeps compiling and keeps reading `dangling` with its meaning
+  unchanged (a link the model _declares_ is broken). Every report this module
+  produces sets both explicitly.
+
+  ⚠️ **Expect `provenance` to be large on the first run against an aged
+  database.** One deleted user dangles every row they ever touched. That number
+  is pre-existing state being reported for the first time — not damage the audit
+  caught being done, and not a regression introduced by looking at it.
+
+  For the same reason `provenance` **alone does not raise the summary warning**.
+  On a database of any age it is non-empty on every healthy run, and a line that
+  always fires is the #4747 broken alarm again — it would train its reader
+  straight past the run where `dangling` had something in it. The counts ride
+  along in the payload whenever the line fires for a real finding, and the
+  itemised rows are always in the returned report. `provenanceUndetermined` is
+  separate from `undetermined` for the same reason: on a stack that never
+  registers `sys_user`, every provenance value probes "cannot tell", and that is
+  a fact about which platform tables are mounted, not about the audited data.
+
+  Scan order gained a third tier to keep the change from costing the signal it
+  sits next to: security surface, then objects carrying a business reference,
+  then the provenance-only remainder. Admitting the family means nearly every
+  object now has an auditable field, so without the tier a bounded run would
+  spend its row budget on tables carrying only provenance and never reach the
+  business findings the budget was built for.
+
+  Part of #4743 (fact 2). The stale `assertReferencesResolve` comment in
+  `engine.ts` (fact 1) is deliberately untouched here.
+
+- afa6aa5: feat(objectql): export the delete-dispatch contract so test doubles can be pinned to it (#4550)
+
+  A test double that is **looser** than the implementation it replaces converts a
+  green suite into no suite at all — silently, and on exactly the paths a double
+  was introduced for, which are the paths that were hard to test, which are
+  usually where the contract is densest. #4434 is the worked example:
+  `DELETE /api/v1/sharing/rules/:idOrName` answered 500 for every rule and both
+  address forms it advertises, from the day it was written, while
+  `deleteRule drops rule + all its grants` asserted success against it the whole
+  time — against a fake engine whose `delete` accepted the one call shape
+  `ObjectQL.delete` refuses.
+
+  `ObjectQL.delete`'s dispatch decision now lives in one exported place instead of
+  being re-derived by every fake:
+
+  ```ts
+  import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+
+  async delete(object: string, options?: any) {
+    assertEngineDeleteDispatch(options);   // refuses what a real server refuses
+    …
+  }
+  ```
+
+  New exports, all pure and side-effect free:
+
+  - `resolveEngineDeleteDispatch(options)` → `{ kind: 'by-id', id }` |
+    `{ kind: 'multi' }` | `{ kind: 'reject', message }` — what the engine will do
+    with this call, without doing it.
+  - `assertEngineDeleteDispatch(options)` — throws exactly what the engine throws
+    on `reject`, returns the dispatch otherwise. This is the line a fake engine's
+    `delete` opens with.
+  - `scalarDeleteId(options)` — the SCALAR `where.id` or `undefined`. The half a
+    hand-written mirror drops: `where: { id: { $in: [...] } }` looks like an id
+    and is a multi-row predicate, so the engine rejects it without `multi`.
+  - `ENGINE_DELETE_REJECT_MESSAGE`, `ENGINE_DELETE_DISPATCH_CASES` — the message
+    and the shared conformance case-set, the same role
+    `packages/spec/src/data/*-conformance.ts` plays for drivers.
+
+  `ObjectQL.delete` itself reads `resolveEngineDeleteDispatch`, so a double that
+  imports it cannot be looser than the engine, ever — that is the property, and
+  it is the one a hand-mirrored `if` can only have until somebody edits one side.
+  No runtime behaviour changes: the same three verdicts, over the same inputs,
+  proved case-by-case against the real engine in
+  `engine-delete-dispatch.test.ts`.
+
+  Repo-side, `pnpm check:engine-double-contract` (wired into `lint.yml`) finds all
+  39 fake ObjectQL engines in the repo, holds new ones to this predicate, and
+  keeps the 30 not yet converted in a measured, shrink-only baseline.
+
+- c7406b0: fix(objectql,driver-sql,driver-memory,driver-mongodb)!: `FilterArray` 在 engine 门下沉,四驱动的数组方言删除 (#5158 拍板 C 第 2 步)
+
+  `FilterArray` —— `['stage','=','won']`、`['and', […], […]]`、`[[…], […]]` —— 是**仅输入**的
+  授权糖。#5285 已在 spec 里把这件事写明(`data/filter.zod.ts`,`filter-array-declaration.test.ts`
+  钉住「被声明」且「`where` 不接受它」)。本次是拍板 C 的第 2 步:让**运行时**与那份声明一致。
+
+  ## 改了什么
+
+  进入运行时的门有两扇,过去只有一扇按契约读:
+
+  | 门                                                                                                | 改前                                                                                                                               | 改后                                                                                            |
+  | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+  | **Door 1** —— 协议/HTTP 面(`metadata-protocol`)                                                   | `isFilterAST` → `parseFilterAST`,不可下沉的数组答 `400 INVALID_FILTER`                                                             | 不变                                                                                            |
+  | **Door 2** —— 进程内 engine 直调(`ObjectQL.find`/`findOne`/`count`/`aggregate`/`update`/`delete`) | 数组**原样**透传给驱动                                                                                                             | 走**同一条缝**:`isFilterAST` → `parseFilterAST` 下沉为 `FilterCondition`,不可下沉的数组响亮拒收 |
+  | 四驱动(`driver-sql`、继承它的 `driver-sqlite-wasm`、`driver-memory`、`driver-mongodb`)            | 各自带**第二套过滤器编译器**,包括一种**中缀**方言(`[condA, 'or', condB]`)—— 没有任何 schema 声明过它,`parseFilterAST` 也表达不了它 | 数组方言删除;数组到达驱动即 `INVALID_FILTER` / 400                                              |
+
+  一个查询两套编译器正是 ADR-0053 D-A1 禁止的分叉,而且它已经产生了真实的产品分叉:cloud 的
+  `RemoteTransport.buildWhereSQL` 自 cloud#1075 起对**同一输入**响亮拒收,`driver-sql` 却编译它。
+  删掉方言后两侧自然合流。
+
+  ## 授权面:零变化
+
+  `FilterBuilder`(`@objectstack/client`)产出的元组与 `['and', ...]` 组、React block 的
+  `filters` prop、wire 的 `$filter` 面、showcase 的授权点 —— **全部原样工作**,因为下沉正是
+  这些形状本来的用途。wire 契约逐字节不变(Door 1 的行为未改)。
+
+  ## ⚠️ 可观察的行为变更
+
+  1. **中缀连接不再被编译。** `where: [condA, 'or', condB]` 过去只有驱动认识,现在在 engine 门被拒收。
+     声明的写法是前缀组:`['or', condA, condB]` —— 语义相同,`parseFilterAST` 有它的下沉。
+  2. **`findOne({ where: [] })` 现在抛错。** `[]` 的含义**没有变**(仍是「无过滤」,`find`/`count`
+     照旧返回/计数全部行)。变的是 `findOne` 终于**看得见**这一点:未下沉的 `[]` 过去被
+     `requireFindOnePredicate` 当作「驱动自己去解释的表达式树」放行,于是 `limit: 1` 落在整张表上,
+     返回**任意一行** —— 正是 #4419 要挡的缺陷,活在 #4419 自己的守卫里面。
+  3. **不可下沉的数组在 engine 门拒收,不再由驱动拒收。** 形状与操作符词表相同(`isFilterAST` 同一套),
+     变的是消息来自调用点、带上调用方自己的值,以及明说「过滤器没有被应用,否则会返回**未过滤**的结果集」。
+  4. **驱动直调者(不经 engine)受影响。** `SqlDriver` / `InMemoryDriver` / `translateFilter` 是公开
+     导出;把数组 `where` 直接喂给它们的调用方需要改为先 `parseFilterAST(...)` 再传,或改走 ObjectQL。
+     注意 `QueryAST.where` 的 `FilterCondition` 是索引签名类型,数组对它是**可赋值**的 —— 类型层从未
+     挡住这个输入,所以拒收必须在运行时。
+  5. **`driver-mongodb` 的 `createdAt` → `created_at` 字段别名随方言一起消失。** 它只存在于数组路径
+     (`mapFieldName`,仅被已删除的 `translateComparison` 调用),对象路径从未应用过它。消费端别名按
+     AGENTS.md PD #12 是债务而非模式,故不再补回:请写声明的字段名 `created_at`。
+
+  ## 删除的代码面
+
+  - `SqlDriver.applyFilters` 的数组遍历分支,及其比较发射器 `protected applyAstComparison`(约 220 行)
+  - `InMemoryDriver.convertToMongoQuery` 的 legacy array 分支(约 62 行)
+  - `driver-mongodb` `mongodb-filter.ts` 的 `translateArrayFilter` / `translateComparison` / `mapFieldName`(约 140 行)
+  - `driver-sqlite-wasm` 无自有实现,随 `SqlDriver` 继承变更
+
+  `[]` 在每一层的读法**都不变**:engine 删键、`parseFilterAST([])` 为 `undefined`、三个驱动都提前返回。
+
+- 5d3ced9: fix(objectql,lint)!: a `json_schema` validation rule's `format` keyword is now ENFORCED — records that passed before can start failing (#5029)
+
+  > **⚠️ BEHAVIOUR CHANGE ON DEPLOYED DATA — READ BEFORE UPGRADING.** A `format`
+  > keyword inside a `json_schema` validation rule used to enforce **nothing**.
+  > It now enforces. If any deployed object carries such a rule, writes that
+  > succeeded on the previous version can be **rejected** after this upgrade —
+  > including writes from flows, seeds, imports and integrations, not just the UI.
+  > Nothing about the metadata changed; the runtime simply started honouring what
+  > the metadata always said. See "Before you upgrade" below.
+
+  ## What was broken
+
+  `packages/objectql/src/validation/rule-validator.ts` built its shared ajv as
+  `new Ajv({ allErrors: true, strict: false })` and stopped there. In ajv 8 the
+  `format` keyword is **not built in** — it ships in the separate `ajv-formats`
+  package — and under `strict: false` an unregistered format is not an error: ajv
+  logs one line at compile time and **drops the keyword**.
+
+  So this rule:
+
+  ```ts
+  {
+    type: 'json_schema',
+    name: 'support_config_shape',
+    field: 'support_config',
+    message: 'Support config is invalid.',
+    schema: {
+      type: 'object',
+      properties: { email: { type: 'string', format: 'email' } },
+      required: ['email'],
+    },
+  }
+  ```
+
+  compiled fine, ran on **every** write, enforced `type` and `required` — and
+  enforced **nothing at all** for `format`. `{ email: 'not-an-email' }` was
+  accepted, for every record, forever. The only signal was a stderr line at
+  compile time naming no rule and no object.
+
+  This is the #4649 / #4762 family one level in, and the partial failure is what
+  made it nasty: the rule visibly rejects a bad `type` / missing `required`
+  payload in dev, so it reads as _working_ while the `format` half never fires.
+  `format` is also one of the most reached-for JSON Schema keywords (`email`,
+  `uri`, `uuid`, `date`, `date-time`, `ipv4`), so this was not an exotic corner —
+  and it is exactly the shape an AI writing metadata reaches for first.
+
+  ## What changed
+
+  - **`@objectstack/objectql`** now depends on `ajv-formats` and registers it on
+    the shared instance (`addFormats(ajv)`). The **default (full)** format set is
+    used deliberately: `fast` mode trades correctness for speed on precisely the
+    formats authors reach for most, and a format that "mostly" matches is the same
+    declared ≠ enforced defect with a smaller hole.
+  - **`@objectstack/lint`** — the #4762 publish gate
+    (`validate-rule-compilability.ts`) compiles every `json_schema` rule with the
+    SAME ajv environment the runtime uses, on purpose, so it registers the same
+    plugin. This is not cosmetic parity: `ajv-formats` also installs the
+    `formatMinimum` / `formatMaximum` keywords, so a gate without it treats them
+    as unknown keywords (`strict: false` ⇒ silently ignored) and would publish a
+    schema the runtime then refuses to compile — a rule that passes review and
+    enforces nothing, which is the failure that gate exists to prevent. The parity
+    test now reads the plugin registration out of the runtime's source, so the two
+    cannot drift apart silently.
+
+  **Authoring is unchanged.** `format` stays a legal, publishable JSON Schema
+  keyword; the publish gate does not refuse it (option 2 on #5029 was considered
+  and rejected — refusing standard JSON Schema would push authors into private
+  spellings). What changed is only that the declaration is now true.
+
+  ## Before you upgrade
+
+  1. Find the rules at risk: any `object.validations[]` entry with
+     `type: 'json_schema'` whose `schema` contains a `format` key, at any depth
+     (including inside `$defs` / `$ref` and a `conditional`'s `then` /
+     `otherwise` branch).
+  2. For each, audit the existing column against that format. Rows already stored
+     are **not** re-validated — nothing is rejected retroactively, and no
+     migration runs — but the **next write that touches the field** is checked,
+     which includes an unrelated PATCH that merely resends the JSON blob.
+  3. If a format was aspirational rather than real, remove that `format` key (or
+     relax it) _before_ upgrading. Deleting the keyword is now a meaningful,
+     visible act rather than a no-op.
+
+  ## Known limitation, recorded deliberately
+
+  A **misspelled** format name is still ignored. `format: 'emial'` compiles under
+  `strict: false` — ajv logs `unknown format "emial" ignored` and drops it — in
+  both the runtime and the publish gate, so a typo still enforces nothing. That
+  behaviour is unchanged here and pinned by test in both packages, so it is a
+  known boundary rather than an oversight; closing it is an authoring-time
+  decision of its own and is tracked separately.
+
+- 7c2f7dd: fix(objectql,service-queue): a `lifecycle` settings override can no longer undercut a consumer's retention floor (#5195)
+
+  ADR-0057 P4 lets an operator override any object's retention window per
+  environment and per tenant through the `lifecycle` settings namespace. Until now
+  the only validation on that override was **does it parse** — and a retention
+  window is not only the operator's business: other code can depend on the rows
+  still being there.
+
+  `sys_job_queue` is the worked example. `DbQueueAdapter` deduplicates publishes by
+  comparing a terminal row's `created_at` against its idempotency window, so the
+  dedup check only means anything while that row still exists; #5179 made the
+  ordering an invariant by refusing, at construction, an idempotency window longer
+  than the object's **declared** retention. A settings override the constructor
+  cannot see walks straight around it:
+
+  ```jsonc
+  // lifecycle → retention_overrides
+  { "sys_job_queue": { "maxAge": "1h" } }
+  ```
+
+  completed rows are reaped an hour after they are written, publish keeps
+  deduplicating against 24h, and duplicate deliveries resume **with nothing in any
+  log**.
+
+  **New: retention floors.** A consumer may now declare, at runtime, the shortest
+  window its own contract survives:
+
+  ```ts
+  lifecycle.registerRetentionFloor("sys_job_queue", {
+    policy: "retention", // or 'ttl'
+    minWindowMs: 24 * 60 * 60 * 1000,
+    declaredBy: "com.objectstack.service.queue",
+    consequence: "…what silently breaks below it",
+    remedy: "…the settings change that makes an override legal",
+  });
+  ```
+
+  - An override below the floor — **global or tenant-scoped** — is **rejected**,
+    and the declared window keeps running. Not clamped to the floor: clamping
+    would enforce a third number written in neither the declaration nor the
+    settings, and that number would move whenever an unrelated package changed
+    its floor. Rejection has exactly one fallback, the declaration, which is
+    already how an unparseable override resolves.
+  - The rejection is `error`-level and carries both the consequence and the fix,
+    because what it prevents leaves the system looking entirely healthy. It is
+    also on the sweep report as `LifecycleSweepReport.floorViolations` — machine-
+    readable, every sweep.
+  - A **declared** window below a registered floor is reported the same way and
+    still enforced: refusing to reap would trade a broken consumer contract for
+    the unbounded table #5179 just closed.
+  - Objects with no registered floor are completely unaffected — P4 overrides
+    behave exactly as before.
+
+  Floors are runtime wiring, not spec surface (the same call ADR-0057's reap-guard
+  amendment makes), plus a reason of their own: the queue's floor **is**
+  `DbQueueAdapterOptions.idempotencyWindowMs`, a per-kernel construction option, so
+  a static key on the object's `lifecycle` block could only ever be a second copy
+  of it that drifts. No `packages/spec` change.
+
+  `QueueServicePlugin` registers `sys_job_queue`'s floor on `kernel:ready`,
+  carrying the window the adapter was actually constructed with — so a non-default
+  `db.idempotencyWindowMs` is covered too. The ordering is now enforced from both
+  sides: the constructor rejects a too-long `idempotencyWindowMs`, the floor
+  rejects a too-short `maxAge`.
+
+  New exports from `@objectstack/objectql`: `LifecycleRetentionFloor`,
+  `LifecycleFloorViolation`, plus `LifecycleService.registerRetentionFloor()`.
+  `LifecycleLoggerLike` gained an optional `error()` (absent ⇒ falls back to
+  `warn`), and `LifecycleSweepReport` gained `floorViolations`.
+
+- 5b8f95b: fix(objectql,lint): enforce parent-scoped `readonlyWhen` on the server (#4889)
+
+  `readonlyWhen: P\`parent.status == 'paid'\``— the documented "once the header
+invoice is Paid, its lines are frozen" lock — was enforced **only in the client
+grid**. The server-side strip bound`record`and`previous`and had no`parent`at all, so every parent-scoped predicate faulted, took the fail-open branch, and
+the write landed anyway. On the reference app that meant one`PATCH` rewrote the
+  quantity and unit price of a settled invoice's line: HTTP 200, value persisted,
+  the grid still drawing the cell read-only. ADR-0057 D10 puts enforcement on the
+  server and makes the client courtesy; here only the courtesy layer enforced.
+
+  **`parent` is now bound on the write path.** For a detail object — one declaring
+  exactly one `master_detail` relationship — the engine resolves the master record
+  and binds it as `parent` before the strip runs, on both the single-id and the
+  bulk (`multi: true`) update paths. A repointing write is judged against the
+  master it _lands on_, not the one it leaves. The read is gated on the payload
+  actually touching a parent-scoped predicate (decided from the parsed CEL AST, so
+  a field named `parent_id` costs nothing), and the bulk path batch-reads the
+  distinct headers in one query rather than one per row.
+
+  **An unbindable scope no longer waives the lock.** A `readonlyWhen` that names a
+  root the operation could not bind now resolves to **locked** — the field is
+  stripped — instead of "not locked". "The platform could not check this" must not
+  mean "allowed" on a field the author declared frozen. This is deliberately the
+  narrowest possible carve-out from the fail-open policy the strip has always had:
+  a predicate that is merely _broken_ on the record (undeclared key, `null`
+  ordering overload, parse error, engine throw) still fails open exactly as
+  before, and `requiredWhen` / option `visibleWhen` are untouched. Recorded as an
+  addendum to ADR-0058's D5 fail-policy matrix, alongside the same narrowing
+  already made for validation predicates (#4649) and hook conditions (#4775).
+
+  **And the runtime branch is a backstop, not the plan.** `objectstack compile`
+  now **rejects** a `parent`-scoped `readonlyWhen` on an object that declares no
+  `master_detail` relationship, or two of them (where the metadata does not say
+  which one is "the parent" and picking by declaration order would make a
+  data-integrity lock depend on field ordering). The common authoring mistake is
+  caught where it is cheap to fix, so it never reaches a runtime that has to judge
+  it — declared, not guessed.
+
+  No metadata changes are required: an app whose parent-scoped locks were already
+  correct simply starts having them enforced. If you authored one on an object
+  with no single master, the build now names it.
+
+- 441d79f: fix(objectql): 同一 object 的多个 reap guard 现在按交集组合,后注册者不再静默顶掉前者 (#5535)
+
+  `LifecycleService.registerReapGuard(object, guard)` 此前是一行 `set()`,契约写明
+  「One guard per object (last registration wins)」,而注册表是 `private`、无探针、
+  覆盖时也不打日志。两点合起来:同一 object 上的**第二个注册方静默解除第一个**,且
+  **无从察觉**。
+
+  这在 reap guard 这个座位上格外危险,因为 guard 的语义不是「投票」而是**回执**——
+  「外部副作用已经做完,这行现在可以删了」。`sys_file` 的 guard 做的正是字节回收:
+  先 `storage.delete(row.key)`,失败则 veto 把行留到下一轮(行是字节的唯一指针,
+  先删行就永久泄漏)。任何第二个消费者在 `sys_file` 上注册,这段字节回收会被**整体
+  解除**:行照删、字节泄漏、零日志。而 ADR-0057 §3.3 的 amendment 恰恰把「domain
+  callback」认定为 guard 的合法形态,第二个注册方是被 ADR 鼓励出来的,不是假想。
+
+  **新契约:交集组合。** 一个 object 可以有多个 guard,注册**追加**而非替换;只有
+  **全部** guard 都确认的 id 才进删除集,任一 veto 即保留、由下一轮 sweep 重试。这与
+  单 guard 时的语义完全兼容(现有五条单 guard 回归全部原样通过),也与同文件
+  `registerRetentionFloor` 的「每个注册方都保留发言权,最严者胜」同构。
+
+  写 guard 时值得知道的两点:
+
+  - **guard 按注册顺序执行,但只会被问到「前面的 guard 已经确认过」的行。** 这是
+    刻意的:被问到即意味着「到目前为止所有人都同意这行可以删」,于是 guard 不会
+    为一行别人正要保留的记录做不可逆的清理(否则就会出现「行还在、字节已删」或
+    「行还在、索引已删」)。删除集本身与注册顺序无关。
+  - **guard 抛异常的处置不变**:异常上抛到 `sweep()` 的 per-object handler,该
+    object 本轮一行不删(erroring guard 永不 fail open 进删除)。同一批里更早的
+    guard 已经做掉的清理由下一轮 sweep 重试,而不会在无人完成确认的批次上兑现成
+    一次删除。
+
+  重复注册**同一个函数引用**是 no-op(重跑 wiring,不是第二份意见):与自己求交集
+  不改变任何结果,却会让它的外部清理在每批上跑两遍。
+
+  无需调用方改动:`service-storage` 的两个注册方(`sys_file` / `sys_upload_session`)
+  一行未改,行为逐条不变。本单落地即解除 #4672(知识插件走 reap-guard 去索引化)的
+  Blocked-by——它可以直接在 `sys_file` 上追加注册,而不必担心顶掉字节回收。
+
+- 23dba62: feat(spec,objectql): `strictReadonlyWrites` —— 让调用点选择「被剥离即响亮失败」(#5126)
+
+  写路径上的 readonly 剥离一直是**静默**的:调用方送来的只读字段被丢掉,写入照常提交并返回成功,该列保持原值。#4903(PR #5123)把这件事修得**可发现**(一条说清后果与出路的 WARN + `onFieldsDropped` 机器可读信号),但没能补上「出路」本身 —— 一个宁可让写入失败也不接受丢列的调用方(cron / 服务端插件)无处表达这个意图,因为选项键必须先落在 `packages/spec`。
+
+  本次按维护者裁定的 **B 方案**补上这一半:
+
+  - **`@objectstack/spec`**:`WriteObservabilityOptions`(`contracts/data-engine.ts`,`onFieldsDropped` 所在的**进程内** TS 契约)新增 `strictReadonlyWrites?: boolean`,默认关闭;`ERROR_CODE_LEDGER` 在 `@objectstack/objectql` 名下登记 `ERR_READONLY_FIELD_REJECTED`。
+  - **`@objectstack/objectql`**:`update` 在剥离接缝处兑现该语义 —— 置位且确有字段将被剥离时,在**任何驱动调用之前**抛出 `ReadonlyFieldRejectedError`(新导出,`code = 'ERR_READONLY_FIELD_REJECTED'`),因此**什么都不写**:不只是被拒字段,连本可存活的字段也不落库。单条与 bulk 两条路径同此。
+
+  三点值得单独说明:
+
+  - **默认行为零变化。** 不传(或传 `false`)时,剥离、`onFieldsDropped` 事件、提交结果与此前完全一致。这是一个 per-call 的选择加入项。
+  - **覆盖两种剥离原因。** 静态 `readonly`(#2948,仅对非 system 调用方生效)与 `readonlyWhen` 判定为真(#3042,对**所有**调用方生效,含 `isSystem`)。只覆盖前者会让本特性对它最想服务的调用方 —— 已声明 `isSystem: true` 的可信 cron —— 近乎失效:它恰恰豁免了静态剥离,却仍会静默丢掉被 `readonlyWhen` 锁住的列。两种原因累积进**同一个**异常,`fields` 是全量并集,`drops` 保留按原因的明细。
+  - **strict 是进程内语义,不跨 RPC / VDE 边界。** 它挂在 TS 契约而非可序列化的 `EngineUpdateOptionsSchema` 上,因此 REST / wire body **设不了**它:远程调用方既拿不到 `onFieldsDropped` 也拿不到 strict,其写入仍是「剥离后提交」。这是刻意的 —— 把写入拒绝开关放进客户端可填的袋子等于在安全相邻路径上开新攻击面(即被否掉的 A 方案)。契约测试钉住了这条边界。
+
+### Patch Changes
+
+- c497d26: fix(objectql): `autonumber` 是运行时拥有的字段,写路径不再接受调用者提交的单号 (#5503)
+
+  `autonumber` 的值一直被文档声明为运行时所有 —— `applyAutonumbers` 的注释写着
+  "the runtime owns the value, not the client",两个记录校验器也正是因此在 insert
+  与 update 上都豁免了 `required` 检查。缺的是另一半:**没有任何一层写路径阻止客户端
+  自己填这个值**。于是一个普通的 REST 调用者可以:
+
+  - `POST /data/:object` 携带显式单号 → 原样落库,序列被绕过;
+  - `PATCH /data/:object/:id` 携带该字段 → 200 且改写落库,业务单号被篡改。
+
+  这与已修复的 #4447(`created_at` 可被普通 PATCH 伪造)是同一缺陷族。区别在于:
+  声明了 `readonly: true` 的字段早已被 #2948 / #3043 的剥离机制保护,而 `autonumber`
+  字段身上根本没有这个标记,剥离循环从它旁边直接走过去了。
+
+  **修法:在引擎/校验层把 `type: 'autonumber'` 视为隐含 readonly,insert 与 update
+  同权。** 非 system 上下文提交的单号,在派发给任何驱动之前就被剥离:
+
+  - **UPDATE** —— `stripReadonlyFields`(`packages/objectql`)的判定从"作者声明的
+    `readonly: true`"扩展为"作者声明的 **或** 运行时拥有的字段类型"
+    (`isRuntimeOwnedField`,当前恰好只有 `autonumber`)。单行更新与 `multi` 批量更新
+    共用这一个剥离点,因此两条路径同时被覆盖。
+  - **INSERT** —— 引擎新增一个更窄的 `stripRuntimeOwnedFields`,只剥离运行时拥有的
+    字段。它**不**接管作者声明的 `readonly` 在 insert 上的语义:那条防线按 #3413 的
+    设计留在 DataProtocol 入口(#3043),因为 create 确实可能合法地写入只读列,而直接
+    调用 `engine.insert` 的可信内部写入者(身份预置、元数据仓库、事件游标)必须不受影响。
+    单号没有这种两可性 —— 谁都不该在 create 时自带单号。
+
+  剥离发生在引擎里、派发之前,这正是修复**与驱动无关**的原因:声明
+  `supports.autonumber === true` 的 SQL 驱动(持久序列)拿到的行里根本没有这个键,
+  所以它的序列必然胜出 —— 没有任何驱动需要改动一行代码。测试直接断言递交给
+  `driver.create` 的负载,而不是打补丁到驱动上。
+
+  **豁免语义保持不变**,与 update 侧原有的白名单完全一致:
+
+  - `isSystem` 写入(seed 回放、迁移、内部预置)整体跳过剥离;
+  - `preserveAudit`(#3493)的"历史数据导入"仍可写入原始单号 —— 把遗留系统的历史
+    单号迁移进来正是这个白名单存在的业务场景,而 `autonumber` 属于作者声明的业务字段
+    (`system !== true`),恰好落在 `isPreservableUnderAudit` 允许的范围内;
+  - `beforeInsert` / `beforeUpdate` 钩子计算出的值不受影响 —— 只有**调用者提交**的键
+    才是剥离候选。
+
+  **这是一次静默剥离,所以它被上报而不是被吞掉。** 引擎 insert 路径上的
+  `onFieldsDropped`(#3407)此前只是为了与 `update()` 对称而存在、从不触发,并留了一
+  句"若 insert 将来出现静默剥离,必须在剥离点接上监听器"——现在正是那个剥离点。
+  事件沿用既有的 `readonly` 原因码(对调用者而言,隐含只读与声明只读被丢弃的理由完全
+  相同,不值得为一个没有消费者会区分的差别在 `packages/spec` 里分叉词表)。
+  `createManyData` 与 `insertManyData` 也补上了监听器转发:后者保持**逐行精度**——
+  引擎事件是整批的并集,但剥离只会移除**行自身提交过**的键,因此可以准确归属回具体行。
+  导入器优先走的正是 `insertManyData` 这条部分成功路径。
+
+  **与 `strictReadonlyWrites`(#5126 / #5610)叠加。** 该开关是"剥离即拒绝"的进程内出路,
+  本次改动使它自然覆盖单号,两条路径同权:
+
+  - **UPDATE 无需新代码** —— autonumber 限肢走的正是 `stripReadonlyFields` →
+    `reportDroppedFields` → `assertNoStrictDrops` 这条 #5126 已经铺好的接缝,因此 strict
+    开启时,调用者提交的单号与声明 `readonly` 的字段一样被拒绝,整笔写入不落库;
+  - **INSERT 需要接上** —— #5126 当时把该开关在 insert 上留作惰性,并写下条件:"insert
+    一旦有了剥离,两个成员就在那个剥离点一起接上"。本次正是那个剥离点,于是
+    `onFieldsDropped` 与 `strictReadonlyWrites` 一并兑现:默认剥离+上报,strict 开启则在
+    任何驱动调用之前抛 `ERR_READONLY_FIELD_REJECTED`,且**监听器不触发**(被拒绝的写入
+    并未完成,这是 #5126 自己的设计要点)。
+
+  接缝处**没有新增任何策略**:#5126 明确写着 strict "不引入第二套策略,它只是把既有策略
+  报出来",且"剥离拿不走的字段也不会被拒绝"。照此逐字适用,`isSystem` 与 `preserveAudit`
+  两个豁免在 strict 下依旧被接受(它们根本不会走到剥离分支)。
+
+  `ReadonlyFieldRejectedError` 新增可选的 `operation`(默认 `'update'`,#5126 的 UPDATE
+  文案逐字节不变):动词与补救办法确实因操作而异 —— INSERT 的拒绝必然关于运行时拥有的值,
+  其合法写入者是 `isSystem` 与历史导入 `preserveAudit`,而 `readonlyWhen` 在 create 上
+  根本锁不住任何东西。
+
+  **升级影响。** 普通(非历史)导入若把遗留单号列映射到 `autonumber` 字段,该值现在会
+  被丢弃并改由序列发号,同时在响应的 `droppedFields` 里上报、在服务端日志里留下一条
+  带补救办法的 `warn`。要保留原始单号,请把导入标记为历史导入
+  (`treat_as_historical` → `preserveAudit`),这与 #3493 为只读业务字段确立的划分一致。
+
+  `packages/spec` 未改动:`autonumber` builder 是否应当直接注入 `readonly: true` 是
+  spec 层的独立议题,与这条引擎侧防线不冲突。
+
+- bbdbf28: fix(metadata-protocol,objectql): a boot that could not read `sys_metadata` says so at `error`, instead of reporting "no persisted metadata" at debug (#5897)
+
+  `loadMetaFromDb` — the boot step that hydrates `sys_metadata` overlay rows into
+  the SchemaRegistry — returned `{ loaded, errors, invalid }`, and no field in
+  that shape could express **"this hydration never read the store"**. An
+  unreachable database and a genuinely empty one both answered `loaded: 0`.
+
+  Its only production consumer, `ObjectQLPlugin.restoreMetadataFromDb`, therefore
+  had nothing to branch on: its single branch chose between two log lines, and
+  the "nothing came back" side was
+  `logger.debug('No persisted metadata found in database')`. So a kernel that
+  could not read a word of its persisted metadata stated at **debug** level that
+  there was none, and went on to report ready.
+
+  What that costs is not hypothetical — it is written into the plugin's own
+  Phase 2 comment. With the registry empty, `registry.getObject` answers "not
+  declared" where the truth is "we could not look": unknown-column query guards,
+  hooks and relationships silently degrade, and overlay objects get neither a
+  synced table nor a metadata bridge. This is ADR-0110 D3 (an outage is not a
+  miss) on the boot side, after the same rule landed for `DatabaseLoader`
+  (#5108), `listForIndex` (#5089) and the overlay reads (#5532 / #5707).
+
+  **What changed**
+
+  - `loadMetaFromDb` returns `storeUnavailable: boolean`, set on exactly the
+    branch that already prints `[Protocol] DB hydration skipped` — a read that
+    failed for a reason `isMissingTableError` does _not_ call benign. A store
+    that has merely not been provisioned yet (first boot, before migrations)
+    keeps `storeUnavailable: false`, because `loaded: 0` genuinely is the truth
+    there (#5841).
+  - `restoreMetadataFromDb` reads it and logs at **`error`**, naming the
+    consequence (nothing was restored, the kernel keeps reporting healthy, and
+    which capabilities silently degrade) and the fix (check the datasource behind
+    `sys_metadata` — connection, credentials, table existence — then restart).
+    Per AGENTS.md "Degradation log levels": persisted state and runtime state
+    disagreeing while the system still looks healthy is the `error` class. An
+    empty-but-readable store keeps its quiet debug line, so first boots do not
+    start emitting durability errors.
+
+  **Not changed**: control flow. Boot still degrades and continues — refusing to
+  boot on an unreadable overlay store would turn a transient outage into an
+  outright one. What changes is that the degradation is now distinguishable from
+  health, and reported as such.
+
+  **Impact on duck-typed `ProtocolWithDbRestore` implementers**: none required.
+  `ObjectQLPlugin` matches the `protocol` service structurally, and the new field
+  is declared **optional** on its side of the contract, exactly as `invalid`
+  already is. A shim that predates the field keeps type-checking and is read as
+  "not an outage" — the only verdict it was able to express before — so its
+  behaviour is byte-for-byte what it was. The trade-off is deliberate and worth
+  naming: an optional field cannot _force_ a third-party shim to start reporting
+  outages, so such a shim stays as silent as it is today. Requiring the field
+  would have made that impossible to ignore at the cost of breaking every
+  external implementer for a bit only one in-repo producer sets; the in-repo
+  producer (`ObjectStackProtocolImplementation`) declares and returns it
+  **required**, so the path that actually runs in every ObjectStack kernel is
+  fully covered.
+
+- 4335497: fix(objectql): a bulk write blocked by a `previous` hook condition is told it is a VERSION limit, not an authoring mistake (#5037)
+
+  #4775 made an unevaluable hook `condition` abort the operation, and #4861 gave
+  the predicate-bulk-write case its own sentence instead of a raw
+  `Unknown variable: previous`. What that sentence still said was
+  _"rewrite the condition without `previous`, or target the write at one record"_ —
+  written before the maintainer's 2026-08-04 ruling on #4800/#4862, and wrong in
+  its most important claim. The ruling settled the contract: **on a bulk write,
+  after-hooks and record-change flow triggers evaluate and fire per row** (recorded
+  as an ADR-0058 addendum, implemented by #5038). The author's transition condition
+  is legitimate; the engine is what is behind. Telling them to drop `previous` was
+  advising a silent semantic change — a transition ("just became done") becomes a
+  state test ("is done"), which fires on every row that was already done.
+
+  The rejection now says what is actually true:
+
+  - it names the batch and why there is no single prior record to bind, as before;
+  - it states this is a **current-version limitation**, cites the per-row contract
+    (ADR-0058 addendum, #4800/#4862) and the issue that retires the rejection
+    (#5038);
+  - it leads with the route that works today — target the write at one record, and
+    the same condition evaluates as authored — and prices the rewrite instead of
+    recommending it;
+  - it still refuses to point at a record-change flow trigger as a way out, which
+    remains verified rather than assumed: that trigger binds the same lifecycle
+    hooks and receives the same unbound `previous` on a bulk write (#4862).
+
+  **Machine-readable, so a caller never parses the prose.** `HookConditionError`
+  gains `limitation?: 'bulk_write_previous_unbound' |
+'bulk_write_stored_state_unavailable'` (exported as `HookConditionLimitation`)
+  alongside the existing `predicateBulkWrite` flag. It is deliberately _not_ named
+  `code`: ADR-0112 makes `error.code` a closed wire vocabulary
+  (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) and `rest-server.ts` promotes a
+  thrown error's `.code` onto the response envelope, so a `.code` here would mint
+  an unregistered wire code as a side effect. A code that needs to travel goes
+  through the ledger as a decision.
+
+  **"Does this condition read `previous`" is now read off the parsed CEL AST**
+  (`collectCelRootIdentifiers`, the utility #4972's build gate already uses),
+  computed once at wrap time, with the old fault-text check kept as a fallback.
+  The diagnosis no longer depends on cel-js's wording, and it stays correct when
+  the evaluator faults on some other key the same condition reads.
+  `record.previous_status` is not a `previous` reference — the AST reports roots,
+  not member names — so it keeps the declared-field diagnosis, whose remedy is the
+  right one there.
+
+  Unchanged, and pinned by tests: single-record writes (bound `previous`, condition
+  evaluates, handler runs), bulk writes whose conditions do not name `previous`,
+  the plain undeclared-key typo report on a bulk write, and fail-loud itself — the
+  write still fails. Nothing here is an exemption; it is the same rejection with a
+  diagnosis attached.
+
+- 1b49eaf: fix(objectql,spec): app-declared `capabilities` reach the registry with package provenance (#5870, #4967 Part 2)
+
+  An authorization capability a package DEFINES (`defineCapability` →
+  `stack.capabilities`, ADR-0066 D1) never acquired registry provenance, so a
+  declaration that did not repeat its owner by hand was **declared but never
+  enforced**.
+
+  **FROM.** `ObjectQL.registerApp()` decomposes a manifest's metadata arrays and
+  calls `SchemaRegistry.registerItem(type, item, 'name', packageId)` — the only
+  seam that runs `applyProtection(item, { packageId })` and stamps `_packageId` /
+  `_provenance`. The key list driving that decomposition (`metadataArrayKeys`,
+  present twice in `packages/objectql/src/engine.ts`: the manifest seam and the
+  nested-plugin seam) carried every other Security-Protocol collection —
+  `permissions`, `sharingRules`, `roles`, `profiles`, `policies` — but not
+  `capabilities`. The other path a stack's security metadata travels,
+  `AppPlugin` → `MetadataManager.registerInMemory`, stamps nothing by design. So
+  `readDeclared(ql, 'capability')` always returned `[]`, and
+  `bootstrapDeclaredCapabilities` — which resolves the owner as
+  `cap._packageId ?? cap.packageId` — could never satisfy the first half.
+
+  The consequence was a contract that lied in the direction that costs the most:
+  `CapabilityDeclarationSchema.packageId` documents itself as the ADR-0086 D3
+  _fallback_ used "when the registry has not stamped `_packageId`", and the field
+  is `.optional()`, but in practice it was **mandatory**. Omitting it produced one
+  boot `warn` and one authorization grant that silently never took effect —
+  permission sets have rows and materialize, capabilities did not.
+
+  **TO.** `capabilities` is registered through the same provenance seam as
+  `permissions`, at both `metadataArrayKeys` sites, and `capabilities` →
+  `capability` joins `PLURAL_TO_SINGULAR` in `@objectstack/spec` so the items land
+  under the singular type name the seeder reads back (the same mapping
+  `AppPlugin`'s security bridge already used). A capability declared by a package
+  — or by a package's nested plugin — now carries `_packageId` /
+  `_provenance: 'package'`, is listable via `registry.listItems('capability')`,
+  and is seeded into `sys_capability` with `managed_by:'package'` and a real
+  `package_id`.
+
+  **What authors should do.** Nothing is required and nothing breaks: an authored
+  `packageId` still parses and still wins where the registry has not stamped
+  (items registered outside a package context). It is now genuinely optional —
+  drop it and the platform supplies the owner. Where both are present the registry
+  stamp takes precedence, as the schema always said; the showcase's
+  `showcase.export_data` keeps its authored `packageId` and names the same id the
+  stack does, so the two agree.
+
+  This does not change what may be created at runtime: `capability` has no entry
+  in `DEFAULT_METADATA_TYPE_REGISTRY`, and the runtime-create gate reads that
+  registry, not the item store — its verdict for the type is the same before and
+  after.
+
+- 58ffcab: fix(objectql): the dangling-reference audit names the objects a finite row
+  budget never reached, instead of dropping them (#5718)
+
+  `auditDanglingReferences` stops the moment `report.scanned >= maxRows`
+  (default 5 000). Every object behind that stop was never opened — and left no
+  trace in the report at all. Its `dangling: []` was indistinguishable from the
+  `dangling: []` of a table that really was read and really was clean, which is
+  the one reading this module is written to prevent: it already carries
+  `truncatedObjects` (the budget ran out INSIDE a table), `unreadableObjects`
+  (the datasource refused) and `aborted` (#4747, the run was called off), and the
+  module header says outright that together they are what stops `0 dangling` from
+  being read as `everything is fine`. Object-level budget exhaustion was the one
+  incompleteness path with no bucket of its own.
+
+  | Key                          | Means                                                                                                              |
+  | :--------------------------- | :----------------------------------------------------------------------------------------------------------------- |
+  | `unscannedObjects: string[]` | objects this run never opened — the overall row budget was gone before their turn, or the run was called off first |
+
+  Notes on the shape:
+
+  - **Names, in scan order** (the `prioritise` tiers), so a caller can feed them
+    straight back as `options.objects` to finish the picture on a second run.
+  - **Optional in the type, always set at runtime** — same contract as `aborted`
+    and #4743's `provenance`: a hand-written report literal (a test double) still
+    compiles, while every report this module produces states the key explicitly,
+    `[]` included. `undefined` therefore never has to be guessed at; it can only
+    mean "a report shape that predates the key", never "complete".
+  - **Two things are deliberately absent from it.** Objects with no reference
+    field at all (nothing referential can break on them, so their silence is
+    proven rather than assumed) and objects the caller excluded via
+    `options.objects` (that is the caller's own narrowing, not the audit missing
+    something).
+  - **It does not raise the summary warning on its own**, exactly like
+    `truncatedObjects` and for the reason #4747 wrote down: a large database
+    exhausts a finite budget on every healthy run, and an alarm that always fires
+    trains its reader past the run that had a real finding. It rides itemised in
+    the warning payload and is always in the returned report.
+
+  #4743 did not cause this — it made it easy to reach. Admitting the provenance
+  family means nearly every object now has an auditable field, so a bounded run
+  spreads the same budget over far more tables and hits the stop sooner. The
+  three-tier scan order that shipped with it decides WHO gets a finite budget;
+  this bucket reports who got none. Only the second one can make a bounded run
+  honest.
+
+- eda599e: fix(platform-objects): 超预算后台 seed 期间不再空库自证 —— 一次启动不再跑两套契约
+
+  #4769 已把 ADR-0104 的空库自证从 `kernel:ready` 挪到 `app:seeded`(本次启动自身数据的结算点),但保留 `kernel:ready` 作为「从不 seed 的内核」的兜底。剩下的窗口是这两个钩子**到达顺序可以颠倒**:`AppPlugin` 的 inline seed 超出软预算(`OS_INLINE_SEED_BUDGET_MS`,默认 8s)后转入后台,于是 `kernel:ready` 先到、兜底自证在 seed 仍在写的时候签发证书并把闸门翻到 strict——同一次 seed 运行的后半段撞上前半段从未见过的契约。showcase 冷启(`OS_INLINE_SEED_BUDGET_MS=1`)实测:自证发生在 +0.470s,seed 结算在 +3.617s,窗口 3.147s。
+
+  现在两个钩子都先问一句「本次启动自己的 seed 落定了吗」,任一处报告仍有未结算的 seed 源就不签发。`app:seeded` 同样受这道检查约束——多 config app 的 bundle 会每个 app 触发一次,第一次并不是本次启动的结算点。
+
+  新增 `seed-settlement` 契约(`@objectstack/spec/contracts`)承载这个信号,而不是让 platform-objects 去嗅 runtime 内部的 `seed-datasets` 服务:那个数组的存在只能说明「seed 源存在」,永远说明不了「已经落定」,而这两件事之间的差正是本 bug 的整个窗口。runtime 在选择分支之前先声明 seed 源,并在写入真正结束的同一刻结算它。
+
+  **multi-tenant 与 `skipSeedData` 的 ADR-0104 姿态(2026-08-06 裁定,#4795)**:这两种部署会注册 seed 数据但在启动时并不写入(前者按 org 在 `sys_organization` insert 时重放,后者是 `os migrate` 的只读规划启动,#3917),`app:seeded` 永不触发。它们的姿态是**启动时不自证,等 `os migrate … --apply` 在真实扫描的证据上落笔**——由同一个判据自然得出,不需要单独分支。这是答案而不是缺口:在启动那一刻断言一次尚未发生的 per-org 重放不含违规值,正是 #4769 的同一个错误、只是引信更长;而停在 warn-first 是可恢复的方向,随时可由 `os migrate value-shapes --apply` / `os migrate files-to-references --apply` 关闭。
+
+  `@objectstack/objectql` 侧只更新了 #4769 撤销机制的注释:「后台 seed 收尾晚于签发」不再是它要兜的场景(已在源头关闭),它对 `os dev` 热重载 seeder、运行期 marketplace 安装以及 lax 开关仍然有效。
+
+- 2b63a00: fix(objectql): a re-registered driver stops crying wolf, and a real name collision starts saying what it cost (#4773)
+
+  Every boot printed one line into `⚠ Boot diagnostics`:
+
+  ```
+  WARN Driver already registered, skipping {"driverName":"com.objectstack.driver.sql"}
+  ```
+
+  It was never an anomaly. The standalone `default` datasource is registered
+  twice, on two legs of one round trip, and traced end to end it is the **same
+  object instance** both times:
+
+  1. `DatasourceConnectionService.attemptConnect()` builds the default driver and
+     registers it (`isDefault: true`), driven by `DefaultDatasourcePlugin.init()`;
+  2. that plugin republishes the instance it just read back out of the engine as
+     the `driver.<name>` kernel service — the surface `os migrate` and serve's
+     storage detection resolve the primary DB through — and
+     `ObjectQLPlugin.start()`'s `driver.*` discovery loop bridges every such
+     service into the engine, handing back the driver it already holds.
+
+  Nothing is decided and nothing is discarded, so `registerDriver` now reports
+  that at `debug`. A no-anomaly line on every single boot does not belong at
+  `warn`; it only teaches operators that `warn` means nothing.
+
+  The reason this is not a blanket downgrade: the same `warn` also covered the
+  case that genuinely matters — **two different driver instances claiming one
+  name**, where "skipping" silently drops one of two configurations (connection
+  string, pool, tenant scoping, capability set) while every query bound to that
+  name keeps working against the winner. The two are now told apart by object
+  identity:
+
+  - **same instance** → `debug`, nothing happened;
+  - **different instance under a held name** → still `warn`, now naming which
+    configuration was KEPT and which was DISCARDED (with both versions) so the
+    operator can tell what is actually in force;
+  - **same instance re-registered with `isDefault` while another driver holds
+    that role** → `warn`, because the caller's intent is otherwise dropped in
+    silence.
+
+  Registration behaviour is unchanged in all three cases — first registration
+  still wins. Only which of them is worth an operator's attention changed.
+
+- afb83d3: `ObjectQL.update` 的三分支派发抽成生产者侧唯一判定 `engine-update-dispatch.ts`
+
+  `delete` 的派发决策自 #4550 起就是一份共享判定(`resolveEngineDeleteDispatch`),任何顶替引擎的测试替身都能 import 它,因此结构上不可能比引擎更宽松。`update` 的同款三分支——标量 `where.id` → 按 id;`options.multi` → `driver.updateMany`;否则抛错——此前只是 `engine.ts` 里的一个内联字面量 throw,既没有导出的常量也没有可复用的函数。后果不是理论上的:#5393 给 flow 的 `update_record` / `delete_record` 补真实契约测试时,delete 侧能把假引擎钉死在生产者契约上,update 侧只能退而断言执行器交出的 options 包,并在文件头写明「不对引擎会不会接受它发表第二份意见」——因为唯一的替代做法是在 fake 里手抄一遍判定,而手抄必然漏掉 `where: { id: { $in: [...] } }` 看着像 id 实为谓词这一半(#4434 正是这样带着全绿的测试发布了一条对每个调用者都回 500 的路由)。同一个执行器的两个写入动词,一个能被绑定到生产者契约、另一个结构上不能,而谓词 update 的破坏性并不低——它覆盖每一行匹配记录的字段。
+
+  本次新增:
+
+  - `packages/objectql/src/engine-update-dispatch.ts`,导出 `resolveEngineUpdateDispatch` / `assertEngineUpdateDispatch` / `scalarUpdateId` / `ENGINE_UPDATE_REJECT_MESSAGE` / `ENGINE_UPDATE_DISPATCH_CASES`,均从 `@objectstack/objectql` 公开导出;
+  - `ObjectQL.update` **自身改用它**——生产者与判定必须是同一份,否则只是第二份副本。
+
+  这是**行为保持的重构**:三分支语义、`$in` 谓词判定、拒绝消息文本一字未改(`Update requires an ID or options.multi=true`,现在是导出常量 `ENGINE_UPDATE_REJECT_MESSAGE`)。判定里有两处刻意照抄而非「改良」了生产者的现状,并在模块头与测试中写明:
+
+  1. `data.id` **不做标量测试**,只要为真就直接作为 id,且优先于 `where` 与 `multi`;
+  2. 分支按**真值**而非 `!== undefined`,所以 `where: { id: 0 }` 不走按 id 路径。
+
+  比生产者更「聪明」的判定就是第二份意见,正是 #4550 消除的东西;这两点该改的时候会在两个文件里一起改,现在那是一次编辑而不是两次。
+
+  新测试 `engine-update-dispatch.test.ts` 不去对照写在旁边的期望表,而是用记录型 driver 驱动**真实引擎**跑完 `ENGINE_UPDATE_DISPATCH_CASES`,逐例断言引擎的实际行为等于判定的裁决——两半唯一同处一室的地方。
+
+- 290d944: fix(objectql): the hook layer logs through the `Logger` contract instead of a local dialect (#5637)
+
+  `packages/spec/src/contracts/logger.ts` declares `error(message, error?: Error,
+meta?)` — the `Error` slot is **second**, the meta bag **third**. Both hook
+  modules declared their own four-method logger shape instead, and that shape
+  spelled `error` as `(msg, meta?)`, so every call site put its diagnostic in the
+  `Error` slot.
+
+  Nothing caught it. The contract's type satisfies the local shape structurally
+  (a function of fewer parameters is assignable, and `any` is compatible both
+  ways), so `tsc` never spoke; and the implementation the platform injects today,
+  `ObjectLogger`, dispatches its second argument **by shape**
+  (`errorOrMeta instanceof Error`), so the meta landed anyway. That tolerance is
+  not something the contract declares. Its two sibling implementations —
+  `ConsoleLogger` / `JsonLogger` in `@objectstack/observability` — follow the
+  contract literally: the meta object lands in the `error` slot, `error.message`
+  and `error.stack` read `undefined`, `meta` **is** `undefined`, and the whole
+  diagnostic evaporates, leaving a bare sentence. The first host to plug a
+  faithful structured logger into `ctx.logger` would have lost the fields of every
+  hook diagnostic, with a symptom ("the log has fewer fields than it used to")
+  that is close to unattributable.
+
+  So the dialect is gone rather than being met halfway (Prime Directive #12 — one
+  contract, no consumer-side dialects):
+
+  - `WrapDeclarativeOptions.logger` and `BindHooksOptions.logger` are now
+    `HookDiagnosticsLogger` = `Pick<Logger, 'debug' | 'info' | 'warn' | 'error'>`,
+    taken from `@objectstack/spec/contracts` — the four levels this layer calls,
+    and nothing more.
+  - All four `error(...)` call sites pass the meta in the contract's third
+    parameter (`error(msg, undefined, { … })`). The values in hand at each site
+    are a `CelFault` (`{ kind, message }`) or a `catch` binding of type `unknown`,
+    none of them statically an `Error`, so the `Error` slot stays empty and each
+    message is carried in meta exactly as before.
+
+  `debug`/`info`/`warn` already matched the contract and are unchanged.
+
+  No behaviour change for hosts on `ObjectLogger` (the default, and what
+  `ctx.logger` / `engine.logger` supply): it accepts all three shapes since #5575,
+  so an empty `Error` slot renders the same record it rendered before. Callers
+  passing a full `Logger` are unaffected — a `Logger` satisfies the narrowed type
+  unchanged. A caller that hand-rolled a four-method object still satisfies it too,
+  as long as its `error` does not _require_ a meta object in the second position;
+  if yours does, move that parameter to third — the contract's order is now the
+  one the hook layer calls with.
+
+- 7f1a635: fix(lint,spec,objectql): 编写期表达式与 `highlightFields` 校验识别注册表注入的系统列 (#5378)
+
+  平台在每个业务对象上注入 `owner_id` / `created_at` / `organization_id` 等系统列,
+  文档也把 `ownership: 'user'` 写作 "injects reassignable owner_id"。但编写期的两处
+  校验只读**作者声明的** `fields`,于是注入列一律当作不存在:
+
+  - `validate-expressions.ts` 的 `buildFieldIndex` 让 `has(record.owner_id)` 直接
+    报错 `unknown field owner_id`;
+  - `highlightFields` 存在性检查对 `['owner_id']` 发出 "is not a field on this
+    object — it is silently skipped by every consumer"。
+
+  也就是平台自己的 linter 否认平台自己的契约。结果是应用被迫**重声明系统列**才能通过
+  编写期校验:hotcrm#548 为此在全部 12 个业务对象上显式声明了 `owner_id`(6 个对象曾
+  报 `highlightFields` 警告,`contact_welcome` 触发器的 `has(record.owner_id)` 被硬
+  拒)。这正是本项目视为缺陷的形状:能力已声明(列确实注入且有文档),但执行层不认。
+
+  **权威来源只有一份。** 新增纯派生 `resolveInjectedSystemColumns()`
+  (`@objectstack/spec/data`)回答"这个对象带哪些系统列",并由 registry 的
+  `applySystemFields()` **消费**它——沿用 #3786 为审计字段族确立的分工:spec 声明
+  **有哪些**列,registry 拥有**每列长什么样**。lint 通过同一派生取答案,因此编写期
+  判断与运行时注入不可能不一致(`@objectstack/lint` 的包契约是"只依赖 spec,绝不依赖
+  运行时",此前它根本无法读到权威)。两个消费面共用同一判定,不各写一份。
+
+  **并入是按对象有条件的**,不是无条件放行整张系统列名单:`ownership: 'org' | 'none'`
+  的对象没有 `owner_id`,那里的 `record.owner_id` 仍然是真错误并继续报;
+  `tenancy.enabled: false` 无 `organization_id`;`systemFields: { audit: false }` 无
+  审计四列;`systemFields: false` / `managedBy: 'better-auth'` 什么都不注入(只剩驱动
+  提供的主键 `id`)。真正拼错的字段照旧被拒,并且注入列现在也进入 "did you mean?" 候选
+  (`record.ownerid` → 提示 `owner_id`)。
+
+  被解析的注入列在诊断与补全语义上与授权字段等同;类型健全性与 null-guard 两个索引
+  **刻意**仍只读声明字段,原因写在各自注释里:列的 `type` 与可空性属于 registry 的列
+  定义,在 lint 侧另立一份就是本次要消灭的第二份副本,而 null-guard 喂的是会中断构建的
+  判定,擅自并入会让今天能构建的 stack 变红。
+
+  注入行为本身零改动:`applySystemFields` 的输出在全条件矩阵上逐列不变(新增 parity
+  pin 用实跑注入代码比对)。已显式重声明系统列的应用不受影响——重声明仍然合法,
+  examples 三个 app 的 `os validate` 输出改动前后完全一致。
+
+- 1eadac0: lifecycle: the Archiver's batch loop now honours the teardown abort bit (#4747)
+
+  `LifecycleService.stop()` raises an abort bit that the sweep checks at each leg
+  boundary — between objects, and (since #5753) between reap pages. The Archiver's
+  own batch loop did not check it, so teardown landing mid-archive still ran the
+  remaining batches out: up to 20 × 500 rows of `find` + per-row `upsert` +
+  `bulkDelete` issued across two datasources the host is already closing.
+
+  It now breaks at the batch boundary like the reap loop does. The "hot-delete only
+  what the cold store took" safety rule is unaffected: the batch in flight finishes
+  its `upsert` → `bulkDelete` pair, and batches not yet begun are left for the next
+  sweep to re-read.
+
+  Not reachable in any of today's deployments — the Archiver only engages once an
+  object declares `archive` with a provisioned cold datasource, and no platform
+  object does. This is prevention for the first deployment that declares one.
+
+- 9b26699: fix(objectql): bound every lifecycle reap, not just the guarded ones
+
+  `LifecycleService.reap()` issued a single unlimited `delete(..., { multi: true })`
+  per sweep for any object without a registered reap guard — no limit, no paging.
+  Batching existed only on the two side paths (`guardedReap` and the Archiver,
+  both 500 × 20 per sweep), whose comment gives the reason plainly: "bound one
+  sweep's work, drain the backlog across sweeps". That reason never depended on a
+  guard being registered.
+
+  Steady state was fine — an hourly sweep deletes a small increment. The cost
+  landed exactly once per table, on the first sweep after `retention` is declared
+  on a table that already holds history: one DELETE scanning every historical row,
+  which on SQLite holds the whole database's write lock for its duration and on
+  Postgres arrives later as autovacuum debt.
+
+  Unguarded reaps now run the same batched machinery the guarded ones do — an
+  object with no guard is simply the empty guard intersection, which confirms
+  every candidate row — so there is one reap path rather than two parallel ones.
+  Candidates are read a page at a time and deleted by id, at most 500 × 20 rows
+  per object per sweep, with the remainder draining on later sweeps. Cutoff and
+  `retention.onlyWhen` predicates are unchanged; they now select the candidate
+  read. The sweep report's `deleted` count reflects rows actually deleted this
+  sweep.
+
+  Two consequences worth knowing:
+
+  - A reap fires one `afterDelete` hook per reaped row instead of one per object
+    per sweep. Every lifecycle-declaring platform object is in the audit writer's
+    `SKIP_OBJECTS`, and `sys_file` already reaped per id via its guards, so no
+    object in the platform changes its audit output.
+  - An engine that does not implement `find` cannot page and keeps the previous
+    single bulk DELETE, so retention enforcement never silently stops on it. Every
+    real engine implements `find`.
+
+- 1c625ca: metadata: `getDiagnosed` — a metadata read that FAILED stops arriving as "nobody declared this"
+
+  `MetadataManager.loadDiagnosed` computes the ADR-0110 D3 verdict (a MISS and an OUTAGE
+  are different facts with opposite security meanings) and `get()` discarded it two hops
+  later: `load()` kept only `.data`, `get()` turned that `null` into `undefined`. Every
+  consumer of `get()` therefore received one `undefined` for two opposite facts and could
+  not have told them apart even if it had wanted to.
+
+  **New read.** `MetadataManager.getDiagnosed(type, name)` returns
+  `{ data, degraded, errors }` — the registry-first counterpart of `loadDiagnosed`, declared
+  as an optional member of `IMetadataService`. A registry hit is never degraded (it
+  consulted no loader); a clean miss is never degraded (every loader answered).
+
+  **`get()` is unchanged — zero breaking.** Same signature, same answer, same behaviour for
+  every existing caller, including the microtask-level ordering `register()`'s watchers
+  depend on. Only callers that ASK for the verdict pay for it. Making `get()` throw on
+  `degraded` was deliberately not done: the boot path degrades on purpose.
+
+  **Consumers switched**, each with a disposition argued for its own context rather than one
+  blanket rule:
+
+  - `getMetaItem` / `getMetaItemCached` — a degraded MetadataService read with nothing in
+    the registry now raises `503 SERVICE_UNAVAILABLE` instead of falling through to
+    `404 RESOURCE_NOT_FOUND`. This is the half that made the existing `#5532` comment ("
+    reaching here now means a real miss") untrue.
+  - `getMetaItemLayered` — the `code` layer joins the rule its `overlay` layer already
+    followed. `code: null` is a positive claim, and `lockSource = code ?? overlay ?? {}`
+    derives from it, so an outage could render an item the packager locked
+    (`_lock: 'full'`) as `editable: true, deletable: true`.
+  - `ObjectQLPlugin`'s `object` metadata-event refresh — logs `warn` naming the consequence
+    (the registry keeps the previous definition; nothing retries) and the fix, instead of
+    `debug` "metadata service has no fresh body". `warn` and not `error` because the write
+    already landed; only a re-read failed.
+
+  Hosts whose `metadata` slot is a shim that predates `getDiagnosed` are read as
+  "not degraded" — exactly what they could express before — so their behaviour is unchanged.
+
+- 1cae606: fix(objectql): resolve the `NOW()` defaultValue token in the engine, so it works on every datasource (#4597)
+
+  `Field.datetime({ defaultValue: 'NOW()' })` only ever worked on SQL. The engine's
+  `applyFieldDefaults` special-cased exactly two `defaultValue` shapes — the
+  Expression envelope and the `current_user` token — and passed everything else
+  through verbatim, so the four characters `NOW()` were written into the record as
+  a **literal string**. The SQL driver hid that: `SqlDriver.formatInput` carries an
+  insert-time safety net that swaps any `NOW()` string for a real ISO timestamp
+  before it hits the wire. Memory and MongoDB have no such net.
+
+  This is the mirror image of #4560. There, `current_user` was known to the engine
+  and not to the DDL, so the DDL stored the token text. Here, `NOW()` was known to
+  the SQL driver and not to the engine — same crack, opposite side. It surfaced two
+  ways:
+
+  - On a **validated** field the insert was **rejected outright**, by the engine's
+    own write validator, against a value the engine itself had just filled in:
+    `ValidationError: … must be a valid datetime (ISO-8601)`. Every insert omitting
+    such a field failed, with an error naming a field the caller never sent.
+  - On a `readonly` / `system` field — which `validateRecord` skips, i.e. the ~100
+    `created_at` / `updated_at` declarations across the platform objects — nothing
+    was rejected at all and the string `NOW()` was **stored**.
+
+  `applyFieldDefaults` now resolves the token itself, from the same per-insert
+  `now` snapshot it already passes to Expression defaults, so every field defaulted
+  in one insert (and every row of one batch) carries the identical instant. The
+  spelling it matches is the spec's (`isNowDefaultToken` from
+  `@objectstack/spec/data`, case-insensitive and whitespace tolerant), the same
+  predicate a driver's DDL consults — the engine does not re-derive its own.
+
+  The token resolves into the shape the field's **declared type** stores, which is
+  what `SqlDriver.nowColumnDefault` already emits per type (ADR-0053), so no
+  datasource disagrees about the stored form:
+
+  | field type                                          | stored value                                                |
+  | --------------------------------------------------- | ----------------------------------------------------------- |
+  | `date`                                              | `YYYY-MM-DD` (UTC calendar day)                             |
+  | `time`                                              | `HH:MM:SS[.fff]` (UTC wall clock; a zero `.000` is trimmed) |
+  | `datetime`, and any non-temporal field that opts in | `YYYY-MM-DDTHH:MM:SS.sssZ`                                  |
+
+  No authoring change: `defaultValue: 'NOW()'` is the same declaration it always
+  was, and a caller-supplied value is still never overwritten. What changes is that
+  it now means the same thing on memory and MongoDB as it always did on SQL.
+  Records written on a non-SQL datasource before this fix may hold the literal
+  string `NOW()` in those columns; they are not rewritten.
+
+  Both driver-side mechanisms stay, unchanged, as defence in depth: `formatInput`'s
+  safety net (now unreachable from the engine's insert path) and the native column
+  DEFAULT, which still serves writes that bypass the engine entirely — the same
+  division of labour `current_user` has.
+
+- b9cc17d: chore(objectql): retire `applyFormulaPlan`'s zero-caller `nowSnapshot` parameter and narrow its docstring to what actually holds (#5699)
+
+  `applyFormulaPlan` declared a fourth optional parameter `nowSnapshot?: Date`
+  whose only effect was `nowSnapshot ?? new Date()`. Not one of its three call
+  sites ever passed it — `find`, `findOne`, and the write-response hydration
+  `hydrateWriteFormulas` added by #5504 — so the parameter went down the
+  `new Date()` branch from birth. Dormant code, removed rather than archived: a
+  parameter that looks live is worse than no parameter, because everyone
+  reasoning from it concludes the caller can pin the instant, and one caller
+  plainly should have.
+
+  No behaviour change (the removed branch was unreachable), no public API change
+  (`applyFormulaPlan` is module-private and never exported).
+
+  The docstring claimed the eval context "mirrors `applyFieldDefaults`". Half of
+  that was true — the same keys, so `formula` and `defaultValue` expressions share
+  one vocabulary — and half was not: the two pin their own `now`.
+  `applyFieldDefaults` is handed the insert's pre-write snapshot, while
+  `applyFormulaPlan` reads the clock once per call, because a formula is evaluated
+  when a record is materialized. So inside one `insert` a `NOW()` default and a
+  `now()` formula observe two instants a driver round-trip apart (sub-millisecond
+  in practice; across a second/day boundary they can land on different calendar
+  days). The docstring now says so, and names #5699 as where making them share one
+  instant would have to be argued — it would hand the write path a determinism
+  guarantee the read path cannot have, which is a semantic decision, not a cleanup.
+
+  Adds the pins that the retired parameter's _appearance_ was standing in for
+  (`engine-write-formula-hydration.test.ts`): one snapshot per call shared by every
+  row × every formula field, asserted by object identity on the eval context so a
+  per-evaluation `new Date()` fails even when the milliseconds agree, on the write
+  path and the read path alike; plus a tripwire that the default's instant and the
+  formula's instant stay independently sourced.
+
+- 0d24078: fix(objectql): `wantOwner` 由排除式改为正面清单,并注入 `owning_business_unit_id`(ADR-0117 D1,#5677)
+
+  `applySystemFields` 判定是否注入 `owner_id` 的 `wantOwner` 原本是**排除式**的
+  (`ownership !== 'org' && ownership !== 'none'`):只有两个值被排除,任何第四个
+  `ownership` 值都会掉进默认分支、照常被盖上 `owner_id`。这与 ADR-0117 D1 的表格
+  **恰好相反**——新增的 `business_unit` 档的全部含义就是「归属于组织单元而非个人」
+  (`owner_id` ❌、`owning_business_unit_id` ✅)。#4611 的一次性探针已实测确认过这个
+  反向结果。
+
+  **翻面。** 判定改为正面清单 `ownership === undefined || ownership === 'user'`
+  (`managedBy` 平台表与 `sys_` 命名空间的跳过规则不变)。对今天存在的三个值
+  **行为完全不变**:`undefined`/`user` 照常注入,`org`/`none` 照常排除;唯一的变化是
+  新档位不再靠「落进默认分支」继承 owner 语义。这是先决单点:先翻面,枚举扩展
+  (#5678)才是安全的。
+
+  **注入 `owning_business_unit_id`。** 记录级组织单元归属(lookup → `sys_business_unit`),
+  按 D1 表格覆盖 `undefined`/`user`/`business_unit` 三档,`org`/`none` 不注入。
+
+  | `ownership`          | `owner_id` | `owning_business_unit_id` |
+  | -------------------- | ---------- | ------------------------- |
+  | `undefined` / `user` | ✅         | ✅                        |
+  | `business_unit`      | ❌         | ✅                        |
+  | `org` / `none`       | ❌         | ❌                        |
+
+  **用户可见的行为变化**:声明 `ownership: 'business_unit'` 的对象此前会被误注入
+  `owner_id`,现在改为注入 `owning_business_unit_id`。(该值今天仍被 `ObjectSchema`
+  的枚举拒收 —— 枚举扩展在 #5678,严格后置于本单;所以本次发布中这条路径只有
+  引擎侧就绪,尚无法从元数据声明触达。)
+
+  列的形态比照 `organization_id`(服务端盖章的作用域锚点)而非 `owner_id`(用户可指派
+  的业务字段):`readonly: true` + `hidden: true` + `required: false`,不建索引。三者
+  都**不预设** ADR-0117 D2 尚未裁定的盖章策略(`pinned`/`follow_owner`/`transferable`)
+  ——它们不授予任何能力,因此 D2 的每种结论都仍然可达;盖章中间件(D2/D4)与回填
+  (D8)落地前,该列被提供但处于惰性状态(恒为 NULL)。
+
+  `packages/spec` 未改动:`SystemFieldName.OWNING_BUSINESS_UNIT_ID` 的 JSDoc 与
+  `object.zod.ts` 的描述同步在 #5767。该名早已在公开表单 server-managed 拒收名单上
+  (#4611 提前登记),因此新列从第一天起就不可由匿名面客户端提供。
+
+- 2ddba89: fix(tenancy): eight sites answered "is this deployment multi-org?" with the demoted `OS_MULTI_ORG_ENABLED` (#5262)
+
+  ADR-0105 D1 made `OS_TENANCY_POSTURE` the authoritative knob and demoted
+  `OS_MULTI_ORG_ENABLED` to a back-compat _input_ of `resolveTenancyPosture()`.
+  A deployment configured the documented way — `OS_TENANCY_POSTURE=isolated` (or
+  `group`), legacy boolean unset — therefore reads `false` from
+  `resolveMultiOrgEnabled()` while running a fully mounted organization wall.
+  #5233 corrected two sites in `plugin-auth`; a census found eight more, all
+  written before that function's doc comment was corrected. Third recurrence of
+  the shape (cloud#1020, #5233).
+
+  Each site was judged separately for **which** posture answers its question —
+  what the operator REQUESTED, or what the `tenancy` service reports is actually
+  IN FORCE — rather than converted mechanically:
+
+  - `objectql` `SchemaRegistry` — the env-derived multi-tenant default. Reads the
+    REQUESTED posture (it is constructed below the kernel, with no service
+    registry to ask). The `organization_id` column was always provisioned; what
+    diverged is its INDEX, so a posture-only deployment ran the Layer 0 wall's
+    hottest predicate unindexed while SecurityPlugin compiled that same wall.
+  - `plugin-dev` — whether to load the enterprise `@objectstack/organizations`.
+    REQUESTED posture, mirroring `serve.ts`: this branch is what mounts the wall,
+    so asking whether the wall is up would be circular. A posture-only dev stack
+    previously never loaded the package at all and served traffic unwalled. Its
+    diagnostic now names the posture that was requested instead of asserting
+    `OS_MULTI_ORG_ENABLED=true` at an operator who never set it.
+  - `runtime` `AppPlugin` (inline seed + hot-reload seeder) — EFFECTIVE posture,
+    via the `tenancy` service. These ask "will the per-org replay run instead of
+    me?", and on an ADR-0093 D5 degraded boot that replay does not exist, so
+    keying on the request would defer to a replay that can never happen. Walled
+    deployments previously inline-seeded exactly the NULL-organization rows the
+    code's own comment exists to avoid.
+  - `cloud-connection` marketplace local install (install-time seed + rehydrate
+    heal) — EFFECTIVE posture, same reasoning. The install path is a write path:
+    a walled deployment wrote every sample row with no `organization_id`, landing
+    the app's data outside the wall its own reads apply.
+  - `driver-sql` `isMultiTenantMode()` — REQUESTED posture (a driver has no
+    kernel to ask, and a suppressed warning is the costlier error for a
+    diagnostic). It also no longer memoises into `_multiTenantMode`: that froze a
+    process-level fact into a per-instance verdict on whichever write landed
+    first. The gate now resolves live, which is affordable because
+    `auditMissingTenant` consults it only after the `tenantId` early-out.
+  - `cli` `os verify` — REQUESTED posture. This one produced a green verification
+    run over an unverified property: a posture-only deployment silently skipped
+    every multi-tenant proof and exited 0.
+
+  **No configuration change is needed anywhere.** Deployments setting only
+  `OS_MULTI_ORG_ENABLED=true` keep working unchanged — `resolveTenancyPosture()`
+  falls back to it — and the `OS_TENANCY_POSTURE=isolated` + `OS_MULTI_ORG_ENABLED=true`
+  belt-and-braces configuration stays valid. Deployments that set only
+  `OS_TENANCY_POSTURE` can now drop the redundant boolean. Single-org behaviour is
+  unchanged at every site; only the knob each one reads is corrected.
+
+- 37a8f2b: fix(objectql): the static-`readonly` write strip now logs its consequence and its remedy
+
+  Writing a `readonly: true` column from server-side code — a cron job or background
+  task reaching the engine through `ctx.getService('data')` — dropped the value and
+  reported success. The only trace was:
+
+  ```
+  WARN Field 'work_duration' is read-only — ignoring incoming change (#2948)
+  ```
+
+  which says what the engine did, not what it cost the caller or how to fix it. The
+  downstream symptom is a field that persists fine through every REST path and never
+  persists from cron (os-project-titanwind-ehr#750), which reads as "cron is broken"
+  rather than "the value was stripped". The strip now names the object, states that
+  the update was **committed without the field**, and carries both remedies: trusted
+  server code declares itself with `{ context: { isSystem: true } }`, and any caller
+  can detect drops programmatically with `options.onFieldsDropped` (the machine-readable
+  strip signal that has existed since #3407 — one event per strip pass, with `fields`
+  and `reason`).
+
+  The level stays `warn`, deliberately: this seam cannot distinguish a hostile REST
+  body forging `created_by` from trusted server code, because `ExecutionContext`
+  carries no origin marker and `isSystem` — the only trust bit — is precisely the
+  exemption. `error` would make the error log client-triggerable; `debug` would restore
+  the silent drop.
+
+  Behaviour is unchanged: what is stripped, what survives, and what `onFieldsDropped`
+  reports are all identical. Documented in the [security protocol
+  page](/docs/protocol/objectql/security) — strip condition, the caller-supplied-keys
+  scope, why a `beforeUpdate` hook's backfill is exempt (the key snapshot is taken at
+  engine entry, before hooks run), and the `isSystem` convention for plugin writes —
+  and pinned in `engine-readonly-strip-signal.test.ts`.
+
+- 2680cd3: fix(objectql): `seedAutonumber` 把非「表未建」的读故障上抛,不再从 0 重发自增号 (#5979)
+
+  引擎在 driver 不自带自增序列时,走 fallback 路径:先从库里读 `MAX(existing)`
+  给内存计数器播种,再自增发号。这次播种读此前挂在一个裸 `} catch { return 0; }`
+  后面 —— **所有**失败(连接断开、超时、权限拒绝、查询错误)都被答成跟「表里真的
+  一行都没有」完全相同的 `0`。
+
+  这两件事是相反的事实(ADR-0110 D3),在这里混淆是 #4728 / #4825 / #5108 同族里
+  代价最高的一支:对一张已经有 N 行的表,一次抖动的读就让序列从 1 重新开始,发出
+  与既有行**相撞**的自增号。插入是**成功**的,一行日志都没有,而撞号落在业务标识符
+  上 —— 一个写错了的值,重试修不好,重启也修不好。危险本身早就写在那个读上方的
+  注释里(#4371:"the catch below would have swallowed the guard's rejection into
+  'seed from 0', i.e. duplicate autonumbers");当时读被修了,catch 没有。
+
+  现在按错误**类型**判别,问的是共享谓词 `isMissingTableError`
+  (`@objectstack/metadata/errors`,#4825),而不是手抄一份 `code === '42P01'`:
+
+  - **表尚未 provision** → 仍旧从 0 起号。库里确实没有行,1 号不会撞到任何东西,
+    这是唯一良性的失败原因,行为与此前完全一致。
+  - **其余任何读故障** → 原样上抛,**不发号、不写入**。行没被看见不等于行不存在,
+    所以引擎拒绝用一份自己从没读到的数据去推算号段。
+
+  **行为变化(升级须知)**:自增字段所在对象的写入,在存储读故障期间会**失败**,
+  而不再像以前那样"成功"并写入一个可能撞号的编号。这是有意的 —— 一次响亮的失败
+  可以重试,一个静默写错的业务编号不能。故障恢复后下一次插入会重新播种并从真实的
+  `MAX(existing)` 继续(失败的播种不会污染内存计数器)。
+
+- db2ea82: fix(objectql): a single-record `delete()` binds `hookContext.previous` — the pre-image the contract has always promised (#5272)
+
+  `HookContext.previous` is documented in the spec as _"the state of the record
+  BEFORE the operation (**for update/delete**)"_, and `update()` has bound it all
+  along. `delete()` never did. `previous` was `undefined` in **both**
+  `beforeDelete` and `afterDelete`, for every single-record delete, on every
+  object.
+
+  That is not a cosmetic gap. Since #4775 a condition that cannot be evaluated
+  **fails the operation**, so a legal, contract-shaped delete-side hook:
+
+  ```ts
+  { events: ['afterDelete'], condition: "previous.status == 'done'" }
+  ```
+
+  rejected _every_ single-record delete of that object — and reported it through
+  the generic branch (`Unknown variable: previous`), which reads like the author
+  misspelled a key. The key was fine; the engine never bound it. Same shape as
+  #5037: a platform gap surfacing as the author's mistake.
+
+  **Why now.** #5038 made a predicate bulk delete dispatch `afterDelete` once per
+  matched row, each carrying that row's own pre-image. The single-record path
+  still bound nothing, so it became strictly _worse_ than the bulk path — the
+  exact inversion the #4800/#4862 ruling ("an author writes the hook once; single
+  and bulk mean the same thing") exists to prevent.
+
+  **What changed.** `delete()` now takes the doomed row's pre-image once, before
+  `beforeDelete` fires, and binds it to `hookContext.previous` for both phases —
+  so hook `condition`s, record-change flow triggers and delete-audit handlers all
+  see the deleted row. The read is demand-driven, exactly like `update()`'s: it
+  happens only when the object has a delete-side hook (either phase) or a roll-up
+  summary aggregating it. An object with neither pays nothing, and an object with
+  both phases pays **one** read, not two — the roll-up path's own separate
+  pre-image fetch has been folded into this one, and is now the same raw driver
+  read `update()` already feeds the summary recompute.
+
+  Nothing is fabricated: if the row is not there, `previous` stays **unbound**
+  rather than becoming `{}`/`null`, so a condition reading it still faults loudly
+  instead of answering for a record nobody read (#4649/#4775). The batch dispatch
+  of a predicate delete still carries no `previous` — it stands for N rows — and
+  its per-row `afterDelete` contexts are unchanged.
+
+  Upgrade impact: a delete-side hook whose `condition` reads `previous` starts
+  evaluating instead of rejecting the write, and delete-side handlers start
+  receiving `ctx.previous`. If you worked around the gap by testing
+  `ctx.previous == null` to detect "this is a delete", that test now answers
+  differently — read `ctx.event` instead.
+
+- 51a587d: 两个写动词的派发判定下沉到 `@objectstack/metadata-core` —— 公共 API 零变化,一次关闭 26 条 engine-double 基线条目
+
+  `ObjectQL.delete` / `ObjectQL.update` 的三分支派发判定(`engine-delete-dispatch.ts` #4550、
+  `engine-update-dispatch.ts` #5480)从 `packages/objectql/src/` **原样搬到**
+  `packages/metadata-core/src/`。这是一次搬移,不是重构:两个模块本来就零 import、纯自包含,
+  判定逻辑一个字未改。
+
+  **为什么搬。** `@objectstack/objectql` 的 `dependencies` 含 `@objectstack/metadata-protocol`,
+  所以那个包里 13 个假引擎结构性地无法 import 这两个谓词 —— 反向 devDependency 即成环,
+  turbo 2.10.7 直接拒绝任务图。判据来自门禁台账里
+  `packages/spec/src/contracts/data-engine.test.ts` 那条 EXEMPT:反向 import 不可行时,唯一
+  出路是下沉到**两边都已依赖**的包。`@objectstack/metadata-core` 正是这个包
+  (`objectql -> metadata-core` 与 `metadata-protocol -> metadata-core` 都是既有边),而它自己
+  的 `dependencies` 只有 `{ @objectstack/spec, zod }`,不含 objectql,故不引入新环。
+
+  **公共 API 与既有调用点零变化。** `packages/objectql/src/engine-delete-dispatch.ts` /
+  `engine-update-dispatch.ts` 保留在原路径,改为 re-export shim,因此
+  `@objectstack/objectql` 仍然导出
+  `resolveEngineDeleteDispatch` / `assertEngineDeleteDispatch` / `scalarDeleteId` /
+  `ENGINE_DELETE_REJECT_MESSAGE` / `ENGINE_DELETE_DISPATCH_CASES` 及 update 侧的五个同名对应物
+  (与全部类型),`engine.ts` 与 37 个既有 pinned 调用点一行未动。同一批符号现在也从
+  `@objectstack/metadata-core` 导出。
+
+  搭配的门禁改动:`scripts/check-engine-double-contract.mjs` 的两个 slice 现在同时接受
+  `@objectstack/metadata-core` 与 `@objectstack/objectql` 两种拼写(它们指向同一个函数),
+  失败提示也改为在「objectql 依赖该包」时优先建议 metadata-core。
+
+- d56bcdb: fix(objectql): 新建父行时把 count/sum 型 `Field.summary` 汇总字段初始化为 0
+
+  `recomputeSummaries()` 只会重算「本次子记录写入所指向的父行」,所以一个**从未有过子记录**的父行永远不会被访问到,汇总列停在 insert 时的 `null`;而把最后一条子记录**删掉**的父行反而会被访问到(经由 `previous`)并落到 `0`。同一个「零个子记录」的逻辑状态因此读出两个不同的值。
+
+  后果不是显示难看,而是**筛选静默漏行**:`["task_count","=",0]` / `["task_count","<",1]`(库内比对)会把「从来没建过任务的项目」整行丢掉,没有任何报错;排序、GROUP BY、以及以该字段为输入的公式字段(null 传播)同样受影响。
+
+  本次在**生产端**修:父行 insert 时,按父对象取一份 summary descriptor,把该行自己拥有的 `count` / `sum` 汇总字段落成空集合的值 `0` —— 与 `recomputeSummaries` 的空集兜底共用同一份函数清单(现已提取为单一来源),所以「从未有过子记录」与「删光子记录」必然读到同一个值。`min` / `max` / `avg` 在空集上没有定义,仍然保持 `null`,口径不变。
+
+  边界:
+
+  - 作者显式提供的值不会被覆盖(与 `applyFieldDefaults` 同口径:insert 时 `undefined` 与显式 `null` 都算「未提供」);`beforeInsert` 钩子仍有最终决定权。
+  - 关系无法解析的汇总字段不落初值 ——「落了初值」与「会被重算维护」是同一个集合,不会出现一个没人维护的 `0`。
+  - **存量数据不受本 PR 影响**:这是 create-time 初始化,已经存成 `null` 的老父行仍然是 `null`,直到某次子记录写入把它重算。存量回填是独立取舍,另行处理。
+
+- 488b66c: fix(objectql): say out loud when `transaction()` is not giving you a transaction (#4619)
+
+  `ObjectQL.transaction()` carries two caveats that are part of its **declared**
+  meaning (ADR-0119 D1, `packages/spec/src/contracts/objectql-engine.ts`), not
+  hidden behaviour:
+
+  1. when the default driver has no `beginTransaction`, the callback runs with no
+     transaction and no rollback;
+  2. the transaction covers the **default** datasource only, so an object routed
+     elsewhere by `setDatasourceMapping` is written outside it.
+
+  Declaring them is not the same as being able to observe them, and both were
+  completely mute. A caller asking for atomicity and not getting it had no way to
+  find out; a multi-datasource "atomic" unit of work that partially committed
+  reported nothing at all — one store reverted, the other kept its rows, and the
+  caller saw only that the whole thing failed. That is the same shape as
+  `batchData`'s `atomic` flag being a lie for as long as it was (ADR-0119 D4).
+
+  **Nothing about what the engine does has changed.** Both caveats still hold
+  exactly as declared; this release only makes them discoverable.
+
+  - **`warn`, once per driver per engine instance**, when `transaction()` (or
+    `ctx.api.transaction()` in a sandboxed hook/action body) degrades because the
+    driver has no `beginTransaction`. The line names the driver, the consequence
+    — writes commit as they execute, so a later throw leaves the earlier ones
+    persisted while the call rejects as if nothing had landed — and the fix.
+    `warn` rather than `error` on purpose: at that moment nothing has been lost,
+    a capability is simply absent, which is the functional-degradation branch
+    AGENTS.md keeps at `warn`. Once per driver because the drivers that reach
+    this path (test doubles, foreign engines) reach it on _every_ call.
+
+  - **`error`, once per transaction per datasource**, when an `insert`/`update`/
+    `delete` inside an open `transaction()` is routed to a driver that
+    transaction does not cover. The line names the object, the datasource it went
+    to, the datasource the transaction was opened on, and says the write commits
+    on its own and will survive the rollback. `error` per AGENTS.md's judgment
+    question: afterwards the system looks entirely normal from the outside while
+    a write it claimed was part of an atomic unit has landed by itself — the
+    durability class, not the functional one.
+
+  Both diagnostics are reported by the engine, so the direct
+  (`engine.transaction`) and sandboxed (`ScopedContext.transaction`) surfaces
+  share one budget and one wording rather than drifting apart.
+
+  Tightening either caveat — an `opts.require` that throws instead of degrading,
+  refusing a cross-driver write, or surfacing an owned-vs-joined signal to the
+  callback — would change the contract's declared semantics and is deliberately
+  **not** done here; that half of #4619 is tracked separately against
+  `packages/spec`.
+
+- 946a131: fix(metadata-core,objectql): `ObjectQL.update` 的 `data.id` 同过标量测试,不再把载荷里的算子对象当主键 (#5748)
+
+  `ObjectQL.update(object, data, options)` 用两处取主键,而这两处此前用的是**两套规则**:
+
+  - `options.where.id` 走**标量测试** —— `{ id: { $in: [...] } }` / `{ id: [...] }` /
+    `{ id: null }` 是多行谓词,不算 id(#4434 / #4550);
+  - `data.id` **不做任何测试**,只要为真就原样当主键,并且先于 `where`、也先于
+    `options.multi`。
+
+  于是同一个算子对象,写在 `where.id` 里被正确识别为谓词,写在 `data.id` 里却被
+  当成主键绑进 `driver.update(object, id, …)` 的主键位置,**显式声明的
+  `multi: true` 被无声忽略**。后果不是数据被覆盖,而是静默失灵或难读的驱动错误:
+  SQLite 侧报参数绑定错误,别的驱动可能只匹配零行 —— 两种都不会告诉调用方
+  「你的 `multi` 被忽略了」。这是 declared ≠ enforced 的一种,#5393 刚给 flow 的
+  `update_record` 补上的 `multi` 批量意图键正是被这条更早的规则盖掉的。
+
+  现在 `data.id` 与 `where.id` **共用同一个标量测试**(判定在
+  `packages/metadata-core/src/engine-update-dispatch.ts` 定义一次,`engine.ts` 与
+  全部 fake engine 经 `resolveEngineUpdateDispatch` /
+  `assertEngineUpdateDispatch` 复用同一份)。非标量 `data.id` 不算 id,因此不再
+  盖住任何东西:判定按 `where.id` → `multi` → `reject` 的原有阶梯继续往下走。
+
+  **行为矩阵(FROM → TO)。标量 `data.id` 的按 id 写法完全不受影响。**
+
+  | 调用                                                                | FROM                       | TO                                                                |
+  | :------------------------------------------------------------------ | :------------------------- | :---------------------------------------------------------------- |
+  | `update(o, { id: 'rec_1', …f })`                                    | by-id `'rec_1'`            | **不变**                                                          |
+  | `update(o, { id: 'rec_1', …f }, { multi: true })`                   | by-id `'rec_1'`            | **不变**(标量 `data.id` 仍先于 `multi`)                           |
+  | `update(o, { id: 'rec_1', …f }, { where: { id: 'rec_2' } })`        | by-id `'rec_1'`            | **不变**(标量 `data.id` 仍先于 `where`)                           |
+  | `update(o, { id: 0, …f }, { multi: true })`                         | multi                      | **不变**(真值判定,`0` 不标识行)                                   |
+  | `update(o, { id: { $in: [...] }, …f }, { multi: true })`            | by-id,算子对象被绑进主键位 | **multi** —— 声明的批量意图被执行                                 |
+  | `update(o, { id: ['a','b'], …f }, { multi: true })`                 | by-id,数组被绑进主键位     | **multi**                                                         |
+  | `update(o, { id: { $in: [...] }, …f })`(**无** `multi`)             | by-id,算子对象被绑进主键位 | **reject**,消息不变:`Update requires an ID or options.multi=true` |
+  | `update(o, { id: { $in: [...] }, …f }, { multi: false })`           | 同上                       | **reject**                                                        |
+  | `update(o, { id: { $in: [...] }, …f }, { where: { id: 'rec_1' } })` | by-id,绑的是**算子对象**   | by-id,绑的是 **`'rec_1'`**                                        |
+
+  最后一格是这次修复里唯一「判定不变、绑定值变了」的一格 —— 前后都是 `by-id`,
+  变的是哪一个 id 源胜出。`ENGINE_UPDATE_DISPATCH_CASES` 因此新增可选的
+  `expectId`,把落进主键位的值本身也钉住,避免用例因为「什么都没产出」而绿。
+
+  **「无 `multi` 的非标量 `data.id`」被明确定成响亮拒绝**,不会静默升级成一次真的
+  批量写 —— 这是裁决(维护者 2026-08-06)对方案 B 那条顾虑的处置:把算子对象写进
+  载荷大概率是写错了位置,那就报错,而不是替作者决定他想批量写。
+
+  无 API 变更:导出符号、类型与 `ENGINE_UPDATE_REJECT_MESSAGE` 的文案均不变。
+
+- 909895d: perf(objectql): `update()` 的单 id 前置行读取改为按对象判定需求(#5284)
+
+  单记录 `update()` 在写入前会读一次「前置行」(`driver.findOne`),用于对象校验规则、
+  `readonlyWhen` 剥离、`hookContext.previous`,以及 roll-up 汇总的旧父记录重算。这道门
+  以前问的是 `this.hooks.get('afterUpdate').length > 0` —— **全部对象汇总在一起**的注册
+  列表。于是只要有**任意一个**对象被观察,平台上**每一个**对象的**每一次**单 id update 都
+  要多付一次数据库往返。同文件的批量路径早就按对象问同一个问题(`hasHooksFor`,#5038),
+  一个文件里存在两种精度。
+
+  现在按对象问,需求项恰好三条,全部是 `priorRecord` 在这条分支上的真实消费方:
+
+  - `needsPriorRecord(schema)` —— 对象校验规则(ADR-0020 的 state_machine / cross_field /
+    script;PATCH 只带变更字段)以及它涵盖的 `readonlyWhen` / `requiredWhen` / 选项可见性;
+  - **本对象**存在 `afterUpdate` hook(`'*'` / 全局注册照样算,`hasHooksFor` 与
+    `triggerHooks` 的过滤逻辑一致)—— 它的 handler 与声明式 `condition` 都读 `previous`;
+  - 本对象被某个 roll-up `summary` 聚合 —— `previous` 携带**旧的**父记录 id,子记录改挂父
+    记录时要同时重算两个父。
+
+  **省下多少取决于 hook 怎么注册,不取决于有多少个。** 按对象注册的那些(record-change flow
+  trigger、plugin-sharing 的按规则重算、plugin-auth 的 `sys_user` 快照刷新、所有元数据编写的
+  hook)从此不再向邻居收税;而**完全不带 `object`** 的注册(plugin-audit 的 `writeAudit`、
+  service-storage 的文件引用回收)本来就会在每个对象上真的执行,所以在装了它们的部署里这道门
+  依然恒真、省不下读 —— 让这两处在注册面上表达它们 handler 里已经在做的过滤,是 #5846,不在
+  本次改动内。
+
+  **正确性保证不变。** `previous` 的语义、fail-loud 的形态(#4775:求不出值即拒绝,绝不
+  伪造 `{}`/`null`)、after-hook 的分发都与之前完全一致;有 `afterUpdate` 的对象付的读一次
+  不少。变的只是**没有任何消费方**的对象不再替别人付账。
+
+  顺带修掉一个此前只是**偶然**成立的行为:子记录改挂父记录时的「旧父重算」依赖的正是这次
+  读,而在一个没有任何 `afterUpdate` hook 的部署里它本来就不会发生(旧父的汇总值静默过期)。
+  roll-up 现在自己声明这项需求,不再靠别的对象的 hook 捎带。
+
+  `beforeUpdate` **不**计入这道门,这是它与 `delete()`(#5272)唯一不对称的地方,原因是两条
+  路径的读取时机不同:`delete()` 在派发 `beforeDelete` **之前**读前置行并绑定,before 阶段
+  因此是真实读者;`update()` 先派发 `beforeUpdate`(它还可能改写这次读要比对的 payload),
+  `hookContext.previous` 要到写入之后才绑定 —— 所以在这条路径上 `beforeUpdate` 无论门怎么
+  判都看不到 `previous`,计入它只会买一次没有读者的读。这一点由测试直接测量钉住。
+
+- 2b52bc8: fix(objectql): a write response is a record, so it carries the record's `formula` fields (#5504)
+
+  `POST /data/:object` and `PATCH /data/:object/:id` answered with the stored
+  document, in which a `formula` field is not `null` but **absent** — formulas are
+  virtual, so no driver ever returns a column for one. The very next `GET` of the
+  same row carried every one of them. Read-your-write was broken in the direction
+  that is hardest to notice: the response calls itself `record`, so consumers
+  render it directly, and every object whose `nameField` points at a formula
+  rendered blank until a second round-trip.
+
+  Cause: `applyFormulaPlan` had exactly two call sites — the `find` result and the
+  `findOne` result. The write paths returned the driver's row untouched, and the
+  REST layer passed it straight through.
+
+  **What changed.** `engine.insert` and `engine.update` now hydrate formula
+  virtuals onto what they hand back, using the _same_ plan builder and the _same_
+  evaluation the read path uses — one formula semantic, not a write-path dialect.
+  Evaluation runs against the row the driver already returned (`create` uses
+  `RETURNING *`, `update` re-reads), so there is no extra round-trip and no
+  formula sees a partial record. Execution context is threaded exactly as `find`
+  threads it today.
+
+  Covered by construction, not per call site: single insert, batch insert,
+  `insertMany` / `createManyData` / `insertManyData`, and single-id update all
+  flow through the one hydration point on each verb. A **predicate** (`multi`)
+  update is unchanged — `driver.updateMany` resolves to an affected-row COUNT and
+  names no row, so it has no record to materialize.
+
+  Ordering, both halves pinned by tests:
+
+  - **after** the write-path strips and refusals — a formula reading a stripped
+    `autonumber` (#5503) or `readonly` (#2948) field reports what was STORED, and
+    a write refused under `strictReadonlyWrites` (#5126) produces no response to
+    hydrate at all;
+  - **before** the `afterInsert` / `afterUpdate` dispatch, mirroring the read
+    path's `applyFormulaPlan` → `afterFind` order, so an after-hook observes the
+    same complete record on a write that it observes on a read.
+
+  Cost is gated exactly as on the read path: an object that declares no formula
+  builds an empty plan and evaluates nothing.
+
+  No API or schema change — a response that was missing keys now has them.
+  Consumers that worked around this with an extra `GET` after every write can drop
+  it; consumers that treated the absent key as "field not configured" should note
+  that an unevaluable formula is reported as `null`, as it always has been on read.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [c497d26]
+- Updated dependencies [e96ad55]
+- Updated dependencies [bbdbf28]
+- Updated dependencies [2e284b2]
+- Updated dependencies [75bb3af]
+- Updated dependencies [43ca399]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [533a0a4]
+- Updated dependencies [1f82d1e]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [3133cda]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c794f78]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [0f17114]
+- Updated dependencies [ecc61ab]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [db0d53c]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [2b2175b]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [58f3220]
+- Updated dependencies [07f1822]
+- Updated dependencies [729a43a]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [65159ae]
+- Updated dependencies [95b4f0d]
+- Updated dependencies [877545c]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [444a07c]
+- Updated dependencies [288e5a4]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [b5459bc]
+- Updated dependencies [1624f4a]
+- Updated dependencies [e6db317]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [da538b1]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [79822b5]
+- Updated dependencies [15e61fb]
+- Updated dependencies [72bd873]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [dde9202]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [bf1edef]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5ab0842]
+- Updated dependencies [5c94f83]
+- Updated dependencies [d275c10]
+- Updated dependencies [73e576f]
+- Updated dependencies [1d29e6d]
+- Updated dependencies [c5a5996]
+- Updated dependencies [5ea8e1e]
+- Updated dependencies [51a587d]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [dca25e1]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [e92e2c3]
+- Updated dependencies [946a131]
+- Updated dependencies [38f53a0]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/metadata-protocol@17.0.0-rc.4
+  - @objectstack/metadata@17.0.0-rc.4
+  - @objectstack/formula@17.0.0-rc.4
+  - @objectstack/metadata-core@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Major Changes

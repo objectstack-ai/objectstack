@@ -1,5 +1,488 @@
 # @objectstack/service-settings
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- 586d6f7: feat(auth): `membership_policy` is a platform setting, and sign-up and backfill read one source (#5152)
+
+  **What a new user joins is now configurable at runtime.** ADR-0093's
+  `membershipPolicy` decides whether a freshly created user is auto-bound to the
+  deployment's default organization (`auto`) or gets membership only from an
+  explicit act — creating a workspace, accepting an invitation, an admin adding
+  them, SSO just-in-time provisioning (`invite-only`). Until now it was settable
+  **only** as an `AuthPlugin` constructor option, and the AuthPlugin a self-hosted
+  stack gets is injected by the CLI, which passes no such option and has no env
+  fallback. Every self-hosted deployment therefore ran `auto`, with no way to say
+  otherwise. `invite-only` was, in practice, unreachable outside a custom host.
+
+  It is now `auth.membership_policy` in the platform settings — a two-value select
+  (`auto` / `invite-only`, default `auto`) alongside `signup_enabled`, which it
+  pairs with: one says whether people may self-register, the other says what they
+  join when they do. Set it in Setup → Authentication → Membership, or pin it
+  per-deployment with `OS_AUTH_MEMBERSHIP_POLICY`. It applies **without a
+  restart** — the existing `settings.subscribe('auth', …)` re-application seam
+  carries it, the same one the password-policy keys ride.
+
+  **No behaviour changes unless you set it.** Only an _explicit_ value applies;
+  the manifest's `auto` default is a UI default and never masks a deployment that
+  configured the policy in code. A stack that sets nothing keeps today's
+  auto-binding exactly.
+
+  **Bug fix — the two membership paths read one source.** Sign-up (the reconciler
+  in better-auth's `user.create.after`) read the AuthManager's live config, while
+  the ADR-0093 D6 backfill of pre-existing member-less users read the plugin's
+  **constructor options**. Wiring a setting to the first and not the second would
+  have produced "sign-up honours the new policy, backfill still runs the old one"
+  — and the backfill binds in **bulk**, so it is the more dangerous half. Both now
+  resolve the policy through the new `AuthManager.getMembershipPolicy()`, and the
+  backfill waits for the settings namespace to bind before its first pass (the two
+  `kernel:ready` hooks fire in registration order, which was the wrong order).
+
+  **An invalid value is rejected, not coerced.** `PUT /api/settings/auth` refuses
+  a policy outside the declared option table (`invalid_option`, naming the allowed
+  set). A value arriving from `OS_AUTH_MEMBERSHIP_POLICY` — which bypasses that
+  validation — is logged at `error` and **ignored**, leaving the deployment's
+  current policy in force; it is never silently read as `auto`, because that would
+  leave an operator believing a wall is up while every sign-up is auto-bound.
+
+  New public API on `@objectstack/plugin-auth`: `AuthManager.getMembershipPolicy()`,
+  plus `MEMBERSHIP_POLICIES` and `isMembershipPolicy()` from `reconcile-membership`.
+
+- 9c4f174: feat(plugin-email): durable email delivery through `sys_job_queue`, opt-in (#5160)
+
+  `IEmailService.send()` has always delivered **inline**: the SMTP session ran
+  inside the caller's `await`, and `EmailService`'s retry loop lived in the same
+  process — so a crash between the attempt and the retry dropped the message with
+  no trace beyond a `sys_email` row stuck at `queued`. The pieces for a durable
+  path all existed (`sys_job_queue`, the `DbQueueAdapter`, an `email.send.async`
+  subscriber) but nothing in the repo ever published to that topic.
+
+  **New: `queueDelivery`.** With it on, `send()` persists the `sys_email` row,
+  publishes an `email.send.async` job **referencing that row**, and returns
+  `{ status: 'queued' }` immediately. A worker delivers the row and finalizes it
+  in place (`sent` + `message_id`, or `failed` + `error`); the queue retries with
+  exponential backoff (1s → 5min cap) and dead-letters the job when the attempts
+  run out, so a restart resumes delivery instead of losing it. The `'queued'`
+  status was already in `EmailDeliveryStatus` — no spec change.
+
+  Three ways to turn it on, all default-off:
+
+  - `new EmailServicePlugin({ queueDelivery: true })`
+  - `OS_EMAIL_QUEUE_ENABLED=true` (or `config.email.queueDelivery`) on `os serve`
+  - Settings → Mail → **Durable queue delivery**, hot-applied without a restart
+
+  **One retry budget, not two.** `retries` keeps its meaning — total attempts are
+  `retries + 1` in both modes. Inline it drives the in-process loop; queued it
+  becomes the queue's `maxAttempts` and the per-row loop is pinned to one attempt
+  per delivery. Turning the toggle on changes _where_ a retry happens (durable,
+  backed off) and never _how many_ happen, so the two layers cannot multiply.
+
+  **Fixed in the same change: the `email.send.async` subscriber inserted a new
+  `sys_email` row per delivery.** It called `send()` with the message, so a job
+  the queue retried five times left five rows — four permanently `failed`, none
+  carrying the real attempt count. It now delivers the referenced row via
+  `deliverPersistedRow`, so one message is one row and `attempt_count`
+  accumulates on it. Messages published in the old shape (a bare `SendEmailInput`)
+  are still accepted and delivered inline for a migration window.
+
+  Boundaries worth knowing before you switch it on:
+
+  - **"Send test email" always sends inline**, in every mode — the button has to
+    report the provider's own answer (`535 …`), and "queued" is exactly the
+    non-answer #5087 removed from it.
+  - **Messages with attachments or custom headers are delivered inline**, because
+    `sys_email` has no columns for them and a queued copy would arrive stripped.
+    Queueing them is tracked separately; this ships the loss-free behaviour.
+  - **A declaration that cannot be honoured fails the boot.** `queueDelivery: true`
+    from the constructor or `OS_EMAIL_QUEUE_ENABLED` with no durable queue
+    registered (or with `persist: false`) throws on `kernel:ready`, naming the
+    fix — the #5132 judgement, applied to durability. The **settings toggle** is
+    the opposite trade: it logs at `error` and keeps sending inline, because one
+    save must not stop the mail.
+  - The kernel's built-in in-memory `queue` fallback does **not** count as a
+    durable queue: it delivers synchronously with no retry or DLQ, so publishing
+    to it would report `queued` for a message nothing could ever recover. Mount
+    `@objectstack/service-queue` over an ObjectQL engine (the `queue` capability
+    does this on `os serve`) to get the `sys_job_queue`-backed adapter.
+
+  Leaving `queueDelivery` unset keeps today's behaviour byte for byte.
+
+- 8597a7d: fix(service-settings,plugin-email): the mail provider dropdown lists only providers that actually deliver (#5094)
+
+  **Settings → Mail → Provider** offered `SMTP | SendGrid | Amazon SES | Postmark`.
+  `@objectstack/plugin-email` has never carried a SendGrid or an SES transport —
+  `makeTransport` knows `log` / `resend` / `postmark` / `smtp` and nothing else. So
+  selecting either of the two validated, saved, showed a success toast, and then
+  delivered no mail at all: the same declared-but-not-delivered gap #5087 closed
+  for SMTP, one field to the left.
+
+  The same field broke the invariant in the other direction at the same time:
+  **`resend` has shipped a working transport all along and was not on the list**,
+  so nobody could pick the one HTTP provider that worked.
+
+  **The dropdown is now `SMTP | Resend | Postmark | None (log only — no real
+delivery)` — exactly the set `makeTransport` can build.** No email capability was
+  removed with SendGrid and SES. Both publish SMTP endpoints, and #5087 shipped a
+  real `SmtpTransport`, so both are configured today as `smtp`:
+
+  | provider   | host                                | port | credentials                                                                        |
+  | :--------- | :---------------------------------- | :--- | :--------------------------------------------------------------------------------- |
+  | SendGrid   | `smtp.sendgrid.net`                 | 587  | username `apikey`, password = your API key                                         |
+  | Amazon SES | `email-smtp.<region>.amazonaws.com` | 587  | SES **SMTP credentials** (generated in the SES console — not your AWS access keys) |
+
+  The provider field's own description says this, so the migration is in front of
+  whoever goes looking for the option that disappeared.
+
+  `log` is listed rather than hidden. It is the one option that does not deliver —
+  but it does not pretend to: the label says so, `LogTransport` still records every
+  message to `sys_email`, and "Send test email" answers `ok: false` for it. That
+  gives an operator the deliberate, visible opt-out AGENTS.md asks a degradation to
+  be, instead of expressing "no outbound mail" as a half-filled SMTP form. It is
+  also what makes _offered_ and _deliverable_ the same set rather than merely
+  overlapping — which is the property a test can hold.
+
+  **Already saved `sendgrid` or `ses`? Nothing breaks and nothing goes quiet.** The
+  stored value outlives the dropdown, so `applyMailSettings` now recognises it
+  explicitly: the previous transport is kept (a settings row written by an older
+  release must never fail a boot), and the server logs at `error` with both halves
+  AGENTS.md requires — the consequence (_no mail is delivered through it_) and the
+  fix (the SMTP settings above), not a bare "unknown provider". It is checked
+  _before_ the API-key check, because "set an API key" is the wrong instruction for
+  a provider that has nothing to hand a key to. "Send test email" refuses the same
+  way and sends nothing. Switching the provider to `smtp` and saving recovers the
+  transport without a restart.
+
+  Two smaller corrections in the same field:
+
+  - `api_key` is now shown and required for exactly `resend` and `postmark`
+    (`provider === 'resend' || provider === 'postmark'`). It was `provider !==
+'smtp'`, which only worked because every non-SMTP option happened to be an
+    HTTP API; `required` is enforced server-side wherever the field is visible, so
+    that expression would have refused to save "None (log only)" until an API key
+    it never reads had been typed in.
+  - The built-in `mail/test` fallback (the one that runs when no email plugin is
+    mounted) rejects any `provider` outside the manifest's own option list instead
+    of answering "the form is well-formed".
+
+  **Held by a test, in both directions.** `EMAIL_TRANSPORT_PROVIDERS` is now a
+  runtime array (the `EmailTransportProvider` union is derived from it), and
+  `plugin-email`'s `mail-manifest-providers.contract.test.ts` asserts set equality
+  between it and the manifest's option values, then builds a real transport for
+  each. Adding an option without a transport fails; adding a transport without an
+  option fails. `RETIRED_EMAIL_PROVIDERS` / `isEmailTransportProvider` /
+  `unsupportedProviderFix` are exported alongside it for hosts that surface the
+  same guidance.
+
+- 9c90ea0: feat(sms): 短信全局日发送配额 —— 成本总量闸 (#2814)
+
+  #2780 给 OTP 端点落了**按号码**的防滥用（60s 冷却 + 每号码 5 条/小时）。那挡住的是「一个号码花多少钱」，挡不住「这套部署一天花多少钱」：攻击者轮换上万个不同号码时，每个号码都稳稳待在自己的预算里，而日累计账单没有任何上限——这正是 SMS pumping / toll fraud 的典型打法。更要紧的是，按号码那道闸住在 better-auth 的 `hooks.before` 里，只看得见 auth 端点：`notify(channels:['sms'])` 与邀请短信从旁边直接走过去，一条都不计数。
+
+  本次新增一道**总量**闸，扣减点放在所有出站短信本来就必经的那一处 —— `SmsService.send()`。OTP、邀请、messaging `sms` channel 三条路无论从哪扇门进来，都记在同一本账上。
+
+  ## 新增设置项
+
+  `sms` 命名空间新增 `daily_quota`（Daily send limit，number，默认 `0` = 不限）：这套部署每个 **UTC 自然日**允许发出的短信总条数。超出后拒发，直到 00:00 UTC。env 覆盖沿用既有的每键机制，无需额外接线：`OS_SMS_DAILY_QUOTA=2500`。
+
+  `0` 是出厂姿态，所以升级本身不改变任何现有部署的发送行为——闸门要由运营者显式配置才会闭合。
+
+  ## Observable behaviour change
+
+  **配置配额后，发送可能被拒**，两条路径的表现分别是：
+
+  - OTP / 邀请路径 —— `SendSmsResult.status='failed'`，`error` 为 `TOO_MANY_REQUESTS: daily SMS quota exhausted`。刻意与按号码闸抛出的 `TOO_MANY_REQUESTS` 用同一个码，且**不带任何剩余额度细节**：从外面看，两道墙必须长得一样，攻击者不该能试探出自己撞的是哪一道。
+    ⚠️ 但这个码**目前到不了 HTTP 调用方**：`AuthManager.deliverPhoneOtp` 把它重抛成普通 `Error`，而 better-call 对非 `APIError` 一律回 500（实测，见 #6039）。也就是说 OTP 端点上，按号码闸回 429、总量闸回 500。补齐要动 plugin-auth，已单独立案。
+  - messaging `sms` channel —— `SendResult.ok=false`，且 `classifyError` 返回 `'rate_limited'`（此前一律 `'retryable'`）。投递落进 outbox 走退避重试 / 死信，不会被静默丢弃；`rate_limited` 与 `retryable` 走同一条重试阶梯，但把「额度用尽」与「网关抖动」在投递记录上区分开。
+
+  ## 计数落在哪里
+
+  复用仓内唯一那份定窗计数（`incrementFixedWindow`）与它的惰性存储解析（`createLazyCounterStore`，#4772/#4790），不写第三份：
+
+  - 有 kernel `cache` 服务时计在共享 cache（集群共享与否取决于 cache 本身）；
+  - 解析不到时降级为有界的进程内计数，并由解析器**点名**打一条 warn，说明降级的代价（N 节点部署最多可花 N× 配额）；
+  - 解析在**计数被消费时**发生，而非插件 init —— 后注册的 cache 也能在下一次发送时被接上（#4772 的坑）。
+
+  窗口是 UTC 自然日，且由两个机制同时保证：计数键带 UTC 日期（`sms-daily-sends:2026-08-06`），窗口开启时的 TTL 恰为距下一个 UTC 午夜的秒数。任一机制单独也能翻窗，合起来则不可能互相矛盾。
+
+  ## 两条刻意的姿态
+
+  - **fail-open**：计数存储读不到时，闸门**放行**并打一次 warn。短信成本闸不能把登录拖下水（#2814 诉求 4）。
+  - **配额值的钳制在消费侧**：manifest 上的 `min: 0` 今天并不被 `validatePatch` 执行（#5932），所以负值 / `NaN` / `Infinity` / 非数字都会原样抵达读取方。这些一律降级为 `0`（不限）并**点名**打 warn，而不是拒发、也不是替运营者编一个别的默认值——一个设置表单里的手误不该变成手机登录的全站故障，而编一个没人声明过的上限只会把手误藏进看似合理的行为里。
+
+  ## 不在本次范围
+
+  诉求中的**每租户日配额**（`daily_quota_per_tenant`）未实现：`SendSmsInput`（`@objectstack/spec/contracts`）不携带任何租户标识，而在 service 侧另造一个只此一家的拼法就是 Prime Directive #12 明令禁止的影子契约。租户维度要么落在 spec 契约上，要么不落——详见 #2814 上的讨论。
+
+### Patch Changes
+
+- 4022b78: Settings: an `OS_*` env override is now checked against the specifier's declared `options` table (#5204)
+
+  A manifest's `options` table has been enforced on the write path since #5131, but
+  `SettingsService.get()` produced an effective value by a second route that never
+  consulted it: an `OS_*` override was reshaped by the default's type and returned
+  straight from the top of the cascade with `locked: true`. So the providers #5094 and
+  #5133 retired from `mail.provider` could walk back in through the one door with no
+  gate on it — `OS_MAIL_PROVIDER=sendgrid` reached the mail plugin unchallenged — and a
+  plain typo such as `OS_BRANDING_THEME_MODE=drak` was served to every consumer as a
+  normal value with normal-looking provenance, each consumer left to improvise.
+
+  An override whose value the table does not declare is now **ignored** rather than
+  repaired: the value falls through to the next layer of the cascade (a stored
+  global/tenant/user value, else the manifest default), and the read API reports that
+  layer honestly instead of claiming `source: 'env'` for a value not in force. The
+  rejection is logged once at `error`, naming the variable, the rejected value, the legal
+  value set and the consequence. The same audit runs at `registerManifest`, so a
+  misconfigured deployment learns at boot rather than whenever somebody first opens the
+  settings page.
+
+  Registration **reports but never refuses**: option tables move, a pin that was legal
+  the day it was written must not turn an upgrade into a crash-on-start.
+
+  Two behaviour notes for anyone relying on the old shape:
+
+  - Keys with no declared option table are untouched — text, boolean, number and
+    password overrides behave exactly as before. The check applies only to
+    `select`/`radio`/`multiselect` specifiers that declare a non-empty table.
+  - A **rejected** override no longer pins its key against writes. `setMany` used to
+    refuse on the mere presence of the variable; judged by presence, an ignored value
+    would have left the key configurable by nothing at all — env value discarded, UI
+    refused with `SETTINGS_LOCKED`, and `get()` reporting `locked: false` to a settings
+    page whose save would then fail. An override that _is_ in force still locks the key,
+    unchanged.
+
+- 82a06af: fix(service-settings): a settings `select` now rejects values outside its declared `options` (#5131)
+
+  `SettingsService.validatePatch` enforced two of the constraints a settings
+  manifest declares — `required` and `pattern` — and skipped the third. A
+  specifier's `options` table never took part in save-time validation, so any
+  string at all could be written into a dropdown field:
+
+  ```ts
+  await svc.setMany("mail", { provider: "sendgrid", from_email: "a@b.com" }); // stored
+  ```
+
+  Going through the console this was unreachable: the dropdown only ever emits a
+  value from the table. But `PUT /api/settings/:ns` is an authorizable public
+  surface, and scripts, migration tools and AI-authored bootstrap code write it
+  directly — where the bad value was accepted, persisted and read back **in
+  silence**, leaving every consumer to improvise its own answer for an
+  enumeration member that does not exist. It was not `mail`-specific:
+  `storage.adapter`, `sms.provider`, `ai.provider`, `localization.date_format` and
+  every other `select` behaved the same way.
+
+  This is the API-side gate that #5094 was missing. That change retired
+  `sendgrid` / `ses` from the `mail` provider table because this server cannot
+  deliver through them — with no write-side enforcement, the values it had just
+  retired could be written straight back in the same afternoon.
+
+  **Now:** a `select` / `radio` / `multiselect` value that is not a member of the
+  declared table is rejected with a `FieldError` whose `code` is `invalid_option`
+  and whose `constraint` carries the allowed set (`{ allowed: 'smtp, resend,
+postmark, log' }`), so a client composes its own message instead of parsing
+  ours. The enforced set is the spec's own: `SpecifierSchema` already _requires_ a
+  non-empty `options` on exactly those three types, so declared and enforced name
+  one list rather than two that can drift.
+
+  Two deliberate limits keep this from breaking workspaces that already carry
+  drift:
+
+  - **The check is gated on TOUCH**, like `required` and `pattern` before it. A
+    value that pre-dates the current option table only fails the patch that
+    writes that key — editing `from_name` is not rejected because a stale
+    `provider` sits in the store. The opposite rule would lock every workspace
+    with historical drift out of its own settings page entirely, which is worse
+    than the gap being closed. Resets (all-null patches) are never blocked.
+  - **A specifier that declares no option table is left alone.** It cannot say
+    what is legal, so it stays lenient rather than rejecting every write.
+
+  Values are compared in string form, so an option declared `value: 30` still
+  matches after a round trip through JSON or a form post. There is no opt-out: a
+  manifest that needs to accept custom values would declare that explicitly in
+  the spec, not rely on a tolerant consumer.
+
+- 41c3b48: feat(plugin-email): real SMTP delivery — `SmtpTransport`, settings hot-swap, and a `mail/test` that actually sends (#5087)
+
+  The **Mail Delivery** settings page has always defaulted to SMTP and offered a
+  full host / port / TLS / username / password form. Nothing behind it delivered:
+  `applyMailSettings` treated `provider: 'smtp'` as a no-op ("transport
+  unchanged"), `mail/test` answered `ok: true, "Configuration looks valid … Wire
+@objectstack/plugin-mail for actual delivery"` — a success toast for a message
+  nobody sent, naming a package that has never existed — and the code pointed
+  operators at `@objectstack/plugin-mail-smtp`, which is not in this repo or on
+  npm. A workspace that selected SMTP got a green form, a green test button, and
+  mail that only ever reached the log and the `sys_email` table. For deployments
+  in China this left **no** working channel at all: Resend and Postmark are
+  overseas HTTPS SaaS with unreliable reach and deliverability to QQ / 163 /
+  enterprise mailboxes, where SMTP is the normal path (Aliyun DirectMail, Tencent
+  SES, corporate mail servers).
+
+  **`SmtpTransport` now ships in `@objectstack/plugin-email`** (ADR-0012: SMTP in
+  core, implemented with `nodemailer`). `nodemailer` is a real dependency but is
+  imported **lazily on the first send**, so deployments that never select SMTP —
+  and non-Node runtimes — never load `node:net` / `node:tls`.
+
+  Three doors reach it, all sharing one options reader so they cannot drift:
+
+  - **Settings → Mail** (`smtp_host` / `smtp_port` / `smtp_secure` / `smtp_user` /
+    `smtp_password`) hot-swaps the live transport on save, no restart.
+  - **`os serve`** via `OS_EMAIL_PROVIDER=smtp` plus the new `OS_EMAIL_SMTP_HOST` /
+    `_PORT` / `_SECURE` / `_USER` / `_PASSWORD` (or `config.email.options`).
+  - **Constructor**: `new EmailServicePlugin({ provider: 'smtp', providerOptions:
+{ host, port, secure, user, password } })`.
+
+  TLS is one toggle with the wire behaviour derived from the port, as providers
+  document it: on `465` implicit TLS (SMTPS); on any other port a **required**
+  STARTTLS upgrade, so a server that refuses to upgrade fails the send instead of
+  leaking credentials over a cleartext socket; `secure: false` connects in the
+  clear and upgrades only when STARTTLS is offered.
+
+  **Failure is loud everywhere, because a silent fallback is the bug this fixes.**
+  On the construction path (CLI / plugin options) a `smtp` provider with no host
+  **throws** and the boot fails — it no longer degrades into a LogTransport that
+  reports every send as successful. On the settings hot-swap path a save can never
+  kill a running server, so the previous transport is kept — but the failure is
+  logged at `error` naming the consequence and the fix, and **`mail/test` now
+  performs a real delivery** through the settings on screen and reports the SMTP
+  server's own words (`535 … authentication failed`) instead of a green toast. The
+  built-in fallback `mail/test` handler (used only when no email plugin is
+  mounted) answers `ok: false` and says plainly that nothing was sent.
+
+  Nothing to migrate: `log`, `resend` and `postmark` behave exactly as before, and
+  a deployment that never selects `smtp` is unaffected.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Patch Changes

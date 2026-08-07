@@ -1,5 +1,627 @@
 # @objectstack/driver-memory
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- f7df82c: fix(driver-memory): the analytics (cube) face stops round-tripping filter comparands through `string[]`, which was losing booleans, `null` and numeric-looking strings (#5373)
+
+  **This is an observable behaviour change on a shipped surface: widgets whose
+  `where` carries a boolean, a `null`, or a numeric-looking string comparand will
+  show different — correct — numbers.** Some of them go from zero rows to a real
+  answer; others go from the whole table down to the rows actually asked for.
+
+  ## What was happening
+
+  `MemoryAnalyticsService` lowers `AnalyticsQuery.where` into a cube-style
+  `{member, operator, values}` list whose `values` was typed `string[]`, because
+  the cube WIRE format serialises filter values as strings. So every comparand
+  made a JS value → string → JS value round trip on its way to the pipeline, and
+  that round trip is lossy for anything that is not already a string:
+
+  | `where`                       | stringified | recovered as         | compared against      | rows                |
+  | ----------------------------- | ----------- | -------------------- | --------------------- | ------------------- |
+  | `{is_active: true}`           | `'1'`       | the number `1`       | stored `true`         | **0**               |
+  | `{is_active: false}`          | `'0'`       | the number `0`       | stored `false`        | **0**               |
+  | `{closed_at: null}`           | —           | _(dropped entirely)_ | —                     | **the whole table** |
+  | `{closed_at: {$ne: null}}`    | `''`        | `''`                 | stored `null`         | **the whole table** |
+  | `{code: '100'}` (TEXT column) | `'100'`     | the number `100`     | stored `'100'`        | **0**               |
+  | `{is_active: {$ne: true}}`    | `'1'`       | the number `1`       | stored `true`/`false` | **the whole table** |
+
+  mingo compares across JS types the way MongoDB compares across BSON types —
+  never equal — so none of these is an error. Each is a wrong row set, silently.
+
+  The two directions fail differently, and the widening one is worse. A boolean
+  filter that returns nothing renders an empty chart, which someone notices. A
+  `null` filter that returns everything renders a _normal-looking_ chart: a
+  "closed_at is empty" widget quietly counted the closed records too. That is the
+  direction #3948 outlawed, and on an RLS read scope it is an unauthorized read
+  rather than a wrong number.
+
+  `{is_active: true, stage: {$nin: ['lost']}}` is `AnalyticsQuerySchema.where`'s
+  own docstring example. It returned zero rows on this face.
+
+  ## Why the encoding could not simply be fixed
+
+  `stringifyForCube` encoded booleans as `'1'`/`'0'` "so that downstream consumers
+  expecting SQLite-style numeric booleans match correctly". That justification is
+  sound for the SQL-generating exit and false for the in-memory one — and both
+  exits shared the single encoding. There is no string spelling of `true` that is
+  right for `WHERE is_active = ?` and for a mingo `$eq` against a stored boolean at
+  the same time, so making the round trip lossless would have meant tagging values
+  in a format the two exits then have to agree to decode.
+
+  So the round trip is **gone** instead. `values` is `unknown[]`; the comparand
+  stays whatever the author wrote, and each exit converts at its own boundary
+  where it knows what it needs. This is affordable because the triple is a purely
+  internal intermediate: `AnalyticsQuery.where` is a `FilterCondition` and nothing
+  else (#5375 removed the leg that also accepted a cube-style array as input), and
+  the API layer actively rejects a `{member, operator, values}` array on the wire.
+  No caller, no spec schema and no serialized form observes its shape — this
+  change touches zero spec bytes.
+
+  ## What changes for you
+
+  Filters are evaluated against the values you wrote:
+
+  - `{is_active: true}` selects the true rows instead of none.
+  - `{closed_at: null}` selects the null rows instead of every row, and
+    `{closed_at: {$ne: null}}` selects the complement instead of every row.
+  - `{code: '100'}` on a TEXT column matches the string `'100'` instead of nothing.
+  - `{qty: 100}` on a numeric column is unchanged — it was already right.
+
+  `generateSql()` is corrected on the same cases, because a fix that satisfied
+  mingo while emitting SQL meaning something else would only have moved the bug:
+
+  - a numeric-looking string is now quoted (`code = '100'`, previously `code = 100`)
+    while a real number still is not (`qty = 100`);
+  - a null comparand becomes a nullness test (`closed_at IS NULL` /
+    `closed_at IS NOT NULL`) rather than the `= NULL` that is never true in SQL,
+    or — as before this fix — no clause at all;
+  - booleans keep the SQLite-style `1`/`0` spelling, which was always right for
+    this half.
+
+  Temporal comparands still convert, and now do so through the driver's own
+  storage-form rule (`filterComparandStorageForm`, keyed on the declared field
+  kind, #4047) rather than an ad-hoc `toISOString()`. A `Date` against a declared
+  `datetime` column therefore keeps meeting the canonical UTC ISO text the driver
+  wrote — a second derivation of that rule inside the analytics face is exactly
+  the in-package divergence #5240 ruled against.
+
+  Nothing else moves: operator vocabulary, the #5345 refusals, `$and` folding,
+  nested-relation flattening, time dimensions and the empty filter are unchanged.
+
+  ## Coverage
+
+  The cases live in the shared conformance file beside the #5324/#5345 shape
+  table, not in a suite of their own. `FILTER_LOGIC_CASES` varies the filter's
+  SHAPE over an all-string fixture — deliberately, so nothing in it is about
+  coercion — which is why every one of its cases stayed green through this defect.
+  The new block varies the comparand's TYPE over the fixture measured in the
+  issue, and holds the same invariant: the analytics face must return the same ids
+  as `find()`, or refuse. Reverting only the source change fails 11 of the new
+  assertions, across both exits.
+
+- d085670: fix(driver-memory): the analytics (cube) face REFUSES a filter it cannot compile instead of silently dropping it (#5345)
+
+  **This is an observable behaviour change on a shipped surface, and it will turn
+  some working-looking dashboards red.** That is the point: the widgets it breaks
+  were returning inflated aggregates, and some of them were returning rows the
+  caller had no permission to read.
+
+  ## What was happening
+
+  `MemoryAnalyticsService` lowers `AnalyticsQuery.where` into a flat, cube-style
+  `{member, operator, values}` list. Anything that did not fit was answered with
+  `continue` — in two places, and with a comment presenting it as a feature
+  ("ignore so a partial query still runs rather than failing entirely"):
+
+  | dropped                     | why it did not fit                                   |
+  | --------------------------- | ---------------------------------------------------- |
+  | `$or` (whole branch)        | no expression in a flat AND-list                     |
+  | `$not` (whole branch)       | same                                                 |
+  | `$between`                  | no row in the mongo→cube operator table              |
+  | `$startsWith` / `$endsWith` | same                                                 |
+  | `$null`                     | same                                                 |
+  | `$regex`                    | same — and `plugin-auth`'s ObjectQL adapter emits it |
+
+  Dropping a predicate does not narrow a query, it **widens** it: fewer
+  constraints means more rows. A widget filtered to two stages with
+  `{$or: [{stage: 'won'}, {stage: 'lost'}]}` aggregated the **entire table** and
+  rendered as a perfectly normal chart. Measured on the shared
+  `FILTER_LOGIC_CASES` fixture, **15 of its 17 cases** returned a wider row set
+  than the standard specifies — usually every row. Of the two that did agree, one
+  (`a $or nested under a top-level $and`) agreed by _coincidence_: its dropped
+  `$or` happened to be redundant against a surviving sibling key, which is the
+  best illustration available of why "the number looked right" was never evidence.
+
+  `$not` makes it more than a wrong number. `cel-to-filter.ts` compiles a CEL
+  `!expr` RLS read scope into `{$not: {…}}`, so the dropped branch was the read
+  scope itself — the aggregate included records the caller is not allowed to see.
+
+  ## What changes for you
+
+  A `where` carrying any of the shapes above now raises **`INVALID_FILTER` / 400**
+  (the ADR-0112 envelope every sibling filter refusal in this driver already
+  speaks, reaching REST callers as a 400 since #5366) naming the offending
+  operator or combinator and its position, e.g.:
+
+  > Filter operator `"$between"` on field `"amount"` at `where.amount` is declared
+  > by the Filter Protocol but cannot be compiled by driver-memory's analytics
+  > (cube) face. Supported operators on this surface: `$eq, $ne, $gt, $gte, $lt,
+$lte, $in, $nin, $contains, $notContains, $exists`.
+
+  Both entry points refuse identically — `query()` and `generateSql()`.
+
+  **The fix, per shape:**
+
+  - `$between` on a range → the two bounds, which this face has always compiled:
+    `{ closed_at: { $gte: '2026-01-01', $lte: '2026-01-31' } }`, or a
+    `timeDimensions[].dateRange`, which is unaffected.
+  - `$startsWith` / `$endsWith` / `$regex` → `$contains`, or move the query to
+    `find()`.
+  - `$null` → `{ field: { $exists: false } }` for the absent case.
+  - `$or` / `$not` → restate as the implicit AND of field keys where the intent
+    allows it; where it does not, the cube pipeline genuinely cannot express it,
+    and the query belongs on `find()`.
+
+  Nothing that was **compiled** changes. All eleven supported operators, `$and`,
+  implicit equality, nested-relation flattening, time dimensions and the empty
+  filter produce byte-identical pipelines.
+
+  ## Why refuse rather than teach the cube pipeline `$or`
+
+  This is the call ADR-0078 / #4286 made for `objectql`'s `having` — an ignored
+  operator there "silently returns UNFILTERED aggregates", so it throws — and the
+  posture #3948 established for every filter backend: a filter that cannot be
+  compiled is refused loudly, never skipped. It is also where the two neighbouring
+  faces landed (#5366, #5368).
+
+  Mechanically, the refusal is not a new check bolted onto this face. It reuses
+  the package's single filter gate, `assertFilterConditionShape`, which now takes
+  the calling face's declared capabilities; and the analytics face derives those
+  capabilities from its own mongo→cube operator table, so widening what it accepts
+  and teaching it to compile the operator are now the same edit. The shared
+  `FILTER_LOGIC_CASES` conformance table covers this third face for the first time
+  (it watched only two of the driver's three), holding it to: agree with
+  `find()`, or refuse — never a third, quieter answer.
+
+- 01c0bae: fix(driver-memory): the analytics (cube) face compiles `$notContains` to a predicate that actually excludes rows, instead of a bare mingo `{$not: 'x'}` that constrains nothing (#5374)
+
+  **This is an observable behaviour change on a shipped surface: widgets whose
+  `where` carries `$notContains`, `$contains`, or an empty `$in` will show
+  different — correct — numbers.** Every one of them moves in the same direction,
+  from a wider row set to the rows actually asked for, because each of these
+  defects made a predicate mean less than it says.
+
+  ## What was happening
+
+  `MemoryAnalyticsService` mapped each cube operator to the NAME of a mingo
+  operator, and the call site filled that name in as
+  `matchStage[field] = {[name]: comparand}`. That shape can express "compare this
+  field to this value" and nothing else, so the two operators that need to WRAP
+  their comparand were pushed through it anyway:
+
+  | `where`                        | compiled `$match`           | analytics | `find()` |
+  | ------------------------------ | --------------------------- | --------- | -------- |
+  | `{name: {$notContains: 'et'}}` | `{name: {$not: 'et'}}`      | **3**     | 2        |
+  | `{name: {$notContains: 'a'}}`  | `{name: {$not: 'a'}}`       | **3**     | 0        |
+  | `{name: {$contains: 'a.p'}}`   | `{name: {$regex: 'a.p'}}`   | **1**     | 0        |
+  | `{name: {$contains: 'ALPHA'}}` | `{name: {$regex: 'ALPHA'}}` | **0**     | 1        |
+  | `{code: {$in: []}}`            | _(no predicate emitted)_    | **3**     | 0        |
+
+  - **`notContains` → `'$not'`.** mingo's `$not` takes a regex or an operator
+    expression; handed a bare scalar it constrains nothing. The predicate was
+    emitted, appeared in the pipeline, and passed the whole table. A predicate
+    that is emitted and inert is indistinguishable from a working one at the
+    author's end — the same amplifying direction as #3948, reached a third way.
+  - **`contains` → `'$regex'`** was the right operator with the comparand handed
+    in raw, so it was neither escaped (a `.` matched any character) nor
+    case-folded, while the live query path escapes and matches `/…/i`. One
+    `where`, two meanings, depending on which face read it (#5240).
+  - **an empty `$in`** hit the call site's `values.length > 0` guard and emitted
+    no predicate at all, so the query widened to the whole table where `find()`
+    returned nothing.
+  - **an operand that is not a comparand** — a `$contains` pattern, a `$exists`
+    flag — went through the field's storage-form conversion anyway, so on a
+    declared `datetime` column the PATTERN itself was rewritten into canonical
+    form and then matched rows `find()` does not match (#4047).
+
+  ## What changed
+
+  The operator table now holds a **predicate builder** per operator rather than an
+  operator name, so `notContains` can say `{$not: {$regex: …}}` and the class of
+  "this operator needs a structure and the table can only hold a name" is gone
+  rather than this one instance of it. `$in` / `$nin` / `$lte` / `$exists`, which
+  the call site had grown an `if` chain for, are ordinary rows in that table now.
+
+  The substring rule itself is **borrowed from the driver** (new narrow
+  `InMemoryDriver.filterSubstringPattern`, alongside `filterComparandStorageForm`)
+  instead of re-derived, so `contains` on the analytics face escapes and case-folds
+  exactly as `find()` does and the two cannot drift apart again.
+
+  The `opMap[operator] || '$eq'` fallback — under which a misspelled or unmapped
+  operator silently became an EQUALITY comparison — is gone. It was already
+  unreachable after #5345 gated the vocabulary upstream, but only until someone
+  widened that vocabulary, which #5345 deliberately made a one-line edit. The
+  predicate table is keyed by the operator union derived from that same table, so
+  the widening edit now **fails to compile** until the predicate exists.
+
+  Two dead entries were deleted with it: `'notSet': '$exists'` (unreachable, and
+  inverted if it ever had been reached) and `'inDateRange': '$gte'` (unreachable,
+  and a one-ended `>=` answer to a two-ended range — its own comment conceded
+  "Will need special handling" and nothing implemented it).
+
+  ## Not changed
+
+  The `generateSql()` exit is untouched. Its operator-layer defects are #5433,
+  filed and deliberately not bundled.
+
+- 0f17114: fix(driver-sql,driver-memory,formula)!: `{ field: {} }` 一律拒收 —— 零个操作符的字段约束不再在四个后端有三个答案 (#5240)
+
+  `{ a: {} }`(一个字段,后面跟零个操作符)是 `FilterConditionSchema` 今天**声明合法**的形状,
+  而同一个 filter 在同仓四条路径上有三个答案:
+
+  | 路径                                | 改前                                                                                            | 改后                          |
+  | ----------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------- |
+  | `driver-sql`,顶层 plain map         | 抛 `INVALID_FILTER`(#5041 的比较数闸门)                                                         | 抛 `INVALID_FILTER`(专用消息) |
+  | `driver-sql`,`$and`/`$or`/`$not` 内 | 遍历零个操作符 → 不产出任何 SQL → **TRUE(匹配全表)**                                            | 抛 `INVALID_FILTER`           |
+  | `driver-memory`                     | 实时路径经 mingo 变成「字段深等于空文档」;参考匹配器落到 `JSON.stringify` 结构相等 → 顺带 FALSE | 抛 `INVALID_FILTER`           |
+  | `@objectstack/formula`              | `keys.length === 0` 显式 fail-closed → FALSE                                                    | 抛 `INVALID_FILTER`           |
+
+  于是 `{ $or: [ { a: {} }, { b: 2 } ] }` 在 SQL 上编译成 `(b = 2)` —— 既不是「零约束即 TRUE」
+  该给的全表,也不是两个 JS 后端给的 FALSE,而是**子句被 knex 连同空分组一起丢掉**的结果;
+  而 `driver-sql` 自己内部就不自洽:同一个 `{ a: {} }` 写在顶层被响亮拒收,包进一层 `$or`
+  就变成静默的 TRUE。
+
+  维护者拍板取**拒收**(不取 TRUE、不取 FALSE):这个形状几乎必然是编写期事故 ——
+  筛选器记下了字段却没记下操作符,或生成的元数据把操作符弄丢了 —— 让它在编写期就炸,
+  好过在某个后端上安静地多返回或少返回几行。与 #5041 已在 driver-sql 顶层建立的先例一致,
+  本次只是把同一道闸门补进组合子内部。四个后端(第四个是继承 `SqlDriver` 的
+  `driver-sqlite-wasm`)现在给出同一个 `INVALID_FILTER` / 400,消息里指名出事的位置
+  (如 `filter.$or[0].stage`)。
+
+  **⚠️ 可观察的行为变更 —— RLS `check` 求值路径。** `@objectstack/formula` 的
+  `matchesFilterCondition` 是 `plugin-security` 对 insert/update **后像**执行行级 `check`
+  的那条路径(没有查询可下推,这个求值器就是执行本身)。它改为抛出后,落在 #4775
+  「求不出值 = 该次操作失败」的既定姿态上。这不只是「拒绝得更响」——有一类结果直接翻转:
+
+  | `check` 策略                                    | 改前                                  | 改后                     |
+  | ----------------------------------------------- | ------------------------------------- | ------------------------ |
+  | `{ a: {} }`                                     | FALSE → 写入被拒(403)                 | 抛出 → 该次写入失败(400) |
+  | `{ $or: [ { a: {} }, { owner: '{userId}' } ] }` | FALSE 被另一析取项吸收 → 写入**放行** | 抛出 → 该次写入失败      |
+  | `{ $not: { a: {} } }`                           | `!false` → 写入**放行**               | 抛出 → 该次写入失败      |
+
+  后两行是**原本能成功、现在会失败**的写入。这是拍板的目的而非副作用:一条含
+  `{ field: {} }` 的权限规则,是一条作者弄丢了操作符的规则,它的含义不该取决于四个后端里
+  哪一个在求值。升级后请检查 `check`/`using` 策略里是否存在零操作符的字段约束——
+  错误消息会指名位置。
+
+  同一条改动也让 `@objectstack/driver-memory` 的两个过滤面(经 mingo 的实时查询路径,
+  与跨后端一致性套件所用的 `memory-matcher` 参考匹配器)第一次对这个形状给出同一个答案。
+
+  非空形状**逐字符不变**:普通比较、`$in`、`$or`/`$and` 组合、`$not` 的 #5146 NULL-safe 改写,
+  编译出的 SQL 文本与匹配结果都与改前相同;`{}`(零个键的**节点**,#5134 的布尔单位元)
+  与 `{ field: {} }` 是两个不同形状,前者的语义不受本次影响。
+
+  注:本次收紧的是**实现**。`packages/spec` 的 `FilterConditionSchema` 仍然声明这个形状合法
+  (非递归半边是 `z.record(z.string(), z.unknown())`),即实现现在比已声明的契约更严;
+  契约收窄与 `FILTER_LOGIC_CASES` 补条归 spec 车道另行处理。
+
+- c7406b0: fix(objectql,driver-sql,driver-memory,driver-mongodb)!: `FilterArray` 在 engine 门下沉,四驱动的数组方言删除 (#5158 拍板 C 第 2 步)
+
+  `FilterArray` —— `['stage','=','won']`、`['and', […], […]]`、`[[…], […]]` —— 是**仅输入**的
+  授权糖。#5285 已在 spec 里把这件事写明(`data/filter.zod.ts`,`filter-array-declaration.test.ts`
+  钉住「被声明」且「`where` 不接受它」)。本次是拍板 C 的第 2 步:让**运行时**与那份声明一致。
+
+  ## 改了什么
+
+  进入运行时的门有两扇,过去只有一扇按契约读:
+
+  | 门                                                                                                | 改前                                                                                                                               | 改后                                                                                            |
+  | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+  | **Door 1** —— 协议/HTTP 面(`metadata-protocol`)                                                   | `isFilterAST` → `parseFilterAST`,不可下沉的数组答 `400 INVALID_FILTER`                                                             | 不变                                                                                            |
+  | **Door 2** —— 进程内 engine 直调(`ObjectQL.find`/`findOne`/`count`/`aggregate`/`update`/`delete`) | 数组**原样**透传给驱动                                                                                                             | 走**同一条缝**:`isFilterAST` → `parseFilterAST` 下沉为 `FilterCondition`,不可下沉的数组响亮拒收 |
+  | 四驱动(`driver-sql`、继承它的 `driver-sqlite-wasm`、`driver-memory`、`driver-mongodb`)            | 各自带**第二套过滤器编译器**,包括一种**中缀**方言(`[condA, 'or', condB]`)—— 没有任何 schema 声明过它,`parseFilterAST` 也表达不了它 | 数组方言删除;数组到达驱动即 `INVALID_FILTER` / 400                                              |
+
+  一个查询两套编译器正是 ADR-0053 D-A1 禁止的分叉,而且它已经产生了真实的产品分叉:cloud 的
+  `RemoteTransport.buildWhereSQL` 自 cloud#1075 起对**同一输入**响亮拒收,`driver-sql` 却编译它。
+  删掉方言后两侧自然合流。
+
+  ## 授权面:零变化
+
+  `FilterBuilder`(`@objectstack/client`)产出的元组与 `['and', ...]` 组、React block 的
+  `filters` prop、wire 的 `$filter` 面、showcase 的授权点 —— **全部原样工作**,因为下沉正是
+  这些形状本来的用途。wire 契约逐字节不变(Door 1 的行为未改)。
+
+  ## ⚠️ 可观察的行为变更
+
+  1. **中缀连接不再被编译。** `where: [condA, 'or', condB]` 过去只有驱动认识,现在在 engine 门被拒收。
+     声明的写法是前缀组:`['or', condA, condB]` —— 语义相同,`parseFilterAST` 有它的下沉。
+  2. **`findOne({ where: [] })` 现在抛错。** `[]` 的含义**没有变**(仍是「无过滤」,`find`/`count`
+     照旧返回/计数全部行)。变的是 `findOne` 终于**看得见**这一点:未下沉的 `[]` 过去被
+     `requireFindOnePredicate` 当作「驱动自己去解释的表达式树」放行,于是 `limit: 1` 落在整张表上,
+     返回**任意一行** —— 正是 #4419 要挡的缺陷,活在 #4419 自己的守卫里面。
+  3. **不可下沉的数组在 engine 门拒收,不再由驱动拒收。** 形状与操作符词表相同(`isFilterAST` 同一套),
+     变的是消息来自调用点、带上调用方自己的值,以及明说「过滤器没有被应用,否则会返回**未过滤**的结果集」。
+  4. **驱动直调者(不经 engine)受影响。** `SqlDriver` / `InMemoryDriver` / `translateFilter` 是公开
+     导出;把数组 `where` 直接喂给它们的调用方需要改为先 `parseFilterAST(...)` 再传,或改走 ObjectQL。
+     注意 `QueryAST.where` 的 `FilterCondition` 是索引签名类型,数组对它是**可赋值**的 —— 类型层从未
+     挡住这个输入,所以拒收必须在运行时。
+  5. **`driver-mongodb` 的 `createdAt` → `created_at` 字段别名随方言一起消失。** 它只存在于数组路径
+     (`mapFieldName`,仅被已删除的 `translateComparison` 调用),对象路径从未应用过它。消费端别名按
+     AGENTS.md PD #12 是债务而非模式,故不再补回:请写声明的字段名 `created_at`。
+
+  ## 删除的代码面
+
+  - `SqlDriver.applyFilters` 的数组遍历分支,及其比较发射器 `protected applyAstComparison`(约 220 行)
+  - `InMemoryDriver.convertToMongoQuery` 的 legacy array 分支(约 62 行)
+  - `driver-mongodb` `mongodb-filter.ts` 的 `translateArrayFilter` / `translateComparison` / `mapFieldName`(约 140 行)
+  - `driver-sqlite-wasm` 无自有实现,随 `SqlDriver` 继承变更
+
+  `[]` 在每一层的读法**都不变**:engine 删键、`parseFilterAST([])` 为 `undefined`、三个驱动都提前返回。
+
+### Patch Changes
+
+- 06ba036: feat(drivers): `@objectstack/driver-turso` 迁回本仓并公开发布，五个 driver 统一收进 `packages/drivers/` (#4645)
+
+  `TursoDriver` 一直以 `extends SqlDriver` 的方式**跨仓库继承**本仓的类，自己却住在闭源的
+  `objectstack-ai/cloud`（`publishConfig: restricted`）。而本仓的 runtime 早就把 turso 当一等
+  公民——`http-dispatcher.ts` 里环境 provisioning 的偏好顺序第一位就是它，`POST /cloud/environments`
+  的 `driver` 参数示例是 `memory | turso`，`objectql/src/engine.ts` 还带着一段 turso 专属的瞬时
+  `fetch failed` 重试。开源侧的代码路径引用着一个自己仓里既测不到也 grep 不到的 driver，闭源侧则
+  在每次 pin bump 时追赶父类的重构。维护者裁定把核心迁回本仓、公开 Apache-2.0 发布。
+
+  **新包 `@objectstack/driver-turso`（`packages/drivers/driver-turso`，Apache-2.0，`access: public`）**
+  带着它在 cloud 的全部实现与测试落地：`TursoDriver`（local / replica / remote 三种传输模式）、
+  `RemoteTransport`（纯 `@libsql/client` 走 HTTP/WebSocket，无原生依赖，可跑 serverless/edge）、
+  驱动的 spec/Studio 元数据，以及 15 个测试文件 538 条断言——全部 hermetic，默认 CI 下不碰网络、
+  不要凭据（remote 面走包内的 sqlite stub）。
+
+  **留在 cloud（不随迁）**：按租户路由的 `multi-tenant.ts`（云产品差异化能力）及其 schema、
+  `vector-poc.test.ts`。因此本包的 barrel **不再导出** `createMultiTenantRouter` /
+  `MultiTenantConfig` / `MultiTenantRouter`，也不导出多租户 schema——它们从来不是这个 driver 的
+  一部分，只是曾经同包而已。
+
+  **目录重组**：五个 `IDataDriver` 实现（`driver-memory` / `driver-mongodb` / `driver-sql` /
+  `driver-sqlite-wasm` + 迁入的 `driver-turso`）现在都住在 `packages/drivers/`，
+  `knowledge-*` 与 `embedder-*` 留在 `packages/plugins/`。四个存量包**内容零改动**，只有
+  `repository.directory` 随目录更新——包名、入口、导出面、行为全部不变，消费者无需改动任何 import。
+
+  这也把 turso 交给了本仓的仓库级守卫：`check:driver-conformance` 从磁盘发现 driver 包，
+  迁入即入矩阵（5 drivers × 5 case-sets）。它的 temporal 两格是真绿（local 与 remote 双面套件），
+  filter 组合语义与两个分页 case-set 记为 measured DEBT——remote 传输自带一套 `buildWhereSQL` 与
+  `LIMIT`/`OFFSET` 拼装，是独立实现，"继承所以没问题"正是这些共享套件存在来证伪的假设。
+  补齐工作跟踪在 #5590。
+
+- 60a7a2d: fix(driver-memory): the live query path refuses the filters it cannot evaluate, and compiles the one it must (#5324, #5328)
+
+  **This is an observable behaviour change.** Two filter shapes that used to be
+  answered _silently_ now raise the catalogued `INVALID_FILTER` / 400 every other
+  filter refusal in this driver and in `driver-sql` already speaks (ADR-0112):
+
+  | filter                                                                                                                              | before                                                                                                                       | now                                                                     |
+  | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+  | an operator outside the Filter Protocol — `{ name: { $sounds_like: 'x' } }`, `$elemMatch`, `$size`, `$where`, field-level `$not`, … | handed to mingo, which threw a `MingoError` carrying **no `code` and no `status`** — served as a 500-shaped `{ error }` body | `INVALID_FILTER` / 400, naming the operator, the field and its position |
+  | a `$between` whose comparand is not `[min, max]` — `{ score: { $between: 5 } }`                                                     | the arm was skipped, the constraint **vanished**, and `find` returned `[]`                                                   | `INVALID_FILTER` / 400, wording aligned with `driver-sql`'s             |
+
+  Two more shapes join them, same cause: an undeclared `$`-combinator in a node
+  position (`{ $nor: … }`, `{ $where: … }` — `FilterConditionSchema` declares
+  `$and`/`$or`/`$not` and nothing else), and a combinator operand that is not a
+  filter condition (`{ $or: 'x' }`, `{ $or: [null] }`, `{ $not: 'x' }`).
+
+  If a query of yours starts returning a 400, it was already broken — it was
+  returning an empty result set or an uncoded 500 for the same input, and
+  `driver-sql` was rejecting it. The message names the operator and the path
+  (`filter.$or[1].$and[0].stage`).
+
+  **`$not` is the opposite change: it now works.** `$not` is a declared combinator
+  (`LOGICAL_OPERATORS`), `cel-to-filter` emits it for every CEL `!expr` in an RLS
+  read scope, and `driver-sql` / `driver-mongodb` / this package's own reference
+  matcher all implement it — but the live query path passed it to mingo, and
+  MongoDB has no document-level `$not`, so **every query carrying a negated scope
+  threw** `unknown top level operator: $not`. It is compiled to `$nor` with one
+  operand, the same rewrite `driver-mongodb` performs, which is NULL-safe by
+  construction and therefore lands on the answer #5146 ruled canonical.
+
+  Both of this package's filter faces — the live mingo path and the reference
+  matcher — now share ONE shape gate, so they cannot answer one filter
+  differently again. They did: given a malformed `$between` the live path returned
+  NO rows while the matcher returned EVERY row.
+
+  The conformance gap that hid all of this is closed too. `FILTER_LOGIC_CASES`
+  was run against this backend through the reference matcher only — the driver
+  does not call it — so the table's `$not` case had been green for as long as it
+  existed while the same filter through `InMemoryDriver.find` threw. The table now
+  runs through the real driver, as it does for the other three backends.
+
+  Accepted operators are the spec's `FILTER_OPERATORS`, plus `$regex` (produced by
+  plugin-auth's ObjectQL adapter, compiled by `driver-sql`) and its `$options`
+  companion. `$options` is a modifier, not a predicate: on its own, with no
+  `$regex` beside it, it is refused like any other filter this driver cannot
+  evaluate — it used to raise the same uncoded engine error on the live path and
+  match every row in the matcher.
+
+- 9c5abf4: fix(driver-sql,driver-memory,driver-mongodb): refuse out-of-contract filter input at the door instead of answering it differently per backend (#5347, #5348)
+
+  Two shapes the Filter Protocol never declared were reaching the drivers, and
+  every driver ANSWERED them — with a different answer. Both are now refused with
+  `INVALID_FILTER` / 400, in the ADR-0112 envelope every sibling filter refusal
+  already speaks.
+
+  ## `$null` with a non-boolean comparand — a behaviour change you can observe
+
+  `FieldOperatorsSchema` declares `$null: z.boolean()`. A non-boolean was read by
+  default branches hung on opposite sides, so one filter meant opposite things per
+  backend. Measured against one row with `stage: 'won'` (id 1) and one with
+  `stage: null` (id 2), on `{ stage: { $null: 'yes' } }`:
+
+  | backend                                     | read as                           | rows        |
+  | ------------------------------------------- | --------------------------------- | ----------- |
+  | driver-sql, driver-sqlite-wasm, Turso local | IS NULL (anything but `false`)    | `["2"]`     |
+  | driver-memory query path, driver-mongodb    | IS NOT NULL (anything but `true`) | `["1"]`     |
+  | driver-memory reference matcher             | no constraint at all              | `["1","2"]` |
+
+  **What changes for you:** a caller that today gets rows back for
+  `{ field: { $null: <non-boolean> } }` now gets a `400 INVALID_FILTER` naming the
+  operator, the field and the position. That includes calls working by truthy /
+  falsy coincidence — and the sharpest case is the STRING `"false"`, which is
+  truthy: it compiled to IS NULL on SQL and IS NOT NULL on the JS backends, i.e.
+  the opposite of what its author wrote it to mean, on at least one of them
+  whichever they meant. A JSON round-trip or generated metadata produces it
+  readily.
+
+  **The fix:** write the boolean. `{ field: { $null: true } }` for "has no value",
+  `{ field: { $null: false } }` for "has a value". Both are unchanged, on all four
+  backends, and so is every other operator. `$exists` is deliberately NOT tightened
+  here — it diverges on its own axis (what "exists" means for a null-valued key)
+  and is tracked separately.
+
+  ## An undeclared `$op` in a document position — silent empty set becomes a 400
+
+  `FilterConditionSchema` declares exactly three `$`-keys at a node
+  (`$and` / `$or` / `$not`); every other key is a field name. `driver-sql`
+  compiled the rest as COLUMNS, so `{ $where: '…' }`, `{ $nor: […] }`,
+  `{ $expr: … }` produced a predicate that matched nothing and reported nothing —
+  a caller could not tell "no rows matched" from "the filter never compiled". The
+  FIELD position had refused the same class of input since v16, so one driver gave
+  two answers depending on depth.
+
+  **What changes for you:** those filters now raise `400 INVALID_FILTER` instead of
+  returning `[]`. `driver-memory` already refused them; this brings `driver-sql`
+  (and `driver-sqlite-wasm`, which inherits it) into line. The three declared
+  combinators, their boolean identities (`$and: []` is TRUE, `$or: []` is FALSE)
+  and every legal filter compile byte-identically.
+
+  Both refusals are raised on the driver's validating walk rather than in its SQL
+  emitter, so a malformed node is refused regardless of whether a sibling
+  disjunct would have short-circuited the compile.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Major Changes

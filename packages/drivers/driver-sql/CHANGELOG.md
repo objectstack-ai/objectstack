@@ -1,5 +1,795 @@
 # @objectstack/driver-sql
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- 0f17114: fix(driver-sql,driver-memory,formula)!: `{ field: {} }` 一律拒收 —— 零个操作符的字段约束不再在四个后端有三个答案 (#5240)
+
+  `{ a: {} }`(一个字段,后面跟零个操作符)是 `FilterConditionSchema` 今天**声明合法**的形状,
+  而同一个 filter 在同仓四条路径上有三个答案:
+
+  | 路径                                | 改前                                                                                            | 改后                          |
+  | ----------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------- |
+  | `driver-sql`,顶层 plain map         | 抛 `INVALID_FILTER`(#5041 的比较数闸门)                                                         | 抛 `INVALID_FILTER`(专用消息) |
+  | `driver-sql`,`$and`/`$or`/`$not` 内 | 遍历零个操作符 → 不产出任何 SQL → **TRUE(匹配全表)**                                            | 抛 `INVALID_FILTER`           |
+  | `driver-memory`                     | 实时路径经 mingo 变成「字段深等于空文档」;参考匹配器落到 `JSON.stringify` 结构相等 → 顺带 FALSE | 抛 `INVALID_FILTER`           |
+  | `@objectstack/formula`              | `keys.length === 0` 显式 fail-closed → FALSE                                                    | 抛 `INVALID_FILTER`           |
+
+  于是 `{ $or: [ { a: {} }, { b: 2 } ] }` 在 SQL 上编译成 `(b = 2)` —— 既不是「零约束即 TRUE」
+  该给的全表,也不是两个 JS 后端给的 FALSE,而是**子句被 knex 连同空分组一起丢掉**的结果;
+  而 `driver-sql` 自己内部就不自洽:同一个 `{ a: {} }` 写在顶层被响亮拒收,包进一层 `$or`
+  就变成静默的 TRUE。
+
+  维护者拍板取**拒收**(不取 TRUE、不取 FALSE):这个形状几乎必然是编写期事故 ——
+  筛选器记下了字段却没记下操作符,或生成的元数据把操作符弄丢了 —— 让它在编写期就炸,
+  好过在某个后端上安静地多返回或少返回几行。与 #5041 已在 driver-sql 顶层建立的先例一致,
+  本次只是把同一道闸门补进组合子内部。四个后端(第四个是继承 `SqlDriver` 的
+  `driver-sqlite-wasm`)现在给出同一个 `INVALID_FILTER` / 400,消息里指名出事的位置
+  (如 `filter.$or[0].stage`)。
+
+  **⚠️ 可观察的行为变更 —— RLS `check` 求值路径。** `@objectstack/formula` 的
+  `matchesFilterCondition` 是 `plugin-security` 对 insert/update **后像**执行行级 `check`
+  的那条路径(没有查询可下推,这个求值器就是执行本身)。它改为抛出后,落在 #4775
+  「求不出值 = 该次操作失败」的既定姿态上。这不只是「拒绝得更响」——有一类结果直接翻转:
+
+  | `check` 策略                                    | 改前                                  | 改后                     |
+  | ----------------------------------------------- | ------------------------------------- | ------------------------ |
+  | `{ a: {} }`                                     | FALSE → 写入被拒(403)                 | 抛出 → 该次写入失败(400) |
+  | `{ $or: [ { a: {} }, { owner: '{userId}' } ] }` | FALSE 被另一析取项吸收 → 写入**放行** | 抛出 → 该次写入失败      |
+  | `{ $not: { a: {} } }`                           | `!false` → 写入**放行**               | 抛出 → 该次写入失败      |
+
+  后两行是**原本能成功、现在会失败**的写入。这是拍板的目的而非副作用:一条含
+  `{ field: {} }` 的权限规则,是一条作者弄丢了操作符的规则,它的含义不该取决于四个后端里
+  哪一个在求值。升级后请检查 `check`/`using` 策略里是否存在零操作符的字段约束——
+  错误消息会指名位置。
+
+  同一条改动也让 `@objectstack/driver-memory` 的两个过滤面(经 mingo 的实时查询路径,
+  与跨后端一致性套件所用的 `memory-matcher` 参考匹配器)第一次对这个形状给出同一个答案。
+
+  非空形状**逐字符不变**:普通比较、`$in`、`$or`/`$and` 组合、`$not` 的 #5146 NULL-safe 改写,
+  编译出的 SQL 文本与匹配结果都与改前相同;`{}`(零个键的**节点**,#5134 的布尔单位元)
+  与 `{ field: {} }` 是两个不同形状,前者的语义不受本次影响。
+
+  注:本次收紧的是**实现**。`packages/spec` 的 `FilterConditionSchema` 仍然声明这个形状合法
+  (非递归半边是 `z.record(z.string(), z.unknown())`),即实现现在比已声明的契约更严;
+  契约收窄与 `FILTER_LOGIC_CASES` 补条归 spec 车道另行处理。
+
+- c7406b0: fix(objectql,driver-sql,driver-memory,driver-mongodb)!: `FilterArray` 在 engine 门下沉,四驱动的数组方言删除 (#5158 拍板 C 第 2 步)
+
+  `FilterArray` —— `['stage','=','won']`、`['and', […], […]]`、`[[…], […]]` —— 是**仅输入**的
+  授权糖。#5285 已在 spec 里把这件事写明(`data/filter.zod.ts`,`filter-array-declaration.test.ts`
+  钉住「被声明」且「`where` 不接受它」)。本次是拍板 C 的第 2 步:让**运行时**与那份声明一致。
+
+  ## 改了什么
+
+  进入运行时的门有两扇,过去只有一扇按契约读:
+
+  | 门                                                                                                | 改前                                                                                                                               | 改后                                                                                            |
+  | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+  | **Door 1** —— 协议/HTTP 面(`metadata-protocol`)                                                   | `isFilterAST` → `parseFilterAST`,不可下沉的数组答 `400 INVALID_FILTER`                                                             | 不变                                                                                            |
+  | **Door 2** —— 进程内 engine 直调(`ObjectQL.find`/`findOne`/`count`/`aggregate`/`update`/`delete`) | 数组**原样**透传给驱动                                                                                                             | 走**同一条缝**:`isFilterAST` → `parseFilterAST` 下沉为 `FilterCondition`,不可下沉的数组响亮拒收 |
+  | 四驱动(`driver-sql`、继承它的 `driver-sqlite-wasm`、`driver-memory`、`driver-mongodb`)            | 各自带**第二套过滤器编译器**,包括一种**中缀**方言(`[condA, 'or', condB]`)—— 没有任何 schema 声明过它,`parseFilterAST` 也表达不了它 | 数组方言删除;数组到达驱动即 `INVALID_FILTER` / 400                                              |
+
+  一个查询两套编译器正是 ADR-0053 D-A1 禁止的分叉,而且它已经产生了真实的产品分叉:cloud 的
+  `RemoteTransport.buildWhereSQL` 自 cloud#1075 起对**同一输入**响亮拒收,`driver-sql` 却编译它。
+  删掉方言后两侧自然合流。
+
+  ## 授权面:零变化
+
+  `FilterBuilder`(`@objectstack/client`)产出的元组与 `['and', ...]` 组、React block 的
+  `filters` prop、wire 的 `$filter` 面、showcase 的授权点 —— **全部原样工作**,因为下沉正是
+  这些形状本来的用途。wire 契约逐字节不变(Door 1 的行为未改)。
+
+  ## ⚠️ 可观察的行为变更
+
+  1. **中缀连接不再被编译。** `where: [condA, 'or', condB]` 过去只有驱动认识,现在在 engine 门被拒收。
+     声明的写法是前缀组:`['or', condA, condB]` —— 语义相同,`parseFilterAST` 有它的下沉。
+  2. **`findOne({ where: [] })` 现在抛错。** `[]` 的含义**没有变**(仍是「无过滤」,`find`/`count`
+     照旧返回/计数全部行)。变的是 `findOne` 终于**看得见**这一点:未下沉的 `[]` 过去被
+     `requireFindOnePredicate` 当作「驱动自己去解释的表达式树」放行,于是 `limit: 1` 落在整张表上,
+     返回**任意一行** —— 正是 #4419 要挡的缺陷,活在 #4419 自己的守卫里面。
+  3. **不可下沉的数组在 engine 门拒收,不再由驱动拒收。** 形状与操作符词表相同(`isFilterAST` 同一套),
+     变的是消息来自调用点、带上调用方自己的值,以及明说「过滤器没有被应用,否则会返回**未过滤**的结果集」。
+  4. **驱动直调者(不经 engine)受影响。** `SqlDriver` / `InMemoryDriver` / `translateFilter` 是公开
+     导出;把数组 `where` 直接喂给它们的调用方需要改为先 `parseFilterAST(...)` 再传,或改走 ObjectQL。
+     注意 `QueryAST.where` 的 `FilterCondition` 是索引签名类型,数组对它是**可赋值**的 —— 类型层从未
+     挡住这个输入,所以拒收必须在运行时。
+  5. **`driver-mongodb` 的 `createdAt` → `created_at` 字段别名随方言一起消失。** 它只存在于数组路径
+     (`mapFieldName`,仅被已删除的 `translateComparison` 调用),对象路径从未应用过它。消费端别名按
+     AGENTS.md PD #12 是债务而非模式,故不再补回:请写声明的字段名 `created_at`。
+
+  ## 删除的代码面
+
+  - `SqlDriver.applyFilters` 的数组遍历分支,及其比较发射器 `protected applyAstComparison`(约 220 行)
+  - `InMemoryDriver.convertToMongoQuery` 的 legacy array 分支(约 62 行)
+  - `driver-mongodb` `mongodb-filter.ts` 的 `translateArrayFilter` / `translateComparison` / `mapFieldName`(约 140 行)
+  - `driver-sqlite-wasm` 无自有实现,随 `SqlDriver` 继承变更
+
+  `[]` 在每一层的读法**都不变**:engine 删键、`parseFilterAST([])` 为 `undefined`、三个驱动都提前返回。
+
+- 4addd9d: feat(driver-sql)!: organization-scoped uniques are NULL-safe — `COALESCE(organization_id, '__global__')` key part + `unique: 'organization'` on declared indexes (ADR-0120 D3/D4, #5030)
+
+  SQL UNIQUE is NULL-distinct, so the `(organization_id, field)` composite #3696
+  introduced enforced **nothing** on rows whose organization is NULL — which on a
+  single-tenant stack (where the kernel injects the column and never fills it) is
+  **every row**: field-level `unique: true` was a silent no-op there, measured in
+  #5030. Per ADR-0120 D3, every organization-scoped unique now materializes its
+  organization key part as `COALESCE(organization_id, '__global__')`: NULL-organization
+  rows collapse into one platform bucket, unique among themselves; non-NULL rows
+  are untouched. Storage stays NULL — the sentinel exists only inside the index
+  key, and it is the same word the autonumber sequence table already uses
+  (`GLOBAL_TENANT`), so a constraint-violation error reads as "the platform
+  bucket collided", not as corrupt data.
+
+  What changes, concretely:
+
+  - **Field-level `unique: true`** (and the new explicit synonym
+    `'organization'`) on a tenant-scoped object → composite
+    `(COALESCE(tenantField, '__global__'), field)`. `unique: 'global'` and
+    tenant-less objects are unchanged.
+  - **Declared indexes gain the ADR-0120 D1 scope vocabulary at the driver**:
+    `unique: 'organization'` prepends the NULL-safe organization key part to the
+    listed columns (degrading to the listed columns on a tenant-less object; a
+    listed tenant column is made NULL-safe in place instead — the S6 respelling).
+    `unique: true` / `'global'` on a declared index stays **verbatim** — the
+    #3696 contract, now the `'global'` arm; the nine engine dedup/idempotency
+    keys keep their exact physical shape. (The spec/lint side of the vocabulary
+    lands separately via #4986; the driver deliberately merges first.)
+  - **Drift detection reads both sides through one normalization**
+    (the #4884 discipline, extended to the tenant key part): the physical
+    `COALESCE(organization_id, <literal>)` form is attributed to the column,
+    compared **literal-agnostically**, and recognised as the sync's own
+    vocabulary — a healthy database reports zero drift on every dialect.
+  - **Existing bare composites migrate through the ceremony (ADR-0120 D4)**:
+    `(organization_id, X) → (COALESCE(organization_id, '__global__'), X)`
+    surfaces as a `recreate_index` drift op — a pure tightening — gated by a
+    **duplicate pre-flight probe**. Clean probe → the op grades `safe` and dev
+    `autoMigrate: 'safe'` / a plain `os migrate apply` applies it. Duplicates
+    (data the void constraint wrongly admitted) → the op is **blocked** with a
+    per-group row report, the old index stays in place, and apply re-probes so
+    even `--allow-destructive` cannot drop a constraint whose replacement is not
+    creatable. Deduplicate, re-plan, apply.
+  - **`'__global__'` is reserved at the organization-minting seam**
+    (plugin-auth): an organization whose id or slug equals the sentinel is
+    rejected at creation with a prescriptive error (ADR-0120 D3 guardrail).
+
+  Migration note for operators: on databases with pre-existing
+  organization-composite uniques, the first `os migrate plan` after upgrading
+  shows one `recreate_index` per affected index. On healthy data it auto-applies
+  in dev and is a no-op content-wise; a blocked op means the #5030 defect
+  admitted real duplicate rows — resolve the listed rows first. MySQL < 8.0.13 /
+  MariaDB cannot express the functional key part: the driver degrades to the
+  bare composite, says exactly what is not enforced at `error` level, and keeps
+  reporting the tightening as drift for after the server upgrade.
+
+### Patch Changes
+
+- 28ad90e: feat(types,cloud-connection,lint,cli): ADR-0120 17.x 收尾 —— `isolated` 安装期姿态硬门(D5e)、D5c 重拼写 advisory、成文契约扫荡与三姿态 conformance (#5081)
+
+  ADR-0120 17.x 波的第三块,也是最后一块。前两块已在 main 上:#5212(driver 侧
+  D3+D4 —— `COALESCE(organization_id, '__global__')` 物化、drift 两侧同步、重复预检)
+  与 #5208(spec 词汇 `'organization'` + D5a/D5b lint)。本次补齐三件事:安装期的
+  姿态决策点、剩余的成文契约、以及把「一个 app 包跑遍三种姿态」从假设变成测试。
+
+  **D5e —— 装进 `isolated` 环境时的硬门。** 词汇本身是姿态无关的:作者说的是业务
+  边界(`'organization'` 一个组织一份 / `'global'` 整个安装一份),没有任何索引形状
+  读姿态。唯一的残留在一个方向上:`isolated` 下组织就是**不同客户**,此时 app 业务
+  对象上的 `'global'` 唯一既跨客户过度约束,又变成跨客户的存在性预言机(S10/S14)。
+  维护者裁定这是**硬门而非 advisory**:把带 `'global'` 唯一(非 `sys` 对象)的 app
+  装进 `isolated` 环境会**停下来并逐索引列出**,安装者(通常是 AI agent)要么确认它
+  确实是平台级的,要么改写为 `'organization'`;确认按 ADR-0104 attestation 风格
+  留痕在安装清单里(`InstalledManifestEntry.globalUniqueAttestation` —— 确认了什么、
+  谁确认的、何时、在哪个姿态下问的),**之后不复问**。
+
+  - 停下的安装**什么都不留**:先于 hot-register 和任何 ledger 写入,所以作者改完
+    元数据可以直接重试,不需要先卸载。
+  - 逐索引确认是有牙齿的:`confirmGlobalUniques` 收 `true` 或明确的 id 数组,只确认
+    其中一条仍会在剩下的那条上停住。
+  - 升级引入的**新**约束会被问,老的答案继续算数。
+  - 另一个姿态下给出的确认**不算同意** —— `isolated` 那个问题在 `single` 下从未被
+    问过,所以按「未确认」处理(唯一不会静默放行跨客户约束的方向)。
+  - ⛔ **永不做成启动期告警**(#4884 纪律)。boot 时的 rehydrate 不评估此门;门够不到
+    的两类存量 —— 门禁上线前的安装、装后姿态变更的环境 —— 由 `os doctor` 与
+    `os migrate plan` 的 advisory 形态覆盖。
+
+  判定里有三条是承重的,别「简化」掉:声明索引上的裸 `unique: true` **算**(D1 说它
+  就是 `'global'` 的位置式拼写,排除它等于让整个 17.x 可以靠拼写绕过);字段级
+  `true` **不算**(它是 `'organization'`,永久合法);`sys_`/`base_` 对象**不算**
+  (S5 那批引擎幂等键天然就是平台级的,每次安装都问一遍就是 #4884 的误报类)。
+
+  CLI: `os package install` 新增 `--confirm-global-uniques`,并把 409 渲染成可读的
+  逐条清单而不是一句 "Install failed (409)"。
+
+  **D5c —— 遗留手写组织复合索引的 advisory。** 新规则
+  `unique/legacy-organization-composite`:声明的唯一索引自己列出了组织列
+  (`{ fields: ['name','organization_id'], unique: true }`)—— 这是词汇出现之前手写
+  per-organization 的写法。它读起来像「每组织唯一」,物化出来却是普通复合索引,而
+  SQL UNIQUE 是 NULL-distinct 的:组织列为 NULL 的行上它**什么都不约束**(#5030),
+  在单组织部署上那就是每一行。改写成 `unique: 'organization'`(`fields` 原样保留,
+  driver 会把已列出的组织列**就地**变成 NULL-safe 形式)正是补上这个洞的动作。
+  **永远只是 advisory,永远不自动修**:老拼写永久合法、零强制 drift,而 opt-in 是
+  真实的物理收紧,要走 D4 的 `recreate_index` + 重复预检。
+
+  **D6 —— 成文契约扫荡。** `content/docs/data-modeling/indexing.mdx` 的
+  §Two ways to say "unique" 全节按新词汇重写(含 `os:check` 代码块);
+  `content/docs/protocol/objectql/schema.mdx` 的 §Uniqueness and tenancy 重写为
+  §Uniqueness and scope —— 其中那句「单租户部署不受影响,租户列是常量,复合索引
+  退化为单列索引」是 #5030 **证伪过的原话**,现已替换为 D3 的 NULL-safe 事实;
+  `content/docs/deployment/cli.mdx` 的 `replace_unique_index` / `recreate_index`
+  条目补上 NULL-safe 形状与重复预检;`content/docs/references/**` 经
+  `gen:schema && gen:docs` 再生成,未手改。
+
+  按 ADR-0120 Resolved #2 的非规范性引导(官方示例/脚手架/生成器在新代码中输出
+  显式拼写),`skills/objectstack-data/**` 的索引与校验规则整体扫过:声明索引一律
+  说清 scope,并新增一节完整讲 `'organization'` 的 NULL-safe 语义与「永远不写姿态」。
+  顺带修掉那里长期使用的 `tenant_id` —— 平台的列叫 `organization_id`。
+  `examples/**`、`create-objectstack` 模板与 `os generate` 经核查**根本没有声明任何
+  唯一约束**,故无可扫;这是核查结论,不是遗漏。
+
+  **三姿态 conformance(ADR §Acceptance tests)。** 同一个 fixture app 在
+  `single | group | isolated` 三姿态下启动,逐 S 行用**真实的违规插入**断言 enforcement
+  (S1/S2/S3/S4/S5/S6/S7/S8/S9/S11/S12),并逐姿态捕获物化出的索引键,断言三者
+  **逐字节相同** —— 「没有任何索引形状读姿态」这句话一旦有两者不同就是假的。相同性
+  断言配了一条正向断言(对着期望的键形状),这样「三次都什么都没建」不会读成「一致」。
+  外加 ADR 只要的那一条 transition smoke:在 `single` 下建库、`isolated` 下重新打开,
+  drift op 为零。
+
+  对既有部署的影响:除新增的安装期确认外,本次不改变任何已有物化行为。字段级
+  `unique: true` 一如既往合法。
+
+- 06ba036: feat(drivers): `@objectstack/driver-turso` 迁回本仓并公开发布，五个 driver 统一收进 `packages/drivers/` (#4645)
+
+  `TursoDriver` 一直以 `extends SqlDriver` 的方式**跨仓库继承**本仓的类，自己却住在闭源的
+  `objectstack-ai/cloud`（`publishConfig: restricted`）。而本仓的 runtime 早就把 turso 当一等
+  公民——`http-dispatcher.ts` 里环境 provisioning 的偏好顺序第一位就是它，`POST /cloud/environments`
+  的 `driver` 参数示例是 `memory | turso`，`objectql/src/engine.ts` 还带着一段 turso 专属的瞬时
+  `fetch failed` 重试。开源侧的代码路径引用着一个自己仓里既测不到也 grep 不到的 driver，闭源侧则
+  在每次 pin bump 时追赶父类的重构。维护者裁定把核心迁回本仓、公开 Apache-2.0 发布。
+
+  **新包 `@objectstack/driver-turso`（`packages/drivers/driver-turso`，Apache-2.0，`access: public`）**
+  带着它在 cloud 的全部实现与测试落地：`TursoDriver`（local / replica / remote 三种传输模式）、
+  `RemoteTransport`（纯 `@libsql/client` 走 HTTP/WebSocket，无原生依赖，可跑 serverless/edge）、
+  驱动的 spec/Studio 元数据，以及 15 个测试文件 538 条断言——全部 hermetic，默认 CI 下不碰网络、
+  不要凭据（remote 面走包内的 sqlite stub）。
+
+  **留在 cloud（不随迁）**：按租户路由的 `multi-tenant.ts`（云产品差异化能力）及其 schema、
+  `vector-poc.test.ts`。因此本包的 barrel **不再导出** `createMultiTenantRouter` /
+  `MultiTenantConfig` / `MultiTenantRouter`，也不导出多租户 schema——它们从来不是这个 driver 的
+  一部分，只是曾经同包而已。
+
+  **目录重组**：五个 `IDataDriver` 实现（`driver-memory` / `driver-mongodb` / `driver-sql` /
+  `driver-sqlite-wasm` + 迁入的 `driver-turso`）现在都住在 `packages/drivers/`，
+  `knowledge-*` 与 `embedder-*` 留在 `packages/plugins/`。四个存量包**内容零改动**，只有
+  `repository.directory` 随目录更新——包名、入口、导出面、行为全部不变，消费者无需改动任何 import。
+
+  这也把 turso 交给了本仓的仓库级守卫：`check:driver-conformance` 从磁盘发现 driver 包，
+  迁入即入矩阵（5 drivers × 5 case-sets）。它的 temporal 两格是真绿（local 与 remote 双面套件），
+  filter 组合语义与两个分页 case-set 记为 measured DEBT——remote 传输自带一套 `buildWhereSQL` 与
+  `LIMIT`/`OFFSET` 拼装，是独立实现，"继承所以没问题"正是这些共享套件存在来证伪的假设。
+  补齐工作跟踪在 #5590。
+
+- d9971d3: fix(driver-sql): `$field` 跨字段比较改为按 ADR-0112 响亮拒绝,不再抛裸 TypeError
+
+  `{ amount: { $gt: { $field: 'budget' } } }`(spec `FieldReferenceSchema`,由 `compileCelToFilter` 在转译含字段间比较的 CEL 权限/RLS 规则时产出)此前被 SqlDriver 当作**绑定值**交给驱动,sqlite 抛出无 `code`、无 `status` 的裸 `TypeError` —— 落在 `INVALID_FILTER` 信封之外,到客户端表现为不透明的服务端错误。更隐蔽的是列表位置:`$in` / `$between` 里的 `$field` 成员连报错都没有,直接静默返回零行。
+
+  现在两者都以完整信封拒绝(`error.code = INVALID_FILTER`、HTTP 400、无 `[sql-driver]` 前缀),报错点名字段、运算符与被引用字段,并说明跨字段比较**当前仅内存求值路径(`matchesFilter`)支持**。三个比较发射点统一处理,Filter Protocol 与数组三元组两种写法得到同一答案。
+
+  同一处闸门补上了 issue 指出的通用臂:**已知运算符 + 无法绑定的值形态**(标量比较位上的普通对象 / 数组)此前同样是裸 `TypeError`,现在也返回 `INVALID_FILTER`。`$in` / `$nin` / `$between` 的正常数组绑定不受影响。
+
+  `FieldReferenceSchema` 声明保留,JSDoc 补注执行支持面(内存求值 ✅ / SQL 下推 ❌ 响亮拒绝);SQL 列对列编译实现见 #5222。
+
+- 2ddba89: fix(tenancy): eight sites answered "is this deployment multi-org?" with the demoted `OS_MULTI_ORG_ENABLED` (#5262)
+
+  ADR-0105 D1 made `OS_TENANCY_POSTURE` the authoritative knob and demoted
+  `OS_MULTI_ORG_ENABLED` to a back-compat _input_ of `resolveTenancyPosture()`.
+  A deployment configured the documented way — `OS_TENANCY_POSTURE=isolated` (or
+  `group`), legacy boolean unset — therefore reads `false` from
+  `resolveMultiOrgEnabled()` while running a fully mounted organization wall.
+  #5233 corrected two sites in `plugin-auth`; a census found eight more, all
+  written before that function's doc comment was corrected. Third recurrence of
+  the shape (cloud#1020, #5233).
+
+  Each site was judged separately for **which** posture answers its question —
+  what the operator REQUESTED, or what the `tenancy` service reports is actually
+  IN FORCE — rather than converted mechanically:
+
+  - `objectql` `SchemaRegistry` — the env-derived multi-tenant default. Reads the
+    REQUESTED posture (it is constructed below the kernel, with no service
+    registry to ask). The `organization_id` column was always provisioned; what
+    diverged is its INDEX, so a posture-only deployment ran the Layer 0 wall's
+    hottest predicate unindexed while SecurityPlugin compiled that same wall.
+  - `plugin-dev` — whether to load the enterprise `@objectstack/organizations`.
+    REQUESTED posture, mirroring `serve.ts`: this branch is what mounts the wall,
+    so asking whether the wall is up would be circular. A posture-only dev stack
+    previously never loaded the package at all and served traffic unwalled. Its
+    diagnostic now names the posture that was requested instead of asserting
+    `OS_MULTI_ORG_ENABLED=true` at an operator who never set it.
+  - `runtime` `AppPlugin` (inline seed + hot-reload seeder) — EFFECTIVE posture,
+    via the `tenancy` service. These ask "will the per-org replay run instead of
+    me?", and on an ADR-0093 D5 degraded boot that replay does not exist, so
+    keying on the request would defer to a replay that can never happen. Walled
+    deployments previously inline-seeded exactly the NULL-organization rows the
+    code's own comment exists to avoid.
+  - `cloud-connection` marketplace local install (install-time seed + rehydrate
+    heal) — EFFECTIVE posture, same reasoning. The install path is a write path:
+    a walled deployment wrote every sample row with no `organization_id`, landing
+    the app's data outside the wall its own reads apply.
+  - `driver-sql` `isMultiTenantMode()` — REQUESTED posture (a driver has no
+    kernel to ask, and a suppressed warning is the costlier error for a
+    diagnostic). It also no longer memoises into `_multiTenantMode`: that froze a
+    process-level fact into a per-instance verdict on whichever write landed
+    first. The gate now resolves live, which is affordable because
+    `auditMissingTenant` consults it only after the `tenantId` early-out.
+  - `cli` `os verify` — REQUESTED posture. This one produced a green verification
+    run over an unverified property: a posture-only deployment silently skipped
+    every multi-tenant proof and exited 0.
+
+  **No configuration change is needed anywhere.** Deployments setting only
+  `OS_MULTI_ORG_ENABLED=true` keep working unchanged — `resolveTenancyPosture()`
+  falls back to it — and the `OS_TENANCY_POSTURE=isolated` + `OS_MULTI_ORG_ENABLED=true`
+  belt-and-braces configuration stays valid. Deployments that set only
+  `OS_TENANCY_POSTURE` can now drop the redundant boolean. Single-org behaviour is
+  unchanged at every site; only the knob each one reads is corrected.
+
+- 9c5abf4: fix(driver-sql,driver-memory,driver-mongodb): refuse out-of-contract filter input at the door instead of answering it differently per backend (#5347, #5348)
+
+  Two shapes the Filter Protocol never declared were reaching the drivers, and
+  every driver ANSWERED them — with a different answer. Both are now refused with
+  `INVALID_FILTER` / 400, in the ADR-0112 envelope every sibling filter refusal
+  already speaks.
+
+  ## `$null` with a non-boolean comparand — a behaviour change you can observe
+
+  `FieldOperatorsSchema` declares `$null: z.boolean()`. A non-boolean was read by
+  default branches hung on opposite sides, so one filter meant opposite things per
+  backend. Measured against one row with `stage: 'won'` (id 1) and one with
+  `stage: null` (id 2), on `{ stage: { $null: 'yes' } }`:
+
+  | backend                                     | read as                           | rows        |
+  | ------------------------------------------- | --------------------------------- | ----------- |
+  | driver-sql, driver-sqlite-wasm, Turso local | IS NULL (anything but `false`)    | `["2"]`     |
+  | driver-memory query path, driver-mongodb    | IS NOT NULL (anything but `true`) | `["1"]`     |
+  | driver-memory reference matcher             | no constraint at all              | `["1","2"]` |
+
+  **What changes for you:** a caller that today gets rows back for
+  `{ field: { $null: <non-boolean> } }` now gets a `400 INVALID_FILTER` naming the
+  operator, the field and the position. That includes calls working by truthy /
+  falsy coincidence — and the sharpest case is the STRING `"false"`, which is
+  truthy: it compiled to IS NULL on SQL and IS NOT NULL on the JS backends, i.e.
+  the opposite of what its author wrote it to mean, on at least one of them
+  whichever they meant. A JSON round-trip or generated metadata produces it
+  readily.
+
+  **The fix:** write the boolean. `{ field: { $null: true } }` for "has no value",
+  `{ field: { $null: false } }` for "has a value". Both are unchanged, on all four
+  backends, and so is every other operator. `$exists` is deliberately NOT tightened
+  here — it diverges on its own axis (what "exists" means for a null-valued key)
+  and is tracked separately.
+
+  ## An undeclared `$op` in a document position — silent empty set becomes a 400
+
+  `FilterConditionSchema` declares exactly three `$`-keys at a node
+  (`$and` / `$or` / `$not`); every other key is a field name. `driver-sql`
+  compiled the rest as COLUMNS, so `{ $where: '…' }`, `{ $nor: […] }`,
+  `{ $expr: … }` produced a predicate that matched nothing and reported nothing —
+  a caller could not tell "no rows matched" from "the filter never compiled". The
+  FIELD position had refused the same class of input since v16, so one driver gave
+  two answers depending on depth.
+
+  **What changes for you:** those filters now raise `400 INVALID_FILTER` instead of
+  returning `[]`. `driver-memory` already refused them; this brings `driver-sql`
+  (and `driver-sqlite-wasm`, which inherits it) into line. The three declared
+  combinators, their boolean identities (`$and: []` is TRUE, `$or: []` is FALSE)
+  and every legal filter compile byte-identically.
+
+  Both refusals are raised on the driver's validating walk rather than in its SQL
+  emitter, so a malformed node is refused regardless of whether a sibling
+  disjunct would have short-circuited the compile.
+
+- f98fa65: fix(driver-sql): a fresh database no longer boots "drifted", and the drift
+  detector never points `--allow-destructive` at an index the framework created
+  (#4884)
+
+  Booting `examples/app-showcase` on a brand-new empty SQLite file printed two
+  `[schema-drift]` warnings before the server was even ready, both about the
+  ADR-0048 overlay indexes the same boot had just created. Both were false, and
+  one of them was dangerous:
+
+  > `[schema-drift] sys_metadata: index 'idx_sys_metadata_overlay_draft' UNIQUE
+(type, name, organization_id) carries ObjectStack's generated naming but
+matches no declared index (orphaned) — "os migrate apply --allow-destructive"
+to drop it.`
+
+  `idx_sys_metadata_overlay_draft` is the unique index enforcing **draft-overlay
+  uniqueness**. An operator following our own boot advice would have dropped a
+  live data-integrity guarantee to fix a problem that did not exist — and, worse,
+  learned to treat `--allow-destructive` as routine boot hygiene, which is exactly
+  what makes the _next_, real drift warning dangerous.
+
+  Three fixes, in the driver's detector only (no metadata declaration changed —
+  `sys-metadata.object.ts` documents its four-column `indexes[]` entry as _the
+  fallback shape for drivers without the runtime migration_, and that contract
+  still holds for the drivers that rely on it):
+
+  - **The index key is now read as written.** Introspection took the key from each
+    dialect's per-column catalogue view (`PRAGMA index_info`, `pg_attribute`,
+    `STATISTICS.COLUMN_NAME`), which describes an expression key as a NULL column
+    and nothing else. The canonical
+    `(type, name, organization_id, COALESCE(package_id,''))` overlay index
+    therefore arrived as three columns and was reported as a mismatch against its
+    own four-column declaration. SQLite and Postgres now parse the index
+    definition (`sqlite_master.sql` / `pg_get_indexdef`), MySQL reads
+    `STATISTICS.EXPRESSION` where the server has it, and `COALESCE(col, <literal>)`
+    is recognised as keying on `col` — which is what ADR-0048 uses it for: a plain
+    UNIQUE index treats NULLs as distinct, so package-less globals would not be
+    unique among themselves.
+  - **Partial predicates are captured.** A `WHERE`-restricted index is something
+    `syncDeclaredIndexes` can neither create nor rebuild, so the detector no
+    longer claims authorship of one, no longer calls it orphaned, and never
+    proposes a remedy it could not undo.
+  - **The driver keeps a ledger of the index DDL it executed.** An index this
+    process created through raw `execute()` — how `metadata-protocol`'s
+    `ensureOverlayIndex` issues its migration — is the framework's to manage. This
+    also covers the plain-index fallback the same migration takes on dialects that
+    reject partial indexes.
+
+  Genuine drift is unaffected: an orphaned generated index, a redefined declared
+  index and the #3696 legacy-unique replacement are all still detected, still
+  categorised exactly as before, and still remediable through `os migrate`.
+
+- 193cd5c: fix(driver-sql): 空 `$and`/`$or`/`$not` 按布尔单位元编译 —— `$or: []` 不再返回全表
+
+  **这是一处查询行为变更,且直接关系到 RLS。** `{ $or: [] }` 以前返回**整张表**,
+  现在返回**零行**。如果你的代码依赖了旧行为,它依赖的是一个 filter 旁路。
+
+  `applyFilterCondition` 把每个组合子都编译成一个 knex 分组回调,而 knex 对「一个子句
+  都没加进去的分组」不产出任何 SQL。于是「这个组是空的」和「这个组已被满足」编译成了
+  同一条查询。**丢弃子句不等于套用单位元**,而两个单位元的方向是相反的:
+
+  | 写法                 | 布尔代数                      | 旧编译    | 错的方向     |
+  | -------------------- | ----------------------------- | --------- | ------------ |
+  | `{ $and: [] }`       | TRUE → 全部行                 | 全表      | 碰巧正确     |
+  | `{ $or: [] }`        | FALSE → **零行**              | 全表      | **静默放松** |
+  | `{ $or: [{a}, {}] }` | `{}` 是 TRUE 析取项 → 全部行  | `(a = ?)` | 静默收紧     |
+  | `{ $not: {} }`       | `NOT TRUE ≡ FALSE` → **零行** | 全表      | **静默放松** |
+
+  `$and: []` 恰好正确的理由不是代码理解了单位元,而是「丢掉」在 AND 侧碰巧等价于
+  TRUE —— 同一段代码在 OR 与 NOT 侧就必然错。放松的那两格是安全相关的:`$or: []`
+  最常见的来源正是「本该有条件、但循环一个析取项都没填进去」的 RLS read scope,
+  把它当成全表意味着**本该看不到任何行的人拿到了整表**。
+
+  同仓另外两个后端(`formula` 的 `matchesFilterCondition`、`driver-memory`)三条
+  本来就都是对的,`driver-sql` 是唯一的例外;现在四个答案统一。
+
+  **配套的形状拒收(否则修复会变得更糟)。** 套用单位元的前提是「编译成空」只剩一个
+  成因。在此之前 `$or: [null]`、`$or: ['x']`、`$or: [[…]]`、`$or: [new Date()]`
+  同样会无痕消失;不先拦掉它们就上单位元,会把它们从「被静默忽略」**升级成「匹配所有
+  行」**,比原 bug 更坏。因此 `$and`/`$or` 的元素与 `$not` 的操作数现在必须是
+  **plain object** 的 filter 节点,否则按 ADR-0112 响亮拒收
+  (`INVALID_FILTER` / 400,报错指明出错位置,如 `filter.$or[1]`)。原型检查是关键
+  的一半:`Date`/`RegExp`/class 实例都满足 `typeof x === 'object'` 却枚举为空,
+  若被接受就会被读成 TRUE。同理 `$and: 'x'` 这类非数组操作数也不再被当成一个名为
+  `$and` 的字段列。
+
+  判定是**结构性**的(编译前先归约整棵树),而不是「编译完再问 knex 有没有产出」——
+  原缺陷本身就是后者那种观察,而观察分不清「因为本来就是空」和「因为有东西没编译
+  出来」。结构判定没有这个盲区,并且保证编译器打开的每个分组都至少收到一条子句,
+  knex 再没有机会静默丢弃一个组。
+
+  非空的 `$and`/`$or`/`$not` 编译方式完全未变。
+
+- 5aae790: fix(driver-sql): `$not` 改为 NULL-safe —— 被比较列为 NULL 的行不再被否定条件静默排除
+
+  **这是一处可观察的查询行为变更,且直接关系到 RLS 的可见集合。**
+  `{ $not: { stage: 'won' } }` 以前**不返回** `stage IS NULL` 的行,现在**返回**它们。
+  如果你的规则依赖了旧行为,它依赖的是「同一条规则在不同后端给出不同可见集合」。
+
+  SQL 是三值逻辑:`NULL = 'won'` 是 UNKNOWN,`NOT UNKNOWN` 仍是 UNKNOWN,而 `WHERE`
+  只保留 TRUE。于是 `applyFilterCondition` 编译出的裸 `NOT (stage = 'won')` 会把
+  「该列没有值」的行整批丢掉;同一条 filter 在 `driver-memory` 与 `formula` 的
+  `matchesFilterCondition` 上是普通的两值 JS 求值(`undefined !== 'won'` → 行匹配),
+  两边把这些行**都返回**。一个 spec 声明的算子,答案取决于跑它的是哪个驱动。
+
+  这不是「数目对不上」而已:权限规则里的 CEL `!expr` 经 `cel-to-filter.ts` 正是降解成
+  `{ $not: {…} }`,所以同一条 read scope 在 SQL 数据源与内存数据源上准入的行集不同。
+  #5146 判定以 JS 家族的答案为准(2:1 的多数派;写 `!(stage == 'won')` 的人不会预期
+  「stage 为空的行被隐藏」),本次把 SQL 侧对齐过去。
+
+  **编译出来的形状。** `$not` 的操作数在取反之前先被改写成**全域(total)谓词** ——
+  永远是 TRUE 或 FALSE,不会是 UNKNOWN:
+
+  ```sql
+  -- 之前
+  not (`stage` = 'won')
+  -- 现在
+  not ((`stage` is not null) and (`stage` = 'won'))
+  ```
+
+  对 issue 里给出的扁平形状,这与 `NOT (…) OR col IS NULL` 完全等价。把守卫下推到
+  **每个叶子**而不是挂在 `NOT` 旁边,是为了在操作数嵌套时仍然正确:`$not` 里套一个
+  `$or` 时,顶层的 `OR col IS NULL` 会把 JS 家族排除的行重新放进来(某一列为 NULL、
+  但另一个析取分支成立的行)。
+
+  **守卫方向按算子逐个判定,不是一刀切。** `{ $not: { a: { $ne: 5 } } }` 的语义是
+  「a 就是 5」,两个 JS 后端都把 NULL 行排除在外;无条件加 `OR a IS NULL` 会把这些行
+  交回去 —— 正是本驱动反复付过学费的静默放松(#2704 / #5134)。因此
+  `$ne` / `$nin` / `$notContains` 用的是 `col IS NULL OR (…)`,`$eq` / `$in` /
+  `$gt` / `$contains` 一族用 `col IS NOT NULL AND (…)`,而 `$null` / `$exists` /
+  `$eq: null` / `$ne: null` 本来就是全域谓词,一个字节都不加。
+
+  **只有 `$not` 路径被改写。** 普通比较的 SQL 逐字符不变(`{ a: 1 }` 仍然是
+  `a = 1`),因此没有任何非否定谓词因此失去索引;`$not` 路径上的 `IS NOT NULL` 守卫
+  本身处在一个原本就不可 sargable 的 `NOT (…)` 里。
+
+  `#5134` / PR #5243 定下的布尔单位元(`{ $not: {} }` → 零行、`$not` of FALSE →
+  全部行、非 filter 节点的操作数按 ADR-0112 响亮拒收)全部保持不变;`{ field: {} }`
+  (#5240)也刻意不在此裁定 —— 它编译出的 SQL 与之前完全一致。
+
+  `driver-memory` 与 `formula` 无需改动,本次为三家各补了一组 pin 测试,把「值缺失
+  行在 `$not` 下的去留」钉在一起。跨驱动 conformance case(`FILTER_LOGIC_CASES`)与
+  契约 TSDoc 归 spec 车道,随 #5239 落地。
+
+- 07f1822: fix(driver-sql): `$ne` / `$nin` / `$notContains` 改为 NULL-safe;`$exists` 的非布尔比较值改为拒收
+
+  **这是一处可观察的查询行为变更,且直接关系到 RLS 的可见集合。**
+  `{ stage: { $ne: 'won' } }` 以前**不返回** `stage IS NULL` 的行,现在**返回**它们。
+  `$nin` 与 `$notContains` 同理。
+
+  ### 变更一:三个否定算子在 `$not` 之外也 NULL-safe(#5298)
+
+  #5146 已经把 `$not` 判定为 NULL-safe(PR #5296),但**只改了 `$not` 内部**;算子自身
+  携带否定的三个 —— `$ne` / `$nin` / `$notContains` —— 逐字符未变。于是留下一个使用者
+  可见的裂缝:`{ $not: { stage: 'won' } }` 三家一致,`{ stage: { $ne: 'won' } }` 仍然
+  分叉。
+
+  成因与 #5146 同源:SQL 是三值逻辑,`NULL <> 'won'` 是 UNKNOWN 而不是 TRUE,`WHERE`
+  只保留 TRUE;`driver-memory` 与 `formula` 的 `matchesFilterCondition` 用两值 JS 求值
+  (`undefined !== 'won'` 直接为真),把这些行**都返回**。2026-08-06 裁定取「包含无值行」
+  方向(与 #5146 同向),本次把 SQL 侧对齐过去。
+
+  ```sql
+  -- 之前
+  `stage` <> 'won'
+  `stage` not in ('won')
+  `stage` NOT LIKE '%won%' ESCAPE '\'
+  -- 现在
+  (`stage` is null or `stage` <> 'won')
+  (`stage` is null or `stage` not in ('won'))
+  (`stage` is null or `stage` NOT LIKE '%won%' ESCAPE '\')
+  ```
+
+  **统一用 OR 展开,不走方言等价物**(`IS DISTINCT FROM` / `IS NOT` / `<=>`),三条理由:
+  `NOT LIKE` 根本没有对应形式,走方言就必然要维护两种形状;SQLite 的写法依赖本仓并不
+  锁定的引擎版本(sql.js 与 libSQL 各自演进);实测 `EXPLAIN QUERY PLAN` 两种写法计划
+  完全相同 —— `<>` / `NOT IN` / `NOT LIKE` 改动前**本来就是全表扫描**,没有索引可失去,
+  也没有索引可赢回。
+
+  **正向比较一个字节都没动。** `{ a: 1 }` 仍然是 `a = 1`,`$in` 仍然是 `in (…)`,
+  `$gt` / `$contains` 一族同理,所以绝大多数普通查询的 SQL 形状不变。
+  `$ne: null` 也不变 —— 它是空值**谓词**(`IS NOT NULL`)而不是比较,「有任何值」对
+  一个没有值的行本来就是假。
+
+  **`$not` 路径不受影响。** `nullSafeNegationOperand` 的逐叶守卫按原样保留:它必须能在
+  操作数任意嵌套时通过 De Morgan 组合,这与叶子发射器自身是否全域是两个独立的正确性
+  来源,把它们耦合起来会让其中一个的回退静默破坏另一个。
+
+  ### 变更二:`$exists` 的非布尔比较值改为拒收(#5369,套用 #5347 裁定 A)
+
+  `FieldOperatorsSchema` 声明 `$exists: z.boolean()`,而从 `where` 到驱动之间没有任何
+  环节按它校验,所以非布尔值真的会到达发射器。到达之后各后端分叉方向相反:本驱动的
+  `opValue === false` 恒等判断把「除 false 以外的一切」读成 `IS NOT NULL`,`=== true`
+  的写法则把「除 true 以外的一切」读成 `IS NULL`。注意字符串 `"false"` 是**真值**,
+  所以它落在与作者本意**相反**的一侧 —— JSON 往返或 AI 生成的 scope 很容易产出它。
+
+  现在与 `$null` 的闸门并排,在 `reduceFilterKey` 的校验遍历里拒收,`INVALID_FILTER` /
+  400,信封与措辞同款。`{ $exists: true }` / `{ $exists: false }` 行为一字未变。
+
+  **发射器与极性表刻意不动。** 闸门落地后只有两个布尔值能到达它们,`opValue === false`
+  与 `value === false` 已经是穷尽的二选一。#5369 正文建议的「收紧为 `value === true`」
+  方向写反了:极性表回答的是「NULL 列是否**满足**该算子」,而 NULL 列恰恰在调用方要求
+  `$exists: false` 时满足它 —— `$null: true` 与 `$exists: false` 是同一个问题,两条
+  分支正确地互为镜像,而不是互为副本。
+
+  ### 相关
+
+  `driver-memory` / `driver-mongodb` 的对应半边按 #5499 冻结,本次零改动、既有一致性
+  断言全绿;`driver-turso` 的 remote transport 是独立编译器,归 #5903;
+  `service-analytics` 的 `filter-normalizer`(Cube 面)归本裁决第二批。
+
+- acf34e3: fix(drivers): refuse an `undefined` filter comparand instead of crashing (SQL) or silently answering `IS NULL` (Turso remote) (#6050)
+
+  **⚠️ 行为变更(升级说明在最后一节)。** 比较数位置上的 `undefined` 从「静默/崩溃」变为 `INVALID_FILTER` / 400 拒收。作者侧的修法是显式判空,或改用 `null` / `$null`。
+
+  ## 实测到的毛病
+
+  同一个 `TursoDriver`,同一条过滤器,答案取决于它是用哪个 `url` 构造的 —— 四行 fixture(`d` 在 1-2 有值、3-4 为 NULL),`origin/main` @ `cba7454df`:
+
+  | filter                                | LOCAL(继承 `SqlDriver`)          | REMOTE(`RemoteTransport`) |
+  | ------------------------------------- | -------------------------------- | ------------------------- |
+  | `{ d: undefined }`                    | 抛裸 knex `Undefined binding(s)` | `['3','4']`               |
+  | `{ d: { $eq: undefined } }`           | 抛裸 knex `Undefined binding(s)` | `['3','4']`               |
+  | `{ $not: { d: undefined } }`          | 抛裸 knex `Undefined binding(s)` | `['1','2']`               |
+  | `{ d: { $ne: undefined } }`           | `['1','2']`                      | `['1','2']`               |
+  | `{ $not: { d: { $ne: undefined } } }` | `[]`                             | `['3','4']`               |
+  | `{ d: { $in: [undefined] } }`         | 抛裸 knex `Undefined binding(s)` | `[]`                      |
+  | `{ d: { $gt: undefined } }`           | 抛裸 knex `Undefined binding(s)` | `[]`                      |
+
+  两个可分开的毛病:
+
+  **A —— 抛出的那几格没有 ADR-0112 信封。** knex 的 `Undefined binding(s) detected when compiling SELECT` 既没有 `code` 也没有 `status`,`mapDataError` 落默认分支,于是一条「调用方把 filter 写坏了」的错误以不透明 500 的形态到达客户端。#1116 / #4436 为这条通路清点过同类形态,唯独漏了这一格。
+
+  **B —— 守卫与它自己的发射器分裂。** `$ne` 发射器读 `coerced == null`(宽松,所以 `undefined` 编译成 `IS NOT NULL` —— 一条 TOTAL 谓词),而必须钉住这个发射器的两张极性表 `operatorIsNullTotal` / `nullValueSatisfiesOperator` 读 `=== null`(严格,于是判它「不 total」且「NULL 行满足它」)。`nullGuardForFieldSpec` 因此把一条已经 total 的谓词包成 `d IS NULL OR d IS NOT NULL` —— 恒真 —— 取反后恒假,答 `[]`。这正是 #5298 立的不变量(每张极性表钉的是它自己发射器的拼写)在它自己的定义处被破坏。
+
+  ## 修法
+
+  一道闸,落在比较数进入**任何**发射器或守卫之前,两个毛病同闸消灭:knex 再也见不到 undefined 绑定,守卫与发射器对 undefined 的分歧变成**不可达**而不是「被修好」。
+
+  - `driver-sql`:闸落在 `reduceFilterKey` 的校验走查上(与 `$null` / `$exists` 的拒收并排),外加 `applyFilters` 的平铺映射分支 —— `{ d: undefined }` 进不了走查(`typeof undefined` 不是 `'object'`,构不成 `hasMongoOperators`),而它恰恰是这个 bug 最常见的拼写。两处共用一个函数。
+  - `driver-turso`:`buildWhereSQL` 入口做一次整棵子树的前置走查。必须前置,否则 `{ $not: { d: undefined } }` 会先把操作数交给 `nullSafeNegationOperand`(一个守卫)。
+  - 顺带把两侧的 `== null` / `|| === undefined` 拼写统一收严成 `=== null`(#5347 收紧 `$null` 臂时给的理由:宽松拼写在闸被挪走后会悄悄恢复回答一个没人裁决过的取值)。
+
+  拒收的位置逐个清点:直接比较数、单值算子的比较数(`$eq`/`$ne`/`$gt`/`$gte`/`$lt`/`$lte` 与 LIKE 族)、列表算子数组的**成员**(`$in`/`$nin`/`$between`)、以及嵌在 `$and`/`$or`/`$not` 里的以上各位。`$null` / `$exists` 的 `undefined` 保持它们**自己**的拒收措辞(比较数是声明的布尔量,那条消息更贴切 —— #5240「一个条件一种措辞」两个方向都适用)。两个驱动的拒收句子逐字一致。
+
+  ## ⛔ `null` 一字未动
+
+  `{ f: null }`、`{ $eq: null }` → `IS NULL`;`{ $ne: null }` → `IS NOT NULL`;`$null: true/false` 不变;`null` 仍是合法的 `$in` 成员。`null` 是声明过的比较数,拒的只是 JS 里与「没有这个键」不可区分的那个值。
+
+  ## 升级说明
+
+  如果你的进程内代码这样拼过 filter:
+
+  ```ts
+  // 之前:id 缺失时 —— 本地崩、远端静默匹配全环境行
+  await ql.find("deal", { where: { owner_id: ctx.user?.id } });
+  ```
+
+  现在会收到 `INVALID_FILTER` / 400,消息里带修法。两种正确写法:
+
+  ```ts
+  // 1) 显式判空 —— 键不存在就是「不约束」
+  const where: Record<string, unknown> = {};
+  if (ctx.user?.id !== undefined) where.owner_id = ctx.user.id;
+
+  // 2) 真的想要空值谓词 —— 写出来
+  await ql.find("deal", { where: { owner_id: null } }); // 或
+  await ql.find("deal", { where: { owner_id: { $null: true } } });
+  ```
+
+  `where` 整体缺席仍然是「没有过滤器」(`query?.where` 为 `undefined` 是它唯一合法的位置),不受影响。
+
+  ⚠️ 本次只覆盖 `driver-sql` 与 `driver-turso`(含 remote)。`driver-memory` / `driver-mongodb` 是 #5499 的投入冻结面,按裁决只测不改;`@objectstack/formula` 与 `service-analytics` 的 `read-scope-sql.ts` 对同一形状各有一种不同读法,实测记录在 #6125,留待单独裁决。
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [02dc076]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/types@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/observability@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Major Changes

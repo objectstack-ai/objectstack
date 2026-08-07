@@ -1,5 +1,258 @@
 # @objectstack/service-queue
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- e98fb14: fix(service-queue): `sys_job_queue` no longer grows forever — `completed` rows expire on a declared 7-day retention (#5179)
+
+  `DbQueueAdapter` marked a delivered message `status: 'completed'` and then
+  **nothing ever touched that row again**. `purge()` had zero production callers
+  (tests only), `purgeFailed()` is a manual dead-letter API, and the object
+  declared no lifecycle policy at all — so every queue delivery left a permanent
+  row, which since #5160 means one permanent row per queued email.
+
+  `sys_job_queue` now declares an ADR-0057 policy and the platform
+  `LifecycleService` enforces it on its existing hourly sweep:
+
+  ```ts
+  lifecycle: {
+    class: 'transient',
+    retention: { maxAge: '7d', onlyWhen: { status: 'completed' } },
+  }
+  ```
+
+  **Only `completed` rows are swept.** `pending` / `running` are live work, and
+  `failed` / `dlq` are the dead-letter queue — they exist to wait for a human, so
+  they are never deleted automatically at any age. `listFailed()` / `replay()` /
+  `purgeFailed()` remain the only way a dead letter leaves the table. This is
+  also why the policy is `retention` (age + row filter) rather than a `ttl` on
+  `completed_at`: TTL has no row filter, and `dlq` rows stamp `completed_at` too.
+
+  **No new configuration, and no new sweeper.** ADR-0057 §3.3 puts one reaper in
+  the platform rather than one per plugin — the same call the sibling
+  `sys_job_run` (30d) already makes. Any kernel with a data engine already runs
+  it, its per-sweep `[lifecycle] sweep: … ~N rows reaped` line now accounts for
+  this table too, and the window is overridable per environment through the
+  `lifecycle` settings namespace without touching code.
+
+  **The dedup window is now an enforced invariant, not a coincidence.** Publish
+  dedups against a terminal row by comparing its `created_at` to
+  `idempotencyWindowMs` (default 24h), and the reaper cuts off on that same
+  `created_at` axis — so retention (7d) ≥ dedup window is what keeps "duplicate
+  publishes inside the window are suppressed" true. `DbQueueAdapter` reads the
+  declared window (new export `completedRetentionWindowMs()`) and **throws at
+  construction** if `idempotencyWindowMs` is configured longer than it, instead of
+  silently degrading into duplicate deliveries days later. If you raise
+  `idempotencyWindowMs` past 7 days, raise the object's declared retention (or the
+  `lifecycle` settings override) to match — the error message names both numbers.
+
+  `class: 'transient'` is deliberate: `telemetry`/`event`/`audit` classes
+  relocate their table to the dedicated `telemetry` datasource wherever one is
+  registered (ADR-0057 §3.6), and moving a live work queue's storage would be a
+  migration, not a cleanup.
+
+### Patch Changes
+
+- 7c2f7dd: fix(objectql,service-queue): a `lifecycle` settings override can no longer undercut a consumer's retention floor (#5195)
+
+  ADR-0057 P4 lets an operator override any object's retention window per
+  environment and per tenant through the `lifecycle` settings namespace. Until now
+  the only validation on that override was **does it parse** — and a retention
+  window is not only the operator's business: other code can depend on the rows
+  still being there.
+
+  `sys_job_queue` is the worked example. `DbQueueAdapter` deduplicates publishes by
+  comparing a terminal row's `created_at` against its idempotency window, so the
+  dedup check only means anything while that row still exists; #5179 made the
+  ordering an invariant by refusing, at construction, an idempotency window longer
+  than the object's **declared** retention. A settings override the constructor
+  cannot see walks straight around it:
+
+  ```jsonc
+  // lifecycle → retention_overrides
+  { "sys_job_queue": { "maxAge": "1h" } }
+  ```
+
+  completed rows are reaped an hour after they are written, publish keeps
+  deduplicating against 24h, and duplicate deliveries resume **with nothing in any
+  log**.
+
+  **New: retention floors.** A consumer may now declare, at runtime, the shortest
+  window its own contract survives:
+
+  ```ts
+  lifecycle.registerRetentionFloor("sys_job_queue", {
+    policy: "retention", // or 'ttl'
+    minWindowMs: 24 * 60 * 60 * 1000,
+    declaredBy: "com.objectstack.service.queue",
+    consequence: "…what silently breaks below it",
+    remedy: "…the settings change that makes an override legal",
+  });
+  ```
+
+  - An override below the floor — **global or tenant-scoped** — is **rejected**,
+    and the declared window keeps running. Not clamped to the floor: clamping
+    would enforce a third number written in neither the declaration nor the
+    settings, and that number would move whenever an unrelated package changed
+    its floor. Rejection has exactly one fallback, the declaration, which is
+    already how an unparseable override resolves.
+  - The rejection is `error`-level and carries both the consequence and the fix,
+    because what it prevents leaves the system looking entirely healthy. It is
+    also on the sweep report as `LifecycleSweepReport.floorViolations` — machine-
+    readable, every sweep.
+  - A **declared** window below a registered floor is reported the same way and
+    still enforced: refusing to reap would trade a broken consumer contract for
+    the unbounded table #5179 just closed.
+  - Objects with no registered floor are completely unaffected — P4 overrides
+    behave exactly as before.
+
+  Floors are runtime wiring, not spec surface (the same call ADR-0057's reap-guard
+  amendment makes), plus a reason of their own: the queue's floor **is**
+  `DbQueueAdapterOptions.idempotencyWindowMs`, a per-kernel construction option, so
+  a static key on the object's `lifecycle` block could only ever be a second copy
+  of it that drifts. No `packages/spec` change.
+
+  `QueueServicePlugin` registers `sys_job_queue`'s floor on `kernel:ready`,
+  carrying the window the adapter was actually constructed with — so a non-default
+  `db.idempotencyWindowMs` is covered too. The ordering is now enforced from both
+  sides: the constructor rejects a too-long `idempotencyWindowMs`, the floor
+  rejects a too-short `maxAge`.
+
+  New exports from `@objectstack/objectql`: `LifecycleRetentionFloor`,
+  `LifecycleFloorViolation`, plus `LifecycleService.registerRetentionFloor()`.
+  `LifecycleLoggerLike` gained an optional `error()` (absent ⇒ falls back to
+  `warn`), and `LifecycleSweepReport` gained `floorViolations`.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Patch Changes

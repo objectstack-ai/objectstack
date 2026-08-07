@@ -1,5 +1,282 @@
 # @objectstack/metadata-core
 
+## 17.0.0-rc.4
+
+### Patch Changes
+
+- db0d53c: `resolveEngineDeleteDispatch` 末尾改真值测试:假值标量 `where.id` 不再答 `by-id`
+
+  `engine-delete-dispatch.ts` 的自我描述是「what does `ObjectQLEngine.delete` do with this call」的**唯一**答案,其测试文件头把赌注写得很明白:一份漂移的共享判定比没有判定更糟——每个钉在它上面的假引擎都会自信地、一致地错,而门禁照样报绿。这条性质此前在**假值标量 id** 上不成立,实测(origin/main,记录型 driver 驱动真实引擎):
+
+  | 调用                                 | 真实 `ObjectQL.delete` | 判定(修改前) |
+  | :----------------------------------- | :--------------------- | :----------- |
+  | `{ where: { id: 0 } }`               | `reject`               | `by-id`      |
+  | `{ where: { id: '' } }`              | `reject`               | `by-id`      |
+  | `{ where: { id: 0 }, multi: true }`  | `multi`                | `by-id`      |
+  | `{ where: { id: '' }, multi: true }` | `multi`                | `by-id`      |
+
+  原因是两侧问了不同的问题:判定读 `scalarDeleteId(...) !== undefined`,而 `engine.ts` 把判定结果落进 `id` 之后按 `if (hookContext.input.id)` 分支——**真值**测试,`0` / `''` 落到 multi/reject 阶梯。于是按 `assertEngineDeleteDispatch(options)` 钉死的替身会**接受** `delete(o, { where: { id: '' } })`,而真服务器抛 `Delete requires an ID or options.multi=true`:pinned 替身在这一个输入上仍比生产者宽松,正是本模块存在的理由(#4434 形状)。`id: ''`(路径段为空 / 表单字段未填直传 `where.id`)是可达形状,不是猎奇。
+
+  本次改的是**判定,不是引擎**。`resolveEngineDeleteDispatch` 是对 `ObjectQL.delete` 的描述,错的是描述:`delete(o, { where: { id: 0 } })` 改动前抛错,改动后照样抛错,**生产者行为零变化**,`engine.ts` 一字未动。反向做法(让 `{ id: 0 }` 变成真的按 id 删)是改生产者行为,已作为 #5747 的 B 方案明确不取。
+
+  同时给 `ENGINE_DELETE_DISPATCH_CASES` 补上 `{ id: 0 }` / `{ id: '' }` 的有/无 `multi` 四例——此前这套逐例对照**结构上够不到**这个输入(#4868 家族:一次逐例跑不可能反驳一个没人列出来的输入),这才是判定能悄悄漂移一年的原因。`scalarDeleteId` 保持值忠实(`{ where: { id: 0 } }` 仍返回 `0`),真值测试只加在判定这一层,与 update 侧孪生模块 `scalarUpdateId` 的分法一致。
+
+- 72c3c86: refactor(spec)!: retire `indexes[].type` and `indexes[].partial` — two authorable index keys no driver ever read (#5248, #4943)
+
+  `IndexSchema` declared five keys; only three of them ever reached a `CREATE
+INDEX`. `SqlDriver.syncDeclaredIndexes` builds every declared index through
+  knex's `table.index(fields, name)` / `table.unique(fields, { indexName })`, and
+  the drift differ's `DeclaredIndexInput` carries `name` / `fields` / `unique` /
+  `nullSafeColumns`. So:
+
+  - **`partial`** — documented as _"Partial index condition (SQL WHERE clause)"_ —
+    produced a **full** index with the predicate silently discarded. This was the
+    damaging half, because it reads as a correctness control: the platform's own
+    `sys_metadata` declared `partial: "state = 'active'"` for overlay uniqueness,
+    and what the declaration alone materialized was an _unrestricted_ unique index.
+  - **`type`** additionally carried `.default('btree')`, so it appeared in **every**
+    parse output of **every** index — an access-method knob that had never
+    influenced a single statement, rendered as live configuration. (It was pinned
+    as such in a `sys_presence` test, on an object that never declared it.)
+
+  Both are the ADR-0078 no-silently-inert / ADR-0049 enforce-or-remove shape.
+  Remove was chosen over enforce: enforcing needs per-dialect algorithm mapping
+  (`gin`/`gist` Postgres-only, `fulltext` MySQL-family), raw-SQL `CREATE INDEX …
+WHERE` on the dialects that have partial indexes at all (MySQL does not), and a
+  redesign of how `isSyncReproducibleIndex` excludes partial indexes from
+  incremental sync — design cost for a capability with no demand. If a real need
+  appears it returns enforce-first.
+
+  ## Migration
+
+  | FROM                                                      | TO                                                                                              |
+  | :-------------------------------------------------------- | :---------------------------------------------------------------------------------------------- |
+  | `indexes: [{ fields: […], type: 'gin' }]`                 | `indexes: [{ fields: […] }]` — create the specialised index from a database-layer migration     |
+  | `indexes: [{ fields: […], partial: "state = 'active'" }]` | `indexes: [{ fields: […] }]` — issue `CREATE [UNIQUE] INDEX … WHERE …` from a runtime migration |
+
+  **One-line fix: delete the key.** Neither removal changes any DDL, because no
+  DDL ever depended on them — verified byte-for-byte against the `CREATE INDEX`
+  statements SQLite actually stores
+  (`packages/drivers/driver-sql/src/declared-index-retired-keys.test.ts`).
+
+  Both capabilities remain available where they are implementable. The index
+  method is the driver/dialect's choice. A partial index is issued as raw SQL from
+  a runtime migration — exactly what `metadata-protocol`'s `ensureOverlayIndex`
+  already does for `sys_metadata`, and what actually delivers that table's
+  active-row-scoped uniqueness today.
+
+  ⚠️ **Not affected:** driver-sql's own `partial` flag (`parseIndexDdl` /
+  `introspectIndexes` / `isSyncReproducibleIndex`). That is a boolean parsed back
+  out of the _database's own_ DDL for drift detection — the opposite direction —
+  so migration-created partial indexes stay recognized and exempt from incremental
+  sync, unchanged.
+
+  ## The retirement kit
+
+  - `retiredKey()` tombstones at `IndexSchema` (the shape is deliberately
+    `.strip()`, so a plain delete would swap one silent no-op for another): writing
+    either key is now a `tsc` error and a parse error carrying the prescription.
+    They sit at the bottom of the shape per the #5606 renderer note.
+  - **ADR-0087 D2 conversion + D3 chain step** (`object-index-type-partial-removed`,
+    `toMajor: 17`, wired into the existing step-17 chain): strips both keys from
+    `objects[]` and `objectExtensions[]`; `os migrate meta --from 16` rewrites sources
+    mechanically. A pure lossless delete — there was no effect to lose.
+  - **Producers flipped:** `sys_metadata` (`idx_sys_metadata_overlay_active`, the
+    case #4943 named) and `sys_view_definition` (`idx_sys_view_def_active`), both
+    with their comments corrected to say what is actually materialized.
+  - Published skill (`objectstack-data`), `content/docs/data-modeling/objects.mdx`,
+    liveness ledger note and generated baselines updated.
+
+- 51a587d: 两个写动词的派发判定下沉到 `@objectstack/metadata-core` —— 公共 API 零变化,一次关闭 26 条 engine-double 基线条目
+
+  `ObjectQL.delete` / `ObjectQL.update` 的三分支派发判定(`engine-delete-dispatch.ts` #4550、
+  `engine-update-dispatch.ts` #5480)从 `packages/objectql/src/` **原样搬到**
+  `packages/metadata-core/src/`。这是一次搬移,不是重构:两个模块本来就零 import、纯自包含,
+  判定逻辑一个字未改。
+
+  **为什么搬。** `@objectstack/objectql` 的 `dependencies` 含 `@objectstack/metadata-protocol`,
+  所以那个包里 13 个假引擎结构性地无法 import 这两个谓词 —— 反向 devDependency 即成环,
+  turbo 2.10.7 直接拒绝任务图。判据来自门禁台账里
+  `packages/spec/src/contracts/data-engine.test.ts` 那条 EXEMPT:反向 import 不可行时,唯一
+  出路是下沉到**两边都已依赖**的包。`@objectstack/metadata-core` 正是这个包
+  (`objectql -> metadata-core` 与 `metadata-protocol -> metadata-core` 都是既有边),而它自己
+  的 `dependencies` 只有 `{ @objectstack/spec, zod }`,不含 objectql,故不引入新环。
+
+  **公共 API 与既有调用点零变化。** `packages/objectql/src/engine-delete-dispatch.ts` /
+  `engine-update-dispatch.ts` 保留在原路径,改为 re-export shim,因此
+  `@objectstack/objectql` 仍然导出
+  `resolveEngineDeleteDispatch` / `assertEngineDeleteDispatch` / `scalarDeleteId` /
+  `ENGINE_DELETE_REJECT_MESSAGE` / `ENGINE_DELETE_DISPATCH_CASES` 及 update 侧的五个同名对应物
+  (与全部类型),`engine.ts` 与 37 个既有 pinned 调用点一行未动。同一批符号现在也从
+  `@objectstack/metadata-core` 导出。
+
+  搭配的门禁改动:`scripts/check-engine-double-contract.mjs` 的两个 slice 现在同时接受
+  `@objectstack/metadata-core` 与 `@objectstack/objectql` 两种拼写(它们指向同一个函数),
+  失败提示也改为在「objectql 依赖该包」时优先建议 metadata-core。
+
+- 946a131: fix(metadata-core,objectql): `ObjectQL.update` 的 `data.id` 同过标量测试,不再把载荷里的算子对象当主键 (#5748)
+
+  `ObjectQL.update(object, data, options)` 用两处取主键,而这两处此前用的是**两套规则**:
+
+  - `options.where.id` 走**标量测试** —— `{ id: { $in: [...] } }` / `{ id: [...] }` /
+    `{ id: null }` 是多行谓词,不算 id(#4434 / #4550);
+  - `data.id` **不做任何测试**,只要为真就原样当主键,并且先于 `where`、也先于
+    `options.multi`。
+
+  于是同一个算子对象,写在 `where.id` 里被正确识别为谓词,写在 `data.id` 里却被
+  当成主键绑进 `driver.update(object, id, …)` 的主键位置,**显式声明的
+  `multi: true` 被无声忽略**。后果不是数据被覆盖,而是静默失灵或难读的驱动错误:
+  SQLite 侧报参数绑定错误,别的驱动可能只匹配零行 —— 两种都不会告诉调用方
+  「你的 `multi` 被忽略了」。这是 declared ≠ enforced 的一种,#5393 刚给 flow 的
+  `update_record` 补上的 `multi` 批量意图键正是被这条更早的规则盖掉的。
+
+  现在 `data.id` 与 `where.id` **共用同一个标量测试**(判定在
+  `packages/metadata-core/src/engine-update-dispatch.ts` 定义一次,`engine.ts` 与
+  全部 fake engine 经 `resolveEngineUpdateDispatch` /
+  `assertEngineUpdateDispatch` 复用同一份)。非标量 `data.id` 不算 id,因此不再
+  盖住任何东西:判定按 `where.id` → `multi` → `reject` 的原有阶梯继续往下走。
+
+  **行为矩阵(FROM → TO)。标量 `data.id` 的按 id 写法完全不受影响。**
+
+  | 调用                                                                | FROM                       | TO                                                                |
+  | :------------------------------------------------------------------ | :------------------------- | :---------------------------------------------------------------- |
+  | `update(o, { id: 'rec_1', …f })`                                    | by-id `'rec_1'`            | **不变**                                                          |
+  | `update(o, { id: 'rec_1', …f }, { multi: true })`                   | by-id `'rec_1'`            | **不变**(标量 `data.id` 仍先于 `multi`)                           |
+  | `update(o, { id: 'rec_1', …f }, { where: { id: 'rec_2' } })`        | by-id `'rec_1'`            | **不变**(标量 `data.id` 仍先于 `where`)                           |
+  | `update(o, { id: 0, …f }, { multi: true })`                         | multi                      | **不变**(真值判定,`0` 不标识行)                                   |
+  | `update(o, { id: { $in: [...] }, …f }, { multi: true })`            | by-id,算子对象被绑进主键位 | **multi** —— 声明的批量意图被执行                                 |
+  | `update(o, { id: ['a','b'], …f }, { multi: true })`                 | by-id,数组被绑进主键位     | **multi**                                                         |
+  | `update(o, { id: { $in: [...] }, …f })`(**无** `multi`)             | by-id,算子对象被绑进主键位 | **reject**,消息不变:`Update requires an ID or options.multi=true` |
+  | `update(o, { id: { $in: [...] }, …f }, { multi: false })`           | 同上                       | **reject**                                                        |
+  | `update(o, { id: { $in: [...] }, …f }, { where: { id: 'rec_1' } })` | by-id,绑的是**算子对象**   | by-id,绑的是 **`'rec_1'`**                                        |
+
+  最后一格是这次修复里唯一「判定不变、绑定值变了」的一格 —— 前后都是 `by-id`,
+  变的是哪一个 id 源胜出。`ENGINE_UPDATE_DISPATCH_CASES` 因此新增可选的
+  `expectId`,把落进主键位的值本身也钉住,避免用例因为「什么都没产出」而绿。
+
+  **「无 `multi` 的非标量 `data.id`」被明确定成响亮拒绝**,不会静默升级成一次真的
+  批量写 —— 这是裁决(维护者 2026-08-06)对方案 B 那条顾虑的处置:把算子对象写进
+  载荷大概率是写错了位置,那就报错,而不是替作者决定他想批量写。
+
+  无 API 变更:导出符号、类型与 `ENGINE_UPDATE_REJECT_MESSAGE` 的文案均不变。
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Major Changes

@@ -1,5 +1,698 @@
 # @objectstack/service-automation
 
+## 17.0.0-rc.4
+
+### Major Changes
+
+- 4845f85: **The retry policy's last two dialects converge** (#4964 `flow.errorHandling`, #4962
+  `ETLPipeline.retry`).
+
+  #4661 converged the retry policy onto one declaration. It converged the two shapes that
+  published the **same exported name** (`RetryPolicy` from `./automation` and `./system` —
+  the #4411 trap), because that is the question the dual-source instrument asks. Two more
+  encodings of the identical concept were outside its vision _by construction_: both are
+  anonymous inline `z.object`s nested in a bigger schema, with no exported name to collide.
+
+  The cost of the gap fell on the author who did the right thing. `shared/retry-policy.zod.ts`
+  tombstoned `retryDelayMs` and told them to write `backoffMs` — and `flow.errorHandling`
+  then **rejected** `backoffMs` and demanded `retryDelayMs`. Reading the newer file was
+  punished, and which file an AI author reads first is arbitrary.
+
+  All four surfaces — `job.retryPolicy`, a `try_catch` node's `retry`, `flow.errorHandling`
+  and an ETL pipeline's `retry` — now build from one shared shape.
+
+  ## FROM → TO
+
+  ### `flow.errorHandling` (#4964)
+
+  |                                                                   | FROM                                | TO                                                                       |
+  | ----------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------ |
+  | base delay                                                        | `retryDelayMs`, min 0, default 1000 | **`backoffMs`**, min 0, default 1000                                     |
+  | `maxRetries` / `backoffMultiplier` / `maxRetryDelayMs` / `jitter` | _(already identical)_               | unchanged                                                                |
+  | `strategy`                                                        | `'fail' \| 'retry' \| 'continue'`   | unchanged — it selects _whether_ the policy runs, so it stays outside it |
+
+  One key, one word, no default changes. Every other key, bound and default already
+  matched the converged policy, which is exactly why the divergence survived a release:
+  it looked reviewed.
+
+  ### `ETLPipeline.retry` (#4962)
+
+  |                     | FROM                                           | TO                                        |
+  | ------------------- | ---------------------------------------------- | ----------------------------------------- |
+  | count               | `maxAttempts`, min 0, **default 3**, unbounded | **`maxRetries`**, 0–**10**, **default 0** |
+  | base delay          | `backoffMs`, default **60000**                 | `backoffMs`, default **1000**             |
+  | `backoffMultiplier` | _(absent)_                                     | ≥1, default 1                             |
+  | `maxRetryDelayMs`   | _(absent)_                                     | default 30000                             |
+  | `jitter`            | _(absent)_                                     | default false                             |
+
+  ## What you must change
+
+  **1. Rename `retryDelayMs` → `backoffMs`** in any `flow.errorHandling` block. The value
+  (milliseconds before the first retry) is unchanged. The old spelling is **tombstoned**,
+  not deleted, so it rejects with the rename rather than being silently stripped, and
+  `os migrate meta --from 16` (the `retry-policy-converged` conversion, now with a
+  flow-level branch) rewrites it for you.
+
+  **2. Rename `maxAttempts` → `maxRetries`** in any `ETLPipeline.retry` block. **The number
+  does not change** — both counted the retries _after_ the initial attempt. Do **not**
+  subtract one: that adjustment belongs to `integration/connector.zod.ts`'s
+  identically-spelled `RetryConfig.maxAttempts`, which _includes_ the first attempt and is
+  deliberately **not** part of this convergence.
+
+  **3. If an ETL pipeline relied on the implicit retry count, write it out.** `retry: {}`
+  used to mean three re-runs 60s apart; it now means **none**. State `maxRetries: 3` (and
+  `backoffMs: 60000` for the old delay) to keep the old behaviour.
+
+  ## Why the ETL default flips to 0
+
+  Not merely to follow #4661. An ETL destination is a foreign system _by definition_ — a
+  warehouse, an API, someone else's database. A silent retry against a non-idempotent
+  destination is a **duplicate write**: a second invoice, a second export, a second
+  webhook. Default 0 makes retrying something an author states, and thereby claims
+  idempotency for. An unstated key is precisely where LLM-authored metadata hides this.
+
+  ## Migration surface
+
+  **`flow.errorHandling`** is live: `service-automation`'s `retryExecution` reads the key
+  (it now destructures `backoffMs`), and the D2 conversion covers stored and authored
+  flows, so no deployed stack changes behaviour.
+
+  **`ETLPipeline.retry` has an empty migration surface today, and that is why now was the
+  moment.** `etl.zod.ts` has no parse site in objectstack / objectui / cloud (批 12's
+  measurement) and an ETL pipeline is not a `defineStack` collection, so there is no stored
+  document a conversion could walk — it deliberately gets a tombstone and **no** D2 step,
+  rather than a walker advertising coverage that does not exist. Once an ETL engine lands,
+  flipping this default stops being a schema edit and becomes a behaviour change to every
+  deployed pipeline.
+
+  ## Also
+
+  The two automation retry surfaces now carry the **same** curated unknown-key table, so an
+  author learns one lesson instead of two, and `retry-policy.test.ts` gains a
+  concept-level guard: all four surfaces are asserted to expose the same key set and the
+  same defaults, by parse rather than by inspecting how each obtains them. Adding a fifth
+  retry surface without wiring it to the shared shape now fails a test — which is the check
+  that would have caught both of these issues, and the one the name-based scan could never be.
+
+### Minor Changes
+
+- 168f60f: feat(spec,automation): `update_record` / `delete_record` can declare bulk intent with `multi` (#5393)
+
+  A flow could not express "write every row this filter matches" — at all, from
+  any app. `UpdateRecordConfigSchema` / `DeleteRecordConfigSchema` are
+  `strictObject`s and neither declared any spelling of bulk intent (`multi`,
+  `bulk`, `all` and `options.multi` were each rejected as an unrecognized key),
+  and the CRUD executors never passed `options.multi` to the data engine. The
+  engine accepts a write only when `where.id` is a **scalar** or `options.multi`
+  is truthy, and throws otherwise — so a predicate `update_record` /
+  `delete_record` was unreachable, while the node descriptors advertised
+  `Delete Records` / "Delete records matching a filter." Declared ≠ enforced
+  (Prime Directive #10); the symptom was #5225's showcase sweep flow, which had
+  never deleted a record.
+
+  **New authorable key — `multi` (boolean, default `false`), on `update_record`
+  and `delete_record`.** One name for one concept (PD #12): `multi` is what the
+  data engine has always called it (`EngineUpdateOptions.multi` /
+  `EngineDeleteOptions.multi`), so the word is the same from node config to
+  driver call and greps end to end.
+
+  ```ts
+  // before — refused by the engine at run time, with no authoring-time signal
+  { type: 'delete_record', config: { objectName: 'lead', filter: { stage: 'stale' } } }
+
+  // after — the declaration makes the intent explicit and the write reachable
+  { type: 'delete_record', config: { objectName: 'lead', filter: { stage: 'stale' }, multi: true } }
+  ```
+
+  - **Absent or `false`** — unchanged behaviour. The executor forwards
+    `multi: false`, so the write must name one row by scalar `id`; anything else
+    (a predicate, or `id: { $in: [...] }`) is refused by the engine with
+    `Delete requires an ID or options.multi=true`. **That refusal is the
+    contract**, not a defect to route around: it is what keeps an undeclared
+    unbounded write from happening by accident.
+  - **`true`** — the executor forwards `options.multi: true`, the write lands on
+    `driver.updateMany` / `deleteMany`, and the step's `acted` metric reports the
+    affected row count.
+
+  Additive and backward compatible: no existing flow changes behaviour, and every
+  by-id write keeps working untouched.
+
+  Two guards are unchanged and worth stating explicitly. The #3810
+  erased-condition guard still refuses a node whose authored filter condition
+  interpolated to nothing, `multi` or not — bulk intent says "many rows are
+  fine", never "a condition may vanish". And `multi: true` with **no** `filter`
+  is the whole object, by declaration: write the constraint you mean.
+
+  Wrong spellings are answered by name rather than by edit distance (which
+  reaches `multi` from none of them): `bulk` / `all` / `multiple` get the
+  prescription, and `options: { multi: true }` is called out as the engine's
+  options bag written at the node's altitude.
+
+- f0d98e1: fix(automation): a `wait` timer's wake-up job is dropped when the run leaves the node, not only when the timer fires (#5512)
+
+  A timer `wait` arms a one-shot job on entry (`flow-wait:<runId>:<nodeId>`,
+  `{ type: 'once', at }`) and, until now, only that job's own callback ever tore it
+  down. Every other way out of the pause left it armed:
+
+  - resumed early through the REST resume endpoint (`POST
+/api/v1/automation/:name/runs/:runId/resume` — a door the #3801 resume gate
+    deliberately leaves open for `screen`/`wait` pauses) or the SDK equivalent;
+  - cancelled while parked (`cancelRun`, ADR-0044);
+  - terminally failed under a subflow ancestor.
+
+  Reported from 17.0-rc2 acceptance: a `wait P1D` pause resumed early ran to
+  completion while its one-shot stayed `active: true` in `sys_job` with tomorrow's
+  deadline. For the next 24h anyone reading `sys_job` saw "a run is still waiting
+  to be woken" — the row contradicted the run — and when the deadline arrived the
+  job fired a resume at a run that had completed the day before (harmless: the
+  engine reports a machine-state error and the callback discards it, then the job
+  self-cancels). A long-running org accumulated one stale row per early wake-up.
+
+  **What changed.** The engine now tells the node its pause is over. `NodeExecutor`
+  gains an optional `onSuspensionReleased(release)` — the mirror of `suspend: true`
+  — called from the single choke point every consumption of a suspension already
+  passes through, with the `runId`, the node, the `correlation` the node minted at
+  suspend time, and why the pause ended (`resumed` / `cancelled` / `failed`). The
+  `wait` node implements it by cancelling the one-shot whose name it recognises as
+  its own, so the `sys_job` row goes inactive the moment the run leaves the node,
+  whichever route it left by. `SuspensionRelease` / `SuspensionReleaseReason` are
+  exported for plugin nodes that arm something on entry (a lease, a reminder, a
+  timeout) and need the same teardown.
+
+  Teardown is best-effort and runs after the suspension is consumed: a job service
+  that is down or throwing can neither delay nor fail the continuation — the engine
+  logs one warning naming the correlation an operator would cancel by hand. Node
+  types that arm nothing are unaffected (the hook is optional), and a pause that
+  armed no job — a signal wait, or a timer with no parseable duration — cancels
+  nothing, since its correlation is not a job name. Deprecated ADR-0018 node
+  aliases delegate the hook to their canonical executor, so authoring the old type
+  name cannot silently lose the teardown.
+
+  The timer callback keeps its own `finally` cancel: the two answer different
+  questions — "the run left the node" versus "this one-shot has had its single
+  shot", including shots that did not consume a pause. `cancel` is idempotent.
+
+### Patch Changes
+
+- 02a8256: fix(service-automation): connector 降级路径的两条日志改用结构化 `meta`,message 保持单行 (#5636)
+
+  ## 接缝
+
+  `degradeConnectorInstance`(#3017 的降级/重试路径)有两条记录报告的是**外来**失败,却把
+  它插进了日志 message —— 与 #5048(flow 绑定)、#5575(`reconcileDeclaredConnectors` 的
+  `fail()`)同一类,是那两单范围之外的第三个接缝:
+
+  - **husk 注册失败**(`warn`):`err` 来自 `engine.registerDegradedConnector` →
+    `ConnectorSchema.parse`,catch 自己的注释就写着「the entry's def no longer parses」,
+    也就是说这里预期接到的正是 `ZodError` —— 它的 `.message` 是 issue 数组的多行 JSON
+    dump,第一行只有一个 `[`。
+  - **降级公告**(`error`):文本是 `ConnectorUpstreamUnavailableError.message`,由第三方
+    provider factory 构造(ADR-0097 明确鼓励第三方去写)。spec 只定义错误类、不约束文本,
+    所以上游 SDK 的多行失败会原样落在这里。
+
+  ## 危害:这条 `warn` 的下游与 #5575 的 `error` 不同(实测)
+
+  `ObjectLogger` 把 `warn` 送 stdout、`error`/`fatal` 送 stderr,而 `serve` 的启动静默窗口
+  只包了 `process.stdout.write`。#5575 的接缝全是 `error`,所以那一单的结论是「启动缓冲根本
+  看不到」;这一条不同,而且差别是**测出来**的,不是推的:
+
+  - 它是 `warn` → stdout,缓冲**确实**看得到;
+  - 它在**冷启动**就会跑 —— `materializeDeclaredConnectors(ctx, { fatal: true })` 遇到上游
+    不可达是降级、不是抛错 —— 而窗口此时正开着(`serve` 在 config 加载前接管 stdout,直到
+    banner 打印才恢复);
+  - `BootLogCapture.offer()` 只在 `classifyBootLogLine` 能在该物理行上找到 `<ts> <LEVEL>`
+    头时才保留它,所以插值 dump 的每一条续行是被**直接丢弃**,不只是难解析。
+
+  对一份 13 行的插值 ZodError 实测:写出 13 行物理行,缓冲保留 **1** 行(那条止于 Zod `[`
+  的头行)、丢弃 **12** 行 —— 唯一被留下的那行不含任何事实。这正是 cloud#971 的原始形态。
+  `error` 那一条走 stderr,不经缓冲,危害是 #5575 那一串按行消费者(文件 sink、
+  `docker logs`/journald 送采集、`grep ERROR`):一条诊断散成 N 个无法归属的碎片。
+
+  ## 改法
+
+  两条都复用同包 `thrown-cause-diagnostics.ts` 的 `describeThrownForLog`(#5572/#5575 落地):
+  message 是不含换行的自足句子,cause 走 logger 的结构化 meta。位置按 `Logger` 契约区分,
+  并且是核对源码后确认的而非照抄:`warn(message, meta?)` 没有 `Error` 位,cause 就在**第二**
+  参;`error(message, error?, meta?)` 的 cause 在**第三**参(第二参塞原始 error 会让每次重试
+  的记录都附带完整堆栈)。
+
+  ## 刻意没有改的一件事
+
+  `degradedReason` —— `GET /connectors` 展示的、以及 `connector_action` 被拒时引用的那段文本
+  —— 仍然逐字保留 provider 自己的 message,包含换行。它是人透过 JSON 读的字段,不经按行切分
+  的消费者;重塑它属于另一次契约变更。因此调用点同时传 `reason`(那段文本)与 `cause`(抛出值
+  本身):前者喂 husk 与重试簿记,后者只喂日志记录。测试双向钉住了这个分离。
+
+- b746aa0: fix(service-automation): connector 物化失败的软路径改用结构化 `meta`;顺带修好 `ObjectLogger.error` 丢弃契约第三参的缺陷 (#5575)
+
+  ## service-automation:`fail(msg, cause)`
+
+  `reconcileDeclaredConnectors` 的报错器有两条路径(ADR-0097):冷启动 `throw`(fatal),
+  `metadata:reloaded` 之后 —— Studio publish、`os dev` 重编译 —— 记日志并让旧 connector
+  继续服务(soft)。其中两个调用点把**外来**的 `err.message` 插进那条日志 message:
+  `resolveInstanceAuth` 失败处,以及 provider factory 抛错处。这两个 message 都不是我们
+  自己的:credential resolver 由宿主提供
+  (`AutomationServicePluginOptions.credentialResolver`),provider factory 更是 ADR-0097
+  明确鼓励第三方去写的代码 —— 第一个用严格 Zod schema 校验 `providerConfig` 的 factory
+  抛出的就是 `ZodError`,它的 `.message` 是 issue 数组的多行 JSON dump,第一行是一个 `[`。
+
+  `ObjectLogger` 每次调用只写一条 `<ts> <LEVEL> <msg>` 记录,带换行的 message 会溢出到
+  不带等级头的后续物理行,于是运行时 stderr 的每一个按行工作的消费者 —— 文件 sink、
+  `docker logs`/journald 送进日志采集、一次 `grep ERROR` —— 都会把那些续行读成无法归属的
+  垃圾记录:一条诊断散成 N 个碎片。与 #5048 在 flow 绑定接缝上是同一类,也是同一条 #4632
+  原则:被搅烂的诊断比没有诊断更贵。
+
+  改法与 PR #5572 同源:`fail(msg, cause?)` —— message 是不含换行的自足句子,cause 按路径
+  分别渲染。soft 路径把 cause 交给 logger 的**结构化 meta**(`issues[]` / `error`);fatal
+  路径把 cause 文本接在抛出的 message 后面(`… cause: <text>`),因为 throw 不是日志记录,
+  内核失败通道原样打印,多行 ZodError dump 在终端里本来就好读 —— 同一个 cause,两种受众,
+  刻意不共用一种形状。`#5048` 引入的内部模块随之从 `flow-bind-diagnostics.ts` 更名为
+  `thrown-cause-diagnostics.ts`(`describeThrownForLog`),因为它从来不是 flow 专属的:
+  主题是日志管线,不是 metadata 类型。被拒键名仍放在 `unrecognized` 而不是 Zod 原本的
+  `keys`(`ObjectLogger` 的脱敏表按子串匹配,`keys` 含 `key`)。
+
+  **一处订正**:#5575 的 issue 正文把此处的危害归给了 `serve` 的启动诊断缓冲
+  (`BootLogCapture`)。那个缓冲看不到这条路径 —— `ObjectLogger` 把 `warn` 送 stdout(启动
+  静默窗口只包了 `process.stdout.write`),`error`/`fatal` 送 **stderr**,而且 soft 路径在
+  `metadata:reloaded` 之后才跑,窗口早已恢复。危害是上面那串按行消费者,以及日志查询根本
+  无法按字段过滤;机制写进了模块文档,连同 `warn`/`error` 下游不同这件事本身。
+
+  ## core:`ObjectLogger.error`/`fatal` 兑现契约声明的 `meta`
+
+  `Logger` 契约声明 `error(message, error?: Error, meta?)`。`ObjectLogger` 按形状分派,
+  所以 meta 也允许出现在 `error` 位 —— 这份宽容没问题;**丢掉一个自己声明的参数**有问题:
+  `error === undefined` 时旧代码走 `write(level, message, errorOrMeta)`,第三个参数从未被
+  读取。于是每一个按契约书写的 `logger.error(msg, undefined, { … })` 都只输出一条裸 message,
+  事实全部静默消失 —— `metadata`、`metadata-protocol`、`client`、`core/security` 里约 15 处
+  调用点今天就是这样(其中 `metadata/src/endpoint-matcher.ts` 送的正是一个 Zod issue 数组)。
+  契约的另外两个实现(`@objectstack/observability` 的 `ConsoleLogger`/`JsonLogger`)都老老实实
+  用了这个位置,所以是契约对、这一个实现错:declared ≠ enforced。
+
+  三种形状现在都被兑现,两个位置同时带值时以更靠后的 `meta` 为准。这一处修好之后,上述
+  调用点的诊断自动恢复(`client` 的 `HTTP request failed` 记录重新带上
+  `{method, url, status, error}`)。connector 接缝改用契约的第三参而非第二参,是刻意的:
+  把原始 error 塞进第二位会让每条记录都附带完整堆栈,ZodError 还会附带整段多行 dump ——
+  正是我们要消灭的无界形状。
+
+- f205c32: fix(service-automation): 降级注册那条 warn 不再插值 provider 的 reason,cause 走结构化 meta (#5660)
+
+  ## 接缝
+
+  `AutomationEngine.registerDegradedConnector` 自己那条记录:
+
+  ```ts
+  this.logger.warn(
+    `Connector registered DEGRADED: ${parsed.name} (origin: ${origin}) — ${reason}`
+  );
+  ```
+
+  `reason` 不是我们的文本 —— 唯一调用点(`plugin.ts` 的 `degradeConnectorInstance`)传进来的是
+  `ConnectorUpstreamUnavailableError.message`,由**第三方 provider factory** 构造(ADR-0097 明确
+  邀请第三方去写;spec 只约束 `code`,不约束文本),所以上游 SDK 的多行失败会原样落进 message。
+  `ObjectLogger.write()` 每次调用只打一个 `<ts> <LEVEL>` 头,带换行的 message 就变成若干物理行,
+  只有第一行是记录。
+
+  这是 #5048(flow 绑定)、#5575(`reconcileDeclaredConnectors` 的 `fail()`)、#5636
+  (`degradeConnectorInstance` 的两条)之后同族的**第四条**,在另一个文件、另一个方法、另一份
+  契约里,所以是单独一单。它值得单独修的理由是**顺序**,不是严重度:
+
+  - 它**先**发生 —— `degradeConnectorInstance` 先调 `engine.registerDegradedConnector(…)`,
+    之后才打自己那两条;
+  - 它在**默认分支**上 —— #5636 那条 `warn` 在 `catch` 里(husk 自己 parse 失败才走到),
+    这条在同一个 `try` **成功**时打,也就是每个实例首次降级都打。
+
+  即:#5636 落地之后,常见的冷启动降级路径上仍然留着一条会溢出的 warn。
+
+  ## 危害(与 #5636 同一条下游,机制已实测)
+
+  `ObjectLogger` 把 `warn` 送 stdout;`serve` 的启动静默窗口只包了 `process.stdout.write`;
+  冷启动会走到这个接缝 —— `materializeDeclaredConnectors(ctx, { fatal: true })` 遇到上游不可达是
+  **降级**、不是抛错 —— 而窗口此时正开着。`BootLogCapture.offer()` 只在 `classifyBootLogLine`
+  能在物理行上找到级别头时才保留该行,所以插值 message 的每条续行是被**直接丢弃**的。
+
+  本单新测试按 `pretty`(CLI 实际用的格式)实测了旧形状的代价,并且刻意报告了一个**比 #5636 更窄**
+  的结论:#5636 的载荷是 `ZodError.message`(首行只有一个 `[`),唯一被留下的那行不含任何事实;
+  这里的载荷是 provider 的散文,**首行会活下来**,丢掉的是它后面的 `cause:` / `hint:` 两行 ——
+  也就是「连哪个地址被拒」和「该去查什么」。3 行进,1 行留,2 行丢。
+
+  ## 改法(#5660 分诊 A 路)
+
+  `registerDegradedConnector` 签名末尾加可选 `cause?: unknown`(在有默认值的 `origin` 之后,
+  所以既有调用形状全部照旧编译 —— 新测试里就有一个两参调用在钉这件事)。message 变成单行自足
+  (name / origin / 这个状态的后果与后续动作),事实走 `warn(message, meta?)` 的第二参:
+
+  - `degradedReason` —— **恒定存在**,是这次注册**存进** husk 的那段文本。字段名照 #5573 挑过:
+    `ObjectLogger` 按 `password`/`token`/`secret`/`key` 子串递归脱敏,这个名字一个都不含;
+  - 抛出值自身的渲染(`error` 或 `issues`,经同包 `describeThrownForLog`)—— 仅当调用点传了
+    `cause` 时出现。它描述的是**失败**,`degradedReason` 描述的是**注册**;今天唯一的调用点从
+    前者派生后者所以两者重合,但记录形状不依赖这个巧合,将来传摘要的调用点也不会静默丢信息。
+
+  唯一调用点顺手把 `info.cause` 传了进来(该字段 #5636 已经存在)。
+
+  ## 刻意没做的两件事
+
+  - **`reason` / `degradedReason` 一字不动**。`GET /connectors` 展示的、`connector_action` 被拒时
+    引用的那段文本仍逐字保留 provider 自己的 message,换行包含在内 —— 它是人透过 JSON 读的,不经
+    按行切分的消费者(#5636 在上一层做了同样的判断)。测试从两个方向钉住了这个分离。
+  - **没有扩 `describeThrownForLog`**。`ConnectorUpstreamUnavailableError` 自带一个 `cause`
+    (底层 connect 错误),把**抛出值本身**一路带过来才使渲染它成为可能;但该 helper 目前只读
+    `.message` / `.issues`,所以嵌套 cause 今天还不会出现在记录里。这一点被一条测试如实钉住,
+    而不是含混带过 —— 扩宽它是改四个接缝共用的 helper,不是这个接缝该顺手做的决定。
+
+- cc5b048: 自动化引擎:嵌入式 host 从未调用 `sealNodeTypeVocabulary()` 时,首次执行 flow 会告警一次(#4792)
+
+  #4771 把 ADR-0018 的节点类型校验从 `registerFlow` 挪到了 `sealNodeTypeVocabulary()`。`AutomationServicePlugin` 在 `kernel:bootstrapped` 自动 seal,插件路径不受影响;但自己 `new AutomationEngine()` 且从不 seal 的嵌入式 host 就彻底拿不到这项校验,而且完全静默 —— 只有读过 changeset 的人才知道要补一行调用。现在这类 host 在第一次真正执行 flow 时会得到一条 `warn`,说明丢了什么、以及要调用哪个方法。
+
+  - 首次执行是最早既安全又必然到达的时点:正在跑 flow 的 host 显然已经装配完毕(否则这次执行本身就会 `NO_EXECUTOR` 失败)。
+  - **每个引擎实例一次**,不是每进程一次 —— 一个 host 建了多个引擎(按租户/环境各一个是常见形态)就是在每个上都漏了这次调用。
+  - 告警只报「缺了这次调用」这个关于 host 的事实,**不报**未知节点类型的审计结果:未 seal 的引擎其词汇表按契约仍可增长,在那里断言「某类型没有执行器」正是 #4771 删掉的那种会被本次启动反驳的判断。需要审计结果又不想封闭词汇表的 host 用只读的 `getUnknownNodeTypeAudit()`。
+  - 也**不会**顺带自动 seal:「谁决定词汇表封闭」只能有一个答案(host)。而且 seal 之后 `registerFlow` 会转为即时校验,自动 seal 会让「先执行、后注册插件执行器」(ADR-0018 允许)的嵌入式 host 开始收到 #4771 那种误报。
+
+  走 `AutomationServicePlugin` 的部署与已显式调用过 `sealNodeTypeVocabulary()` 的 host 都不会多打任何日志(两条哨兵测试守着)。
+
+- 8108787: fix(service-automation): flow 绑定失败的告警改用结构化 `meta`,不再把 Zod issue 数组塞进单行日志 (#5048)
+
+  `AutomationServicePlugin` 的五个 flow 绑定/读取失败点都把 `err.message` 插进一条
+  单行 `logger.warn`。而 `registerFlow` 用 `FlowSchema` 解析,#4001 关闭 metadata
+  schema 之后未知键是**抛出**而不是被丢弃 —— ZodError 的 `.message` 是 issue 数组的
+  多行 JSON dump,第一行就是一个 `[`。
+
+  两级管线随后把余下内容销毁:`ObjectLogger.write()` 每次调用只写一条
+  `<ts> <LEVEL> <msg>` 记录,带换行的 message 会溢出到没有等级前缀的后续行;而
+  `serve` 的启动诊断缓冲(`BootLogCapture.offer()`)只保留 `classifyBootLogLine`
+  能认出等级前缀的行。于是一次启动里 24 个绑不上的 flow,给出的是 24 条点了名字、
+  然后说一个 `[` 的告警 —— cloud#971 能横跨整条 rc.1 发布线没人发现,就是因为这个。
+
+  现在这些位置改为:message 是不含换行的静态字符串,事实交给 logger 的 `meta`
+  第二参(仓库里每个 `Logger` 实现都用 `JSON.stringify` 序列化它,值里的换行变成
+  `\n` 转义,整条记录稳定占一行,正是启动缓冲会保留的形态)。新增内部模块
+  `flow-bind-diagnostics.ts` 把 Zod issue 摊平成 `{ code, path, message,
+unrecognized }`:`path` 渲染成 `nodes[0].config.x`,被拒的键名放在
+  `unrecognized` 而不是 Zod 原本的 `keys` —— 因为 `ObjectLogger` 的默认脱敏表
+  (`['password','token','secret','key']`)按**子串**递归匹配,`keys` 含 `key`,
+  原样转发 `err.issues` 会渲染成 `"keys":"***REDACTED***"`,恰好丢掉读者唯一需要
+  的那个事实。issue 列表有上限,超出时用 `issueCount` **显式声明**总数,而不是静默
+  截断。非 ZodError 的失败退回 `error` 字符串分支。
+
+  无公开 API 变化;日志文本的可 grep 前缀(`cold-boot flow bind: failed to
+register`、`flow re-sync: failed to register`、`flow pull from ObjectQL
+registry failed`、`flow read from protocol failed`)全部保留。与 #4632 同源:
+  被截断的诊断比没有诊断更贵。
+
+- c5adfe1: fix: 节点执行与热重载 shutdown 的超时守卫在 race 落定时被清除,不再留下孤儿定时器 (#4952)
+
+  #4813(PR #4874,内核 init/start)与 #4875(PR #4950,周期性健康检查)修掉的是同一种漏法:
+  守卫 armed 之后就被扔掉 —— 被守护的一方赢下 race 之后,那根 `setTimeout` 既没 `clearTimeout`
+  也没 `unref()`,带着 ref 一直把事件循环钉满整个超时预算。本次清仓剩下的两处生产实例:
+
+  - **`AutomationEngine.executeWithTimeout()`**(`service-automation`)—— 三处里量级最大的一处:
+    **每个声明了 `timeoutMs` 的流程节点各一根**,孤儿数随流程节点数 × 触发频率线性增长;一次性进程
+    (`os` CLI 跑到 flow 的路径)干完活之后还会被最长的那根守卫按住到超时才退出。
+  - **`HotReloadManager.reloadPlugin()`**(`core`)—— 插件 `destroy()` 的 shutdown 守卫,与 #4813
+    修掉的两处一字不差:一次毫秒级完成的热重载,照样把循环钉满 `shutdownTimeout`。
+
+  两处修法与 #4874 / #4950 同形,不新造变体:私有 helper +
+  `try { return await Promise.race([...]) } finally { clearTimeout(guard) }`。`hot-reload.ts` 的
+  helper 把入参放宽到 `T | PromiseLike<T>`(Plugin 契约允许同步 `destroy()`);`engine.ts` 的不放宽
+  (`NodeExecutor.execute` 声明返回 `Promise`)。
+
+  **为什么是 `clearTimeout` 而不是 `unref()`。** `unref()` 让定时器不再钉住事件循环的同时,也让它
+  不再是一个守卫 —— 若被守护的一方永不 settle 且没有别的东西撑着事件循环,Node 会在定时器触发之前
+  退出,超时被静默吞掉。守卫必须在 race 未决期间保持 ref'd、在落定那一刻被回收,这正是
+  `finally { clearTimeout(guard) }` 表达的语义。两处的回归测试各自沿用 #4950 的双向写法:
+  真实定时器下不留 ref'd 定时器、fake timers 下连跑多轮不累积(计数能看见 `unref()` 过的定时器,
+  因此识破 `unref()` 式的假修复)、以及被守护方真的挂住时超时照常上报。
+
+  超时时长(`timeoutMs` / `shutdownTimeout`)一个都没动 —— 问题从来不在时长,而在没人回收。
+
+- dadf542: fix(service-automation): 启动路径三条日志改用结构化 `meta`,message 保持单行 (#5661)
+
+  ## 接缝
+
+  `AutomationServicePlugin` 里还有三处把**外来**错误的文本插进日志 message —— 与
+  #5048(flow 绑定)、#5575(`reconcileDeclaredConnectors` 的 `fail()`)、#5636
+  (`degradeConnectorInstance`)同一类,是那三单范围之外的第四组:
+
+  - **`registerRunObject`**(`warn`):`err` 来自内核服务注册表(`ctx.getService('manifest')`
+    或 `manifest.register()` 的解析拒绝),文本不是我们的。
+  - **启动 probe**(`error`):`err` 来自 `candidate.probe()`,即**数据源驱动**抛出的错误。
+  - **重启后 wait-timer 重新挂载**(`error`):`err` 是从 `rearmSuspendedWaitTimers` 逃出来
+    的任何东西。
+
+  ## 为什么后两条尤其值得改
+
+  它们的**存在理由**就是可读性。代码自己写明后果 —— 「suspended runs will NOT survive a
+  restart」「every wait/approval paused before this restart will hang indefinitely」—— 并被
+  #4632 特意定为 `error` 级,好让运维能找到。而 `ObjectLogger.write()` 一次调用只加一个
+  「时间戳 + 级别」记录头,所以带换行的 message 会变成多个物理行、只有第一行有头:文件 sink
+  把其余行当成独立记录存,采集端读成无法归属的碎片,`grep ERROR` 只捞到那条不含任何事实的
+  头行。这个 plugin 里最响的耐久性告警,恰好是最可能以读不懂的形态抵达的那一条。
+
+  第一条的危害是另一种,并且是测出来的:`warn` 走 **stdout**,正是 `serve` 启动静默窗口包住
+  的那条流,而 `BootLogCapture.offer()` 只在该物理行上找得到级别头时才保留它 —— 所以续行是
+  被**直接丢弃**,不只是难解析。`registerRunObject` 在 `init()` 里跑,正处于窗口开着的时候。
+
+  ## 改法(零新词汇)
+
+  三处都复用同包 `thrown-cause-diagnostics.ts` 的 `describeThrownForLog`:message 是不含换行
+  的自足句子,cause 走 logger 的结构化 meta。参数位按 `Logger` 契约区分 ——
+  `warn(message, meta?)` 没有 `Error` 位,cause 在**第二**参;`error(message, error?, meta?)`
+  的 cause 在**第三**参(第二参塞原始 error 会让记录额外附带堆栈)。#4632 要求的「后果 + 修
+  法」仍然完整留在 message 的第一行里,只是末尾的 `: ${err.message}` / `Cause: ${err.message}`
+  换成了指向 meta 的一句话。
+
+  `pnpm check:durability-log-level` 仍绿:24 个耐久性接缝,三处 `error` 未降级、未改成 rethrow。
+
+  ## 测试
+
+  新增 `plugin-startup-log-cause.test.ts`:13 个用例全部让真 `ObjectLogger` 写真字节再读回来
+  (照 #5662 的先例 —— spy 只能证明接缝**调用**了什么,证明不了按行消费者会**看到**什么,而
+  后者才是 cloud#971 付掉一整条 rc 线的那一半)。三条接缝各自钉住「多行 cause 不进 message、
+  进结构化 meta」、参数位、以及无 cause 时输出零字节;末尾两个用例把插值形态与结构化形态并排
+  渲染、量出差别(`warn` 侧:一次调用多个物理行、启动缓冲只留下止于 Zod `[` 的那一行;`error`
+  侧:一条记录散成三个碎片,后两行无记录头)。
+
+  `plugin-suspended-run-wiring.test.ts` 里那条 #4420 的 probe 用例做了重新裁决而不是重新拼写:
+  它原来断言驱动文本出现在 message 里,现在双向断言 —— message 里**没有**、meta 里**有**。
+  单向的断言在 cause 被整个丢掉时也会通过。
+
+- c42a19a: fix(service-automation): `wait` 节点的五条日志不再把外来 cause 拼进 message,改走 meta (#5737)
+
+  `builtin/wait-node.ts` 里有五处记录把**我们不控制文本**的失败原因(数据源驱动、
+  job 服务、`engine.resume()` 的错误信封)直接插进日志 message。`ObjectLogger.write()`
+  一次调用只加一个「时间戳 + 级别」记录头,所以 message 里的换行会把**一条**记录变成
+  多个物理行,后面几行既无级别也无时间戳。在 `pretty` / `text` 格式(`os dev` / `os serve`
+  的默认)下,文件 sink 会把它们当成独立记录存,日志采集器读成无主碎片,而
+  `grep ERROR` 只捞得到不含任何事实的那一行 —— 恰恰是运维正在找的那条。
+
+  五处现在都改成:**message 单行自足**,外来 cause 交给 logger 的结构化参数位 ——
+  按 `Logger` 契约(`packages/spec/src/contracts/logger.ts`)选位置,`warn(message, meta?)`
+  用第二参,`error(message, error?, meta?)` 用**第三**参(第二参留空,否则每条记录都
+  会带上整个栈)。与 #5048 / #5575 / #5636 / #5661 完全同一套修法,零新词汇。
+
+  对运维可见的变化(日志形状,非行为):
+
+  - 这五条记录各自恒为**一个**物理行,不论日志格式;
+  - 原因文本从 `msg` 末尾的 `Cause: …` 移到记录的 `error` 字段(`meta`),多行驱动错误
+    由 `JSON.stringify` 转义换行后完整保留 —— 一个字节都不丢;
+  - 消息里原本指向拼接文本的「the cause below」措辞改为指向记录的 meta;
+  - 级别一律不变。其中三处是 #4632 明确定为 `error` 的耐久性诊断
+    (`rearmSuspendedWaitTimers` 的 store 不可列、overdue 运行叫不醒、唤醒 job 没排上),
+    仍是 `error`,`pnpm check:durability-log-level` 照旧覆盖;「无 job 服务」那条声明式
+    缺失仍是 `warn`。
+
+  按 `Cause:` 字面量 grep 这五条记录的日志查询需要改成读记录的 `error` 字段。
+
+- 229d29e: fix(automation): a wait node's timer wake-up no longer disarms itself when the store outage means it never woke the run (#5529)
+
+  A timer `wait` arms one job to wake its run. That job used to disarm itself in an
+  unconditional `finally` — and `AutomationEngine.resume()` reports failure by
+  **returning** a code rather than throwing, so "this shot consumed the pause" and
+  "this shot missed" were indistinguishable to that `finally`. Both were cancelled.
+
+  On `STORE_UNAVAILABLE` that was a durability hole. The durable suspended-run
+  store being unreadable does **not** mean the run is gone (#4420 draws exactly
+  that line): the pause was never consumed, the run is still parked at its wait
+  node, and its row is still there — but the one job that was ever going to wake it
+  had just retired itself. Nothing then woke that run until the next process start,
+  where `rearmSuspendedWaitTimers` picks it up as overdue. A store that wobbled for
+  the one moment the deadline landed, plus no restart, meant a run parked forever.
+
+  The one-shot now settles on the resume's return code:
+
+  - **`STORE_UNAVAILABLE`** — the job stays armed, and the degradation is reported
+    at `error` (this path was previously silent — the result was discarded without
+    even a `warn`). The line names the job, the run, and both remedies.
+  - **everything else** — cancelled exactly as before: success consumed the pause,
+    `RESUME_IN_PROGRESS` means a concurrent resume is consuming it, a machine-state
+    failure means there is no pause left to serve, and a thrown error is not a
+    store outage.
+
+  Keeping the job armed is **not** self-healing, and the log line says so rather
+  than implying a retry: a `once` schedule is a single `setTimeout`, so it never
+  re-fires on its own. What survival buys is the two things `cancel` destroys — the
+  `sys_job` row stays `active` with its deadline (true, here: the run really is
+  still waiting) instead of flipping to `active: false` and reading as "this
+  wake-up is done", and the registration stays in the job service, so
+  `trigger('flow-wait:<runId>:<nodeId>')` re-fires that wake-up once the store is
+  back **without a restart**. After a cancel, `trigger` reports the job as not
+  found and a restart is the only path left.
+
+  Both sites that arm this job — the wait node's own arming path and the cold-boot
+  re-arm — now share one handler, so they cannot drift, the same reason the job's
+  name is a single declaration. This is separate from the `onSuspensionReleased`
+  teardown added in #5512 and does not replace it: that one fires when the **run**
+  leaves the node, this one when the **job** has had its single shot.
+
+  No authoring surface changes; no flow needs editing.
+
+- b508244: automation: a pausing node type that never declares `resumeAuthority` is now named
+  at registration, and the four pausing built-ins declare theirs (#5561)
+
+  `registerNodeExecutor` warns once per node type (per engine instance) when a
+  descriptor declares `supportsPause: true` and omits `resumeAuthority` — the state in
+  which the #3801 resume gate silently treats every pause that type creates as
+  raw-resumable through the generic resume route. The line names the two legal values
+  and says that declaring `'any'` explicitly silences it and changes no behaviour, so
+  a node whose pause really is open to the route is not pushed toward `'service'` to
+  quieten a log.
+
+  `screen`, `wait`, `subflow` and `map` now declare `resumeAuthority: 'any'`
+  explicitly. Each was already correct on its own terms — it was inheriting the value
+  rather than stating it — so the warning names nothing on a stock boot today and only
+  catches future omissions. Authority resolution is unchanged: `resolveResumeAuthority`
+  still resolves an absent value to `'any'`.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [0f17114]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [58f3220]
+- Updated dependencies [07f1822]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [bf1edef]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/formula@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes

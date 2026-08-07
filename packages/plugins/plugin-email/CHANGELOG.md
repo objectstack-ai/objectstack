@@ -1,5 +1,505 @@
 # @objectstack/plugin-email
 
+## 17.0.0-rc.4
+
+### Minor Changes
+
+- bcfebb0: fix(cli,plugin-email)!: `OS_EMAIL_PROVIDER=resend/postmark` without an API key now fails the boot instead of silently becoming the log transport (#5132)
+
+  **BREAKING for one configuration: a delivery provider selected without the
+  credential it needs.** `os serve` used to answer that by rewriting `provider` to
+  `log`, printing a warning, and booting normally. The result was a server that
+  accepted every send, recorded each one in `sys_email` as sent, and delivered
+  nothing — the warning scrolled past in CI logs and the truth surfaced when a
+  user reported never receiving a verification code. #5087 closed exactly this gap
+  inside `@objectstack/plugin-email` (`makeTransport` throws rather than
+  substituting a transport); the CLI's own capability assembly kept doing it one
+  layer up, for `resend` / `postmark`.
+
+  `resolveEmailCapabilityArg` now refuses every mail configuration it cannot
+  deliver through, the way its neighbouring `smtp` arm already did:
+
+  - `resend` / `postmark` with no `OS_EMAIL_API_KEY` (or `config.email.apiKey`);
+  - a `provider` tag outside `log` / `smtp` / `resend` / `postmark` — including
+    the retired `sendgrid` / `ses`, which get their SMTP migration in the message.
+
+  **Who is affected:** deployments (typically CI or preview environments) that set
+  `OS_EMAIL_PROVIDER=resend` or `=postmark` without a key and relied on the
+  fallback to boot. Nothing else changes — a complete configuration is passed
+  through untouched, and an unset `OS_EMAIL_PROVIDER` still defaults to `log`.
+
+  **Migration — one line, either direction:**
+
+  - the environment is _not_ meant to send mail → `OS_EMAIL_PROVIDER=log`
+    (that explicit value is the supported way to say so, and why refusing the
+    others is fair);
+  - the environment _is_ meant to send mail → set `OS_EMAIL_API_KEY` (or
+    `config.email.apiKey`).
+
+  Both errors name the consequence and both fixes, per AGENTS.md's
+  degradation-log-level rule.
+
+  `@objectstack/plugin-email` gains the vocabulary the CLI reads instead of
+  restating: `API_KEY_EMAIL_PROVIDERS`, `emailProviderRequiresApiKey()` and the
+  `ApiKeyEmailProvider` type, alongside `EMAIL_TRANSPORT_PROVIDERS` /
+  `isEmailTransportProvider` / `unsupportedProviderFix` from #5094. One vocabulary,
+  two consumers, pinned by a contract test — a second literal list in the CLI is
+  how the settings dropdown and the transports drifted apart in the first place.
+
+- 9c4f174: feat(plugin-email): durable email delivery through `sys_job_queue`, opt-in (#5160)
+
+  `IEmailService.send()` has always delivered **inline**: the SMTP session ran
+  inside the caller's `await`, and `EmailService`'s retry loop lived in the same
+  process — so a crash between the attempt and the retry dropped the message with
+  no trace beyond a `sys_email` row stuck at `queued`. The pieces for a durable
+  path all existed (`sys_job_queue`, the `DbQueueAdapter`, an `email.send.async`
+  subscriber) but nothing in the repo ever published to that topic.
+
+  **New: `queueDelivery`.** With it on, `send()` persists the `sys_email` row,
+  publishes an `email.send.async` job **referencing that row**, and returns
+  `{ status: 'queued' }` immediately. A worker delivers the row and finalizes it
+  in place (`sent` + `message_id`, or `failed` + `error`); the queue retries with
+  exponential backoff (1s → 5min cap) and dead-letters the job when the attempts
+  run out, so a restart resumes delivery instead of losing it. The `'queued'`
+  status was already in `EmailDeliveryStatus` — no spec change.
+
+  Three ways to turn it on, all default-off:
+
+  - `new EmailServicePlugin({ queueDelivery: true })`
+  - `OS_EMAIL_QUEUE_ENABLED=true` (or `config.email.queueDelivery`) on `os serve`
+  - Settings → Mail → **Durable queue delivery**, hot-applied without a restart
+
+  **One retry budget, not two.** `retries` keeps its meaning — total attempts are
+  `retries + 1` in both modes. Inline it drives the in-process loop; queued it
+  becomes the queue's `maxAttempts` and the per-row loop is pinned to one attempt
+  per delivery. Turning the toggle on changes _where_ a retry happens (durable,
+  backed off) and never _how many_ happen, so the two layers cannot multiply.
+
+  **Fixed in the same change: the `email.send.async` subscriber inserted a new
+  `sys_email` row per delivery.** It called `send()` with the message, so a job
+  the queue retried five times left five rows — four permanently `failed`, none
+  carrying the real attempt count. It now delivers the referenced row via
+  `deliverPersistedRow`, so one message is one row and `attempt_count`
+  accumulates on it. Messages published in the old shape (a bare `SendEmailInput`)
+  are still accepted and delivered inline for a migration window.
+
+  Boundaries worth knowing before you switch it on:
+
+  - **"Send test email" always sends inline**, in every mode — the button has to
+    report the provider's own answer (`535 …`), and "queued" is exactly the
+    non-answer #5087 removed from it.
+  - **Messages with attachments or custom headers are delivered inline**, because
+    `sys_email` has no columns for them and a queued copy would arrive stripped.
+    Queueing them is tracked separately; this ships the loss-free behaviour.
+  - **A declaration that cannot be honoured fails the boot.** `queueDelivery: true`
+    from the constructor or `OS_EMAIL_QUEUE_ENABLED` with no durable queue
+    registered (or with `persist: false`) throws on `kernel:ready`, naming the
+    fix — the #5132 judgement, applied to durability. The **settings toggle** is
+    the opposite trade: it logs at `error` and keeps sending inline, because one
+    save must not stop the mail.
+  - The kernel's built-in in-memory `queue` fallback does **not** count as a
+    durable queue: it delivers synchronously with no retry or DLQ, so publishing
+    to it would report `queued` for a message nothing could ever recover. Mount
+    `@objectstack/service-queue` over an ObjectQL engine (the `queue` capability
+    does this on `os serve`) to get the `sys_job_queue`-backed adapter.
+
+  Leaving `queueDelivery` unset keeps today's behaviour byte for byte.
+
+- d25f20b: fix(plugin-email): `sys_email` rows stranded at `queued` are swept at boot, and a failed drain says so at `error` (#5161)
+
+  `status: 'queued'` had exactly one consumer: the `afterInsert` outbox drain that
+  fires during the insert itself (plus, since #5160, the `email.send.async` job
+  `send()` publishes). Nothing ever looked at such a row again. A process that
+  died between the insert and the delivery — or a drain whose delivery threw —
+  left the row at `queued` **forever**: a state named after a queue that had no
+  reader, while the caller had already been told the message was accepted.
+
+  **A once-per-boot sweep is now that reader.** At `kernel:ready`, after the
+  registries are settled and the `email.send.async` subscriber is attached,
+  `sweepStrandedOutbox` picks up `sys_email` rows still at `queued` and advances
+  them:
+
+  - **durable queue delivery on** → the row is published as an `{ rowId }` job to
+    `email.send.async` through the same producer, options and
+    `sys_email:<id>` idempotency key `send()` uses, so a row that still has a
+    pending job collapses onto it instead of putting a second worker on it;
+  - **inline delivery** → the row is delivered and finalized in place (`sent` /
+    `failed`), which is what the drain hook would have done had the process lived.
+
+  Only rows **older than five minutes** are eligible. A row inserted seconds ago
+  is not stranded, it is someone's in-flight work — this process's `send()`, its
+  deferred drain hook, or the same on another instance — and sweeping it would
+  send that message twice. (Age, not "created before this boot": one instance's
+  boot time says nothing about a sibling's row inserted a second ago.) Rows this
+  process is delivering right now, and rows that already carry a `message_id`, are
+  skipped. The batch is bounded at 500 rows per boot, oldest first, and says so
+  when it truncates. One `info` line reports the counts; boot does **not** wait on
+  the sweep, and a sweep that cannot run reports at `error` rather than relying on
+  `kernel:ready` error propagation.
+
+  **Drain-hook failures are now `error`, not `warn`.** A drain that throws means
+  the mail was not sent while the insert reported success and the row still reads
+  `queued` — the durability class the degradation-log-level rule pins at `error`.
+  Both lines now name the consequence (this message was NOT sent, the row stays at
+  `queued`) and the fix (the boot sweep picks it up on the next restart; turn on
+  durable queue delivery to have failures retried and dead-lettered instead).
+  `deliverPersistedRow` joins `DURABILITY_CRITICAL_CALLEES`, so a future `catch`
+  that quietly downgrades it fails `pnpm check:durability-log-level`.
+
+  New exports: `sweepStrandedOutbox`, `OUTBOX_OBJECT`, `OUTBOX_SWEEP_MIN_AGE_MS`,
+  `OUTBOX_SWEEP_LIMIT`, `EmailService.enqueuePersistedRow`, and
+  `EmailServicePlugin.outboxSweepSettled` (the sweep's promise, for callers that
+  need determinism). The normal `send()` → deliver path is byte-for-byte
+  unchanged.
+
+- 1b9a53b: plugin-email: large attachments (>256 KiB) now get durable queue delivery, with their content held out of the `sys_email` row
+
+  A message whose attachments exceeded the in-row budget was pushed back onto inline delivery — whole, but with none of the durability queue delivery exists to provide, which meant the platform was weakest about exactly the mail that matters most (a signed contract, an exported report). Its content now goes to the `file-storage` capability, the row records a `storageKey` plus the audit metadata, and the queue worker fetches the content back to rebuild the message.
+
+  - **Zero migration.** `attachments_json` declared `storageKey` from the start; this adds the producer and the reader. Attachments at or under `SYS_EMAIL_ATTACHMENT_LIMIT_BYTES` still go in the row exactly as before, and the boundary includes equality.
+  - **The row stays an audit log, not a blob store.** `filename` / `contentType` / `size` / `hash` stay on the row permanently; the content is a delivery artifact and is deleted a grace window (24h) after the row reaches a terminal state, at which point `storageKey` is replaced by `contentReclaimedAt`. Reclamation is a delayed `email.attachment.reclaim` queue job that carries the storage keys, so a row deleted in the meantime reclaims its content instead of orphaning it.
+  - **Nothing degrades silently.** No `file-storage` capability, or an upload that fails, keeps today's behaviour — inline delivery of the whole message — and says which of the two it was and how to fix it. On the way back, content that cannot be fetched (outage, missing object, no capability on the worker, truncated or substituted bytes) fails the row loudly; a message is never delivered without an attachment it declares.
+
+- 8597a7d: fix(service-settings,plugin-email): the mail provider dropdown lists only providers that actually deliver (#5094)
+
+  **Settings → Mail → Provider** offered `SMTP | SendGrid | Amazon SES | Postmark`.
+  `@objectstack/plugin-email` has never carried a SendGrid or an SES transport —
+  `makeTransport` knows `log` / `resend` / `postmark` / `smtp` and nothing else. So
+  selecting either of the two validated, saved, showed a success toast, and then
+  delivered no mail at all: the same declared-but-not-delivered gap #5087 closed
+  for SMTP, one field to the left.
+
+  The same field broke the invariant in the other direction at the same time:
+  **`resend` has shipped a working transport all along and was not on the list**,
+  so nobody could pick the one HTTP provider that worked.
+
+  **The dropdown is now `SMTP | Resend | Postmark | None (log only — no real
+delivery)` — exactly the set `makeTransport` can build.** No email capability was
+  removed with SendGrid and SES. Both publish SMTP endpoints, and #5087 shipped a
+  real `SmtpTransport`, so both are configured today as `smtp`:
+
+  | provider   | host                                | port | credentials                                                                        |
+  | :--------- | :---------------------------------- | :--- | :--------------------------------------------------------------------------------- |
+  | SendGrid   | `smtp.sendgrid.net`                 | 587  | username `apikey`, password = your API key                                         |
+  | Amazon SES | `email-smtp.<region>.amazonaws.com` | 587  | SES **SMTP credentials** (generated in the SES console — not your AWS access keys) |
+
+  The provider field's own description says this, so the migration is in front of
+  whoever goes looking for the option that disappeared.
+
+  `log` is listed rather than hidden. It is the one option that does not deliver —
+  but it does not pretend to: the label says so, `LogTransport` still records every
+  message to `sys_email`, and "Send test email" answers `ok: false` for it. That
+  gives an operator the deliberate, visible opt-out AGENTS.md asks a degradation to
+  be, instead of expressing "no outbound mail" as a half-filled SMTP form. It is
+  also what makes _offered_ and _deliverable_ the same set rather than merely
+  overlapping — which is the property a test can hold.
+
+  **Already saved `sendgrid` or `ses`? Nothing breaks and nothing goes quiet.** The
+  stored value outlives the dropdown, so `applyMailSettings` now recognises it
+  explicitly: the previous transport is kept (a settings row written by an older
+  release must never fail a boot), and the server logs at `error` with both halves
+  AGENTS.md requires — the consequence (_no mail is delivered through it_) and the
+  fix (the SMTP settings above), not a bare "unknown provider". It is checked
+  _before_ the API-key check, because "set an API key" is the wrong instruction for
+  a provider that has nothing to hand a key to. "Send test email" refuses the same
+  way and sends nothing. Switching the provider to `smtp` and saving recovers the
+  transport without a restart.
+
+  Two smaller corrections in the same field:
+
+  - `api_key` is now shown and required for exactly `resend` and `postmark`
+    (`provider === 'resend' || provider === 'postmark'`). It was `provider !==
+'smtp'`, which only worked because every non-SMTP option happened to be an
+    HTTP API; `required` is enforced server-side wherever the field is visible, so
+    that expression would have refused to save "None (log only)" until an API key
+    it never reads had been typed in.
+  - The built-in `mail/test` fallback (the one that runs when no email plugin is
+    mounted) rejects any `provider` outside the manifest's own option list instead
+    of answering "the form is well-formed".
+
+  **Held by a test, in both directions.** `EMAIL_TRANSPORT_PROVIDERS` is now a
+  runtime array (the `EmailTransportProvider` union is derived from it), and
+  `plugin-email`'s `mail-manifest-providers.contract.test.ts` asserts set equality
+  between it and the manifest's option values, then builds a real transport for
+  each. Adding an option without a transport fails; adding a transport without an
+  option fails. `RETIRED_EMAIL_PROVIDERS` / `isEmailTransportProvider` /
+  `unsupportedProviderFix` are exported alongside it for hosts that surface the
+  same guidance.
+
+- 41c3b48: feat(plugin-email): real SMTP delivery — `SmtpTransport`, settings hot-swap, and a `mail/test` that actually sends (#5087)
+
+  The **Mail Delivery** settings page has always defaulted to SMTP and offered a
+  full host / port / TLS / username / password form. Nothing behind it delivered:
+  `applyMailSettings` treated `provider: 'smtp'` as a no-op ("transport
+  unchanged"), `mail/test` answered `ok: true, "Configuration looks valid … Wire
+@objectstack/plugin-mail for actual delivery"` — a success toast for a message
+  nobody sent, naming a package that has never existed — and the code pointed
+  operators at `@objectstack/plugin-mail-smtp`, which is not in this repo or on
+  npm. A workspace that selected SMTP got a green form, a green test button, and
+  mail that only ever reached the log and the `sys_email` table. For deployments
+  in China this left **no** working channel at all: Resend and Postmark are
+  overseas HTTPS SaaS with unreliable reach and deliverability to QQ / 163 /
+  enterprise mailboxes, where SMTP is the normal path (Aliyun DirectMail, Tencent
+  SES, corporate mail servers).
+
+  **`SmtpTransport` now ships in `@objectstack/plugin-email`** (ADR-0012: SMTP in
+  core, implemented with `nodemailer`). `nodemailer` is a real dependency but is
+  imported **lazily on the first send**, so deployments that never select SMTP —
+  and non-Node runtimes — never load `node:net` / `node:tls`.
+
+  Three doors reach it, all sharing one options reader so they cannot drift:
+
+  - **Settings → Mail** (`smtp_host` / `smtp_port` / `smtp_secure` / `smtp_user` /
+    `smtp_password`) hot-swaps the live transport on save, no restart.
+  - **`os serve`** via `OS_EMAIL_PROVIDER=smtp` plus the new `OS_EMAIL_SMTP_HOST` /
+    `_PORT` / `_SECURE` / `_USER` / `_PASSWORD` (or `config.email.options`).
+  - **Constructor**: `new EmailServicePlugin({ provider: 'smtp', providerOptions:
+{ host, port, secure, user, password } })`.
+
+  TLS is one toggle with the wire behaviour derived from the port, as providers
+  document it: on `465` implicit TLS (SMTPS); on any other port a **required**
+  STARTTLS upgrade, so a server that refuses to upgrade fails the send instead of
+  leaking credentials over a cleartext socket; `secure: false` connects in the
+  clear and upgrades only when STARTTLS is offered.
+
+  **Failure is loud everywhere, because a silent fallback is the bug this fixes.**
+  On the construction path (CLI / plugin options) a `smtp` provider with no host
+  **throws** and the boot fails — it no longer degrades into a LogTransport that
+  reports every send as successful. On the settings hot-swap path a save can never
+  kill a running server, so the previous transport is kept — but the failure is
+  logged at `error` naming the consequence and the fix, and **`mail/test` now
+  performs a real delivery** through the settings on screen and reports the SMTP
+  server's own words (`535 … authentication failed`) instead of a green toast. The
+  built-in fallback `mail/test` handler (used only when no email plugin is
+  mounted) answers `ok: false` and says plainly that nothing was sent.
+
+  Nothing to migrate: `log`, `resend` and `postmark` behave exactly as before, and
+  a deployment that never selects `smtp` is unaffected.
+
+- f104bab: feat(plugin-email,platform-objects): `sys_email` carries headers and small attachments, so those messages become durably deliverable (#5177)
+
+  Durable email delivery works from the **row**, not from the in-memory message:
+  `send()` publishes an `{ rowId }` job (#5160), the boot sweep re-reads rows
+  (#5161), and both end at `rowToNormalized`. So anything a `sys_email` row could
+  not carry, a row-based delivery would have dropped — and custom headers and
+  attachments were exactly that. The honest workaround was to refuse: a message
+  with either was pushed back onto inline delivery so that it would at least go
+  out whole, which closed the durable path to precisely the mail most worth
+  making durable (a signed receipt, a `List-Unsubscribe` header, an invoice PDF).
+
+  `sys_email` now has two columns, and those messages are queueable.
+
+  **`headers_json`** — the custom headers, as a JSON object. Written in both
+  delivery modes (it is audit evidence as much as delivery input) and rebuilt on
+  read. Headers are no longer a reason to fall back to inline delivery.
+
+  **`attachments_json`** — attachments as a JSON array of
+  `{ filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey? }`,
+  content base64 in `inline`. Written when the **combined raw size of one
+  message's attachments is within `SYS_EMAIL_ATTACHMENT_LIMIT_BYTES` (256 KiB,
+  exported from `@objectstack/plugin-email`)** — worst case ~350 KB of base64, so
+  a row stays bounded. Both arms of the declared `content: string | Buffer`
+  contract round-trip as the arm they were sent as: restoring a text attachment
+  as a Buffer would silently drop `charset=utf-8` from its MIME part and let the
+  recipient's client mis-decode a UTF-8 file, so `contentForm` records which one
+  it was. `cid` travels too — an inline `<img src="cid:…">` is unusable without
+  it.
+
+  **Over the limit, nothing changes.** The message is delivered inline exactly as
+  before, whole, and the row stores no attachment content; the reason is stated
+  at `info` (a bound, not a degradation — the worst outcome is today's
+  behaviour). Out-of-row storage for large attachments is #5172; `storageKey` is
+  declared now so that lands as a new _producer_ rather than a data migration.
+
+  Rows written before these columns exist read exactly as they did. A column that
+  is present but does not describe what it claims — malformed JSON, a size or
+  hash that disagrees with the content, a missing `contentForm` — is **rejected**,
+  and the row lands at `failed` carrying the reason, rather than being delivered
+  with a part quietly missing.
+
+  The `sys_email` schema change is additive (two optional textarea columns); no
+  migration is required and default inline delivery is unchanged.
+
+### Patch Changes
+
+- 205e81b: fix(plugin-email)!: `EmailPersistence.insert` must return the row's own id — a substituted id is rejected instead of double-sending (#5523)
+
+  **FROM** — `insert` could answer with an id of its own (a database-assigned
+  primary key, an external delivery system's receipt id) and `EmailService.send()`
+  adopted it: the substituted id was added to the service-managed set, used as the
+  queued job's `rowId`, and returned to the caller.
+
+  **TO** — `insert` must confirm the id it was handed. Returning a different id
+  throws, naming the contract and the value returned, **before the message is
+  delivered**.
+
+  **Fix, one line:** return `{ id: row.id }` (or `row.id`) from `insert`. If your
+  store assigns its own primary key, keep the service-minted id in the row's `id`
+  column and record the store's key in a column of its own.
+
+  Why the contract tightened rather than the service accommodating both: the id is
+  minted by the service _before_ the insert and is already load-bearing by the time
+  `insert` is called — out-of-row attachment content has been uploaded under
+  `sys_email/attachments/<row.id>/…`, so the row id is the only key that finds
+  those bytes again. Re-keying the row also broke delivery exactly-once: the
+  `sys_email` `afterInsert` outbox drain hook decides whether a freshly-inserted
+  row is the service's to deliver by asking `isServiceManaged()` about **the
+  inserted row's own id**, and that hook runs _inside_ the insert — before `send()`
+  had seen, let alone reserved, the substituted id. So the hook read the row as an
+  application-inserted outbox entry and delivered it, while `send()` delivered it
+  again down its own path: one message sent twice, two terminal updates racing on
+  one row. The only thing that ever prevented it was the hook's `setTimeout(…, 0)`
+  losing a race to `send()`'s inline delivery — and `transport.send` is real
+  network I/O, so that race is normally lost.
+
+  Scope of the check: it judges the confirmation's **value**, not its presence. An
+  implementation that returns no id at all leaves nothing to disagree with (the
+  drain hook reads the id off the inserted row, which is the minted one either
+  way), so the mail still goes. An insert that _throws_ is unchanged — that stays
+  an operational condition the service rides out with a warning and inline
+  delivery; only a _successful_ insert that renames the row is fatal.
+
+  Breaking for external `EmailPersistence` implementations that re-key the row —
+  of which there are currently none: the in-repo implementation forwards the
+  engine's own answer and ObjectQL honours the id it is handed. Filed at `patch`
+  because the surface has no known external consumer and the declared TypeScript
+  signature is unchanged; a maintainer who counts a narrowed public-interface
+  contract as `minor`/`major` should relabel it.
+
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [d4e0809]
+- Updated dependencies [f724f69]
+- Updated dependencies [28ad90e]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [de70b42]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [ddc2527]
+- Updated dependencies [553a47f]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [2e284b2]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [a019e52]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [947d4f9]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [6513c17]
+- Updated dependencies [c142ced]
+- Updated dependencies [eda599e]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [4615a18]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [0f17114]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [4dfd002]
+- Updated dependencies [77be690]
+- Updated dependencies [811c30c]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [85d95e7]
+- Updated dependencies [168f60f]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [58f3220]
+- Updated dependencies [07f1822]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [d9971d3]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [795b6e1]
+- Updated dependencies [175d789]
+- Updated dependencies [55dbbba]
+- Updated dependencies [72c3c86]
+- Updated dependencies [7f1a635]
+- Updated dependencies [e98fb14]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [674ac99]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [502564d]
+- Updated dependencies [471839d]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [594508e]
+- Updated dependencies [1c625ca]
+- Updated dependencies [71f205d]
+- Updated dependencies [414395b]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [26e1029]
+- Updated dependencies [108ba8d]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [089767f]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [7adc841]
+- Updated dependencies [4845f85]
+- Updated dependencies [bf1edef]
+- Updated dependencies [7b005b4]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [73e576f]
+- Updated dependencies [c5a5996]
+- Updated dependencies [ae490ef]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [07f1822]
+- Updated dependencies [04fab5e]
+- Updated dependencies [efedd28]
+- Updated dependencies [5278e11]
+- Updated dependencies [23dba62]
+- Updated dependencies [ba98e26]
+- Updated dependencies [f104bab]
+- Updated dependencies [fc5f536]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [c89d18c]
+- Updated dependencies [aac90a5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [c183a12]
+- Updated dependencies [8064b07]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [06df4fa]
+  - @objectstack/spec@17.0.0-rc.4
+  - @objectstack/core@17.0.0-rc.4
+  - @objectstack/platform-objects@17.0.0-rc.4
+  - @objectstack/formula@17.0.0-rc.4
+
 ## 17.0.0-rc.2
 
 ### Minor Changes
