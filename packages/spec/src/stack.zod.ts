@@ -393,8 +393,13 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    * - **skills**: Reusable capability bundles ("topics" in Salesforce
    *   parlance) — THE extension primitive. Each skill groups related tools,
    *   declares its agent surface affinity (`'ask' | 'build' | 'both'`,
-   *   ADR-0063 §3 — checked by lint, enforced at load), trigger phrases for
-   *   intent matching, and trigger conditions for context-aware activation.
+   *   ADR-0063 §3 — checked by lint, enforced at load) and `triggerConditions`
+   *   (an AND of context field/operator/value) for context-aware activation.
+   *   Activation is that intersected with the agent's own skill allowlist —
+   *   there is no phrase list: `triggerPhrases` was retired in #3896 because
+   *   phrases were never matched against the user's message, and the key is now
+   *   a `retiredKey()` tombstone that rejects on parse. Natural-language intent
+   *   belongs in `description` / `instructions`, where the LLM reads it.
    * - **tools**: OPTIONAL refinement layer, never required (ADR-0109). The
    *   default third-party path declares no tool records: a skill's `tools[]`
    *   names a platform-registered tool (`PLATFORM_PROVIDED_TOOL_NAMES`) or a

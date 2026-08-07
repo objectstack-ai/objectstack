@@ -419,7 +419,7 @@ describe('HookContextSchema', () => {
       const context = HookContextSchema.parse({
         object: 'account',
         event: 'beforeInsert',
-        input: { doc: { name: 'Test Account' } },
+        input: { data: { name: 'Test Account' } },
         ql: {},
       });
 
@@ -460,7 +460,7 @@ describe('HookContextSchema', () => {
         object: 'account',
         event: 'beforeInsert',
         input: {
-          doc: {
+          data: {
             name: 'New Account',
             industry: 'Technology',
           },
@@ -471,7 +471,7 @@ describe('HookContextSchema', () => {
 
       // `input` is `z.record(z.string(), z.unknown())` by contract — the payload
       // shape varies per event — so a parsed read is narrowed at the read site.
-      expect((context.input.doc as { name: string }).name).toBe('New Account');
+      expect((context.input.data as { name: string }).name).toBe('New Account');
     });
 
     it('should accept update input', () => {
@@ -480,14 +480,14 @@ describe('HookContextSchema', () => {
         event: 'beforeUpdate',
         input: {
           id: '123',
-          doc: { status: 'active' },
+          data: { status: 'active' },
           options: {},
         },
         ql: {},
       });
 
       expect(context.input.id).toBe('123');
-      expect((context.input.doc as { status: string }).status).toBe('active');
+      expect((context.input.data as { status: string }).status).toBe('active');
     });
 
     it('should accept delete input', () => {
@@ -667,7 +667,7 @@ describe('HookContextSchema', () => {
         object: 'account',
         event: 'beforeInsert',
         input: {
-          doc: {
+          data: {
             name: 'New Account',
             industry: 'Technology',
             status: 'active',
@@ -701,7 +701,7 @@ describe('HookContextSchema', () => {
         event: 'afterUpdate',
         input: {
           id: '123',
-          doc: { status: 'active' },
+          data: { status: 'active' },
           options: {},
         },
         result: {
@@ -745,7 +745,7 @@ describe('Integration Tests', () => {
       object: 'account',
       event: 'beforeInsert',
       input: {
-        doc: { name: 'Test Account' },
+        data: { name: 'Test Account' },
       },
       session: {
         userId: 'user_123',
@@ -758,7 +758,7 @@ describe('Integration Tests', () => {
       object: 'account',
       event: 'afterInsert',
       input: {
-        doc: { name: 'Test Account' },
+        data: { name: 'Test Account' },
       },
       result: {
         id: '123',
