@@ -421,8 +421,12 @@ export const ShowcaseTranslationBundle = {
         fields: { f_lookups: { label: '查找 → 客户（多值）' } },
         // 三个视图共用一套门控动作，差别只在「被门控的字段是否也作为列显示」——
         // 即客户端是否展开它、投影是否本来就会带上它。见 ui/views/field-zoo.view.ts。
+        // `_views.default` —— 容器的默认列表：它声明时不带 `name`，composer 把它
+        // 注册为 `showcase_field_zoo.default`，bundle 的键就是这个裸运行时键
+        // （#5164，2026-08-06 定案）。写成 `list` 是没有任何查找能到达的拼法 ——
+        // 本条正是这么错过一次的：分支落后 main 时本地绿、合进 main 后 CI 红。
         _views: {
-          list: { label: '字段动物园' },
+          default: { label: '字段动物园' },
           gated_columns: { label: '被门控字段作为列' },
           inline_bulk_defs: { label: '内联批量定义' },
         },
