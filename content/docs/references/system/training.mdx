@@ -72,13 +72,26 @@ Security training course definition
 | **id** | `string` | ✅ | Unique course identifier |
 | **title** | `string` | ✅ | Course title |
 | **description** | `string` | ✅ | Course description and learning objectives |
-| **category** | `Enum<'security_awareness' \| 'data_protection' \| 'incident_response' \| 'access_control' \| 'phishing_awareness' \| 'compliance' \| 'secure_development' \| 'physical_security' \| 'business_continuity' \| 'other'>` | ✅ | Training category |
+| **category** | `Enum<'security_awareness' \| 'data_protection' \| 'incident_response' \| 'access_control' \| 'phishing_awareness' \| 'compliance' \| 'secure_development' \| … +3 more>` | ✅ | Training category |
 | **durationMinutes** | `number` | ✅ | Estimated course duration in minutes |
 | **mandatory** | `boolean` | ✅ | Whether training is mandatory |
 | **targetRoles** | `string[]` | ✅ | Target roles or groups |
 | **validityDays** | `number` | optional | Certification validity period in days |
 | **passingScore** | `number` | optional | Minimum passing score percentage |
 | **version** | `string` | optional | Course content version |
+
+### Allowed Values: `TrainingCourse.category`
+
+* `security_awareness`
+* `data_protection`
+* `incident_response`
+* `access_control`
+* `phishing_awareness`
+* `compliance`
+* `secure_development`
+* `physical_security`
+* `business_continuity`
+* `other`
 
 
 ---

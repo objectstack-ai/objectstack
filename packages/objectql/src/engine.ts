@@ -7491,22 +7491,83 @@ export class ScopedContext implements IScopedContext {
    * Carries BOTH of `ObjectQL.transaction`'s declared caveats (ADR-0119 D1) —
    * default-datasource-only, and a silent degrade when that driver has no
    * `beginTransaction` — because it is a second implementation of the same
-   * thing, reached from `ctx.api.transaction(fn)` in sandboxed hook and action
-   * bodies. Behaviour is unchanged, and so is the split: since #4619 both
-   * caveats report through the SAME engine-side helpers the engine's own
-   * `transaction()` uses, so the sandbox surface is no quieter than the direct
-   * one and "say it once" holds across both.
+   * thing, reached from `ctx.api.transaction(fn)` in hook and action bodies.
+   * Behaviour is unchanged, and so is the split: since #4619 both caveats
+   * report through the SAME engine-side helpers the engine's own
+   * `transaction()` uses, so this surface is no quieter than the direct one and
+   * "say it once" holds across both.
    *
    * `opts.require` and the callback's `owned` argument (#5696) are honoured
    * here for the same reason: a second implementation of one primitive must not
    * become a second DIALECT of it. A hook body that fails closed through
    * `ctx.api.transaction` gets the same refusal the engine's own surface gives.
+   *
+   * And so, since #6168, is the **ADR-0067 D2 join** — the first thing this
+   * method does, exactly as on the engine surface. It was the one point where
+   * the second implementation still diverged, and it diverged in the direction
+   * that costs the most: a hook triggered from inside an `engine.transaction()`
+   * that called `ctx.api.transaction(fn)` opened a SECOND driver transaction,
+   * which (a) takes a second connection — the deadlock D2 exists to avoid on a
+   * single-connection pool like SQLite's — and (b) committed itself, so its
+   * writes SURVIVED the outer rollback. D2's whole point is that the outermost
+   * caller owns the one-and-only commit/rollback for every write made through
+   * nested helpers. The `owned` signal was already honest about this
+   * (`true` every time, because this surface really did always open); what was
+   * wrong is the behaviour it was honestly describing.
+   *
+   * DECLARED LIMIT, so the next reader does not mistake it for the same
+   * oversight: the join reads the engine's ambient `txStore` only. The discrete
+   * `beginTransaction`/`commit`/`rollback` trio below deliberately does not
+   * populate that store (its handle is threaded explicitly across
+   * `setImmediate` boundaries where AsyncLocalStorage does not survive), so a
+   * trio-held handle is invisible here and is NOT joined — which is what keeps
+   * this branch from mistaking an explicitly-threaded handle for an ambient
+   * one. The QuickJS sandbox drives `ctx.api.transaction(fn)` through that trio
+   * rather than through this method, so a VM-side body is outside this join;
+   * unattributable handles are the same surface #6167 tracks, and closing that
+   * needs handle ownership to become discoverable on `IDataDriver`.
    */
   async transaction(
     callback: (trxCtx: ScopedContext, info: EngineTransactionInfo) => Promise<any>,
     opts?: EngineTransactionOptions,
   ): Promise<any> {
     const engine = this.engine as any;
+    // The engine's ambient transaction store (ADR-0034), reached the `as any`
+    // way this whole class reaches engine internals. One accessor serves both
+    // readers below: the D2 join, and the `run` that publishes a transaction
+    // this call opens.
+    const txStore = engine?.txStore as
+      | {
+          getStore(): { transaction: unknown } | undefined;
+          run<R>(s: { transaction: unknown; scope?: unknown }, fn: () => R): R;
+        }
+      | undefined;
+
+    // ADR-0067 D2 — JOIN an already-open ambient transaction instead of opening
+    // a nested driver one (#6168). Same first move, same reasons and the same
+    // shape as `ObjectQL.transaction`: a nested begin would take a second
+    // connection AND would not be covered by the outer rollback, so the outer
+    // caller would stop owning the one-and-only commit/rollback.
+    //
+    // BEFORE the driver/`require` handling on purpose, mirroring the engine:
+    // when there is an ambient transaction there IS a transaction, so
+    // `require: true` is satisfied by joining it and the degrade is not
+    // reachable.
+    const ambient = txStore?.getStore();
+    if (ambient?.transaction) {
+      // The handle is threaded EXPLICITLY into the child context, not left to
+      // the ambient store, for the same reason the engine surface threads it:
+      // `buildDriverOptions` prefers the explicit handle, and it survives async
+      // boundaries the store does not. It is identity-equal to the store's
+      // handle, so `transactionCoversDriverFor` still attributes it to the
+      // OUTER owner and the #5351 same-origin gate judges it unchanged.
+      const joinedCtx = new ScopedContext(
+        { ...this.executionContext, transaction: ambient.transaction },
+        this.engine
+      );
+      // JOINED, not owned: the outer caller decides commit vs rollback (#5696).
+      return callback(joinedCtx, { owned: false });
+    }
 
     // Find the default driver for transaction support
     const driver = engine.defaultDriver
@@ -7531,21 +7592,19 @@ export class ScopedContext implements IScopedContext {
       { ...this.executionContext, transaction: trx },
       this.engine
     );
-    // Share the engine's ambient transaction store so internal queries during
-    // writes reuse this transaction's connection (ADR-0034). The store entry
-    // also carries WHICH driver owns the transaction (#4619) so the write path
-    // can report a write routed off it; `newTransactionScope` is the engine's,
+    // Publish this transaction into the engine's ambient store so internal
+    // queries during writes reuse its connection (ADR-0034) — and so a nested
+    // `transaction()` on either surface can JOIN it. The store entry also
+    // carries WHICH driver owns the transaction (#4619) so the write path can
+    // report a write routed off it; `newTransactionScope` is the engine's,
     // reached the same `as any` way as `txStore` itself.
-    const txStore = (this.engine as any)?.txStore as
-      | { run<R>(s: { transaction: unknown; scope?: unknown }, fn: () => R): R }
-      | undefined;
     const scope = engine.newTransactionScope?.(driver);
     const runIn = <R>(fn: () => Promise<R>): Promise<R> =>
       txStore ? txStore.run({ transaction: trx, scope }, fn) : fn();
 
     try {
-      // This surface always OPENS (it has no ADR-0067 D2 join branch of its
-      // own), so a callback that reaches here owns the outcome.
+      // Reached only with no ambient transaction to join, so this call really
+      // did open one and the callback owns the outcome (#5696 / #6168).
       const result = await runIn(() => callback(trxCtx, { owned: true }));
       if (driver.commit) await driver.commit(trx);
       else if (driver.commitTransaction) await driver.commitTransaction(trx);

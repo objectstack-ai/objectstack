@@ -9,6 +9,7 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
  * The baseline security posture for an object.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const OWDModel = z.enum([
   'private',               // Only owner can see
   'public_read',           // Everyone can see, owner can edit
@@ -169,6 +170,22 @@ const BaseSharingRuleSchema = z.object({
     type: ShareRecipientType,
     value: z.string().describe('ID or code of the recipient (user / team / position / business unit)'),
   }, { error: sharingRecipientUnknownKeyError }).strict().describe('The recipient of the shared access'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by loader).
+  //
+  // [#6245] Declared for the reason `webhook.zod.ts` states for its own spread:
+  // BOTH metadata load paths call `applyProtection` on EVERY type, so a
+  // package-loaded sharing rule already carries these keys by the time anything
+  // re-parses it. This shape is `.strict()`, so until now that stamped envelope
+  // was not merely dropped — it was REJECTED, which stayed invisible only
+  // because the type resolved no schema at the overlay door and nothing parsed
+  // it there. #6245 binds that door, so declaring the envelope is what keeps
+  // the new 422 aimed at malformed AUTHOR input instead of at the runtime's own
+  // stamp. `metadata-type-schemas.test.ts` names this failure exactly ("is
+  // strict and does not declare the ADR-0010 envelope, so `applyProtection`
+  // output fails to parse — a hard 422 on the overlay path") and prescribes
+  // this spread as the fix.
+  ...MetadataProtectionFields,
 }, { error: sharingRuleUnknownKeyError }).strict();
 
 /**

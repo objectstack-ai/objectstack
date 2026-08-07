@@ -241,7 +241,12 @@ export interface StrictUnknownKeyErrorOptions {
    * key. Matched case-sensitively (exact authored spelling).
    */
   guidance?: Readonly<Record<string, string>>;
-  /** One sentence of history: why this key would previously have failed silently. */
+  /**
+   * One sentence of history: why this key would previously have failed
+   * silently. Rendered **last**, after both fix channels (`Did you mean` and
+   * the `guidance` bullets) — see the ordering note on
+   * {@link strictUnknownKeyError}.
+   */
   history: string;
 }
 
@@ -268,6 +273,24 @@ export interface StrictUnknownKeyErrorOptions {
  *
  * First consumers: `ui/action.zod.ts` (#3746, the template this generalizes),
  * `security/permission.zod.ts`, `automation/flow.zod.ts`.
+ *
+ * ## Message order: the fix comes before the history (#5955)
+ *
+ * One message per rejected object — every unknown key of that object is named
+ * in it, and the surface's `history` sentence appears exactly once, whatever
+ * the key count. The parts are emitted in the order an author has to read
+ * them:
+ *
+ * ```text
+ * Unrecognized key(s) on {surface}: `k1`, `k2`.   ← which keys are wrong
+ * [ Did you mean `k1` → `canonical`? ]            ← fix, channel 1 (renames)
+ * [ \n  • {guidance} ]                            ← fix, channel 2 (prescriptions)
+ * {history}                                       ← why it used to be silent
+ * ```
+ *
+ * `history` sat in the middle until #5955, which pushed the fix past character
+ * ~220 on the single-line displays several consumers use. It is still emitted
+ * verbatim and unconditionally — only its position moved.
  *
  * ## The table is recorded as it is built (#5483)
  *
@@ -317,10 +340,18 @@ export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.
         aliases[aliasProbe(key)] ?? findClosestMatches(key, knownKeys, maxDistance, 1)[0];
       if (canonical && canonical !== key) renames.push(`\`${key}\` → \`${canonical}\``);
     }
-    let message =
-      `Unrecognized key(s) on ${surface}: ${keys.map((k) => `\`${k}\``).join(', ')}. ${history}`;
+    // Order: WHICH KEY IS WRONG → HOW TO FIX IT → why it used to be silent.
+    // `history` used to sit in the middle, between the key statement and the
+    // suggestion, which put the fix past character ~220 of a message several
+    // consumers render on ONE line (`os validate`'s `• where: message`, CI
+    // logs, and `validateFlowTriggerReadiness`, which flattens the newlines).
+    // Since #5762 promoted one of those rules to error level the author — often
+    // an AI — reads the front of that line and acts on it, so the prescription
+    // has to be there. Nothing is dropped or made conditional: the sentence is
+    // still emitted verbatim, once per message, just last (#5955).
+    let message = `Unrecognized key(s) on ${surface}: ${keys.map((k) => `\`${k}\``).join(', ')}.`;
     if (renames.length) message += ` Did you mean ${renames.join(', ')}?`;
     if (prescriptions.length) message += `\n${prescriptions.map((p) => `  • ${p}`).join('\n')}`;
-    return message;
+    return `${message} ${history}`;
   };
 }

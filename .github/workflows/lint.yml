@@ -139,6 +139,21 @@ jobs:
       - name: Reserved-word ("role") docs ratchet
         run: pnpm check:role-word
 
+      # #6319: content/docs/getting-started/quick-reference.mdx is the protocol
+      # index, and each "## <Name> Protocol (N schemas)" heading is a DECLARATION
+      # about the table under it. The page is hand-written (build-docs.ts writes
+      # only content/docs/references/), so the two drift one edit at a time —
+      # #6319 found Kernel claiming 17 over a 15-row table because two kernel
+      # rows had migrated into the Cloud section and only Cloud's heading was
+      # updated. Nothing breaks at runtime; the cost is that content/docs/ is the
+      # corpus humans and AIs copy from, so a miscounted index is read as a fact
+      # about the schema catalog. Declared = enforced.
+      # It lives in this job with the other docs guards: the change that breaks
+      # the count is a docs edit, so a packages/** paths filter would blind it to
+      # its own failure mode.
+      - name: Quick-reference section counts match their tables
+        run: pnpm check:quick-reference-counts
+
       # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
       # That incident reversed three accepted ADRs with a patch-level changeset,
       # and the mechanism was simply that the edited file never mentioned them —

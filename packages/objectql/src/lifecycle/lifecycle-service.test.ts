@@ -1643,10 +1643,16 @@ describe('LifecycleService teardown (#4747)', () => {
     const pageReads: number[] = [];
     const copied: string[] = [];
     const hotDeleted: Array<Array<string | number>> = [];
+    // [#5966] The cold-side `keep` prune is the loop's successor leg, so it is
+    // recorded the same way the loop's legs are — with the predicate it sent,
+    // not just a count, so "the prune ran" and "the prune ran on the right
+    // cutoff" are separable assertions.
+    const coldPruned: Array<Record<string, unknown> | undefined> = [];
     return {
       pageReads,
       copied,
       hotDeleted,
+      coldPruned,
       remaining: () => remaining,
       hot: {
         name: 'default',
@@ -1672,7 +1678,10 @@ describe('LifecycleService teardown (#4747)', () => {
           return row;
         },
         bulkDelete: async () => {},
-        deleteMany: async () => 0,
+        deleteMany: async (_object: string, query?: Record<string, unknown>) => {
+          coldPruned.push(query);
+          return 0;
+        },
       },
     };
   }
@@ -1725,6 +1734,109 @@ describe('LifecycleService teardown (#4747)', () => {
     // …and the batches never begun are still hot, for the next sweep to move.
     expect(pair.remaining()).toHaveLength(9500);
     expect(report.swept.find((e) => e.policy === 'archive')?.archived).toBe(1000);
+  });
+
+  /**
+   * [#5966] The leg AFTER the loop. #5755 stopped the batch loop; the cold-side
+   * `keep` prune sits past its exit and had no check of its own, so teardown
+   * landing anywhere inside `archiveObject` still ended with one predicate
+   * DELETE at the cold datasource.
+   *
+   * The distinction that makes this worth pinning separately: by the time the
+   * prune is reached, the abort bit has already been READ — either the loop
+   * broke on it, or a leg the loop issued raised it. Continuing is a decision
+   * the code makes with the answer in hand, not an await that merely straddled
+   * teardown. The three tests below cover the prune's two ends and both ways
+   * the loop can hand control to it.
+   */
+  const KEEP_OBJ: LifecycleObjectLike = {
+    name: 'sys_audit_log',
+    lifecycle: {
+      class: 'audit',
+      retention: { maxAge: '90d' },
+      // The delta from ARCHIVED_OBJ is `keep`, and only `keep`: the prune leg
+      // does not run at all without it, which is why #5755's fixture omitted it.
+      archive: { after: '90d', to: 'archive', keep: '365d' },
+    } as any,
+  };
+
+  it('a `keep` prune nobody calls off runs, on the cutoff `keep` declares', async () => {
+    // The control: with the abort bit down the prune is ordinary work, and the
+    // guard must not cost it. 700 rows drain inside the budget, so the loop
+    // exits on its short page — not on abort — and the prune follows it.
+    const pair = archivePair(700);
+    const { engine } = captureEngine([KEEP_OBJ], {
+      driver: pair.hot,
+      datasources: { archive: pair.cold },
+    });
+
+    const report = await service(engine).sweep();
+
+    expect(pair.pageReads).toHaveLength(2);
+    expect(pair.copied).toHaveLength(700);
+    expect(pair.remaining()).toHaveLength(0);
+    // Exactly one prune, carrying the `keep` cutoff (not `after`'s).
+    expect(pair.coldPruned).toEqual([{ where: { created_at: { $lt: isoCutoff('365d') } } }]);
+    expect(report.swept.find((e) => e.policy === 'archive')?.archived).toBe(700);
+  });
+
+  it('stop() mid-archive stops the prune too, not just the batch loop', async () => {
+    // Teardown lands while batch 2 copies, so the loop breaks at its head after
+    // READING `aborted === true` — and the very next statement used to send a
+    // predicate DELETE to the cold store the host is closing.
+    let svc!: LifecycleService;
+    const pair = archivePair(10_500, (copied) => {
+      if (copied === 501) svc.stop(); // first row of batch 2
+    });
+    const { engine } = captureEngine([KEEP_OBJ], {
+      driver: pair.hot,
+      datasources: { archive: pair.cold },
+    });
+    svc = service(engine);
+
+    const report = await svc.sweep();
+
+    expect(svc.stopped).toBe(true);
+    expect(pair.pageReads).toHaveLength(2); // #5755's guard, still holding
+    expect(pair.copied).toHaveLength(1000);
+    // The leg this test exists for: nothing at all is sent to the cold store
+    // after the loop reads the bit.
+    expect(pair.coldPruned).toEqual([]);
+    // Deferral, not loss: the rows the prune would have taken are still cold,
+    // and the archiving that DID complete is still reported.
+    expect(pair.remaining()).toHaveLength(9500);
+    expect(report.swept.find((e) => e.policy === 'archive')?.archived).toBe(1000);
+  });
+
+  it('stop() after the loop has made its last check still calls the prune off', async () => {
+    // The other way in, and the one the per-batch check cannot see: the backlog
+    // drains inside the budget, so the loop exits on `rows.length <
+    // ARCHIVE_BATCH_SIZE` and never re-reads the abort bit. Teardown lands in
+    // the final hot delete — after the loop's last check, before the prune —
+    // which is precisely the window #5755 left open.
+    let svc!: LifecycleService;
+    const pair = archivePair(700);
+    const hotBulkDelete = pair.hot.bulkDelete;
+    pair.hot.bulkDelete = async (object: string, ids: Array<string | number>) => {
+      await hotBulkDelete(object, ids);
+      if (pair.remaining().length === 0) svc.stop(); // the last batch just landed
+    };
+    const { engine } = captureEngine([KEEP_OBJ], {
+      driver: pair.hot,
+      datasources: { archive: pair.cold },
+    });
+    svc = service(engine);
+
+    const report = await svc.sweep();
+
+    expect(svc.stopped).toBe(true);
+    // The archive itself completed — every row copied and hot-deleted in pairs.
+    expect(pair.pageReads).toHaveLength(2);
+    expect(pair.hotDeleted.map((ids) => ids.length)).toEqual([500, 200]);
+    expect(pair.hotDeleted.flat()).toEqual(pair.copied);
+    expect(report.swept.find((e) => e.policy === 'archive')?.archived).toBe(700);
+    // …and the prune, the one leg still owed, is left for the next sweep.
+    expect(pair.coldPruned).toEqual([]);
   });
 
   it('stop() then start() re-arms the service — teardown is not one-way', async () => {

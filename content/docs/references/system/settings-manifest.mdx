@@ -112,7 +112,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| 'password' \| 'email' \| 'url' \| 'phone' \| 'number' \| 'toggle' \| 'select' \| 'radio' \| 'multiselect' \| 'slider' \| 'color' \| 'json' \| 'action_button'>` | ✅ | Specifier variant |
+| **type** | `Enum<'group' \| 'child_pane' \| 'info_banner' \| 'title_value' \| 'text' \| 'textarea' \| 'password' \| 'email' \| 'url' \| 'phone' \| 'number' \| 'toggle' \| 'select' \| 'radio' \| … +5 more>` | ✅ | Specifier variant |
 | **id** | `string` | optional | Stable identifier (snake_case) |
 | **key** | `string` | optional | Storage key (snake_case) |
 | **label** | `string` | ✅ | Display label |
@@ -141,6 +141,28 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **childNamespace** | `string` | optional | Sub-namespace (child_pane) |
 | **bannerText** | `string` | optional | Markdown body (info_banner) |
 | **bannerSeverity** | `Enum<'info' \| 'success' \| 'warning' \| 'error'>` | optional |  |
+
+### Allowed Values: `Specifier.type`
+
+* `group`
+* `child_pane`
+* `info_banner`
+* `title_value`
+* `text`
+* `textarea`
+* `password`
+* `email`
+* `url`
+* `phone`
+* `number`
+* `toggle`
+* `select`
+* `radio`
+* `multiselect`
+* `slider`
+* `color`
+* `json`
+* `action_button`
 
 
 ---

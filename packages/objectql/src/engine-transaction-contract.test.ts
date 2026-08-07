@@ -309,7 +309,7 @@ describe('ScopedContext.transaction (ctx.api.transaction) carries the same two p
     await expect(scopedOf(engine).transaction(async () => 'ran')).resolves.toBe('ran');
   });
 
-  it('reports owned: true (this surface always opens) and false when degraded', async () => {
+  it('reports owned: true when it opens one, and false when degraded', async () => {
     const withTx = await engineWith({ transactional: true });
     const withoutTx = await engineWith({ transactional: false });
     let ownedOpen: boolean | undefined;
@@ -320,5 +320,49 @@ describe('ScopedContext.transaction (ctx.api.transaction) carries the same two p
 
     expect(ownedOpen).toBe(true);
     expect(ownedDegraded).toBe(false);
+  });
+
+  // The third point of parity, added by #6168. Until then this was the ONE
+  // place the second implementation still diverged: it had no ADR-0067 D2 join
+  // branch, so `owned` reported `true` here forever — honest about a behaviour
+  // that was not. Durability coverage lives in `engine-ambient-transaction.test.ts`
+  // (the inner write must be undone by the outer rollback); what is pinned here
+  // is the CONTRACT parity — same handle, same signal, same ordering.
+  it('JOINS an ambient transaction rather than opening a second one (ADR-0067 D2, #6168)', async () => {
+    const { engine, driver } = await engineWith({ transactional: true });
+    let outerHandle: unknown;
+    let innerHandle: unknown;
+    let innerOwned: boolean | undefined;
+
+    await engine.transaction(async (ctx: any) => {
+      outerHandle = ctx.transaction;
+      await scopedOf(engine).transaction(async (trxCtx, info) => {
+        innerHandle = (trxCtx as unknown as { transactionHandle: unknown }).transactionHandle;
+        innerOwned = info.owned;
+      });
+    });
+
+    // `beginTransaction` mints a fresh object per call, so identity is what
+    // separates "joined the outer handle" from "opened an identical-looking one".
+    expect(innerOwned).toBe(false);
+    expect(innerHandle).toBe(outerHandle);
+    expect(driver.writes).toHaveLength(0);
+  });
+
+  it('joins under require: true — an ambient transaction satisfies it, nothing is refused', async () => {
+    const { engine } = await engineWith({ transactional: true });
+    let owned: boolean | undefined;
+
+    // The join sits BEFORE the driver/`require` handling on both surfaces, and
+    // it must: when there is an ambient transaction there IS a transaction, so
+    // a caller who declared it cannot run without one is served by joining.
+    await engine.transaction(async () => {
+      await scopedOf(engine).transaction(
+        async (_ctx, info) => { owned = info.owned; },
+        { require: true },
+      );
+    });
+
+    expect(owned).toBe(false);
   });
 });

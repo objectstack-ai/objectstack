@@ -94,13 +94,55 @@ const result = BulkDataEventSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique event identifier |
-| **type** | `Enum<'metadata.object.created' \| 'metadata.object.updated' \| 'metadata.object.deleted' \| 'metadata.field.created' \| 'metadata.field.updated' \| 'metadata.field.deleted' \| 'metadata.view.created' \| 'metadata.view.updated' \| 'metadata.view.deleted' \| 'metadata.app.created' \| 'metadata.app.updated' \| 'metadata.app.deleted' \| 'metadata.agent.created' \| 'metadata.agent.updated' \| 'metadata.agent.deleted' \| 'metadata.tool.created' \| 'metadata.tool.updated' \| 'metadata.tool.deleted' \| 'metadata.flow.created' \| 'metadata.flow.updated' \| 'metadata.flow.deleted' \| 'metadata.action.created' \| 'metadata.action.updated' \| 'metadata.action.deleted' \| 'metadata.workflow.created' \| 'metadata.workflow.updated' \| 'metadata.workflow.deleted' \| 'metadata.dashboard.created' \| 'metadata.dashboard.updated' \| 'metadata.dashboard.deleted' \| 'metadata.report.created' \| 'metadata.report.updated' \| 'metadata.report.deleted' \| 'metadata.role.created' \| 'metadata.role.updated' \| 'metadata.role.deleted' \| 'metadata.permission.created' \| 'metadata.permission.updated' \| 'metadata.permission.deleted'>` | ✅ | Event type |
+| **type** | `Enum<'metadata.object.created' \| 'metadata.object.updated' \| 'metadata.object.deleted' \| 'metadata.field.created' \| 'metadata.field.updated' \| … +34 more>` | ✅ | Event type |
 | **metadataType** | `string` | ✅ | Metadata type (object, view, agent, etc.) |
 | **name** | `string` | ✅ | Metadata item name |
 | **packageId** | `string` | optional | Package ID |
 | **definition** | `any` | optional | Full definition (create/update only) |
 | **userId** | `string` | optional | User who triggered the event |
 | **timestamp** | `string` | ✅ | Event timestamp |
+
+### Allowed Values: `MetadataEvent.type`
+
+* `metadata.object.created`
+* `metadata.object.updated`
+* `metadata.object.deleted`
+* `metadata.field.created`
+* `metadata.field.updated`
+* `metadata.field.deleted`
+* `metadata.view.created`
+* `metadata.view.updated`
+* `metadata.view.deleted`
+* `metadata.app.created`
+* `metadata.app.updated`
+* `metadata.app.deleted`
+* `metadata.agent.created`
+* `metadata.agent.updated`
+* `metadata.agent.deleted`
+* `metadata.tool.created`
+* `metadata.tool.updated`
+* `metadata.tool.deleted`
+* `metadata.flow.created`
+* `metadata.flow.updated`
+* `metadata.flow.deleted`
+* `metadata.action.created`
+* `metadata.action.updated`
+* `metadata.action.deleted`
+* `metadata.workflow.created`
+* `metadata.workflow.updated`
+* `metadata.workflow.deleted`
+* `metadata.dashboard.created`
+* `metadata.dashboard.updated`
+* `metadata.dashboard.deleted`
+* `metadata.report.created`
+* `metadata.report.updated`
+* `metadata.report.deleted`
+* `metadata.role.created`
+* `metadata.role.updated`
+* `metadata.role.deleted`
+* `metadata.permission.created`
+* `metadata.permission.updated`
+* `metadata.permission.deleted`
 
 
 ---

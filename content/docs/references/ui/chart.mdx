@@ -96,7 +96,7 @@ Inline aggregation for an object-bound chart
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | ✅ |  |
+| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| … +6 more>` | ✅ |  |
 | **title** | `string` | optional | Chart title |
 | **subtitle** | `string` | optional | Chart subtitle |
 | **description** | `string` | optional | Accessibility description — announced to screen readers as the chart’s label |
@@ -110,6 +110,29 @@ Inline aggregation for an object-bound chart
 | **annotations** | `{ type: Enum<'line' \| 'region'>; axis: Enum<'x' \| 'y'>; value: number \| string; endValue?: number \| string; … }[]` | optional | Reference lines/bands drawn over the plot: `{ type: "line" \| "region", axis: "x" \| "y", value, endValue?, color?, label?, style? }` |
 | **interaction** | `{ tooltips: boolean; brush: boolean }` | optional | Interaction toggles: `{ tooltips?, brush? }` |
 | **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Allowed Values: `ChartConfig.type`
+
+* `bar`
+* `horizontal-bar`
+* `column`
+* `line`
+* `area`
+* `pie`
+* `donut`
+* `funnel`
+* `scatter`
+* `treemap`
+* `sankey`
+* `combo`
+* `gauge`
+* `solid-gauge`
+* `metric`
+* `kpi`
+* `bullet`
+* `radar`
+* `table`
+* `pivot`
 
 
 ---
@@ -179,13 +202,36 @@ Type: `string`
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Field name or series identifier |
 | **label** | `string` | optional | Series display label |
-| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'>` | optional | Override chart type for this series |
+| **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| … +6 more>` | optional | Override chart type for this series |
 | **color** | `string` | optional | Series color (hex/rgb/token) |
 | **stack** | `string` | optional | Stack identifier to group series |
 | **yAxis** | `Enum<'left' \| 'right'>` | ✅ | Bind to specific Y-Axis |
 | **variant** | `Enum<'primary' \| 'comparison'>` | optional | Series visual role |
 | **dashArray** | `string` | optional | SVG stroke-dasharray override |
 | **opacity** | `number` | optional | Series opacity override |
+
+### Allowed Values: `ChartSeries.type`
+
+* `bar`
+* `horizontal-bar`
+* `column`
+* `line`
+* `area`
+* `pie`
+* `donut`
+* `funnel`
+* `scatter`
+* `treemap`
+* `sankey`
+* `combo`
+* `gauge`
+* `solid-gauge`
+* `metric`
+* `kpi`
+* `bullet`
+* `radar`
+* `table`
+* `pivot`
 
 
 ---

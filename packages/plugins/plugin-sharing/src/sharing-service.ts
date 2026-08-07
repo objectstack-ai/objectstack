@@ -976,6 +976,15 @@ export class SharingService implements ISharingService {
           // AUTHORITATIVE (#5858 / PR #5973). Never `(context as any).organizationId`:
           // no execution context in this repo carries that key.
           organizationId,
+          // [#6139] What a `null` organizationId MEANS. Under `single` it is
+          // the one implicit tenant and DEPTH resolves normally; under
+          // `group`/`isolated` it is a missing constraint and the resolver's
+          // fail-closed obligation applies. Without this a spec-conformant
+          // resolver had to refuse every `null`, which killed DEPTH on exactly
+          // the single-posture deployments ruling C (#5859) requires it to work
+          // on. Same value the refusal above keys on — one derivation, so the
+          // two cannot disagree.
+          posture: this.effectiveTenancyPosture(),
           // The @deprecated compatibility alias, carried through unchanged for
           // resolvers that still read it. It is NOT the authority — a resolver
           // reading it alone is the shape #5858 ruled out.
@@ -1023,19 +1032,46 @@ export class SharingService implements ISharingService {
    * on precisely the deployments whose configuration is already suspect.
    */
   private organizationScopeRequired(): boolean {
+    return postureEnforcesWall(this.effectiveTenancyPosture());
+  }
+
+  /**
+   * [#6139] The posture this deployment reports to a
+   * {@link IHierarchyScopeResolver} — and the single place the answer is
+   * decided.
+   *
+   * `HierarchyScopeContext.posture` is what lets a resolver tell "single
+   * posture, legitimately no organization" apart from "walled posture,
+   * organization missing ⇒ fail closed": the two `null`s that were previously
+   * indistinguishable on that interface, and that demand opposite answers. The
+   * producer already had to resolve the posture for
+   * {@link SharingService.organizationScopeRequired}, so reporting it costs
+   * nothing new. Deriving it TWICE is what would let the local refusal and the
+   * reported posture drift apart, which is why that predicate is now expressed
+   * in terms of this one rather than beside it.
+   *
+   * Fails CLOSED, exactly as the contract requires of a producer: an
+   * unresolvable posture (no `tenancy` probe wired, a throwing probe, a value
+   * outside the vocabulary) reports the strictest WALLED posture, never
+   * `single`. An unknown posture is not evidence of `single`, and reading it as
+   * such would restore the #5852 widening on precisely the deployments whose
+   * configuration is already suspect.
+   */
+  private effectiveTenancyPosture(): TenancyPosture {
     let probe: SharingTenancyProbe | null | undefined;
     try {
       probe = this.tenancy?.();
     } catch {
-      return true; // unresolvable → assume walled
+      return 'isolated'; // unresolvable → strictest walled posture
     }
-    if (!probe) return true;
+    if (!probe) return 'isolated';
     const posture = normalizeTenancyPosture(probe.posture);
-    if (posture) return postureEnforcesWall(posture);
-    // Pre-ADR-0105 shape: only `isolationActive === false` is a positive
-    // statement that no wall is enforced. `undefined` stays unresolved.
-    if (probe.isolationActive === false) return false;
-    return true;
+    if (posture) return posture;
+    // Pre-ADR-0105 shape: only `isolationActive === false` is a POSITIVE
+    // statement that no wall is enforced — the wall-less shape `single` names.
+    // `undefined` stays unresolved and keeps the strict answer.
+    if (probe.isolationActive === false) return 'single';
+    return 'isolated';
   }
 
   private shouldBypass(object: string, context: SharingExecutionContext): boolean {

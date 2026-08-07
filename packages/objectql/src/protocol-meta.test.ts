@@ -1445,8 +1445,19 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // would have kept the assertion green through the *other* branch of
         // `isRuntimeCreateAllowed` (statically registered with
         // `allowRuntimeCreate: true`) while the test claimed to prove the
-        // "no static entry" fall-through. `theme` and `webhook` still exercise
-        // that branch; `api`'s own behaviour is pinned in the test below.
+        // "no static entry" fall-through.
+        //
+        // [#6245] `webhook` left it too, for the SAME reason and by the same
+        // rule — but note the difference from `api`: webhook/connector/
+        // sharing_rule gained a SCHEMA, not a registry entry, so they still
+        // take this test's "no static entry" branch for AUTHORIZATION. What
+        // they no longer do is accept any JSON, which is what disqualifies the
+        // old specimen: its body (`events`, an alias of `triggers`, plus the
+        // non-enum trigger `'x.created'`) is spec-INVALID and now 422s. Kept
+        // here it would have flipped this test red for a reason that has
+        // nothing to do with what it proves. `theme` and `policy` still carry
+        // the branch — neither resolves a schema. Each newly-bound type's own
+        // behaviour, door and 422 both, is pinned in the tests below.
         // ───────────────────────────────────────────────────────────────
 
         it('accepts brand-new plugin-registered type (no static registry entry)', async () => {
@@ -1458,15 +1469,149 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 item: { name: 'my_theme', label: 'Test', tokens: {} },
                 organizationId: 'org_alpha',
             });
-            const webhookResult = await scoped.saveMetaItem({
-                type: 'webhook',
-                name: 'my_webhook',
-                item: { name: 'my_webhook', url: 'https://e.example/x', events: ['x.created'] },
+            const policyResult = await scoped.saveMetaItem({
+                type: 'policy',
+                name: 'my_policy',
+                item: { name: 'my_policy', label: 'Test' },
                 organizationId: 'org_alpha',
             });
 
             expect(themeResult.success).toBe(true);
-            expect(webhookResult.success).toBe(true);
+            expect(policyResult.success).toBe(true);
+        });
+
+        // ───────────────────────────────────────────────────────────────
+        // [#6245] `webhook` / `connector` / `sharing_rule` — the write door is
+        // UNCHANGED, the shape check is new. Same shape as the `api` pair
+        // below, and asserted the same way: a change that quietly CLOSED the
+        // door would fail the "accepts" half, which is why both halves are
+        // pinned per type rather than just the 422.
+        //
+        // These three resolve a schema WITHOUT a `DEFAULT_METADATA_TYPE_REGISTRY`
+        // entry, so `isRuntimeCreateAllowed` still takes its synthesised
+        // `allowRuntimeCreate: true` fall-through — the authorization verdict is
+        // byte-identical to before.
+        // ───────────────────────────────────────────────────────────────
+
+        it('accepts a spec-valid `webhook` item (write door unchanged by the schema binding)', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            const result = await scoped.saveMetaItem({
+                type: 'webhook',
+                name: 'my_webhook',
+                item: {
+                    name: 'my_webhook',
+                    object: 'case',
+                    triggers: ['create'],
+                    url: 'https://e.example/x',
+                },
+                organizationId: 'org_alpha',
+            });
+
+            expect(result.success).toBe(true);
+        });
+
+        it('refuses a spec-INVALID `webhook` item with 422 instead of storing it unvalidated', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            // The exact body the "plugin-registered types" case above used to
+            // save with `success: true`: `events` is an ALIAS of `triggers`
+            // (so the strict surface names the real key), and `'x.created'` is
+            // not a `WebhookTriggerType`. Stored verbatim, this webhook
+            // subscribed to nothing.
+            await expect(
+                scoped.saveMetaItem({
+                    type: 'webhook',
+                    name: 'my_webhook',
+                    item: { name: 'my_webhook', url: 'https://e.example/x', events: ['x.created'] },
+                    organizationId: 'org_alpha',
+                }),
+            ).rejects.toMatchObject({
+                code: 'INVALID_METADATA',
+                status: 422,
+            });
+        });
+
+        it('accepts a spec-valid `connector` item (write door unchanged by the schema binding)', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            const result = await scoped.saveMetaItem({
+                type: 'connector',
+                name: 'my_connector',
+                item: { name: 'my_connector', label: 'My Connector', type: 'api' },
+                organizationId: 'org_alpha',
+            });
+
+            expect(result.success).toBe(true);
+        });
+
+        it('refuses a `connector` that breaks an ADR-0097 authoring rule with 422', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            // Bound to `DeclarativeConnectorEntrySchema` — the same schema
+            // `stack.zod.ts` validates `connectors:` with — so the ADR-0097 §3
+            // rule that a provider-bound instance may not inline credentials
+            // holds at BOTH authoring doors, not just the stack one.
+            await expect(
+                scoped.saveMetaItem({
+                    type: 'connector',
+                    name: 'my_connector',
+                    item: {
+                        name: 'my_connector',
+                        label: 'My Connector',
+                        type: 'api',
+                        provider: 'github',
+                        authentication: { type: 'basic', username: 'u', password: 'p' },
+                    },
+                    organizationId: 'org_alpha',
+                }),
+            ).rejects.toMatchObject({
+                code: 'INVALID_METADATA',
+                status: 422,
+            });
+        });
+
+        it('accepts a spec-valid `sharing_rule` item (write door unchanged by the schema binding)', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            const result = await scoped.saveMetaItem({
+                type: 'sharing_rule',
+                name: 'sales_records',
+                item: {
+                    name: 'sales_records',
+                    type: 'criteria',
+                    object: 'case',
+                    condition: "record.department == 'Sales'",
+                    sharedWith: { type: 'team', value: 'sales' },
+                },
+                organizationId: 'org_alpha',
+            });
+
+            expect(result.success).toBe(true);
+        });
+
+        it('refuses a spec-INVALID `sharing_rule` item with 422 instead of storing it unvalidated', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            // No `condition` and no `object`: a criteria rule that names
+            // neither what it shares nor which records. Stored unvalidated this
+            // is the #3896 shape — a rule that binds to nothing, or worse
+            // compiles to the empty filter.
+            await expect(
+                scoped.saveMetaItem({
+                    type: 'sharing_rule',
+                    name: 'sales_records',
+                    item: {
+                        name: 'sales_records',
+                        type: 'criteria',
+                        sharedWith: { type: 'team', value: 'sales' },
+                    },
+                    organizationId: 'org_alpha',
+                }),
+            ).rejects.toMatchObject({
+                code: 'INVALID_METADATA',
+                status: 422,
+            });
         });
 
         // ───────────────────────────────────────────────────────────────
