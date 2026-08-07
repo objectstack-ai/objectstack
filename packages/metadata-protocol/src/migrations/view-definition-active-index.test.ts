@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
@@ -22,9 +23,15 @@ import {
  * emits today — `packages/drivers/driver-sql/src/declared-index-retired-keys.test.ts`
  * pins that string against the same engine, so the fixture below is that test's
  * measured output rather than a guess at it.
+ *
+ * Uses Node's built-in `node:sqlite` rather than `better-sqlite3` (which the
+ * driver packages use) on purpose: this package needs no SQL dependency of its
+ * own for anything else, and adding one to run a test would put a native module
+ * in the lockfile purely for fixture purposes. The built-in gives the same real
+ * SQLite — real partial indexes, real UNIQUE enforcement — for free.
  */
 describe('sys_view_definition active-row uniqueness (#5839)', () => {
-    let db: InstanceType<typeof Database>;
+    let db: DatabaseSync;
     let exec: IndexExec;
 
     /** Exactly the DDL `syncDeclaredIndexes` produces for the declaration. */
@@ -59,7 +66,7 @@ describe('sys_view_definition active-row uniqueness (#5839)', () => {
     };
 
     beforeEach(() => {
-        db = new Database(':memory:');
+        db = new DatabaseSync(':memory:');
         db.exec(`CREATE TABLE sys_view_definition (
             id TEXT PRIMARY KEY, name TEXT, organization_id TEXT, owner TEXT, state TEXT
         );`);
