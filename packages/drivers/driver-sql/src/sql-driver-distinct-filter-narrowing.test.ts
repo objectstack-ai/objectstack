@@ -157,20 +157,30 @@ describe('SqlDriver.distinct takes a bare FilterCondition (#6320)', () => {
       // a call silently, which is the half of #6320's asymmetry driver-sql
       // owns: the envelope's `where` value is an object, and no comparand may
       // be one.
-      const envelope: FilterCondition = { object: 'orders', where: { status: 'completed' } };
-      await expect(driver.distinct('orders', 'product', envelope)).rejects.toMatchObject({
+      //
+      // Written INLINE at the call site on purpose. A `const envelope:
+      // FilterCondition = …` would prove only that the alias admits the shape;
+      // the claim being pinned is that it reaches THIS PARAMETER uncast, which
+      // only an argument position can show.
+      await expect(
+        driver.distinct('orders', 'product', { object: 'orders', where: { status: 'completed' } }),
+      ).rejects.toMatchObject({
         code: 'INVALID_FILTER',
         status: 400,
       });
     });
 
     it('admits an array at compile time, then refuses it as a FilterArray (#5158)', async () => {
-      // Same reason: an array satisfies a string index signature, so the
-      // FilterArray authoring form reaches `distinct` type-checked. It is
-      // refused by the shared `applyFilters` door — `distinct` inherits that
-      // refusal rather than carrying its own.
-      const asArray = ['status', '=', 'completed'] as unknown as FilterCondition;
-      await expect(driver.distinct('orders', 'product', asArray)).rejects.toMatchObject({
+      // Same reason, and MEASURED rather than assumed: an array satisfies the
+      // string index signature, so the FilterArray authoring form reaches
+      // `distinct` type-checked. No cast here, deliberately — a cast would make
+      // this case survive a `FilterCondition` that had stopped admitting arrays
+      // while the sentence above quietly became false. It is refused by the
+      // shared `applyFilters` door, which `distinct` inherits rather than
+      // carrying its own copy of.
+      await expect(
+        driver.distinct('orders', 'product', ['status', '=', 'completed']),
+      ).rejects.toMatchObject({
         code: 'INVALID_FILTER',
         status: 400,
       });
