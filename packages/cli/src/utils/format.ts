@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import type { ZodError } from 'zod';
 import { formatZodIssue } from '@objectstack/spec';
 import type { TenancyPosture } from '@objectstack/spec/security';
+import { writeStdoutDirect } from './json-stdout.js';
 
 // ─── Constants ──────────────────────────────────────────────────────
 export const CLI_NAME = 'objectstack';
@@ -129,9 +130,11 @@ export function isExitSignal(error: unknown): boolean {
  * applies here too.
  */
 export async function emitText(text: string, exitCode: CliExitCode = 0): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    process.stdout.write(text + '\n', (err) => (err ? reject(err) : resolve()));
-  });
+  // `writeStdoutDirect`, not `process.stdout.write`: a `--json` command that
+  // boots a kernel reserves stdout so the kernel's INFO stream goes to stderr
+  // (#6217), and the payload is the one thing that must still reach the real
+  // stdout. Outside a reservation this is `process.stdout.write` verbatim.
+  await writeStdoutDirect(text + '\n');
   if (exitCode !== 0) process.exitCode = exitCode;
 }
 
