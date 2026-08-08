@@ -3471,7 +3471,11 @@ export class ObjectStackProtocolImplementation implements
                     if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                         (data as any)._packageId = recPkg;
                     }
-                    return { data, packageId: recPkg };
+                    // [#6602] The row's own scope travels with its body. The
+                    // merged set below is env-wide rows PLUS this org's rows,
+                    // and the two are only distinguishable here, at the row.
+                    const recOrg = (record as { organization_id?: string | null }).organization_id ?? null;
+                    return { data, packageId: recPkg, organizationId: recOrg };
                 });
 
                 // ADR-0048 (#1828) — package-aware merge: a package-scoped row
@@ -3496,9 +3500,22 @@ export class ObjectStackProtocolImplementation implements
                 // shared {@link hydrateOverlayIntoRegistry} that both callers
                 // use: a read and a write that register differently would put
                 // the registry in two different states for the same row.
+                //
+                // [#6602] The kernel gate below is only half the rule, and the
+                // half that was missing is the ROW's: `overlays` is the MERGED
+                // env-wide + org-scoped set, so this loop used to graft this
+                // caller's org bodies into the registry every other org in the
+                // process reads from — one listing call was enough, and it also
+                // undid the write-side gate for anything already saved. The
+                // per-row verdict now lives in the shared hydrator, which each
+                // row's own `organizationId` answers to; the merged LIST above
+                // is unchanged, so org readers still get their overlays.
                 if (this.environmentId === undefined) {
-                    for (const { data, packageId: recPkg } of overlays) {
-                        this.hydrateOverlayIntoRegistry(request.type, data, recPkg);
+                    for (const { data, packageId: recPkg, organizationId: recOrg } of overlays) {
+                        this.hydrateOverlayIntoRegistry(request.type, data, {
+                            packageId: recPkg,
+                            organizationId: recOrg,
+                        });
                     }
                 }
             }
@@ -7668,14 +7685,52 @@ export class ObjectStackProtocolImplementation implements
      * so a colliding overlay no longer grafts the first-registered package's
      * provenance/lock onto another package's row.
      *
-     * Returns whether anything was registered (bodies without a `name`, and
-     * registry doubles without `registerItem`, are no-ops).
+     * ── [#6602] THE ROW-SCOPE GATE LIVES HERE, AND ITS ARGUMENT IS REQUIRED ──
+     *
+     * ADR-0005 (revised 2026-05): **only env-wide rows
+     * (`organization_id IS NULL`) enter the process-wide SchemaRegistry.**
+     * Per-org overlays are served on demand by `getMetaItem` /
+     * `getMetaItems` and never grafted into the shared registry, because that
+     * registry has exactly one plain key per `(type, name)` and no org
+     * dimension to hold them apart.
+     *
+     * Boot already obeyed this — `loadMetaFromDb` filters
+     * `organization_id: null` and states the rule in its own comment — but
+     * the two RUNTIME seams did not: {@link applyRegistryWriteThrough} gated
+     * on `environmentId` alone (its TSDoc claimed the rule and the code said
+     * nothing about org), and the `getMetaItems` hydration loop walked the
+     * merged env-wide + org record set. Measured on an unscoped kernel, an
+     * org-scoped `view` write landed in the registry under the plain key, and
+     * one org-scoped listing call did the same — so org B's next listing
+     * started from org A's body (#6602).
+     *
+     * `organizationId` is therefore a REQUIRED parameter and not an optional
+     * one: an omitted org would default to "env-wide" and reinstate the exact
+     * hole, whereas a required one makes every caller state the row's scope.
+     * Declared = enforced, at the ONE choke point all three hydration callers
+     * (boot, read-side, write-through) already share — a fourth caller cannot
+     * forget a gate it has to answer to compile.
+     *
+     * The KERNEL-scope gate (`environmentId === undefined`) deliberately
+     * stays with the callers: that is a fact about the kernel this protocol
+     * instance serves, not about the row in hand.
+     *
+     * Returns whether anything was registered (org-scoped rows, bodies
+     * without a `name`, and registry doubles without `registerItem`, are
+     * no-ops).
      */
-    private hydrateOverlayIntoRegistry(type: string, data: unknown, packageId?: string | null): boolean {
+    private hydrateOverlayIntoRegistry(
+        type: string,
+        data: unknown,
+        options: { packageId?: string | null; organizationId: string | null },
+    ): boolean {
+        // [#6602] ADR-0005 — a per-org overlay is served on demand, never
+        // grafted into the registry every org in this process shares.
+        if (options.organizationId !== null && options.organizationId !== undefined) return false;
         if (!data || typeof data !== 'object' || !('name' in data)) return false;
         const registry: any = (this.engine as any)?.registry;
         if (!registry || typeof registry.registerItem !== 'function') return false;
-        const artifact = this.lookupArtifactItem(type, (data as any).name, packageId ?? undefined);
+        const artifact = this.lookupArtifactItem(type, (data as any).name, options.packageId ?? undefined);
         registry.registerItem(type, mergeArtifactProtection(data, artifact), 'name' as any);
         return true;
     }
@@ -7712,15 +7767,43 @@ export class ObjectStackProtocolImplementation implements
      * gate the read-side hydration carries: a project-scoped row must not be
      * registered into a registry that unscoped (control-plane) callers share.
      * The write must not be more permissive about that than the read is.
+     *
+     * [#6602] That sentence was true of the ENVIRONMENT dimension and false
+     * of the ORGANIZATION one: the gate above says nothing about
+     * `organization_id`, so on an unscoped kernel a per-org overlay write
+     * hydrated straight into the process-wide registry under the plain key —
+     * the designed per-org overlay leaking out of its org. `organizationId`
+     * is now part of this request and is handed to
+     * {@link hydrateOverlayIntoRegistry}, which owns the row-scope verdict
+     * for all three hydration paths. Callers pass the SAME `orgId` they wrote
+     * the row with, so the registry's view cannot disagree with the row's
+     * scope.
      */
-    private applyRegistryWriteThrough(request: { type: string; name: string; item?: any; packageId?: string | null }): void {
+    private applyRegistryWriteThrough(request: {
+        type: string;
+        name: string;
+        item?: any;
+        packageId?: string | null;
+        /** The row's org scope — `null` for an env-wide row. [#6602] */
+        organizationId: string | null;
+    }): void {
         if (request.type === 'object' || request.type === 'objects') {
+            // NOT org-gated, deliberately: an `object` is `allowOrgOverride:
+            // false` (ADR-0005) and its physical TABLE is env-wide, so the
+            // registry entry backing it is env-wide too — `assertObjectRegistered`
+            // fails CLOSED on a missing entry, and refusing to register here
+            // would make a runtime-created object unreachable for data CRUD
+            // rather than merely un-listed. This branch has never carried the
+            // `environmentId` gate either, for the same reason.
             this.applyObjectRegistryMutation(request);
             return;
         }
         if (this.environmentId !== undefined) return;
         try {
-            this.hydrateOverlayIntoRegistry(request.type, request.item, request.packageId ?? undefined);
+            this.hydrateOverlayIntoRegistry(request.type, request.item, {
+                packageId: request.packageId ?? undefined,
+                organizationId: request.organizationId,
+            });
         } catch (err: any) {
             // Best-effort, exactly like the object branch: the row is already
             // persisted, so a registry hiccup must not fail the write that
@@ -8412,6 +8495,9 @@ export class ObjectStackProtocolImplementation implements
                     name: request.name,
                     item: request.item,
                     packageId: request.packageId ?? null,
+                    // [#6602] The SAME scope the row was just written with —
+                    // a per-org overlay stays out of the shared registry.
+                    organizationId: orgId,
                 });
                 await this.ensureObjectStorage(request.type, request.name);
             }
@@ -9043,6 +9129,8 @@ export class ObjectStackProtocolImplementation implements
             name: args.name,
             item: args.body,
             packageId: args.packageId,
+            // [#6602] The promoted draft carries the org it was drafted in.
+            organizationId: args.orgId,
         });
         // Create the object's table now so it's CRUD-able without a restart.
         await this.ensureObjectStorage(args.requestType, args.name);
@@ -10597,6 +10685,9 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 item: result.item.body,
                 packageId: rollbackPackageId,
+                // [#6602] A rollback restores the row IN ITS OWN SCOPE — an
+                // org-scoped restore must not graft the body process-wide.
+                organizationId: orgId,
             });
             return {
                 success: true,
@@ -11188,10 +11279,21 @@ export class ObjectStackProtocolImplementation implements
                         // When artifacts load after this hydration the merge
                         // finds nothing and the row registers unchanged — same
                         // as before, scoped or not.
+                        //
+                        // [#6602] The org argument states what the WHERE
+                        // clause above already selected for. It is a no-op
+                        // today by construction — and that is the point: the
+                        // rule this branch's comment states ("hydrate only
+                        // env-wide rows") stops depending on a query filter
+                        // staying correct, because the hydrator refuses an
+                        // org-scoped row whatever selected it.
                         this.hydrateOverlayIntoRegistry(
                             normalizedType,
                             data,
-                            (record as { package_id?: string | null }).package_id ?? undefined,
+                            {
+                                packageId: (record as { package_id?: string | null }).package_id ?? undefined,
+                                organizationId: (record as { organization_id?: string | null }).organization_id ?? null,
+                            },
                         );
                     }
                     loaded++;
