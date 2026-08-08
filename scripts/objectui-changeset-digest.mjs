@@ -1904,15 +1904,27 @@ function selfTest() {
     // The other half. Same file, same range, same generator — only the human's
     // answer is added, and the gate's verdict flips. A red that no answer can
     // clear would be a broken gate, not a scaffold.
-    writeFileSync(
-      gateCs,
-      readFileSync(gateCs, 'utf8').replace(
-        ADR_0087_SCAFFOLD,
-        '<!-- adr-0087: not-required (already-registered old-entry-one) the pinned frontend range carries no spec surface beyond that entry -->',
-      ),
+    //
+    // The replacement is CHECKED before it is committed, and the commit allows an
+    // empty tree. Found while reverse-verifying this group: with the emission
+    // ablated there is no placeholder to replace, so the write was a no-op, `git
+    // commit` exited 1 on a clean tree and threw — the whole self-test died with
+    // a raw `execFileSync` stack instead of naming a failed check. An ablation is
+    // exactly when the next reader needs a NAME, not a stack trace.
+    const answered = readFileSync(gateCs, 'utf8').replace(
+      ADR_0087_SCAFFOLD,
+      '<!-- adr-0087: not-required (already-registered old-entry-one) the pinned frontend range carries no spec surface beyond that entry -->',
     );
+    check(
+      '#6494 the answer replaces the placeholder IN PLACE — one marker before, one after',
+      answered !== readFileSync(gateCs, 'utf8') &&
+        !answered.includes('adr-0087: TODO') &&
+        markersIn(answered).length === 1,
+      answered.slice(-400),
+    );
+    writeFileSync(gateCs, answered);
     gg('add', '-A');
-    gg('commit', '-q', '-m', 'answer the ADR-0087 question');
+    gg('commit', '-q', '--allow-empty', '-m', 'answer the ADR-0087 question');
     const gateGreen = runGate();
     check(
       '#6494 ROUND TRIP (green): a real disposition written in that same place clears it',
