@@ -207,12 +207,15 @@ export const PAGINATION_ALL_IDS: readonly string[] = PAGINATION_ROWS.map((r) => 
  *
  * # Scope
  *
- * `find()` and whatever a driver builds on it. Nothing here says what a
- * backend's *native* client means by `0`: the MongoDB Node driver, for one,
- * defines `limit: 0` as *no limit*, so honouring this contract there needs a
- * deliberate guard at that boundary rather than the presence check the SQL
- * family needed — a decision about who owns the boundary, recorded on that
- * driver's ledger row rather than papered over here.
+ * `find()` and whatever a driver builds on it. Nothing here says HOW a driver
+ * keeps the promise, and the answers genuinely differ — which is the reason
+ * this is a shared case-set rather than a lint rule. The SQL family needed a
+ * presence check; `driver-memory` needed the same on its slice; and
+ * `driver-mongodb` needed neither, because it already forwarded `0` faithfully
+ * — into a client that DEFINES `limit: 0` as *no limit*. There the contract has
+ * to be answered BEFORE the client is consulted, by a short-circuit that
+ * returns the empty result without a round trip. Same standard, three
+ * mechanisms; the cases test the property, not the clause.
  */
 export interface ZeroLimitConformanceCase {
     /** Case label, used as the test name. */

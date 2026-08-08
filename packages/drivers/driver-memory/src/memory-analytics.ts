@@ -428,10 +428,18 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     }
 
     // Stage 6: $limit and $skip
+    //
+    // PRESENCE on the limit, not truthiness (#6577) — the same defect and the
+    // same reason as `memory-driver.ts`'s slice: `limit: 0` means "return no
+    // records" (#6485), `0` is falsy, so the stage was omitted entirely and an
+    // analytics read that asked for none came back with every row. Mingo
+    // honours `{ $limit: 0 }` as zero records (measured: 3 in, 0 out), so
+    // pushing the stage is sufficient here — no short-circuit needed, unlike
+    // the MongoDB driver, whose upstream client defines `0` as "no limit".
     if (query.offset) {
       pipeline.push({ $skip: query.offset });
     }
-    if (query.limit) {
+    if (query.limit !== undefined) {
       pipeline.push({ $limit: query.limit });
     }
 
@@ -595,7 +603,10 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       );
       sql += ` ORDER BY ${orderClauses.join(', ')}`;
     }
-    if (query.limit) {
+    // PRESENCE, not truthiness (#6577) — the third site of the same shape in
+    // this package. `limit: 0` means "return no records" (#6485), and a dropped
+    // `LIMIT 0` widens the statement to the whole table.
+    if (query.limit !== undefined) {
       sql += ` LIMIT ${query.limit}`;
     }
     if (query.offset) {

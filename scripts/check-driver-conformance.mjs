@@ -334,47 +334,6 @@ const CASE_SETS = [
 const LEDGER = [
   {
     driver: 'driver-memory',
-    marker: 'PAGINATION_ZERO_LIMIT_CASES',
-    kind: 'DEBT',
-    why:
-      'The one row in this column that is a LIVE DEFECT rather than missing coverage, and it is measured, '
-      + 'not inferred. `memory-driver.ts` slices with `if (query.limit) { results = results.slice(0, '
-      + 'query.limit); }` — truthiness, so `limit: 0` drops the slice entirely. Executed against the real '
-      + '`find()` on this branch, three rows seeded: `{ limit: 0 }` -> **3 rows** (the whole table), '
-      + '`{ limit: 2 }` -> 2, no limit -> 3, `{ limit: 0, offset: 1 }` -> 2 — i.e. the OFFSET is applied and '
-      + 'the LIMIT is not. The SQL family answers 0 to the same `QueryAST`, so two shipped drivers disagree '
-      + 'and the one that disagrees returns MORE data than was requested. The same shape sits twice more in '
-      + '`memory-analytics.ts` (the `$limit` pipeline stage and the SQL string builder). NOT fixed here: '
-      + 'driver-memory is inside the #5499 investment freeze, and #6577 was split by triage ruling into the '
-      + 'unfrozen driver-sql half (landed) and this frozen half, which goes to the maintainer as a freeze '
-      + 'question rather than being flipped quietly. Reachable today rather than theoretical: since #6578 the '
-      + 'client puts `top=0` on the wire, so a memory-backed (LiteKernel) deployment answers '
-      + '`find(obj, { limit: 0 })` with every row. To clear this row: land the freeze decision, flip the '
-      + 'three sites, then write the suite and delete this entry in the same PR.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/6577',
-  },
-  {
-    driver: 'driver-mongodb',
-    marker: 'PAGINATION_ZERO_LIMIT_CASES',
-    kind: 'DEBT',
-    why:
-      'A DIFFERENT defect from driver-memory\'s, and it must not be "fixed" into the same one. Located by '
-      + 'inspection rather than executed — the mongod-backed suites are opt-in (#5517), so this row states '
-      + 'what the compiler does and stops there. `mongodb-driver.ts` already tests PRESENCE — '
-      + '`if (query.limit !== undefined) findOptions.limit = query.limit;` — so the driver-sql edit has no '
-      + 'analogue here: the value is forwarded exactly as written. The divergence is one layer lower, at the '
-      + 'boundary, because the MongoDB Node driver DEFINES `limit: 0` as "no limit", so a faithfully '
-      + 'forwarded `0` still returns every document. Honouring this case-set therefore needs a deliberate '
-      + 'guard where the query is handed to the client (answer the empty set without a round trip, or '
-      + 'translate `0` into a form the client reads as none) — a decision about who owns that boundary, not '
-      + 'a one-line flip, which is why #6577 filed it as a decision item rather than a patch. Also inside '
-      + 'the #5499 freeze. DEBT rather than EXEMPT because the contract does apply: #6485 ruled `limit: 0` '
-      + 'means "return no records" for every backend, and "our client spells it differently" is the reason '
-      + 'this row is open, not a reason the standard does not reach here.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/6577',
-  },
-  {
-    driver: 'driver-memory',
     marker: 'FILTER_TEXT_CASES',
     kind: 'DEBT',
     why:
