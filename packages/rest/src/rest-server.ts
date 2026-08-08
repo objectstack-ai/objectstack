@@ -7,6 +7,7 @@ import {
 import {
     isMcpServerEnabled,
     looksLikeInternalErrorLeak,
+    isUniqueViolationError,
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
@@ -743,6 +744,62 @@ export function mapDataError(error: any, object?: string): { status: number; bod
         };
     }
 
+    // [#6250] Unique-constraint conflict → 409 `UNIQUE_VIOLATION`.
+    //
+    // The verdict is the shared `isUniqueViolationError` predicate
+    // (`@objectstack/types`), and BOTH halves of that sentence are the fix.
+    //
+    // **Why it moved up here.** This branch used to live *inside* the
+    // `looksLikeInternalErrorLeak(raw)` true-branch below, so a conflict was
+    // recognised only if the message first looked like a server-internals leak
+    // — two unrelated questions, one nested inside the other. MySQL is where
+    // they disagree. `ER_DUP_ENTRY: Duplicate entry 'a@b.com' for key
+    // 'idx_email_unique'` matches not one of the leak heuristic's limbs
+    // (`sqlite_` / `sqlstate` / `constraint failed` / `unique constraint` /
+    // `foreign key` / a leading `insert into `/`update `/`select `/`delete
+    // from `), so it never reached the `if` at all and fell out of
+    // `UNCLASSIFIED_FAULT` as `500 INTERNAL_ERROR` — on EVERY unique conflict
+    // in a MySQL deployment, against an API contract that registers
+    // `UNIQUE_VIOLATION` (`error-code-ledger.zod.ts`). The front end could not
+    // tell "this email is taken" from "the server fell over". SQLite and
+    // Postgres hid it: their prose happens to contain `unique constraint`.
+    //
+    // The fix is deliberately NOT to teach the leak heuristic about MySQL.
+    // That heuristic decides what text is unsafe to echo; widening it to reach
+    // a status mapping would make an information-disclosure rule depend on a
+    // conflict vocabulary, and every future dialect would have to be taught to
+    // both. Asking the conflict question by name, first and independently, is
+    // the #5841 `isMissingTableError` move — and it leaves the leak classifier
+    // byte-identical, so nothing else it guards is reclassified.
+    //
+    // **Why the predicate rather than more substrings.** The message is only
+    // one of the two channels drivers use. Postgres surfaces SQLSTATE `23505`
+    // and mysql2 an `ER_DUP_ENTRY` / `errno 1062` — measured, a Postgres error
+    // carrying the code but a plain message was also a 500 here. The predicate
+    // reads code, errno, message and one step of `cause`; a substring added to
+    // this file would have been the fifth private vocabulary, which is the
+    // defect #6250 is named for.
+    //
+    // **The body says nothing the driver said.** The message is a fixed
+    // sentence and the only interpolated value is the object name the ROUTE
+    // supplied. That is load-bearing, not incidental: MySQL's text embeds the
+    // offending USER DATA (`Duplicate entry 'acme@example.com' …`) and
+    // Postgres' embeds the index and column names, so echoing the driver here
+    // would trade a status-code bug for an information-disclosure one. Pinned
+    // in `rest-unique-violation-dialects.test.ts`. The full text still reaches
+    // the operator: `handleRouteError` / `logWithheldServerFault` log the
+    // original error untouched.
+    if (isUniqueViolationError(error)) {
+        return {
+            status: 409,
+            body: {
+                error: 'A record with this value already exists',
+                code: 'UNIQUE_VIOLATION',
+                ...(object ? { object } : {}),
+            },
+        };
+    }
+
     const raw = String(error?.message ?? error ?? '');
     const lower = raw.toLowerCase();
 
@@ -945,18 +1002,13 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // returned raw SQL to clients. Behaviour here is unchanged; only the
     // predicate's home moved.
     if (looksLikeInternalErrorLeak(raw)) {
-        // Surface unique-constraint violations as a structured 409 so
-        // the UI can map them to "this value already exists".
-        if (lower.includes('unique constraint') || lower.includes('unique violation')) {
-            return {
-                status: 409,
-                body: {
-                    error: 'A record with this value already exists',
-                    code: 'UNIQUE_VIOLATION',
-                    ...(object ? { object } : {}),
-                },
-            };
-        }
+        // [#6250] The unique-constraint 409 used to be nested HERE, keyed on
+        // `unique constraint` / `unique violation`. Both substrings are now
+        // limbs of the shared `isUniqueViolationError` predicate, which runs
+        // far above this line and unconditionally — so this branch cannot
+        // narrow the verdict, and a conflict no longer has to look like a leak
+        // to be recognised as one. What is left here is the original job:
+        // withhold text that would ship driver internals.
         return DATA_STORE_FAULT();
     }
     return UNCLASSIFIED_FAULT();
