@@ -40,6 +40,39 @@
 // guarantees the next author is TOLD which decision they are standing on. The
 // enforcement of each invariant lives in its own tests (see the ADR).
 //
+// ## The second thing it checks: an ADR number names ONE decision (#5992)
+//
+// Everything above rests on a premise nothing verified: that `ADR-0057` in a
+// code comment identifies a decision. It did not. Three numbers under
+// `docs/adr/` were each claimed by two unrelated records — 0010, 0019, 0057 —
+// so PD #13's "grep the ADRs for the surface you are touching" lands an author
+// on two documents with nothing to choose between them, and the cost is worst
+// exactly where the pairs are furthest apart: `ADR-0057` is either the ERP
+// authorization core (security) or system-data retention (reclamation), and
+// four entries in `adr-anchors.json` ride that number today.
+//
+// Maintainer ruling 2026-08-07 on #5992, in order: **C first, B to finish, A
+// rejected.** C is this gate — stop the bleeding, so a FOURTH collision cannot
+// be introduced. B (slug-qualified references for the three existing pairs) is
+// separate work, amortised as those files are touched. A (renumbering the later
+// record of each pair) was rejected outright: 296+ bare references would have
+// to migrate, and it would establish that an accepted ADR's number can move.
+// So the three existing pairs sit on `KNOWN_NUMBER_COLLISIONS` below — an
+// explicit, shrink-only allowlist. Do not add a fourth entry to make a red
+// build green; take the next free number instead.
+//
+// **Versions of one decision are not a collision.** `0006-project-environment-
+// split{,.v2,.v4}.md` is one decision revised twice, and the rule that
+// separates it from a real collision is structural rather than a name on a list:
+// a version repeats the SAME `NNNN-slug` stem and adds `.vN`, while a collision
+// is two different stems under one number. That is why the audit groups by stem
+// and not by number alone.
+//
+// Deliberately NOT part of the rule: the records' `**Status**` lines. They are
+// free prose (`Proposed`, `Draft (2026-05-24)`, `Accepted in part`, `Superseded
+// by v4`), and the navigation damage a shared number does is the same whatever
+// they say — a grep does not read status either.
+//
 // ## Adding an entry
 //
 // Add one when an accepted ADR's decision is realized in code that would look
@@ -49,6 +82,7 @@
 // everything is a map of nothing, and each entry must earn its failure mode.
 //
 //   node scripts/check-adr-anchors.mjs
+//   node scripts/check-adr-anchors.mjs --self-test   # verify the checker itself
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -56,9 +90,76 @@ import { join } from 'node:path';
 const ROOT = process.cwd();
 const MAP_PATH = 'scripts/adr-anchors.json';
 const ADR_DIR = 'docs/adr';
+const SELF_PATH = 'scripts/check-adr-anchors.mjs';
 
 /** An ADR id as written in code comments: `ADR-0090`. */
 const ADR_ID = /^ADR-(\d{4})$/;
+
+/**
+ * A decision-record filename.
+ *
+ *   `0057-system-data-lifecycle-and-retention.md` → number 0057, stem
+ *     `0057-system-data-lifecycle-and-retention`, no version
+ *   `0006-project-environment-split.v4.md`        → number 0006, stem
+ *     `0006-project-environment-split`, version 4
+ *
+ * The stem is the decision's identity; `.vN` is a revision OF that stem. Two
+ * stems under one number is the collision this file audits.
+ */
+const ADR_FILENAME = /^(\d{4})-([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.v(\d+))?\.md$/;
+
+/**
+ * Markdown under `docs/adr/` that is deliberately not a decision record.
+ * Kept explicit rather than pattern-matched: the directory IS the decision
+ * registry, so a file that is not a record should have to say so once, here,
+ * instead of slipping past the number audit because its name did not parse.
+ */
+const NON_RECORD_FILES = new Set(['PRIORITIZATION.md']);
+
+/**
+ * ⛔ SHRINK-ONLY. The number collisions that already existed when this audit
+ * was written (#5992). Every entry is a navigation tax being paid daily, kept
+ * only because the maintainer ruled renumbering an accepted record out.
+ *
+ * **Adding an entry is not the fix for a red build.** If this gate just told you
+ * your new record collides, the fix is the next free number — it names the one
+ * to use. Widening this list re-opens the exact defect the gate closes, and does
+ * it for every future reader of that number rather than for you once.
+ *
+ * Removing an entry is always welcome and the gate enforces it: an entry that
+ * no longer matches `docs/adr/` fails as stale, so a resolved collision cannot
+ * silently return under cover of its own grandfather clause.
+ */
+const KNOWN_NUMBER_COLLISIONS = [
+  {
+    number: '0010',
+    decisions: ['0010-metadata-protection-model', '0010-nl-to-flow-authoring'],
+    // Metadata Protection Model (L1/L2/L3 lock states, package provenance) vs
+    // Natural-Language → Flow Authoring. Ten other records link the first by
+    // path, four link the second; nothing but the path tells them apart.
+    why: 'metadata protection (L1/L2/L3 lock states) vs natural-language → flow authoring',
+  },
+  {
+    number: '0019',
+    decisions: ['0019-app-as-consumer-unit', '0019-approval-as-flow-node'],
+    // App as the consumer-installable unit vs collapsing approval into the flow
+    // engine as a durable-pause node. The second is Accepted and fully
+    // implemented, so a bare `ADR-0019` in code most likely means it — "most
+    // likely" being precisely the problem.
+    why: 'app as the consumer-facing unit vs approval-as-a-flow-node',
+  },
+  {
+    number: '0057',
+    decisions: [
+      '0057-erp-authorization-core-business-units-and-scope-depth',
+      '0057-system-data-lifecycle-and-retention',
+    ],
+    // The worst pair, and the one #5992 was filed over: security vs
+    // reclamation, no shared vocabulary, and four `ADR-0057` entries in
+    // scripts/adr-anchors.json plus hundreds of bare references in packages/**.
+    why: 'ERP authorization core (security) vs system-data lifecycle/retention (reclamation)',
+  },
+];
 
 let anchors;
 try {
@@ -72,19 +173,128 @@ if (!Array.isArray(anchors)) {
   process.exit(1);
 }
 
-/** Decision records that actually exist, by number: `0090` → `0090-permission-model-...md`. */
-const records = new Set();
-try {
-  for (const f of readdirSync(join(ROOT, ADR_DIR))) {
-    const m = /^(\d{4})-/.exec(f);
-    if (m) records.add(m[1]);
+/**
+ * Inventory `docs/adr/` and audit the premise every anchor rests on: one
+ * number, one decision.
+ *
+ * Pure over a filename list — `--self-test` drives it with synthetic
+ * directories, so the red paths below are exercised by the REAL function
+ * rather than by an imitation of it.
+ *
+ * @param {string[]} filenames
+ * @param {{ number: string, decisions: string[], why: string }[]} allowlist
+ * @returns {{ records: Set<string>, errors: string[] }} `records` is the set of
+ *   numbers that name a real record, as the anchor loop below needs it.
+ */
+function auditAdrDirectory(filenames, allowlist) {
+  const errors = [];
+  const records = new Set();
+  /** number → set of decision stems claiming it. */
+  const stemsByNumber = new Map();
+
+  for (const name of [...filenames].sort()) {
+    if (!name.endsWith('.md') || NON_RECORD_FILES.has(name)) continue;
+    const m = ADR_FILENAME.exec(name);
+    if (!m) {
+      errors.push(
+        `${ADR_DIR}/${name}: filename does not parse as a decision record. Expected \`NNNN-kebab-slug.md\`, ` +
+          'or `NNNN-kebab-slug.vN.md` for a later version of the SAME decision.\n' +
+          '      The number-uniqueness audit reads the number off the FILENAME, so a record it cannot parse is ' +
+          'a record it cannot protect — and `ADR-NNNN` in a code comment would resolve to "no record under ' +
+          `${ADR_DIR}/".\n` +
+          `      If this is a companion doc rather than a decision, add it to NON_RECORD_FILES in ${SELF_PATH}.`,
+      );
+      continue;
+    }
+    const [, number, slug] = m;
+    records.add(number);
+    const stem = `${number}-${slug}`;
+    if (!stemsByNumber.has(number)) stemsByNumber.set(number, new Set());
+    stemsByNumber.get(number).add(stem);
   }
+
+  /** number → the sorted stems sharing it, for numbers claimed more than once. */
+  const collisions = new Map();
+  for (const [number, stems] of stemsByNumber) {
+    if (stems.size > 1) collisions.set(number, [...stems].sort());
+  }
+  const allowed = new Map(allowlist.map((e) => [e.number, { ...e, decisions: [...e.decisions].sort() }]));
+
+  const nextFree = String(Math.max(0, ...[...records].map(Number)) + 1).padStart(4, '0');
+  const sameSet = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+  // One error per NUMBER, not one per side: a third record joining an
+  // allowlisted pair is a single fact and reads as one.
+  for (const number of [...new Set([...collisions.keys(), ...allowed.keys()])].sort()) {
+    const found = collisions.get(number);
+    const known = allowed.get(number);
+    if (found && known && sameSet(found, known.decisions)) continue;
+
+    if (found && !known) {
+      errors.push(
+        `${ADR_DIR}/: ADR number ${number} is claimed by ${found.length} unrelated decisions —\n` +
+          found.map((s) => `        ${s}.md`).join('\n') +
+          '\n      An ADR number must name exactly ONE decision. AGENTS.md Prime Directive #13 tells the next ' +
+          'author to grep the ADRs for the id they found in the code; a shared number hands them two records ' +
+          'and no way to choose, which is how an accepted decision gets reversed by someone who read the ' +
+          'other one (#3723, the incident this whole file exists for).\n' +
+          `      Fix: give the NEW record the next free number — ${nextFree} — and update any reference you ` +
+          'already wrote. Renumbering an ALREADY-ACCEPTED record was ruled out (#5992: 296+ bare references ' +
+          "would migrate, and an accepted decision's number must not move), so before it is referenced is the " +
+          'only cheap moment.\n' +
+          '      Successive versions of ONE decision are not a collision and do not belong here — they repeat ' +
+          'the same stem and add `.vN` (see 0006-project-environment-split{,.v2,.v4}.md).',
+      );
+    } else if (known && !found) {
+      errors.push(
+        `${SELF_PATH}: the KNOWN_NUMBER_COLLISIONS entry for ${number} is stale — nothing under ${ADR_DIR}/ ` +
+          `collides on that number any more (it listed ${known.decisions.join(', ')}).\n` +
+          '      Delete the entry. The allowlist is shrink-only: a resolved collision that keeps its ' +
+          'grandfather clause can silently come back.',
+      );
+    } else {
+      errors.push(
+        `${ADR_DIR}/: ADR number ${number} is allowlisted (#5992) for ${known.decisions.length} records, but ` +
+          `${found.length} claim it now —\n` +
+          `        allowlisted: ${known.decisions.join(', ')}\n` +
+          `        found:       ${found.join(', ')}\n` +
+          `      The allowlist grandfathers exactly the pair that existed; it does not licence the number. ` +
+          `Give the new record the next free number — ${nextFree} — or, if a record was renamed, update the ` +
+          `entry in ${SELF_PATH} to the stems that remain.`,
+      );
+    }
+  }
+
+  return { records, errors };
+}
+
+/** Anchor ids whose number names two decisions — reported, never failed. */
+function ambiguousAnchorRefs(anchorList, allowlist) {
+  const ambiguous = new Set(allowlist.map((e) => e.number));
+  const hits = [];
+  for (const entry of anchorList ?? []) {
+    for (const adr of entry?.adrs ?? []) {
+      const m = ADR_ID.exec(adr);
+      if (m && ambiguous.has(m[1])) hits.push(`${entry.file} → ${adr}`);
+    }
+  }
+  return hits;
+}
+
+if (process.argv.includes('--self-test')) selfTest();
+
+let adrFiles;
+try {
+  adrFiles = readdirSync(join(ROOT, ADR_DIR));
 } catch {
   console.error(`check-adr-anchors: no ${ADR_DIR}/ directory — run from the repo root.`);
   process.exit(1);
 }
 
-const errors = [];
+/** Decision records that actually exist, by number: `0090` → `0090-permission-model-...md`. */
+const { records, errors: numberErrors } = auditAdrDirectory(adrFiles, KNOWN_NUMBER_COLLISIONS);
+
+const errors = [...numberErrors];
 let checked = 0;
 
 for (const entry of anchors) {
@@ -145,4 +355,177 @@ if (errors.length) {
   );
   process.exit(1);
 }
-console.log(`check-adr-anchors: OK (${checked} anchored file(s), every governing ADR still referenced).`);
+console.log(
+  `check-adr-anchors: OK (${checked} anchored file(s), every governing ADR still referenced; ` +
+    `${records.size} decision number(s), each naming one decision or an allowlisted pair).`,
+);
+
+// Reported, never failed. These anchors are correct — the number they name is
+// the ambiguous thing, and #5992's route B (slug-qualified references) is the
+// separate change that fixes it. Printing them keeps the size of that debt
+// visible instead of leaving it to be rediscovered.
+const ambiguous = ambiguousAnchorRefs(anchors, KNOWN_NUMBER_COLLISIONS);
+if (ambiguous.length) {
+  console.log(
+    `check-adr-anchors: note — ${ambiguous.length} anchor reference(s) name an ADR number that two records ` +
+      'share (#5992, allowlisted):',
+  );
+  for (const hit of ambiguous) console.log(`  · ${hit}`);
+}
+
+/**
+ * Verify the number audit itself — both directions, over the real function.
+ *
+ * A gate whose red path was never exercised is not a gate, and this one's red
+ * path is rare by construction: a fourth collision has to be introduced before
+ * anyone sees it fail. So the failures are provoked here instead, on synthetic
+ * directories, plus one ablation against the live tree (drop the allowlist and
+ * the three real collisions must surface).
+ *
+ * Every assertion is NAMED and the whole body is guarded: a self-test that dies
+ * with a stack trace at the moment a reader needs to know which invariant broke
+ * has failed at its one job.
+ */
+function selfTest() {
+  const failures = [];
+  let checked = 0;
+  /** @param {string} name @param {boolean} cond @param {string} detail */
+  const assert = (name, cond, detail) => {
+    checked++;
+    if (!cond) failures.push(`${name} — ${detail}`);
+  };
+  const audit = (files, allowlist = []) => auditAdrDirectory(files, allowlist);
+  const joined = (errs) => errs.join('\n');
+
+  const BASE = ['0001-alpha.md', '0002-beta.md', 'PRIORITIZATION.md'];
+  const PAIR = [{ number: '0002', decisions: ['0002-beta', '0002-gamma'], why: 'synthetic' }];
+
+  try {
+    {
+      const { errors: e, records } = audit(BASE);
+      assert('clean-directory-is-green', e.length === 0, `expected no errors, got:\n${joined(e)}`);
+      assert(
+        'records-carries-every-number',
+        records.has('0001') && records.has('0002') && records.size === 2,
+        `expected {0001,0002}, got {${[...records].join(',')}}`,
+      );
+      assert(
+        'companion-doc-is-not-audited',
+        !joined(e).includes('PRIORITIZATION'),
+        'PRIORITIZATION.md must be skipped as a non-record, not reported as unparseable',
+      );
+    }
+
+    {
+      // The 0006 case, derived from structure rather than named: same stem, `.vN`.
+      const { errors: e } = audit([...BASE, '0002-beta.v2.md', '0002-beta.v4.md']);
+      assert('versions-of-one-decision-are-not-a-collision', e.length === 0, `expected no errors, got:\n${joined(e)}`);
+    }
+
+    {
+      // The whole point: a FOURTH collision, unlisted.
+      const { errors: e } = audit([...BASE, '0002-gamma.md']);
+      assert('new-collision-is-red', e.length === 1, `expected exactly 1 error, got ${e.length}:\n${joined(e)}`);
+      const msg = joined(e);
+      assert('collision-message-names-the-number', msg.includes('0002'), `message lacks the number:\n${msg}`);
+      assert(
+        'collision-message-names-both-records',
+        msg.includes('0002-beta.md') && msg.includes('0002-gamma.md'),
+        `message must list the colliding files:\n${msg}`,
+      );
+      assert(
+        'collision-message-names-the-next-free-number',
+        msg.includes('0003'),
+        `message must offer the next free number so the fix is mechanical:\n${msg}`,
+      );
+      assert(
+        'collision-message-does-not-invite-allowlisting',
+        !/add .*KNOWN_NUMBER_COLLISIONS/i.test(msg),
+        `the remedy must be "take the next number", never "widen the allowlist":\n${msg}`,
+      );
+    }
+
+    {
+      const { errors: e } = audit([...BASE, '0002-gamma.md'], PAIR);
+      assert('allowlisted-collision-is-green', e.length === 0, `expected no errors, got:\n${joined(e)}`);
+    }
+
+    {
+      // A `.vN` on a DIFFERENT stem is still a different decision.
+      const { errors: e } = audit([...BASE, '0002-gamma.v2.md']);
+      assert(
+        'version-suffix-cannot-launder-a-collision',
+        e.length === 1 && joined(e).includes('0002-gamma'),
+        `expected the collision to be reported, got:\n${joined(e)}`,
+      );
+    }
+
+    {
+      const { errors: e } = audit([...BASE, '0002-gamma.md', '0002-delta.md'], PAIR);
+      assert(
+        'third-record-on-an-allowlisted-number-is-red',
+        e.length === 1 && joined(e).includes('0002-delta'),
+        `an allowlisted PAIR must not licence a third claimant, got:\n${joined(e)}`,
+      );
+    }
+
+    {
+      const { errors: e } = audit(BASE, PAIR);
+      assert(
+        'stale-allowlist-entry-is-red',
+        e.length === 1 && /stale/.test(joined(e)),
+        `a grandfather clause outliving its collision must fail, got:\n${joined(e)}`,
+      );
+    }
+
+    {
+      const { errors: e } = audit([...BASE, '0003_underscore.md']);
+      assert(
+        'unparseable-record-filename-is-red',
+        e.length === 1 && joined(e).includes('0003_underscore.md'),
+        `a filename the audit cannot parse is a record it cannot protect, got:\n${joined(e)}`,
+      );
+    }
+
+    // ── Live tree: green as shipped, red under ablation ──────────────────────
+    let liveFiles = null;
+    try {
+      liveFiles = readdirSync(join(ROOT, ADR_DIR));
+    } catch (e) {
+      assert('live-tree-is-readable', false, `cannot read ${ADR_DIR}/ (run from the repo root) — ${e.message}`);
+    }
+    if (liveFiles) {
+      const { errors: green } = audit(liveFiles, KNOWN_NUMBER_COLLISIONS);
+      assert('live-tree-is-green-today', green.length === 0, `${ADR_DIR}/ must pass as shipped, got:\n${joined(green)}`);
+
+      // Ablation, predicted RED: drop the allowlist and the three real
+      // collisions must each surface. If this ever goes green, the allowlist is
+      // no longer what keeps the build green and the entries are dead weight.
+      const { errors: red } = audit(liveFiles, []);
+      const numbers = KNOWN_NUMBER_COLLISIONS.map((c) => c.number);
+      assert(
+        'ablation-without-allowlist-is-red',
+        red.length === numbers.length,
+        `expected ${numbers.length} collision(s) with the allowlist removed, got ${red.length}:\n${joined(red)}`,
+      );
+      for (const n of numbers) {
+        assert(
+          `ablation-reports-${n}`,
+          red.some((e) => e.includes(`number ${n} is claimed`)),
+          `ADR number ${n} is allowlisted but does not collide under ablation — the entry is stale`,
+        );
+      }
+    }
+  } catch (e) {
+    // Never let the harness itself be the message.
+    failures.push(`self-test threw before finishing — ${e && e.stack ? e.stack : e}`);
+  }
+
+  if (failures.length) {
+    console.error(`✗ check-adr-anchors --self-test — ${failures.length} failure(s) of ${checked} assertion(s)\n`);
+    for (const f of failures) console.error('  • ' + f + '\n');
+    process.exit(1);
+  }
+  console.log(`✓ check-adr-anchors --self-test: ${checked} assertions over the real auditAdrDirectory() path.`);
+  process.exit(0);
+}
