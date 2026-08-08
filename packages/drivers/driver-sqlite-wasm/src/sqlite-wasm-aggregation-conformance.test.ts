@@ -69,7 +69,7 @@ describe('[#6409] driver-sqlite-wasm — aggregate vocabulary conformance', () =
   });
 
   it('the fixture is all six rows, with the nulls stored AS nulls', async () => {
-    const rows = await driver.find(OBJECT, { sort: [{ field: 'id', order: 'asc' }] });
+    const rows = await driver.find(OBJECT, { orderBy: [{ field: 'id', order: 'asc' }] });
     expect(rows).toHaveLength(6);
     expect((rows as any[]).filter((r) => r.stage === null)).toHaveLength(2);
   });

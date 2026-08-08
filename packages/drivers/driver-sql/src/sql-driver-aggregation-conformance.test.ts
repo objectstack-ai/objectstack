@@ -118,7 +118,7 @@ describe('[#6409] SqlDriver — aggregate vocabulary conformance', () => {
    * seed is most likely to mangle.
    */
   it('the fixture is all six rows, with the nulls stored AS nulls', async () => {
-    const rows = await driver.find(CONFORMANCE_OBJECT.name, { sort: [{ field: 'id', order: 'asc' }] });
+    const rows = await driver.find(CONFORMANCE_OBJECT.name, { orderBy: [{ field: 'id', order: 'asc' }] });
     expect(rows.map((r: any) => String(r.id))).toEqual(['1', '2', '3', '4', '5', '6']);
     for (const r of rows as any[]) {
       const seeded = AGGREGATION_ROWS.find((s) => s.id === String(r.id))!;
