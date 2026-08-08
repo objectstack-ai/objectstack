@@ -190,6 +190,118 @@ export interface QueryOptionsV2 {
   groupBy?: string[];
 }
 
+/**
+ * [#6322] A key that exists on {@link QueryOptionsV2} and on NO spelling of the
+ * legacy {@link QueryOptions} — computed by the type system, not restated by
+ * hand. Presence of any one of them is what tells `data.find()` the caller
+ * wrote canonical vocabulary.
+ *
+ * `aggregations` / `groupBy` are excluded automatically because both options
+ * types declare them: shared vocabulary cannot discriminate between the two.
+ */
+type QueryOptionsV2OnlyKey = Exclude<keyof QueryOptionsV2, keyof QueryOptions>;
+
+/**
+ * Every canonical-only key, exhaustively.
+ *
+ * WHY A `Record<QueryOptionsV2OnlyKey, true>` AND NOT AN ARRAY OF STRINGS.
+ * `data.find()` used to sniff the branch with a hand-written inline condition
+ * (`'where' in options || 'fields' in options || 'orderBy' in options ||
+ * 'offset' in options`), duplicated verbatim in both `find` copies. A
+ * hand-written list is a second, independent statement of what
+ * `QueryOptionsV2` declares, and it had already fallen behind that declaration
+ * TWICE:
+ *
+ *   - `limit` was never in it, so `find('task', { limit: 20 })` — the most
+ *     natural canonical spelling of "first 20" — fell to the legacy branch,
+ *     which reads only `top`/`skip`/`sort`/`select`/`filter`/`filters`/
+ *     `aggregations`/`groupBy`. Nothing there reads `limit`, so the value was
+ *     dropped between the call and the wire: HTTP 200, server default page
+ *     size, no warning. Its pagination twin `offset` WAS in the list, so one
+ *     interface shipped two pagination keys with opposite behaviour.
+ *   - `expand` was never in it either (see {@link canonicalExpandParam}).
+ *
+ * Appending the missing key would have been the third round of the same
+ * mistake. This shape cannot fall behind: TypeScript rejects the object if a
+ * canonical-only key is MISSING and rejects it if a key that is not
+ * canonical-only is present, so the next key added to `QueryOptionsV2` is a
+ * compile error here until it is listed — and both `find` copies pick it up
+ * from this one definition on the same commit.
+ */
+const QUERY_OPTIONS_V2_ONLY_KEYS: Record<QueryOptionsV2OnlyKey, true> = {
+  where: true,
+  fields: true,
+  orderBy: true,
+  limit: true,
+  offset: true,
+  expand: true,
+};
+
+/**
+ * Does this options bag speak canonical {@link QueryOptionsV2} vocabulary?
+ *
+ * ONE definition read by both `data.find()` implementations
+ * (`ObjectStackClient` and `ScopedProjectClient`), which are two faces of one
+ * wire contract and were byte-identical copies of the old inline condition.
+ */
+function isCanonicalQueryOptions(options: QueryOptions | QueryOptionsV2): options is QueryOptionsV2 {
+  return Object.keys(QUERY_OPTIONS_V2_ONLY_KEYS).some((key) => key in options);
+}
+
+/**
+ * `QueryOptionsV2.expand` → the `?expand=` transport spelling, or `undefined`
+ * when there is nothing to expand.
+ *
+ * THE ACCEPTED SPELLING, verified against the server rather than invented:
+ * `HttpFindQueryParamsSchema` (packages/spec/src/api/protocol.zod.ts) declares
+ * `expand` on the GET list route as a "Comma-separated list of
+ * lookup/master_detail field names to expand", and the protocol normalizer
+ * (packages/metadata-protocol/src/protocol.ts, `findData`) splits that string
+ * on commas and folds each name into `{ [name]: { object: name } }` before the
+ * engine batch-loads it. So a comma-joined name list is not one encoding among
+ * several — it is the only shape this route reads.
+ *
+ * Until #6322 `expand` was declared on `QueryOptionsV2`, documented as the
+ * replacement for a legacy `populate` that `QueryOptions` never had, and mapped
+ * on NEITHER branch: not one character of it reached the wire.
+ *
+ * WHY A NESTED PER-RELATION QUERY IS REFUSED RATHER THAN TRIMMED. The `Record`
+ * form's KEYS are relation names — exactly what the server derives from the
+ * comma list, so they map losslessly. Its VALUES are nested QueryASTs, and a
+ * query string has no spelling for them: trimming them away would deliver a
+ * wider read than the caller asked for and say nothing, which is the same
+ * silent-drop defect this function exists to close (and the one the engine
+ * itself refused inside `expand` in #4371). `data.query()` carries a QueryAST
+ * body and is where nested expand detail belongs.
+ */
+function canonicalExpandParam(expand: QueryOptionsV2['expand']): string | undefined {
+  if (expand == null) return undefined;
+
+  let names: string[];
+  if (Array.isArray(expand)) {
+    names = expand.map((name) => String(name).trim()).filter(Boolean);
+  } else if (typeof expand === 'object') {
+    for (const [relation, nested] of Object.entries(expand)) {
+      const nestedKeys = nested != null && typeof nested === 'object' && !Array.isArray(nested)
+        ? Object.keys(nested as Record<string, unknown>)
+        : [];
+      if (nestedKeys.length > 0) {
+        throw new Error(
+          `data.find(): expand['${relation}'] carries a nested query (${nestedKeys.slice().sort().join(', ')}), `
+          + 'but the list route accepts only `expand=<comma-separated relation names>` — a nested per-relation '
+          + 'query has no transport spelling on a GET, so it would be dropped rather than applied. '
+          + 'Pass relation names only, or use data.query() with a QueryAST `expand` for nested detail.',
+        );
+      }
+    }
+    names = Object.keys(expand).map((name) => name.trim()).filter(Boolean);
+  } else {
+    return undefined;
+  }
+
+  return names.length > 0 ? names.join(',') : undefined;
+}
+
 export interface PaginatedResult<T = any> {
   /** Spec-compliant: array of matching records */
   records: T[];
@@ -4083,16 +4195,24 @@ export class ObjectStackClient {
         const queryParams = new URLSearchParams();
 
         // ── Normalize V2 canonical options → HTTP transport params ───
-        // Detect V2 options by presence of canonical-only keys.
+        // Detect V2 options by presence of canonical-only keys. The predicate
+        // is derived from QueryOptionsV2 itself and SHARED with the copy of
+        // this method on ScopedProjectClient — see QUERY_OPTIONS_V2_ONLY_KEYS
+        // for why an inline hand-written key list is not allowed here (#6322).
         const v2 = options as QueryOptionsV2;
         const normalizedOptions: QueryOptions = {} as QueryOptions;
-        if ('where' in options || 'fields' in options || 'orderBy' in options || 'offset' in options) {
+        let expandParam: string | undefined;
+        if (isCanonicalQueryOptions(options)) {
             // V2 canonical options detected — map to legacy HTTP transport keys
             if (v2.where) normalizedOptions.filter = v2.where as any;
             if (v2.fields) normalizedOptions.select = v2.fields;
             if (v2.orderBy) normalizedOptions.sort = v2.orderBy as any;
             if (v2.limit != null) normalizedOptions.top = v2.limit;
             if (v2.offset != null) normalizedOptions.skip = v2.offset;
+            // `expand` has no legacy QueryOptions counterpart to normalize INTO
+            // (QueryOptions never had `populate`), so it goes straight to its
+            // own transport param below.
+            expandParam = canonicalExpandParam(v2.expand);
             if (v2.aggregations) normalizedOptions.aggregations = v2.aggregations;
             if (v2.groupBy) normalizedOptions.groupBy = v2.groupBy;
         } else {
@@ -4147,6 +4267,11 @@ export class ObjectStackClient {
         }
         if (normalizedOptions.groupBy) {
              queryParams.set('groupBy', normalizedOptions.groupBy.join(','));
+        }
+
+        // 6. Handle Expand (canonical-only — see canonicalExpandParam)
+        if (expandParam) {
+            queryParams.set('expand', expandParam);
         }
 
         const res = await this.fetch(`${this.baseUrl}${route}/${object}?${queryParams.toString()}`);
@@ -4761,14 +4886,19 @@ export class ScopedProjectClient {
     find: async <T = any>(object: string, options: QueryOptions | QueryOptionsV2 = {}): Promise<PaginatedResult<T>> => {
       const queryParams = new URLSearchParams();
 
+      // Same normalization as ObjectStackClient.data.find — one shared
+      // predicate and one shared expand mapping, so the two copies cannot
+      // diverge on which vocabulary a bag speaks (#6322).
       const v2 = options as QueryOptionsV2;
       const normalizedOptions: QueryOptions = {} as QueryOptions;
-      if ('where' in options || 'fields' in options || 'orderBy' in options || 'offset' in options) {
+      let expandParam: string | undefined;
+      if (isCanonicalQueryOptions(options)) {
         if (v2.where) normalizedOptions.filter = v2.where as any;
         if (v2.fields) normalizedOptions.select = v2.fields;
         if (v2.orderBy) normalizedOptions.sort = v2.orderBy as any;
         if (v2.limit != null) normalizedOptions.top = v2.limit;
         if (v2.offset != null) normalizedOptions.skip = v2.offset;
+        expandParam = canonicalExpandParam(v2.expand);
         if (v2.aggregations) normalizedOptions.aggregations = v2.aggregations;
         if (v2.groupBy) normalizedOptions.groupBy = v2.groupBy;
       } else {
@@ -4805,6 +4935,9 @@ export class ScopedProjectClient {
       }
       if (normalizedOptions.groupBy) {
         queryParams.set('groupBy', normalizedOptions.groupBy.join(','));
+      }
+      if (expandParam) {
+        queryParams.set('expand', expandParam);
       }
 
       const qs = queryParams.toString();

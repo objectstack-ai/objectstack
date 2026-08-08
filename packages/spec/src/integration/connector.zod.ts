@@ -21,11 +21,43 @@ import { retiredKey } from '../shared/retired-key';
  * - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
  * 
  * **SCOPE: Most comprehensive integration layer.**
- * Includes authentication, webhooks, rate limiting, field mapping, bidirectional sync,
+ * Includes authentication, webhooks, field mapping, bidirectional sync,
  * retry policies, and complete lifecycle management.
- * 
+ *
  * This protocol supports multiple authentication strategies, bidirectional sync,
- * field mapping, webhooks, and comprehensive rate limiting.
+ * field mapping, webhooks, and comprehensive retry and resilience policies.
+ *
+ * ## What this layer does NOT provide
+ *
+ * **There is no outbound rate limiting.** This header used to advertise "rate
+ * limiting" twice — once in the SCOPE line, once as "comprehensive rate limiting" —
+ * and no engine ever backed either. `connector.rateLimitConfig`, and the entire
+ * `ConnectorRateLimitConfig` / `RateLimitStrategy` shape behind it, was removed in
+ * `@objectstack/spec` 17.0.0 (#4911, ADR-0049 D2), because **no outbound
+ * rate-limiting engine ever existed**. The platform's only token bucket (runtime
+ * `security/rate-limit.ts`) throttles **INBOUND** requests *to* us; nothing throttles
+ * the calls a connector makes *out*. Do **not** substitute `shared`'s
+ * `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction.
+ * **Until an outbound throttle exists, rate-limit at the connector provider or
+ * upstream gateway.** What L3 does declare for a rate-limited upstream is
+ * `retryConfig` — whose `retryableStatusCodes` default `[408, 429, 500, 502, 503,
+ * 504]` includes `429` — and `health.circuitBreaker`. The full removal reasoning is
+ * recorded at the removal site: the "REMOVED: outbound rate limiting" block in
+ * `integration/connector.zod.ts`, and `packages/spec/docs/SYNC_ARCHITECTURE.md`.
+ *
+ * **Field mapping does not transform values.** This header used to offer "field
+ * mapping and transformations"; only the first half was ever true.
+ * `ConnectorFieldMappingSchema` extends the base mapping with exactly three keys —
+ * `dataType`, `required` and `syncMode`. `FieldMapping.transform` was removed in
+ * `@objectstack/spec` 17.0.0 (#5552, ADR-0049), and the whole `FieldMappingTransform`
+ * union went with it (`constant` / `cast` / `lookup` / `javascript` / `map`) — **no
+ * runtime ever executed any of the five**. An L3 connector mapping moves a value from
+ * `source` to `target`; it does not compute one. **Value conversion belongs on a
+ * surface that runs it:** the import mapping's own `mapping.fieldMapping[].transform`
+ * (`data/mapping.zod.ts` — a string enum,
+ * `none`/`constant`/`map`/`split`/`join`/`lookup`, with its settings in `params`),
+ * applied row by row by the REST import path — or an ETL transformation step
+ * (L2 above). Already authored the retired key? `os migrate meta --from 16` rewrites it.
  *
  * ## Runtime contract — descriptor vs. registered connector (#2612)
  *
@@ -55,8 +87,8 @@ import { retiredKey } from '../shared/retired-key';
  * **Use Enterprise Connector when:**
  * - Building enterprise-grade connectors (e.g., Salesforce, SAP, Oracle)
  * - Complex OAuth2/SAML authentication required
- * - Bidirectional sync with field mapping and transformations
- * - Webhook management and rate limiting required
+ * - Bidirectional sync with field mapping (`dataType` / `syncMode` per field — it moves values, it does not transform them)
+ * - Webhook management required
  * - Full CRUD operations and data synchronization
  * - Need comprehensive retry strategies and error handling
  * 

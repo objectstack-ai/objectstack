@@ -503,6 +503,71 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * One field-level finding from a validate-only run — the same
+ * `{ field, code, message }` triple the engine's `ValidationError.fields`
+ * carries, so a caller reads one vocabulary whether the verdict arrived from a
+ * preview or from a rejected write.
+ */
+export const ValidateDataIssueSchema = lazySchema(() => z.object({
+  field: z.string().describe('The field the finding is about (`_record` for an object-level rule).'),
+  code: z.string().describe('Machine-readable finding code, e.g. `required`, `invalid_type`, `rule_violation`.'),
+  message: z.string().describe('Human-readable message — a validation rule\'s author-written text where one exists.'),
+}));
+
+/**
+ * Validate Data Request (#6037 — #4633 ruling D)
+ *
+ * Ask for the write path's verdict on candidate rows WITHOUT writing them.
+ *
+ * @example
+ * {
+ *   "object": "leads",
+ *   "mode": "insert",
+ *   "data": [{ "first_name": "John", "email": "not-an-email" }]
+ * }
+ */
+export const ValidateDataRequestSchema = lazySchema(() => z.object({
+  object: z.string().describe('The object name.'),
+  data: z.union([
+    z.record(z.string(), z.unknown()),
+    z.array(z.record(z.string(), z.unknown())),
+  ]).describe('A candidate record, or an array of them. Nothing is persisted.'),
+  mode: z.enum(['insert', 'update']).optional().describe(
+    "Which write the verdict should predict. `insert` (default) walks every declared field, so a " +
+    "missing required field is a finding; `update` judges only the supplied keys, matching a PATCH.",
+  ),
+}));
+
+/**
+ * Validate Data Response
+ *
+ * One entry per submitted row, in submission order.
+ */
+export const ValidateDataResponseSchema = lazySchema(() => z.object({
+  object: z.string().describe('The object name.'),
+  mode: z.enum(['insert', 'update']).describe('The write mode the verdict was reached for.'),
+  valid: z.boolean().describe('True when EVERY row is valid — the whole-set answer.'),
+  results: z.array(z.object({
+    valid: z.boolean().describe('True when this row would be accepted by the write path.'),
+    errors: z.array(ValidateDataIssueSchema).describe('Findings that would REJECT this row. Empty when valid.'),
+    warnings: z.array(ValidateDataIssueSchema).describe(
+      'Findings the target deployment ADMITS rather than rejects — today, ADR-0104 value shapes under a ' +
+      'warn-first posture. The row is valid; the write would store it and log the same complaint.',
+    ),
+  })).describe('Per-row verdicts, in submission order.'),
+  posture: z.object({
+    valueShapeStrict: z.boolean().describe('True when this deployment rejects non-conforming value shapes (ADR-0104 self-certified).'),
+    mediaValueShapeStrict: z.boolean().describe('The same, for media field value shapes.'),
+  }).describe(
+    'The ADR-0104 posture the verdict was reached under — reported because it is the difference between ' +
+    '"this row is fine" and "this row is fine HERE". The same row can be an error on a self-certified ' +
+    'deployment and an admitted warning on an un-migrated one, and a caller explaining a verdict needs to ' +
+    'know which it got. An unconditionally-strict preview was considered and rejected (#4633 option B): it ' +
+    'would fail rows on every un-migrated deployment that the write would have accepted.',
+  ),
+}));
+
+/**
  * Update Data Request
  * Modification of an existing record.
  * 
@@ -1329,6 +1394,9 @@ export type GetDataRequest = z.input<typeof GetDataRequestSchema>;
 export type GetDataResponse = z.input<typeof GetDataResponseSchema>;
 export type CreateDataRequest = z.input<typeof CreateDataRequestSchema>;
 export type CreateDataResponse = z.input<typeof CreateDataResponseSchema>;
+export type ValidateDataIssue = z.input<typeof ValidateDataIssueSchema>;
+export type ValidateDataRequest = z.input<typeof ValidateDataRequestSchema>;
+export type ValidateDataResponse = z.input<typeof ValidateDataResponseSchema>;
 export type UpdateDataRequest = z.input<typeof UpdateDataRequestSchema>;
 export type UpdateDataResponse = z.input<typeof UpdateDataResponseSchema>;
 export type DeleteDataRequest = z.input<typeof DeleteDataRequestSchema>;
@@ -1519,6 +1587,23 @@ export interface DataProtocol {
   createData(request: CreateDataRequest): Promise<CreateDataResponse>;
   updateData(request: UpdateDataRequest): Promise<UpdateDataResponse>;
   deleteData(request: DeleteDataRequest): Promise<DeleteDataResponse>;
+
+  /**
+   * Validate-only (#6037 — #4633 ruling D): the write path's verdict on
+   * candidate rows, with nothing persisted.
+   *
+   * Declared optional because it is additive to a shipped contract, not
+   * because it is aspirational — `metadata-protocol` implements it in the same
+   * change that declares it. That is a ruling clause, not a style note:
+   * `BatchOptions.validateOnly` was retired in #4052 as a dry-run flag that
+   * "promised a dry-run" while every batch surface persisted regardless, so a
+   * caller previewing a mutation had it EXECUTED. A second declared-and-unmet
+   * validation promise is the one outcome this operation must not become.
+   *
+   * The verdict honours the deployment's real ADR-0104 posture, so it predicts
+   * what THIS deployment would do — see `ValidateDataResponseSchema.posture`.
+   */
+  validateData?(request: ValidateDataRequest): Promise<ValidateDataResponse>;
 
   // Batch Operations (optional)
   batchData?(request: BatchDataRequest): Promise<BatchDataResponse>;

@@ -5529,6 +5529,31 @@ export class ObjectStackProtocolImplementation implements
         throw recordNotFoundError(request.object, request.id);
     }
 
+    /**
+     * Validate-only (#6037 — #4633 ruling D): report the write path's verdict
+     * on candidate rows without persisting any of them.
+     *
+     * Deliberately thin. The verdict comes from `engine.validate()`, which
+     * calls the same `validateRecord` / `evaluateValidationRules` that
+     * `insert()` calls — so "the preview agrees with the write" is guaranteed
+     * by construction rather than by a mirror kept in step by hand. That
+     * mirror is what this replaces: `rest/src/import-coerce.ts` re-implemented
+     * a slice of the engine's rules and structurally could not predict the
+     * rest of the family (ADR-0104 value shapes, `format`, object-level
+     * `validations`, the state machine).
+     *
+     * Same object-existence gate as every other data entry point (#3770), so
+     * an unknown object fails the same way here as it would on the real write
+     * — a preview that 404s differently from its write is a mirror again.
+     */
+    async validateData(request: { object: string, data: any, mode?: 'insert' | 'update', context?: any }) {
+        this.assertObjectRegistered(request.object);
+        return this.engine.validate(request.object, request.data, {
+            ...(request.mode !== undefined ? { mode: request.mode } : {}),
+            ...(request.context !== undefined ? { context: request.context } : {}),
+        });
+    }
+
     async createData(request: { object: string, data: any, context?: any }) {
         this.assertObjectRegistered(request.object); // [#3770]
         // [#3043] Ingress-level static-`readonly` strip — a non-system caller
