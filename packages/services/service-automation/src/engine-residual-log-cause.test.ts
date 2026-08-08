@@ -56,6 +56,7 @@ import { ObjectLogger } from '@objectstack/core';
 import { AutomationEngine } from './engine.js';
 import type { NodeExecutor, SuspendedRun, SuspendedRunStore, FlowTrigger } from './engine.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
 
 // ── fixtures ───────────────────────────────────────────────────────────────
 
@@ -83,10 +84,22 @@ function workingStore(overrides: Partial<SuspendedRunStore>): SuspendedRunStore 
     };
 }
 
-/** A pausing executor; `onRelease` optionally makes its teardown throw. */
+/**
+ * A pausing executor; `onRelease` optionally makes its teardown throw.
+ *
+ * Declares `resumeAuthority: 'any'` because these tests continue the pause
+ * through the public {@link AutomationEngine.resume} door. Since #5561 that is
+ * an opt-in: a node type that declares nothing is refused there, so a fixture
+ * exercising anything OTHER than the resume gate has to state the posture it
+ * relies on — the same declaration the four pausing built-ins carry.
+ */
 function pauser(onRelease?: () => void): NodeExecutor {
     return {
         type: 'pauser',
+        descriptor: defineActionDescriptor({
+            type: 'pauser', version: '1.0.0', name: 'Pauser',
+            supportsPause: true, resumeAuthority: 'any',
+        }),
         async execute(node) {
             return { success: true, suspend: true, correlation: `test-armature:${node.id}` };
         },

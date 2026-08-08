@@ -273,7 +273,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /automation/:name/trigger', domain: '/automation', disposition: 'sdk', client: 'automation.execute' },
   { route: 'POST /automation/:name/toggle', domain: '/automation', disposition: 'sdk', client: 'automation.toggle' },
   { route: 'POST /automation/:name/runs/:runId/resume', domain: '/automation', disposition: 'sdk', client: 'automation.resume',
-    note: "generic, so the SUSPENDED NODE gates it (#3801): a pause whose descriptor declares resumeAuthority:'service' — today `approval` — answers 403 here and continues only through its owning service (ApprovalService.decide), which authorizes and records the decision first. Screen/wait pauses are unaffected; this route is the screen-flow runner's door" },
+    note: "generic, so the SUSPENDED NODE gates it (#3801): a pause whose descriptor declares resumeAuthority:'service' — today `approval` / `approval_revise` — answers 403 here and continues only through its owning service (ApprovalService.decide), which authorizes and records the decision first. A node type that declares NO resumeAuthority answers 403 too, fail-closed since #5561: this door is an opt-in a descriptor states with 'any'. Screen/wait pauses are unaffected because they declare it; this route is the screen-flow runner's door" },
   { route: 'GET /automation/:name/runs/:runId/screen', domain: '/automation', disposition: 'sdk', client: 'automation.getScreen' },
   { route: 'GET /automation/:name/runs/:runId', domain: '/automation', disposition: 'sdk', client: 'automation.getRun' },
   { route: 'GET /automation/:name/runs', domain: '/automation', disposition: 'sdk', client: 'automation.listRuns' },
