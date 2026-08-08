@@ -57,6 +57,7 @@ import { AutomationEngine } from './engine.js';
 import type { NodeExecutor, SuspendedRun, SuspendedRunStore, FlowTrigger } from './engine.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { registerScreenNodes } from './builtin/screen-nodes.js';
 
 // ── fixtures ───────────────────────────────────────────────────────────────
 
@@ -490,6 +491,14 @@ describe('#6499 sites 9–13 — engine-internal seams carrying foreign text, al
         const engine = new AutomationEngine(jsonLogger(), workingStore({
             async load(runId) { return runId === 'run_scr' ? parked : null; },
         }));
+        // The real `screen` executor, as any booted engine has it. Needed since
+        // #5561 step two: the resume below goes through the public gate, and the
+        // authority of a pause is read off the SUSPENDED NODE's descriptor — with
+        // no `screen` registered there is no descriptor, which now resolves
+        // fail-closed and refuses the resume before this seam is ever reached.
+        // `screen` declares `resumeAuthority: 'any'`, so registering it restores
+        // exactly the production shape this site is about.
+        registerScreenNodes(engine, { logger: jsonLogger(), getService() { return undefined; } } as never);
         engine.registerFlow('onboard', {
             name: 'onboard',
             label: 'Onboard',
