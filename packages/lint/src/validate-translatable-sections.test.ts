@@ -314,22 +314,35 @@ describe('validateTranslatableSections — what it deliberately leaves alone', (
     expect(findings).toEqual([]);
   });
 
-  it('reads a detail section\'s `title` as its heading', () => {
-    // `record:details` reads `title ?? label` — a nameless section with only a
-    // `title` renders a heading just the same.
-    const findings = validateTranslatableSections({
-      objects: [crmCase],
-      pages: [
-        {
-          name: 'case_detail',
-          object: 'crm_case',
-          regions: [{ components: [{ type: 'record:details', properties: { sections: [{ title: 'SLA' }] } }] }],
-        },
-      ],
-      translations: caseTranslated,
-    });
+  // #5730: `label` is the only heading spelling `RecordDetailsProps.sections[]`
+  // declares (#5611). The rule used to read `label ?? title`, which meant an
+  // off-spec `title` earned a translation-shaped warning — telling the author
+  // their `title` heading needed a `name` to be translatable, i.e. teaching the
+  // spelling the schema rejects. The two cases below are one pin, deliberately
+  // PAIRED: the `label` case proves the walk reaches this component at all, so
+  // the `title` case's empty result is the tolerance being gone and not the
+  // fixture failing to arrive (#5046's "green because nothing was produced").
+  const namelessDetailSection = (section: Record<string, unknown>) => ({
+    objects: [crmCase],
+    pages: [
+      {
+        name: 'case_detail',
+        object: 'crm_case',
+        regions: [{ components: [{ type: 'record:details', properties: { sections: [section] } }] }],
+      },
+    ],
+    translations: caseTranslated,
+  });
+
+  it('reads a detail section\'s `label` as its heading', () => {
+    const findings = validateTranslatableSections(namelessDetailSection({ label: 'SLA' }));
     expect(findings).toHaveLength(1);
     expect(findings[0].where).toContain('section "SLA"');
+  });
+
+  it('does NOT read a detail section\'s off-spec `title` as its heading', () => {
+    const findings = validateTranslatableSections(namelessDetailSection({ title: 'SLA' }));
+    expect(findings).toEqual([]);
   });
 
   it('keys a retargeted component under the object it actually binds', () => {

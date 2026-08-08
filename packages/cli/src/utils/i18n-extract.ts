@@ -439,10 +439,14 @@ function addSectionList(index: SectionIndex, sections: unknown, objectName: unkn
   for (const section of sections) {
     if (!section || typeof section !== 'object') continue;
     const s = section as Record<string, unknown>;
-    // `record:details` reads `title ?? label`, form views author `label`; a
-    // localized-map label (`{ en, 'zh-CN' }`) is already multilingual and
+    // `label` is the ONE heading spelling both surfaces declare —
+    // `RecordDetailsProps.sections[]` and `FormSectionSchema` (#5611, #5730).
+    // A `title` here is off-spec and deliberately unread: reading it would
+    // scaffold a bundle key for a heading the schema rejects, which is how a
+    // consumer-side tolerance grows into a second de-facto contract (PD #12).
+    // A localized-map label (`{ en, 'zh-CN' }`) is already multilingual and
     // `inlineText` drops it to "nothing authored in plain text".
-    addSection(index, objectName, s.name, s.label ?? s.title);
+    addSection(index, objectName, s.name, s.label);
   }
 }
 
