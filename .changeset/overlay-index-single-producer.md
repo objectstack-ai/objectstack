@@ -51,3 +51,6 @@ swallowing driver-resolution failures.
 **Migration:** if you called `addSysMetadataOverlayIndex(driver)` directly, delete
 the call. Assemble `metadata-protocol` for the partial, active-scoped index, or rely
 on the declared index that `syncSchema` already builds.
+
+<!-- adr-0087: not-required (no-migration-prescription) what is removed is a TypeScript function export, not an authored metadata surface: no metadata key, no key spelling and no stored value moves, so `objectstack migrate meta` has nothing to rewrite and the ledger has no upgrader to reach. The index itself is unchanged in the only spelling that ever reached a database from a correct producer. Measured: the export had zero call sites outside its own package across objectstack, cloud and objectui. -->
+
