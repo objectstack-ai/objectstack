@@ -436,13 +436,17 @@ const translationDataShape = () => ({
    *   pages.<name>.title        → the page's `page:header` `properties.title`
    *   pages.<name>.subtitle     → the page's `page:header` `properties.subtitle`
    *
+   *   pages.<name>.components.<componentId>.<key>
+   *                             → that component's `properties.<key>` (#6080)
+   *
    * `title` falls back to `label` when omitted, since a page's header title
    * and its nav/breadcrumb label are usually the same string — translators
    * only author `title` separately when the two genuinely differ.
    *
-   * Header copy lives here rather than under a per-component key because
-   * `page:header` instances carry no stable `id`; the page name is the only
-   * addressable identifier on the metadata document.
+   * Header copy lives at the TOP level here rather than under `components`
+   * because `page:header` instances carry no stable `id`; the page name is the
+   * only addressable identifier for them. Every other component does have one,
+   * which is what `components` addresses — see its own note.
    */
   pages: z.record(z.string(), strictObject({
     surface: 'this page translation',
@@ -453,6 +457,69 @@ const translationDataShape = () => ({
     description: z.string().optional().describe('Translated page description'),
     title: z.string().optional().describe('Translated `page:header` title (defaults to `label`)'),
     subtitle: z.string().optional().describe('Translated `page:header` subtitle'),
+    /**
+     * Per-component copy, keyed by the component's `id`
+     * (`PageComponentSchema.id`) — the page half of what
+     * `dashboards.<name>.widgets.<widgetId>` has always given dashboards
+     * (#6080).
+     *
+     * **Why this existed as a hole.** The two component trees are near-identical
+     * in shape and a dashboard widget's `title`/`description` were translatable
+     * while a page component's were not, so a page's cards, KPI blocks and
+     * related lists had no key to write at all — not a drifted key, no key. The
+     * strings then reached the user as whatever literal the `*.page.ts` author
+     * typed, in every locale. It bit hardest on landing pages: hotcrm's
+     * `sales_home_page` rendered a translated header above four English cards
+     * and four English KPI blocks in zh/ja/es (12 strings across 8 pages).
+     * Nothing was misconfigured — the contract had nowhere to put them, and
+     * `.strict()` (correctly) refused the keys a translator invented.
+     *
+     * **The key face is measured, not mirrored.** Each key below is a copy prop
+     * that some component in `ComponentPropsMap` (`ui/component.zod.ts`)
+     * actually declares — every one is a plain `z.string()`/`I18nLabelSchema`,
+     * i.e. a literal with no inline `{en, zh}` form, so the bundle is its ONLY
+     * localization route:
+     *
+     * | key | declared by |
+     * |:---|:---|
+     * | `title` | `page:card`, `record:related_list` (and `page:header`, see below) |
+     * | `label` | `page:tabs`, `page:accordion`, `record:details`, `record:related_list`, `record:path`, `element:button`, `element:record_picker`, `element:text_input` |
+     * | `description` | `element:text_input` |
+     * | `placeholder` | `element:record_picker`, `element:text_input` |
+     * | `emptyText` | `element:record_picker` |
+     * | `submitLabel` | `element:form` |
+     *
+     * Two deliberate exclusions, both of which a mirror of the issue's proposed
+     * shape would have got wrong:
+     *
+     * - **`help` is not here** — no component in the model declares it. It
+     *   would parse clean and translate nothing, which is the ADR-0078 shape
+     *   this file keeps paying to remove. (`helpText` exists on an ACTION
+     *   PARAM, a different surface with its own translation face.)
+     * - **`subtitle` is not here** — `page:header` is its only declarer, and
+     *   that component is addressed by page name above. Declaring it in both
+     *   places would give one string two spellings, which is how the
+     *   dashboards/pages asymmetry started.
+     *
+     * `properties` is an open record and custom component types are legal, so
+     * these keys are also the route for a bespoke component that speaks the
+     * same vocabulary (hotcrm's `ai_briefing` carries `title` + `description`).
+     */
+    components: z.record(z.string(), strictObject({
+      surface: 'this page component translation',
+      history: TRANSLATION_HISTORY,
+      // A page component's headline is `title`; the PAGE's is `label`. Same
+      // document one level apart with opposite spellings — the same trap
+      // `dashboards.widgets` names, so it gets the same alias table.
+      aliases: { name: 'title', heading: 'title', text: 'label', caption: 'description', help: 'description', helpText: 'description', empty: 'emptyText', emptyState: 'emptyText', submit: 'submitLabel' },
+    }, {
+      title: z.string().optional().describe('Translated component title (`page:card`, `record:related_list`, …)'),
+      description: z.string().optional().describe('Translated component description / supporting copy'),
+      label: z.string().optional().describe("Translated component label — overlays the component's own `label` when it declares one, else `properties.label`"),
+      placeholder: z.string().optional().describe('Translated input placeholder (`element:record_picker`, `element:text_input`)'),
+      emptyText: z.string().optional().describe('Translated empty-state text (`element:record_picker`)'),
+      submitLabel: z.string().optional().describe('Translated submit button label (`element:form`)'),
+    })).optional().describe('Per-component copy keyed by component id (`PageComponentSchema.id`)'),
   })).optional().describe('Page translations keyed by page name'),
 
   /**

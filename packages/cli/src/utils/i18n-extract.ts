@@ -49,6 +49,7 @@
  *   dashboards.<dash>.widgets.<w>.title / .description
  *   pages.<page>.label / .description
  *   pages.<page>.title / .subtitle   (from the page's `page:header` component)
+ *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -63,7 +64,7 @@
  */
 
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
-import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
+import { METADATA_FORM_REGISTRY, PAGE_COMPONENT_COPY_KEYS } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { expandViewContainer } from '@objectstack/spec/ui';
@@ -749,6 +750,34 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
         }
         if (typeof props.subtitle === 'string' && props.subtitle) {
           pushEntry(out, ['pages', name, 'subtitle'], props.subtitle, 'page');
+        }
+      }
+    }
+
+    // Per-component copy, addressed by the component's own id (#6080). Without
+    // this pass the face exists but nothing writes the skeleton, so a
+    // translator would have to know the keys to hand-write them — which is
+    // most of the reason the copy went untranslated in the first place.
+    //
+    // `page:header` is deliberately skipped: its copy is addressed by page
+    // name above, and emitting it here too would offer one string under two
+    // keys.
+    for (const region of regions) {
+      const components: any[] = Array.isArray(region?.components) ? region.components : [];
+      for (const component of components) {
+        if (component?.type === 'page:header') continue;
+        const id = component?.id;
+        if (typeof id !== 'string' || !id) continue;
+        const props = component.properties ?? {};
+        for (const key of PAGE_COMPONENT_COPY_KEYS) {
+          // `label` may be authored on the component itself or in its props —
+          // the same either/or `translatePage` resolves back onto.
+          const value = key === 'label' && typeof component.label === 'string' && component.label
+            ? component.label
+            : props[key];
+          if (typeof value === 'string' && value) {
+            pushEntry(out, ['pages', name, 'components', id, key], value, 'page');
+          }
         }
       }
     }

@@ -1171,6 +1171,28 @@ const gitInPackage: GitRun = (...args: string[]) =>
   });
 
 /**
+ * Make one commit READABLE in this checkout, fetching it when the tree does not
+ * hold it yet (#5235, factored out for #6452's second caller).
+ *
+ * `--depth=1` is the whole point rather than a compromise: the commit is wanted
+ * for its TREE — the shards under it — never for a walk, and every consumer here
+ * already treats a truncated walk as "no answer" rather than as a verdict. A
+ * deeper fetch would be a bounded workaround for the truncation instead of a read
+ * of the one commit the gate names, which #6452 rejected in as many words ("把
+ * 「永远走不通」换成「偶尔走不通」,更难诊断").
+ *
+ * False means neither the checkout nor the remote can produce it: an offline
+ * container, or a rev nothing upstream advertises. Callers decide what that
+ * costs them; none of them may treat it as a pass.
+ */
+function ensureCommitPresent(git: GitRun, rev: string): boolean {
+  if (git('cat-file', '-e', `${rev}^{commit}`).status === 0) return true;
+  // Shallow checkout (CI's typecheck job): ask the remote for that one commit.
+  git('fetch', '--quiet', '--depth=1', 'origin', rev);
+  return git('cat-file', '-e', `${rev}^{commit}`).status === 0;
+}
+
+/**
  * The in-tree anchor must be an authentic copy of an UPSTREAM commit's baseline,
  * and this is the environment that can prove it (#5235).
  *
@@ -1204,20 +1226,26 @@ function verifyCommittedSurfaceBase(
 
   // Fast path, and the common one right after a refresh: the anchor names the
   // very rev this run resolved out of git, so the baseline to compare against is
-  // already in hand — no object lookup, and no ancestry question either (that
-  // rev IS origin/main's merge base or tip).
+  // already in hand — no object lookup, and no ancestry question either.
+  //
+  // What makes it sound is a property of `resolved`, not of the equality: those
+  // keys were READ OUT OF GIT at that rev, never out of this file. Every producer
+  // of a `SurfaceBaseResolution.gitAnchor` goes through `readSurfaceKeysAtRev`,
+  // including the shallow re-anchor added by #6452 — which is the one caller that
+  // can make `rev === resolved.rev` true by CONSTRUCTION rather than by
+  // coincidence, and would therefore be exactly where a file-validating-file
+  // comparison could hide. Keeping the keys git-sourced is what stops it; the pin
+  // is behavioural (a key shed from this file is still caught under `.git/shallow`
+  // — see build-schemas-check-mode.test.ts) rather than a comment asserting it.
+  //
+  // The ancestry half is not skipped by that caller either: it establishes the
+  // rev is upstream BEFORE handing it over — see `resolveBaselineWithoutMergeBase`.
   if (rev === resolved.rev) {
     compareAnchorKeys(resolved.keys, committed, short, fix);
     return;
   }
 
-  let present = git('cat-file', '-e', `${rev}^{commit}`).status === 0;
-  if (!present) {
-    // Shallow checkout (CI's typecheck job): ask the remote for that one commit.
-    git('fetch', '--quiet', '--depth=1', 'origin', rev);
-    present = git('cat-file', '-e', `${rev}^{commit}`).status === 0;
-  }
-  if (!present) {
+  if (!ensureCommitPresent(git, rev)) {
     console.log(
       `ℹ️  ${SURFACE_BASE_FILE_NAME}: commit ${short} is not in this checkout and could not be\n` +
         `   fetched, so its authenticity is unverifiable here. This run anchored on the merge base\n` +
@@ -1230,13 +1258,21 @@ function verifyCommittedSurfaceBase(
   // `merge-base --is-ancestor` answers "not an ancestor" for a commit that
   // demonstrably is one — the same truncation the merge-base fallback above
   // already accounts for, and it fails the whole build if trusted (caught on this
-  // change's own first CI run). Ask whether the answer can mean anything first.
-  if (git('rev-parse', '--is-shallow-repository').stdout.trim() === 'true') {
+  // change's own first CI run). Ask whether the answer can mean anything first —
+  // through `probeAncestry`, the ONE reading of those exit codes this file has
+  // (#5370/#5847). It used to be open-coded here, which also meant git DECLINING
+  // to answer (exit 128, the cloud#1116 trap) was read as a verdict of "not an
+  // ancestor" and failed the build; the shared reading tells the two apart.
+  const ancestry = probeAncestry(git, rev, tip);
+  if (ancestry.answer === 'unknown') {
     console.log(
-      `ℹ️  ${SURFACE_BASE_FILE_NAME}: shallow checkout — cannot walk history to confirm ${short} is\n` +
-        `   on origin/main, so only its recorded keys are verified here (#5235). A full clone checks both.`,
+      ancestry.reason === 'shallow'
+        ? `ℹ️  ${SURFACE_BASE_FILE_NAME}: shallow checkout — cannot walk history to confirm ${short} is\n` +
+            `   on origin/main, so only its recorded keys are verified here (#5235). A full clone checks both.`
+        : `ℹ️  ${SURFACE_BASE_FILE_NAME}: \`git merge-base --is-ancestor\` did not answer about ${short}\n` +
+            `   (exit ${ancestry.status}): ${ancestry.stderr} — so only its recorded keys are verified here (#5235).`,
     );
-  } else if (git('merge-base', '--is-ancestor', rev, tip).status !== 0) {
+  } else if (ancestry.answer === 'no') {
     console.error(
       `\n❌ ${SURFACE_BASE_FILE_NAME} names a baseRev (${short}) that is NOT an ancestor of\n` +
         `   origin/main (#5235).\n\n` +
@@ -1454,6 +1490,119 @@ function assertAnchorMovesForward(git: GitRun, committedRev: string, resolvedRev
 }
 
 /**
+ * The `baseRev` ORIGIN/MAIN itself records, read out of the anchor file as it is
+ * committed at the tip (#6452).
+ *
+ * This is the one statement about which upstream commit the anchor names that a
+ * PR cannot rewrite: the bytes live in main's tree, not in the tree under test.
+ * And it is readable in exactly the checkouts where ancestry is NOT — a
+ * `--depth=1` fetch of main carries that commit's whole tree, while its history
+ * is precisely what got cut.
+ *
+ * Null when main carries no anchor (a history predating #5235) or carries one
+ * this reader cannot make sense of. Deliberately quiet: nothing here is a verdict
+ * about the tree under test, only an input the caller may or may not get.
+ */
+function readUpstreamAnchorRev(git: GitRun, tip: string): string | null {
+  const show = git('show', `${tip}:./${SURFACE_BASE_FILE_NAME}`);
+  if (show.status !== 0) return null;
+  try {
+    const doc = JSON.parse(show.stdout) as Partial<AuthorableSurfaceBase>;
+    const rev = doc?.baseRev ?? '';
+    return /^[0-9a-f]{40}$/.test(rev) ? rev : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The baseline anchor for a checkout where `merge-base HEAD origin/main` cannot
+ * answer — a shallow one, which is every CI job that does not ask for
+ * `fetch-depth: 0` and every agent container (#6452).
+ *
+ * ── Why the tip is the wrong answer there ───────────────────────────────────
+ * Under a TIP anchor, "main added a key after this branch forked" and "this
+ * branch deleted a key" are the SAME fact, and the gate reports the first as the
+ * second: #6359 measured PR #6356, which touched no packages/spec file at all,
+ * being told it had deleted `ui/BulkActionDef:requiredPermissions` — a key main
+ * had just ADDED. The correlation is inverted, which is what makes it expensive:
+ * it fires on the PRs where "you deleted an authorable key" is most believable.
+ *
+ * ── Why not simply skip the check ───────────────────────────────────────────
+ * Because that is the #4650 bypass with extra steps, in every shallow job at
+ * once. So the disposition is to move the ANCHOR, never the verdict: the gate
+ * still runs, still adjudicates, and a key that existed at the anchored rev and
+ * is gone now is still caught. What it stops seeing is keys main added AFTER the
+ * anchored rev — which is the false-positive set, not the deletion set.
+ *
+ * ── Which rev, and why it has to be earned ──────────────────────────────────
+ * The obvious candidate is the in-tree anchor's own `baseRev`: it is upstream, it
+ * is normally no NEWER than the branch's fork point, and the offline route
+ * already anchors there (#5235). But its authenticity has two parts
+ * (`verifyCommittedSurfaceBase`), and a shallow checkout can only prove the
+ * second: `merge-base --is-ancestor` reports "not an ancestor" about a commit
+ * that plainly is one, so part 1 SKIPS — the gate says so itself. Today that skip
+ * is free, because that same doc comment records why: "in that environment the
+ * merge-base anchor — not this file — is what the deletion check ran on anyway."
+ * Making the file load-bearing there is exactly what removes that sentence's
+ * protection, and a PR CAN point `baseRev` at one of its own commits (a
+ * `--depth=1` fetch resolves any sha the remote advertises, its own head
+ * included) whose shards already lack the key it is deleting. Both halves of the
+ * key check then pass, against a baseline the PR authored.
+ *
+ * So the rev is accepted only when something the PR does not control says it is
+ * upstream, in this order:
+ *
+ *   1. reachability DEMONSTRATED — `probeAncestry` answers "yes", which is proof
+ *      in every checkout, truncated included (a cut walk can only lose
+ *      reachability, never invent it). Rare in the shallow case by construction;
+ *      it is what a non-shallow checkout with unrelated histories gets.
+ *   2. ORIGIN/MAIN NAMES THE SAME REV — main's own committed anchor points at it.
+ *      The ordinary case: the anchor moves only under an explicit `--update-base`
+ *      (#5358), so a branch and main agree on it unless a re-anchor landed in
+ *      between.
+ *   3. otherwise, the rev MAIN names, never the one this tree names. Still
+ *      upstream, still far older than the tip, and unforgeable — the residue is
+ *      that it may be NEWER than the branch's fork point, which narrows the false
+ *      positive window rather than closing it. Announced, so it is never mistaken
+ *      for case 2.
+ *
+ * With none of those available the caller keeps today's tip anchor and says so:
+ * a loud false red beats a silent bypass, and that is the honest degradation for
+ * a checkout that can see origin/main's tip and nothing else.
+ */
+function resolveBaselineWithoutMergeBase(
+  git: GitRun,
+  tip: string,
+  committed: AuthorableSurfaceBase | null,
+): { rev: string; why: string } | null {
+  if (!committed) return null;
+  const own = committed.baseRev;
+  const upstreamRev = readUpstreamAnchorRev(git, tip);
+  const ownPresent = ensureCommitPresent(git, own);
+
+  if (ownPresent && probeAncestry(git, own, tip).answer === 'yes') {
+    return { rev: own, why: `${own.slice(0, 12)} is a demonstrated ancestor of origin/main` };
+  }
+  if (ownPresent && upstreamRev === own) {
+    return {
+      rev: own,
+      why: `origin/main's own ${SURFACE_BASE_FILE_NAME} names the same commit, so it is upstream`,
+    };
+  }
+  if (upstreamRev && upstreamRev !== own && ensureCommitPresent(git, upstreamRev)) {
+    return {
+      rev: upstreamRev,
+      why:
+        `this tree's ${SURFACE_BASE_FILE_NAME} names ${own.slice(0, 12)}, which nothing here can\n` +
+        `   show is upstream (truncated history), so this run anchors on ${upstreamRev.slice(0, 12)} —\n` +
+        `   the rev origin/main's own copy records`,
+    };
+  }
+  return null;
+}
+
+/**
  * What `resolveSurfaceBase()` resolved: the baseline itself, plus — only when
  * the GIT path produced it — the anchor that path is allowed to write.
  *
@@ -1488,12 +1637,18 @@ type SurfaceBaseResolution = {
  * when no baseline existed there at all; failure to ANCHOR the base is fatal —
  * a deletion check that silently skips is the #4650 bypass with extra steps.
  *
- * Two anchors, in strict preference order (#5235):
+ * Three anchors, in strict preference order (#5235, #6452):
  *
  *   `merge-base` — origin/main is reachable (every dev checkout, every CI run).
  *      Unchanged from #4650: the baseline is read out of git at the merge base,
  *      and the in-tree anchor is additionally VERIFIED against it here, which is
  *      what makes that file trustworthy in the environments that cannot check.
+ *   `re-anchor`  — origin/main resolves but its history is TRUNCATED, so
+ *      `merge-base` has nothing to walk. The rev then comes from an upstream
+ *      anchor and the keys are read out of git at it — see
+ *      `resolveBaselineWithoutMergeBase` for which rev is eligible and why the
+ *      tip is not. Nothing is skipped and nothing is waived; only the anchor
+ *      moves (#6452).
  *   `in-tree`  — origin/main is not resolvable and no fetch can make it so. That
  *      is not a developer who forgot to fetch; it is a build environment with no
  *      route to GitHub: cloud's buildx image stages (framework is COPYed into the
@@ -1530,34 +1685,49 @@ function resolveSurfaceBase(): SurfaceBaseResolution | null {
     const tip = tipProbe.stdout.trim();
     // Merge base, so a branch behind origin/main is compared against what it
     // FORKED from (keys added on main since then are not "deleted" here). In a
-    // shallow clone there is no walkable ancestry — fall back to the tip, which
-    // on a PR's synthetic merge commit is the merge base anyway.
+    // shallow clone there is no walkable ancestry, and the old fallback used the
+    // TIP — which the parenthetical here used to justify as "on a PR's synthetic
+    // merge commit that is the merge base anyway". It is not: the merge ref is
+    // built when the PR is opened or updated and goes stale as main advances,
+    // while the `--depth=1` fetch above always brings back main's CURRENT tip.
+    // #6359 measured the two apart and the gate called main's addition this
+    // branch's deletion. Re-anchor instead of re-judging (#6452).
     const mergeBase = git('merge-base', 'HEAD', tip);
-    const rev = mergeBase.status === 0 ? mergeBase.stdout.trim() : tip;
+    let rev = mergeBase.status === 0 ? mergeBase.stdout.trim() : tip;
     if (mergeBase.status !== 0) {
-      // That "…is the merge base anyway" holds only while the merge ref is
-      // fresh. It is generated when the PR opens or updates and goes STALE as
-      // main advances, so on a branch that forked earlier the tip anchor
-      // carries keys the fork point never had — and this gate reads every one
-      // of them as a line THIS commit deleted. The direction is worth spelling
-      // out because the verdict it produces ("deleted without proof") reads
-      // like a severe spec violation and costs far more to diagnose than to
-      // fix: #6359 was one CI job missing `fetch-depth: 0`, and the PR it
-      // reddened (#6356) had not touched packages/spec at all.
-      //
-      // Diagnostic only — the verdict below is unchanged. Making this route
-      // stop MISJUDGING rather than merely announcing itself is a separate
-      // decision with a much wider blast radius: this block is top-level, so
-      // every `gen:schema` runs it, which means every shallow job that builds
-      // @objectstack/spec (ci.yml `build-core`, docker-publish, release, …)
-      // takes this path whenever that build is a cache miss. Tracked in #6452.
-      console.log(
-        `   (shallow history — no merge base is walkable here, so this run anchors on the\n` +
-          `    origin/main TIP ${tip.slice(0, 12)} instead. ⚠️  Under a tip anchor a key that main ADDED\n` +
-          `    after this branch forked is indistinguishable from a key this branch DELETED. If a\n` +
-          `    deletion is reported below for a file you did not touch, check that first — and if\n` +
-          `    this is CI, the job's checkout step needs \`fetch-depth: 0\` (#6359).)`,
-      );
+      // `--update-base` is deliberately excluded. Its job is to resolve a NEW
+      // baseline out of git and write it down, so anchoring it on the anchor is
+      // circular: the run would report "nothing to re-anchor" instead of the
+      // #5370 refusal a truncated history owes it (`assertAnchorMovesForward`
+      // fails closed there, and that refusal is the correct answer).
+      const reanchored = UPDATE_BASE ? null : resolveBaselineWithoutMergeBase(git, tip, committed?.doc ?? null);
+      if (reanchored) {
+        rev = reanchored.rev;
+        console.log(
+          `ℹ️  shallow history — \`merge-base HEAD origin/main\` cannot answer here, so the\n` +
+            `   authorable-surface deletion check (#4650) anchors on ${rev.slice(0, 12)} rather than on\n` +
+            `   origin/main's tip ${tip.slice(0, 12)} (#6452): ${reanchored.why}.\n` +
+            `   Under a tip anchor "main added a key after this branch forked" and "this branch deleted\n` +
+            `   a key" are the same fact, and the gate reports the first as the second. The baseline's\n` +
+            `   keys are read from git at that commit, never from ${SURFACE_BASE_FILE_NAME} itself.`,
+        );
+      } else {
+        // #6359's diagnostic, kept for the one arm it still describes. With no
+        // upstream anchor to move to, the tip is all this run has — so the
+        // direction it misjudges is exactly what the reader needs spelled out,
+        // because the verdict it produces ("deleted without proof") reads like a
+        // severe spec violation and costs far more to diagnose than to fix
+        // (#6359 was one CI job missing `fetch-depth: 0`, and the PR it reddened,
+        // #6356, had not touched packages/spec at all).
+        console.log(
+          `   (shallow history — no merge base is walkable here, and no upstream anchor was usable\n` +
+            `    either (#6452), so this run anchors on the origin/main TIP ${tip.slice(0, 12)} instead.\n` +
+            `    ⚠️  Under a tip anchor a key that main ADDED after this branch forked is\n` +
+            `    indistinguishable from a key this branch DELETED. If a deletion is reported below for\n` +
+            `    a file you did not touch, check that first — and if this is CI, the job's checkout\n` +
+            `    step needs \`fetch-depth: 0\` (#6359).)`,
+        );
+      }
     }
     const baseline = readSurfaceKeysAtRev(
       git,

@@ -676,6 +676,10 @@ export function translateDashboard<T extends DashboardLike>(
 /** Minimal page-component shape consumed by `translatePage`. */
 export interface PageComponentLike {
   type?: string;
+  /** `PageComponentSchema.id` — the key `pages.<name>.components` addresses (#6080). */
+  id?: string;
+  /** The component's own top-level label, where `label` copy lands when present. */
+  label?: string;
   properties?: Record<string, any>;
   [key: string]: any;
 }
@@ -714,6 +718,54 @@ function lookupPageAttr(
 }
 
 /**
+ * The copy keys `pages.<name>.components.<id>` carries (#6080). Measured
+ * against `ComponentPropsMap` — see the schema's own note for which component
+ * declares which.
+ *
+ * Exported because the CLI's `i18n-extract` writes exactly these keys into the
+ * skeleton bundle. Two hand-maintained copies of this list would drift into the
+ * classic pair of failures — the extractor offering a key the resolver ignores,
+ * or omitting one it reads — so there is one list and both sides import it.
+ * `translation.zod.ts` declares the same six; `translation.test.ts` pins the
+ * two in agreement.
+ */
+export const PAGE_COMPONENT_COPY_KEYS = [
+  'title', 'description', 'label', 'placeholder', 'emptyText', 'submitLabel',
+] as const;
+
+export type PageComponentCopyKey = typeof PAGE_COMPONENT_COPY_KEYS[number];
+
+/**
+ * Per-component copy for one component id, resolved across the locale chain.
+ *
+ * Resolved KEY BY KEY rather than by taking the first locale that has an entry
+ * for the id: a partially-translated `zh` entry must still fall back to `en`
+ * for the keys it omits, which is how every other resolver on this surface
+ * behaves.
+ */
+function lookupPageComponentCopy(
+  bundle: TranslationBundle | undefined,
+  name: string,
+  id: string,
+  opts?: ResolveOptions,
+): Partial<Record<PageComponentCopyKey, string>> | undefined {
+  if (!bundle) return undefined;
+  let found: Partial<Record<PageComponentCopyKey, string>> | undefined;
+  for (const code of localeChain(opts)) {
+    const entry = pickData(bundle, code)?.pages?.[name]?.components?.[id];
+    if (!entry || typeof entry !== 'object') continue;
+    for (const key of PAGE_COMPONENT_COPY_KEYS) {
+      if (found?.[key] !== undefined) continue;
+      const candidate = (entry as Record<string, unknown>)[key];
+      if (typeof candidate === 'string' && candidate.length > 0) {
+        (found ??= {})[key] = candidate;
+      }
+    }
+  }
+  return found;
+}
+
+/**
  * Apply the active locale to a page metadata document — translates the page's
  * own `label` / `description` and the `properties.title` / `properties.subtitle`
  * of every `page:header` component in its regions, against
@@ -724,6 +776,13 @@ function lookupPageAttr(
  * `page:header` instances carry no stable id in practice. `title` falls back to
  * `pages.<name>.label` so translators need not repeat a string that is normally
  * identical to the page's nav label.
+ *
+ * Every OTHER component is addressed by its own `id` through
+ * `pages.<name>.components.<id>` (#6080), which overlays that component's
+ * `properties` — the page half of what `dashboards.<name>.widgets.<id>` has
+ * always given dashboards. Because the id route is the more specific of the
+ * two, it wins wherever both could apply (a `page:header` that does carry an
+ * id).
  *
  * Only region-level components are visited: `page:header` is a top-level
  * layout block by convention, and components nested inside another component's
@@ -746,13 +805,44 @@ export function translatePage<T extends PageLike>(
 
   const translateComponent = (component: PageComponentLike): PageComponentLike => {
     if (!component || typeof component !== 'object') return component;
-    if (component.type !== PAGE_HEADER_COMPONENT) return component;
-    if (headerTitle === undefined && headerSubtitle === undefined) return component;
+
+    // Per-component copy (#6080) — addressed by the component's own id, so it
+    // is strictly more specific than the page-name route below and is applied
+    // first. A `page:header` that DOES carry an id can therefore be translated
+    // either way, and the id wins.
+    const copy = typeof component.id === 'string' && component.id.length > 0
+      ? lookupPageComponentCopy(bundle, name, component.id, opts)
+      : undefined;
+
+    let next = component;
+    if (copy) {
+      const { label: copyLabel, ...propCopy } = copy;
+      // `label` lands wherever the author declared it. `PageComponentSchema`
+      // has a top-level `label` AND an open `properties` bag, and different
+      // components use different slots — writing both would invent a key the
+      // author never authored, and writing only one would silently miss half
+      // the components.
+      const labelAtTopLevel = copyLabel !== undefined && typeof component.label === 'string';
+      next = {
+        ...component,
+        ...(labelAtTopLevel ? { label: copyLabel } : {}),
+        properties: {
+          ...component.properties,
+          ...propCopy,
+          ...(copyLabel !== undefined && !labelAtTopLevel ? { label: copyLabel } : {}),
+        },
+      };
+    }
+
+    if (next.type !== PAGE_HEADER_COMPONENT) return next;
+    if (headerTitle === undefined && headerSubtitle === undefined) return next;
     return {
-      ...component,
+      ...next,
       properties: {
-        ...component.properties,
-        ...(headerTitle !== undefined ? { title: headerTitle } : {}),
+        ...next.properties,
+        // The id-addressed copy above is more specific — do not overwrite what
+        // it already resolved for this header.
+        ...(headerTitle !== undefined && copy?.title === undefined ? { title: headerTitle } : {}),
         ...(headerSubtitle !== undefined ? { subtitle: headerSubtitle } : {}),
       },
     };
