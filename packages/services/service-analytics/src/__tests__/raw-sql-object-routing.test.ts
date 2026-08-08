@@ -107,6 +107,15 @@ function fakeEngine(opts: {
         const datasource = opts.routing[name];
         return datasource ? { fields, datasource } : { fields };
       },
+      // [#5288] The engine's own answer to "where does this object's data live",
+      // which is what the analytics probe asks now — `getObject().datasource` is
+      // the DECLARED value and covers only the first of five resolution steps.
+      // `routing` above is already the effective placement (it is what `execute`
+      // resolves by), so the double answers both faces from the one map, the way
+      // `ObjectQL.resolveEffectiveDatasource` and `getDriver` answer from one
+      // resolution order.
+      resolveEffectiveDatasource: (name: string) =>
+        (opts.schema[name] ? opts.routing[name] : undefined),
     },
   };
 }

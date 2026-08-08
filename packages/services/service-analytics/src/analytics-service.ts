@@ -451,6 +451,15 @@ export interface AnalyticsServiceConfig {
    * datasources before any query is ever built. Absence keeps the pre-#5115
    * behaviour exactly ("cannot answer, do not block") — the query-time
    * diagnostic above stays as the backstop.
+   *
+   * [#5288] "Bound to" above is the whole contract, and it took until #5288 for
+   * the built-in host to honour it: `plugin.ts` answered with the object's
+   * DECLARED `datasource` — step 1 of the five `ObjectQL.getDriver` routes by —
+   * so an object placed by a `datasourceMapping` rule, by the ADR-0057 §3.6
+   * lifecycle split, or by its package's `defaultDatasource` reported
+   * `'default'` and sent the message above to the wrong database. It now asks
+   * `ObjectQL.resolveEffectiveDatasource`. A custom host owes the same answer:
+   * the datasource an object is BOUND to, `undefined` when nothing binds it.
    */
   getObjectDatasource?: (objectName: string) => string | undefined;
   /**
