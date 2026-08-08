@@ -231,7 +231,7 @@ describe.each([true, false])('[#6562] /meta object read — effective schema (mu
         // `FieldSchema` key at all — removed in the 16.x line (#2377, ADR-0049)
         // and rejected BY NAME by the strict schema — so `applySystemFields`
         // stamping it is why a registry-backed read already answers
-        // `_diagnostics: { valid: false }` (pinned below, filed separately). Its
+        // `_diagnostics: { valid: false }` (pinned below, filed as #6810). Its
         // only consumer is `driver-mongodb`'s schema builder, which reads the
         // REGISTERED schema and never a served document. Converging the served
         // answer onto a key the object schema refuses would have spread that
@@ -283,13 +283,13 @@ describe.each([true, false])('[#6562] /meta object read — effective schema (mu
             .toContain('organization_id');
     });
 
-    it('[residual, filed separately] only the registry-backed answer fails its own schema', async () => {
+    it('[residual, filed as #6810] only the registry-backed answer fails its own schema', async () => {
         // Not a defect this PR introduces and not one it papers over: the
         // registry stamps `indexed`, `FieldSchema` rejects it by name, so the
         // registry-backed exit has been answering `valid: false` on every
         // multi-tenant-capable object since #4001 closed the schema. Pinned in
-        // both directions so the follow-up that fixes the injection site has to
-        // come back and flip this line, rather than leave a stale expectation.
+        // both directions so #6810's fix at the injection site has to come back
+        // and flip these lines, rather than leave a stale expectation behind.
         const { registryBacked, overlayBacked } = await bothAnswers();
         expect(overlayBacked._diagnostics).toEqual({ valid: true });
         expect(registryBacked._diagnostics.valid).toBe(false);

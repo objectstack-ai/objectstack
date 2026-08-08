@@ -59,7 +59,7 @@
  *
  * Measured on `origin/main` (2026-08-08): a registry-backed `/meta` object read
  * therefore already answers `_diagnostics: { valid: false }` on exactly that
- * key, in BOTH multiTenant modes — filed separately, and deliberately not
+ * key, in BOTH multiTenant modes — filed as #6810, and deliberately not
  * inherited here. Converging the overlay-backed exit onto a key the object
  * schema refuses would spread that defect rather than close #6562's; the field
  * SET and every spec-authorable key converge, and the DDL hint stays where the

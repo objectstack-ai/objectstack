@@ -63,4 +63,5 @@ One key is deliberately not carried onto a served document: `organization_id`'s
 `indexed`. It is not a `FieldSchema` key — removed in the 16.x line (#2377,
 ADR-0049) and rejected by name by the strict schema — and its only consumer is
 `driver-mongodb`'s schema builder, which reads the registered schema and never a
-served document. It stays at the injection site.
+served document. It stays at the injection site; that the registry-backed read
+answers `_diagnostics: { valid: false }` because of it is filed as #6810.
