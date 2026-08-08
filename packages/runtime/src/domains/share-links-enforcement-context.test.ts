@@ -52,10 +52,12 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
-import { SecurityPlugin } from '@objectstack/plugin-security';
+import { PermissionDeniedError, SecurityPlugin } from '@objectstack/plugin-security';
 import { ShareLinkService } from '@objectstack/plugin-sharing';
+import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import { apiErrorResponse } from '../error-envelope.js';
 import { handleShareLinksRequest } from './share-links.js';
+import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 
@@ -119,6 +121,24 @@ const EAST_VIEWER: PermissionSet = PermissionSetSchema.parse({
             positions: ['pos_east'],
         },
     ],
+});
+
+/**
+ * [#6649] The CRUD-gate denial's input: an object grant with NO `allowRead`.
+ *
+ * The baseline is ADDITIVE for every human principal (ADR-0090 D5 — the
+ * `fallbackPermissionSet` applies IN ADDITION to whatever else resolved), so a
+ * caller only reaches the CRUD gate's deny branch when the baseline itself
+ * withholds read. This set is therefore wired as BOTH the caller's explicit set
+ * and the fallback in the #6649 cases below: `allowCreate` alone, so
+ * `checkObjectPermission('find', 'crm_account', …)` is false and the security
+ * middleware throws `PermissionDeniedError` — the `statusCode`-only shape whose
+ * status the domain used to drop.
+ */
+const ACCT_NO_READ: PermissionSet = PermissionSetSchema.parse({
+    name: 'acct_no_read',
+    label: 'Account create-only (no read grant)',
+    objects: { crm_account: { allowCreate: true } },
 });
 
 const PERMISSION_SETS = [ACCT_MEMBER, EAST_VIEWER];
@@ -216,13 +236,21 @@ function makeEngine(tables: Record<string, any[]>) {
  * posture arrives the production way — via the `tenancy` service (ADR-0093
  * D4 / ADR-0105 D1).
  */
-async function bootSecurity(engine: any, posture: 'single' | 'group'): Promise<void> {
+async function bootSecurity(
+    engine: any,
+    posture: 'single' | 'group',
+    // [#6649] The permission-set world and its additive baseline are parameters
+    // now; the defaults are byte-for-byte what every #6551 case above booted
+    // with, so those verdicts are untouched.
+    sets: PermissionSet[] = PERMISSION_SETS,
+    fallback: string = 'acct_member',
+): Promise<void> {
     const services: Record<string, any> = {
         manifest: { register: vi.fn() },
         objectql: engine,
         metadata: {
             get: async (_type: string, name: string) => (name === OBJECT ? ACCOUNT_SCHEMA : null),
-            list: async () => PERMISSION_SETS,
+            list: async () => sets,
         },
         tenancy: { posture },
     };
@@ -236,11 +264,11 @@ async function bootSecurity(engine: any, posture: 'single' | 'group'): Promise<v
         },
     };
     const plugin = new SecurityPlugin({
-        defaultPermissionSets: PERMISSION_SETS,
+        defaultPermissionSets: sets,
         // The additive human baseline, as in production (member_default's role).
         // This is also exactly what a TRUNCATED context degrades to: with
         // `permissions` stripped, resolution falls back to this one set.
-        fallbackPermissionSet: 'acct_member',
+        fallbackPermissionSet: fallback,
     });
     await plugin.init(ctx);
     await plugin.start(ctx);
@@ -273,6 +301,24 @@ function envelopeFor(opts: {
     return ctx as ExecutionContext;
 }
 
+/**
+ * [#6649] The dispatcher's own thrown-error mapper — the REAL private method,
+ * borrowed off a dispatcher constructed over a kernel stub exactly as
+ * `error-envelope.conformance.test.ts`'s `makeDispatcher()` does.
+ *
+ * Deliberately NOT a hand-written `e?.status ?? e?.statusCode ?? 500` double: a
+ * restatement here would make these cases green against the double's rules
+ * rather than production's, which is the same class of mistake as the
+ * hand-written catch this issue is about. Every branch it takes (status from
+ * `status` OR `statusCode`, `.code` carried through `details` for
+ * `buildApiError` to promote, `INTERNAL_ERROR` derived when the throw has no
+ * code, the 5xx leak guard) is production's.
+ */
+const realErrorFromThrown = (() => {
+    const dispatcher: any = new HttpDispatcher({ context: { getService: () => null } } as any);
+    return (e: any, fallbackStatus?: number) => dispatcher.errorFromThrown(e, fallbackStatus);
+})();
+
 function makeDeps(engine: any, svc: any): DomainHandlerDeps {
     const deps: any = {
         resolveService: async (_c: any, name: string) =>
@@ -284,6 +330,7 @@ function makeDeps(engine: any, svc: any): DomainHandlerDeps {
         // ADR-0112 shape, not a lookalike.
         error: (message: string, httpStatus = 500, details?: any) => apiErrorResponse({ message, httpStatus, details }),
         routeNotFound: (route: string) => apiErrorResponse({ message: `Route not found: ${route}`, httpStatus: 404 }),
+        errorFromThrown: realErrorFromThrown,
     };
     return deps as DomainHandlerDeps;
 }
@@ -295,6 +342,10 @@ interface MintOptions {
     posture: 'single' | 'group';
     envelope: ExecutionContext | undefined;
     records: any[];
+    /** [#6649] The permission-set world to boot; defaults to the #6551 one. */
+    permissionSets?: PermissionSet[];
+    /** [#6649] The additive baseline; defaults to the #6551 `acct_member`. */
+    fallbackPermissionSet?: string;
 }
 
 /**
@@ -305,7 +356,7 @@ interface MintOptions {
 async function mintOnDispatcher(opts: MintOptions): Promise<{ status: number; body: any }> {
     const tables: Record<string, any[]> = { [OBJECT]: opts.records, sys_share_link: [], sys_permission_set: [] };
     const engine = makeEngine(tables);
-    await bootSecurity(engine, opts.posture);
+    await bootSecurity(engine, opts.posture, opts.permissionSets, opts.fallbackPermissionSet);
     const svc = new ShareLinkService({ engine: engine as any });
     const deps = makeDeps(engine, svc);
     const res = await handleShareLinksRequest(
@@ -466,5 +517,144 @@ describe('[#6551] the dispatcher seam itself', () => {
         expect(res.response?.status).toBe(401);
         expect(res.response?.body).toMatchObject({ success: false, error: { code: 'UNAUTHENTICATED' } });
         expect(svc.createLink).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * [#6649] The domain's unified catch and the two channels a thrown refusal
+ * carries its HTTP status on.
+ *
+ * The catch read `err?.status ?? 500` only. Every refusal `ShareLinkService`
+ * raises itself carries `status` (its `makeError` sets `status` + `code`), which
+ * is why the `403 FORBIDDEN` cases above were already correct and stayed correct
+ * — but the SECURITY middleware's refusals do not come from that service. The
+ * CRUD gate throws `PermissionDeniedError { code: 'PERMISSION_DENIED';
+ * statusCode: 403 }` — no `status` field at all — straight out of
+ * `svc.createLink`'s visibility read, past a service that does not catch it, into
+ * this catch. `err?.status` was `undefined`, so the 403 left as a **500** while
+ * `code` still read `PERMISSION_DENIED`: an envelope that contradicts itself, and
+ * a status many clients treat as retryable when the answer is permanent.
+ *
+ * The fix routes the catch through `deps.errorFromThrown` — the dispatcher's
+ * shared mapper, which `/meta`, `/actions` and `/mcp` already exit through and
+ * which reads `status` OR `statusCode`. These cases assert `status` AND `code`
+ * together on purpose: a denial arriving as 403 under the wrong code would be
+ * just as wrong as the 500, and only the pair separates them.
+ */
+
+/** The ADR-0112 envelope checks every case below shares. */
+function expectDeclaredEnvelope(res: { status: number; body: any }): any {
+    expect(BaseResponseSchema.safeParse(res.body).success).toBe(true);
+    expect(envelopeViolations(res.body), `not the declared envelope: ${JSON.stringify(res.body)}`).toEqual([]);
+    const parsed = ApiErrorSchema.safeParse(res.body.error);
+    // `ApiErrorSchema.code` validates against the CLOSED set (StandardErrorCode ∪
+    // ERROR_CODE_LEDGER), so this is also what keeps the code out of the
+    // free-string space the old `'INTERNAL'` fallback sat in.
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(res.body.error.httpStatus).toBe(res.status);
+    return res.body.error;
+}
+
+/** A `/share-links` call served by a service double that throws `thrown`. */
+async function refusalFromService(
+    thrown: unknown,
+    verb: 'POST' | 'GET' | 'DELETE' = 'POST',
+): Promise<{ status: number; body: any }> {
+    const boom = async () => { throw thrown; };
+    const svc = {
+        createLink: vi.fn(boom),
+        listLinks: vi.fn(boom),
+        revokeLink: vi.fn(boom),
+        resolveToken: vi.fn(async () => null),
+    };
+    const deps = makeDeps(makeEngine({ [OBJECT]: [], sys_share_link: [] }), svc);
+    const res = await handleShareLinksRequest(
+        deps,
+        verb === 'DELETE' ? '/shl_x' : '',
+        verb,
+        verb === 'POST' ? { object: OBJECT, recordId: RECORD } : undefined,
+        {},
+        httpContext(envelopeFor({ memberOf: [ORG_A], permissions: ['acct_member'] })),
+    );
+    if (!res.handled || !res.response) throw new Error(`${verb} /share-links was not handled`);
+    return res.response as { status: number; body: any };
+}
+
+/** The caller of the repro: create-only grant, so the visibility read is denied. */
+const noReadCaller = (posture: 'single' | 'group') => ({
+    posture,
+    envelope: envelopeFor({ memberOf: [ORG_A], permissions: ['acct_no_read'] }),
+    records: ownRecordInA(),
+    permissionSets: [ACCT_NO_READ],
+    fallbackPermissionSet: 'acct_no_read',
+});
+
+describe('[#6649] a security-middleware refusal keeps its own status through the domain catch', () => {
+    it('single posture: no allowRead on the object answers 403 PERMISSION_DENIED (was 500 + PERMISSION_DENIED)', async () => {
+        const res = await mintOnDispatcher(noReadCaller('single'));
+
+        // The pair, together. Before the fix `code` was ALREADY
+        // `PERMISSION_DENIED` here — only the status was wrong — so a case
+        // asserting the code alone was green on the defect, and one asserting
+        // "not 500" alone could not tell a right refusal from a wrong one.
+        expect(res.status).toBe(403);
+        expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
+        // Coverage, NOT a discriminator: the message does not move between the
+        // two directions of this fix (the pre-fix 500 exited through this
+        // harness's `error` double, which has no leak guard, and the security
+        // message trips no clause of `looksLikeInternalErrorLeak` anyway). It
+        // pins the refusal's own reason against a FUTURE widening of that
+        // heuristic swallowing an authorization answer.
+        expect(res.body.error.message).toContain('Access denied');
+    }, 30_000);
+
+    it('group posture: the same denial, the same envelope — the defect was never posture-specific', async () => {
+        const res = await mintOnDispatcher(noReadCaller('group'));
+
+        expect(res.status).toBe(403);
+        expect(expectDeclaredEnvelope(res).code).toBe('PERMISSION_DENIED');
+    }, 30_000);
+
+    it('the catch is shared, so list and revoke answer the statusCode-only refusal identically', async () => {
+        // Driven with a service double raising the REAL `PermissionDeniedError`
+        // (the production class, `statusCode` and no `status`), because what is
+        // under test here is the CATCH, not a second trip through the middleware.
+        for (const verb of ['GET', 'DELETE'] as const) {
+            const res = await refusalFromService(
+                new PermissionDeniedError(`[Security] Access denied: operation on object '${OBJECT}'`),
+                verb,
+            );
+            expect(res.status, `${verb} status`).toBe(403);
+            expect(expectDeclaredEnvelope(res).code, `${verb} code`).toBe('PERMISSION_DENIED');
+        }
+    });
+
+    it('a throw carrying neither channel still answers 500 — under the CATALOGUED code, not the unregistered `INTERNAL`', async () => {
+        const res = await refusalFromService(new Error('share link storage exploded'));
+
+        expect(res.status).toBe(500);
+        // `'INTERNAL'` is registered in `ERROR_CODE_LEDGER` for `rest` /
+        // `service-storage` / `service-i18n` / `plugin-sharing` — never for
+        // `@objectstack/runtime`. The union dedupes, so the schema stayed green
+        // while this domain emitted a code it had not registered; the shared
+        // mapper answers with the derived `INTERNAL_ERROR` instead.
+        expect(expectDeclaredEnvelope(res).code).toBe('INTERNAL_ERROR');
+    });
+
+    it('a refusal that DOES carry `status` is untouched — the fix widens the channel, it does not switch it', async () => {
+        // Honest note: this case is green in BOTH directions of the fix, by
+        // construction — `ShareLinkService.makeError` sets `status`, which the
+        // old chain read first and the shared mapper reads first. It is not a
+        // regression pin for #6649 but for the NEXT change to this exit: it goes
+        // red if the `status` channel is ever dropped in favour of `statusCode`.
+        const res = await refusalFromService(
+            Object.assign(new Error('Sharing is not enabled for this object'), {
+                status: 422,
+                code: 'SHARING_NOT_ENABLED',
+            }),
+        );
+
+        expect(res.status).toBe(422);
+        expect(expectDeclaredEnvelope(res).code).toBe('SHARING_NOT_ENABLED');
     });
 });
