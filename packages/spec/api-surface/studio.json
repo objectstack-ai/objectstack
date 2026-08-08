@@ -59,6 +59,7 @@
     "ObjectSortFieldSchema (const)",
     "PanelContribution (type)",
     "PanelContributionSchema (const)",
+    "PanelLocation (type)",
     "PanelLocationSchema (const)",
     "RelationshipDisplay (type)",
     "RelationshipDisplaySchema (const)",

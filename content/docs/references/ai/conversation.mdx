@@ -18,7 +18,7 @@ Enables context preservation, conversation history, and token optimization.
 
 ```typescript
 import { CodeContentSchema, ConversationAnalyticsSchema, ConversationContextSchema, ConversationMessageSchema, ConversationSessionSchema, ConversationSummarySchema, FileContentSchema, FunctionCallSchema, ImageContentSchema, MessageContentSchema, MessageContentTypeSchema, MessagePruningEventSchema, MessageRoleSchema, TextContentSchema, TokenBudgetConfigSchema, TokenBudgetStrategySchema, TokenUsageStatsSchema, ToolCallSchema } from '@objectstack/spec/ai';
-import type { ConversationAnalytics, ConversationContext, ConversationMessage, ConversationSession, ConversationSummary, FunctionCall, MessageContent, MessageContentType, MessagePruningEvent, MessageRole, TokenBudgetConfig, TokenBudgetStrategy, TokenUsageStats, ToolCall } from '@objectstack/spec/ai';
+import type { ConversationAnalytics, ConversationContext, ConversationMessage, ConversationSession, ConversationSummary, FileContent, FunctionCall, MessageContent, MessageContentType, MessagePruningEvent, MessageRole, TextContent, TokenBudgetConfig, TokenBudgetStrategy, TokenUsageStats, ToolCall } from '@objectstack/spec/ai';
 
 // Validate data
 const result = CodeContentSchema.parse(data);

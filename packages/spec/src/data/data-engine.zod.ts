@@ -767,3 +767,6 @@ export type DataEngineCountOptions = z.input<typeof DataEngineCountOptionsSchema
 export type DataEngineRequest = z.input<typeof DataEngineRequestSchema>;
 /** Post-parse shape of {@link DataEngineRequest} — defaults applied, transforms run (ADR-0122). */
 export type DataEngineRequestParsed = z.infer<typeof DataEngineRequestSchema>;
+export type DataEngineExecuteRequest = z.input<typeof DataEngineExecuteRequestSchema>;
+export type DataEngineInsertRequest = z.input<typeof DataEngineInsertRequestSchema>;
+export type DataEngineVectorFindRequest = z.input<typeof DataEngineVectorFindRequestSchema>;

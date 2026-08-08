@@ -8,6 +8,7 @@ import { mailSettingsManifest, mailTestActionHandler } from './manifests/mail.ma
 import { aiSettingsManifest } from './manifests/ai.manifest.js';
 import { authSettingsManifest } from './manifests/auth.manifest.js';
 import { localizationSettingsManifest } from './manifests/localization.manifest.js';
+import { companySettingsManifest } from './manifests/company.manifest.js';
 import { brandingSettingsManifest } from './manifests/branding.manifest.js';
 import { featureFlagsSettingsManifest } from './manifests/feature-flags.manifest.js';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
@@ -2284,6 +2285,98 @@ describe('SettingsService — env overrides are judged against the declared valu
     const ok = new SettingsService({ env: { OS_LOCALIZATION_DEFAULT_COUNTRY: 'CH' }, logger: okLogger });
     ok.registerManifest(localizationSettingsManifest);
     expect((await ok.get('localization', 'default_country')).value).toBe('CH');
+    expect(okErrors).toHaveLength(0);
+  });
+});
+
+/**
+ * #6579 — `company.country` adopts `iso_3166_alpha2`, the fourth case of the
+ * hole #5712 closed on localization: the description promised ISO 3166-1 all
+ * along while `^[A-Za-z]{2}$` constrained shape only, so `ZZ` (assigned to
+ * nobody) and `UK` (a CLDR alias, not an ISO 3166-1 code) passed the write
+ * door. Same enforcement machinery, same verdicts — these pins only cover the
+ * adoption, not the machinery (that lives in the #5712 blocks above).
+ */
+describe('SettingsService — company.country adopts iso_3166_alpha2 (#6579)', () => {
+  const companyService = () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(companySettingsManifest);
+    return svc;
+  };
+
+  it('write door: admits an assigned code, refuses ZZ/UK with the domain in the constraint', async () => {
+    const svc = companyService();
+    await expect(svc.setMany('company', { country: 'CH' })).resolves.toBeDefined();
+    expect((await svc.get('company', 'country')).value).toBe('CH');
+    for (const cc of ['ZZ', 'UK']) {
+      await expect(svc.setMany('company', { country: cc })).rejects.toMatchObject({
+        code: 'SETTINGS_VALIDATION',
+        fields: [
+          {
+            field: 'country',
+            code: 'invalid_value',
+            label: 'Country',
+            constraint: { valueDomain: 'iso_3166_alpha2' },
+            value: cc,
+          },
+        ],
+      });
+    }
+  });
+
+  it('shape breach still speaks first, in the pattern vocabulary', async () => {
+    // `pattern` stays on the specifier: shape and membership narrow
+    // independently, and the shape verdict is the coarser, more actionable
+    // fact (the same window-before-grid ordering argument as #5712).
+    const svc = companyService();
+    await expect(svc.setMany('company', { country: 'ZZZ' })).rejects.toMatchObject({
+      fields: [{ field: 'country', code: 'invalid_format' }],
+    });
+  });
+
+  it('pins the deliberate tightening: lowercase `us` moves from pattern-accept to domain-reject', async () => {
+    // Before the adoption `^[A-Za-z]{2}$` admitted `us`; domain membership is
+    // exact uppercase, as ISO 3166-1 spells its codes — the same tightening
+    // #5712 recorded for `localization.default_country`. No in-repo runtime
+    // reader consumes `company.country` today, so the risk grade matches.
+    const svc = companyService();
+    await expect(svc.setMany('company', { country: 'us' })).rejects.toMatchObject({
+      fields: [
+        { field: 'country', code: 'invalid_value', constraint: { valueDomain: 'iso_3166_alpha2' } },
+      ],
+    });
+  });
+
+  it('env door judges OS_COMPANY_COUNTRY against the domain too — both doors move together', async () => {
+    // Domain membership ONLY: the env door does not enforce `pattern` for
+    // company keys — that gap is #6580's card, deliberately untouched here.
+    const errors: string[] = [];
+    const svc = new SettingsService({
+      env: { OS_COMPANY_COUNTRY: 'ZZ' },
+      logger: { error: (m: string) => void errors.push(m) },
+    });
+    svc.registerManifest(companySettingsManifest);
+
+    const r = await svc.get('company', 'country');
+    // Not in force: `country` declares no default, so the read resolves to the
+    // empty default layer rather than the rejected override.
+    expect(r.source).toBe('default');
+    expect(r.value).toBeNull();
+    expect(r.locked).toBe(false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_COMPANY_COUNTRY');
+    expect(errors[0]).toContain('ISO 3166-1');
+
+    // And a legal member is honored.
+    const okErrors: string[] = [];
+    const ok = new SettingsService({
+      env: { OS_COMPANY_COUNTRY: 'CH' },
+      logger: { error: (m: string) => void okErrors.push(m) },
+    });
+    ok.registerManifest(companySettingsManifest);
+    const okR = await ok.get('company', 'country');
+    expect(okR.value).toBe('CH');
+    expect(okR.source).toBe('env');
     expect(okErrors).toHaveLength(0);
   });
 });

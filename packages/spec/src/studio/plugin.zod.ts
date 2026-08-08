@@ -213,6 +213,7 @@ export type MetadataIconContribution = z.input<typeof MetadataIconContributionSc
 
 /** Where a panel can be placed */
 export const PanelLocationSchema = lazySchema(() => z.enum(['bottom', 'right', 'modal']));
+export type PanelLocation = z.input<typeof PanelLocationSchema>;
 
 /**
  * Declares an auxiliary panel (like VS Code's Terminal, Problems, Output panels).

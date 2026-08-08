@@ -241,6 +241,48 @@ describe('validateComponentProps — value verdicts', () => {
   });
 
   /**
+   * #6276 — the #5068 worklist entry #5775's key-by-key ruling left behind.
+   * The picker's renderer reads FOUR keys through one `ds.<k> ?? props.<k>`
+   * pattern; two of the flat spellings were declared and two were not, so this
+   * gate reported `sort`/`limit` as undeclared while the renderer honoured
+   * them. Both halves of the rule are asserted, because they fail differently:
+   * the key must stop being an unknown-key finding, and its VALUE must now be
+   * judged (before the declaration a wrong `limit` was stripped in silence).
+   */
+  it('reports nothing on the flat `sort` / `limit` shorthands the picker honours (#6276)', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        {
+          type: 'element:record_picker',
+          id: 'project_picker',
+          properties: {
+            object: 'showcase_project',
+            labelField: 'name',
+            sort: [{ field: 'created_at', order: 'desc' }],
+            limit: 20,
+          },
+        },
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('now judges the VALUE of a flat `limit` instead of stripping it (#6276)', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        {
+          type: 'element:record_picker',
+          properties: { object: 'showcase_project', limit: 'twenty' },
+        },
+      ]),
+    );
+    expect(invalid(findings).map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.limit',
+    ]);
+    expect(invalid(findings)[0].message).toContain('expected number, received string');
+  });
+
+  /**
    * The container half of #5775. `page:card` `children` and the three thin
    * containers' `children` were all reported as unknown keys while the
    * renderers rendered exactly them; `record:path` `stages[].terminal` and the

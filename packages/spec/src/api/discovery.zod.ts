@@ -2,6 +2,10 @@
 
 import { z } from 'zod';
 import { HttpMethod } from '../shared/http.zod';
+// [#6287] Type-only: erased at compile time, so this carries no runtime edge
+// from `api/` to `cloud/`. It is what makes the NODE_ENV fold table provably
+// total over the environment taxonomy rather than total by inspection.
+import type { EnvironmentType } from '../cloud/environment.zod';
 
 /**
  * Service Status Enum
@@ -311,16 +315,51 @@ export type DiscoveryEnvironment = z.input<typeof DiscoveryEnvironmentSchema>;
  * | `development`, `dev`    | `development`  | exact / short spelling |
  * | `test`                  | `development`  | ephemeral developer-class run (vitest/CI), not a provisioned pre-production copy |
  * | `staging`               | `sandbox`      | pre-production and production-LIKE; certainly not `production`, and `sandbox` is the enum's pre-production member |
+ * | `preview`               | `sandbox`      | a PROVISIONED environment (own database, hostname, plan tier, per-environment RBAC), not a developer's machine — same class as `staging` (#6287) |
+ * | `trial`                 | `sandbox`      | a provisioned environment holding an evaluating customer's real business data; developer-class would understate it (#6287) |
  * | unset / blank           | `production`   | the host declined to say; every other reader of that absence already says `production`, and of the two ways to be wrong, calling a real production deployment `development` is the dangerous one (#5673, #5936) |
  * | anything else           | `development`  | an unrecognised spelling is a GUESS, and this function never claims `production` on a guess (#4828) |
  *
  * The last two rows carry the whole safety argument, and they point opposite
- * ways on purpose. An unrecognised spelling (`qa`, `preview`) degrades to
+ * ways on purpose. An unrecognised spelling (`qa`, `uat`) degrades to
  * `development`, so nothing here ever advertises `production` for an
  * environment it failed to recognise. **Absence is not a guess** — it is the
  * host declining to answer, and the conservative response to that is
  * `production`: `environment` is machine-readable, and a client may skip
  * production warnings or loosen a destructive action's confirmation on it.
+ *
+ * ## `preview` and `trial` are a THIRD case — declared, not absent, not a guess (#6287)
+ *
+ * Until #6287 those two reached `development` through the `??` fallback rather
+ * than through a decision, so this table declared five of the seven
+ * `EnvironmentTypeSchema` members and let the other two fall off the end. That
+ * is the same shape the two rows above exist to separate: the fallback answers
+ * for spellings this repo has never heard of, and a first-class member of our
+ * OWN taxonomy is not one of those. It is neither the host declining to answer
+ * nor a guess — it is a bucket we ship, and where it folds is ours to state.
+ *
+ * Both fold to `sandbox`, and the reasoning is the same for each:
+ *
+ * 1. **What they are here.** In this repo's taxonomy an environment is a
+ *    provisioned runtime container — isolated database, canonical hostname,
+ *    plan tier, per-environment RBAC (`cloud/environment.zod.ts`). A `preview`
+ *    or `trial` environment is that, not an ephemeral developer-class run. The
+ *    `development` bucket is reserved for the machine-and-CI class (`development`,
+ *    `dev`, `test`); `sandbox` is the enum's provisioned pre-production member,
+ *    which is what these two are.
+ * 2. **Posture, in the tightening direction.** `trial` in particular holds an
+ *    evaluating customer's real business data. `environment` is read to decide
+ *    whether to soften a destructive action's confirmation, so answering
+ *    `development` there understates the posture — the same *kind* of error the
+ *    unset row was flipped to avoid (#5673, #5936), one bucket down. Neither is
+ *    `production`: they are by definition not the customer's production
+ *    deployment, and claiming otherwise would make the flag's one question
+ *    ("am I talking to production?") answer wrongly in the other direction.
+ * 3. **It keeps the author's distinction.** An operator who tags an environment
+ *    `preview` had `development` and `test` available and did not pick them.
+ *    Folding `preview` onto `development` erases the only information that
+ *    choice carried; folding it onto `sandbox` preserves it as far as a
+ *    three-member enum can.
  *
  * The unset row moved from `development` to `production` in #5673 (maintainer
  * ruling 2026-08-06) and moved HERE, into the shared mapper, in #5936 (ruling
@@ -337,15 +376,43 @@ export type DiscoveryEnvironment = z.input<typeof DiscoveryEnvironmentSchema>;
  * folded that into its default (it tests with `||`). Had this treated blank as
  * "anything else" the two producers would have drifted again on exactly that
  * input — the drift this consolidation exists to end.
+ *
+ * ## The taxonomy half of this table is EXHAUSTIVE, and tsc keeps it so (#6287)
+ *
+ * The seven `EnvironmentTypeSchema` rows are grouped behind a
+ * `satisfies Record<EnvironmentType, DiscoveryEnvironment>`: adding a bucket to
+ * that enum without deciding where it folds does not compile, and a key that is
+ * not a member does not compile either. The operator shorthands (`prod`, `dev`)
+ * sit outside that group precisely so the check stays writable — they are
+ * convenience spellings, not members.
+ *
+ * It is a COMPILE-time check rather than a runtime assertion because a runtime
+ * one cannot see this defect: the fallback and three of the seven rows all
+ * produce `'development'`, so calling `resolveDiscoveryEnvironment` returns an
+ * indistinguishable answer whether a row exists or the `??` invented it. A
+ * runtime exhaustiveness test would have passed on the exact state #6287
+ * reported. `tsc` compares the KEY SET, which is the actual claim. The negative
+ * control for it lives in `discovery.test.ts`.
  */
 const NODE_ENV_TO_DISCOVERY_ENVIRONMENT: Readonly<Record<string, DiscoveryEnvironment>> = {
-  production: 'production',
+  // The seven declared `EnvironmentTypeSchema` buckets. The `satisfies` is the
+  // gate described above: every member must appear, and nothing that is not a
+  // member may (#6287).
+  ...({
+    production: 'production',
+    sandbox: 'sandbox',
+    development: 'development',
+    test: 'development',
+    staging: 'sandbox',
+    preview: 'sandbox',
+    trial: 'sandbox',
+  } satisfies Record<EnvironmentType, DiscoveryEnvironment>),
+
+  // Operator convenience spellings — deliberately OUTSIDE the block above,
+  // because they are not taxonomy members and folding them in would make the
+  // exhaustiveness check unwritable.
   prod: 'production',
-  sandbox: 'sandbox',
-  staging: 'sandbox',
-  development: 'development',
   dev: 'development',
-  test: 'development',
 };
 
 /**
@@ -369,6 +436,13 @@ const NODE_ENV_TO_DISCOVERY_ENVIRONMENT: Readonly<Record<string, DiscoveryEnviro
 export function resolveDiscoveryEnvironment(raw?: string | null): DiscoveryEnvironment {
   const spelling = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   if (spelling === '') return 'production';
+  // [#6287] The fallback's ONE remaining job: a spelling that is not a declared
+  // `EnvironmentType` member and not an operator shorthand — `qa`, `uat`, a
+  // typo. It no longer silently answers for members of our own taxonomy; the
+  // table above is total over them and `tsc` keeps it that way, so a future
+  // bucket cannot reach this line by being forgotten. Keep it: `NODE_ENV` is an
+  // arbitrary operator string, so "anything else" is a real input class, and
+  // degrading it to `development` is what stops a guess claiming `production`.
   return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[spelling] ?? 'development';
 }
 

@@ -206,6 +206,29 @@ all real:
   forcing the template; #4984 is the family origin — fixtures spelling
   rejected aliases kept the tests green while the rule was dead).
 
+**⛔ Take the fix out with `git checkout`, a patch file or a temp commit — NEVER
+`git stash`.** The worktree isolates your files and your HEAD; it does **not**
+isolate `refs/stash`, which lives in the **common** `.git` and is one LIFO stack
+shared by every worktree of the repo. Reverse verification is what makes this
+bite: "stash the fix, re-run, restore" is the reflex move, so two agents doing it
+at the same time swap entries — one `pop` restores the *other's* changes into your
+worktree while yours stay on the stack, `pop` reports **success**, and a following
+`git add -A` commits their half-finished work into your PR (objectui#3430, two dev
+agents, both changesets recoverable only as unreachable commits). Use instead, all
+inside your own worktree:
+
+```
+git checkout origin/main -- <path>     # take the fix out; restore: git checkout <branch> -- <path>
+git diff > /tmp/wip.patch && git checkout -- <paths>      # restore: git apply /tmp/wip.patch
+git commit -am wip                     # restore: git reset --soft HEAD~1
+```
+
+`.claude/hooks/guard-shared-stash.sh` blocks the mutating forms on the `Bash`
+matcher (`push`/`pop`/`drop`/`clear`, and `stash@{N}` — a *position* in a stack you
+don't own); `git stash list`/`show`/`create` and `apply`/`store` pinned to a literal
+hex object id stay allowed. Escape hatch, when the stack really is yours alone:
+`OS_ALLOW_STASH=1`.
+
 **Rejection-class cases assert the envelope, not the throw.** For any case whose
 point is that bad input is *refused*, the minimum assertion set is the error's
 **`code` AND `status`** (the ADR-0112 envelope). `expect(...).toThrow()` /
