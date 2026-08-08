@@ -5732,6 +5732,35 @@ export class ObjectQL implements IObjectQLEngine {
       // untouched, hooks run after and may override.
       const nowSnap = new Date();
       const isBatch = Array.isArray(opCtx.data);
+      // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
+      // resolves any `defaultValue` / `current_user` token and before the
+      // beforeInsert hooks stamp `owner_id` / `organization_id` /
+      // `created_by`. The reference check consults it to decide WHAT THE
+      // CALLER ACTUALLY SENT, so neither a platform stamp nor a backfilled
+      // default is ever reported as the caller's bad reference.
+      //
+      // [#6339] It carries the caller's VALUES, and it is taken HERE — ahead of
+      // the hooks — as an explicit shallow COPY. Both halves are load-bearing:
+      //  - VALUES, because the runtime-owned strip below runs AFTER
+      //    `beforeInsert`, so "the caller named this key" and "this key still
+      //    holds the caller's value" are different facts, and only the second
+      //    one licenses a delete (see `stripRuntimeOwnedFields`).
+      //  - a COPY, taken ahead of the hooks, because `rows[i]` is a different
+      //    object from `opCtx.data` only by the grace of two upstream helpers:
+      //    `applyFieldDefaults` returns `{ ...record }` — except on its
+      //    `!fields` early return, which hands the SAME reference back — and
+      //    `initializeSummaryFields` copies only when it actually seeds. Hooks
+      //    mutate `ctx.input.data` IN PLACE, so an aliased snapshot would
+      //    answer "what did the caller send?" with the post-hook payload.
+      //    Measured on `origin/main`: not aliased today, because that early
+      //    return lines up with the strip's own `!fields` bail — a coincidence
+      //    of three call sites, which the copy turns into an invariant of this
+      //    one. Same spread, same reason, as the update path's `suppliedValues`
+      //    (#5591).
+      const suppliedPerRow: Array<Record<string, unknown>> =
+        (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
+          (row) => ({ ...((row ?? {}) as Record<string, unknown>) }),
+        );
       const defaultedData = isBatch
         ? (opCtx.data as any[]).map((row) =>
             this.initializeSummaryFields(
@@ -5814,16 +5843,6 @@ export class ObjectQL implements IObjectQLEngine {
         // Locale + translation hooks for the rejection messages (#3957) —
         // resolved once for the batch, identical for every row.
         const msgCtx = this.validationMessageContext(object, opCtx.context);
-        // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
-        // resolved any `defaultValue` / `current_user` token and before the
-        // beforeInsert hooks stamped `owner_id` / `organization_id` /
-        // `created_by`. The reference check consults it to decide WHAT THE
-        // CALLER ACTUALLY SENT, so neither a platform stamp nor a backfilled
-        // default is ever reported as the caller's bad reference.
-        const suppliedPerRow: Array<Record<string, unknown>> =
-          (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
-            (row) => (row ?? {}) as Record<string, unknown>,
-          );
         // [#5503] `autonumber` is RUNTIME-owned: the engine (or the driver's
         // persistent sequence) issues the value, so a non-system caller does not
         // get to supply or rewrite it. Until now nothing enforced that — a POST
@@ -5842,14 +5861,21 @@ export class ObjectQL implements IObjectQLEngine {
         // path's, unchanged: `isSystem` (seed replay, migration) skips the whole
         // pass, and `preserveAudit` (#3493) lets a historical import reinstate
         // legacy record numbers.
+        //
+        // [#6339] `suppliedPerRow[i]` is handed over WHOLE — values included —
+        // rather than reduced to its key set. This pass runs after the
+        // beforeInsert hooks, so a key set could only say "the caller named
+        // this", and `delete` then took whatever value was standing there: a
+        // hook that RE-ISSUES the record number lost its write to any caller
+        // that had also submitted the key, while the same hook's write survived
+        // on a caller that had not. The update path's twin (#5591).
         const autonumberDropped: string[] = [];
         if (!opCtx.context?.isSystem) {
           const preserveAudit = opCtx.context?.preserveAudit === true;
           for (let i = 0; i < rows.length; i++) {
             if (rowErrors[i] !== undefined) continue;
-            const supplied = new Set(Object.keys(suppliedPerRow[i] ?? {}));
             const stripped = stripRuntimeOwnedFields(
-              schemaForValidation as any, rows[i], supplied, this.logger, { preserveAudit },
+              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger, { preserveAudit },
             ) as Record<string, unknown>;
             if (stripped === rows[i]) continue;
             for (const k of Object.keys(rows[i])) {
