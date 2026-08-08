@@ -10163,10 +10163,38 @@ export class ObjectStackProtocolImplementation implements
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
                 } else if (it.prevVersion !== null && it.prevVersion !== undefined) {
                     // Edited an existing artifact → restore the pre-commit body.
+                    //
+                    // [#6563] The write INTENT is derived per item, exactly as the
+                    // sibling caller {@link rollbackMetaItem} derives it. Left
+                    // unstated, `SysMetadataRepository.restoreVersion` defaults to
+                    // `'override-artifact'` and `put`'s `assertAllowed` refuses every
+                    // type that is not `allowOrgOverride` — `object` among them — so
+                    // each `object` item of a reverted commit came back in `failed[]`
+                    // as `NOT_OVERRIDABLE` while the same edit reverted fine one
+                    // artifact at a time through the version-history revert. The
+                    // repository's default is right for callers that genuinely mean
+                    // "override a packaged artifact"; the defect was this caller never
+                    // saying which of the two cases it is.
+                    //
+                    // Per ITEM, not per call: `revertCommit` reverts a batch, and a
+                    // commit routinely mixes a runtime-created object with an overlay
+                    // on a packaged view. A genuinely artifact-backed item still
+                    // resolves to `'override-artifact'` and is still refused — the
+                    // derivation states the case, it does not widen the gate.
+                    //
+                    // Two neighbours are deliberately NOT changed here, each filed
+                    // with its own measurement: the soft-remove limb above states the
+                    // same intent as a CONSTANT, so a commit that CREATED an object
+                    // still cannot be reverted (#6620); and neither limb refreshes the
+                    // SchemaRegistry the way `rollbackMetaItem` does, so a restored
+                    // body is persisted but not yet dispatched on (#6621).
+                    const intent: 'override-artifact' | 'runtime-only' =
+                        this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
                     await repo.restoreVersion(ref, it.prevVersion, {
                         actor,
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
+                        intent,
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
                 }
