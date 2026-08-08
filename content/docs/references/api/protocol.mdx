@@ -268,7 +268,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name |
-| **request** | `{ operation: Enum<'create' \| 'update' \| 'upsert' \| 'delete'>; records: { id?: string; data?: Record<string, any>; externalId?: string }[]; options?: object }` | ✅ | Batch operation request |
+| **request** | `{ operation: Enum<'create' \| 'update' \| 'upsert' \| 'delete'>; records: object[]; options?: object }` | ✅ | Batch operation request |
 
 
 ---
@@ -286,7 +286,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **total** | `number` | ✅ | Total number of records in the batch |
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
-| **results** | `{ id?: string; success: boolean; errors?: { code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
+| **results** | `{ id?: string; success: boolean; errors?: object[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
 
 ---
@@ -434,7 +434,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **total** | `number` | ✅ | Total number of records in the batch |
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
-| **results** | `{ id?: string; success: boolean; errors?: { code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
+| **results** | `{ id?: string; success: boolean; errors?: object[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
 
 ---
@@ -525,7 +525,7 @@ Enable package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | The unique machine name of the object to query (e.g. "account"). |
-| **query** | `{ object: string; fields?: string[]; where?: any; search?: string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }; … }` | optional | Structured query definition (filter, sort, select, pagination). |
+| **query** | `{ object: string; fields?: string[]; where?: any; search?: string \| object; … }` | optional | Structured query definition (filter, sort, select, pagination). |
 
 
 ---
@@ -885,7 +885,7 @@ Get package response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **locale** | `string` | ✅ | Locale code |
-| **translations** | `{ objects?: Record<string, { label?: string; pluralLabel?: string; description?: string; fields?: Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>; … }>; apps?: Record<string, { label: string; description?: string; navigation?: Record<string, { label: string }> }>; messages?: Record<string, string>; globalActions?: Record<string, { label?: string; confirmText?: string; successMessage?: string; params?: Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>; … }>; … }` | ✅ | Translation data |
+| **translations** | `{ objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }` | ✅ | Translation data |
 
 
 ---
@@ -911,9 +911,9 @@ Get package response
 | **name** | `string` | optional | Item name — supplied by the metadata door; for an object-scoped container it is the object name. |
 | **label** | `string \| Record<string, string>` | optional | Human-readable label shown in metadata lists. |
 | **object** | `string` | optional | Object this container binds to — how a stack-level `views: [...]` entry says which object its views belong to; read by `getViewsByObject()` / `GET /meta/view?object=`. |
-| **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }` | optional |  |
+| **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object \| object; … }` | optional |  |
 | **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }` | optional |  |
-| **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: { provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
+| **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object \| object; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
 | **formViews** | `Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>` | optional | Additional named form views |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -974,7 +974,7 @@ Install package response
 | :--- | :--- | :--- | :--- |
 | **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Installed package details |
 | **message** | `string` | optional | Installation status message |
-| **dependencyResolution** | `{ dependencies: { packageId: string; requiredRange: string; resolvedVersion?: string; installedVersion?: string; … }[]; canProceed: boolean; requiredActions: { type: Enum<'install' \| 'upgrade' \| 'confirm_conflict'>; packageId: string; description: string }[]; installOrder: string[]; … }` | optional | Dependency resolution result from install analysis |
+| **dependencyResolution** | `{ dependencies: object[]; canProceed: boolean; requiredActions: object[]; installOrder: string[]; … }` | optional | Dependency resolution result from install analysis |
 
 
 ---
@@ -1463,7 +1463,7 @@ Uninstall package response
 | **total** | `number` | ✅ | Total number of records in the batch |
 | **succeeded** | `number` | ✅ | Number of records that succeeded |
 | **failed** | `number` | ✅ | Number of records that failed |
-| **results** | `{ id?: string; success: boolean; errors?: { code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
+| **results** | `{ id?: string; success: boolean; errors?: object[]; data?: Record<string, any>; … }[]` | ✅ | Detailed results for each record |
 
 
 ---
@@ -1525,7 +1525,7 @@ Uninstall package response
 | **object** | `string` | ✅ | The object name. |
 | **mode** | `Enum<'insert' \| 'update'>` | ✅ | The write mode the verdict was reached for. |
 | **valid** | `boolean` | ✅ | True when EVERY row is valid — the whole-set answer. |
-| **results** | `{ valid: boolean; errors: { field: string; code: string; message: string }[]; warnings: { field: string; code: string; message: string }[] }[]` | ✅ | Per-row verdicts, in submission order. |
+| **results** | `{ valid: boolean; errors: object[]; warnings: object[] }[]` | ✅ | Per-row verdicts, in submission order. |
 | **posture** | `{ valueShapeStrict: boolean; mediaValueShapeStrict: boolean }` | ✅ | The ADR-0104 posture the verdict was reached under — reported because it is the difference between "this row is fine" and "this row is fine HERE". The same row can be an error on a self-certified deployment and an admitted warning on an un-migrated one, and a caller explaining a verdict needs to know which it got. An unconditionally-strict preview was considered and rejected (#4633 option B): it would fail rows on every un-migrated deployment that the write would have accepted. |
 
 

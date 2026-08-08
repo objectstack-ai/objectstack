@@ -69,7 +69,7 @@ const result = AccessControlConfigSchema.parse(data);
 | **versioning** | `boolean` | ✅ | Enable object versioning |
 | **encryption** | `{ enabled: boolean; algorithm: Enum<'AES256' \| 'aws:kms' \| 'azure:kms' \| 'gcp:kms'>; kmsKeyId?: string }` | optional | Server-side encryption configuration |
 | **accessControl** | `{ acl: Enum<'private' \| 'public_read' \| 'public_read_write' \| 'authenticated_read' \| … +2 more>; allowedOrigins?: string[]; allowedMethods?: Enum<'GET' \| 'PUT' \| 'POST' \| 'DELETE' \| 'HEAD'>[]; allowedHeaders?: string[]; … }` | optional | Access control configuration |
-| **lifecyclePolicy** | `{ enabled: boolean; rules: { id: string; enabled: boolean; action: Enum<'transition' \| 'delete' \| 'abort'>; prefix?: string; … }[] }` | optional | Lifecycle policy configuration |
+| **lifecyclePolicy** | `{ enabled: boolean; rules: object[] }` | optional | Lifecycle policy configuration |
 | **multipartConfig** | `{ enabled: boolean; partSize: number; maxParts: number; threshold: number; … }` | optional | Multipart upload configuration |
 | **tags** | `Record<string, string>` | optional | Bucket tags for organization |
 | **description** | `string` | optional | Bucket description |

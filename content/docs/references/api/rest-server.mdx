@@ -169,10 +169,10 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **api** | `{ version: string; basePath: string; apiPath?: string; enableCrud: boolean; … }` | optional | REST API configuration |
-| **crud** | `{ operations?: object; patterns?: Record<string, { method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; path: string; summary?: string; description?: string }>; dataPrefix: string; objectParamStyle: Enum<'path' \| 'query'> }` | optional | CRUD endpoints configuration |
+| **crud** | `{ operations?: object; patterns?: Record<string, object>; dataPrefix: string; objectParamStyle: Enum<'path' \| 'query'> }` | optional | CRUD endpoints configuration |
 | **metadata** | `{ prefix: string; enableCache: boolean; cacheTtl: integer; endpoints?: object }` | optional | Metadata endpoints configuration |
 | **batch** | `{ maxBatchSize: integer; enableBatchEndpoint: boolean; operations?: object; defaultAtomic: boolean }` | optional | Batch endpoints configuration |
-| **routes** | `{ includeObjects?: string[]; excludeObjects?: string[]; nameTransform: Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>; overrides?: Record<string, { enabled?: boolean; basePath?: string; operations?: Record<string, boolean> }> }` | optional | Route generation configuration |
+| **routes** | `{ includeObjects?: string[]; excludeObjects?: string[]; nameTransform: Enum<'none' \| 'plural' \| 'kebab-case' \| 'camelCase'>; overrides?: Record<string, object> }` | optional | Route generation configuration |
 | **openApi31** | `never` | optional | [REMOVED] `RestServerConfig.openApi31` was removed in @objectstack/spec 17 (#4579, ADR-0049) — no runtime ever read it: the REST server forwards only `api`/`crud`/`metadata`/`batch`/`routes`, and the served /openapi.json is the pre-generated contract enriched with the live server URL and the registered objects, so webhook/callback definitions declared here never appeared in it. Delete the key. Config-driven OpenAPI 3.1 webhooks/callbacks documentation is a new capability and must arrive via the enforce route of ADR-0049 (a new ADR), not by re-declaring the key; for a real outbound webhook use `Webhook` from `@objectstack/spec/automation`. |
 
 

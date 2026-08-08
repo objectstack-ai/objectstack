@@ -61,7 +61,7 @@ const result = KernelSecurityPolicySchema.parse(data);
 | **vulnerabilities** | `{ cve?: string; id: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>; category?: string; … }[]` | optional |  |
 | **codeIssues** | `{ severity: Enum<'error' \| 'warning' \| 'info'>; type: string; file: string; line?: integer; … }[]` | optional |  |
 | **dependencyVulnerabilities** | `{ package: string; version: string; vulnerability: object }[]` | optional |  |
-| **licenseCompliance** | `{ status: Enum<'compliant' \| 'non-compliant' \| 'unknown'>; issues?: { package: string; license: string; reason: string }[] }` | optional |  |
+| **licenseCompliance** | `{ status: Enum<'compliant' \| 'non-compliant' \| 'unknown'>; issues?: object[] }` | optional |  |
 | **summary** | `{ totalVulnerabilities: integer; criticalCount: integer; highCount: integer; mediumCount: integer; … }` | ✅ |  |
 
 
@@ -140,7 +140,7 @@ Scope of permission application
 | **resource** | `Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| 'ui.report' \| 'system.config' \| 'system.plugin' \| 'system.api' \| 'system.service' \| … +6 more>` | ✅ | Type of resource being accessed |
 | **actions** | `Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| 'share' \| 'export' \| 'import' \| 'admin'>[]` | ✅ |  |
 | **scope** | `Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>` | optional | Scope of permission application |
-| **filter** | `{ resourceIds?: string[]; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; fields?: string[] }` | optional |  |
+| **filter** | `{ resourceIds?: string[]; condition?: string \| object; fields?: string[] }` | optional |  |
 | **description** | `string` | ✅ |  |
 | **required** | `boolean` | optional |  |
 | **justification** | `string` | optional | Why this permission is needed |
@@ -188,10 +188,10 @@ Scope of permission application
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ |  |
 | **trustLevel** | `Enum<'verified' \| 'trusted' \| 'community' \| 'untrusted' \| 'blocked'>` | ✅ | Trust level of the plugin |
-| **permissions** | `{ permissions: { id: string; resource: Enum<'data.object' \| 'data.record' \| 'data.field' \| 'ui.view' \| 'ui.dashboard' \| … +11 more>; actions: Enum<'create' \| 'read' \| 'update' \| 'delete' \| 'execute' \| 'manage' \| 'configure' \| … +4 more>[]; scope?: Enum<'global' \| 'tenant' \| 'user' \| 'resource' \| 'plugin'>; … }[]; groups?: { name: string; description: string; permissions: string[] }[]; defaultGrant?: Enum<'prompt' \| 'allow' \| 'deny' \| 'inherit'> }` | ✅ |  |
+| **permissions** | `{ permissions: object[]; groups?: object[]; defaultGrant?: Enum<'prompt' \| 'allow' \| 'deny' \| 'inherit'> }` | ✅ |  |
 | **sandbox** | `{ enabled?: boolean; level?: Enum<'none' \| 'minimal' \| 'standard' \| 'strict' \| 'paranoid'>; runtime?: object; filesystem?: object; … }` | ✅ |  |
 | **policy** | `{ csp?: object; cors?: object; rateLimit?: object; authentication?: object; … }` | optional |  |
-| **scanResults** | `{ timestamp: string; scanner: object; status: Enum<'passed' \| 'failed' \| 'warning'>; vulnerabilities?: { cve?: string; id: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>; category?: string; … }[]; … }[]` | optional |  |
+| **scanResults** | `{ timestamp: string; scanner: object; status: Enum<'passed' \| 'failed' \| 'warning'>; vulnerabilities?: object[]; … }[]` | optional |  |
 | **vulnerabilities** | `{ cve?: string; id: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>; category?: string; … }[]` | optional |  |
 | **codeSigning** | `{ signed: boolean; signature?: string; certificate?: string; algorithm?: string; … }` | optional |  |
 | **certifications** | `{ name: string; issuer: string; issuedDate: string; expiryDate?: string; … }[]` | optional |  |
