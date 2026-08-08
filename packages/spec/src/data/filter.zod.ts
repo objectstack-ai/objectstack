@@ -133,6 +133,16 @@ const ORDERING_COMPARAND_DESCRIPTION =
  *   `plugin-auth`'s better-auth adapter, which lowers a `gt`/`gte`/`lt`/`lte`
  *   clause with the producer's own untyped `condition.value`.
  *
+ * The mismatch was already COSTING something, and the receipt is in the tree:
+ * `@objectstack/objectql`'s `filter-comparand-shape.ts` (#5869) had to state,
+ * as its reason for not using this schema as its gate, that the schema is
+ * "stricter than the runtime in ways the runtime deliberately allows — `$gt` is
+ * declared `number | Date | FieldReference`, while `['created_at', '>',
+ * '2026-01-01']` lowers to a STRING bound that every backend accepts and that
+ * **the showcase apps rely on**". A second package building around this
+ * declaration, and writing down that it is wrong, is the measurement that says
+ * the pull is real rather than hypothetical.
+ *
  * An author — an AI author in particular — reading `number | Date` concluded
  * that a date window must be a `Date` object or an epoch number, which is the
  * one form the platform's own date-macro path can never hand them. This is the
