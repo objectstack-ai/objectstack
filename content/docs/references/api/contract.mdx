@@ -348,7 +348,7 @@ const result = ApiErrorSchema.parse(data);
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ id?: string; success: boolean; errors?: { code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }[]; index?: number; … }[]` | ✅ | Results for each item in the batch |
+| **data** | `{ id?: string; success: boolean; errors?: object[]; index?: number; … }[]` | ✅ | Results for each item in the batch |
 
 
 ---
@@ -417,7 +417,7 @@ const result = ApiErrorSchema.parse(data);
 | **having** | `any` | optional | HAVING — filter over the AGGREGATED rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **windowFunctions** | `never` | optional | [REMOVED] `query.windowFunctions` was removed in @objectstack/spec 17 (#4286, ADR-0049) — `find()` never applied it: no engine or driver read the key on the query path, so every OVER clause it declared was silently dropped. Delete the key. Window functions are a SQL-driver capability behind `SqlDriver.findWithWindowFunctions(object, query)` (embedder-level; not on the `IDataDriver` contract or the REST surface); request-level analytics are `aggregations` + `groupBy`. |
 | **distinct** | `never` | optional | [REMOVED] `query.distinct` was removed in @objectstack/spec 17 (#4286, ADR-0049 / ADR-0078) — no driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate while still returning duplicate rows. Delete the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone (`total` is truthful again). For unique values of one column use the SQL/memory drivers' `distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated count, the `count_distinct` aggregation. |
-| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }; … }>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
+| **expand** | `Record<string, { object: string; fields?: string[]; where?: any; search?: string \| object; … }>` | optional | Recursive relation loading map. Keys are lookup/master_detail field names; values are nested QueryAST objects that control select (`fields`) and filter (`where`, AND-merged with the batch $in), plus further expansion on the related object. The engine resolves expand via batch $in queries (driver-agnostic) with a default max depth of 3; per-parent `limit`/`offset`/`orderBy` are NOT applied on this path. |
 
 
 ---

@@ -784,15 +784,25 @@ describe('formatType — over-wide enums inside a shape summary are elided with 
     expect(rendered.length).toBe(174);
   });
 
-  it('elides through array-of-object nesting — the `api/*.mdx` `error` shape', () => {
-    // A direct object child is forced opaque, but an ARRAY of objects recurses,
-    // which is how a 261-member enum reached a cell two levels down.
-    const rendered = formatType(ERROR_RESPONSE, ctx());
-    expect(rendered).toBe(
-      "{ success: boolean; error?: { code: Enum<'VALIDATION_ERROR' | 'INVALID_FIELD' | " +
-        "'MISSING_REQUIRED_FIELD' | … +258 more>; message: string }[] }",
+  it('elides through a WRAPPER reached from a summary — array of enum', () => {
+    // REPLACED FIXTURE (#6374). This case used to run on `ERROR_RESPONSE`, whose
+    // enum sat two SHAPE levels down (`{ success; error?: { code: Enum<…> }[] }`)
+    // — a route the shape budget closes: that inner shape now prints `object`,
+    // so there is no enum there left to elide and the old assertion could only
+    // have been kept by asserting an emptiness. What #5340 actually claims is
+    // that the elision composes through the wrappers between a summary and a
+    // vocabulary, and that is still true and still worth pinning — the budget
+    // stops the renderer re-entering the OBJECT branch, it does not sever
+    // `inShapeSummary` from arrays and records. `ERROR_RESPONSE` keeps its job
+    // one block down, where it now pins the budget itself.
+    const rendered = formatType(
+      { type: 'object', properties: { codes: { type: 'array', items: { type: 'string', enum: ERROR_CODES } } } },
+      ctx(),
     );
+    expect(rendered).toContain('… +258 more');
     expect(3 + 258).toBe(ERROR_CODES.length);
+    // Still an array OF the elided vocabulary, not an elided array.
+    expect(rendered.endsWith('>[] }')).toBe(true);
     // Was 5000+ characters in one table cell.
     expect(rendered.length).toBeLessThan(150);
   });
@@ -1199,17 +1209,266 @@ describe('formatType — a union spells four variants and counts the rest (#6226
     expect(rendered).toContain('… +5 more');
   });
 
-  it('caps a union nested inside a shape summary too, alongside the enum elision', () => {
-    // The two elisions compose: `Page.slots`-shaped cells carry both.
+  it('caps a union nested inside a shape summary too — the `Manifest.navigationContributions` cell', () => {
+    // REPLACED FIXTURE (#6374). This case used to build six OBJECT variants
+    // under a key and assert `… +2 more`. Below a summary those six now all
+    // render `object`, and six six-character spellings are narrower than the
+    // marker that would replace two of them, so the shared pay-for-your-marker
+    // guard refuses — correctly, and the case would have been asserting the
+    // guard rather than the cap. The corpus keeps exactly one cell where a
+    // nested union is still wide enough for the cap to pay, and this is it.
     const rendered = formatType(
       {
         type: 'object',
         properties: {
-          slot: { anyOf: Array.from({ length: 6 }, (_, i) => variant(`k${i}`)) },
+          app: { type: 'string' },
+          items: { type: 'array', items: { anyOf: Array.from({ length: 9 }, (_, i) => variant(`k${i}`)) } },
+        },
+        required: ['app', 'items'],
+      },
+      ctx(),
+    );
+    expect(rendered).toBe('{ app: string; items: (object | object | object | object | … +5 more)[] }');
+    // 4 shown + 5 hidden = the 9 the schema declares, below a summary exactly as
+    // above one: the budget changes what a variant SPELLS, never the arity the
+    // cap reports.
+    expect(4 + 5).toBe(9);
+  });
+});
+
+/**
+ * The real `ui/page.mdx` `Page.slots` node, as `gen:schema` emits it — seven
+ * slot keys, each a union of `PageComponent` or an array of it, and
+ * `PageComponent` inlined by value (not `$ref`d) at all fourteen positions.
+ *
+ * This is the corpus maximum #6374 was filed on: 1538 characters in one table
+ * cell, WITH `INLINE_ENUM_WIDTH_LIMIT` already firing eight times inside it.
+ */
+const PAGE_COMPONENT = {
+  type: 'object',
+  properties: {
+    type: {
+      anyOf: [
+        {
+          type: 'string',
+          enum: [
+            'page:header', 'page:footer', 'page:sidebar', 'page:tabs', 'page:accordion',
+            'page:card', 'page:section', 'record:details', 'record:highlights',
+            'record:related_list', 'record:activity', 'record:chatter', 'record:path',
+            'record:alert', 'record:quick_actions', 'record:reference_rail', 'record:history',
+            'app:launcher', 'nav:menu', 'nav:breadcrumb', 'global:search',
+            'global:notifications', 'user:profile', 'ai:chat_window', 'ai:suggestion',
+            'element:text', 'element:number', 'element:image', 'element:divider',
+            'element:button', 'element:filter', 'element:form', 'element:record_picker',
+            'element:text_input',
+          ],
+        },
+        { type: 'string' },
+      ],
+    },
+    id: { type: 'string' },
+    label: { type: 'string' },
+    properties: { type: 'object', additionalProperties: {} },
+    events: { type: 'object', additionalProperties: {} },
+  },
+  required: ['type'],
+  additionalProperties: false,
+};
+
+const PAGE_SLOTS = {
+  type: 'object',
+  properties: Object.fromEntries(
+    ['header', 'actions', 'alerts', 'highlights', 'details', 'tabs', 'discussion'].map(k => [
+      k,
+      { anyOf: [PAGE_COMPONENT, { type: 'array', items: PAGE_COMPONENT }] },
+    ]),
+  ),
+  additionalProperties: false,
+};
+
+/**
+ * Pin for the shape-depth budget — #6374.
+ *
+ * The renderer has always opened exactly ONE `{ … }` level per cell, but it
+ * spent that budget in the key loop, so only a DIRECT object child was held to
+ * it. An array element, a `Record` value and a union variant each re-entered
+ * the object branch with the budget out of scope, and cell width became keys ×
+ * variants × shape width, multiplied per level. `SHAPE_DEPTH_LIMIT` moves the
+ * same budget to the object branch itself, where all four descents pass.
+ *
+ * REVERSE VERIFICATION, predicted BEFORE running. Reverting = deleting the
+ * `depth >= SHAPE_DEPTH_LIMIT` guard and putting the
+ * `child?.type === 'object' && child.properties ? 'object' : …` ternary back.
+ * The direction is NOT uniformly red, and that asymmetry is the point of the
+ * block: this fix makes an existing rule uniform, so the cases pinning the
+ * limb that already existed MUST stay green under the revert or they are not
+ * pinning uniformity at all. Predicted:
+ *   RED   — every case whose `object` is reached through an array, a `Record`
+ *           value or a union variant (the three descents the budget adds), and
+ *           the no-`ctx` case, which reaches its `object` through a variant.
+ *   GREEN — 'a direct object child was ALREADY opaque' (that IS the ternary),
+ *           both 'a wrapper does not spend the budget' cases (one level either
+ *           way), and 'a keyless `Record` is not a shape' (the guard sits
+ *           inside the declared-keys branch and cannot fire there).
+ * Predicted split: 6 red, 4 green.
+ * ACTUAL: recorded in the PR body against this prediction.
+ */
+describe('formatType — one shape level, whichever way down (#6374)', () => {
+  it('renders the `Page.slots` cell without re-expanding `PageComponent` (the filed instance)', () => {
+    const rendered = formatType(PAGE_SLOTS, ctx());
+    expect(rendered).toBe(
+      '{ header?: object | object[]; actions?: object | object[]; alerts?: object | object[]; ' +
+        'highlights?: object | object[]; … }',
+    );
+    // 1538 → 122 characters. The vacuity guard for the whole block: with the
+    // budget reverted this node renders the same `PageComponent` summary eight
+    // times, so both of these are false by more than an order of magnitude.
+    expect(rendered.length).toBe(122);
+    expect(rendered).not.toContain('Enum<');
+  });
+
+  it('holds an ARRAY element to the budget — the `api/*.mdx` `error` shape', () => {
+    // `ERROR_RESPONSE`'s old job, kept as the array case: the 261-member
+    // vocabulary sat two shape levels down and reached the cell because
+    // `{ … }[]` re-entered the object branch. The array is not what is elided —
+    // the cell still says "an array of them".
+    expect(formatType(ERROR_RESPONSE, ctx())).toBe('{ success: boolean; error?: object[] }');
+  });
+
+  it('holds a `Record` VALUE to the budget — the `GetTranslationsResponse` shape', () => {
+    expect(
+      formatType(
+        {
+          type: 'object',
+          properties: {
+            objects: {
+              type: 'object',
+              additionalProperties: { type: 'object', properties: { label: { type: 'string' } } },
+            },
+          },
+        },
+        ctx(),
+      ),
+    ).toBe('{ objects?: Record<string, object> }');
+  });
+
+  it('holds a union VARIANT to the budget — the `Object.userActions` shape', () => {
+    expect(
+      formatType(
+        {
+          type: 'object',
+          properties: {
+            edit: {
+              anyOf: [
+                { type: 'boolean' },
+                { type: 'object', properties: { enabled: { type: 'boolean' } } },
+              ],
+            },
+          },
+        },
+        ctx(),
+      ),
+    ).toBe('{ edit?: boolean | object }');
+  });
+
+  it('holds a direct object child to the budget — the limb that was ALREADY opaque', () => {
+    // Unchanged by this commit and asserted here on purpose: it is the rule the
+    // other three cases were brought into line with, so it has to be read as
+    // one rule with them rather than as a fourth special case.
+    expect(
+      formatType(
+        {
+          type: 'object',
+          properties: { inner: { type: 'object', properties: { deep: { type: 'string' } } } },
+        },
+        ctx(),
+      ),
+    ).toBe('{ inner?: object }');
+  });
+
+  it('spends the budget on SHAPES, so a wrapper at the top of a cell still opens one level', () => {
+    // `{ … }[]` and `Record<string, { … }>` are one shape level, not two — the
+    // budget counts `{ … }`, and a wrapper is not one. Getting this wrong would
+    // collapse the whole `ConversationSession.messages` family to a bare
+    // `object[]` and take the corpus with it.
+    expect(
+      formatType({ type: 'array', items: { type: 'object', properties: { a: { type: 'string' } } } }, ctx()),
+    ).toBe('{ a?: string }[]');
+    expect(
+      formatType(
+        { type: 'object', additionalProperties: { type: 'object', properties: { a: { type: 'string' } } } },
+        ctx(),
+      ),
+    ).toBe('Record<string, { a?: string }>');
+  });
+
+  it('does not fire on a keyless `Record` below a summary — that is not a shape', () => {
+    // `properties?: Record<string, any>` is on `PageComponent` itself and on
+    // hundreds of other nodes. The guard sits inside the declared-keys branch,
+    // so an open object with NO declared keys renders as it always did.
+    expect(
+      formatType(
+        { type: 'object', properties: { properties: { type: 'object', additionalProperties: {} } } },
+        ctx(),
+      ),
+    ).toBe('{ properties?: Record<string, any> }');
+  });
+
+  it('applies without a `ctx`, because depth is recursion state and not page state', () => {
+    // The ternary this replaces needed no `ctx` either. A budget that lived in
+    // `TypeContext` would silently switch itself off for every caller that
+    // renders a type string without page context — the failure mode
+    // `inShapeSummary` documents one field up, and not one to copy.
+    expect(
+      formatType({
+        type: 'object',
+        properties: {
+          edit: { anyOf: [{ type: 'boolean' }, { type: 'object', properties: { a: { type: 'string' } } }] },
+        },
+      }),
+    ).toBe('{ edit?: boolean | object }');
+  });
+
+  it('leaves a cell that never opened a second shape level byte-identical', () => {
+    // The corpus check that the budget is not a rewrite: 173 of the 215 pages
+    // do not move at all. `BulkActionDef.params` (#5340's instance) and
+    // `App.navigation` (#6226's) are both one level deep and both unchanged.
+    expect(formatType(BULK_ACTION_PARAMS, ctx()).length).toBe(174);
+    expect(formatType(INDEX_SCHEMA, ctx())).toBe(
+      "{ name?: string; fields: string[]; unique?: boolean | 'global' | 'organization' }[]",
+    );
+    expect(formatType(BULK_ACTION_OPTIONS, ctx())).toBe(
+      '({ label: string; value: string | number | boolean } & Record<string, any>)[]',
+    );
+  });
+
+  it('prints an identical variant once per variant — the budget may not drop the arity', () => {
+    // Six object variants below a summary all print `object`, and the cell says
+    // so six times. It reads oddly and it is deliberate: #6226 ruled that a
+    // union elision must SELF-REPORT what it hid, and the shared
+    // pay-for-your-marker guard refuses a marker here because six six-character
+    // spellings are narrower than the count that would replace two of them.
+    // Collapsing them to one `object` would drop the arity — the one fact the
+    // cell still carries — and would re-decide #6226 on a surface the
+    // maintainer has just ruled on. The renderer already ships exactly this
+    // shape for scalars (`string | string | string | string | string`, pinned
+    // in the #6226 block), so this is that pinned behaviour meeting a new
+    // spelling, not a new behaviour. Filed for the maintainer as a finding.
+    const rendered = formatType(
+      {
+        type: 'object',
+        properties: {
+          slot: {
+            anyOf: Array.from({ length: 6 }, (_, i) => ({
+              type: 'object',
+              properties: { id: { type: 'string' }, [`k${i}`]: { type: 'string' } },
+            })),
+          },
         },
       },
       ctx(),
     );
-    expect(rendered).toContain('… +2 more');
+    expect(rendered).toBe('{ slot?: object | object | object | object | object | object }');
+    expect(rendered).not.toContain('more');
   });
 });

@@ -118,7 +118,7 @@ const result = CodeContentSchema.parse(data);
 | **context** | `{ sessionId: string; userId?: string; agentId?: string; object?: string; … }` | ✅ |  |
 | **modelId** | `string` | optional | AI model ID |
 | **tokenBudget** | `{ maxTokens: integer; maxPromptTokens?: integer; maxCompletionTokens?: integer; reserveTokens: integer; … }` | ✅ |  |
-| **messages** | `{ id: string; timestamp: string; role: Enum<'system' \| 'user' \| 'assistant' \| 'function' \| 'tool'>; content: ({ type: 'text'; text: string; metadata?: Record<string, any> } \| { type: 'image'; imageUrl: string; detail: Enum<'low' \| 'high' \| 'auto'>; metadata?: Record<string, any> } \| { type: 'file'; fileUrl: string; mimeType: string; fileName?: string; … } \| { type: 'code'; text: string; language: string; metadata?: Record<string, any> })[]; … }[]` | ✅ |  |
+| **messages** | `{ id: string; timestamp: string; role: Enum<'system' \| 'user' \| 'assistant' \| 'function' \| 'tool'>; content: (object \| object \| object \| object)[]; … }[]` | ✅ |  |
 | **tokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer; budgetLimit: integer; … }` | optional |  |
 | **totalTokens** | `{ promptTokens: integer; completionTokens: integer; totalTokens: integer }` | optional | Total tokens across all messages |
 | **totalCost** | `number` | optional | Total cost for this session in USD |

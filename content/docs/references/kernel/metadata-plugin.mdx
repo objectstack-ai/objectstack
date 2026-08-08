@@ -117,7 +117,7 @@ const result = MetadataBulkResultSchema.parse(data);
 | **type** | `'standard'` | ✅ | Plugin type |
 | **description** | `string` | optional | Plugin description |
 | **capabilities** | `{ crud?: boolean; query?: boolean; overlay?: boolean; watch?: boolean; … }` | ✅ | Plugin capabilities |
-| **config** | `{ storage: object; customizationPolicies?: { metadataType: string; allowCustomization?: boolean; lockedFields?: string[]; customizableFields?: string[]; … }[]; mergeStrategy?: object; additionalTypes?: { label: string; description?: string; filePatterns: string[]; supportsOverlay?: boolean; … }[]; … }` | optional | Plugin configuration |
+| **config** | `{ storage: object; customizationPolicies?: object[]; mergeStrategy?: object; additionalTypes?: object[]; … }` | optional | Plugin configuration |
 
 
 ---
