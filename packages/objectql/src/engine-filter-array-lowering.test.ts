@@ -517,10 +517,12 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
   it('a scalar on a NON-collection operator is untouched', async () => {
     await engine.find('deal', asFilterArrayQuery([['stage', '!=', 'won']]));
     expect(lastWhere()).toEqual({ stage: { $ne: 'won' } });
-    // String bounds on a range comparison stay legal — `FieldOperatorsSchema`
-    // declares `$gt` as number|Date|FieldReference, but ISO strings are what the
-    // showcase apps send and every backend accepts. This gate enforces the
-    // three list declarations, not the whole schema.
+    // String bounds on a range comparison stay legal, and since #5685 the
+    // declaration agrees: `FieldOperatorsSchema` now declares `$gt` as
+    // number|Date|string|FieldReference, matching the ISO strings the showcase
+    // apps send and every backend accepts. This gate still enforces only the
+    // three list declarations, not the whole schema — for cost, not because the
+    // schema disagrees.
     await engine.find('deal', asFilterArrayQuery([['stage', '>', '2026-01-01']]));
     expect(lastWhere()).toEqual({ stage: { $gt: '2026-01-01' } });
   });

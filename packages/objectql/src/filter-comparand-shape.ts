@@ -210,14 +210,20 @@ function malformedRangeComparandError(
  *
  * Read-only and allocation-free on the overwhelmingly common path (a filter
  * with no list operator walks its own keys and returns). Runs on every engine
- * read and write, so it stays a walk rather than a schema parse:
- * `FieldOperatorsSchema` cannot be used as the gate directly because it is
- * stricter than the runtime in ways the runtime deliberately allows — `$gt` is
- * declared `number | Date | FieldReference`, while `['created_at', '>',
- * '2026-01-01']` lowers to a STRING bound that every backend accepts and that
- * the showcase apps rely on. Enforcing the whole schema here would refuse
- * working queries; this gate enforces the three declarations that the drivers
- * genuinely cannot agree on.
+ * read and write, so it stays a walk rather than a schema parse — that cost is
+ * now the whole reason, and this gate deliberately enforces only the three
+ * list declarations the drivers genuinely cannot agree on.
+ *
+ * [#5685] This paragraph used to carry a second reason: that
+ * `FieldOperatorsSchema` was "stricter than the runtime in ways the runtime
+ * deliberately allows", because `$gt` was declared `number | Date |
+ * FieldReference` while `['created_at', '>', '2026-01-01']` lowers to a STRING
+ * bound that every backend accepts and the showcase apps rely on. That was a
+ * real mismatch and it is **fixed at the source** rather than tolerated here:
+ * the four ordering slots now declare `string` too, so the observation that
+ * motivated this note no longer describes the schema. It is recorded rather
+ * than deleted because this file's workaround is part of the evidence that
+ * closed #5685 — the schema, not the runtime, was the wrong side.
  */
 export function assertListComparandShapes(
   object: string,

@@ -37,6 +37,8 @@
  * | `validations[].condition` / `.when` / `.then` / `.otherwise` | the six `*ValidationSchema` variants |
  * | `objects[].fields[].reference`         | `FieldSchema`                     |
  * | `objects[].fields[].expression`        | `FieldSchema`                     |
+ * | `objects[].fields[].options`           | `FieldSchema`                     |
+ * | `options[].value` / `.visibleWhen`     | `SelectOptionSchema`              |
  * | `actions[].objectName`                 | the action schema                 |
  * | `sharingRules[].condition` / `.object` | `SharingRuleSchema`               |
  *
@@ -390,6 +392,69 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   };
 
   /**
+   * A FIELD-level conditional rule (`visibleWhen` / `readonlyWhen` /
+   * `requiredWhen`) that reaches for `current_user` — the one root the field
+   * level does not bind (#6146, measured at both ends: `evalFieldPredicate` /
+   * `resolveFieldRuleState` bind `record` + `previous` + `parent` and nothing
+   * else, and objectui#1582's authoring autocomplete pins the same three).
+   *
+   * ## Why this is a rule of its own rather than a missing root
+   *
+   * Until #6290 the same rejection fell out of `@objectstack/formula`'s
+   * `SCOPE_ROOTS` not listing `current_user` — a global baseline, doing a
+   * per-surface job by accident. Two things were wrong with that:
+   *
+   *  1. The rest of the package said the opposite. `introspectScope` hands
+   *     `current_user` to authors as a legal root and `checkRoleCatalog`'s four
+   *     position-membership regexes all lead with it, because ADR-0068 D1 makes
+   *     it THE canonical spelling and `buildScope` really does mount it. One
+   *     package, two accounts of one root.
+   *  2. The diagnostic was the generic bare-field one, so it prescribed
+   *     "Write `record.current_user`" — a shape that binds on NO layer. An
+   *     author who followed it wrote something strictly worse than what they
+   *     started with, and the failure stayed silent.
+   *
+   * So the baseline now declares the root (a reference through it never faults
+   * platform-wide) and the surface that genuinely cannot bind it says so here,
+   * in its own words, with the prescriptions that actually exist.
+   *
+   * ## Why it is an error and not a warning
+   *
+   * The failure direction is the worst one available: an unbound identifier
+   * faults, the fault falls back, and visibility's fallback is `true` — so a
+   * predicate written to HIDE a field leaves it permanently visible, which is
+   * the opposite of what the author wrote and the half nobody notices (#6146).
+   *
+   * Verdict scope is the field level only. Per-option `visibleWhen` is checked
+   * by the loop in the field walk and deliberately NOT passed through here:
+   * options resolve against the host's predicate scope, which binds
+   * `current_user` (ADR-0068 / objectui#2284) — that surface is where such a
+   * predicate belongs, which is why it is also the first prescription below.
+   */
+  const checkFieldRuleUserRoot = (where: string, slot: string, raw: unknown): void => {
+    const source = celSourceOf(raw);
+    if (!source) return;
+    const roots = collectCelRootIdentifiers(source);
+    if (!roots.ok || !roots.roots.includes('current_user')) return;
+    issues.push({
+      where,
+      message:
+        `\`${slot}\` reads \`current_user\`, but a field-level conditional rule binds only ` +
+        `\`record\` (plus \`previous\`, and \`parent\` on a master-detail line item) — ` +
+        `\`current_user\` is unbound here, so the predicate faults and falls back to VISIBLE, ` +
+        `leaving the field the test was meant to hide showing for everyone (#6146). ` +
+        `To gate the CHOICES of a select by user, move the predicate to the option's own ` +
+        `\`visibleWhen\` (\`options: [{ …, visibleWhen: … }]\`) — per-option is the one \`*When\` ` +
+        `surface that binds \`current_user\`. To hide the FIELD by role, declare field-level ` +
+        `security on a permission set (\`fields: { '<object>.<field>': { readable: false } }\`), ` +
+        `which the server enforces. To gate on record state, rewrite the predicate against ` +
+        `\`record\`.`,
+      source,
+      severity: 'error',
+    });
+  };
+
+  /**
    * A declared bare-CEL slot (#4027). No object schema is passed: these slots
    * bind the *screen's own* collected values, not the trigger record's fields, so
    * a field-existence pass would report every field name as unknown.
@@ -571,6 +636,34 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // not enforced = data-integrity hole). #1928 class, same as actions.
       for (const key of ['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen'] as const) {
         check(`object '${objectName}' · field '${fname}' ${key}`, (f as AnyRec)[key], objectName, 'record');
+        checkFieldRuleUserRoot(`object '${objectName}' · field '${fname}' ${key}`, key, (f as AnyRec)[key]);
+      }
+      // [#6290] Per-OPTION `visibleWhen` — a `select`/`multiselect`/`radio`
+      // option's own predicate (`SelectOptionSchema.visibleWhen`,
+      // `field.zod.ts:143`). It had no traversal here at all, so the whole
+      // option surface reached compile, validate and run time unvalidated:
+      // a bare field ref (`country == 'cn'`) or a reference to a field that
+      // does not exist produced no build error, and the option then simply
+      // never offered itself.
+      //
+      // Deliberately checked on the SAME `record` scope as the field-level
+      // slots, and that is the whole of the difference between the two faces
+      // after #6290: `current_user` is a declared root platform-wide (ADR-0068
+      // D1), so it passes here — options resolve through
+      // `resolveCascadingOptions` against the host's predicate scope, which
+      // binds it (ADR-0068 / objectui#2284), and the showcase's
+      // `'admin' in current_user.positions` is the pinned legal usage — while
+      // `checkFieldRuleUserRoot` above rejects it one level up, where nothing
+      // binds it. Same helper, two verdicts, because the two surfaces have two
+      // evaluators; neither verdict is a side effect of a shared root list.
+      for (const [oi, opt] of asArray(f.options).entries()) {
+        const label = typeof opt.value === 'string' ? `'${opt.value}'` : `#${oi}`;
+        check(
+          `object '${objectName}' · field '${fname}' option ${label} visibleWhen`,
+          opt.visibleWhen,
+          objectName,
+          'record',
+        );
       }
       // [#4889] A `parent`-scoped `readonlyWhen` is a SERVER-enforced lock:
       // the write path resolves the object's master-detail header and binds it

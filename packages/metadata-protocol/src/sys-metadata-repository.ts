@@ -386,6 +386,20 @@ export class SysMetadataRepository implements MetadataRepository {
     const body = (spec ?? {}) as Record<string, unknown>;
     const hash = hashSpec(body);
 
+    // ADR-0048 — the ONE row this write targets. A write is not a search: it
+    // upserts exactly one `(org, type, name, package_id)` row, so its scope is
+    // always a concrete package or the unbound row — never `get`'s "any
+    // package" match. That asymmetry with the sibling read at {@link get} is
+    // deliberate, and it is why this value is named here rather than inlined:
+    // `put` reads it TWICE (the optimistic-lock lookup below and the
+    // `package_id` stamp), and #6215 was a caller — `restoreVersion` — whose
+    // silence about the binding was resolved to `null` by this expression, so
+    // the lock looked up a row that does not exist for every package-bound
+    // overlay. Callers state their scope; this line no longer decides it
+    // anywhere but for the documented `PutOptions.packageId` default
+    // (omitted/undefined = the env-local, unbound row).
+    const targetPackageId: string | null = opts.packageId ?? null;
+
     // Run all reads + writes inside one transaction so the optimistic
     // lock, the parent-row mutation, and the history append are atomic.
     const result = await this.withTxn(async (ctx) => {
@@ -393,7 +407,7 @@ export class SysMetadataRepository implements MetadataRepository {
       // save for package B does not find (and overwrite) package A's same-name
       // overlay. A package-less save (packageId null) targets the global row.
       const existing = await this.engine.findOne('sys_metadata', {
-        where: this.whereFor(ref, state, opts.packageId ?? null),
+        where: this.whereFor(ref, state, targetPackageId),
         context: ctx,
       });
       const existingHash: string | null = existing?.checksum ?? null;
@@ -436,9 +450,9 @@ export class SysMetadataRepository implements MetadataRepository {
       // selected never silently re-binds the row; only fill a null binding.
       if (existing) {
         const existingPkg = (existing as { package_id?: string | null }).package_id ?? null;
-        parentRowData.package_id = existingPkg ?? opts.packageId ?? null;
+        parentRowData.package_id = existingPkg ?? targetPackageId;
       } else {
-        parentRowData.package_id = opts.packageId ?? null;
+        parentRowData.package_id = targetPackageId;
       }
       if (existing) {
         const existingId = (existing as { id?: string }).id;
@@ -723,6 +737,11 @@ export class SysMetadataRepository implements MetadataRepository {
    * with `operation_type='revert'` so the audit trail captures the
    * intent. Does NOT touch any draft row.
    *
+   * The restore stays on the row it found: the active row's ADR-0048
+   * `package_id` is read here and threaded into {@link put}, so a row bound to
+   * a Studio package is UPDATED in place rather than missed by a lookup
+   * narrowed to `package_id IS NULL` (#6215).
+   *
    * Throws `[version_not_found]` (404) if the target version row is
    * missing or is a delete tombstone (no body to restore).
    */
@@ -759,7 +778,30 @@ export class SysMetadataRepository implements MetadataRepository {
       throw err;
     }
     const body = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
-    const currentActive = await this.get(ref, { state: 'active' });
+    // ADR-0048 / #6215 — read the RAW active row, not just its body, and carry
+    // its `package_id` into the write. `put` upserts exactly ONE row and scopes
+    // its optimistic-lock lookup by package; an unstated `packageId` resolves to
+    // the unbound row (`package_id IS NULL`). This restore used to state
+    // nothing while reading the parent hash package-agnostically, so for a row
+    // bound to a Studio package (`app.myapp`, …) the two disagreed by
+    // construction: the lock read `null`, the parent hash was the real one, and
+    // `put` threw ConflictError. Both user-facing callers — `rollbackMetaItem`
+    // and `revertCommit` — answered 409 "advanced during rollback" for every
+    // package-bound overlay while nothing had advanced. Its second face was the
+    // write: had the lock ever passed, `existing` was `null` and the restore
+    // INSERTED a duplicate unbound row instead of updating the bound one.
+    //
+    // One read supplies both facts, exactly as {@link promoteDraft} does, so
+    // the row the lock is taken on is by construction the row that is written.
+    // A missing active row (deleted, or never published) yields `null` — the
+    // unbound row, which is the only defined answer: `sys_metadata_history`
+    // carries no `package_id` column, so a vanished binding is not recoverable.
+    const activeRow = await this.engine.findOne('sys_metadata', {
+      where: this.whereFor(ref, 'active'),
+    });
+    const activePackageId =
+      (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
+    const currentActive = activeRow ? this.rowToItem(ref, activeRow) : null;
     return this.put(ref, body, {
       parentVersion: currentActive?.hash ?? null,
       actor: opts.actor,
@@ -768,6 +810,7 @@ export class SysMetadataRepository implements MetadataRepository {
       intent: opts.intent ?? 'override-artifact',
       state: 'active',
       opType: 'revert',
+      packageId: activePackageId,
     });
   }
 
@@ -1051,9 +1094,12 @@ export class SysMetadataRepository implements MetadataRepository {
     // ADR-0048 — when the caller scopes by package, the overlay row is keyed by
     // `(org, type, name, package_id)` so two installed packages shipping the
     // same name each get their OWN customization row (a package-less / global
-    // overlay uses `package_id IS NULL`). When `packageId` is omitted (legacy
-    // callers — delete/promote/restore), the package dimension is left out so
-    // the query keeps its historical "match any package" behaviour.
+    // overlay uses `package_id IS NULL`). When `packageId` is omitted, the
+    // package dimension is left out so the query keeps its historical "match
+    // any package" behaviour — which is what the RESOLVING reads want
+    // (delete/promote/restore each locate the one row whatever it is bound to).
+    // The writes never rely on it: they resolve the binding from the row that
+    // read returned and state it (#6215).
     if (packageId !== undefined) where.package_id = packageId; // string → eq; null → IS NULL
     return where;
   }

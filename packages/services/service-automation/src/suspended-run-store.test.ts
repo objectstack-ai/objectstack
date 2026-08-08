@@ -256,11 +256,11 @@ describe('resume failure codes', () => {
     });
 
     it('logs a failed durable write at ERROR — a pause kept only in memory is data loss in waiting', async () => {
-        const lines: { level: string; msg: string }[] = [];
+        const lines: { level: string; msg: string; meta?: Record<string, unknown> }[] = [];
         const logger: any = {
             info: (m: any) => lines.push({ level: 'info', msg: String(m) }),
-            warn: (m: any) => lines.push({ level: 'warn', msg: String(m) }),
-            error: (m: any) => lines.push({ level: 'error', msg: String(m) }),
+            warn: (m: any, meta?: any) => lines.push({ level: 'warn', msg: String(m), meta }),
+            error: (m: any, _err?: any, meta?: any) => lines.push({ level: 'error', msg: String(m), meta }),
             debug: () => {},
             child() { return logger; },
         };
@@ -270,9 +270,12 @@ describe('resume failure codes', () => {
             .execute('approval_flow');
 
         expect(paused.status).toBe('paused'); // the run still pauses…
-        const errs = lines.filter(l => l.level === 'error').map(l => l.msg).join('\n');
-        expect(errs).toMatch(/no such table: sys_automation_run/);
-        expect(errs).toMatch(/NOT be resumable after a restart/);
+        const rec = lines.find(l => l.level === 'error' && /NOT be resumable after a restart/.test(l.msg));
+        expect(rec).toBeTruthy();
+        // #6499 — the driver's own text rides the STRUCTURED slot, never the
+        // message (whose line count must stay ours).
+        expect(rec!.msg).not.toMatch(/no such table/);
+        expect(String(rec!.meta?.error)).toMatch(/no such table: sys_automation_run/);
     });
 });
 
