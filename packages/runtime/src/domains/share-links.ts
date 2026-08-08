@@ -264,6 +264,41 @@ export async function handleShareLinksRequest(
 
         return { handled: true, response: deps.routeNotFound(`/share-links${subPath}`) };
     } catch (err: any) {
-        return sendErr(err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Share link request failed');
+        // [#6649] The dispatcher's SHARED thrown-error mapper, not a hand-written
+        // status read. This catch used to be
+        // `sendErr(err?.status ?? 500, err?.code ?? 'INTERNAL', …)`, and the two
+        // channels it collapsed are the whole defect:
+        //
+        //  1. **Status.** The refusals that actually fly out of the enforcement
+        //     paths below carry `statusCode`, not `status`:
+        //     `PermissionDeniedError { code = 'PERMISSION_DENIED'; statusCode = 403 }`
+        //     (`plugin-security/src/errors.ts`, mirrored by runtime's own
+        //     `security/resolve-execution-context.ts`) is thrown by the security
+        //     middleware's CRUD gate when the caller's permission sets grant no
+        //     `allowRead` on the object — so `svc.createLink`'s visibility read
+        //     `engine.find(object, { context })` throws it, `ShareLinkService`
+        //     does not catch it, and it lands here. `err?.status` was `undefined`
+        //     on it, so a 403-class refusal left as a **500** while `code` read
+        //     `PERMISSION_DENIED` — an envelope that contradicts itself, and a
+        //     status many SDK/browser clients treat as retryable when the answer
+        //     is permanent. `errorFromThrown` reads `status` OR `statusCode`.
+        //  2. **Code.** The `'INTERNAL'` fallback is not registered for
+        //     `@objectstack/runtime` in `ERROR_CODE_LEDGER` — only
+        //     `service-storage` / `service-i18n` / `rest` / `plugin-sharing`
+        //     register it, and the ledger's per-package rows are provenance, so
+        //     the global union kept `ApiErrorSchema` green while this domain
+        //     emitted a code it never registered. The shared mapper leaves the
+        //     required field to `standardErrorCodeForHttpStatus` instead, which
+        //     spells the catalogued `INTERNAL_ERROR` (ADR-0112) — the same
+        //     derived code every other dispatcher exit already answers with.
+        //
+        // `ShareLinkService`'s own refusals are unaffected: its `makeError` sets
+        // `err.status` + `err.code`, which the mapper reads on the same first
+        // branch the old chain did (403 `FORBIDDEN`, 422 `SHARING_NOT_ENABLED`,
+        // …). What it adds on top is the structured `issues` / `fields` detail
+        // the `/meta` and `/actions` domains already carry through this exit —
+        // which is the point: a hand-written catch is exactly how this domain
+        // diverged from the shared mapper in the first place.
+        return { handled: true, response: deps.errorFromThrown(err, 500) };
     }
 }

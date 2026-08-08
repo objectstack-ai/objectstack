@@ -91,6 +91,28 @@ describe('ApiRoutesSchema', () => {
     expect(routes.data).toBe('/api/v1/data');
     expect(routes.auth).toBeUndefined();
   });
+
+  // [#6633] The two direct-mount surface keys. `packages` predates this issue;
+  // `datasources` is the base for the `datasources/:name/external/*`
+  // federation-admin family. Both optional: absent = not mounted (ADR-0076
+  // D12), and a rebased deployment advertises its real base.
+  it('accepts the direct-mount surface keys (packages / datasources), rebased or absent', () => {
+    const rebased = ApiRoutesSchema.parse({
+      data: '/backend/api/v9/data',
+      metadata: '/backend/api/v9/meta',
+      packages: '/backend/api/v9/packages',
+      datasources: '/backend/api/v9/datasources',
+    });
+    expect(rebased.packages).toBe('/backend/api/v9/packages');
+    expect(rebased.datasources).toBe('/backend/api/v9/datasources');
+
+    const minimal = ApiRoutesSchema.parse({
+      data: '/api/v1/data',
+      metadata: '/api/v1/meta',
+    });
+    expect(minimal.packages).toBeUndefined();
+    expect(minimal.datasources).toBeUndefined();
+  });
 });
 
 /** Minimal services map used as base fixture for DiscoverySchema tests */
