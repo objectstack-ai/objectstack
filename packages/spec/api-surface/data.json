@@ -229,6 +229,7 @@
     "FILTER_OPERATORS (const)",
     "FILTER_TEXT_CASES (const)",
     "FILTER_TEXT_ROWS (const)",
+    "FILTER_TOKEN_WRAPPED_RE (const)",
     "FeedFilterMode (type)",
     "FeedItemType (type)",
     "Field (type)",
