@@ -442,22 +442,18 @@ describe('#4636 — rollback re-registers under the row\'s own package binding',
         });
 
         const realFindOne = engine.findOne.bind(engine);
-        // Reads of the ACTIVE overlay row, in order: [1] the protocol resolving
-        // the ownership key for the write-through, [2] `restoreVersion`'s
-        // parent-hash read. Arm on [2] — that is the one the write races.
-        let activeReads = 0;
+        // The concurrent publish lands between `restoreVersion`'s parent read
+        // and `put`'s optimistic-lock read. That second read is identified by
+        // the one property only it has — it runs INSIDE the write transaction,
+        // so the engine call carries a `context` — rather than by counting
+        // reads, which would silently stop covering anything the day a read is
+        // added to the rollback path.
         let fired = false;
-        engine.findOne = async (table: string, opts: { where: Record<string, unknown> }) => {
+        engine.findOne = async (table: string, opts: Record<string, any>) => {
             const row = await realFindOne(table, opts);
-            if (table === 'sys_metadata' && row && opts.where?.state === 'active') {
-                activeReads += 1;
-                if (activeReads === 2) {
-                    fired = true;
-                    const snapshot = { ...(row as Record<string, unknown>) };
-                    // Someone else publishes while the rollback is in flight.
-                    (row as any).checksum = `sha256:${'a'.repeat(64)}`;
-                    return snapshot;
-                }
+            if (!fired && table === 'sys_metadata' && row && 'context' in opts && opts.where?.state === 'active') {
+                fired = true;
+                (row as any).checksum = `sha256:${'a'.repeat(64)}`; // someone else published
             }
             return row;
         };

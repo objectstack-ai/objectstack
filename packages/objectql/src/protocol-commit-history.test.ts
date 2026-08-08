@@ -309,32 +309,34 @@ function makeRealRepoHarness(seedCommits: any[] = []) {
   return { protocol, engine, rows, historyRows, commits, registry };
 }
 
-const invoiceBody = (extra?: Record<string, unknown>) => ({
-  name: 'myapp_invoice',
-  label: 'Invoice',
-  fields: {
-    name: { name: 'name', type: 'text', label: 'Name' },
-    amount: { name: 'amount', type: 'number', label: 'Amount' },
-  },
-  ...extra,
+/**
+ * The reverted artifact is a `view`, not an `object`, and deliberately: the
+ * repository's `assertAllowed` refuses `override-artifact` on `object` (not
+ * `allowOrgOverride`), and `revertCommit` — unlike `rollbackMetaItem`, which
+ * derives `runtime-only` for a runtime-created artifact — passes no intent, so
+ * an object item fails that gate BEFORE reaching the scoping this file pins.
+ * That is a separate defect of the same family, filed as #6563; using an
+ * overlay-allowed type keeps this pin measuring one thing. The repository line
+ * under test is type-agnostic.
+ */
+const gridBody = (label: string) => ({
+  name: 'myapp_case_grid', type: 'grid', label, columns: ['id', 'title'],
 });
 
 /** v1 authored in the package workspace, then the edit the commit recorded. */
 async function seedPackageBoundEdit(protocol: any) {
   await protocol.saveMetaItem({
-    type: 'object', name: 'myapp_invoice', packageId: APP_PKG, item: invoiceBody(),
+    type: 'view', name: 'myapp_case_grid', packageId: APP_PKG, item: gridBody('Cases'),
   });
-  const evolved: any = invoiceBody();
-  evolved.fields.due_date = { name: 'due_date', type: 'date', label: 'Due' };
   await protocol.saveMetaItem({
-    type: 'object', name: 'myapp_invoice', packageId: APP_PKG, item: evolved,
+    type: 'view', name: 'myapp_case_grid', packageId: APP_PKG, item: gridBody('Renamed'),
   });
 }
 
 const editedCommit = () => applyCommit({
   id: 'cmt_pkg',
   package_id: APP_PKG,
-  items: [{ type: 'object', name: 'myapp_invoice', existedBefore: true, prevVersion: 1 }],
+  items: [{ type: 'view', name: 'myapp_case_grid', existedBefore: true, prevVersion: 1 }],
   created_at: '2026-08-08T00:00:00.000Z',
 });
 
@@ -348,16 +350,16 @@ describe('#6215 — revertCommit restores a PACKAGE-BOUND overlay row', () => {
     // Pre-fix this was `failedCount: 1` carrying "advanced during rollback".
     expect(res.failed).toEqual([]);
     expect(res.revertedCount).toBe(1);
-    expect(res.reverted[0]).toMatchObject({ type: 'object', name: 'myapp_invoice', action: 'restored' });
+    expect(res.reverted[0]).toMatchObject({ type: 'view', name: 'myapp_case_grid', action: 'restored' });
 
     // IN PLACE — the write targeted the bound row rather than inserting an
     // unbound duplicate beside it (the defect's second face; `sys_metadata`'s
     // partial unique index keys on `COALESCE(package_id,'')`, so a real DB
     // would have accepted that duplicate too).
-    const stored = Array.from(rows.values()).filter((r) => r.name === 'myapp_invoice');
+    const stored = Array.from(rows.values()).filter((r) => r.name === 'myapp_case_grid');
     expect(stored).toHaveLength(1);
     expect(stored[0].package_id).toBe(APP_PKG);
-    expect(Object.keys(JSON.parse(stored[0].metadata).fields)).not.toContain('due_date');
+    expect(JSON.parse(stored[0].metadata).label).toBe('Cases');
     // The revert is itself an append-only commit (ADR-0067), as before.
     expect((res as any).revertCommitId).toBeTruthy();
   });
@@ -366,22 +368,20 @@ describe('#6215 — revertCommit restores a PACKAGE-BOUND overlay row', () => {
     const { protocol, rows } = makeRealRepoHarness([applyCommit({
       id: 'cmt_global',
       package_id: null,
-      items: [{ type: 'object', name: 'myapp_invoice', existedBefore: true, prevVersion: 1 }],
+      items: [{ type: 'view', name: 'myapp_case_grid', existedBefore: true, prevVersion: 1 }],
       created_at: '2026-08-08T00:00:00.000Z',
     })]);
-    await protocol.saveMetaItem({ type: 'object', name: 'myapp_invoice', item: invoiceBody() });
-    const evolved: any = invoiceBody();
-    evolved.fields.due_date = { name: 'due_date', type: 'date', label: 'Due' };
-    await protocol.saveMetaItem({ type: 'object', name: 'myapp_invoice', item: evolved });
+    await protocol.saveMetaItem({ type: 'view', name: 'myapp_case_grid', item: gridBody('Cases') });
+    await protocol.saveMetaItem({ type: 'view', name: 'myapp_case_grid', item: gridBody('Renamed') });
 
     const res = await protocol.revertCommit({ commitId: 'cmt_global' });
 
     expect(res.failed).toEqual([]);
     expect(res.revertedCount).toBe(1);
-    const stored = Array.from(rows.values()).filter((r) => r.name === 'myapp_invoice');
+    const stored = Array.from(rows.values()).filter((r) => r.name === 'myapp_case_grid');
     expect(stored).toHaveLength(1);
     expect(stored[0].package_id).toBeNull();
-    expect(Object.keys(JSON.parse(stored[0].metadata).fields)).not.toContain('due_date');
+    expect(JSON.parse(stored[0].metadata).label).toBe('Cases');
   });
 
   /**
@@ -402,20 +402,17 @@ describe('#6215 — revertCommit restores a PACKAGE-BOUND overlay row', () => {
     await seedPackageBoundEdit(protocol);
 
     const realFindOne = engine.findOne.bind(engine);
-    // Active-row reads, in order: [1] `revertCommit`'s own existence probe,
-    // [2] `restoreVersion`'s parent-hash read — the one the write races.
-    let activeReads = 0;
+    // The concurrent publish lands between `restoreVersion`'s parent read and
+    // `put`'s optimistic-lock read. That second read is identified by the one
+    // property only it has — it runs INSIDE the write transaction, so the
+    // engine call carries a `context` — rather than by counting reads, which
+    // would silently stop covering anything the day a read is added.
     let fired = false;
-    engine.findOne = async (table: string, opts: { where: Record<string, unknown> }) => {
+    engine.findOne = async (table: string, opts: Record<string, any>) => {
       const row = await realFindOne(table, opts);
-      if (table === 'sys_metadata' && row && opts.where?.state === 'active') {
-        activeReads += 1;
-        if (activeReads === 2) {
-            fired = true;
-            const snapshot = { ...(row as Record<string, unknown>) };
-            row.checksum = `sha256:${'a'.repeat(64)}`; // someone else publishes
-            return snapshot;
-        }
+      if (!fired && table === 'sys_metadata' && row && 'context' in opts && opts.where?.state === 'active') {
+        fired = true;
+        row.checksum = `sha256:${'a'.repeat(64)}`; // someone else published
       }
       return row;
     };
@@ -425,12 +422,12 @@ describe('#6215 — revertCommit restores a PACKAGE-BOUND overlay row', () => {
     expect(fired).toBe(true);
     expect(res.revertedCount).toBe(0);
     expect(res.failedCount).toBe(1);
-    expect(res.failed[0]).toMatchObject({ type: 'object', name: 'myapp_invoice', code: 'METADATA_CONFLICT' });
+    expect(res.failed[0]).toMatchObject({ type: 'view', name: 'myapp_case_grid', code: 'METADATA_CONFLICT' });
     // Refused means refused: the concurrent writer's body stands, and no
     // unbound duplicate was left behind.
-    const stored = Array.from(rows.values()).filter((r) => r.name === 'myapp_invoice');
+    const stored = Array.from(rows.values()).filter((r) => r.name === 'myapp_case_grid');
     expect(stored).toHaveLength(1);
     expect(stored[0].package_id).toBe(APP_PKG);
-    expect(Object.keys(JSON.parse(stored[0].metadata).fields)).toContain('due_date');
+    expect(JSON.parse(stored[0].metadata).label).toBe('Renamed');
   });
 });
