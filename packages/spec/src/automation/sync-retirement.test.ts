@@ -133,8 +133,29 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     ]) {
       expect(automationNames, `./automation must not export ${retired}`).not.toContain(retired);
     }
-    expect(automationNames).toContain('ETLPipelineSchema');
+    // ⚠️ The L2 anchor that stood here — `expect(automationNames).toContain(
+    // 'ETLPipelineSchema')` — was DELETED, not re-spelled, at #6414. It was
+    // written to prove the L1 retirement stopped at L1, and it did that job for
+    // four months; then L2 was retired on the same narrative-only reading, so
+    // keeping it would have asserted the survival of a layer this repo
+    // deliberately removed. Re-pointing it at another `automation/` export
+    // would have preserved the line and lost the meaning. What survives as the
+    // "did not over-reach" witness is `StateMachineSchema` plus the >50 export
+    // floor above — and, one layer out, the surviving sync surfaces are
+    // asserted by name in section 4 below.
     expect(automationNames).toContain('StateMachineSchema');
+    for (const alsoRetired of [
+      'ETLPipeline', 'ETLPipelineSchema', 'ETLPipelineRun', 'ETLPipelineRunSchema',
+      'ETLSource', 'ETLSourceSchema', 'ETLDestination', 'ETLDestinationSchema',
+      'ETLTransformation', 'ETLTransformationSchema', 'ETLEndpointTypeSchema',
+      'ETLTransformationTypeSchema', 'ETLSyncModeSchema', 'ETLRunStatusSchema',
+      'ETL',
+    ]) {
+      expect(
+        automationNames,
+        `./automation must not export ${alsoRetired} (#6414, L2 retired on L1's reading)`,
+      ).not.toContain(alsoRetired);
+    }
 
     // 2. The renamed side: `ConnectorConflictResolution(Schema)` originates in
     //    integration/connector.zod.ts and is exported by ./integration alone

@@ -5427,8 +5427,30 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<ValidateDataResponse> {
     object = this.resolveObjectName(object);
     const mode = options?.mode ?? 'insert';
-    const rows = Array.isArray(data) ? data : [data];
     const schemaForValidation = this._registry.getObject(object);
+
+    // [#4633] `insert()` resolves `defaultValue`s and seeds owned roll-up
+    // `summary` fields BEFORE it validates, so a required field carrying a
+    // default is never missing by the time `validateRecord` runs. The preview
+    // has to walk the same two steps or it reports `required` on a row the
+    // write happily creates — a FALSE ALARM, and the one failure mode the
+    // ruling that created this operation set out to prevent. (Measured on the
+    // import dry run: `tier: { required: true, defaultValue: 'standard' }`
+    // unmapped ⇒ preview `failed`, write `created`.)
+    //
+    // Both helpers are pure and synchronous: they read the registry, copy the
+    // row, and touch neither driver nor hook — so running them here keeps the
+    // "nothing is written, nothing is executed" contract intact. `update()`
+    // deliberately does not default (#2706: a PATCH's explicit `null` means
+    // "clear it"), so neither does an `update`-mode preview.
+    const rawRows = Array.isArray(data) ? data : [data];
+    const nowSnapshot = new Date();
+    const rows: Record<string, unknown>[] = mode === 'insert'
+      ? rawRows.map((row) => this.initializeSummaryFields(
+          object,
+          this.applyFieldDefaults(object, row, options?.context, nowSnapshot),
+        ) as Record<string, unknown>)
+      : rawRows;
 
     // Resolved once for the whole set, exactly as the write path resolves them
     // once per batch — this is the "same posture as the real write" guarantee.
