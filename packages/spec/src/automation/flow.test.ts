@@ -1438,23 +1438,6 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
         expect(message, `\`${key}\` should point at the start node`).toContain('START node');
       }
     });
-
-    it('accepts every key the schema declares (guards FLOW_KEYS drift)', () => {
-      const probes: Record<string, unknown> = {
-        description: 'd', successMessage: 's', errorMessage: 'e', version: 2,
-        status: 'active', template: false, variables: [{ name: 'v', type: 'text' }],
-        active: true, runAs: 'system',
-        errorHandling: { strategy: 'retry', maxRetries: 2 },
-        protection: { lock: 'none' },
-      };
-      for (const [key, value] of Object.entries(probes)) {
-        const result = FlowSchema.safeParse({ ...minimalFlow, [key]: value });
-        const unknown = result.success
-          ? undefined
-          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-        expect(unknown, `\`${key}\` should be a declared Flow key`).toBeUndefined();
-      }
-    });
   });
 
   describe('FlowNodeSchema', () => {
@@ -1477,24 +1460,6 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
     it('explains where node inputs live for an `inputs` key', () => {
       expect(unknownKeyIssue(FlowNodeSchema, { id: 'n1', type: 'script', label: 'S', inputs: {} })!.message)
         .toContain('`config`');
-    });
-
-    it('accepts every key the schema declares (guards FLOW_NODE_KEYS drift)', () => {
-      const probes: Record<string, unknown> = {
-        config: { a: 1 },
-        connectorConfig: { connectorId: 'c', actionId: 'a', input: {} },
-        position: { x: 0, y: 0 }, timeoutMs: 100,
-        inputSchema: { p: { type: 'string' } }, outputSchema: { o: { type: 'number' } },
-        waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' },
-        boundaryConfig: { attachedToNodeId: 'n0', eventType: 'error' },
-      };
-      for (const [key, value] of Object.entries(probes)) {
-        const result = FlowNodeSchema.safeParse({ id: 'n1', type: 'script', label: 'S', [key]: value });
-        const unknown = result.success
-          ? undefined
-          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-        expect(unknown, `\`${key}\` should be a declared FlowNode key`).toBeUndefined();
-      }
     });
   });
 

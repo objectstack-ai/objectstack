@@ -162,11 +162,30 @@ describe('posture reading, with a red control for each', () => {
   });
 
   it('reads the OLDER z.object(…).strict() spelling as strict too', () => {
-    // The reading the `strictObject(`-only count could not make. These four are
-    // why `security/` is done and `automation/` is not zero.
+    // The reading the `strictObject(`-only count could not make.
+    //
+    // The fixture used to be `security/permission.zod.ts`, whose four sites
+    // were the campaign's canonical `z.object(shape, { error }).strict()`
+    // wiring; #5593 migrated all four to `strictObject`, so the file no longer
+    // exercises the branch under test. `data/object.zod.ts` carries the
+    // spelling deliberately and is expected to keep carrying it: its two
+    // remaining `{ error: … }` maps are HAND-WRITTEN `$ZodErrorMap`s
+    // (`strictCapabilitiesError`, `strictTenancyError`) that emit a standing
+    // explainer the shared template cannot express, which #6416 recorded as
+    // out of #5593's reach. If they are ever converted, move this fixture
+    // rather than deleting the assertion — the AST reader still has to make
+    // the reading, and `packages/spec` is not the only tree it reads.
+    const objectSites = analyzeSites(at('data/object.zod.ts'));
+    const tenancy = objectSites.find((s) => s.name === 'TenancyConfigSchema');
+    expect(tenancy?.posture, 'a plain `.strict()` chain is still strict').toBe('strict');
+    expect(tenancy?.idiom).toBe('z.object');
+
+    // The permission file's four are now the helper, and still strict — the
+    // control that keeps this test a statement about the READER rather than
+    // about one file.
     const perm = analyzeSites(at('security/permission.zod.ts'));
     expect(perm.filter((s) => s.posture === 'strict')).toHaveLength(4);
-    expect(perm.find((s) => s.name === 'PermissionSetSchema')?.idiom).toBe('z.object');
+    expect(perm.find((s) => s.name === 'PermissionSetSchema')?.idiom).toBe('strictObject');
     expect(countStripSites(at('security/permission.zod.ts'))).toBe(0);
   });
 

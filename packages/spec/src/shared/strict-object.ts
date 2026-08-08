@@ -60,7 +60,6 @@
 
 import { z } from 'zod';
 
-import { withoutDirectAliasTableRegistration } from './alias-table-registry';
 import { strictUnknownKeyError } from './suggestions.zod';
 
 /**
@@ -229,14 +228,14 @@ export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptio
         typeof issue.input === 'string' ? retiredForms[issue.input] : undefined;
       if (prescription) return prescription;
     }
-    // Built WITHOUT registering in the direct-call registry (#5483). This table
-    // is already recorded below with its `shape`, which is the stronger record:
-    // letting it land in both would judge it twice — the second time against
-    // the transcription-shaped view (`knownKeys`, tombstones filtered out)
-    // rather than the shape — and would make that registry's population depend
-    // on whether anything happened to reject a key first, since this build is
-    // deferred to the first rejection.
-    return (build ??= withoutDirectAliasTableRegistration(() => strictUnknownKeyError({
+    // The table is recorded ONCE, below, with its `shape` — the strong record
+    // the audit reads. Between #5483 and #5593 a second, transcription-shaped
+    // registry existed for the 44 call sites that predated this helper, and
+    // this build had to be run with that registry suppressed so a
+    // `strictObject` surface would not be judged twice (the second time against
+    // `knownKeys` rather than the shape). #5593 migrated the last of those call
+    // sites and deleted the registry, so the suppression went with it.
+    return (build ??= strictUnknownKeyError({
       surface,
       // Declared-but-unwritable keys (tombstones) are excluded — see
       // `acceptsNothing`. They stay in the SHAPE, so writing one still raises
@@ -249,7 +248,7 @@ export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptio
       history,
       aliases,
       guidance,
-    })))(issue);
+    }))(issue);
   };
 
   DECLARATIONS.push({ options, shape });

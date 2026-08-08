@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * Position Schema — the flat capability-distribution group (ADR-0090 D3).
@@ -43,40 +43,31 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 
-/** Keys {@link PositionSchema} declares (drift-guarded by position.test.ts). */
-const POSITION_KEYS = [
-  'name', 'label', 'description', 'delegatable', 'protection',
-  // ADR-0010 runtime protection envelope (MetadataProtectionFields spread).
-  '_lock', '_lockReason', '_lockSource', '_provenance', '_packageId',
-  '_packageVersion', '_lockDocsUrl',
-] as const;
-
-const positionUnknownKeyError = strictUnknownKeyError({
-  surface: 'this position',
-  knownKeys: POSITION_KEYS,
-  aliases: { title: 'label' },
-  guidance: {
-    permissionSets:
-      '`permissionSets` is not a Position field — a position is only the named ' +
-      'distribution point (ADR-0090 D3); capability arrives via runtime bindings ' +
-      '(`sys_position_permission_set` rows, created in Setup or by an app\'s ' +
-      'kernel:ready binder). Packages SUGGEST bindings via `isDefault` on a ' +
-      'permission set, never by declaring them on the position.',
-    users:
-      '`users` is not a Position field — assignment is a runtime binding ' +
-      '(`sys_user_position` rows), never authored on the position (ADR-0090).',
-    parent:
-      '`parent` is not a Position field — positions are deliberately FLAT (ADR-0090 ' +
-      'D3, finalizing ADR-0057 D5): the visibility hierarchy is the business-unit ' +
-      'tree (`sys_business_unit`) and the manager chain (`sys_user.manager_id`), ' +
-      'never a position tree.',
+export const PositionSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this position',
+    aliases: { title: 'label' },
+    guidance: {
+      permissionSets:
+        '`permissionSets` is not a Position field — a position is only the named ' +
+        'distribution point (ADR-0090 D3); capability arrives via runtime bindings ' +
+        '(`sys_position_permission_set` rows, created in Setup or by an app\'s ' +
+        'kernel:ready binder). Packages SUGGEST bindings via `isDefault` on a ' +
+        'permission set, never by declaring them on the position.',
+      users:
+        '`users` is not a Position field — assignment is a runtime binding ' +
+        '(`sys_user_position` rows), never authored on the position (ADR-0090).',
+      parent:
+        '`parent` is not a Position field — positions are deliberately FLAT (ADR-0090 ' +
+        'D3, finalizing ADR-0057 D5): the visibility hierarchy is the business-unit ' +
+        'tree (`sys_business_unit`) and the manager chain (`sys_user.manager_id`), ' +
+        'never a position tree.',
+    },
+    history:
+      'Until #4001 these were dropped silently — the position still parsed, so the ' +
+      'author believed a distribution property was declared that the runtime never saw.',
   },
-  history:
-    'Until #4001 these were dropped silently — the position still parsed, so the ' +
-    'author believed a distribution property was declared that the runtime never saw.',
-});
-
-export const PositionSchema = lazySchema(() => z.object({
+  {
   /** Identity */
   name: SnakeCaseIdentifierSchema.describe('Unique position name (lowercase snake_case)'),
   label: z.string().describe('Display label (e.g. VP of Sales)'),
@@ -118,7 +109,7 @@ export const PositionSchema = lazySchema(() => z.object({
   // runtime — the schema just could not represent them (the same ADR-0078 §3
   // inverse-drift class the permission schema had).
   ...MetadataProtectionFields,
-}, { error: positionUnknownKeyError }).strict());
+}));
 
 /**
  * [ADR-0090 D5/D9] Built-in AUDIENCE ANCHOR positions. `everyone` is held

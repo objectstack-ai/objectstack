@@ -9,7 +9,7 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { HookBodySchema } from './hook-body.zod';
 // Type-only, and it must stay that way: `contracts/` already imports `data/`
@@ -68,63 +68,6 @@ const hookTargetError =
   + "`object: 'account'` or `object: ['account', 'contact']` — or, if firing on "
   + "every object really is the intent, write the wildcard explicitly: `object: '*'`.";
 
-/** Keys {@link HookSchema} declares (drift-guarded by hook.test.ts). */
-const HOOK_KEYS = [
-  'name', 'label', 'object', 'events', 'handler', 'body', 'priority',
-  'async', 'condition', 'description', 'retryPolicy', 'timeout', 'onError',
-] as const;
-
-/** Keys the hook `retryPolicy` block declares (drift-guarded by hook.test.ts). */
-const HOOK_RETRY_POLICY_KEYS = ['maxRetries', 'backoffMs'] as const;
-
-const hookUnknownKeyError = strictUnknownKeyError({
-  surface: 'this hook',
-  knownKeys: HOOK_KEYS,
-  aliases: {
-    hookname: 'name',
-    objectname: 'object',
-    objects: 'object',
-    event: 'events',
-    fn: 'handler',
-    callback: 'handler',
-    order: 'priority',
-    sequence: 'priority',
-    background: 'async',
-    isasync: 'async',
-    when: 'condition',
-    predicate: 'condition',
-    retry: 'retryPolicy',
-    timeoutms: 'timeout',
-    errorpolicy: 'onError',
-    onfailure: 'onError',
-  },
-  guidance: {
-    enabled:
-      '`enabled` is not a hook key — a hook has no on/off switch. Gate it with `condition` '
-      + '(the hook is skipped when the predicate is false), or remove the hook.',
-    active:
-      '`active` is not a hook key — a hook has no on/off switch. Gate it with `condition`, '
-      + 'or remove the hook.',
-  },
-  history: 'Until #4001 these were dropped silently — the hook still registered and ran.',
-});
-
-const hookRetryPolicyUnknownKeyError = strictUnknownKeyError({
-  surface: "this hook's retryPolicy",
-  knownKeys: HOOK_RETRY_POLICY_KEYS,
-  aliases: {
-    retries: 'maxRetries',
-    attempts: 'maxRetries',
-    basedelayms: 'backoffMs',
-    backoff: 'backoffMs',
-    delayms: 'backoffMs',
-  },
-  history:
-    'Until #4001 these were dropped silently — the hook retried on the defaults rather '
-    + 'than the policy that was written. Note a datasource retryPolicy spells its delay '
-    + '`baseDelayMs`; a hook spells it `backoffMs`.',
-});
-
 export const HookEvent = z.enum([
   // Read — one event per read, regardless of shape. `beforeFind`/`afterFind`
   // fire for BOTH `find` and `findOne` (the event attaches to record
@@ -165,7 +108,38 @@ export const HookEvent = z.enum([
  * - Side Effects (Sending emails, Syncing to external systems)
  * - Security (Filtering data based on context)
  */
-export const HookSchema = lazySchema(() => z.object({
+export const HookSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this hook',
+    aliases: {
+      hookname: 'name',
+      objectname: 'object',
+      objects: 'object',
+      event: 'events',
+      fn: 'handler',
+      callback: 'handler',
+      order: 'priority',
+      sequence: 'priority',
+      background: 'async',
+      isasync: 'async',
+      when: 'condition',
+      predicate: 'condition',
+      retry: 'retryPolicy',
+      timeoutms: 'timeout',
+      errorpolicy: 'onError',
+      onfailure: 'onError',
+    },
+    guidance: {
+      enabled:
+        '`enabled` is not a hook key — a hook has no on/off switch. Gate it with `condition` '
+        + '(the hook is skipped when the predicate is false), or remove the hook.',
+      active:
+        '`active` is not a hook key — a hook has no on/off switch. Gate it with `condition`, '
+        + 'or remove the hook.',
+    },
+    history: 'Until #4001 these were dropped silently — the hook still registered and ran.',
+  },
+  {
   /**
    * Unique identifier for the hook
    * Required for debugging and overriding.
@@ -185,8 +159,8 @@ export const HookSchema = lazySchema(() => z.object({
    * - Wildcard: "*" (All objects)
    *
    * Must name at least one object. An empty target (`''`, `[]`, `['']`) is
-   * refused rather than widened to the wildcard — see the note above
-   * {@link HOOK_KEYS}.
+   * refused rather than widened to the wildcard — see {@link hookTargetError},
+   * which carries the rejection text and the reason.
    */
   object: z.union([z.string(), z.array(z.string())])
     .refine(
@@ -271,10 +245,25 @@ export const HookSchema = lazySchema(() => z.object({
   /**
    * Retry Policy
    */
-  retryPolicy: z.object({
+  retryPolicy: strictObject(
+  {
+    surface: "this hook's retryPolicy",
+    aliases: {
+      retries: 'maxRetries',
+      attempts: 'maxRetries',
+      basedelayms: 'backoffMs',
+      backoff: 'backoffMs',
+      delayms: 'backoffMs',
+    },
+    history:
+      'Until #4001 these were dropped silently — the hook retried on the defaults rather '
+      + 'than the policy that was written. Note a datasource retryPolicy spells its delay '
+      + '`baseDelayMs`; a hook spells it `backoffMs`.',
+  },
+  {
     maxRetries: z.number().default(3).describe('Maximum retry attempts on failure'),
     backoffMs: z.number().default(1000).describe('Backoff delay between retries in milliseconds'),
-  }, { error: hookRetryPolicyUnknownKeyError }).strict().optional().describe('Retry policy for failed hook executions'),
+  }).optional().describe('Retry policy for failed hook executions'),
 
   /**
    * Execution Timeout
@@ -296,7 +285,7 @@ export const HookSchema = lazySchema(() => z.object({
   // REJECTED here — the same live 422 that `permission` hit on the ADR-0094
   // overlay path before Tier-A declared them (#4001 findings log, entries 2/8).
   ...MetadataProtectionFields,
-}, { error: hookUnknownKeyError }).strict());
+}));
 
 /**
  * Hook Runtime Context

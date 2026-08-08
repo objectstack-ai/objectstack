@@ -51,20 +51,6 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
 
 /**
- * Keys `ActionParamSchema` declares.
- *
- * Kept beside the schema rather than derived from `.shape`: the schema body is
- * allocated lazily (see `lazySchema`), and the error map below has to name a
- * canonical key *while* that first parse is still in flight. `action.zod.test.ts`
- * asserts every entry here is really accepted, so the list cannot rot silently.
- */
-const ACTION_PARAM_KEYS = [
-  'name', 'field', 'objectOverride', 'label', 'type', 'required', 'options',
-  'placeholder', 'helpText', 'defaultValue', 'multiple', 'accept', 'maxSize',
-  'reference', 'defaultFromRow', 'visible', 'requiresFeature',
-] as const;
-
-/**
  * Semantic near-misses — a different **word** for the same intent, usually
  * borrowed from a neighbouring schema where that word is correct. Edit distance
  * cannot reach these (`visibleWhen` → `visible` is 4 apart), so they are named
@@ -164,16 +150,15 @@ const actionParamOptionUndeclaredAnywhere = (key: 'icon' | 'disabled'): string =
   + `\`SelectOptionMetadata\` type, which no metadata path populates and no widget reads. An `
   + `action param's options are \`{ label, value, visibleWhen }\`; drop the key.`;
 
-const actionParamUnknownKeyError = strictUnknownKeyError({
-  surface: 'this action param',
-  knownKeys: ACTION_PARAM_KEYS,
-  aliases: ACTION_PARAM_KEY_ALIASES,
-  history:
-    'Until #3405 these were dropped silently — the param still parsed, so a mis-spelled ' +
-    'config shipped as a control that quietly ignored it.',
-});
-
-export const ActionParamSchema = lazySchema(() => z.object({
+export const ActionParamSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this action param',
+    aliases: ACTION_PARAM_KEY_ALIASES,
+    history:
+      'Until #3405 these were dropped silently — the param still parsed, so a mis-spelled ' +
+      'config shipped as a control that quietly ignored it.',
+  },
+  {
   /** Request-body key. Defaults to `field` when `field` is set. */
   name: z.string().optional(),
   /** Reference an existing object field for label/type/validation/options. */
@@ -385,7 +370,7 @@ export const ActionParamSchema = lazySchema(() => z.object({
    * enum-checked and the gate/registry stay in lockstep.
    */
   requiresFeature: z.enum(PUBLIC_AUTH_FEATURE_NAMES).optional().describe('Public auth feature flag gating this param; lowered into `visible` at parse time.'),
-}, { error: actionParamUnknownKeyError }).strict().refine(
+}).refine(
   (p) => Boolean(p.name) || Boolean(p.field),
   { message: 'ActionParam requires either "name" or "field"' },
 ).refine(
