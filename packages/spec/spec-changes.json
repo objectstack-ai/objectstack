@@ -361,6 +361,12 @@
         "to": "page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both)",
         "conversionId": "page-card-body-to-children",
         "toMajor": 17
+      },
+      {
+        "surface": "page.component.element:button.action.params",
+        "to": "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (#5777 — the payload gets its own key; `params` stays the ActionParam[] definition array)",
+        "conversionId": "inline-action-api-params-to-body-extra",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -1188,6 +1194,12 @@
           "surface": "page.component.page:card.body",
           "to": "page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both)",
           "conversionId": "page-card-body-to-children",
+          "toMajor": 17
+        },
+        {
+          "surface": "page.component.element:button.action.params",
+          "to": "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (#5777 — the payload gets its own key; `params` stays the ActionParam[] definition array)",
+          "conversionId": "inline-action-api-params-to-body-extra",
           "toMajor": 17
         }
       ],

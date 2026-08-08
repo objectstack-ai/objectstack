@@ -1189,6 +1189,7 @@ const step17: MigrationStep = {
     'record-picker-inert-keys-removed',
     'page-card-body-to-children',
     'dataset-measure-array-string-agg-removed',
+    'inline-action-api-params-to-body-extra',
   ],
   semantic: [
     {

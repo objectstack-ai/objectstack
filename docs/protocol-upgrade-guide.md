@@ -275,6 +275,7 @@ One entry in this step is not a removal at all but a SECURE-DEFAULT FLIP, the sh
 | `record-picker-display-field-to-label-field` | `page.component.element:record_picker.displayField` | record-picker component prop 'displayField' → 'labelField' (#5775 — the required key no renderer read; `labelField ?? 'name'` is what renders the row) | retired — `migrate meta` only |
 | `record-picker-inert-keys-removed` | `page.component.element:record_picker.searchFields / page.component.element:record_picker.multiple` | record-picker component props 'searchFields'/'multiple' removed (#5775 — the control is a plain single-select with no search box; neither key had a reader) | retired — `migrate meta` only |
 | `page-card-body-to-children` | `page.component.page:card.body` | page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both) | retired — `migrate meta` only |
+| `inline-action-api-params-to-body-extra` | `page.component.element:button.action.params` | inline type:'api' action prop 'params' (object form) → 'bodyExtra' (#5777 — the payload gets its own key; `params` stays the ActionParam[] definition array) | live — protocol 17 loader accepts the old shape |
 
 ### Semantic (delegated to you, with acceptance criteria)
 
