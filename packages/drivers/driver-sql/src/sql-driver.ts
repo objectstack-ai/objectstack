@@ -6408,8 +6408,16 @@ export class SqlDriver implements IDataDriver {
       await this.knex.raw(sql);
     } catch (e: any) {
       const msg = String(e?.message ?? e);
+      // The positive limb is this site's own question — "does this server
+      // reject functional key parts?" — and stays a message test, because
+      // that is the only channel the answer is on. The NEGATIVE limb was a
+      // seventh spelling of the unique-violation vocabulary (`/duplicate/i`)
+      // and is now the shared predicate (#6543): a conflict must never be
+      // read as a syntax rejection and silently degraded to the bare
+      // composite, and on the `errno`-only shape mysql2 can hand back, a
+      // message-only exclusion did not fire.
       const functionalUnsupported =
-        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !/duplicate/i.test(msg);
+        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !isUniqueViolationError(e);
       if (!functionalUnsupported) throw e;
       (this.logger.error ?? this.logger.warn)(
         `[sql-driver] this MySQL/MariaDB server rejects functional key parts — created '${name}' on ` +
