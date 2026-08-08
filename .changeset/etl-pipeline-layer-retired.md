@@ -47,3 +47,5 @@ a rename on a shape that does not survive the major has no observable effect, an
 The retirement kit — route 3: no tombstone, no D2 conversion.
 `RETIRED_DEFS_BY_MAJOR[17]` (9 defs) plus the D3 `SemanticMigration`
 `etl-pipeline-layer-retired` are the declaration.
+
+<!-- adr-0087: registered etl-pipeline-layer-retired -->

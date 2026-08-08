@@ -48,3 +48,5 @@ baselines (`json-schema.manifest/system.json`, `authorable-surface/system.json`,
 
 If host-implementer conformance becomes a real requirement it returns through the
 ENFORCE route: an adapter contract with a checker behind it, vocabulary second.
+
+<!-- adr-0087: registered http-server-runtime-vocabulary-retired -->

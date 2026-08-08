@@ -51,3 +51,5 @@ generated baselines and reference docs lose their entries in the same change.
 
 If "read and write ONE view by id" becomes a real requirement, it returns
 implementation-first.
+
+<!-- adr-0087: registered view-management-protocol-retired -->
