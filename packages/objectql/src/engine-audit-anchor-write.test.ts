@@ -348,12 +348,15 @@ describe('[#4513] the read-path normalizer answers what this engine enforces', (
     const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(shadowed as any);
+    // [#4311] Typed call site: `packageId` is required, and the ledger over
+    // this package's hidden test layer is a shrink-only ratchet — a new test
+    // pays its own way rather than raising the frozen number.
+    engine.registry.registerObject(shadowed as any, 'test');
   });
 
   it('the normalizer reproduces the registry\'s governance, field for field', () => {
     // Ground truth: what the engine will enforce, read off the live registry.
-    const enforced: any = engine.registry.getObject('audit_readface').fields;
+    const enforced: any = engine.registry.getObject('audit_readface')?.fields;
     // What a `/meta` read is allowed to say, computed from the AUTHORED
     // document — the body the read path actually has in hand.
     const reported: any = (applyAuditFieldGovernance(shadowed) as any).fields;
@@ -376,7 +379,9 @@ describe('[#4513] the read-path normalizer answers what this engine enforces', (
       { title: 'T2', created_at: FORGED },
       { where: { id: row.id }, context: { userId: 'u1' } } as any,
     );
-    const after: any = await engine.findOne('audit_readface', { where: { id: row.id } } as any);
+    // [#4918] No `as any` on the options bag — this call is ON contract, and
+    // the signature infers it.
+    const after: any = await engine.findOne('audit_readface', { where: { id: row.id } });
 
     // The write was refused …
     expect(after.created_at).toBe(real);
@@ -395,9 +400,9 @@ describe('[#4513] the read-path normalizer answers what this engine enforces', (
         created_at: { label: 'Created At', type: 'datetime' as const, readonly: false },
       },
     };
-    engine.registry.registerObject(optedOut as any);
+    engine.registry.registerObject(optedOut as any, 'test');
 
-    const enforced: any = engine.registry.getObject('audit_optout').fields.created_at;
+    const enforced: any = engine.registry.getObject('audit_optout')?.fields.created_at;
     const reported: any = (applyAuditFieldGovernance(optedOut) as any).fields.created_at;
     expect(enforced.readonly).toBe(false);
     expect(reported.readonly).toBe(false);
