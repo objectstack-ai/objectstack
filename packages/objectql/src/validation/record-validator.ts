@@ -714,7 +714,7 @@ function LAX_VALUE_SHAPES(): boolean {
  * of wrongly staying lenient is a warning nobody reads, while the cost of
  * wrongly enforcing is a working app that stops writing.
  */
-function mediaStrictEffective(deploymentVerified: boolean): boolean {
+export function mediaStrictEffective(deploymentVerified: boolean): boolean {
   if (LAX_MEDIA_VALUES()) return false;
   if (VALUE_SHAPE_STRICT()) return true;
   return deploymentVerified;
@@ -727,7 +727,7 @@ function mediaStrictEffective(deploymentVerified: boolean): boolean {
  * them would save three lines and lose the distinction the ADR spent an
  * addendum drawing.
  */
-function valueShapeStrictEffective(deploymentVerified: boolean): boolean {
+export function valueShapeStrictEffective(deploymentVerified: boolean): boolean {
   if (LAX_VALUE_SHAPES()) return false;
   if (VALUE_SHAPE_STRICT()) return true;
   return deploymentVerified;
