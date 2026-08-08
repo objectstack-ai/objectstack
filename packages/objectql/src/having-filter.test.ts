@@ -211,6 +211,34 @@ describe('no-value rows and the negation-carrying operators (#5905 / #5298 optio
   });
 
   /**
+   * [#6518] The `$contains` family is case-SENSITIVE by contract (#4706 Q2 = A).
+   *
+   * This face already was, by the same mechanism `formula`'s evaluator is —
+   * `String.prototype.includes` / `startsWith` / `endsWith` compare exactly — so
+   * #6518, which moved the SQL family onto that answer, changed nothing here.
+   * It is pinned for the reason #5905 gave for pinning this file at all:
+   * `having` is the one text-operator face with NO conformance-table coverage
+   * (`check-driver-conformance` scopes itself to `packages/drivers/*`, and
+   * `packages/objectql` imports no case-set), so a fold added here to make some
+   * backend agree would go red nowhere.
+   */
+  describe('[#6518] the $contains family is case-SENSITIVE', () => {
+    it('$contains, $startsWith and $endsWith do not fold case', () => {
+      expect(matchesHaving(VALUED_IN, { tag: { $contains: 'LPH' } })).toBe(false);
+      expect(matchesHaving(VALUED_IN, { tag: { $contains: 'lph' } })).toBe(true);
+      expect(matchesHaving(VALUED_IN, { tag: { $startsWith: 'ALP' } })).toBe(false);
+      expect(matchesHaving(VALUED_IN, { tag: { $startsWith: 'alp' } })).toBe(true);
+      expect(matchesHaving(VALUED_IN, { tag: { $endsWith: 'HA' } })).toBe(false);
+      expect(matchesHaving(VALUED_IN, { tag: { $endsWith: 'ha' } })).toBe(true);
+    });
+
+    it('$notContains carries the mirror: a case-only difference SATISFIES it', () => {
+      expect(matchesHaving(VALUED_IN, { tag: { $notContains: 'LPH' } })).toBe(true);
+      expect(matchesHaving(VALUED_IN, { tag: { $notContains: 'lph' } })).toBe(false);
+    });
+  });
+
+  /**
    * The NULL-safety lives at the LEAF, so `$not` inverts it rather than
    * inheriting it — the same design driver-sql writes down for its own
    * `$not` rewrite (a nested negation totalises its own operand). A no-value

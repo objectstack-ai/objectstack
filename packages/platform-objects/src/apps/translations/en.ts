@@ -86,7 +86,6 @@ export const en: TranslationData = {
         nav_connect_agent: { label: 'Connect an Agent' },
 
         // Approvals
-        nav_approval_processes: { label: 'Processes' },
         nav_approval_requests: { label: 'Requests' },
         nav_approval_actions: { label: 'Action History' },
         nav_approval_delegations: { label: 'Delegations (OOO)' },
@@ -121,13 +120,18 @@ export const en: TranslationData = {
         nav_datasources: { label: 'Datasources' },
 
         // Advanced
+        //
+        // No `nav_verifications` / `nav_device_codes` here on purpose:
+        // `sys_verification` and `sys_device_code` omit `list` from their
+        // `apiMethods`, so `setup-nav.contributions.ts` deliberately declares
+        // no browse entry for them (#2266). Nor `nav_metadata` — that entry
+        // moved to Studio as `nav_metadata_directory`. Re-adding a label here
+        // means re-adding the nav item first; the tombstone in
+        // `setup-nav-dead-key-tombstone.test.ts` states the whole rule (#6660).
         nav_oauth_apps: { label: 'OAuth Applications' },
         nav_jwks: { label: 'Signing Keys (JWKS)' },
-        nav_verifications: { label: 'Verifications' },
-        nav_device_codes: { label: 'Device Codes' },
         nav_accounts: { label: 'Identity Links' },
         nav_user_preferences: { label: 'User Preferences' },
-        nav_metadata: { label: 'All Metadata' },
       },
     },
     studio: {
