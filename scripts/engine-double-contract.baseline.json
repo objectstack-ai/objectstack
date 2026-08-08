@@ -23,6 +23,16 @@
     "`unguarded` is measured by the scan, not asserted by hand. `why` says what stands between",
     "the file and being pinned; `closes` says what removes the entry.",
     "",
+    "NOT EVERY DATA-ACCESS DOUBLE BELONGS HERE. The checker attributes a discovered literal to one",
+    "of THREE contracts and only the engine's is this ledger's subject: a DRIVER double and a SCOPED",
+    "REPOSITORY double (`IScopedObjectRepository`, #5945) are out of SCAN SCOPE, not exempt. Neither",
+    "is a looser copy of `ObjectQL.<verb>` — a repository binds to one object, so its `update(data,",
+    "options?)` is a different function with a different arity and there is no dispatch contract for",
+    "it to be looser than. #6327 added that third arm and the two EXEMPT rows this ledger carried for",
+    "`scoped-context.test.ts` and `hook.test.ts` left with it; a witness of that interface needs no",
+    "row at all now. If you are here because a scoped-repository double came out red, the fix is the",
+    "checker's REPOSITORY_ONLY_MEMBERS, not a row here.",
+    "",
     "WHAT THESE ENTRIES DO AND DO NOT CLAIM. They record that the double is structurally",
     "looser than the contract. They do NOT claim the looseness is currently harmless — proving",
     "that per file means running each suite with the guard installed, and the one package where",
@@ -1113,22 +1123,6 @@
       "kind": "EXEMPT",
       "why": "MEASURED (#5480): the `update` slice of this gate is NEW — `resolveEngineUpdateDispatch` did not exist before #5480, so no double in the repo could route through it and the whole discovered set enters this ledger in one act. Not newly written looseness and not a raised ratchet: it is the first measurement of a contract that had no producer-side predicate to measure against, which is exactly what this script's header used to list under deliberately-not-covered (\"update's twin dispatch ... needs its own producer-side predicate extracted first\"). Discovered at lines 24, 46, 82, 119, 152. EXEMPT for the same reason the delete-slice entry for this file is, restated for the update verb because a per-verb ledger may not inherit a verdict: these are not stand-ins that code under test drives, they are TYPE-CONFORMANCE witnesses that `IDataEngine` is implementable, and `update` is present on each only because the interface requires the member. They cannot be pinned even in principle — @objectstack/objectql depends on @objectstack/spec, so the import would invert the dependency. WHAT THIS ENTRY DOES NOT CLAIM: unlike the #5629 delete batch above it carries NO per-file dormancy probe. Nothing here says the looseness is unexercised — only that the double is structurally free to be looser than ObjectQL.update on the shape a hand-written guard always drops (`where: { id: { $in: [...] } }` looks like an id and is a multi-row predicate) — a shape the producer refuses in `data.id` too since objectstack#5748 put the payload half through the SAME scalar test, so `data.id` still outranks `where` and `multi`, but only when it IS a scalar id.",
       "closes": "nothing — permanent"
-    },
-    {
-      "file": "packages/spec/src/contracts/scoped-context.test.ts",
-      "verb": "update",
-      "unguarded": 1,
-      "kind": "EXEMPT",
-      "why": "MEASURED (#5945): NOT an engine double — a conformance witness for the NEW `IScopedObjectRepository` contract (`packages/spec/src/contracts/scoped-context.ts`), which is a THIRD species this gate's two-way engine-vs-driver attribution has no arm for. A scoped REPOSITORY is bound to one object, so its write verb is `update(data, options?)` — the object name is not a parameter at all, where `IDataEngine.update(objectName, data, options?)` takes it first and `IDataDriver` takes an id second. Discovery reaches it anyway because the literal carries `find`/`findOne`/`count`/`insert` (four ENGINE_SIBLINGS, and `insert` is in ENGINE_ONLY_MEMBERS, which attributes it to the engine side) — accurate for what the scan can see, wrong about what the object is. EXEMPT, not DEBT, on the same ground already recorded twice for `packages/spec/src/contracts/data-engine.test.ts`: it cannot be pinned even in principle, because `assertEngineUpdateDispatch` lives in @objectstack/objectql / @objectstack/metadata-core and BOTH depend on @objectstack/spec — the import would invert the dependency graph. DORMANCY PROBED, not assumed (the #5629 method, which the two update entries above explicitly say they lack): a `process.stderr.write` marker injected as the first statement of this `update` printed NOTHING across a full run of both files (83/83 tests green). The control that makes that silence evidence rather than a broken probe: the same injection in this witness's sibling `updateById` — which the transaction test does call — DID print, in the same run of the same harness. So the looseness is unexercised today. Dormant is not harmless: a future test that starts updating through this witness inherits a double free to accept what ObjectQL.update refuses (`where: { id: { $in: [...] } }` reads as an id and is a multi-row predicate). Discovered at line 296 — the `IScopedObjectRepository` literal in the 'IScopedContext is implementable' block.",
-      "closes": "nothing — permanent, unless this gate grows a scoped-repository arm (then this witness becomes out of scope rather than exempt)"
-    },
-    {
-      "file": "packages/spec/src/data/hook.test.ts",
-      "verb": "update",
-      "unguarded": 1,
-      "kind": "EXEMPT",
-      "why": "MEASURED (#5945): NOT an engine double — a conformance witness for the NEW `IScopedObjectRepository` contract (`packages/spec/src/contracts/scoped-context.ts`), which is a THIRD species this gate's two-way engine-vs-driver attribution has no arm for. A scoped REPOSITORY is bound to one object, so its write verb is `update(data, options?)` — the object name is not a parameter at all, where `IDataEngine.update(objectName, data, options?)` takes it first and `IDataDriver` takes an id second. Discovery reaches it anyway because the literal carries `find`/`findOne`/`count`/`insert` (four ENGINE_SIBLINGS, and `insert` is in ENGINE_ONLY_MEMBERS, which attributes it to the engine side) — accurate for what the scan can see, wrong about what the object is. EXEMPT, not DEBT, on the same ground already recorded twice for `packages/spec/src/contracts/data-engine.test.ts`: it cannot be pinned even in principle, because `assertEngineUpdateDispatch` lives in @objectstack/objectql / @objectstack/metadata-core and BOTH depend on @objectstack/spec — the import would invert the dependency graph. DORMANCY PROBED, not assumed (the #5629 method, which the two update entries above explicitly say they lack): a `process.stderr.write` marker injected as the first statement of this `update` printed NOTHING across a full run of both files (83/83 tests green). The control that makes that silence evidence rather than a broken probe: the same injection in this witness's sibling `updateById` — which the transaction test does call — DID print, in the same run of the same harness. So the looseness is unexercised today. Dormant is not harmless: a future test that starts updating through this witness inherits a double free to accept what ObjectQL.update refuses (`where: { id: { $in: [...] } }` reads as an id and is a multi-row predicate). Discovered at line 1176 — the repository the `liveApi` ScopedContext stand-in returns from `object(name)`, which exists so the #5945 block can assert `HookContextSchema.parse` neither rejects nor clones a live engine object. Nothing in that block calls any repository method at all.",
-      "closes": "nothing — permanent, unless this gate grows a scoped-repository arm (then this witness becomes out of scope rather than exempt)"
     }
   ]
 }

@@ -274,6 +274,23 @@ jobs:
       #     someone gives the checkout a `ref:`, where parent^1 becomes the PR's
       #     previous commit. `merge-base` is right under BOTH checkouts, which is
       #     why it is the one written here.
+      #
+      # #6434: this step REPORTS an unusable base, it does not adjudicate one.
+      # Both of its former `exit 1`s are now `base_error` outputs, and the verdict
+      # moved to `Require a usable diff base` further down -- the one place that
+      # has seen BOTH label reads. The reason is the same #5580/#6378 race one
+      # defect along: this step runs before the settling read, so a
+      # `skip-changeset` label that lands in its window (the COMMON case, ~+10..45s
+      # from PR creation) was still invisible here. Failing on the spot therefore
+      # reddened a PR the job was about to exempt -- two conditions at once, the
+      # late label plus a genuine git-base failure, which is why no instance was
+      # ever observed and why the gap was recorded rather than guessed at.
+      #
+      # What is deliberately NOT changed: an unusable base is still a FAILURE for
+      # every PR the changeset gate applies to. #4690 governs the verdict, not its
+      # address. The warning below is emitted where the fact is discovered so the
+      # infrastructure flake stays visible in the log even on the exempt path,
+      # where nothing else would ever mention it.
       - name: Resolve the diff base (merge base with the base branch)
         id: diffbase
         if: steps.labels.outputs.skip != 'true'
@@ -282,8 +299,9 @@ jobs:
           PINNED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ -z "$BASE_REF" ]; then
-            echo "::error::This event carries no base branch, so the changeset diff base cannot be computed. A gate that cannot read its input has verified nothing, so this is a failure rather than a pass (#4690)."
-            exit 1
+            echo "::warning::This event carries no base branch, so the changeset diff base cannot be computed. Adjudicated below, once the skip-changeset window has settled."
+            echo 'base_error=This event carries no base branch, so the changeset diff base cannot be computed.' >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           if ! git rev-parse --verify --quiet "refs/remotes/origin/$BASE_REF^{commit}" >/dev/null; then
             git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" \
@@ -292,11 +310,17 @@ jobs:
           # `if !` rather than a bare assignment on purpose: these steps run under
           # `bash -e` (no `shell:` key anywhere in this file), where a failing
           # command substitution kills the step with no message at all. The gate
-          # is allowed to fail here -- it is NOT allowed to fail unexplained.
+          # is allowed to fail over this -- it is NOT allowed to fail unexplained.
           if ! MERGE_BASE=$(git merge-base "refs/remotes/origin/$BASE_REF" HEAD); then
-            echo "::error::Could not compute merge-base(origin/$BASE_REF, HEAD), so the changeset diff has no trustworthy starting point. Failing rather than falling back to the frozen base.sha, which is the #6129 defect itself."
-            exit 1
+            echo "::warning::Could not compute merge-base(origin/$BASE_REF, HEAD), so the changeset diff has no trustworthy starting point. Adjudicated below, once the skip-changeset window has settled."
+            echo "base_error=Could not compute merge-base(origin/$BASE_REF, HEAD), so the changeset diff has no trustworthy starting point." >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          # Written explicitly rather than left unset. An unwritten output already
+          # reads as the empty string, but every downstream `if:` here spells the
+          # success case as `base_error == ''`, and a contract that load-bearing
+          # should be visible in the shell that establishes it.
+          echo 'base_error=' >> "$GITHUB_OUTPUT"
           echo "merge_base=$MERGE_BASE" >> "$GITHUB_OUTPUT"
           # The drift is printed, not just corrected. #6129 was invisible for as
           # long as it was because nothing in the log ever said which commit the
@@ -306,18 +330,37 @@ jobs:
           echo "Diff base: $MERGE_BASE  (merge-base of origin/$BASE_REF and HEAD)"
           echo "Frozen payload base.sha: $PINNED_BASE_SHA  -- $BASE_REF has moved $DRIFT commit(s) since it was frozen, and that drift is exactly what this gate used to count as this PR's own."
 
+      # The three toolchain steps and the counting step below all carry the
+      # `base_error == ''` conjunct as well (#6434). For the counting step it is
+      # CORRECTNESS: handed an empty `$MERGE_BASE`, `git diff --diff-filter=A ""
+      # HEAD` fails, but it fails inside a pipeline whose last command is `tr`, so
+      # the step would report `added=0` -- a fabricated count that reads exactly
+      # like "this PR forgot its changeset" and would send the verdict step to the
+      # wrong error message entirely. For the three toolchain steps it is COST and
+      # legibility: an unusable base can no longer be adjudicated until the label
+      # window settles, and there is no reason to buy a Node toolchain and a
+      # `--frozen-lockfile` install first for a run that will either be exempted or
+      # failed without ever compiling anything. It also keeps the failure signature
+      # single: on this path the only red is the adjudication step, never an
+      # install that happened to flake on the same shaky network.
       - name: Setup Node.js
-        if: steps.labels.outputs.skip != 'true'
+        if: >-
+          steps.labels.outputs.skip != 'true'
+          && steps.diffbase.outputs.base_error == ''
         uses: actions/setup-node@v7
         with:
           node-version: '22'
 
       - name: Enable Corepack
-        if: steps.labels.outputs.skip != 'true'
+        if: >-
+          steps.labels.outputs.skip != 'true'
+          && steps.diffbase.outputs.base_error == ''
         run: corepack enable
 
       - name: Install dependencies
-        if: steps.labels.outputs.skip != 'true'
+        if: >-
+          steps.labels.outputs.skip != 'true'
+          && steps.diffbase.outputs.base_error == ''
         run: pnpm install --frozen-lockfile
 
       # COUNTING ONLY -- the verdict is two steps down (#6378). The split is not
@@ -327,7 +370,9 @@ jobs:
       # that fact before any waiting is considered.
       - name: Count the changesets this PR adds
         id: changeset_count
-        if: steps.labels.outputs.skip != 'true'
+        if: >-
+          steps.labels.outputs.skip != 'true'
+          && steps.diffbase.outputs.base_error == ''
         env:
           MERGE_BASE: ${{ steps.diffbase.outputs.merge_base }}
         run: |
@@ -405,11 +450,21 @@ jobs:
       # already behind us, and the loop does exactly one read and no sleeping.
       # Only a genuinely fresh PR can wait at all. 120s is ~3x the worst label
       # latency measured on this repo (~40s, #6358).
+      #
+      # #6434 adds the second disjunct, and it is the SAME invariant rather than a
+      # widening of it: "charge the wait only to a PR that is headed for red". A PR
+      # whose diff base could not be resolved is headed for red just as surely as
+      # one that added no changeset -- it simply gets there by the other route, and
+      # the counting step is skipped on that path, so `added` is `''` and the first
+      # disjunct can never speak for it. No PR waits that would not have waited
+      # under #6378: a resolvable base plus a changeset still skips this step
+      # entirely, at no wall time and no API call.
       - name: Settle the skip-changeset window (only when this PR would otherwise fail)
         id: labels_settled
         if: >-
           steps.labels.outputs.skip != 'true'
-          && steps.changeset_count.outputs.added == '0'
+          && (steps.changeset_count.outputs.added == '0'
+          || steps.diffbase.outputs.base_error != '')
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -463,6 +518,37 @@ jobs:
           done
           echo "Label window closed after $ATTEMPT read(s). Labels on PR #$PR_NUMBER right now: ${LABELS:-(none)}"
           echo 'skip=false' >> "$GITHUB_OUTPUT"
+
+      # #6434: the verdict on an unusable diff base. It is a SEPARATE step rather
+      # than a branch inside the step below, for the reason this job already gives
+      # for splitting `Reject an empty-frontmatter changeset` off: the two failures
+      # are different facts and deserve different messages. "The git base is
+      # unavailable" is not "you forgot a changeset", and an author who reads the
+      # second when the first is true will go looking in the wrong place.
+      #
+      # It sits HERE, immediately after the settling read, because both of its
+      # neighbours constrain it. It cannot move up: above the settling read there
+      # is no settled label state, which is the whole defect being fixed. It cannot
+      # move down: the step below evaluates `[ "$ADDED" -eq 0 ]` on an `ADDED` that
+      # is the empty string whenever the counting step was skipped, and `test`
+      # answering "not a number" is a NON-zero status, so the `if` would take its
+      # else branch and announce "This PR adds  changeset(s)" -- a green verdict on
+      # a gate that never ran. The ordering is load-bearing in both directions.
+      #
+      # This is NOT the route-2 move #6378's cost argument rules out. The settling
+      # read stays exactly where it is, after the count; nothing about which PRs
+      # pay for the window changed. What moved is one verdict, downward, past a
+      # read that had already been paid for.
+      - name: Require a usable diff base (adjudicated after the label window)
+        if: >-
+          steps.labels.outputs.skip != 'true'
+          && steps.labels_settled.outputs.skip != 'true'
+          && steps.diffbase.outputs.base_error != ''
+        env:
+          BASE_ERROR: ${{ steps.diffbase.outputs.base_error }}
+        run: |
+          echo "::error::$BASE_ERROR Failing rather than falling back to the frozen base.sha, which is the #6129 defect itself: a gate that cannot read its input has verified nothing, so this is a failure rather than a pass (#4690). Neither live label read found 'skip-changeset' on this PR, so the changeset gate does apply to it and cannot be evaluated. If this PR releases nothing, apply the label and re-run; if the base branch is genuinely fetchable, this is infrastructure and a re-run will clear it."
+          exit 1
 
       # The VERDICT. Everything it needs was decided above; this step only
       # announces it, which is what makes the failure message a single block of
