@@ -12,6 +12,15 @@ Validated in CI: `pnpm check:platform-checklist`
 (`scripts/check-platform-checklist.mjs`). Execution protocol for agents:
 [RUNNER.md](./RUNNER.md). Run records: [runs/](./runs/README.md).
 
+**Two internal skills drive this ledger** (`.claude/skills/`, never published):
+`coverage-sweep` **authors** items (find gaps → write them, per
+[SWEEP.md](./SWEEP.md)); `checklist-run` **executes** them (pick items by selector →
+drive them → emit a run record, per [RUNNER.md](./RUNNER.md)). The runner resolves what
+to test with `scripts/checklist-select.mjs <selector>` — an item id, an `area:`, a
+`capability:`, a `priority:`, a `since:vN` release, or a **`file:<path>`** that maps a
+framework source file to the items whose `source` cites it ("test whatever covers this
+file").
+
 ## Layout
 
 ```
