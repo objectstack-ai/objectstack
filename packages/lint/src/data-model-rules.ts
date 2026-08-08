@@ -392,22 +392,23 @@ export function lintDataModel(objects: any[]): LintIssue[] {
     // Reading `titleFormat` while ignoring `nameField` made this rule
     // contradict its own package (#6108): an author who followed the platform's
     // own migration advice earned a "records will display as raw IDs"
-    // suggestion, while one who kept the retired key did not. `primaryField`
-    // and the name-like derivation are unchanged.
+    // suggestion, while one who kept the retired key did not. The name-like
+    // derivation is unchanged.
     //
-    // `primaryField` is kept as-is, but do NOT read it as evidence that the key
-    // is authorable: measured on 17.0.0-rc.5, `ObjectSchema.safeParse` reports
-    // `unrecognized_keys: ['primaryField']` and `ObjectSchema.create()` rejects
-    // it outright, so this limb can never be true for an object the spec
-    // accepts. Filed as #6326 (it is declared nowhere in `packages/spec`, yet
-    // this rule, `validate-semantic-roles` and the objectstack-data skill doc
-    // all treat it as a title face) — removing the limb is that issue's call,
-    // not a rider here. The MESSAGE, however, must not advertise it: telling an
-    // author to reach for `primaryField` earns them a hard schema rejection, so
-    // the diagnostic names only the surfaces they can actually declare.
+    // A third limb, `!!obj.primaryField`, was REMOVED here in #6326. That key
+    // is declared nowhere in `packages/spec`: measured on 17.0.0-rc.5,
+    // `ObjectSchema.safeParse` reports `unrecognized_keys: ['primaryField']`
+    // and `ObjectSchema.create()` rejects it outright, so the limb could never
+    // be true for an object the spec accepts — a #4984-family dead branch that
+    // nonetheless read as a title face here, in `validate-semantic-roles` and
+    // in the objectstack-data skill doc. The maintainer ruled remove, not
+    // declare: `nameField` is ADR-0079's one canonical title pointer and a
+    // second parallel pointer contradicts "one Zod source per metadata type"
+    // (Prime Directive #7). Do not reintroduce it as a tolerated alias — a
+    // consumer-side `??` for a key the producer rejects is exactly the second
+    // de-facto contract Prime Directive #12 bans.
     const hasNameField =
       !!obj.nameField ||
-      !!obj.primaryField ||
       fields.some((f) => NAME_LIKE_FIELDS.includes(f.name));
     if (fields.length > 0 && !hasNameField) {
       issues.push({

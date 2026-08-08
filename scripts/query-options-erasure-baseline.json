@@ -42,7 +42,6 @@
     "packages/plugins/plugin-approvals/src/lifecycle-hooks.ts": 4,
     "packages/plugins/plugin-auth/src/admin-import-users.ts": 1,
     "packages/plugins/plugin-auth/src/auth-manager.ts": 14,
-    "packages/plugins/plugin-hono-server/src/current-user-endpoints.ts": 6,
     "packages/plugins/plugin-sharing/src/share-link-routes.ts": 3,
     "packages/plugins/plugin-sharing/src/share-link-service.ts": 5,
     "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts": 1,

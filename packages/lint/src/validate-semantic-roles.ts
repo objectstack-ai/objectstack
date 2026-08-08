@@ -185,9 +185,15 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
     );
     if (declaredStrings.length > 0 && declaredGroups.size > 0) {
       // Mirror the renderer's title resolution: declared role first
-      // (nameField / primaryField / deprecated displayNameField), else the
-      // first conventional display-field name present on the object.
-      const declaredTitle = [obj.nameField, obj.primaryField, obj.displayNameField]
+      // (nameField, else the deprecated displayNameField), else the first
+      // conventional display-field name present on the object.
+      //
+      // `primaryField` sat between those two until #6326 removed it. It is
+      // declared nowhere in `packages/spec` — `ObjectSchema` rejects it with
+      // `unrecognized_keys` — so the entry could never match on an object the
+      // spec accepts, and reading it here advertised a title pointer authors
+      // cannot write. `nameField` is ADR-0079's canonical one.
+      const declaredTitle = [obj.nameField, obj.displayNameField]
         .find((v): v is string => typeof v === 'string' && v.length > 0 && fieldNames.has(v));
       const titleField = declaredTitle
         ?? ['name', 'full_name', 'title', 'subject', 'display_name'].find((c) => fieldNames.has(c));

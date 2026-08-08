@@ -37,8 +37,7 @@
  * round-trip to an auth service that does not implement these paths.
  */
 
-import { IDataEngine, derivePosture } from '@objectstack/core';
-import { ADMIN_FULL_ACCESS, ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
+import { IDataEngine, resolveUserAuthzGrants } from '@objectstack/core';
 import {
     resolveEffectiveApiMethods,
     effectiveOperationsArray,
@@ -455,16 +454,52 @@ export function annotateEffectiveApiOperations(
  * would agree on who the caller is. That surface has since been deleted and
  * these endpoints are the only remaining caller — kept as a named export
  * because the serverless host path (cloud#924) composes it directly.
+ *
+ * ## It resolves the SESSION only; every grant comes from the ONE resolver (#6334)
+ *
+ * This used to re-read the grant tables itself — `sys_member` +
+ * `sys_user_permission_set`, and nothing else. It never read `sys_user_position`
+ * / `sys_position_permission_set`, so a permission set bound to a POSITION (the
+ * ADR-0090 D3 distribution mechanism — showcase grants every persona that way)
+ * was invisible here: `/auth/me/permissions` answered `positions: []` and
+ * withheld that set's `systemPermissions`, while the data plane — which runs on
+ * SecurityPlugin's middleware over the canonical chain — granted the same
+ * action. objectui's four `useCapabilityGate` surfaces (ADR-0066 D4) read
+ * exactly this endpoint, so a user who genuinely HELD the capability had the
+ * button hidden: the failure direction the fail-open design names as the worse
+ * one. Same shape as the REST copy that once silently dropped `sys_user_role`,
+ * which is the drift `resolveAuthzContext` was extracted to end.
+ *
+ * A second, quieter half of the same divergence: the hand-rolled envelope
+ * published membership roles under `roles`, while `ExecutionContext` — and every
+ * reader in this file — calls that field `positions` (ADR-0090 D3, "formerly
+ * `roles`"). So the endpoint's `positions` was ALWAYS `[]` and the resolved role
+ * names never reached `resolvePermissionSets` either, independently of the
+ * position tables.
+ *
+ * So the session lookup — the genuinely transport-specific part — stays here and
+ * ALL grant aggregation delegates to `resolveUserAuthzGrants`, the canonical
+ * resolver's userId-driven core, exported for exactly this caller shape: a
+ * surface that already knows WHO the principal is and needs the SAME envelope
+ * with no HTTP request to resolve it from. `sys_user_position` (null org =
+ * global, active-org match, ADR-0091 validity windows), the implicit `everyone`
+ * position (ADR-0090 D5), `sys_position_permission_set`, `mapMembershipRole`
+ * normalization, the platform-admin derivation and the `ai_seat` synthesis
+ * arrive with it instead of being re-implemented — one copy fewer to drift.
  */
 export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
-    const getObjectQL = () => ctx.getService<IDataEngine>('objectql');
-    // Helper: resolve ExecutionContext from request headers (cookie session
-    // or API key). Mirrors the runtime's resolveExecutionContext but
-    // self-contained to avoid a cross-package dep. We DO query the
-    // `sys_user_permission_set` link tables because hardcoding a single
-    // permission set name (e.g. `member_default`) would silently ignore
-    // any explicit admin / role assignment — including the platform-admin
-    // promotion seeded by `bootstrapPlatformAdmin`.
+    /**
+     * The data engine, or `undefined` when the slot is unclaimed. GUARDED: the
+     * locator's contract permits `getService` to THROW for an absent slot (the
+     * kernel's does), and an engine-less stack must still resolve the SESSION —
+     * a multi-tenant environment kernel carrying `auth` but no `objectql`
+     * answers `{authenticated:true}` with empty grants, never a fake anonymous
+     * (cloud#927). `resolveUserAuthzGrants` accepts `undefined` and yields an
+     * empty-but-valid envelope, so the guard is all this needs.
+     */
+    const getObjectQL = (): IDataEngine | undefined => {
+        try { return ctx.getService<IDataEngine>('objectql'); } catch { return undefined; }
+    };
     const resolveCtx = async (c: any): Promise<any | undefined> => {
         try {
             const authService = ctx.getService<IAuthService>('auth');
@@ -478,159 +513,52 @@ export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
             if (!session?.user?.id) return undefined;
             const userId = session.user.id;
             const tenantId = session.session?.activeOrganizationId ?? undefined;
-            const permissions: string[] = [];
-            const roles: string[] = [];
-            try {
-                const ql = getObjectQL();
-                const sysCtx = { context: { isSystem: true } };
-                // Roles via sys_member (org-scoped if active org).
-                const memberRows = await ql?.find?.(
-                    'sys_member',
-                    {
-                        where: tenantId
-                            ? { user_id: userId, organization_id: tenantId }
-                            : { user_id: userId },
-                        limit: 50,
-                        ...sysCtx,
-                    } as any,
-                ).catch(() => []);
-                for (const m of (memberRows ?? []) as any[]) {
-                    if (typeof m.role === 'string') {
-                        for (const r of m.role.split(',').map((s: string) => s.trim()).filter(Boolean)) {
-                            if (!roles.includes(r)) roles.push(r);
-                        }
-                    }
-                }
-                // User-scoped permission sets — match BOTH (a) the active
-                // org's link rows and (b) the cross-tenant rows
-                // (organization_id IS NULL) so the platform-admin
-                // promotion seeded by `bootstrapPlatformAdmin` applies
-                // regardless of the user's active org.
-                const upsRows = await ql?.find?.(
-                    'sys_user_permission_set',
-                    { where: { user_id: userId }, limit: 100, ...sysCtx } as any,
-                ).catch(() => []);
-                const psIds = new Set<string>();
-                for (const r of (upsRows ?? []) as any[]) {
-                    const orgScope = r.organization_id ?? null;
-                    if (!orgScope || (tenantId && orgScope === tenantId)) {
-                        const pid = r.permission_set_id ?? r.permissionSetId;
-                        if (pid) psIds.add(pid);
-                    }
-                }
-                if (psIds.size > 0) {
-                    const psRows = await ql?.find?.(
-                        'sys_permission_set',
-                        { where: { id: { $in: Array.from(psIds) } }, limit: 500, ...sysCtx } as any,
-                    ).catch(() => []);
-                    for (const ps of (psRows ?? []) as any[]) {
-                        if (ps.name && !permissions.includes(ps.name)) permissions.push(ps.name);
-                    }
-                }
-            } catch {
-                /* fall through with whatever we resolved so far */
-            }
-            // Resolve fellow-org user IDs so identity-table RLS (sys_user
-            // org-members policy) can scope @-mention pickers, owner
-            // lookups and reviewer selectors to the active organization.
-            // Mirrors the resolvers in `@objectstack/rest` and
-            // `@objectstack/runtime` so all three REST entry-points
-            // produce a consistent ExecutionContext shape.
-            let orgUserIds: string[] = [userId];
-            if (tenantId) {
-                try {
-                    const ql = getObjectQL();
-                    const sysCtx = { context: { isSystem: true } };
-                    const memberRows = await ql?.find?.(
-                        'sys_member',
-                        { where: { organization_id: tenantId }, limit: 1000, ...sysCtx } as any,
-                    ).catch(() => []);
-                    const ids = new Set<string>([userId]);
-                    for (const m of (memberRows ?? []) as any[]) {
-                        const uid = m.user_id ?? m.userId;
-                        if (typeof uid === 'string' && uid.length > 0) ids.add(uid);
-                    }
-                    orgUserIds = Array.from(ids);
-                } catch {
-                    /* fall back to self-only */
-                }
-            }
-            // [ADR-0105 D2] The caller's org access set — the `group`
-            // posture's Layer 0 wall is `organization_id IN (...)`, so a
-            // context without it fails every read closed on this surface.
-            // Resolved from the user's OWN memberships (all organizations,
-            // not the active one). This standalone resolver duplicates the
-            // canonical `resolveAuthzContext` by design (see the posture
-            // note below); the duplication is tracked by
-            // `scripts/check-single-authz-resolver.mjs`.
-            let accessibleOrgIds: string[] = [];
-            try {
-                const ql = getObjectQL();
-                const sysCtx = { context: { isSystem: true } };
-                const myMemberships = await ql?.find?.(
-                    'sys_member',
-                    { where: { user_id: userId }, limit: 200, ...sysCtx } as any,
-                ).catch(() => []);
-                const orgIds = new Set<string>();
-                for (const m of (myMemberships ?? []) as any[]) {
-                    const oid = m.organization_id ?? m.organizationId;
-                    if (typeof oid === 'string' && oid.length > 0) orgIds.add(oid);
-                }
-                accessibleOrgIds = Array.from(orgIds);
-            } catch {
-                /* no memberships resolvable → empty set → fails closed */
-            }
-            // Env-side AI-seat marker (simple model). The single-org env
-            // DB has no permission-set/org dimension for this — the seat is
-            // the boolean `sys_user.ai_access`. Read it with a GUARDED system
-            // query (NOT a better-auth additionalField: sys_user is
-            // better-auth-managed and better-auth SELECTs explicit columns,
-            // so an additionalField would make getSession query a possibly-
-            // missing column → broken auth; a guarded read can only no-op).
-            // When true, synthesize the `ai_seat` capability so the per-agent
-            // gate (evaluateAgentAccess → requires `ai_seat`) admits the user
-            // with no permission-set grant. Absent/false/missing-column →
-            // no synthesis (deny, as before).
-            if (!permissions.includes('ai_seat')) {
-                try {
-                    const ql = getObjectQL();
-                    const sysCtx = { context: { isSystem: true } };
-                    const uRows = await ql?.find?.(
-                        'sys_user',
-                        { where: { id: userId }, limit: 1, ...sysCtx } as any,
-                    ).catch(() => []);
-                    // Turso returns sqlite booleans as 1/0; memory driver as boolean.
-                    const aiAccess = (uRows?.[0] as any)?.ai_access;
-                    if (aiAccess === true || aiAccess === 1 || aiAccess === '1') permissions.push('ai_seat');
-                } catch {
-                    /* no ai_access column / query failed → no seat (safe) */
-                }
-            }
+            // THE delegation (#6334). Never throws — fail-closed by
+            // construction: a missing engine or an absent table yields an
+            // empty-but-valid envelope rather than an exception, so no read
+            // here needs its own guard.
+            //
+            // No `seedEmail`: that option exists for a caller holding an email
+            // the resolver cannot read back (the API-key path, which has no
+            // session). Here the resolver's own `sys_user` read — the row it
+            // loads anyway for the `ai_seat` synthesis — answers it, and
+            // `sys_user.email` is unique by the auth invariant, so the two
+            // sources cannot disagree. `AuthSessionApi.getSession` declares
+            // `user: { id?: string }` and nothing more; reading an undeclared
+            // `email` off it through `any` is the #4127 shape, and widening
+            // that contract needs a call site that actually requires it.
+            const grants = await resolveUserAuthzGrants(getObjectQL(), userId, { tenantId });
             // [#2408 / #3361] Open the per-request `Server-Timing` disclosure
             // gate for an admin/service principal — the standalone-surface analog
-            // of the runtime dispatcher's `timedResolveExecutionContext`. This
-            // self-contained resolver derives no posture rung, so derive one HERE,
-            // for the gate decision ONLY, from the resolved permission-set grants,
-            // and hand it to the shared `isPerfDisclosurePrincipal` predicate. The
-            // rung is computed onto a THROW-AWAY object, never the returned
-            // context: `ctx.posture` is an enforcement input (Layer 0 tier
-            // adjudication, ADR-0099 D1) and only the authoritative resolver may
-            // set it. A no-op when perf-tuning is off (no ambient gate).
-            const disclosurePosture = derivePosture({
-                isPlatformAdmin: permissions.includes(ADMIN_FULL_ACCESS),
-                isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n)),
-            });
-            if (isPerfDisclosurePrincipal({ isSystem: false, posture: disclosurePosture } as ExecutionContext)) {
+            // of the runtime dispatcher's `timedResolveExecutionContext`. The rung
+            // is no longer re-derived here onto a throw-away object:
+            // `grants.posture` IS the authoritative derivation (ADR-0095 D2/D3 —
+            // from held capability grants, never a better-auth role), so this
+            // surface and the dispatcher hand the shared predicate the same value.
+            // A no-op when perf-tuning is off (no ambient gate).
+            if (isPerfDisclosurePrincipal({ isSystem: false, posture: grants.posture } as ExecutionContext)) {
                 allowPerfDisclosure();
             }
             return {
                 userId,
                 tenantId,
-                roles,
-                permissions,
+                email: grants.email,
+                // `positions`, not `roles`: the ExecutionContext field name every
+                // reader here uses (ADR-0090 D3). Carries the ADR-0057 D4
+                // `sys_user_position` assignments, the normalized org-membership
+                // names, the implicit `everyone` anchor and the derived
+                // `platform_admin` — none of which this surface used to see.
+                positions: grants.positions,
+                permissions: grants.permissions,
+                systemPermissions: grants.systemPermissions,
+                tabPermissions: grants.tabPermissions,
+                posture: grants.posture,
                 isSystem: false,
-                org_user_ids: orgUserIds,
-                accessible_org_ids: accessibleOrgIds,
+                org_user_ids: grants.org_user_ids,
+                // [ADR-0105 D2] The caller's org access set — the `group`
+                // posture's Layer 0 wall is `organization_id IN (...)`, so a
+                // context without it fails every read closed on this surface.
+                accessible_org_ids: grants.accessible_org_ids,
             } as any;
         } catch {
             return undefined;
