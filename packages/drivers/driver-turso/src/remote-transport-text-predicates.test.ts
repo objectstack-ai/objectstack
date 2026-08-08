@@ -54,11 +54,13 @@ const META_ROWS = [
 async function makeRemoteDriver(schema: Record<string, unknown>, rows: Record<string, unknown>[]) {
   const stub = makeLibsqlSqliteStub();
   // [#5702] The stub is wrapped so the STATEMENTS are readable, not only the
-  // rows. Rows are the right witness for almost everything this file pins — but
-  // `$icontains`'s fold is invisible in rows on SQLite (`LIKE` already folds
-  // ASCII there), so the emitted SQL is the only place a dropped `LOWER()` can
-  // be seen. Recording here rather than standing up a third hand-rolled mock
-  // client keeps every case on the same engine.
+  // rows. #5702 needed that because `$icontains`'s fold was invisible in rows
+  // on SQLite — `LIKE` already folded ASCII there, so a dropped `LOWER()`
+  // changed no answer. [#6518] retires that reason: under `GLOB` the fold IS
+  // observable in rows, and the cases below assert it there. The recording
+  // stays, now pinning the CONSTRUCT (which operator, with which escapes) —
+  // still the only place a silent revert to `LIKE` would show up before its
+  // rows did.
   const executed: string[] = [];
   const recording: LibsqlSqliteStub = {
     ...stub,
@@ -137,47 +139,49 @@ describe('TursoDriver remote — declared text predicates return rows', () => {
   });
 
   /**
-   * [#5702] MEASURED, and the measurement contradicts the assertion this case
-   * was first written with — recorded as it came out rather than as it was
-   * predicted.
+   * [#6518] The case #5702 had to write BACKWARDS, now written forwards.
    *
-   * The intended pin was `$contains: 'ALP'` → `[]` beside `$icontains: 'ALP'` →
-   * `['w1','w2']`, i.e. the two operators told apart by their answers. It fails:
-   * `$contains` returns `['w1','w2']` too. SQLite's `LIKE` folds ASCII case by
-   * itself, so on this dialect `col LIKE '%ALP%'` and `LOWER(col) LIKE
-   * LOWER('%ALP%')` select the SAME rows for EVERY comparand — the second fold
-   * is a no-op on top of the first.
+   * #5702 wanted to pin `$contains: 'ALP'` → `[]` beside `$icontains: 'ALP'` →
+   * `['w1','w2']`, i.e. the two operators told apart by their ANSWERS. It could
+   * not: `$contains` returned `['w1','w2']` too, because SQLite's `LIKE` folds
+   * ASCII case by itself, so `col LIKE '%ALP%'` and `LOWER(col) LIKE
+   * LOWER('%ALP%')` selected the same rows for EVERY comparand. That file
+   * recorded the equality as the honest pin and named the missing half: the
+   * #4706 Q2 = A ruling that the `$contains` family is case-SENSITIVE.
    *
-   * That is not a defect in `$icontains`; it is the `$contains` half of the
-   * #4706 Q2 = A ruling ("the `$contains` family is case-SENSITIVE"), which is
-   * NOT delivered by this PR. Making SQLite's LIKE case-exact needs a different
-   * construct (GLOB / `instr()` / a binary collation) applied in three places
-   * that must move together — this transport, `SqlDriver.applyLike`, and the
-   * RLS/analytics twins (`read-scope-sql`, `service-analytics`'s
-   * `like-pattern.ts`) — or one permission rule compiles to two row sets. It is
-   * filed separately; the `FILTER_TEXT` DEBT rows in
-   * `scripts/check-driver-conformance.mjs` stay open for it.
-   *
-   * So the honest pin here is the CURRENT pair — equal on this dialect — plus
-   * the compiled SQL, which is the only place the fold is observable on SQLite
-   * and therefore the only thing that can catch a `LOWER()` silently dropped.
+   * This is that half. `pushLike` emits `GLOB`, which is case-exact by
+   * definition, so the pin #5702 wanted is the one that now holds — and it
+   * fails loudly on a revert to `LIKE`, which the equality it replaces could
+   * not do.
    */
-  it('$contains and $icontains agree on SQLite today — LIKE already folds ASCII', async () => {
-    expect(await ids(driver, 'widget', { name: { $contains: 'ALP' } })).toEqual(['w1', 'w2']);
+  it('$contains is case-SENSITIVE, and now answers differently from $icontains', async () => {
+    expect(await ids(driver, 'widget', { name: { $contains: 'ALP' } })).toEqual([]);
+    expect(await ids(driver, 'widget', { name: { $contains: 'Alp' } })).toEqual(['w1', 'w2']);
     expect(await ids(driver, 'widget', { name: { $icontains: 'ALP' } })).toEqual(['w1', 'w2']);
   });
 
-  it('$icontains compiles LOWER() on BOTH operands, where $contains compiles neither', async () => {
+  it('$startsWith and $endsWith are case-SENSITIVE too', async () => {
+    expect(await ids(driver, 'widget', { name: { $startsWith: 'alp' } })).toEqual([]);
+    expect(await ids(driver, 'widget', { name: { $startsWith: 'Alp' } })).toEqual(['w1', 'w2']);
+    expect(await ids(driver, 'widget', { name: { $endsWith: 'ETA' } })).toEqual([]);
+    expect(await ids(driver, 'widget', { name: { $endsWith: 'eta' } })).toEqual(['w3']);
+  });
+
+  it('$icontains compiles lower() on BOTH operands, where $contains compiles neither', async () => {
     executed.length = 0;
     await driver.find('widget', { where: { name: { $icontains: 'ALP' } } });
     const icontainsSql = executed.join('\n');
-    expect(icontainsSql).toContain('LOWER("name") LIKE LOWER(?) ESCAPE');
+    expect(icontainsSql).toContain('lower("name") GLOB lower(?)');
+    // GLOB has no ESCAPE clause in SQLite's grammar — emitting one is a syntax
+    // error, so its absence is part of the construct rather than an omission.
+    expect(icontainsSql).not.toContain('ESCAPE');
 
     executed.length = 0;
     await driver.find('widget', { where: { name: { $contains: 'ALP' } } });
     const containsSql = executed.join('\n');
-    expect(containsSql).toContain('"name" LIKE ? ESCAPE');
-    expect(containsSql).not.toContain('LOWER');
+    expect(containsSql).toContain('"name" GLOB ?');
+    expect(containsSql).not.toContain('lower');
+    expect(containsSql).not.toContain('LIKE');
   });
 
   it('REFUSES the retired $regex, in the ADR-0112 envelope, naming $icontains', async () => {
@@ -357,8 +361,20 @@ describe('RemoteTransport — unknown operators throw instead of degrading', () 
   });
 });
 
-describe('RemoteTransport — text predicates bind an explicit ESCAPE', () => {
-  it('emits LIKE … ESCAPE and binds the escaped pattern, not the raw value', async () => {
+describe('RemoteTransport — text predicates bind an ESCAPED pattern, never the raw value', () => {
+  /**
+   * [#6518] What this case pins survived the operator change; the character
+   * class it pins did not.
+   *
+   * Under `LIKE` the metacharacters were `%` and `_` and the answer was an
+   * explicit `ESCAPE '\'` clause, because SQLite honours no default escape
+   * character. Under `GLOB` the metacharacters are `*`, `?` and `[`, there is
+   * no `ESCAPE` clause in the grammar at all, and the escape mechanism is a
+   * self-closing character class. So `%` needs no escape here any more — and
+   * `*` needs one it did not need before. Both directions are asserted, because
+   * a half-migrated escape rule is precisely the P0 this case exists for.
+   */
+  const captureOne = async (where: Record<string, unknown>) => {
     const calls: Array<{ sql: string; args: any[] }> = [];
     const client = {
       execute: vi.fn(async (stmt: any) => {
@@ -369,11 +385,24 @@ describe('RemoteTransport — text predicates bind an explicit ESCAPE', () => {
     };
     const t = new RemoteTransport();
     t.setClient(client as any);
+    await t.find('widget', { where });
+    return calls[0];
+  };
 
-    await t.find('widget', { where: { name: { $startsWith: '50%' } } });
-    const { sql, args } = calls[0];
-    // SQLite honours no default escape character, so the clause must be explicit.
-    expect(sql).toMatch(/"name"\s+LIKE\s+\?\s+ESCAPE\s+'\\'/i);
-    expect(args).toEqual(['50\\%%']);
+  it('emits GLOB with no ESCAPE clause, and leaves the LIKE metacharacters alone', async () => {
+    const { sql, args } = await captureOne({ name: { $startsWith: '50%' } });
+    expect(sql).toMatch(/"name"\s+GLOB\s+\?/i);
+    expect(sql).not.toMatch(/ESCAPE/i);
+    // `%` is an ordinary character to GLOB, so it travels unescaped.
+    expect(args).toEqual(['50%*']);
+  });
+
+  it('escapes the GLOB metacharacters as self-closing classes', async () => {
+    expect((await captureOne({ name: { $contains: '*' } })).args).toEqual(['*[*]*']);
+    expect((await captureOne({ name: { $contains: '?' } })).args).toEqual(['*[?]*']);
+    expect((await captureOne({ name: { $contains: '[' } })).args).toEqual(['*[[]*']);
+    // Unescaped, `*a*b*` is a wildcard pattern rather than a literal — the same
+    // filter bypass an unescaped `%` was under LIKE.
+    expect((await captureOne({ name: { $contains: 'a*b' } })).args).toEqual(['*a[*]b*']);
   });
 });

@@ -210,11 +210,20 @@ async function assertLedgerReaderIsBuilt(): Promise<void> {
 }
 
 describe('installedPackageLedgerFailureCheck — the finding the shared catch used to eat', () => {
+  /**
+   * The resolved ledger directory the reading carries (#5996), which this row
+   * has taken as a required parameter since #6643. Deliberately rooted at
+   * `/srv/app` rather than left relative: the old hard-coded literal was
+   * `.objectstack/installed-packages/` with no root, so any assertion naming
+   * this path is one the literal cannot satisfy.
+   */
+  const DIR = '/srv/app/.objectstack/installed-packages';
+
   it('quotes what was thrown, in the row AND in the verbose detail', () => {
     const err = Object.assign(new Error("ENOTDIR: not a directory, scandir '/p/.objectstack'"), {
       code: 'ENOTDIR',
     });
-    const check = installedPackageLedgerFailureCheck(err);
+    const check = installedPackageLedgerFailureCheck(err, DIR);
 
     // Before #5412 this text existed nowhere in any doctor output under any
     // flag — the error object was discarded at the point it was caught.
@@ -223,7 +232,7 @@ describe('installedPackageLedgerFailureCheck — the finding the shared catch us
   });
 
   it('takes the `Installed packages` name column, so the row is present rather than missing', () => {
-    const check = installedPackageLedgerFailureCheck(new Error('boom'));
+    const check = installedPackageLedgerFailureCheck(new Error('boom'), DIR);
 
     // Load-bearing, not cosmetic. An operator scans the report by its name
     // column, and this row has to be somewhere findable rather than absent —
@@ -238,22 +247,25 @@ describe('installedPackageLedgerFailureCheck — the finding the shared catch us
   });
 
   it('stays a warning — the environment runs, doctor’s sight of it is what broke', () => {
-    expect(installedPackageLedgerFailureCheck(new Error('boom')).status).toBe('warning');
+    expect(installedPackageLedgerFailureCheck(new Error('boom'), DIR).status).toBe('warning');
   });
 
   it('says WHICH half did not run, rather than that "something" failed', () => {
-    const check = installedPackageLedgerFailureCheck(new Error('boom'));
+    const check = installedPackageLedgerFailureCheck(new Error('boom'), DIR);
     const fix = check.fix ?? '';
 
     // The harm the issue names is a reader treating a partial check as a whole
     // one. The row has to state its own incompleteness in both channels.
     expect(check.message).toContain('installed packages NOT checked');
     expect(fix).toContain('two halves and only one of them ran');
-    expect(fix).toContain('.objectstack/installed-packages/');
+    // Re-pointed by #6643. This used to assert the bare
+    // `.objectstack/installed-packages/` literal the fix restated; the row now
+    // names the directory doctor actually read, so the assertion follows it.
+    expect(fix).toContain(DIR);
   });
 
   it('folds a multi-line cause onto the row and keeps it whole in the detail', () => {
-    const check = installedPackageLedgerFailureCheck(new Error('line one\nline two: the reason'));
+    const check = installedPackageLedgerFailureCheck(new Error('line one\nline two: the reason'), DIR);
 
     expect(check.message).toContain('line two: the reason');
     // One row is one line.
@@ -262,15 +274,37 @@ describe('installedPackageLedgerFailureCheck — the finding the shared catch us
   });
 
   it('never trails off into nothing for an Error with no message', () => {
-    const check = installedPackageLedgerFailureCheck(new TypeError());
+    const check = installedPackageLedgerFailureCheck(new TypeError(), DIR);
 
     expect(check.message.endsWith('— ')).toBe(false);
     expect(check.message).toContain('TypeError');
   });
 
   it('reports a thrown non-Error rather than swallowing it', () => {
-    expect(installedPackageLedgerFailureCheck('boom').message).toContain('boom');
-    expect(installedPackageLedgerFailureCheck(42).message).toContain('42');
+    expect(installedPackageLedgerFailureCheck('boom', DIR).message).toContain('boom');
+    expect(installedPackageLedgerFailureCheck(42, DIR).message).toContain('42');
+  });
+
+  it('a NON-default directory flows through — the assertion a re-hardcoded literal cannot pass', () => {
+    // #6643, the sibling of #5996's identical case on
+    // `installedPackageLedgerSkippedEntriesCheck`. The parameter exists so this
+    // row tracks the producer's `DEFAULT_INSTALLED_PACKAGES_DIR` instead of
+    // restating the consumer's old guess. A directory sharing NO substring with
+    // that guess is what separates the two: if the literal ever creeps back,
+    // both assertions below go red at once.
+    const check = installedPackageLedgerFailureCheck(new Error('boom'), '/var/lib/os-ledger');
+
+    expect(check.fix).toContain('The ledger is `/var/lib/os-ledger`;');
+    expect(check.fix).not.toContain('.objectstack/installed-packages');
+  });
+
+  it('drops the "under the project root" hedge — the resolved dir already says where it is', () => {
+    // The old literal was relative, so the row had to add a sentence locating
+    // it. `dir` is `cwd`-joined and absolute, which makes that sentence both
+    // redundant and (for a non-default `storageDir`) wrong.
+    const check = installedPackageLedgerFailureCheck(new Error('boom'), DIR);
+
+    expect(check.fix).not.toContain('project root');
   });
 });
 
@@ -428,6 +462,31 @@ describe('os doctor, end to end, against an unreadable installed-package ledger'
     // Gauge: warning, the report finishes, exit stays 0.
     expect(run.out).toContain('Environment is functional but has some warnings');
     expect(run.exitCode).toBeUndefined();
+  }, 60_000);
+
+  it('the verbose fix names the directory doctor actually read, resolved from the authority (#6643)', async () => {
+    writeConfig();
+    fs.mkdirSync(path.dirname(ledgerPath()), { recursive: true });
+    fs.writeFileSync(ledgerPath(), 'not a directory\n');
+
+    // The expectation is COMPUTED FROM THE AUTHORITY, never hard-coded: the
+    // whole point of #6643 is that this row stops restating a value only
+    // `@objectstack/cloud-connection` decides. Writing `.objectstack/
+    // installed-packages` here would move the literal into the test and pin
+    // the row against the guess a second time — the defect, relocated.
+    // Re-imported rather than read off `LEDGER_REL` for the same reason.
+    const { DEFAULT_INSTALLED_PACKAGES_DIR } = await import('@objectstack/cloud-connection');
+    // `mkdtemp` makes this unique per run, which is what makes "the resolved
+    // dir, not the literal" assertable at all: no literal can contain it.
+    const resolved = path.join(tmp, DEFAULT_INSTALLED_PACKAGES_DIR);
+
+    const run = await runDoctor(['--verbose']);
+
+    expect(run.out).toContain(LEDGER_HEADLINE);
+    expect(run.out).toContain(`The ledger is \`${resolved}\`;`);
+    // And the relative literal it replaced is gone from the report entirely.
+    expect(run.out).not.toContain('The ledger is `.objectstack/installed-packages/` directory');
+    expect(run.out).not.toContain('under the\n      project root');
   }, 60_000);
 
   it('expands the detail under --verbose, and only under --verbose', async () => {

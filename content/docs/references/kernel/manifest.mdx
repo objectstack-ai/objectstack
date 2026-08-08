@@ -44,7 +44,7 @@ const result = ManifestSchema.parse(data);
 | **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Initial seed data (prefer top-level data field) |
 | **capabilities** | `{ implements?: object[]; provides?: object[]; requires?: object[]; extensionPoints?: object[]; … }` | optional | Plugin capability declarations for interoperability |
 | **extensions** | `Record<string, any>` | optional | Extension points and contributions |
-| **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| object \| object \| object \| … +5 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
+| **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
 | **loading** | `{ strategy?: Enum<'eager' \| 'lazy' \| 'parallel' \| 'deferred' \| 'on-demand'>; preload?: object; codeSplitting?: object; dynamicImport?: object; … }` | optional | Plugin loading and runtime behavior configuration |
 | **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
 | **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |

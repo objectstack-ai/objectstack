@@ -73,6 +73,35 @@
 // by v4`), and the navigation damage a shared number does is the same whatever
 // they say — a grep does not read status either.
 //
+// ## The third thing it checks: a cited ADR number RESOLVES to a record (#6634)
+//
+// The two checks above only ever look at ids listed in `adr-anchors.json` — 30-odd
+// ids, hand-registered. Every other `ADR-NNNN` written in a comment, a doc or a
+// changeset was unchecked, and the gap is not theoretical: `ADR-0079` was cited
+// by **77 files** in this repo, 14 times inside `packages/spec` alone, while
+// `docs/adr/0079-*` had never existed here at all. Nothing was wrong with what
+// those 77 files SAID — the display-name contract they describe is the one the
+// code implements — but a reader following PD #13's "grep the ADRs for the
+// surface you are touching" reached nothing, and the number was silently
+// squatted: a future unrelated ADR-0079 would have retroactively falsified all
+// 77 citations at once. It survived the repo growing to 120 distinct cited
+// numbers because no check ever asked the question.
+//
+// So: every `ADR-NNNN` in a tracked file must name a record under `docs/adr/`.
+// Two things are deliberately NOT failures, for opposite reasons:
+//
+//   - **Another repo's registry, named as such.** `ObjectUI ADR-0001` is
+//     objectui's first decision, not ours, and `docs/adr/` is not its home. This
+//     is handled STRUCTURALLY (a repo qualifier immediately before the id), like
+//     the `.vN` version rule above and unlike an allowlist — an author who cites
+//     a sibling repo has a spelling that is both correct to a reader and clean
+//     to the gate. Bare `ADR-0001`, meaning ours, still fails.
+//   - **A record that was withdrawn or deleted, cited as history.** ADR-0107 was
+//     withdrawn before it landed (#3735) and is cited by the changeset that
+//     withdrew it. Those numbers sit on `UNRESOLVED_ADR_CITATIONS` below — an
+//     explicit, shrink-only allowlist, audited in both directions like the
+//     collision list.
+//
 // ## Adding an entry
 //
 // Add one when an accepted ADR's decision is realized in code that would look
@@ -84,6 +113,7 @@
 //   node scripts/check-adr-anchors.mjs
 //   node scripts/check-adr-anchors.mjs --self-test   # verify the checker itself
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -115,6 +145,69 @@ const ADR_FILENAME = /^(\d{4})-([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.v(\d+))?\.md$/;
  * instead of slipping past the number audit because its name did not parse.
  */
 const NON_RECORD_FILES = new Set(['PRIORITIZATION.md']);
+
+/**
+ * An ADR citation as written in prose or a code comment, with the word before it
+ * (if any) captured so a SIBLING REPO's registry can be recognised.
+ *
+ *   `ADR-0090`                → { qualifier: '',         number: '0090' }
+ *   `(ObjectUI ADR-0001)`     → { qualifier: 'ObjectUI', number: '0001' }
+ *   `see ADR-0090`            → { qualifier: 'see',      number: '0090' }
+ *
+ * Only qualifiers in {@link CROSS_REPO_QUALIFIERS} exempt a citation; every other
+ * preceding word (`see`, `cf.`, `per`) is noise and the id must still resolve.
+ */
+const ADR_CITATION = /(?:([A-Za-z0-9_./-]+)[ \t]+)?ADR-(\d{4})/g;
+
+/**
+ * Words that, immediately before an id, say "this number belongs to ANOTHER
+ * repository's decision registry". The two siblings this repo is developed
+ * alongside (see AGENTS.md); matched case-insensitively, and `objectstack-ai/x`
+ * counts as `x`.
+ *
+ * This is a structural escape hatch, not an allowlist: it is available to every
+ * future citation, it keeps the sentence honest for a human reader, and it
+ * cannot hide a BARE id that was meant to be ours.
+ */
+const CROSS_REPO_QUALIFIERS = new Set(['objectui', 'object-ui', 'cloud']);
+
+/**
+ * ⛔ SHRINK-ONLY. ADR numbers that are cited in this repo but have no record
+ * under `docs/adr/`, and legitimately so: the record was **withdrawn** or
+ * **deleted**, and the citations are history discussing that fact.
+ *
+ * **Adding an entry is not the fix for a red build.** If this gate just told you
+ * that the id you wrote resolves to nothing, the id is wrong or the record is
+ * missing — write the record, or cite the number that exists. Widening this list
+ * re-opens #6634 (77 files citing a decision no reader could reach) for every
+ * future reader of that number rather than for you once.
+ *
+ * Removing an entry is always welcome and the gate enforces it in BOTH
+ * directions: an entry whose number gains a record, or that nothing cites any
+ * more, fails as stale — so a number cannot be quietly re-used under cover of
+ * its own grandfather clause, which is the squatting half of #6634.
+ */
+const UNRESOLVED_ADR_CITATIONS = [
+  {
+    number: '0001',
+    // Deleted 2026-02-11 (9da8e3e72) together with 0002-database-driven-metadata-
+    // storage.md and docs/adr/README.md, in the permission-protocol rewrite.
+    // Cited as history by `docs/adr/0002-...md` ("already discarded in v3.4's
+    // ADR-0001"). ⚠️ ARCHITECTURE.md still carries a markdown LINK to the deleted
+    // path — a genuinely broken pointer, not history, filed separately from
+    // #6634; this entry keeps the gate honest about the number, it does not
+    // bless that link.
+    why: 'record deleted 2026-02-11 (9da8e3e72); cited as history by ADR-0002',
+  },
+  {
+    number: '0107',
+    // Withdrawn before it landed: #3700 was closed as not planned and 3bb382b67
+    // (#3735) deleted the record. Cited by the changeset that withdrew it, by
+    // the audit whose D4 it recorded, and by this file's own comment above —
+    // all three discussing the withdrawal itself.
+    why: 'record withdrawn 2026-07-28 (#3735, 3bb382b67); cited by the withdrawal changeset and audit',
+  },
+];
 
 /**
  * ⛔ SHRINK-ONLY. The number collisions that already existed when this audit
@@ -268,6 +361,145 @@ function auditAdrDirectory(filenames, allowlist) {
   return { records, errors };
 }
 
+/**
+ * Parse every ADR citation out of one file's text.
+ *
+ * Pure over a string so the self-test can drive it with fixtures instead of
+ * planting files in the tree.
+ *
+ * @param {string} file  path, used only in the returned rows
+ * @param {string} text
+ * @returns {{ file: string, number: string, qualifier: string }[]}
+ */
+function citationsIn(file, text) {
+  const out = [];
+  for (const m of text.matchAll(ADR_CITATION)) {
+    const raw = (m[1] ?? '').toLowerCase();
+    // `objectstack-ai/cloud` qualifies as `cloud`; trailing punctuation dropped.
+    const qualifier = raw.replace(/^.*\//, '').replace(/[^a-z0-9-]+$/, '');
+    out.push({ file, number: m[2], qualifier });
+  }
+  return out;
+}
+
+/**
+ * Audit that every cited ADR number names a record — the #6634 check.
+ *
+ * Pure over the citation rows and the record set, for the same reason
+ * {@link auditAdrDirectory} is pure over a filename list: the red paths below
+ * are exercised by the REAL function in `--self-test`, not by an imitation.
+ *
+ * @param {{ file: string, number: string, qualifier: string }[]} citations
+ * @param {Set<string>} records  numbers that name a real record
+ * @param {{ number: string, why: string }[]} allowlist
+ * @returns {string[]} errors
+ */
+function auditCitedNumbers(citations, records, allowlist) {
+  const errors = [];
+  const allowed = new Map(allowlist.map((e) => [e.number, e]));
+  /** number → sorted files citing it, for numbers that resolve to nothing. */
+  const danglingFiles = new Map();
+
+  for (const { file, number, qualifier } of citations) {
+    if (CROSS_REPO_QUALIFIERS.has(qualifier)) continue; // another repo's registry
+    if (records.has(number)) continue;
+    if (!danglingFiles.has(number)) danglingFiles.set(number, new Set());
+    danglingFiles.get(number).add(file);
+  }
+
+  const nextFree = String(Math.max(0, ...[...records].map(Number)) + 1).padStart(4, '0');
+
+  for (const number of [...danglingFiles.keys()].sort()) {
+    if (allowed.has(number)) continue;
+    const files = [...danglingFiles.get(number)].sort();
+    const shown = files.slice(0, 8);
+    errors.push(
+      `ADR-${number} is cited by ${files.length} file(s) but names no record under ${ADR_DIR}/ —\n` +
+        shown.map((f) => `        ${f}`).join('\n') +
+        (files.length > shown.length ? `\n        … and ${files.length - shown.length} more` : '') +
+        '\n      A citation is a promise that the decision is readable at the other end. PD #13 tells the ' +
+        'next author to grep the ADRs for the id they found in the code; an id that resolves to nothing ' +
+        'costs them the search and teaches them the citation was decoration.\n' +
+        '      It is also a squat: whoever later writes a real ADR-' +
+        `${number} retroactively falsifies all ${files.length} of those citation(s) at once (#6634, where ` +
+        'one number had accumulated 77 of them).\n' +
+        `      Fix, in order of preference: (a) write the record — if the decision is real, ${ADR_DIR}/${number}-` +
+        `<kebab-slug>.md; (b) cite the number that exists; (c) if it is a SIBLING repo's decision, say so — ` +
+        `\`ObjectUI ADR-${number}\` / \`cloud ADR-${number}\` is recognised and skipped. A brand-new record ` +
+        `takes the next free number — ${nextFree} — not this one.`,
+    );
+  }
+
+  for (const { number, why } of allowlist) {
+    if (records.has(number)) {
+      errors.push(
+        `${SELF_PATH}: the UNRESOLVED_ADR_CITATIONS entry for ${number} is stale — ${ADR_DIR}/ now HAS a ` +
+          `record for that number (the entry said: ${why}).\n` +
+          '      Delete the entry, and check the existing citations still mean what the new record says: a ' +
+          'number that gained a record after being cited as a dead one is exactly the squat #6634 was about.',
+      );
+    } else if (!danglingFiles.has(number)) {
+      errors.push(
+        `${SELF_PATH}: the UNRESOLVED_ADR_CITATIONS entry for ${number} is stale — nothing cites ADR-${number} ` +
+          `any more (the entry said: ${why}).\n` +
+          '      Delete the entry. The allowlist is shrink-only: a grandfather clause outliving its citations ' +
+          'silently re-licences the number.',
+      );
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Every ADR citation in the repo's TRACKED text files.
+ *
+ * `git grep` rather than a directory walk: it is the tool that already knows
+ * what is tracked, what is ignored (`node_modules/`, `dist/`) and what is
+ * binary, and getting any of those three wrong is how a repo-wide scan becomes
+ * either slow or wrong. Collection is deliberately the only impure part — the
+ * judgement lives in {@link auditCitedNumbers}, which is pure and self-tested.
+ *
+ * @returns {{ file: string, number: string, qualifier: string }[]}
+ */
+function collectCitations() {
+  let out;
+  try {
+    // -I text files only · -o just the matches · -h no filename... except we
+    // need it, so: --no-color -n gives `file:line:match`, one per match.
+    // `--untracked` so a NEW file citing a nonexistent record goes red before it
+    // is committed, not after CI has it. Ignored paths (`node_modules/`, `dist/`)
+    // stay excluded either way.
+    out = execFileSync('git', ['grep', '--untracked', '-IonE', '([A-Za-z0-9_./-]+[ \t]+)?ADR-[0-9]{4}'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch (e) {
+    // git grep exits 1 with no output when nothing matches — a repo with zero
+    // ADR citations is odd but not an error.
+    if (e && e.status === 1 && !e.stdout) return [];
+    console.error(
+      `check-adr-anchors: cannot scan for ADR citations — ${e && e.message ? e.message : e}\n` +
+        '  This check reads the tracked tree via `git grep`, so it must run inside the repo checkout.',
+    );
+    process.exit(1);
+  }
+
+  const citations = [];
+  for (const row of out.split('\n')) {
+    if (!row) continue;
+    // `path:lineno:matchtext` — the path may itself contain ':' on no platform
+    // we support, but the first two fields are known-shaped, so split from the
+    // left exactly twice.
+    const first = row.indexOf(':');
+    const second = row.indexOf(':', first + 1);
+    if (first < 0 || second < 0) continue;
+    citations.push(...citationsIn(row.slice(0, first), row.slice(second + 1)));
+  }
+  return citations;
+}
+
 /** Anchor ids whose number names two decisions — reported, never failed. */
 function ambiguousAnchorRefs(anchorList, allowlist) {
   const ambiguous = new Set(allowlist.map((e) => e.number));
@@ -296,6 +528,11 @@ const { records, errors: numberErrors } = auditAdrDirectory(adrFiles, KNOWN_NUMB
 
 const errors = [...numberErrors];
 let checked = 0;
+
+// #6634 — every `ADR-NNNN` written anywhere in the tracked tree resolves to a
+// record, not just the ~30 ids registered in adr-anchors.json.
+const citations = collectCitations();
+errors.push(...auditCitedNumbers(citations, records, UNRESOLVED_ADR_CITATIONS));
 
 for (const entry of anchors) {
   const { file, adrs, invariant } = entry ?? {};
@@ -357,7 +594,8 @@ if (errors.length) {
 }
 console.log(
   `check-adr-anchors: OK (${checked} anchored file(s), every governing ADR still referenced; ` +
-    `${records.size} decision number(s), each naming one decision or an allowlisted pair).`,
+    `${records.size} decision number(s), each naming one decision or an allowlisted pair; ` +
+    `${citations.length} citation(s) across ${new Set(citations.map((c) => c.file)).size} file(s) resolve).`,
 );
 
 // Reported, never failed. These anchors are correct — the number they name is
@@ -487,6 +725,113 @@ function selfTest() {
       );
     }
 
+    // ── Cited numbers resolve (#6634) ────────────────────────────────────────
+    //
+    // ⚠️ Fixture ids are BUILT, never written literally: this file is itself in
+    // the tracked tree the real scan reads, so a literal `ADR-` + four digits in
+    // a fixture would be collected as a genuine citation and fail the gate it is
+    // testing. `id('0202')` keeps the token out of the source.
+    {
+      const id = (n) => 'ADR-' + n;
+      const RECORDS = new Set(['0090', '0107']);
+      const rows = (text, file = 'src/x.ts') => citationsIn(file, text);
+      const cited = auditCitedNumbers;
+
+      {
+        const e = cited(rows(`see ${id('0090')} for why`), RECORDS, []);
+        assert('citation-to-a-real-record-is-green', e.length === 0, `expected no errors, got:\n${joined(e)}`);
+      }
+
+      {
+        const parsed = rows(`(ObjectUI ${id('0202')}) and bare ${id('0203')}`);
+        assert(
+          'citation-parser-reads-the-qualifier',
+          parsed.length === 2 && parsed[0].qualifier === 'objectui' && parsed[1].qualifier === 'bare',
+          `expected [objectui, bare], got ${JSON.stringify(parsed)}`,
+        );
+        assert(
+          'citation-parser-reads-the-number',
+          parsed[0].number === '0202' && parsed[1].number === '0203',
+          `expected [0202, 0203], got ${JSON.stringify(parsed)}`,
+        );
+      }
+
+      {
+        // The whole point: an id nobody can follow.
+        const e = cited(rows(`governed by ${id('0202')}`, 'packages/spec/src/a.ts'), RECORDS, []);
+        assert('dangling-citation-is-red', e.length === 1, `expected exactly 1 error, got ${e.length}:\n${joined(e)}`);
+        const msg = joined(e);
+        assert('dangling-message-names-the-number', msg.includes('0202'), `message lacks the number:\n${msg}`);
+        assert(
+          'dangling-message-names-the-citing-file',
+          msg.includes('packages/spec/src/a.ts'),
+          `message must point at the file to edit:\n${msg}`,
+        );
+        assert(
+          'dangling-message-names-the-next-free-number',
+          msg.includes('0108'),
+          `message must offer the next free number for a NEW record:\n${msg}`,
+        );
+        assert(
+          'dangling-message-offers-the-cross-repo-spelling',
+          /ObjectUI ADR-|cloud ADR-/.test(msg),
+          `an author citing a sibling repo must be told the recognised spelling:\n${msg}`,
+        );
+        assert(
+          'dangling-message-does-not-invite-allowlisting',
+          !/add .*UNRESOLVED_ADR_CITATIONS/i.test(msg),
+          `the remedy must be "write the record / cite a real one", never "widen the allowlist":\n${msg}`,
+        );
+      }
+
+      {
+        const e = cited(rows(`(ObjectUI ${id('0202')})`), RECORDS, []);
+        assert('cross-repo-qualified-citation-is-skipped', e.length === 0, `expected no errors, got:\n${joined(e)}`);
+      }
+
+      {
+        const e = cited(rows(`objectstack-ai/cloud ${id('0202')}`), RECORDS, []);
+        assert('org-qualified-sibling-repo-is-skipped', e.length === 0, `expected no errors, got:\n${joined(e)}`);
+      }
+
+      {
+        // A noise word is not a repo. This is the hole the structural rule
+        // would have if it exempted "any preceding word".
+        const e = cited(rows(`see ${id('0202')}`), RECORDS, []);
+        assert(
+          'noise-word-does-not-exempt-a-bare-id',
+          e.length === 1,
+          `only a sibling-repo qualifier may exempt an id, got ${e.length}:\n${joined(e)}`,
+        );
+      }
+
+      {
+        const e = cited(rows(`withdrawn ${id('0202')}`), RECORDS, [{ number: '0202', why: 'synthetic' }]);
+        assert('allowlisted-dangling-citation-is-green', e.length === 0, `expected no errors, got:\n${joined(e)}`);
+      }
+
+      {
+        // Stale, direction A — the number gained a record. This is the squat
+        // half of #6634: old citations now point at a decision they never meant.
+        const e = cited(rows(`see ${id('0107')}`), RECORDS, [{ number: '0107', why: 'synthetic' }]);
+        assert(
+          'allowlist-entry-whose-number-gained-a-record-is-red',
+          e.length === 1 && /stale/.test(joined(e)) && joined(e).includes('now HAS a record'),
+          `an allowlisted dead number that came back must fail, got:\n${joined(e)}`,
+        );
+      }
+
+      {
+        // Stale, direction B — nothing cites it any more.
+        const e = cited(rows(`see ${id('0090')}`), RECORDS, [{ number: '0202', why: 'synthetic' }]);
+        assert(
+          'allowlist-entry-nothing-cites-is-red',
+          e.length === 1 && /stale/.test(joined(e)),
+          `a grandfather clause outliving its citations must fail, got:\n${joined(e)}`,
+        );
+      }
+    }
+
     // ── Live tree: green as shipped, red under ablation ──────────────────────
     let liveFiles = null;
     try {
@@ -515,6 +860,45 @@ function selfTest() {
           `ADR number ${n} is allowlisted but does not collide under ablation — the entry is stale`,
         );
       }
+
+      // ── The citation scan, over the real tree (#6634) ─────────────────────
+      const liveRecords = audit(liveFiles, KNOWN_NUMBER_COLLISIONS).records;
+      const liveCitations = collectCitations();
+
+      // A scan that reads nothing is a phantom gate, and it would fail SILENTLY
+      // — every citation resolving vacuously. Pin that it really walked the tree
+      // before trusting anything it says.
+      assert(
+        'live-citation-scan-reads-the-tree',
+        liveCitations.length > 100 && new Set(liveCitations.map((c) => c.file)).size > 50,
+        `expected the scan to find citations across the repo, got ${liveCitations.length} in ` +
+          `${new Set(liveCitations.map((c) => c.file)).size} file(s) — the collector is not reading the tree`,
+      );
+
+      const citeGreen = auditCitedNumbers(liveCitations, liveRecords, UNRESOLVED_ADR_CITATIONS);
+      assert(
+        'live-citations-are-green-today',
+        citeGreen.length === 0,
+        `every cited ADR number must resolve as shipped, got:\n${joined(citeGreen)}`,
+      );
+
+      // Ablation, predicted RED: drop the citation allowlist and each entry's
+      // number must surface. Green here means the entries are dead weight.
+      const citeRed = auditCitedNumbers(liveCitations, liveRecords, []);
+      const citeNumbers = UNRESOLVED_ADR_CITATIONS.map((c) => c.number);
+      assert(
+        'citation-ablation-without-allowlist-is-red',
+        citeRed.length === citeNumbers.length,
+        `expected ${citeNumbers.length} dangling number(s) with the allowlist removed, got ${citeRed.length}:\n` +
+          joined(citeRed),
+      );
+      for (const n of citeNumbers) {
+        assert(
+          `citation-ablation-reports-${n}`,
+          citeRed.some((e) => e.includes('ADR-' + n + ' is cited')),
+          `ADR-${n} is allowlisted as unresolved but resolves under ablation — the entry is stale`,
+        );
+      }
     }
   } catch (e) {
     // Never let the harness itself be the message.
@@ -526,6 +910,9 @@ function selfTest() {
     for (const f of failures) console.error('  • ' + f + '\n');
     process.exit(1);
   }
-  console.log(`✓ check-adr-anchors --self-test: ${checked} assertions over the real auditAdrDirectory() path.`);
+  console.log(
+    `✓ check-adr-anchors --self-test: ${checked} assertions over the real auditAdrDirectory() / ` +
+      'auditCitedNumbers() paths.',
+  );
   process.exit(0);
 }

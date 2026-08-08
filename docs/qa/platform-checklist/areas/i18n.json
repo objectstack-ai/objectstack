@@ -1,0 +1,443 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "i18n",
+  "title": "Internationalization",
+  "items": [
+    {
+      "id": "i18n.notification-localized-and-clears",
+      "title": "zh-CN notification is localized, deep-links localized, and mark-as-read clears",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["zh-CN workspace user receiving a collab.assignment notification", "en workspace user (control for per-recipient localization)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the showcase config declares i18n.supportedLocales ['en', 'zh-CN'] (examples/app-showcase/objectstack.config.ts) — the zh-CN session is stock, no extra fixture",
+          "a second user to assign work to, so the assignment notification has a recipient distinct from the actor"
+        ]
+      },
+      "steps": [
+        "boot the showcase under os dev/standalone, sign in as admin, and set the recipient user's locale to zh-CN",
+        "trigger a collab.assignment notification by assigning a seeded showcase_task to the zh-CN recipient (edit the task's assignee field)",
+        "sign in as the recipient (own browser context — never a shared tab), open the bell, and screenshot the notification entry",
+        "click through the notification's deep link and screenshot the target detail page",
+        "capture the mark-as-read request (POST /api/v1/notifications/read) and the unread-count reads before and after",
+        "reload the page fully and re-read the unread count from the server",
+        "repeat the trigger for an en-locale recipient and capture that bell entry as the control"
+      ],
+      "acceptance": [
+        {
+          "clause": "the bell entry's title renders in the recipient locale (zh-CN)",
+          "oracle": "screenshot",
+          "verify": "bell screenshot shows the assignment title in zh-CN, no raw message key",
+          "evidence": "bell screenshot"
+        },
+        {
+          "clause": "the deep-link target renders in zh-CN — the click-through lands on a localized page, not a mixed-language one",
+          "oracle": "screenshot",
+          "verify": "detail-page screenshot in zh-CN (translated object label, field labels, section labels)",
+          "evidence": "detail screenshot"
+        },
+        {
+          "clause": "mark-as-read actually clears the unread state — the notifications REST routes must be mounted on the server actually serving os dev (the #3362 dispatcher-only registration made the console 404 here while unit tests stayed green)",
+          "oracle": "network",
+          "verify": "POST /api/v1/notifications/read returns 2xx on the running server and a fresh unread-count read drops",
+          "evidence": "the network trace + before/after unread count"
+        },
+        {
+          "clause": "the cleared state is authoritative — it survives a full reload, proving the server persisted it rather than the client repainting",
+          "oracle": "api",
+          "verify": "after a hard reload, the server's unread count still reflects the read (no resurrection of the cleared item)",
+          "evidence": "post-reload unread-count read"
+        },
+        {
+          "clause": "localization is per-recipient, not session-global: the same event notifies the en control user in en",
+          "oracle": "screenshot",
+          "verify": "the en recipient's bell entry for an equivalent assignment renders in English",
+          "evidence": "control-user bell screenshot"
+        }
+      ],
+      "negative": [
+        "a mark-as-read that returns 404/405 (routes mounted only on the dispatcher, not the live Hono server) is the #3362 regression — FAIL, and unit-test greenness is not a defense"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "shared-browser-tab"],
+      "source": ["#3358 §7", "#3362", "#3354", "examples/app-showcase/objectstack.config.ts (supportedLocales)"],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; the #3362 route-seam regression is the reason the oracle is a live-server network trace, never a unit test", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "i18n.studio-follows-app-locale",
+      "title": "Studio follows the in-app locale switch — no mixed-language session",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the platform-owned zh-CN metadata-form translations (the metadataForms translation group is owned and translated by platform-objects — scripts/check-i18n-coverage.mjs folds that baseline away because it is platform-owned)"
+        ]
+      },
+      "steps": [
+        "sign in as admin on the showcase, switch the in-app locale to zh-CN, and confirm the app shell followed (nav in zh-CN)",
+        "navigate into Studio / metadata-admin: open the object editor for showcase_project and the dashboard designer for showcase_chart_gallery",
+        "screenshot the object editor's form — its labels/sections come from the metadataForms translation group (packages/spec/src/system/translation.zod.ts: metadataForms.<type>.label / sections / fields)",
+        "screenshot a metadata list surface showing relative dates ('x 天前'-style) in the switched locale",
+        "reload the browser fully and re-screenshot one Studio surface — the locale choice must survive the reload",
+        "switch back to en and re-screenshot the same two Studio surfaces"
+      ],
+      "acceptance": [
+        {
+          "clause": "Studio's metadata-editor forms render in the switched locale via the metadataForms translation group",
+          "oracle": "screenshot",
+          "verify": "object-editor screenshot shows zh-CN section and field labels (e.g. 基础信息-style section labels per the schema's own example), not English",
+          "evidence": "object-editor screenshot"
+        },
+        {
+          "clause": "no mixed-language session: a single Studio screenshot contains no untranslated declared string sitting next to translated ones",
+          "oracle": "screenshot",
+          "verify": "review each captured Studio screenshot for locale consistency of declared (translatable) strings; user data (record values) is exempt",
+          "evidence": "the annotated screenshots"
+        },
+        {
+          "clause": "relative dates follow the locale",
+          "oracle": "screenshot",
+          "verify": "list/timeline timestamps render zh-CN relative forms after the switch",
+          "evidence": "screenshot"
+        },
+        {
+          "clause": "the locale choice persists across a full reload — it is stored, not a transient client state",
+          "oracle": "screenshot",
+          "verify": "post-reload Studio screenshot is still zh-CN without re-selecting",
+          "evidence": "post-reload screenshot"
+        },
+        {
+          "clause": "switching back to en restores English on the same surfaces — the switch is symmetric, not a one-way ratchet",
+          "oracle": "screenshot",
+          "verify": "the return-to-en screenshots show the same surfaces fully in English",
+          "evidence": "return-trip screenshots"
+        }
+      ],
+      "negative": [
+        "a Studio surface staying English after the app switched (mixed session) is the FAIL this item exists for — check against a fresh objectui build before filing (the vendored /_console bundle may be stale)"
+      ],
+      "traps": ["stale-console-bundle"],
+      "source": [
+        "#3358 §7",
+        "packages/spec/src/system/translation.zod.ts (metadataForms group + resolveMetadataFormLabels convention)",
+        "scripts/check-i18n-coverage.mjs (platform metadata-form baseline is platform-objects-owned)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "i18n.surface-matrix",
+      "title": "Every translatable surface localizes on a zh-CN session — one pass over the full translation-group vocabulary, plus the runtime i18n routes it resolves through",
+      "since": "v15",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": ["admin on a zh-CN session"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the showcase translation bundle (examples/app-showcase/src/system/translations/index.ts) — it deliberately covers EVERY field surfaced as a list column so a zh-CN list never mixes locales",
+          "platform-objects' own bundles for sys_ object labels and Studio metadataForms (platform-owned per scripts/check-i18n-coverage.mjs)"
+        ],
+        "knownGaps": [
+          "the showcase's declared surface carries FROZEN untranslated debt, ratcheted by scripts/check-i18n-coverage.mjs + i18n-coverage-baseline.json — expect some declared strings to legitimately fall back to en; the per-surface check is 'translated keys render translated, untranslated keys render the SOURCE label (never a raw dotted key)', not 100% coverage"
+        ]
+      },
+      "steps": [
+        "before the browser: read the served translation metadata (GET /api/v1/meta/translation, or the bundle source) and note, per variant surface, at least one key that IS translated to zh-CN — expectations derive from data, not vibes",
+        "sign in as admin, switch to zh-CN, and walk one surface per variant, screenshotting each:",
+        "nav labels — the Showcase app sidebar groups/nodes (apps.<app>.navigation.<node_id>.label group)",
+        "list headers — the showcase_task list columns (objects.<object>.fields.<field>.label; the bundle translates every surfaced column incl. status/priority OPTION labels)",
+        "form labels + placeholders on a task edit form (fields group), and select options in the form and list filters (fields.<field>.options)",
+        "an action dialog — trigger an object action with confirmText/successMessage and capture the confirm prompt and the success toast (_actions group: label/confirmText/successMessage)",
+        "a view empty state — open a view/slice with zero rows and capture emptyState.title/message (_views.<view>.emptyState)",
+        "detail-page section labels (_sections group)",
+        "a dashboard — Chart Gallery's title and widget titles (dashboards.<name>.label / widgets.<id>.title)",
+        "a page — a seeded page's header title/subtitle (pages.<name> group)",
+        "a Settings namespace — title, group titles, key labels, and the source badges (settings.<namespace> + settingsCommon.sourceLabels)",
+        "Studio metadata forms (metadataForms group — overlaps i18n.studio-follows-app-locale; a pinned pass there may be cited)",
+        "a sys_ object surface — e.g. the All Users list showing sys_user's translated label (platform-objects-owned bundle)",
+        "runtime i18n routes (server truth, consulted independently of the browser — these are what the client resolves labels through): GET /api/v1/i18n/locales and record data.locales",
+        "GET /api/v1/i18n/translations/zh-CN — record whether it is non-empty and whether every key path sits under a declared translation group",
+        "GET /api/v1/i18n/labels/showcase_task/zh-CN — record its { object, locale, labels } and hold it next to the zh-CN list-header the browser rendered for showcase_task",
+        "unknown-locale probe: GET /api/v1/i18n/translations/zz-ZZ and GET /api/v1/i18n/labels/showcase_task/zz-ZZ — capture WHICH degradation the running server does (the FileI18nAdapter returns an empty {} map for an unloaded locale; getTranslations does NOT synthesize the default bundle — record the observed shape, do not assume a fallback)",
+        "feed/audit verb variant (E11): trigger an activity-feed / audit entry (e.g. an assignment or a record edit) and, on the zh-CN session, screenshot its rendered verb/template — the feed/audit verb copy is a translatable surface",
+        "record a per-variant verdict table with the screenshot evidence"
+      ],
+      "acceptance": [
+        {
+          "clause": "every variant surface renders its known-translated key in zh-CN — verified per-variant, no surface inferred from a sibling",
+          "oracle": "screenshot",
+          "verify": "one screenshot per variant showing the pre-identified translated key rendered in zh-CN",
+          "evidence": "per-variant screenshot set + verdict table"
+        },
+        {
+          "clause": "expectations are grounded in server truth first: the translation metadata read names which keys are translated, and the screenshots are judged against THAT list",
+          "oracle": "api",
+          "verify": "the translation read (or bundle source) is captured and each per-variant expectation cites its key",
+          "evidence": "the translation read + key map"
+        },
+        {
+          "clause": "fallback is honest: an untranslated declared string renders its SOURCE-language label — never a raw dotted key path, never an empty cell",
+          "oracle": "screenshot",
+          "verify": "spot-check at least two known-untranslated keys (from the coverage baseline debt); each shows the en label, no 'objects.x.fields.y.label' literals anywhere in the session",
+          "evidence": "the fallback screenshots"
+        },
+        {
+          "clause": "select OPTION labels localize everywhere they appear: list cells, form selects, and list filters all show the translated option label for the same stored value",
+          "oracle": "screenshot",
+          "verify": "the showcase_task status/priority options (translated in the bundle) render zh-CN in all three places",
+          "evidence": "the three screenshots"
+        },
+        {
+          "clause": "a list of a fully-covered object never mixes locales — the bundle's own contract (it translates every surfaced column precisely to prevent 状态 next to 'Assignee')",
+          "oracle": "screenshot",
+          "verify": "the showcase_task list header row is 100% zh-CN",
+          "evidence": "list screenshot"
+        },
+        {
+          "clause": "action dialog copy (confirm prompt, success toast) comes from the _actions translation, and the result renders after the action actually executed",
+          "oracle": "network",
+          "verify": "the action's request fired and returned 2xx while the zh-CN confirm/success strings were shown — the toast is attached to a real server round-trip",
+          "evidence": "network trace + dialog/toast screenshots"
+        },
+        {
+          "clause": "GET /i18n/locales lists exactly the configured locale set — data.locales carries the descriptors for the supportedLocales (showcase: en + zh-CN), inside the declared { success, data } envelope (#3636), never a bare array and never a superset",
+          "oracle": "api",
+          "verify": "the response body's data.locales equals toLocaleDescriptors(getLocales(), defaultLocale) for the configured locales; unwrapResponse keys on the success flag, so a flag-less body is itself the failure #3636 closed",
+          "evidence": "the /i18n/locales response"
+        },
+        {
+          "clause": "GET /i18n/translations/:locale returns a non-empty bundle whose key paths all sit within the declared translation-group vocabulary (translationDataShape) — a key outside the declared groups, or a raw dotted key handed to a consumer, is the silent-strip class",
+          "oracle": "api",
+          "verify": "translations for zh-CN is non-empty; spot-check that sampled keys resolve under objects/_views/_actions/_sections/apps.navigation/dashboards/pages/settings groups, not a fourth dialect",
+          "evidence": "the /translations/zh-CN response + the key check"
+        },
+        {
+          "clause": "the /labels/:object/:locale route is the resolver the UI reads through, and it agrees with the UI: the labels it returns for showcase_task in zh-CN match the zh-CN list-header labels the browser renders (resolveObjectFieldLabels over the nested objects.<obj>.fields.<field>.label shape — the flat o.<obj> dialect that always returned {} was #3778/#3833)",
+          "oracle": "api",
+          "verify": "the labels response's field→label map equals the rendered zh-CN list-header row for showcase_task",
+          "evidence": "the /labels response next to the list-header screenshot"
+        },
+        {
+          "clause": "an unknown locale degrades honestly and the run records WHICH: /translations/zz-ZZ and /labels/showcase_task/zz-ZZ answer 200 with an empty {} map (the adapter does not synthesize the default bundle at the route), never a 500 and never a dotted-key dump — the observed shape is captured, not assumed",
+          "oracle": "api",
+          "verify": "both unknown-locale reads return 200 with an empty translations/labels object (FileI18nAdapter's unloaded-locale path — getTranslations returns {}; fallbackLocale only applies per-KEY inside t(), not to the bulk route); record the exact bodies",
+          "evidence": "the two unknown-locale responses"
+        },
+        {
+          "clause": "the activity-feed / audit verb template localizes on the zh-CN session (E11) — the feed/audit entry's verb renders its zh-CN copy, not an English verb and not a raw key",
+          "oracle": "screenshot",
+          "verify": "a feed/audit entry's verb/template renders zh-CN on the switched session; a raw key or English verb here is the E11 gap (record which group backs it — the messages/globalActions area is the likely home)",
+          "evidence": "the feed/audit screenshot"
+        }
+      ],
+      "negative": [
+        "a raw translation key (dotted path) rendered anywhere is a FAIL — that is the silent-strip failure surfacing to the user",
+        "a surface whose group the spec declares (e.g. _sections) showing NO translation while the bundle carries one for it is a FAIL against the resolver, not a coverage gap",
+        "a /i18n/locales that answers a bare array (the pre-#3636 shape) instead of { success, data: { locales } } is a FAIL — the SDK's unwrapResponse then hands callers the wrong shape depending on which surface mounted the route",
+        "the /labels route and the rendered UI labels disagreeing for the same object+locale is a FAIL against the resolver — they must be one derivation (#3833), not two copies that drift"
+      ],
+      "variants": [
+        "nav labels (apps.navigation)",
+        "list headers (objects.fields.label)",
+        "select option labels (objects.fields.options)",
+        "form labels/placeholders (objects.fields)",
+        "action dialogs (objects._actions: label/confirmText/successMessage)",
+        "view empty states (objects._views.emptyState)",
+        "detail section labels (objects._sections)",
+        "dashboards (dashboards.label / widgets.title)",
+        "pages (pages.label/title/subtitle)",
+        "settings (settings.<namespace> + settingsCommon.sourceLabels)",
+        "Studio metadata forms (metadataForms)",
+        "sys_ object labels (platform-objects bundles)",
+        "relative dates (locale formatting, not a translation group)",
+        "activity-feed / audit verb templates (E11 — a translatable surface not previously in the variant list)"
+      ],
+      "traps": ["stale-console-bundle", "hydration-race", "wrong-panel", "dispatcher-vs-hono-route"],
+      "source": [
+        "packages/spec/src/system/translation.zod.ts (translationDataShape — the authoritative group vocabulary: objects/_views/_actions/_sections, apps.navigation, messages, globalActions, dashboards, pages, settings, metadataForms, settingsCommon)",
+        "examples/app-showcase/src/system/translations/index.ts (full-column coverage rationale)",
+        "packages/services/service-i18n/src/i18n-service-plugin.ts (GET /i18n/locales | /translations/:locale | /labels/:object/:locale; { success, data } envelope #3636/#3675; resolveObjectFieldLabels nested shape #3778/#3833; the plugin mount and the dispatcher /i18n domain serve the same routes interchangeably)",
+        "packages/services/service-i18n/src/file-i18n-adapter.ts (getLocales / getTranslations — unloaded locale → {}; fallbackLocale applies per-KEY in t(), not to the bulk route)",
+        "packages/services/service-i18n/src/i18n-route-ledger.ts (the three routes, conformance-guarded #3636)",
+        "content/docs/ui/translations.mdx",
+        "scripts/check-i18n-coverage.mjs + scripts/i18n-coverage-baseline.json (frozen-debt ratchet)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-surface localization pass over the spec's full translation-group vocabulary, grounded in the showcase bundle and the coverage ratchet", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-08", "change": "clause-extension: runtime i18n routes (/i18n/locales configured set, /translations/:locale ⊂ declared vocabulary, /labels/:object/:locale matches the UI, unknown-locale honest degradation), plus the E11 activity-feed/audit verb-localization variant; traps gain dispatcher-vs-hono-route (the plugin mount and dispatcher /i18n domain must answer one shape, #3636/#3833)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "i18n.strict-translation-key-rejection",
+      "title": "Unknown, legacy-dialect, and retired translation keys are rejected loudly at BOTH authoring doors — never silently stripped",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "runtime metadata authoring enabled (the `translation` item door: the Studio translation editor or the metadata API against /api/v1/meta/translation)"
+        ]
+      },
+      "steps": [
+        "item door — via the metadata API, attempt to save a zh-CN `translation` item carrying each variant in turn (one save per variant), always alongside one VALID key (e.g. objects.showcase_task.label) so the rejection provably targets the bad key, not the document",
+        "capture the exact error text for each attempted save",
+        "after each rejection, read the item back and record that nothing (including the valid key) was persisted by the failed save",
+        "bundle door — in a scratch script inside the worktree, call defineTranslation / defineTranslationBundle from @objectstack/spec with the same variants and capture each parse error (this is the door #3778's item-only guard missed; #4001's strict shapes must cover both)",
+        "verify the alias suggestion channel: a near-miss key (helpText on a FIELD translation, label on a WIDGET translation) must be rejected WITH the did-you-mean pointing at the declared spelling (help; title)",
+        "verify the guidance channel: legacy object-first keys (o, app, nav, dashboard, errors, _meta) and retired validationMessages must carry their prescription (where the content belongs now, or that it has no home), not just 'unrecognized key'",
+        "save a correct version of the same content and confirm it persists and resolves (the gate rejects keys, not translations)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every variant is REJECTED at the item door with an error naming the surface and echoing the offending key",
+          "oracle": "api",
+          "verify": "each save returns a validation error whose text contains the offending key and the surface name ('this translation', 'this field translation', …)",
+          "evidence": "per-variant error texts"
+        },
+        {
+          "clause": "the same variants are rejected at the bundle door — the two doors cannot diverge (the #3778/#4522 asymmetry: covered at one door, open at the other)",
+          "oracle": "test",
+          "verify": "defineTranslation/defineTranslationBundle throw for every variant with equivalent error content",
+          "evidence": "the scratch-script output"
+        },
+        {
+          "clause": "near-miss keys get a did-you-mean naming the declared spelling (aliases channel), so the author's next action is a rename",
+          "oracle": "log",
+          "verify": "helpText→help (field), label→title (dashboard widget) suggestions appear in the respective errors",
+          "evidence": "the two error texts"
+        },
+        {
+          "clause": "legacy-dialect and retired keys carry their PRESCRIPTION (guidance channel): where the content now belongs, or an explicit 'no replacement' (errors/validationMessages: author the message on object.validations[].message)",
+          "oracle": "log",
+          "verify": "the o/app/nav/dashboard errors point at objects./apps./navigation/dashboards (plural); validationMessages cites #4667/ADR-0049 and the rule-message home",
+          "evidence": "the error texts"
+        },
+        {
+          "clause": "a failed save persists NOTHING — the valid sibling key must not have been half-saved",
+          "oracle": "api",
+          "verify": "reading the translation item after each rejected save shows the pre-attempt state",
+          "evidence": "the read-back responses"
+        },
+        {
+          "clause": "the corrected document saves and RESOLVES — the translated label actually renders on a zh-CN session afterwards",
+          "oracle": "screenshot",
+          "verify": "the key rejected-then-corrected (objects.showcase_task.label or similar) shows its zh-CN value in the UI",
+          "evidence": "post-fix screenshot"
+        }
+      ],
+      "negative": [
+        "a 2xx save of ANY variant is a FAIL even if nothing renders wrong afterwards — silent stripping is indistinguishable from 'not translated yet' forever, which is the exact failure #4001 closed",
+        "a rejection that names only 'unknown key' with no surface, no echo, and no suggestion is a PARTIAL — the diagnostic contract is part of the item"
+      ],
+      "variants": [
+        "legacy object-first: o",
+        "legacy object-first: app",
+        "legacy object-first: nav",
+        "legacy object-first: dashboard",
+        "legacy with no replacement: errors",
+        "retired: validationMessages (#4667)",
+        "legacy: _meta",
+        "alias near-miss: helpText on a field translation (→ help)",
+        "alias near-miss: label on a dashboard widget translation (→ title)",
+        "hallucinated group: a wholly invented top-level key"
+      ],
+      "traps": ["dispatcher-vs-hono-route"],
+      "source": [
+        "packages/spec/src/system/translation.zod.ts (TRANSLATION_HISTORY, LEGACY_OBJECT_FIRST_KEYS, TRANSLATION_KEY_GUIDANCE, strict shapes at both doors — #4001, #3778, #4667)",
+        "packages/spec/src/shared/strict-object.ts (surface/aliases/guidance rejection contract)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: strict-key rejection at both translation doors, variants from the spec's own legacy/guidance/alias tables", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "i18n.build-gates-hold",
+      "title": "The i18n build gates hold and can go red: bundle drift, undeclared extract keys, and the coverage ratchet",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "build",
+      "personas": ["ci"],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "a BUILT workspace — both gates run the built CLI and now hard-fail with a named prerequisite verdict when it is missing (#5217/#5862) instead of blaming an innocent config"
+        ]
+      },
+      "steps": [
+        "build the workspace, then run node scripts/check-i18n-bundles.mjs and capture the output (two distinct verdicts: bundle drift; undeclared extract key)",
+        "run node scripts/check-i18n-bundles.mjs --self-test and node scripts/check-i18n-coverage.mjs --self-test — the classifiers must be provably able to go red (#4690: a gate observed only green is indistinguishable from a gate matching nothing)",
+        "run node scripts/check-i18n-coverage.mjs against the baseline",
+        "prove the drift gate bites: perturb one committed bundle value in the worktree, re-run check-i18n-bundles.mjs, capture the red verdict, then revert the perturbation",
+        "prove the ratchet bites: the baseline check must fail on an INCREASED untranslated count — verify by inspecting that the current counts equal the baseline (growth would fail), and capture the baseline comparison output",
+        "in an UNBUILT state (or by consulting the gates' own prerequisite check), confirm the failure mode is the named build-prerequisite verdict, not nine phantom bundle problems"
+      ],
+      "acceptance": [
+        {
+          "clause": "check-i18n-bundles passes on a clean tree, reporting its two verdict classes separately",
+          "oracle": "build",
+          "verify": "exit 0 with the drift and undeclared-key sections both clean",
+          "evidence": "gate output"
+        },
+        {
+          "clause": "both gates' --self-test proves the red path exists",
+          "oracle": "build",
+          "verify": "each --self-test run exercises its classifiers against fixed samples and passes",
+          "evidence": "self-test outputs"
+        },
+        {
+          "clause": "the drift gate actually bites: a perturbed bundle turns the gate red naming the drifted package",
+          "oracle": "build",
+          "verify": "the perturbation run exits non-zero citing the perturbed bundle; the revert run is green again",
+          "evidence": "the red output + the post-revert green output"
+        },
+        {
+          "clause": "the coverage ratchet holds the frozen debt: counts match the committed baseline, and the gate's contract fails growth",
+          "oracle": "build",
+          "verify": "check-i18n-coverage exits 0 with counts equal to scripts/i18n-coverage-baseline.json",
+          "evidence": "gate output + baseline diff"
+        },
+        {
+          "clause": "an unbuilt workspace produces the HARD named prerequisite failure ('measured nothing'), never a skip and never phantom per-config errors",
+          "oracle": "build",
+          "verify": "the prerequisite verdict names the missing build, not an i18n config",
+          "evidence": "the captured failure output"
+        }
+      ],
+      "negative": [
+        "a green run after the deliberate bundle perturbation is a FAIL of the gate itself — file against the gate, and do not trust any of its other verdicts that sweep",
+        "--write printing 'regenerated' while writing nothing (the historical unbuilt-CLI shape) is a FAIL"
+      ],
+      "source": [
+        "scripts/check-i18n-bundles.mjs (#4804 undeclared-key verdict, #5217 prerequisite check, #4690 self-test rationale)",
+        "scripts/check-i18n-coverage.mjs (#3370 declared-surface ratchet, #5862 prerequisite check)",
+        "scripts/i18n-coverage-baseline.json"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the i18n build lane — drift gate, undeclared-key gate, ratchet, and their provable red paths", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    }
+  ]
+}
