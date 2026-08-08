@@ -885,6 +885,7 @@
     "system/ObjectStorageConfig:scope",
     "system/ObjectTranslationData:_actions",
     "system/ObjectTranslationData:_sections",
+    "system/ObjectTranslationData:_tabs",
     "system/ObjectTranslationData:_views",
     "system/ObjectTranslationData:description",
     "system/ObjectTranslationData:fields",
