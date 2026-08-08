@@ -294,7 +294,7 @@ export interface CelBoundsOverrun {
    * What the source itself measures on that axis: the smallest value of
    * `limits[limit]` under which it parses, every OTHER bound lifted, so the
    * number is cel-js's own accounting rather than a second implementation of
-   * it. `null` when the measurement was capped (see {@link MEASURE_CAP_FACTOR})
+   * it. `null` when the measurement was capped (see {@link CEL_BOUNDS_MEASURE_CAP_FACTOR})
    * or is not being taken — a bounds *refusal* never measures, because
    * measuring means re-parsing a source we have just decided is too big.
    */
@@ -356,7 +356,7 @@ export interface ParseCelToAstOptions {
  * without a cap, describing a pathological source means parsing it at whatever
  * size it happens to be.
  */
-const MEASURE_CAP_FACTOR = 64;
+export const CEL_BOUNDS_MEASURE_CAP_FACTOR = 64;
 
 /**
  * The canonical env with ONE bound lifted, used only to measure an overrun.
@@ -403,10 +403,10 @@ function parsesUnder(source: string, key: CelLimitKey, value: number): boolean {
  * the number in the WARN means what it says.
  *
  * Exponential probe from the exceeded bound, then binary search: `O(log n)`
- * parses, capped at {@link MEASURE_CAP_FACTOR}× the bound.
+ * parses, capped at {@link CEL_BOUNDS_MEASURE_CAP_FACTOR}× the bound.
  */
 function measureOverrun(source: string, key: CelLimitKey, limitValue: number): number | null {
-  const cap = limitValue * MEASURE_CAP_FACTOR;
+  const cap = limitValue * CEL_BOUNDS_MEASURE_CAP_FACTOR;
   let hi = limitValue * 2;
   while (hi <= cap && !parsesUnder(source, key, hi)) hi *= 2;
   if (hi > cap) return null;

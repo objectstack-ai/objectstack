@@ -45,7 +45,7 @@
 import type { ASTNode } from '@marcbachmann/cel-js';
 import type { FilterCondition } from '@objectstack/spec/data';
 
-import { parseCelToAstWithReason } from './cel-engine';
+import { CEL_BOUNDS_MEASURE_CAP_FACTOR, parseCelToAstWithReason } from './cel-engine';
 import type { CelBoundsOverrun } from './cel-engine';
 import { celPushdownLimitsMode } from './cel-pushdown-limits';
 
@@ -173,7 +173,7 @@ function warnOverLimitPushdown(source: string, overrun: CelBoundsOverrun): void 
   if (warnedOverLimit.size >= WARNED_OVER_LIMIT_MAX) warnedOverLimit.clear();
   warnedOverLimit.add(source);
   const measure = overrun.measured === null
-    ? `over ${overrun.limitValue * 64} (measurement capped)`
+    ? `over ${overrun.limitValue * CEL_BOUNDS_MEASURE_CAP_FACTOR} (measurement capped)`
     : String(overrun.measured);
   const shown = source.length > 200 ? `${source.slice(0, 197)}...` : source;
   hostConsole()?.warn?.(
