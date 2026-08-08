@@ -1224,36 +1224,16 @@ const step17: MigrationStep = {
         + 'retry re-runs the handler with its writes and callouts. No job fails to register '
         + 'with the retry-policy bound prescription.',
     },
-    {
-      id: 'etl-retry-converged-onto-retry-policy',
-      surface: 'etlPipeline.retry.maxAttempts (and any count above 10)',
-      replacement: 'maxRetries, same number — plus an explicit count if you relied on the old default of 3',
-      reason:
-        'An ETL pipeline\'s `retry` was a THIRD retry vocabulary that #4661\'s convergence never '
-        + 'reached, because that pass was driven by duplicated exported NAMES and this block is an '
-        + 'anonymous inline object (#4962). It now carries the shared `RetryPolicySchema` contract, '
-        + 'which changes three things with no single lossless rewrite between them. The rename '
-        + '`maxAttempts` → `maxRetries` IS lossless and the tombstone performs it — both keys '
-        + 'counted the retries AFTER the initial attempt, so the number does not change, and '
-        + 'subtracting one (correct for `integration/connector.zod.ts`\'s identically-spelled '
-        + '`RetryConfig.maxAttempts`, which includes the first attempt) would silently run one '
-        + 'attempt fewer than asked. What needs a human: the count now DEFAULTS TO 0 instead of 3, '
-        + 'so a pipeline that wrote `retry: {}` or omitted the count bought three silent re-runs '
-        + 'and now buys none. That is deliberate and the business case is the destination — an ETL '
-        + 'destination is a foreign system by definition, and an implicit retry against a '
-        + 'non-idempotent one is a duplicate write (a second invoice, a second export, a second '
-        + 'webhook). Retrying is now something an author states and thereby claims idempotency for. '
-        + 'The shared contract also caps `maxRetries` at 10, which this block never did; clamping '
-        + 'a larger budget would silently halve a number its author chose, so it fails at parse '
-        + 'with the bound named instead.',
-      acceptanceCriteria:
-        'No ETL pipeline declares `retry.maxAttempts`; every one that wants retries declares '
-        + '`maxRetries` >= 1 explicitly (the number carried over unchanged from `maxAttempts`), and '
-        + 'every pipeline that was relying on the old implicit 3 has either written `maxRetries: 3` '
-        + 'or been re-decided against the duplicate-write risk at its destination. No count exceeds '
-        + '10. Pipelines that want the old flat 60s backoff state `backoffMs: 60000` explicitly, '
-        + 'since the shared default is 1000.',
-    },
+    // `etl-retry-converged-onto-retry-policy` (#4962) stood here and was
+    // ABSORBED by `etl-pipeline-layer-retired` below (#6414), the §0 same-major
+    // rule: both land in the unreleased protocol 17, and composed, the rename
+    // `ETLPipeline.retry.maxAttempts` -> `maxRetries` has no observable effect
+    // because the shape carrying it does not survive the major. Leaving both
+    // would tell an upgrader to rewrite a key on a schema this same upgrade
+    // deletes, and would break the fixture-disjointness the replay contract
+    // asserts. The `agent.knowledge` / `WidgetManifest.performance` precedent:
+    // a tombstone goes with the shape that carried it, which is strictly
+    // stronger than the tombstone.
     {
       id: 'flow-retry-max-retries-required',
       surface: "flow.errorHandling.maxRetries (under strategy: 'retry')",
@@ -2473,6 +2453,171 @@ const step17: MigrationStep = {
         + 'envelope or a FilterArray in that slot still compiles and is rejected at run time '
         + 'with INVALID_FILTER / 400.',
     },
+    {
+      id: 'http-server-runtime-vocabulary-retired',
+      surface:
+        'system.serverEvent / system.serverEventType / system.serverCapabilities / '
+        + 'system.serverStatus (the lifecycle-event, capability-report and status vocabulary of '
+        + 'system/http-server.zod.ts — 4 defs, 8 exported names)',
+      replacement:
+        '(removed — there is no replacement key, because there was never a key. Server lifecycle '
+        + 'is the transport plugin\'s own start/stop seam; per-request and per-server '
+        + 'observability is `system/metrics.zod.ts` and `system/logging.zod.ts` (plus '
+        + '`OS_SERVER_TIMING` for timings), and liveness is the `/health` endpoint. What a '
+        + 'transport plugin can DO it states by implementing the kernel plugin contract — the '
+        + 'seams it registers are the capability statement, and a self-described capability '
+        + 'record can only disagree with them. Server-level configuration that IS authorable '
+        + 'lives on `defineStack({ server })` / `StackServerConfigSchema`, which is unaffected)',
+      reason:
+        'The second and final ADR-0049 pass over `system/http-server.zod.ts`. #4938 removed the '
+        + 'CONFIG half (`HttpServerConfigSchema`, nine keys, zero readers, zero authoring '
+        + 'entry); this removes the RUNTIME half — a 7-member lifecycle event union with a '
+        + 'timestamped envelope, an eight-boolean capability report, and a five-state status '
+        + 'record with connection and request counters. Nothing ever emitted, consumed or '
+        + 'parsed any of them. '
+        + 'This card was HELD for four days rather than queued, on a specific and legitimate '
+        + 'doubt: a response/capability vocabulary can be a REFERENCE surface for host '
+        + 'implementers, so "zero consumers in this repo" is weaker evidence for one of those '
+        + 'than for an authorable key (the CSS-variable rebuttal). The hold was lifted by '
+        + 'measuring the reference reader itself rather than by re-running the same grep: '
+        + '`plugin-hono-server`, the one in-tree host implementation, neither implements nor '
+        + 'reports any of the three — it names no capability record, no status shape and no '
+        + 'event union, and what it registers is routes and middleware through the kernel '
+        + 'plugin contract. A declaration-site grep put every declaration in this one file, a '
+        + 'quoted-name sweep across objectstack and objectui found no reader outside it, and '
+        + 'the control passed in the SAME run: `MiddlewareConfig`, declared twelve lines away, '
+        + 'resolves to `packages/runtime/src/middleware.ts`. So the sweep could see a reader in '
+        + 'this file when there was one. '
+        + 'With no carrier key there is nothing to tombstone, and with no author there is no '
+        + 'source or `sys_metadata` row for a D2 conversion to rewrite: RETIRED_DEFS_BY_MAJOR '
+        + 'plus this entry are the declaration — route 3, the same shape as #4938 in this very '
+        + 'file, #4834, #4988 and #5055. If host-implementer conformance becomes a real '
+        + 'requirement it returns through the ENFORCE route: an adapter contract with a checker '
+        + 'behind it, vocabulary second. ADR-0049, #5295.',
+      acceptanceCriteria:
+        'No source imports `ServerEvent`, `ServerEventType`, `ServerEventSchema`, '
+        + '`ServerCapabilities`, `ServerCapabilitiesSchema`, `ServerCapabilitiesParsed`, '
+        + '`ServerStatus` or `ServerStatusSchema` from `@objectstack/spec/system` — a grep over '
+        + 'consumer code resolves none of them, and `tsc` reports TS2724/TS2305 on any that '
+        + 'survives. The route-registration half of the same module still resolves '
+        + '(`RouteHandlerMetadataSchema`, `MiddlewareType`, `MiddlewareConfigSchema`, '
+        + '`MiddlewareConfig`), and `StackServerConfigSchema` — the one authorable server '
+        + 'surface — is untouched: a stack declaring `server: { trustProxy, security }` parses '
+        + 'exactly as it did in 16.x.',
+    },
+    {
+      id: 'view-management-protocol-retired',
+      surface:
+        'api.listViews / api.getView / api.createView / api.updateView / api.deleteView '
+        + '(the ViewProtocol interface and its ten Request/Response schemas in '
+        + 'api/protocol.zod.ts — 10 defs, 25 exported names)',
+      replacement:
+        'the two view surfaces that are actually routed. For a view\'s STORED definition, the '
+        + 'generic metadata methods with `type: \'view\'` — `getMetaItem` / `getMetaItems` / '
+        + '`saveMetaItem` / `deleteMetaItem`, served at `/api/v1/meta/view/:name`. For the '
+        + 'RESOLVED render-time view, `getUiView` (`GetUiViewRequest` / `GetUiViewResponse`), '
+        + 'served at `/api/v1/ui/view/:object/:type`. Neither is addressed by a `viewId`, which '
+        + 'is the one thing the retired surface offered and the one thing nothing implemented',
+      reason:
+        'A complete viewId-addressed CRUD surface — list (with a list/form filter), read, '
+        + 'create, patch, delete — with none of the three things a protocol method needs. '
+        + 'Measured on origin/main immediately before the removal: no implementation '
+        + '(`packages/metadata-protocol/src/protocol.ts` declares no `listViews` / `getView` / '
+        + '`createView` / `updateView` / `deleteView`; its only view resolver is `getUiView`), '
+        + 'no route (`packages/rest/src/rest-server.ts` never mentions `viewId`, so nothing '
+        + 'viewId-addressed is reachable over HTTP at all), and no caller (the only '
+        + '`ViewProtocol` mention outside its own file was the services checklist, which '
+        + 'already recorded the five as declared-and-unrouted). The look-alike hits a bare-name '
+        + 'grep turns up are all different contracts: `metadata-manager.ts`\'s '
+        + '`getView(name: string)` is another class, and objectui\'s '
+        + '`getView(objectName, viewId)` resolves through `client.meta.getItem(\'view\', …)`, '
+        + 'i.e. the metadata route. '
+        + 'What makes this worth a removal rather than a note is that the cost is already '
+        + 'measured. A declared surface that is name-identical and semantics-adjacent to a real '
+        + 'one is an attractive nuisance in every grep, and it mis-directed a decision once: '
+        + '#5948\'s issue body AND its 2026-08-07 maintainer ruling both read '
+        + '`GetViewResponseSchema` (zero implementations) as the contract of '
+        + '`GET /ui/view/:object/:type`, whose declared response is `GetUiViewResponseSchema` — '
+        + 'one word apart, 250 lines up. That ruling\'s reasoning happened to survive the '
+        + 'mix-up ("nobody can consume `{object, view}` successfully today" was true, though '
+        + 'not for the stated reason), which is the luck this removal stops relying on. '
+        + 'Route 3: none of the ten was a key on an authorable shape, nothing parsed them, so '
+        + 'there is no tombstone and no D2 conversion — RETIRED_DEFS_BY_MAJOR plus this entry '
+        + 'are the declaration. If reading and writing ONE view by id becomes a real '
+        + 'requirement it returns implementation-first. ADR-0049, ADR-0087, maintainer ruling '
+        + '2026-08-07, #6239.',
+      acceptanceCriteria:
+        'No source imports `ListViewsRequest(Schema)`, `ListViewsResponse(Schema)`, '
+        + '`GetViewRequest(Schema)`, `GetViewResponse(Schema)`, `CreateViewRequest(Schema)`, '
+        + '`CreateViewResponse(Schema)`, `UpdateViewRequest(Schema)`, '
+        + '`UpdateViewResponse(Schema)`, `DeleteViewRequest(Schema)` or '
+        + '`DeleteViewResponse(Schema)` from `@objectstack/spec/api`, and no host declares a '
+        + '`ViewProtocol` member. Reading and writing views still works end to end through the '
+        + 'surfaces that were always the live ones: `GET /api/v1/meta/view/:name` returns the '
+        + 'stored definition and `GET /api/v1/ui/view/:object/:type` returns the resolved view, '
+        + 'both unchanged by this removal. `GetUiViewRequestSchema` / `GetUiViewResponseSchema` '
+        + 'still resolve — they are the shapes #5948 meant.',
+    },
+    {
+      id: 'etl-pipeline-layer-retired',
+      surface:
+        'automation.etlPipeline / automation.etlPipelineRun / automation.etlSource / '
+        + 'automation.etlDestination / automation.etlTransformation (the whole L2 layer of '
+        + 'automation/etl.zod.ts, its four enums and the `ETL` factory — 9 defs, 27 exported '
+        + 'names)',
+      replacement:
+        '(removed — no protocol surface replaces it, deliberately. Layer by layer: '
+        + 'connector-attached synchronisation is `ConnectorSchema.syncConfig` '
+        + '(`integration/connector.zod.ts`), which IS parsed and executed; per-field value '
+        + 'transformation on import is `shared/mapping.zod.ts`, whose `transform` is applied '
+        + 'row by row by the REST import path and recorded key by key in '
+        + '`packages/spec/liveness/mapping.json`; scheduling is `system/job.zod.ts`. What has '
+        + 'NO replacement is multi-source, multi-stage movement with joins and aggregations — '
+        + 'because it never had an implementation either. It returns through the ENFORCE route: '
+        + 'the engine first, the vocabulary second)',
+      reason:
+        'The reading #4738 used to retire L1 `DataSyncConfig`, re-measured one layer up and '
+        + 'identical: narrative-only. No engine ever parsed, scheduled or executed an '
+        + '`ETLPipeline`. Measured on origin/main immediately before the removal: the only '
+        + 'non-spec references in this repo are two fumadocs-generated documentation sources '
+        + '(`apps/docs/.source/*.ts`), not executors; objectui has no reference at all; there '
+        + 'is no `liveness/etl.json` or `pipeline.json`, so no ADR-0049 gate ever had a reading '
+        + 'on it — while the same file family\'s EXECUTED half does have one '
+        + '(`liveness/mapping.json`), which is the contrast that makes the absence meaningful '
+        + 'rather than an oversight. The `etl` string in this registry was the one untested '
+        + 'link the finding named, and it is not a loader path: it was the id of the #4962 '
+        + 'retry-vocabulary entry, absorbed here. '
+        + 'The layer was ADR-0078\'s asymmetry in its purest form — an author could write a '
+        + 'complete ten-stage pipeline, get no error, and get no execution. It was also '
+        + 'advertised: `packages/spec/docs/SYNC_ARCHITECTURE.md` named `ETLPipeline` as the '
+        + 'recommended destination for authors displaced by the L1 retirement (#4738) and '
+        + 'listed ten transformation types with copyable examples down to '
+        + '`script | Custom JavaScript/Python`. That document is rewritten in the same change; '
+        + 'a retirement whose own doc still recommends the retired layer is self-contradictory, '
+        + 'and forwarding L1\'s authors to a second layer with no executor was the defect '
+        + 'compounding rather than closing. '
+        + '⚠️ `etl-retry-converged-onto-retry-policy` (#4962) is SUBSUMED here, the '
+        + '#4657/#4834/#5055 way: both land in the unreleased protocol 17, so composed, a '
+        + 'rename of `retry.maxAttempts` on a shape that does not survive the major has no '
+        + 'observable effect — and keeping both would tell an upgrader to rewrite a key on a '
+        + 'schema the same upgrade deletes. The `maxAttempts` `retiredKey()` tombstone goes '
+        + 'with the shape that carried it, which is strictly stronger than the tombstone: there '
+        + 'is no longer a `retry` block to author the key into. Route 3 — no carrier key, no '
+        + 'parse site, so no D2 conversion and no tombstone; RETIRED_DEFS_BY_MAJOR plus this '
+        + 'entry are the declaration. ADR-0049, ADR-0078, #6414.',
+      acceptanceCriteria:
+        'No source imports `ETLPipeline`, `ETLPipelineParsed`, `ETLPipelineSchema`, '
+        + '`ETLPipelineRun(Schema)`, `ETLSource(Schema)`, `ETLDestination(Schema)`, '
+        + '`ETLTransformation(Schema)`, `ETLEndpointType(Schema)`, '
+        + '`ETLTransformationType(Schema)`, `ETLSyncMode(Schema)`, `ETLRunStatus(Schema)` or '
+        + 'the `ETL` factory from `@objectstack/spec/automation`; `tsc` reports TS2724/TS2305 '
+        + 'on any that survives. Every author who was pointed at L2 has been re-pointed by '
+        + 'name: SYNC_ARCHITECTURE.md no longer lists an L2 row, no longer recommends '
+        + '`ETLPipeline` as L1\'s destination and no longer advertises a transformation-type '
+        + 'table. The surviving layers still parse unchanged — a connector declaring '
+        + '`syncConfig` and an import declaring `mapping.transform` both behave exactly as they '
+        + 'did in 16.x.',
+    },
   ],
 };
 
@@ -2697,6 +2842,21 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
   // contract, not authorable metadata, and it has a live compile-time consumer
   // in objectui (`packages/fields/src/__tests__/spec-symbol-batch7.test.ts`,
   // landed by objectui PR #3289).
+  //
+  // The 2026-08-08 ADR-0049 sweep (#6486) adds twenty-three more across three
+  // members (4 + 10 + 9), all route 3 and all whole-def: `system/http-server.zod.ts`'s
+  // runtime vocabulary (#5295, D3 `http-server-runtime-vocabulary-retired`),
+  // `api/protocol.zod.ts`'s viewId-addressed view CRUD (#6239, D3
+  // `view-management-protocol-retired`) and the whole L2 ETL layer (#6414, D3
+  // `etl-pipeline-layer-retired`). None had a carrier key and none was ever
+  // parsed outside its own unit tests, so again there is no tombstone and no D2
+  // conversion — this table plus those three entries ARE the declaration.
+  //
+  // ⚠️ `system/ServerRateLimitConfig` is deliberately NOT here. It sits four
+  // lines from the retired `system/ServerCapabilities` in the same manifest and
+  // shares its prefix, but it belongs to `StackServerSecurity.rateLimit` — the
+  // LIVE server surface #5006 admitted, with an executor. Prefix adjacency is
+  // not evidence.
   17: [
     'shared/FieldMappingTransform',
     'ui/WidgetManifest',
@@ -2709,5 +2869,31 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     'ui/NumberFormat',
     'ui/DateFormat',
     'ui/LocaleConfig',
+    // #5295 — system/http-server.zod.ts runtime vocabulary
+    'system/ServerEvent',
+    'system/ServerEventType',
+    'system/ServerCapabilities',
+    'system/ServerStatus',
+    // #6239 — api/protocol.zod.ts view-management operations
+    'api/ListViewsRequest',
+    'api/ListViewsResponse',
+    'api/GetViewRequest',
+    'api/GetViewResponse',
+    'api/CreateViewRequest',
+    'api/CreateViewResponse',
+    'api/UpdateViewRequest',
+    'api/UpdateViewResponse',
+    'api/DeleteViewRequest',
+    'api/DeleteViewResponse',
+    // #6414 — automation/etl.zod.ts, the whole L2 layer
+    'automation/ETLPipeline',
+    'automation/ETLPipelineRun',
+    'automation/ETLSource',
+    'automation/ETLDestination',
+    'automation/ETLTransformation',
+    'automation/ETLEndpointType',
+    'automation/ETLTransformationType',
+    'automation/ETLSyncMode',
+    'automation/ETLRunStatus',
   ],
 };

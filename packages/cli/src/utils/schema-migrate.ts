@@ -16,6 +16,7 @@ import chalk from 'chalk';
 import type { ManagedDriftEntry, DriftCategory, PendingSchemaWork } from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { describeDriverConnection } from './connection-display.js';
+import { reserveStdoutForJson } from './json-stdout.js';
 
 export type { PendingSchemaWork };
 
@@ -139,6 +140,30 @@ function describeDb(driver: SqlDriverLike | null): string {
 /** Boot the schema stack. Caller MUST call `shutdown()` when done. */
 export async function bootSchemaStack(
   opts: {
+    /**
+     * `true` when this run's stdout belongs to a machine-readable payload
+     * (`--json`) — the boot then sends everything the kernel and its plugins
+     * write to **stderr** so `JSON.parse(stdout)` succeeds on the whole
+     * stream, with no heuristic extraction (#6217).
+     *
+     * REQUIRED, and required on purpose. Every command in this family declares
+     * a `--json` flag, and each of them re-introduced the same defect
+     * independently: `os migrate plan` / `apply` / `resume` / `recorded-by` /
+     * `summary-nulls` / `value-shapes` / `files-to-references`, `os migrate
+     * meta --stored` and `os meta resync` all emitted ~60 INFO lines around
+     * their payload. Booting the stack is what makes a command a member of
+     * this family, so this is the one place a new member cannot avoid — and
+     * with no default, a new member has to *decide* rather than inherit the
+     * bug. Pass `false` from anything that owns stdout itself (every
+     * human-mode run, and every test).
+     *
+     * The reservation is NOT lifted when the boot fails: a half-started kernel
+     * can still log, and the command's next act on that path is to emit its
+     * error payload. Lifting it would put those two on the same stream, which
+     * is the defect. `shutdown()` lifts it on the success path, once the kernel
+     * is down and nothing is left to write. See `./json-stdout.ts`.
+     */
+    jsonOutput: boolean;
     databaseUrl?: string;
     /**
      * Service plugins to register after the data stack (driver/metadata/
@@ -176,8 +201,14 @@ export async function bootSchemaStack(
      * whatever directory the test runner happens to be standing in (#4065).
      */
     projectRoot?: string;
-  } = {},
+  },
 ): Promise<SchemaStack> {
+  // Taken BEFORE the first line the boot can print. `createStandaloneStack`
+  // announces a missing compiled artifact on `console.log` before any plugin
+  // is constructed, so a reservation installed one statement later already
+  // arrives too late to keep stdout a single JSON document (#6217).
+  const releaseStdout = opts.jsonOutput ? reserveStdoutForJson() : () => { /* stdout is the caller's */ };
+
   const { createStandaloneStack, Runtime } = await import('@objectstack/runtime');
   const defer = opts.deferSchemaDdl === true;
 
@@ -262,6 +293,12 @@ export async function bootSchemaStack(
     shutdown: async () => {
       try { await kernel.shutdown(); } catch { /* teardown is best-effort */ }
       try { await driver?.disconnect?.(); } catch { /* ignore */ }
+      // Only now — `kernel.shutdown()` is itself two INFO lines ("Graceful
+      // shutdown started" / "complete"), and under `--json` those printed
+      // BELOW the payload, which is half of what made stdout unparseable
+      // (#6217). Released after the kernel is down, when nothing is left to
+      // write; a failed boot never reaches here on purpose.
+      releaseStdout();
     },
   };
 }

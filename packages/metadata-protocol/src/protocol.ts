@@ -2897,6 +2897,15 @@ export class ObjectStackProtocolImplementation implements
             name,
             /** @deprecated Use `name`. Removed in protocol 18 (#4828). */
             apiName: name,
+            // [#5936] The operator's value, passed as read — no local default.
+            // What an ABSENT `NODE_ENV` advertises is decided once, inside
+            // `resolveDiscoveryEnvironment` (`production`, per the 2026-08-07
+            // ruling, direction 1), so this producer and the runtime dispatcher
+            // cannot drift on it. Before that ruling the default lived at the
+            // dispatcher's own call site and this producer had no equivalent, so
+            // a deployment that forgot the variable was told `development` here
+            // and `production` there — the exact drift the shared mapper exists
+            // to prevent (#4828). Do not re-introduce a default here.
             environment: resolveDiscoveryEnvironment(
                 (globalThis as { process?: { env?: Record<string, string | undefined> } })
                     .process?.env?.NODE_ENV,

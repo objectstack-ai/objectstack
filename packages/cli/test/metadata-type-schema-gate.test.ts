@@ -82,6 +82,12 @@ const GATED_AT: Readonly<Record<string, string>> = {
   book: 'books',
   permission: 'permissions',
   position: 'positions',
+  // [#5961] `capability` joined the registry as a CLOSED shape, so it goes
+  // straight into the gated set rather than into NOT_YET_CLOSED below: the
+  // stack authors it at `capabilities:` as a flat array of the registry's own
+  // shape (`stack.zod.ts`: `z.array(CapabilityDeclarationSchema)`), and that
+  // shape is `.strict()`, so both gates reject an undeclared key identically.
+  capability: 'capabilities',
   agent: 'agents',
   tool: 'tools',
   skill: 'skills',

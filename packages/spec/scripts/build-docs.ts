@@ -575,7 +575,11 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
   ],
   automation: [
     { section: 'Flow & Execution', pages: ['flow', 'control-flow', 'execution', 'node-executor', 'state-machine', 'time-relative-trigger'] },
-    { section: 'Integration & Data', pages: ['sync', 'etl', 'connector', 'webhook', 'bpmn-interop', 'offline'] },
+    // `sync` (#4738, L1) and `etl` (#6414, L2) are both retired; `offline` went
+    // with `ui/offline.zod.ts` (#4988). `buildCategoryPages` filters by what was
+    // emitted, so leaving a dead name here is silently harmless — which is why
+    // each is removed deliberately instead.
+    { section: 'Integration & Data', pages: ['connector', 'webhook', 'bpmn-interop'] },
     { section: 'Approvals & Jobs', pages: ['approval', 'job'] },
   ],
   cloud: [
