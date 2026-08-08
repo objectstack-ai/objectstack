@@ -1013,8 +1013,8 @@ async function boot(hooks: Hook[]): Promise<{ engine: ObjectQL; driver: any }> {
   const driver = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(taskObject as any);
-  engine.registry.registerObject(otherObject as any);
+  engine.registry.registerObject(taskObject);
+  engine.registry.registerObject(otherObject);
   if (hooks.length > 0) {
     bindHooksToEngine(engine, hooks, { packageId: 'app:test', logger: silentLogger });
   }

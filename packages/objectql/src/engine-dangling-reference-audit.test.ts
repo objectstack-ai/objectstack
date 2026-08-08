@@ -144,9 +144,9 @@ describe('[#4551] the engine reports the dangling rows its own `isSystem` exempt
     stores = stub.stores;
     engine.registerDriver(stub.driver, true);
     await engine.init();
-    engine.registry.registerObject(permissionSet as any);
-    engine.registry.registerObject(binding as any);
-    engine.registry.registerObject(history as any);
+    engine.registry.registerObject(permissionSet);
+    engine.registry.registerObject(binding);
+    engine.registry.registerObject(history);
     await engine.insert('aud_permission_set', { id: 'ps_real', name: 'Real' }, { context: { isSystem: true } } as any);
   });
 

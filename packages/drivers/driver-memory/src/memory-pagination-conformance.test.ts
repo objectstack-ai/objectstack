@@ -35,6 +35,7 @@ import {
   PAGINATION_CASES,
   PAGINATION_ROWS,
   PAGINATION_UNORDERED_CASES,
+  PAGINATION_ZERO_LIMIT_CASES,
 } from '@objectstack/spec/data';
 import { InMemoryDriver } from './memory-driver.js';
 
@@ -110,4 +111,26 @@ describe('InMemoryDriver — paged reads are a partition of the result set (obje
       expect(paged.map((r) => r.id)).toEqual(PAGINATION_ROWS.map((r) => r.id));
     });
   }
+
+  /**
+   * `limit: 0` returns no records (#6485/#6577).
+   *
+   * This is the driver the card was filed about. `find()` sliced with
+   * `if (query.limit)` — truthiness — so `limit: 0` dropped the slice and the
+   * read that asked for nothing was answered with all twelve rows. Measured
+   * before the fix on a three-row table: `{ limit: 0 }` -> 3, and
+   * `{ limit: 0, offset: 1 }` -> 2, i.e. the OFFSET applied and the LIMIT did
+   * not — which is why every paging suite here stayed green over it.
+   *
+   * The #5499 investment freeze was lifted for this door specifically
+   * (maintainer ruling on #6577), and for nothing else in this package.
+   */
+  describe('`limit: 0` returns no records', () => {
+    for (const testCase of PAGINATION_ZERO_LIMIT_CASES) {
+      it(testCase.name, async () => {
+        const rows = await driver.find('ticket', { ...testCase.query });
+        expect(rows).toHaveLength(testCase.expectedRowCount);
+      });
+    }
+  });
 });

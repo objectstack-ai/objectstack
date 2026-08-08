@@ -125,6 +125,10 @@ import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, Validat
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
+// [#6457] The master-detail header a `parent`-scoped predicate reads is made
+// total over the MASTER's declared fields before it leaves this engine — the
+// same helper every other server seam materialises with (#1871/#4649/#4953).
+import { materializeDeclaredFields } from './declared-fields.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -2588,10 +2592,15 @@ export class ObjectQL implements IObjectQLEngine {
              }
           } else {
              this.logger.debug('Registering objects from manifest (Map)', { id, objectCount: Object.keys(manifest.objects).length });
-             for (const [name, objDef] of Object.entries(manifest.objects)) {
+             // `manifest` is `any` (a raw authored manifest), so the map branch
+             // widens its values to `unknown`. State the contract once, on the
+             // entries, rather than casting the argument at the call: the map
+             // values ARE authored `ServiceObject`s — the INPUT shape, which is
+             // what `registerObject` takes since ADR-0122 phase 2 (#6083).
+             for (const [name, objDef] of Object.entries(manifest.objects) as [string, ServiceObject][]) {
                 // Ensure name in definition matches key
-                (objDef as any).name = name;
-                const fqn = this._registry.registerObject(objDef as any, id, namespace, 'own');
+                objDef.name = name;
+                const fqn = this._registry.registerObject(objDef, id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           }
@@ -2614,7 +2623,7 @@ export class ObjectQL implements IObjectQLEngine {
                   indexes: ext.indexes,
               };
               // Register as extension (namespace is undefined since we're targeting by FQN)
-              this._registry.registerObject(extDef as any, id, undefined, 'extend', priority);
+              this._registry.registerObject(extDef, id, undefined, 'extend', priority);
               this.logger.debug('Registered Object Extension', { target: targetFqn, priority, from: id });
           }
       }
@@ -2809,11 +2818,13 @@ export class ObjectQL implements IObjectQLEngine {
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               } else {
-                  const entries = Object.entries(plugin.objects);
+                  // Same contract statement as the manifest map branch above —
+                  // authored `ServiceObject`s (INPUT shape, ADR-0122 phase 2).
+                  const entries = Object.entries(plugin.objects) as [string, ServiceObject][];
                   this.logger.debug('Registering plugin objects (Map)', { pluginName, count: entries.length });
                   for (const [name, objDef] of entries) {
-                      (objDef as any).name = name;
-                      const fqn = this._registry.registerObject(objDef as any, ownerId, pluginNamespace, 'own');
+                      objDef.name = name;
+                      const fqn = this._registry.registerObject(objDef, ownerId, pluginNamespace, 'own');
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               }
@@ -3418,6 +3429,10 @@ export class ObjectQL implements IObjectQLEngine {
    * `null` on any failure — no relation, no id, header gone, read threw. It is
    * NOT read as "unlocked": an unresolved binding leaves `parent` unbound, and
    * `isReadonlyWhenLocked` treats a predicate that needs it as LOCKED.
+   *
+   * [#6457] A header that IS resolved is handed over TOTAL over the MASTER
+   * object's declared fields — see {@link materializeParentHeader} for why that
+   * had to happen here and nowhere else, and for the verdict table it moves.
    */
   private async resolveMasterDetailParent(
     schema: any,
@@ -3430,7 +3445,9 @@ export class ObjectQL implements IObjectQLEngine {
     if (parentId == null) return null;
     try {
       const row = await this.findOne(rel.master, { where: { id: parentId }, context: { isSystem: true } } as any);
-      return (row as Record<string, unknown>) ?? null;
+      // `null` stays `null` — the fail-CLOSED signal (#4889) is the ABSENCE of
+      // the binding, and materialising a row we do not have would destroy it.
+      return row == null ? null : this.materializeParentHeader(rel.master, row as Record<string, unknown>);
     } catch (err) {
       this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
         object: rel.master, id: parentId, error: err,
@@ -3451,6 +3468,11 @@ export class ObjectQL implements IObjectQLEngine {
    * passed as `null` and each inserted row supplies its own FK, so
    * `masterIdOf(fk, null, row)` reads `row[fk]` and the batch costs one header
    * read for the whole `insert()` call.
+   *
+   * [#6457] Every header this resolves is materialised over the MASTER's
+   * declared fields, exactly as the single-id twin does — the declared-field
+   * table is read ONCE for the batch, not per row. A row this map has no entry
+   * for still answers `null` (unbound, fail-CLOSED for `readonlyWhen`).
    */
   private async resolveMasterDetailParents(
     schema: any,
@@ -3472,8 +3494,13 @@ export class ObjectQL implements IObjectQLEngine {
         where: { id: { $in: [...ids] } },
         context: { isSystem: true },
       } as any) as Array<Record<string, unknown>>;
+      // [#6457] One declared-field lookup for the whole batch, then one shallow
+      // copy per header. A master the registry does not know leaves `fields`
+      // undefined and every header passes through untouched — see
+      // {@link materializeParentHeader}.
+      const masterFields = this.masterDeclaredFields(rel.master);
       for (const row of Array.isArray(rows) ? rows : []) {
-        if (row?.id != null) byId.set(String(row.id), row);
+        if (row?.id != null) byId.set(String(row.id), materializeDeclaredFields({ ...row }, masterFields));
       }
     } catch (err) {
       this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
@@ -3485,6 +3512,73 @@ export class ObjectQL implements IObjectQLEngine {
       const id = masterIdOf(rel.fk, data, row);
       return id == null ? null : (byId.get(String(id)) ?? null);
     };
+  }
+
+  /**
+   * [#6457] Make a resolved master-detail header TOTAL over the MASTER
+   * object's declared fields, so a `parent.<field>` predicate is evaluable
+   * whatever subset of columns the driver echoed back.
+   *
+   * ## The hole this closes
+   *
+   * #4953 made the `record` / `previous` roots total at every server seam
+   * ({@link ./declared-fields.js#materializeDeclaredFields}); the 2026-08-06
+   * ruling deliberately left `parent` out, because `parent` is a row of ANOTHER
+   * object and its ABSENCE is #4889's fail-closed signal. What that left behind
+   * is the same trap one root over — visible as a THREE-row table, of which
+   * only the middle row moves here:
+   *
+   * | header state | `readonlyWhen: parent.status == null` | before | now |
+   * |---|---|---|---|
+   * | carries `status` | evaluates | locks per verdict | unchanged |
+   * | resolved, no `status` key | `No such key: status` — `parent` IS bound, so `unknownVariableOf` does not match ⇒ ordinary fail-OPEN | **declared lock let through** | evaluates (`status` reads `null`) |
+   * | unresolvable (`null`) | `Unknown variable: parent` | LOCKED (#4889) | LOCKED — unchanged |
+   *
+   * The middle row is the bug: whether a declared lock enforced depended on
+   * which columns a driver happened to return, which is not something an author
+   * can see or control. `requiredWhen` (#4977) shares the binding and had the
+   * mirror of it — fail-open there means the requirement is simply not
+   * enforced. One materialisation serves both consumers.
+   *
+   * ## Why HERE, and not in the strip / the evaluator
+   *
+   * `stripReadonlyWhenFields*` and `evaluateValidationRules` are pure functions
+   * over what they are handed; they hold the DETAIL object's field table and
+   * have no way to reach the MASTER's — threading a second field table through
+   * their signatures would put the master's schema in four call sites' hands to
+   * serve one binding. The engine already holds both the registry and the
+   * just-read header at these two seams, so the header arrives at those
+   * functions already total and their signatures do not move.
+   *
+   * ## The fail-CLOSED line is preserved EXACTLY (#4889)
+   *
+   * This function is only ever reached with a row IN HAND — the persisted-state
+   * precondition `declared-fields.ts` states. An UNRESOLVABLE header still
+   * returns `null` from the resolvers above, still leaves `parent` unbound,
+   * still faults as `Unknown variable: parent`, and is still read as LOCKED. The
+   * two cases stay distinguishable by construction: absence is decided before
+   * this function is called, materialisation only ever applies to a row that
+   * exists.
+   *
+   * A master the registry cannot resolve yields no field table, and the header
+   * passes through unchanged — sparse, i.e. exactly the pre-#6457 behaviour.
+   * That is the honest answer: without the declared shape we cannot know which
+   * absent keys are fields and which would be fabrication.
+   *
+   * COPIED before materialising, like every other caller: the row is what
+   * `findOne`/`find` returned and may be observed elsewhere; it must not gain
+   * materialised nulls behind its reader's back.
+   */
+  private materializeParentHeader(master: string, row: Record<string, unknown>): Record<string, unknown> {
+    return materializeDeclaredFields({ ...row }, this.masterDeclaredFields(master));
+  }
+
+  /** The MASTER object's declared-field table, or `undefined` when the registry
+   *  does not know it (see {@link materializeParentHeader}). */
+  private masterDeclaredFields(master: string): Record<string, unknown> | undefined {
+    const schema = this._registry.getObject(master) as { fields?: Record<string, unknown> } | undefined;
+    const fields = schema?.fields;
+    return fields && typeof fields === 'object' ? fields : undefined;
   }
 
   /**
@@ -7273,6 +7367,48 @@ export class ObjectQL implements IObjectQLEngine {
       // the predicate path — see the pre-phase below. `delete()` was already
       // the right shape here; what changed is that the predicate branch grew
       // the same discipline the by-id branch has had since #5272.
+      //
+      // [#5929] The gate's THREE terms, unchanged by that card and enumerated
+      // here because it had to enumerate them to answer it:
+      //   1. `hasHooksFor('beforeDelete', object)`
+      //   2. `hasHooksFor('afterDelete', object)`
+      //   3. `getSummaryDescriptors(object).length > 0`
+      // No validation term, deliberately — see `needsPriorRecord` above.
+      //
+      // What #5929 changed is not this expression but what term 1 MEANS. Until
+      // then, objectql's own `ObjectQLPlugin` registered a builtin
+      // `sys_fetch_previous_delete` on `beforeDelete` with `object: '*'`, so on
+      // every kernel-hosted engine term 1 was true for every object and the
+      // per-object skip this gate exists to perform could never happen. The
+      // builtin's only remaining effect WAS holding this gate open: the read
+      // below binds `previous` before `beforeDelete` dispatches, so its own
+      // `!ctx.previous` guard was already unreachable. Retiring it (plugin.ts,
+      // ADR-0049 enforce-or-remove) makes term 1 an honest question.
+      //
+      // ⚠️ Honest is not the same as usually-false, and the difference is worth
+      // knowing before anyone reads a skip into a production trace. Every
+      // delete-phase hook below registers with NO `object` — global — so each
+      // holds term 1 or term 2 open for every object on a kernel that loads it:
+      //
+      //   * `plugin-auth`   identity-write-guard  beforeDelete  (filters by
+      //                     `isManaged(ctx.object)` inside the handler)
+      //   * `plugin-sharing` record-share-cascade  before+afterDelete (filters
+      //                     by `targets(objectName)` inside the handler)
+      //   * `service-storage` file-reference-lifecycle before+afterDelete
+      //                     (filters by `activeFileFields(object)` inside)
+      //   * `plugin-audit`  captureBefore / writeAudit before+afterDelete,
+      //                     global MINUS `excludeObjects: AUDIT_EXCLUDED_OBJECTS`
+      //                     (#5860) — the one that narrows at the ENGINE face,
+      //                     so `hookMatchesObject` can subtract it and an
+      //                     excluded object really does skip this read.
+      //
+      // The first three are real handlers with real work, merely deciding their
+      // own applicability at dispatch time rather than at registration time;
+      // this gate answering "yes" for them is the gate WORKING, not a second
+      // instance of the #5929 defect. Narrowing any of them to the objects it
+      // actually serves — plugin-audit's `excludeObjects` face is the worked
+      // example — is what would convert them into skips, and that is each
+      // package's own card, not this one's.
       const deleteSchema = this._registry.getObject(object);
       const wantsPreImage =
         this.hasHooksFor('beforeDelete', object) ||
