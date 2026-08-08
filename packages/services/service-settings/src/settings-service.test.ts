@@ -1371,6 +1371,370 @@ describe('SettingsService — env overrides are checked against declared windows
   });
 });
 
+/**
+ * #6199 — `step`, the fifth and last of `SpecifierSchema`'s value constraints,
+ * is enforced on the same two paths as the other four.
+ *
+ * The reading that settles it is the schema's own. `step` is declared under the
+ * SAME "numeric bounds and step" doc comment as `min`/`max`, so it is authored
+ * as a BOUND, and #5932's ruling — a declared bound binds — transfers with it.
+ * The competing reading, that `step` is only
+ * an `input[type=number]` arrow increment and never says other values are
+ * illegal, was checked and does not survive contact: `step` had ZERO read
+ * points at the time this landed — nothing in `packages/services/
+ * service-settings`, nothing anywhere else in this repo, and nothing in
+ * `objectui` — so under that reading the key would be enforcing presentation
+ * for a renderer that does not exist. A declaration with no consumer at all is
+ * the ADR-0049 hole, not a UI affordance.
+ *
+ * The consequence is real and was accepted at ruling time: `ai.temperature`
+ * declares `min: 0, max: 2, step: 0.1`, and `0.15` — a perfectly sensible
+ * temperature for the model behind it — is now refused. That is the manifest's
+ * declaration binding as written; whether it SHOULD declare a 0.1 grid is the
+ * manifest owner's question, not this gate's.
+ */
+describe('SettingsService — the declared step grid is enforced at save time (#6199)', () => {
+  /**
+   * Three shapes the grid arrives in: with a window (the `ai.temperature`
+   * shape), with no window at all, and anchored somewhere other than zero.
+   */
+  const gridManifest = {
+    namespace: 'grid',
+    version: 1,
+    label: 'Grid',
+    scope: 'tenant',
+    readPermission: 'setup.access',
+    writePermission: 'setup.access',
+    specifiers: [
+      { type: 'slider', key: 'temperature', label: 'Temperature', required: false,
+        default: 0.7, min: 0, max: 2, step: 0.1 },
+      { type: 'number', key: 'bare', label: 'Bare', required: false, step: 5 },
+      { type: 'number', key: 'odd', label: 'Odd', required: false, min: 1, max: 9, step: 2 },
+    ],
+  } as any;
+
+  const gridService = () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(gridManifest);
+    return svc;
+  };
+
+  it('refuses a value that misses the grid, naming the step', async () => {
+    const svc = gridService();
+    await expect(svc.setMany('grid', { temperature: 0.15 })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        {
+          field: 'temperature',
+          // No `FieldErrorCode` member names a grid breach, so it takes
+          // `invalid_value` — the catalog's declared slot for "rejected for a
+          // reason no other member names" (ADR-0114). The same verdict
+          // `rest-server.ts` already reaches for Zod's `not_multiple_of`, which
+          // is this exact condition arriving from the other direction.
+          code: 'invalid_value',
+          label: 'Temperature',
+          // The spacing AND its anchor: a client cannot reconstruct the grid
+          // from the step alone, and this specifier's base is its `min`.
+          constraint: { step: 0.1, min: 0 },
+          value: 0.15,
+        },
+      ],
+    });
+    // Atomic: the rejected batch persisted nothing.
+    expect((await svc.get('grid', 'temperature')).source).toBe('default');
+  });
+
+  it('accepts the decimal multiples binary floating point cannot represent exactly', async () => {
+    // THE reason an exact modulo is the wrong implementation. Not every decimal
+    // multiple misses — `2 / 0.1` and `0.2 / 0.1` happen to land exactly — which
+    // is precisely what makes the trap dangerous: it fires on SOME values of a
+    // grid and not others, so a naive check looks correct until an author picks
+    // the wrong temperature. The two pinned below are values the console's own
+    // slider emits, and `n % step === 0` refuses both.
+    expect(0.7 / 0.1).not.toBe(7);  // 6.999999999999999
+    expect(1.2 / 0.1).not.toBe(12); // 11.999999999999998
+    // The tolerance is relative (1e-9 of the magnitudes involved) — six orders
+    // of magnitude above the ~1e-15 a few double operations accumulate, and
+    // eight below the 3e-1 relative miss of a genuinely off-grid `0.15`.
+    const svc = gridService();
+    for (const v of [0, 0.1, 0.2, 0.3, 0.1 + 0.2, 0.7, 0.9, 1.1, 1.2, 1.9, 2]) {
+      await expect(
+        svc.setMany('grid', { temperature: v }),
+        `${v} sits on the 0.1 grid and must be accepted`,
+      ).resolves.toBeDefined();
+    }
+  });
+
+  it('refuses the off-grid neighbours of those same values', async () => {
+    // The other half of the tolerance pin: it must still be a check. Each of
+    // these is a half-step away from a legal value, not a rounding artefact.
+    const svc = gridService();
+    for (const v of [0.05, 0.15, 0.25, 0.75, 1.99]) {
+      await expect(
+        svc.setMany('grid', { temperature: v }),
+        `${v} misses the 0.1 grid and must be refused`,
+      ).rejects.toMatchObject({
+        code: 'SETTINGS_VALIDATION',
+        fields: [{ field: 'temperature', code: 'invalid_value' }],
+      });
+    }
+  });
+
+  it('anchors the grid at the declared min, not at zero', async () => {
+    // The HTML step-base convention, and the only one that makes the
+    // declaration mean what it reads as: `min: 1, step: 2` names the ODD
+    // numbers. Anchoring at 0 regardless would invert this specifier entirely
+    // — it would accept exactly the values the author excluded.
+    const svc = gridService();
+    for (const v of [1, 3, 5, 9]) {
+      await expect(svc.setMany('grid', { odd: v }), `${v} is on the min-anchored grid`)
+        .resolves.toBeDefined();
+    }
+    for (const v of [2, 4, 8]) {
+      await expect(svc.setMany('grid', { odd: v }), `${v} is off the min-anchored grid`)
+        .rejects.toMatchObject({
+          fields: [{ field: 'odd', code: 'invalid_value', constraint: { step: 2, min: 1 } }],
+        });
+    }
+  });
+
+  it('falls back to a zero anchor when the specifier declares no min', async () => {
+    const svc = gridService();
+    await expect(svc.setMany('grid', { bare: 0 })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { bare: 15 })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { bare: -10 })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { bare: 12 })).rejects.toMatchObject({
+      // No `min` was declared, so none travels in the constraint either — the
+      // client is told the spacing and nothing invented.
+      fields: [{ field: 'bare', code: 'invalid_value', constraint: { step: 5 } }],
+    });
+  });
+
+  it('reports the WINDOW before the grid when a value breaches both', async () => {
+    // `validatePatch` emits at most one `FieldError` per key, so the ordering
+    // decides what the author is told. The window is the coarser, more
+    // actionable fact: `temperature: 40` is twenty times the declared maximum,
+    // and answering "it misses the 0.1 grid" — true, and useless — would bury
+    // that.
+    const svc = gridService();
+    await expect(svc.setMany('grid', { temperature: 40.05 })).rejects.toMatchObject({
+      fields: [{ field: 'temperature', code: 'max_value', constraint: { min: 0, max: 2 } }],
+    });
+    await expect(svc.setMany('grid', { temperature: -0.05 })).rejects.toMatchObject({
+      fields: [{ field: 'temperature', code: 'min_value' }],
+    });
+  });
+
+  it('checks the grid only when the patch TOUCHES the key', async () => {
+    // The #5131/#5932 gate, inherited for the same reason and one more: a grid
+    // gets COARSENED over a product's life (a 0.05 slider re-declared at 0.1),
+    // and a workspace holding a value that was legal when it was written must
+    // still be able to edit its unrelated settings.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      ...gridManifest,
+      specifiers: gridManifest.specifiers.map((s: any) =>
+        s.key === 'temperature' ? { ...s, step: 0.05 } : s,
+      ),
+    } as any);
+    await svc.setMany('grid', { temperature: 0.15 });
+    svc.registerManifest(gridManifest); // the coarsened grid
+
+    // The stale value is still there …
+    expect((await svc.get('grid', 'temperature')).value).toBe(0.15);
+    // … and a patch that never mentions it is not rejected on its account.
+    await expect(svc.setMany('grid', { bare: 10 })).resolves.toBeDefined();
+    expect((await svc.get('grid', 'bare')).value).toBe(10);
+    // Only re-writing the key itself is refused.
+    await expect(svc.setMany('grid', { temperature: 0.15 })).rejects.toMatchObject({
+      fields: [{ field: 'temperature', code: 'invalid_value' }],
+    });
+    // And a reset still clears it — an all-null patch is never blocked.
+    await expect(svc.resetNamespace('grid')).resolves.toBeGreaterThan(0);
+    expect((await svc.get('grid', 'temperature')).value).toBe(0.7); // back to the default
+  });
+
+  it('compares a number that arrived as a string, so a form post is not enforced-as-transport', async () => {
+    const svc = gridService();
+    await expect(svc.setMany('grid', { temperature: '0.2' })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { temperature: '0.15' })).rejects.toMatchObject({
+      fields: [{ field: 'temperature', code: 'invalid_value' }],
+    });
+  });
+
+  it('leaves a value it cannot compare alone — that is a different constraint', async () => {
+    // Same posture the window check takes: the value's SHAPE is `invalid_type`'s
+    // business. `Number(true)` is 1 and `Number([])` is 0, so coercing here
+    // would invent a grid verdict about a shape this check never judges.
+    const svc = gridService();
+    await expect(svc.setMany('grid', { temperature: true })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { temperature: 'warm' })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { temperature: [] })).resolves.toBeDefined();
+    await expect(svc.setMany('grid', { temperature: { v: 0.15 } })).resolves.toBeDefined();
+    // Empty is `required`'s business, not the grid's.
+    await expect(svc.setMany('grid', { temperature: null })).resolves.toBeDefined();
+  });
+
+  it('treats a step that is not a positive spacing as no grid at all', async () => {
+    // `anchor + k * 0` is a single point, and a negative spacing names the same
+    // grid as its absolute value while reading as an author error. Neither is a
+    // grid, so neither records one — the same disposition an option-bearing
+    // specifier with no table gets. Registration REPORTS and never refuses
+    // (#5204); an impossible grid has nothing to report, because it rejects no
+    // write and misconfigures no deployment.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'nogrid', version: 1, label: 'No grid', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'number', key: 'zero', label: 'Zero', step: 0 },
+        { type: 'number', key: 'negative', label: 'Negative', step: -0.1 },
+        { type: 'number', key: 'nan', label: 'NaN', step: Number.NaN },
+        // A bad step must not swallow the window declared beside it.
+        { type: 'number', key: 'windowed', label: 'Windowed', min: 0, max: 10, step: 0 },
+      ],
+    } as any);
+    for (const key of ['zero', 'negative', 'nan']) {
+      await expect(svc.setMany('nogrid', { [key]: 3.14159 }), `${key} declares no grid`)
+        .resolves.toBeDefined();
+    }
+    await expect(svc.setMany('nogrid', { windowed: 3.14159 })).resolves.toBeDefined();
+    await expect(svc.setMany('nogrid', { windowed: 99 })).rejects.toMatchObject({
+      fields: [{ field: 'windowed', code: 'max_value' }],
+    });
+  });
+
+  it('never echoes the off-grid value for an encrypted specifier', async () => {
+    // Same rule as `invalid_option` and the window codes, same reason: a grid is
+    // not a secret, but `encrypted` is authorable on any specifier and this
+    // message travels back through the API and into logs.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'vaultgrid', version: 1, label: 'Vault grid', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'number', key: 'shard', label: 'Shard', encrypted: true, min: 0, step: 100 },
+      ],
+    } as any);
+    const err = await svc.setMany('vaultgrid', { shard: 12345 }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields[0]).toMatchObject({ field: 'shard', code: 'invalid_value' });
+    expect(err.fields[0].value).toBeUndefined();
+    expect(err.message).not.toContain('12345');
+    // The grid still travels, so the caller learns what to do.
+    expect(err.fields[0].constraint).toMatchObject({ step: 100, min: 0 });
+  });
+
+  it('binds the real ai manifest — the consequence accepted at ruling time', async () => {
+    // The repo's ONLY `step` declaration: `ai.temperature`, `min: 0, max: 2,
+    // step: 0.1`. Under enforcement `0.15` is refused, and that is the
+    // declaration binding as written rather than a defect of this gate.
+    // `temperature` is `visible: "${data.provider !== 'memory'}"` and the
+    // default provider is `memory`, so the patch carries a real provider (and
+    // its required key) — otherwise the TOUCH/visible contract skips the
+    // specifier entirely, which would make this test green for the wrong reason.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(aiSettingsManifest);
+
+    await expect(
+      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 0.15 }),
+    ).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        { field: 'temperature', code: 'invalid_value', constraint: { step: 0.1, min: 0 }, value: 0.15 },
+      ],
+    });
+    // Nothing was stored — the whole batch is atomic.
+    expect((await svc.get('ai', 'provider')).value).toBe('memory');
+    // …and the on-grid values the slider actually emits still go through.
+    await expect(
+      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 0.7 }),
+    ).resolves.toBeDefined();
+    expect((await svc.get('ai', 'temperature')).value).toBe(0.7);
+  });
+});
+
+/**
+ * #6199, env half — the grid is judged at the ONE decision point
+ * (`effectiveEnvOverride`), for the reason #5204 is on file: the same
+ * comparison in two places is how the env half came to disagree with the save
+ * half in the first place. `step` rides `DeclaredBounds` and
+ * `firstRangeViolation`, so it reaches both doors by construction.
+ */
+describe('SettingsService — env overrides are checked against the declared step grid (#6199)', () => {
+  const spyLogger = () => {
+    const errors: string[] = [];
+    return { errors, logger: { error: (m: string) => void errors.push(m) } };
+  };
+
+  it('ignores an off-grid OS_AI_TEMPERATURE and resolves the manifest default instead', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_AI_TEMPERATURE: '0.15' }, logger });
+    svc.registerManifest(aiSettingsManifest);
+
+    const r = await svc.get('ai', 'temperature');
+    expect(r.value).toBe(0.7); // the manifest default, not 0.15
+    expect(r.source).toBe('default');
+    // Not in force, so it pins nothing either — read and write agree.
+    expect(r.locked).toBe(false);
+    expect(r.cascadeChain?.some((e) => e.scope === 'env')).toBe(false);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_AI_TEMPERATURE');
+    // The grid breach gets its OWN sentence, not the window template: the value
+    // sits squarely inside `min 0, max 2`, so "is outside the declared step"
+    // would be a false description of what happened.
+    expect(errors[0]).toContain('does not sit on the declared step grid');
+    expect(errors[0]).toContain('step 0.1');
+    expect(errors[0]).toContain('IGNORED');
+    expect(errors[0]).toContain('does NOT take effect');
+  });
+
+  it('an on-grid override still wins at the top of the cascade and locks the key', async () => {
+    // The regression pin for the untouched path — the check must not turn into
+    // "env never applies to a stepped key". `1.2` is another float trap:
+    // `1.2 / 0.1` is `11.999999999999998`.
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_AI_TEMPERATURE: '1.2' }, logger });
+    svc.registerManifest(aiSettingsManifest);
+
+    const r = await svc.get('ai', 'temperature');
+    expect(r.value).toBe(1.2);
+    expect(r.source).toBe('env');
+    expect(r.locked).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('reports the misconfiguration at registration, and says it ONCE', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_AI_TEMPERATURE: '0.15' }, logger });
+    expect(errors).toHaveLength(0);
+    svc.registerManifest(aiSettingsManifest);
+    expect(errors).toHaveLength(1);
+    for (let i = 0; i < 5; i++) await svc.get('ai', 'temperature');
+    await svc.getNamespace('ai');
+    expect(errors).toHaveLength(1);
+  });
+
+  it('a REJECTED override pins nothing — the key stays editable', async () => {
+    // The `locked` coherence rule #5204 established, extended to the grid for
+    // free BECAUSE both are judged at the one point: a key configurable by
+    // nothing (env ignored, UI refused) would be a lockout only an env edit
+    // could clear.
+    const { logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_AI_TEMPERATURE: '0.15' }, logger });
+    svc.registerManifest(aiSettingsManifest);
+
+    expect((await svc.get('ai', 'temperature')).locked).toBe(false);
+    await expect(
+      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 0.9 }),
+    ).resolves.toBeDefined();
+    const after = await svc.get('ai', 'temperature');
+    expect(after.value).toBe(0.9);
+    expect(after.source).toBe('global'); // the ai manifest is `scope: 'global'`
+  });
+});
+
 describe('SettingsService — user-scoped values', () => {
   it('isolates writes by ctx.userId', async () => {
     const svc = new SettingsService({ env: {} });
