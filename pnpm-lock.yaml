@@ -1446,9 +1446,6 @@ importers:
         specifier: ^6.2.5
         version: 6.2.7
     devDependencies:
-      '@objectstack/driver-memory':
-        specifier: workspace:*
-        version: link:../../drivers/driver-memory
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
