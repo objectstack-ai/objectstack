@@ -51,6 +51,7 @@ export const FlowNodeAction = z.enum([
   'join_gateway',       // BPMN Join Gateway — AND-join (waits for all incoming branches to complete)
   'boundary_event',     // BPMN Boundary Event — attached to a host node for timer/error/signal interrupts
 ]);
+export type FlowNodeAction = z.input<typeof FlowNodeAction>;
 
 /**
  * The built-in node type ids as a plain string array — the seed set the

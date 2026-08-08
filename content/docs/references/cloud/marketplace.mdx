@@ -238,7 +238,7 @@ Marketplace search response
 | **total** | `integer` | ✅ | Total matching results |
 | **page** | `integer` | ✅ | Current page number |
 | **pageSize** | `integer` | ✅ | Items per page |
-| **facets** | `{ categories?: { category: Enum<'crm' \| 'erp' \| 'hr' \| 'finance' \| 'project' \| 'collaboration' \| 'analytics' \| … +8 more>; count: integer }[]; pricing?: { model: Enum<'free' \| 'freemium' \| 'paid' \| 'subscription' \| 'usage-based' \| 'contact-sales'>; count: integer }[] }` | optional | Aggregation facets for refining search |
+| **facets** | `{ categories?: object[]; pricing?: object[] }` | optional | Aggregation facets for refining search |
 
 
 ---
@@ -259,7 +259,7 @@ Developer submission of a package version for review
 | **artifactUrl** | `string` | ✅ | Package artifact URL for review |
 | **releaseNotes** | `string` | optional | Release notes for this version |
 | **isNewListing** | `boolean` | ✅ | Whether this is a new listing submission |
-| **scanResults** | `{ passed: boolean; securityScore?: number; compatibilityCheck?: boolean; issues?: { severity: Enum<'critical' \| 'high' \| 'medium' \| 'low' \| 'info'>; message: string; file?: string; line?: number }[] }` | optional | Automated scan results |
+| **scanResults** | `{ passed: boolean; securityScore?: number; compatibilityCheck?: boolean; issues?: object[] }` | optional | Automated scan results |
 | **reviewerNotes** | `string` | optional | Notes from the platform reviewer |
 | **submittedAt** | `string` | optional | Submission timestamp |
 | **reviewedAt** | `string` | optional | Review completion timestamp |

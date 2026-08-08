@@ -13,7 +13,7 @@ description: Testing protocol schemas
 
 ```typescript
 import { TestActionSchema, TestActionTypeSchema, TestAssertionSchema, TestAssertionTypeSchema, TestContextSchema, TestScenarioSchema, TestStepSchema, TestSuiteSchema } from '@objectstack/spec/qa';
-import type { TestAction, TestAssertion, TestScenario, TestStep, TestSuite } from '@objectstack/spec/qa';
+import type { TestAction, TestActionType, TestAssertion, TestAssertionType, TestContext, TestScenario, TestStep, TestSuite } from '@objectstack/spec/qa';
 
 // Validate data
 const result = TestActionSchema.parse(data);
@@ -106,9 +106,9 @@ A complete test scenario with setup, execution steps, and teardown
 | **name** | `string` | ✅ | Scenario name for test reports |
 | **description** | `string` | optional | Detailed description of the test scenario |
 | **tags** | `string[]` | optional | Tags for filtering and categorization (e.g. "critical", "regression", "crm") |
-| **setup** | `{ name: string; description?: string; action: object; assertions?: { field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| … +5 more>; expectedValue: any }[]; … }[]` | optional | Steps to run before main test (preconditions) |
-| **steps** | `{ name: string; description?: string; action: object; assertions?: { field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| … +5 more>; expectedValue: any }[]; … }[]` | ✅ | Main test sequence to execute |
-| **teardown** | `{ name: string; description?: string; action: object; assertions?: { field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| … +5 more>; expectedValue: any }[]; … }[]` | optional | Steps to cleanup after test execution |
+| **setup** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to run before main test (preconditions) |
+| **steps** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | ✅ | Main test sequence to execute |
+| **teardown** | `{ name: string; description?: string; action: object; assertions?: object[]; … }[]` | optional | Steps to cleanup after test execution |
 | **requires** | `{ params?: string[]; plugins?: string[] }` | optional | Environment requirements for this scenario |
 
 

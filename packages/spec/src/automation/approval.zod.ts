@@ -69,6 +69,7 @@ export const ApproverType = z.enum([
   // ownership-queue implementation (queue entity + membership + claim).
   'queue',
 ]);
+export type ApproverType = z.input<typeof ApproverType>;
 
 /**
  * Deprecated approver-type spellings → their canonical replacement

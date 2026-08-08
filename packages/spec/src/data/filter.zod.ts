@@ -86,21 +86,128 @@ export const EqualityOperatorSchema = lazySchema(() => z.object({
 }));
 
 /**
- * Comparison operators for numeric and date comparisons.
- * Supported data types: Number, Date
+ * The comparand contract shared by `$gt` / `$gte` / `$lt` / `$lte` (#5685).
+ *
+ * Module-private on purpose: it is documentation attached to four slots, not an
+ * authorable surface of its own, so it stays out of the exported API surface.
+ * The reasoning behind every sentence is in {@link ComparisonOperatorSchema}'s
+ * docblock.
+ */
+const ORDERING_COMPARAND_DESCRIPTION =
+  'Comparand is a number, a Date, a string, or a { $field } reference. '
+  + 'STRING is the form the platform itself produces: the date-macro resolver '
+  + 'returns only strings ("{current_year_start}" -> "2026-01-01"), and the '
+  + 'guaranteed spellings are an ISO calendar day (YYYY-MM-DD), a UTC ISO-8601 '
+  + 'instant, or a wall-clock time of day (HH:MM[:SS[.fff]]) for a Field.time '
+  + 'column. Those are ASCII and fixed-width, so lexicographic order IS '
+  + 'chronological order and every backend agrees; the driver reconciles the '
+  + 'comparand with the column (a bare calendar day used as an upper bound '
+  + 'becomes the half-open next-day boundary). Ordering NON-temporal text is '
+  + 'permitted but NOT promised: the order is the backend collation\'s '
+  + '(byte-wise on SQLite, the database locale on Postgres, UTF-16 code units '
+  + 'in the JS matchers), and those coincide only for ASCII.';
+
+/**
+ * Ordering-comparison operators.
+ *
+ * Supported comparand types: **Number, Date, ISO/clock STRING, FieldReference**.
+ *
+ * ## Why `string` is in the union (#5685)
+ *
+ * Until this was written down the four slots read `number | Date |
+ * FieldReference` — and the platform's own producers put a STRING in them and
+ * nothing else. The declaration did not merely under-describe reality, it
+ * contradicted it:
+ *
+ * - `resolveFilterTokens` (`@objectstack/core`, `filter-tokens.ts`) is the
+ *   evaluator for the `{token}` grammar, and **every** branch returns a string
+ *   — `asYmd(…)` for a calendar day, `.toISOString()` for the sub-day tokens.
+ *   Its own module example is exactly this shape:
+ *   `{ close_date: { $gte: '{current_year_start}' } }` →
+ *   `{ close_date: { $gte: '2026-01-01' } }`.
+ * - `date-macros.zod.ts` states the same rule from the other end: "the DRIVER
+ *   only ever sees ISO date / timestamp strings, never `{tokens}`".
+ * - Three first-party callers send strings today —
+ *   `lifecycle-service.ts` (`{ created_at: { $lt: keepCutoff } }`, a
+ *   `.toISOString()`), `plugin-email`'s `outbox-sweep.ts` (same shape), and
+ *   `plugin-auth`'s better-auth adapter, which lowers a `gt`/`gte`/`lt`/`lte`
+ *   clause with the producer's own untyped `condition.value`.
+ *
+ * The mismatch was already COSTING something, and the receipt is in the tree:
+ * `@objectstack/objectql`'s `filter-comparand-shape.ts` (#5869) had to state,
+ * as its reason for not using this schema as its gate, that the schema is
+ * "stricter than the runtime in ways the runtime deliberately allows — `$gt` is
+ * declared `number | Date | FieldReference`, while `['created_at', '>',
+ * '2026-01-01']` lowers to a STRING bound that every backend accepts and that
+ * **the showcase apps rely on**". A second package building around this
+ * declaration, and writing down that it is wrong, is the measurement that says
+ * the pull is real rather than hypothetical.
+ *
+ * An author — an AI author in particular — reading `number | Date` concluded
+ * that a date window must be a `Date` object or an epoch number, which is the
+ * one form the platform's own date-macro path can never hand them. This is the
+ * declaration aligning to a contract the rest of the stack already keeps, not
+ * a new capability: every evaluation surface ALREADY compares strings
+ * (`driver-sql` binds `>`/`>=`/`<`/`<=`, `formula`'s `matchesFilter` and
+ * `driver-memory`'s matcher fall through to the JS operators).
+ *
+ * ## Why a BARE string, and not an ISO-shaped refinement (#5685 rider ①)
+ *
+ * A tempting narrowing is "accept only an ISO date / date-time string". It was
+ * measured and rejected, for three reasons:
+ *
+ * 1. **This schema is field-AGNOSTIC.** It never sees which column the operator
+ *    is applied to, so any value-shape refinement here is a guess about the
+ *    column. Comparand-vs-column correctness is a field-TYPED judgement and it
+ *    already has an owner: `SqlDriver.coerceFilterValue` dispatches on
+ *    `temporalFieldKind` — `storageDatetimeValue` for `datetime`, `toDateOnly`
+ *    for `date`, `canonicalTimeOfDay` for `time`, passthrough otherwise.
+ * 2. **An ISO refinement would reject a form this platform DECLARES.**
+ *    `field-value.zod.ts`'s `CLOCK_TIME_TYPES` defines a `Field.time` value as
+ *    `HH:MM[:SS[.fff]]` and says in as many words that it is "not
+ *    `Date.parse`-able". `SqlDriver.temporalFilterValue` canonicalises exactly
+ *    that in the COMPARAND position (`'14:30'` → `'14:30:00'`, the #3979
+ *    contract pair). A `$gte: '09:00'` on a `time` column is a supported
+ *    comparison an ISO refinement would refuse.
+ * 3. **date-only and full-timestamp are already reconciled by the driver**, so
+ *    narrowing buys no safety there. A bare `YYYY-MM-DD` anchors to midnight
+ *    UTC for a lower bound and is rewritten to the half-open
+ *    `< next-day-midnight` for an upper bound (`calendarDayUpperBoundRewrite`,
+ *    the #3777 convention).
+ *
+ * ## What widening ADMITS, stated plainly
+ *
+ * `string` also admits ordering comparisons on NON-temporal text columns
+ * (`{ code: { $gt: 'M' } }`). That is real SQL and every backend answers it —
+ * but **the ORDER is the backend's, not this contract's**: `driver-sql` binds a
+ * plain `>` decided by the dialect's collation (byte-wise on SQLite, the
+ * database locale on Postgres, the column collation on MySQL), while `formula`
+ * and `driver-memory` use the JS operators, i.e. UTF-16 code-unit order. Those
+ * answers coincide for ASCII and diverge outside it — the same split
+ * {@link StringOperatorSchema} had to rule on for case sensitivity.
+ *
+ * **The comparand form this contract guarantees is therefore the ISO/clock one**
+ * — `YYYY-MM-DD`, a UTC ISO-8601 instant, or `HH:MM[:SS[.fff]]`. All three are
+ * ASCII and fixed-width, so lexicographic order IS chronological order and every
+ * backend agrees. Ordering arbitrary natural-language text is permitted, not
+ * promised: it is the collation's answer, and it may differ per backend.
  */
 export const ComparisonOperatorSchema = lazySchema(() => z.object({
   /** Greater than - SQL: > | MongoDB: $gt */
-  $gt: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  
+  $gt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
+    .describe(`Greater than. ${ORDERING_COMPARAND_DESCRIPTION}`),
+
   /** Greater than or equal to - SQL: >= | MongoDB: $gte */
-  $gte: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  
+  $gte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
+    .describe(`Greater than or equal to. ${ORDERING_COMPARAND_DESCRIPTION}`),
+
   /** Less than - SQL: < | MongoDB: $lt */
-  $lt: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  
+  $lt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
+    .describe(`Less than. ${ORDERING_COMPARAND_DESCRIPTION}`),
+
   /** Less than or equal to - SQL: <= | MongoDB: $lte */
-  $lte: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
+  $lte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
+    .describe(`Less than or equal to. ${ORDERING_COMPARAND_DESCRIPTION}`),
 }));
 
 // ============================================================================
@@ -263,11 +370,16 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   $eq: z.any().optional(),
   $ne: z.any().optional(),
   
-  // Comparison (numeric/date)
-  $gt: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  $gte: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  $lt: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
-  $lte: z.union([z.number(), z.date(), FieldReferenceSchema]).optional(),
+  // Ordering. `string` is in the union for the reason {@link ComparisonOperatorSchema}
+  // gives at length (#5685): the date-macro resolver and all three first-party
+  // callers produce ISO/clock STRINGS in these slots and nothing else. This copy
+  // is the ENFORCED one — `NormalizedFilterSchema` validates against it and the
+  // exported `FieldOperators` is inferred from it — so it must not drift from the
+  // documentation copy above.
+  $gt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
+  $gte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
+  $lt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
+  $lte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
   
   // Set & Range
   $in: z.array(z.any()).optional(),
@@ -464,10 +576,20 @@ export type Filter<T = any> = {
     | {
         $eq?: T[K];
         $ne?: T[K];
-        $gt?: T[K] extends number | Date ? T[K] : never;
-        $gte?: T[K] extends number | Date ? T[K] : never;
-        $lt?: T[K] extends number | Date ? T[K] : never;
-        $lte?: T[K] extends number | Date ? T[K] : never;
+        // Ordering (#5685). The TYPED half of what {@link ComparisonOperatorSchema}
+        // declares — and unlike that field-agnostic schema, `T` is known here, so
+        // this stays type-precise instead of admitting `string` everywhere:
+        //   - a `Date` field also takes the ISO STRING the date-macro resolver
+        //     produces (`{ close_date: { $gte: '2026-01-01' } }`), which the old
+        //     `T[K] extends number | Date ? T[K]` guard rejected outright;
+        //   - a `string` field (a `Field.time` `'09:00'`, an autonumber code) is
+        //     orderable at every backend, where the old guard collapsed it to
+        //     `never` and made the operator unwritable;
+        //   - a `number` field stays numbers-only — nothing here wants `'5'`.
+        $gt?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
+        $gte?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
+        $lt?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
+        $lte?: T[K] extends number ? number : T[K] extends Date | string ? T[K] | string : never;
         $in?: T[K][];
         $nin?: T[K][];
         $between?: T[K] extends number | Date ? [T[K], T[K]] : never;

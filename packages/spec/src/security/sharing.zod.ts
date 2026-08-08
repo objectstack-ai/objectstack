@@ -239,6 +239,10 @@ export type SharingRuleParsed = z.infer<typeof SharingRuleSchema>;
 export type CriteriaSharingRule = z.input<typeof CriteriaSharingRuleSchema>;
 /** Post-parse shape of {@link CriteriaSharingRule} — defaults applied, transforms run (ADR-0122). */
 export type CriteriaSharingRuleParsed = z.infer<typeof CriteriaSharingRuleSchema>;
+export type OWDModel = z.input<typeof OWDModel>;
+export type ShareRecipientType = z.input<typeof ShareRecipientType>;
+export type SharingLevel = z.input<typeof SharingLevel>;
+export type SharingRuleType = z.input<typeof SharingRuleType>;
 
 /**
  * Type-safe factory for a record sharing rule. Validates at authoring time via

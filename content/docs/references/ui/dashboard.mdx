@@ -32,7 +32,7 @@ const result = DashboardSchema.parse(data);
 | **name** | `string` | ✅ | Dashboard unique name |
 | **label** | `string \| Record<string, string>` | ✅ | Dashboard label |
 | **description** | `string \| Record<string, string>` | optional | Dashboard description |
-| **header** | `{ showTitle: boolean; showDescription: boolean; actions?: { label: string \| Record<string, string>; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[] }` | optional | Dashboard header configuration |
+| **header** | `{ showTitle: boolean; showDescription: boolean; actions?: object[] }` | optional | Dashboard header configuration |
 | **widgets** | `{ id: string; title?: string \| Record<string, string>; description?: string \| Record<string, string>; type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; … }[]` | ✅ | Widgets to display |
 | **columns** | `integer` | optional | Number of grid columns (default 12) |
 | **gap** | `integer` | optional | Grid gap in Tailwind spacing units |

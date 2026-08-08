@@ -23,6 +23,7 @@ export const MetadataStateSchema = lazySchema(() => z.enum([
   'archived', // Soft deleted
   'deprecated' // Running but flagged for removal
 ]));
+export type MetadataState = z.input<typeof MetadataStateSchema>;
 
 /**
  * Unified Metadata Persistence Protocol

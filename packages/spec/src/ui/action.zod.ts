@@ -404,6 +404,7 @@ export const ActionParamSchema = lazySchema(() => z.object({
  * Action type enum values.
  */
 export const ActionType = z.enum(['script', 'url', 'modal', 'flow', 'api', 'form']);
+export type ActionType = z.input<typeof ActionType>;
 
 /**
  * Action types that require a `target` field.

@@ -10955,6 +10955,9 @@ export class ObjectStackProtocolImplementation implements
                     console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}`);
                 }
             }
+            // #6190 — say out loud which org-scoped rows this filter just
+            // walked past. See {@link reportUnhydratableOrgScopedRows}.
+            await this.reportUnhydratableOrgScopedRows();
         } catch (e: unknown) {
             // #5841 — the ONE benign reason this whole read can fail is
             // `sys_metadata` not being provisioned yet: on a first boot, before
@@ -10998,6 +11001,127 @@ export class ObjectStackProtocolImplementation implements
             }
         }
         return { loaded, errors, invalid, storeUnavailable };
+    }
+
+    /**
+     * [#6190] Cold boot walks past every `organization_id IS NOT NULL` row.
+     * For the types the registry declares per-org overridable that is the
+     * design (ADR-0005 revised 2026-05 — those overlays are loaded on demand
+     * by `getMetaItem`/`getMetaItems`, which is why the filter above exists).
+     * For every OTHER type it is a stored row the platform has no per-org
+     * channel for, and until this method the skip was **completely silent**.
+     *
+     * The measured specimen is `flow`. `flow` is `allowOrgOverride: false`
+     * (rolled back in #6283 / PR #6478, matching ADR-0005:57) but
+     * `allowRuntimeCreate: true`, so a tenant authoring a BRAND-NEW flow in
+     * Studio still writes `sys_metadata.organization_id = '<org>'` — the
+     * runtime `PUT /metadata/:type/:name` threads `resolveActiveOrganizationId`
+     * into `saveMetaItem`, and `SysMetadataRepository.put` stamps
+     * `organization_id: this.organizationId` whatever the type is. That flow
+     * binds its triggers for the rest of the process's life (the publish-time
+     * write-through puts it in the process-wide registry) and then, on the
+     * next restart, this filter drops it and the `kernel:ready` binder —
+     * `getMetaItems({ type: 'flow' })`, no `organizationId`, so
+     * `orgRecords = []` — never sees it. It stops firing, and nothing said so:
+     * the `kernel:bootstrapped` unbound audit cannot report a flow that was
+     * never registered.
+     *
+     * This method does not change what boot loads. It makes the absence
+     * LOUD — AGENTS.md's rule, and the half of #6190 that is implementable
+     * without a contract ruling. Whether such a row should exist at all
+     * (refuse the write / force it env-wide / teach the binder to read per-org)
+     * is the maintainer decision recorded on the issue; the operator-visible
+     * consequence is the same either way and it is what an operator needs
+     * TODAY to explain an automation that stopped after a restart.
+     *
+     * Shape decisions, all deliberate:
+     *
+     *  - **Which rows.** Registry-derived, never a hand-written list
+     *    (Prime Directive #7): the complement of
+     *    {@link OVERLAY_ALLOWED_TYPES}'s source flag. Derived from
+     *    `DEFAULT_METADATA_TYPE_REGISTRY` and NOT from
+     *    {@link isOverlayAllowed}, because the `OS_METADATA_WRITABLE` escape
+     *    hatch only unlocks the WRITE — an env-unlocked type's org rows are
+     *    hydrated no more than any other's, so silencing the line on that
+     *    flag would hide exactly the deployment most likely to have these rows.
+     *  - **Two predicates, both narrowing.** `organization_id IS NOT NULL`
+     *    plus the type list keeps the query empty-by-default: a healthy
+     *    deployment reads nothing and prints nothing. A driver that drops
+     *    either predicate degrades to reading more rows, never to a false
+     *    line — the JS filter re-checks both.
+     *  - **One aggregated line.** Counts per type plus a capped sample of
+     *    names, so a tenant with a thousand such rows costs one line rather
+     *    than a thousand.
+     *  - **Best-effort, and non-fatal by construction.** A diagnostic must
+     *    never be the reason a boot fails, so its own catch swallows: the
+     *    caller's outer catch classifies REAL hydration outages
+     *    (`storeUnavailable`, #5897) and this must not be able to reach it.
+     */
+    private async reportUnhydratableOrgScopedRows(): Promise<void> {
+        /** Names printed per type before the line collapses to a count. */
+        const SAMPLE_PER_TYPE = 5;
+        try {
+            const orgOverridable = new Set<string>();
+            const scannedTypes: string[] = [];
+            for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+                if (entry.allowOrgOverride) {
+                    orgOverridable.add(entry.type);
+                    continue;
+                }
+                scannedTypes.push(entry.type);
+                const plural = SINGULAR_TO_PLURAL[entry.type];
+                if (plural) scannedTypes.push(plural);
+            }
+            if (scannedTypes.length === 0) return;
+
+            const rows = await this.engine.find('sys_metadata', {
+                where: {
+                    state: 'active',
+                    organization_id: { $null: false },
+                    type: { $in: scannedTypes },
+                },
+            });
+            if (!rows || rows.length === 0) return;
+
+            // Re-check both predicates in JS: a driver that cannot lower one
+            // of them hands back a superset, and a superset must not become a
+            // false accusation.
+            const counts = new Map<string, number>();
+            const samples = new Map<string, string[]>();
+            let total = 0;
+            for (const row of rows) {
+                const org = (row as { organization_id?: string | null }).organization_id;
+                if (org === null || org === undefined || org === '') continue;
+                const singular = PLURAL_TO_SINGULAR[String(row.type)] ?? String(row.type);
+                if (orgOverridable.has(singular)) continue;
+                total++;
+                counts.set(singular, (counts.get(singular) ?? 0) + 1);
+                const names = samples.get(singular) ?? [];
+                if (names.length < SAMPLE_PER_TYPE) names.push(`${String(row.name)}@${String(org)}`);
+                samples.set(singular, names);
+            }
+            if (total === 0) return;
+
+            const detail = Array.from(counts.entries())
+                .map(([type, count]) => {
+                    const names = samples.get(type) ?? [];
+                    const more = count > names.length ? `, +${count - names.length} more` : '';
+                    return `${type}×${count} (${names.join(', ')}${more})`;
+                })
+                .join('; ');
+            console.warn(
+                `[Protocol] [metadata_org_scoped_unhydrated] ${total} active sys_metadata row(s) are ` +
+                `org-scoped on types the registry declares NOT per-org overridable, so boot hydration ` +
+                `skipped them and they are absent from the process-wide registry: ${detail}. ` +
+                `A 'flow' listed here will NOT bind its triggers in this process (the kernel:ready binder ` +
+                `reads flows env-wide) — it fired until the last restart and stops now. ` +
+                `Re-save the item env-wide (no active organization), or delete the row. See #6190 / ADR-0005.`,
+            );
+        } catch {
+            // Diagnostics never break boot — see the TSDoc. Deliberately not
+            // routed to the caller's outer catch: that one classifies real
+            // hydration outages, and a failed extra probe is not one.
+        }
     }
 
     // ==========================================

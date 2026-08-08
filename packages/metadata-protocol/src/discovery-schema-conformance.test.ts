@@ -254,7 +254,13 @@ describe('[#4828] getDiscovery() conforms to DiscoverySchema', () => {
       expect(DiscoverySchema.safeParse(discovery).success).toBe(true);
     });
 
-    it.each(['qa', 'preview', 'nonsense'])(
+    // [#6287] `preview` left this list when it stopped being unrecognised: it is
+    // a declared `EnvironmentTypeSchema` member and now has a stated fold
+    // (`sandbox`), so asserting `development` for it here would assert the
+    // opposite of the mapper's decision. The RULE these rows pin — an unknown
+    // spelling degrades to `development` and never claims production — is
+    // unchanged; only the examples had to be ones that are genuinely unknown.
+    it.each(['qa', 'uat', 'nonsense'])(
       'NODE_ENV=%s is an unrecognised spelling — still development, never production (#4828)',
       async (raw) => {
         process.env.NODE_ENV = raw;

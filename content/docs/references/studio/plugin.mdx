@@ -65,7 +65,7 @@ const manifest = StudioPluginManifestSchema.parse({
 
 ```typescript
 import { ActionContributionSchema, ActionContributionLocationSchema, CommandContributionSchema, MetadataIconContributionSchema, MetadataViewerContributionSchema, PanelContributionSchema, PanelLocationSchema, SidebarGroupContributionSchema, StudioPluginContributionsSchema, StudioPluginManifestSchema, ViewModeSchema } from '@objectstack/spec/studio';
-import type { ActionContribution, ActionContributionLocation, CommandContribution, MetadataIconContribution, MetadataViewerContribution, PanelContribution, SidebarGroupContribution, StudioPluginContributions, StudioPluginManifest, ViewMode } from '@objectstack/spec/studio';
+import type { ActionContribution, ActionContributionLocation, CommandContribution, MetadataIconContribution, MetadataViewerContribution, PanelContribution, PanelLocation, SidebarGroupContribution, StudioPluginContributions, StudioPluginManifest, ViewMode } from '@objectstack/spec/studio';
 
 // Validate data
 const result = ActionContributionSchema.parse(data);
@@ -208,7 +208,7 @@ const result = ActionContributionSchema.parse(data);
 | **version** | `string` | ✅ | Plugin version |
 | **description** | `string` | optional | Plugin description |
 | **author** | `string` | optional | Author |
-| **contributes** | `{ metadataViewers: { id: string; metadataTypes: string[]; label: string; priority: number; … }[]; sidebarGroups: { key: string; label: string; icon?: string; metadataTypes: string[]; … }[]; actions: { id: string; label: string; icon?: string; location: Enum<'toolbar' \| 'contextMenu' \| 'commandPalette'>; … }[]; metadataIcons: { metadataType: string; label: string; icon: string }[]; … }` | ✅ |  |
+| **contributes** | `{ metadataViewers: object[]; sidebarGroups: object[]; actions: object[]; metadataIcons: object[]; … }` | ✅ |  |
 
 
 ---

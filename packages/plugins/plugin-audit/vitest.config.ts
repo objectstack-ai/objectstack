@@ -15,18 +15,31 @@ export default defineConfig({
     environment: 'node',
   },
   resolve: {
-    alias: {
-      '@objectstack/core': path.resolve(__dirname, '../../core/src/index.ts'),
-      '@objectstack/platform-objects/audit': path.resolve(__dirname, '../../platform-objects/src/audit/index.ts'),
-      '@objectstack/spec/contracts': path.resolve(__dirname, '../../spec/src/contracts/index.ts'),
-      '@objectstack/spec/data': path.resolve(__dirname, '../../spec/src/data/index.ts'),
-      '@objectstack/spec/system': path.resolve(__dirname, '../../spec/src/system/index.ts'),
-      '@objectstack/spec/api': path.resolve(__dirname, '../../spec/src/api/index.ts'),
-      '@objectstack/spec/kernel': path.resolve(__dirname, '../../spec/src/kernel/index.ts'),
-      // [ADR-0105 D1] Reached transitively via `@objectstack/types` (tenancy posture).
-      '@objectstack/spec/security': path.resolve(__dirname, '../../spec/src/security/index.ts'),
-      '@objectstack/spec': path.resolve(__dirname, '../../spec/src/index.ts'),
-      '@objectstack/types': path.resolve(__dirname, '../../types/src/index.ts'),
-    },
+    // Array form with ANCHORED patterns, deliberately — the same correction
+    // `service-knowledge` recorded, arriving here for the same reason. The
+    // object form matches by PREFIX, so the bare `@objectstack/spec` entry
+    // swallowed every subpath not spelled out above it: `@objectstack/spec/ui`
+    // resolved to `spec/src/index.ts/ui` and failed with `ENOTDIR`. That kept
+    // the namespace list a thing every new import had to extend by hand, and
+    // the failure landed on whoever added the import, naming a path nobody
+    // wrote — which is exactly how it surfaced for #5860's real-engine test
+    // (`@objectstack/objectql` reaches `@objectstack/spec/ui` transitively).
+    // One rule for all namespaces cannot go stale that way.
+    alias: [
+      { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      {
+        find: /^@objectstack\/platform-objects\/audit$/,
+        replacement: path.resolve(__dirname, '../../platform-objects/src/audit/index.ts'),
+      },
+      // Covers `data` / `system` / `kernel` / `api` / `contracts` / `ui` /
+      // `shared` and, [ADR-0105 D1], `security` reached transitively via
+      // `@objectstack/types` (tenancy posture).
+      {
+        find: /^@objectstack\/spec\/([a-z-]+)$/,
+        replacement: `${path.resolve(__dirname, '../../spec/src')}/$1/index.ts`,
+      },
+      { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../../spec/src/index.ts') },
+      { find: /^@objectstack\/types$/, replacement: path.resolve(__dirname, '../../types/src/index.ts') },
+    ],
   },
 });

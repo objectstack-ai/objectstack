@@ -1002,9 +1002,16 @@ export class InMemoryDriver implements IDataDriver {
           result[op] = store(val);
           break;
         // Evaluated by mingo under the same name. `$exists` is a presence
-        // predicate, `$regex`/`$options` a pattern and its flags — none of them
-        // is a comparand, so none takes the field's storage form (#4047).
-        case '$exists': case '$regex': case '$options':
+        // predicate, not a comparand, so it does not take the field's storage
+        // form (#4047).
+        //
+        // [#5702] `$regex` and `$options` were passed through here too, on the
+        // same line, for the same "not a comparand" reason. Both are RETIRED
+        // (#4706) and refused by the shape gate before this method runs, so the
+        // arm is gone rather than left as an unreachable third name — an
+        // evaluation arm for a refused operator is exactly what let this
+        // driver's two faces answer one `$regex` differently for so long.
+        case '$exists':
           result[op] = val;
           break;
         default:
