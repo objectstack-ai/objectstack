@@ -602,3 +602,93 @@ describe("#6499 site 14 — validateFlowExpressions' advisory pass: a self-autho
         assertSilent(streams.stderr, "[flow 'expense_check']", 'stderr');
     });
 });
+
+// ═══ the fired-run envelope seam #6499's sweep left (#6587) ════════════════
+
+describe("#6587 — activateFlowTrigger's trigger-fired-run callback: the AutomationResult.error envelope rides meta", () => {
+    // The same class as site 12 (the envelope carries a failing node's /
+    // driver's text VERBATIM, #5912) on the FIRED-RUN path instead of the
+    // subflow path — reported in PR #6568's residual sweep, outside #6499's
+    // list of 13, fixed here.
+
+    /** A record-change flow whose one work node throws the driver's text. */
+    const FIRED_FLOW = {
+        name: 'rc_fired',
+        label: 'rc_fired',
+        type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start', config: { objectName: 'task', triggerType: 'record-after-update' } },
+            { id: 'boom', type: 'exploder', label: 'Boom' },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'boom' },
+            { id: 'e2', source: 'boom', target: 'end' },
+        ],
+    };
+
+    /**
+     * Register trigger + flow, then fire the captured callback ONCE — the
+     * exact path a real trigger plugin drives. The executor THROWS (rather
+     * than returning `success: false`) so `execute()`'s catch puts the
+     * driver's text into `AutomationResult.error` verbatim, un-prefixed —
+     * the #5912-preserved shape this seam re-splices second-hand.
+     */
+    async function fireOnce(engine: AutomationEngine): Promise<void> {
+        let fire: ((ctx: AutomationContext) => Promise<void>) | undefined;
+        const trigger: FlowTrigger = {
+            type: 'record_change',
+            start(_binding, callback) { fire = callback; },
+            stop() {},
+        };
+        engine.registerTrigger(trigger);
+        engine.registerNodeExecutor({
+            type: 'exploder',
+            async execute() { throw new Error(MULTILINE_DRIVER); },
+        } as NodeExecutor);
+        engine.registerFlow('rc_fired', FIRED_FLOW);
+        expect(fire, 'the engine handed the trigger a callback').toBeDefined();
+        await fire!({ event: 'record-after-update', object: 'task', record: { id: 't1' } } as AutomationContext);
+    }
+
+    it("#4632 stays `error` on its own reasoning (no caller holds the envelope): one stderr line, envelope in meta", async () => {
+        const engine = new AutomationEngine(jsonLogger());
+        const streams = await captureBoth(async () => { await fireOnce(engine); });
+
+        // Behaviour unchanged: the callback resolves (nothing is thrown back
+        // at the trigger plugin) and the failed run still lands in history.
+        const runs = await engine.listRuns('rc_fired');
+        expect(runs).toHaveLength(1);
+        expect((runs[0] as { status?: string }).status).toBe('failed');
+
+        const record = soleRecordWith(streams.stderr, 'Trigger-fired run of flow');
+        expectOneLineWithCause(record, 'error');
+        expect(record.msg, 'the flow-name correlation').toContain("'rc_fired'");
+        expect(record.msg, 'the trigger correlation').toContain("trigger 'record_change'");
+        expect(record.msg, 'the consequence, stated out loud').toContain('no caller holds this result');
+        assertSilent(streams.stdout, 'Trigger-fired run', 'stdout');
+    });
+
+    it('stays one physical line in `pretty`, with every fact on the greppable line', async () => {
+        const engine = new AutomationEngine(new ObjectLogger({ level: 'warn', format: 'pretty' }));
+        const streams = await captureBoth(async () => { await fireOnce(engine); });
+        expect(streams.stderr).toHaveLength(1);
+        expect(streams.stderr[0]).toMatch(RECORD_HEAD);
+        expect(streams.stderr[0]).toContain('Trigger-fired run of flow');
+        expect(streams.stderr[0]).toContain('run `os migrate` for this datasource');
+    });
+
+    it('hands the envelope to error(message, error, meta) — meta THIRD, Error slot empty (#5575)', async () => {
+        const spy = vi.spyOn(ObjectLogger.prototype, 'error');
+        const engine = new AutomationEngine(jsonLogger());
+        await captureBoth(async () => { await fireOnce(engine); });
+
+        const call = spy.mock.calls.find((c) => String(c[0]).includes('Trigger-fired run of flow'));
+        expect(call).toBeDefined();
+        const [message, errorSlot, meta] = call as unknown as [string, unknown, Record<string, unknown>];
+        expect(message).not.toContain('\n');
+        expect(errorSlot).toBeUndefined();
+        expect(meta.error).toBe(MULTILINE_DRIVER);
+        spy.mockRestore();
+    });
+});

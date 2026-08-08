@@ -1721,15 +1721,34 @@ export class AutomationEngine implements IAutomationService {
         try {
             // A trigger-fired run's result must not vanish (2026-07-17 eval:
             // a failing record-change flow produced zero output — the failure
-            // lived only in the run-history row). Log failures at ERROR: stderr
-            // survives the CLI's boot-quiet stdout window, and a fired-but-failed
-            // automation is an operational fault. Condition-skipped runs stay
+            // lived only in the run-history row). Condition-skipped runs stay
             // quiet (execute() already debug-logs them — they are high-frequency).
+            //
+            // #6587 — `result.error` is the envelope field that carries a
+            // failing node's / driver's text VERBATIM (#5912 left it that way
+            // on purpose), so foreign newlines reach this message second-hand;
+            // it goes to the structured slot — the identical class as
+            // `bubbleToParent`'s envelope branch, on the fired-run path. See
+            // `forgetSuspendedRun`'s catch for the full mechanism (#6299).
+            //
+            // #4632 verdict: stays `error`, on its own reasoning rather than
+            // inertia. This is the fire-and-forget path: NO caller holds this
+            // result envelope, so after the failure the system looks normal
+            // from the outside — the triggering event was handled and nothing
+            // retries the run — while the flow's declared effects never
+            // landed; the only other trace is the passive run-history row.
+            // That stderr also survives the CLI's boot-quiet stdout window is
+            // stream mechanics, not the verdict.
             trigger.start(resolved.binding, (ctx: AutomationContext) =>
                 this.execute(flowName, ctx).then((result) => {
                     if (!result.success) {
                         this.logger.error(
-                            `Trigger-fired run of flow '${flowName}' failed: ${result.error ?? 'unknown error'}`,
+                            `Trigger-fired run of flow '${flowName}' failed (trigger '${resolved.triggerType}') — ` +
+                                `no caller holds this result and nothing retries the run; the terminal failure ` +
+                                `is recorded in the flow's run history, and the run's failure envelope is in ` +
+                                `this record's meta.`,
+                            undefined,
+                            { error: result.error ?? 'unknown error' },
                         );
                     }
                 }),
