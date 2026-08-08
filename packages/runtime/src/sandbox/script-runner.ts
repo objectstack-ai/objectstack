@@ -89,15 +89,18 @@ export type ScriptSession = ActionSession | HookContext['session'];
  * same over-claim in a spec-shaped disguise. `ActorUser extends EvalUser`, so
  * the action arm still carries the ADR-0068 contract on the path that has it.
  *
- * The `?? …session?.user` fallback chain both writers carry (`body-runner.ts`
- * `:315` / `:340`) forces no THIRD arm — measured, not presumed: neither
- * session shape reaching this seam declares a `user` key
- * (`HookContext['session']`, `ActionSession`) and neither producer writes one
- * (`buildSession()` in objectql, `buildActionSession()` in
- * `../action-execution.ts`), so that arm is unreachable on every real path —
- * the #4984 dead-limb family. It is left in place here because this change
- * types a seam and does not get to re-decide a runtime expression; the limb is
- * filed separately.
+ * No THIRD arm for a session-carried user, and there is no longer a runtime
+ * expression suggesting one. Both writers in `body-runner.ts` used to spell
+ * `?? …session?.user`; #5521 measured that limb unreachable — neither session
+ * shape reaching this seam declares a `user` key (`HookContext['session']`,
+ * `ActionSession`) and neither producer writes one (`buildSession()` in
+ * objectql, `buildActionSession()` in `../action-execution.ts`) — and left it
+ * alone, because typing a seam does not get to re-decide a runtime expression.
+ * #6316 re-ran that sweep across every producer on both faces, confirmed it,
+ * and deleted both limbs (the #4984 dead-limb family). So the union's arms are
+ * the two REAL producer shapes and nothing else; if a session ever should
+ * carry a user, DECLARE it on the session contract rather than restoring a
+ * consumer-side `??` here (PD #12).
  *
  * `undefined` is a member (via `HookContext['user']`'s own optionality, exactly
  * as in {@link ScriptSession}) and it is a REAL value on this seam, not just
