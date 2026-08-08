@@ -133,6 +133,15 @@ export const ApiEndpointSchema = strictObject({
     // reach this schema on the STORED-row paths and are peeled by
     // `peelStoredEnvelope` before the body parse, so meeting one here means it
     // was hand-authored into a declaration — where it configures nothing.
+    //
+    // ⚠️ All SEVEN of `STORED_ENVELOPE_KEYS`, and the completeness is pinned
+    // rather than eyeballed: `stored-envelope.test.ts` walks that exported list
+    // and asserts each key gets this prescription. The first run of that pin
+    // caught `package` missing from this table — the drift is silent in the
+    // direction that matters (a key peeled correctly on the stored paths, so
+    // every other test stays green, while a hand-authoring author gets the
+    // generic "unrecognized key" instead of the upgrade).
+    package: STORED_BOOKKEEPING_GUIDANCE,
     packageId: STORED_BOOKKEEPING_GUIDANCE,
     state: STORED_BOOKKEEPING_GUIDANCE,
     version: STORED_BOOKKEEPING_GUIDANCE,
