@@ -70,7 +70,7 @@ describe.skipIf(!sharedMongod)('driver-mongodb — paged reads are a partition o
   describe('`limit: 0` returns no records', () => {
     for (const testCase of PAGINATION_ZERO_LIMIT_CASES) {
       it(testCase.name, async () => {
-        const rows = await driver.find('ticket', { ...testCase.query } as any);
+        const rows = await driver.find('ticket', { ...testCase.query });
         expect(rows).toHaveLength(testCase.expectedRowCount);
       });
     }
@@ -203,25 +203,25 @@ describe('MongoDBDriver — `limit: 0` is answered before the client is consulte
   const driver = new MongoDBDriver({ url: 'mongodb://127.0.0.1:1/unused', database: 'unused' });
 
   it('find() returns zero records without dialing the server', async () => {
-    await expect(driver.find('ticket', { limit: 0 } as any)).resolves.toHaveLength(0);
+    await expect(driver.find('ticket', { limit: 0 })).resolves.toHaveLength(0);
   });
 
   it('find() returns zero records with an offset too', async () => {
-    await expect(driver.find('ticket', { limit: 0, offset: 5 } as any)).resolves.toHaveLength(0);
+    await expect(driver.find('ticket', { limit: 0, offset: 5 })).resolves.toHaveLength(0);
   });
 
   it('findOne() returns null — the empty result for its signature', async () => {
-    await expect(driver.findOne('ticket', { limit: 0 } as any)).resolves.toBeNull();
+    await expect(driver.findOne('ticket', { limit: 0 })).resolves.toBeNull();
   });
 
   it('does NOT short-circuit a non-zero limit — that read still needs the server', async () => {
     // The control that keeps the guard from becoming "return nothing, always".
     // With no short-circuit the unreachable URI is what answers, so a rejection
     // here IS the assertion: the call went to the client, as it must.
-    await expect(driver.find('ticket', { limit: 2 } as any)).rejects.toThrow();
+    await expect(driver.find('ticket', { limit: 2 })).rejects.toThrow();
   });
 
   it('does NOT short-circuit a read with no limit at all', async () => {
-    await expect(driver.find('ticket', {} as any)).rejects.toThrow();
+    await expect(driver.find('ticket', {})).rejects.toThrow();
   });
 });

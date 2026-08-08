@@ -127,7 +127,7 @@ describe('InMemoryDriver — paged reads are a partition of the result set (obje
   describe('`limit: 0` returns no records', () => {
     for (const testCase of PAGINATION_ZERO_LIMIT_CASES) {
       it(testCase.name, async () => {
-        const rows = await driver.find('ticket', { ...testCase.query } as any);
+        const rows = await driver.find('ticket', { ...testCase.query });
         expect(rows).toHaveLength(testCase.expectedRowCount);
       });
     }
