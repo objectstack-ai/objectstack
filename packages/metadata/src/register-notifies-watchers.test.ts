@@ -52,7 +52,14 @@ import type {
 } from '@objectstack/spec/system';
 import { MetadataManager } from './metadata-manager';
 import { MemoryLoader } from './loaders/memory-loader';
-import type { MetadataLoader } from './loaders/loader-interface';
+// `.js` deliberately, unlike the three extensionless imports above it: under
+// `moduleResolution: nodenext` an extensionless relative import does not
+// resolve, and every symbol it names silently becomes `any` (AGENTS.md, the
+// TS7006 cascade). Spelling this one correctly is what makes `implements
+// MetadataLoader` on the fixture below an actual check rather than decoration.
+// The three above are this package's pre-existing type-check debt (#4311) and
+// are left for whoever pays that ledger down.
+import type { MetadataLoader } from './loaders/loader-interface.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 
 vi.mock('@objectstack/core', () => ({
@@ -557,7 +564,7 @@ describe('#6548 — register() announces only once every WRITABLE LOADER holds t
     const manager = managerOver(fast, slow);
 
     const seen: MetadataWatchEvent[] = [];
-    manager.subscribe('object', (event) => {
+    manager.subscribe('object', (event: MetadataWatchEvent) => {
       seen.push(event);
     });
 
@@ -586,7 +593,7 @@ describe('#6548 — register() announces only once every WRITABLE LOADER holds t
     const manager = managerOver(loader);
 
     const seen: MetadataWatchEvent[] = [];
-    manager.subscribe('object', (event) => {
+    manager.subscribe('object', (event: MetadataWatchEvent) => {
       seen.push(event);
     });
 
