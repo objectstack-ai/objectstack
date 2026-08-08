@@ -218,6 +218,7 @@ function makeEngine(tables: Record<string, any[]>) {
  */
 async function bootSecurity(engine: any, posture: 'single' | 'group'): Promise<void> {
     const services: Record<string, any> = {
+        manifest: { register: vi.fn() },
         objectql: engine,
         metadata: {
             get: async (_type: string, name: string) => (name === OBJECT ? ACCOUNT_SCHEMA : null),
