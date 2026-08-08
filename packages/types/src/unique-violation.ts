@@ -55,13 +55,14 @@
  * on it, so adopting the predicate never adds an edge. This module deliberately
  * imports nothing.
  *
- * ## What this predicate does NOT do
+ * ## The second question, answered separately
  *
- * It does not name the **conflicting column**. `sanitizeRowError` extracts one
- * for the import path, and #5495 wants one to decide whether an autonumber
- * collision is retryable — but a structured conflict-column export is a new
- * contract surface, so it is deliberately not decided here (#6250's ruling).
- * This answers the yes/no question only.
+ * `isUniqueViolationError` answers yes/no. **Which column** conflicted is a
+ * different question with a different failure mode, so it is a different export:
+ * {@link uniqueViolationColumn}, added by #6544 under the maintainer's
+ * 2026-08-08 ruling. Read its doc comment before touching either — the two are
+ * gated on each other and the column answer is deliberately narrower than the
+ * boolean.
  */
 
 /**
@@ -171,4 +172,161 @@ function matchesUniqueViolation(error: unknown, depth: number): boolean {
     if (typeof err.message === 'string' && UNIQUE_VIOLATION.message.test(err.message)) return true;
 
     return matchesUniqueViolation(err.cause, depth + 1);
+}
+
+/* ------------------------------------------------------------------------- *
+ *  #6544 — which column conflicted
+ * ------------------------------------------------------------------------- */
+
+/**
+ * SQLite names the offending **columns** directly, as `table.column` pairs:
+ * `UNIQUE constraint failed: sys_user.email`. Captured to end-of-line because
+ * knex prefixes the failing statement, so the useful part is always the tail.
+ */
+const SQLITE_TARGETS = /unique constraint failed:\s*([^\n]*)/i;
+
+/**
+ * Postgres names the offending **columns** only in its `DETAIL:` line —
+ * `Key (email)=(acme@example.com) already exists.` — which node-postgres puts
+ * on `error.detail` and knex flattens into the message. The trailing `=(`
+ * is required: it is what separates this form from the constraint-name form
+ * (`violates unique constraint "sys_user_email_key"`), which names an INDEX.
+ *
+ * An expression index (`Key (lower(email))=(…)`) cannot match, because the
+ * capture forbids `)` — which is the correct answer: `lower(email)` is not a
+ * column.
+ */
+const POSTGRES_DETAIL_TARGETS = /\bkey \(([^)]+)\)=\(/i;
+
+/** SQLite's other spelling, for a partial or expression index: `UNIQUE constraint failed: index 'x'`. */
+const SQLITE_INDEX_FORM = /^index\b/i;
+
+/** What a column name may look like once the table qualifier and quoting are stripped. */
+const PLAIN_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]*$/;
+
+/** Strip quoting and any `table.` qualifier from one constraint target. */
+function bareIdentifier(raw: string): string {
+    const stripped = raw.trim().replace(/[`"'[\]]/g, '');
+    const dot = stripped.lastIndexOf('.');
+    return dot >= 0 ? stripped.slice(dot + 1) : stripped;
+}
+
+/**
+ * Reduce one dialect's list of constraint targets to THE conflicting column,
+ * or `undefined` when there is not exactly one that is determinably a column.
+ *
+ * A composite key resolves to `undefined` on purpose: there is no single
+ * offending column, and picking the first is the same class of wrong answer as
+ * returning an index name — it points a form at `tenant_id` when what the user
+ * typed twice was `email`.
+ */
+function soleColumn(targets: string): string | undefined {
+    const names = targets.split(',').map(bareIdentifier);
+    if (names.length !== 1) return undefined;
+    const [name] = names;
+    return PLAIN_IDENTIFIER.test(name) ? name : undefined;
+}
+
+function columnFromText(text: string): string | undefined {
+    const sqlite = SQLITE_TARGETS.exec(text);
+    if (sqlite) {
+        const targets = sqlite[1].trim();
+        // `index 'idx_email_unique'` is an index name, not a column. Refuse.
+        return SQLITE_INDEX_FORM.test(targets) ? undefined : soleColumn(targets);
+    }
+
+    const postgres = POSTGRES_DETAIL_TARGETS.exec(text);
+    if (postgres) return soleColumn(postgres[1]);
+
+    // MySQL deliberately has no limb here — see the doc comment on
+    // `uniqueViolationColumn`. `Duplicate entry 'x' for key 'i'` names `i`,
+    // which is an INDEX, and this function does not guess columns from indexes.
+    return undefined;
+}
+
+function findUniqueViolationColumn(error: unknown, depth: number): string | undefined {
+    if (error === null || error === undefined || depth > MAX_CAUSE_DEPTH) return undefined;
+
+    if (typeof error === 'string') return columnFromText(error);
+    if (typeof error !== 'object') return undefined;
+
+    const err = error as { message?: unknown; detail?: unknown; cause?: unknown };
+
+    if (typeof err.message === 'string') {
+        const fromMessage = columnFromText(err.message);
+        if (fromMessage !== undefined) return fromMessage;
+    }
+    // node-postgres keeps the `DETAIL:` line off the message and on its own
+    // field, so for the driver we actually ship this is where the column is.
+    if (typeof err.detail === 'string') {
+        const fromDetail = columnFromText(err.detail);
+        if (fromDetail !== undefined) return fromDetail;
+    }
+
+    return findUniqueViolationColumn(err.cause, depth + 1);
+}
+
+/**
+ * Which column a unique-constraint violation was raised on — or `undefined`
+ * when the dialect did not determinably name one (#6544).
+ *
+ * ## The contract, and why it is this narrow
+ *
+ * **A value comes back only when the identifier the driver printed is
+ * determinably a COLUMN.** When a dialect names an *index* instead — MySQL's
+ * `Duplicate entry 'a@b.com' for key 'idx_email_unique'`, Postgres'
+ * `violates unique constraint "sys_user_email_key"`, SQLite's
+ * `UNIQUE constraint failed: index 'idx_lower_email'` — the answer is
+ * `undefined`, never the index name.
+ *
+ * That is the maintainer's 2026-08-08 ruling on #6544, and the reasoning is the
+ * caller's, not this module's: **an index name mistaken for a column is worse
+ * than no answer at all.**
+ *
+ *  - `@objectstack/rest`'s import runner renders this into a form field —
+ *    "A record with this `email` already exists." An index name there points
+ *    the user at a field that does not exist on the object, so they cannot act
+ *    on it; `undefined` degrades to generic copy, which is merely less helpful.
+ *  - #5495's autonumber-retry branch asks a yes/no question of the answer —
+ *    "is the conflicting column the autonumber field?" — and an index name
+ *    produces a *wrong retry decision*, not a vaguer one.
+ *
+ * ⛔ **The accepted cost: MySQL deployments usually get no column.** MySQL's
+ * duplicate-entry message names the index and never the column, so there is
+ * nothing here to read. That is deliberate. Do not "improve" this by deriving a
+ * column from an index name (`idx_email_unique` → `email`, or MySQL 8's
+ * `for key 'sys_user.email'` → `email`): index names are free-form, a
+ * deployment's may match no column at all, and a plausible-looking wrong field
+ * is exactly the failure this export exists to avoid. If MySQL must name
+ * columns, the answer is a schema lookup of the index — a different, wider
+ * contract — not a guess in this function.
+ *
+ * A **composite** key is `undefined` for the same reason: `Key (tenant_id,
+ * email)=(…)` has no single offending column, and naming the first is the same
+ * class of wrong answer.
+ *
+ * ## What it reads
+ *
+ * Gated on {@link isUniqueViolationError}, so a NOT NULL or FOREIGN KEY failure
+ * can never reach the extraction — SQLite's `NOT NULL constraint failed: t.c`
+ * shares its shape with the positive and is refused at the gate, not by the
+ * patterns. Then `message`, then `detail` (node-postgres keeps its `DETAIL:`
+ * line there), then one step down the `cause` chain, bounded exactly as the
+ * predicate's walk is. A bare string is read as a message, so a caller holding
+ * only `err.message` can pass it straight in.
+ *
+ * @param error - the thrown value, of any shape.
+ * @returns the conflicting column, or `undefined` when none is determinable.
+ *
+ * @example
+ * ```ts
+ * const column = uniqueViolationColumn(error);
+ * return column
+ *   ? `A record with this ${column} already exists.`
+ *   : 'A record with this value already exists.';
+ * ```
+ */
+export function uniqueViolationColumn(error: unknown): string | undefined {
+    if (!isUniqueViolationError(error)) return undefined;
+    return findUniqueViolationColumn(error, 0);
 }

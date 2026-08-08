@@ -182,6 +182,34 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
   /** Base URL for Package Management */
   packages: z.string().optional().describe('e.g. /api/v1/packages'),
 
+  /**
+   * Base URL for the datasource federation-admin family — the base under
+   * which the external-datasource routes (`{datasources}/:name/external/*`,
+   * ADR-0015 §6.2: tables / draft / import / refresh-catalog / validate) are
+   * mounted.
+   *
+   * Declared by #6633 (route B toward #6306): the SDK's
+   * `datasources.external.*` methods hard-coded `/api/v1/datasources` with no
+   * discovery mechanism at all, so any deployment on a non-default base
+   * (`apiPath`, or a programmatic `basePath`/`version`) had the whole family
+   * pinned to a convention the server had moved away from. With the key
+   * declared, a host that mounts the family advertises WHERE, and the SDK
+   * follows — falling back to the `/api/v1/datasources` convention when
+   * unadvertised.
+   *
+   * `optional`, not `nullable` — same reasoning as `mcp`: the key is ABSENT
+   * when no federation surface is mounted. The runtime dispatcher serves no
+   * `/datasources` domain, so it must never advertise one (ADR-0076 D12), and
+   * the `getDiscovery()` builder in `metadata-protocol` emits nothing here
+   * either — the mount belongs to the REST host, which that builder cannot
+   * see. The one producer that CAN answer truthfully is the REST discovery
+   * endpoint, which derives the value from its recorded direct mounts.
+   */
+  datasources: z.string().optional().describe(
+    'e.g. /api/v1/datasources — base for the datasources/:name/external/* federation-admin family; '
+    + 'absent when no host mounts it'
+  ),
+
   // `workflow` was removed here (#4451, v17): no host ever mounted a workflow
   // surface and nothing ever registered the slot (ADR-0115 Evidence 5), so no
   // builder could truthfully populate the field. State machines are enforced

@@ -3436,6 +3436,33 @@ export class RestServer {
                                 : basePath;
                             discovery.routes.auth = `${unscopedBase}/auth`;
                         }
+
+                        // [#6633] Direct-mount surfaces — the mounted ⇒ advertised
+                        // half of ADR-0076 D12. `routes.packages` and
+                        // `routes.datasources` are PROJECTIONS of the recorded
+                        // direct mounts (#5822): the advertised base is read off
+                        // the very route arrays the registrars iterated to mount,
+                        // so advertisement and mounting derive from one fact and
+                        // cannot drift. Today those registrars mount at the
+                        // plugin's `versionedBase` (`/api/v1`) — NOT at this
+                        // server's `getApiBasePath()` — and the advertisement
+                        // says so; when #6306 moves the mount base, the recorded
+                        // paths move and this advertisement follows by
+                        // construction, with no edit here.
+                        //
+                        // A boot that mounted nothing (no `package` service ⇒
+                        // the registrar was never called) advertises nothing:
+                        // the protocol's service-presence `packages` entry is
+                        // deleted rather than left to promise a 404 — this
+                        // server knows the mount fact, which is strictly better
+                        // knowledge than service presence.
+                        const direct = this.getDirectMountRouteBases(
+                            isScoped ? (req.params?.environmentId ?? ':environmentId') : undefined,
+                        );
+                        if (direct.packages) discovery.routes.packages = direct.packages;
+                        else delete discovery.routes.packages;
+                        if (direct.datasources) discovery.routes.datasources = direct.datasources;
+                        else delete discovery.routes.datasources;
                     }
 
                     // Cross-object atomic batch capability (#3298). `declared ===
@@ -9259,6 +9286,57 @@ export class RestServer {
         for (const route of routes) {
             this.directMountedRoutes.push({ ...route, source: 'direct-mount' });
         }
+    }
+
+    /**
+     * [#6633] The advertised bases for the direct-mount surfaces, derived from
+     * the RECORDED mounts themselves — never recomputed from config.
+     *
+     * This is the load-bearing half of the mounted ⇒ advertised parity
+     * (ADR-0076 D12): the registrars mount at whatever base the plugin threads
+     * in (`versionedBase` today; #6306 will move it), the recorder keeps the
+     * very arrays they iterated to mount (#5822), and this method projects the
+     * advertised `routes.packages` / `routes.datasources` out of those arrays.
+     * One expression, two consumers — a future change that moves the mount
+     * moves the advertisement with it, and a change that touches only one side
+     * goes red on the parity pin
+     * (`discovery-advertised-direct-mounts.parity.test.ts`).
+     *
+     * @param scopedEnvironmentId when the discovery response being built is
+     *   served from the environment-scoped mount, the resolved environment id
+     *   (or the `:environmentId` placeholder when unresolved); `undefined` for
+     *   the unscoped mount.
+     */
+    getDirectMountRouteBases(scopedEnvironmentId?: string): { packages?: string; datasources?: string } {
+        const SCOPED_SEGMENT = '/environments/:environmentId';
+        let packagesUnscoped: string | undefined;
+        let packagesScoped: string | undefined;
+        let datasources: string | undefined;
+        for (const { method, path } of this.directMountedRoutes) {
+            // The package registrar's list route (`GET {base}/packages`) IS the
+            // surface base — recorded verbatim, recognised, never rebuilt.
+            if (method === 'GET' && path.endsWith('/packages')) {
+                if (path.includes(SCOPED_SEGMENT)) packagesScoped = path;
+                else packagesUnscoped = path;
+            }
+            // Every federation route sits under
+            // `{base}/datasources/:name/external/…`; the advertised base is
+            // `{base}/datasources`.
+            const extAt = path.indexOf('/datasources/:name/external/');
+            if (extAt >= 0 && datasources === undefined) {
+                datasources = `${path.slice(0, extAt)}/datasources`;
+            }
+        }
+        // A scoped discovery response advertises the scoped packages mount when
+        // one is recorded (with the caller's environment id substituted, the
+        // same move the `data`/`metadata` overrides make); the unscoped mount
+        // is the answer everywhere else. No cross-over in the unscoped case:
+        // advertising a `:environmentId` pattern to an unscoped caller would be
+        // a URL nothing can consume.
+        const packages = scopedEnvironmentId !== undefined
+            ? (packagesScoped?.replace(':environmentId', scopedEnvironmentId) ?? packagesUnscoped)
+            : packagesUnscoped;
+        return { packages, datasources };
     }
 
     /**

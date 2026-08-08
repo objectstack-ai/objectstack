@@ -328,7 +328,14 @@ export const ImportRequestSchema = lazySchema(() => z.object({
   mapping: ImportMappingSchema.optional()
     .describe('Source column → target field mapping'),
   dryRun: z.boolean().default(false)
-    .describe('Validate + coerce every row without persisting'),
+    .describe(
+      'Validate + coerce every row without persisting. The verdict is the engine\'s own write-path ' +
+      'validation, with one boundary an author should know: a preview runs NO automations. Hooks never ' +
+      'fire in a dry run (#6037) — a preview that executed user-authored side effects (mail, outbound ' +
+      'calls, writes to other objects) would be the retired `validateOnly` defect in a new spelling. So a ' +
+      'dry run with `runAutomations: true` can report `required` for a field a `beforeInsert` hook would ' +
+      'populate during the real import; for hook-derived fields the real write is authoritative.',
+    ),
   writeMode: ImportWriteMode.default('insert')
     .describe('insert / update / upsert semantics'),
   matchFields: z.array(z.string()).optional()
