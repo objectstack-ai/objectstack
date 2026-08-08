@@ -286,10 +286,15 @@ const CEL_LIMIT_KEYS = Object.keys(DEFAULT_LIMITS) as readonly CelLimitKey[];
 
 /** How far past a {@link DEFAULT_LIMITS} bound a source actually reaches. */
 export interface CelBoundsOverrun {
-  /** WHICH bound was exceeded — `maxAstNodes` / `maxDepth` / `maxListElements` / … */
-  limit: CelLimitKey;
+  /**
+   * WHICH bound was exceeded — `maxAstNodes` / `maxDepth` / `maxListElements` / …
+   * `null` only if cel-js reports a limit fault this package cannot name (see
+   * {@link limitKeyOf}); a guessed key would send the author to shorten the
+   * wrong axis, so the honest answer is "we know it was a bound, not which".
+   */
+  limit: CelLimitKey | null;
   /** The platform's value for that bound, i.e. what the source had to stay under. */
-  limitValue: number;
+  limitValue: number | null;
   /**
    * What the source itself measures on that axis: the smallest value of
    * `limits[limit]` under which it parses, every OTHER bound lifted, so the
@@ -472,20 +477,24 @@ export function parseCelToAstWithReason(
     if (classifyCelFault(err) !== 'bounds') return { ok: false, kind: 'parse', message };
     const parseErr = err as ParseError;
     const limit = limitKeyOf(parseErr);
-    const limitValue = limit ? DEFAULT_LIMITS[limit] : Number.NaN;
     const summary = parseErr.summary ?? message.split('\n')[0];
     if (!limit) {
-      // A bounds fault we cannot name. Report it as bounds (the class is not in
-      // doubt) with no measure — never as a syntax fault, which is the exact
-      // mislabel this entrance exists to stop.
+      // A bounds fault we cannot NAME — unreachable on cel-js 8.0.0, where
+      // `Parser#limitExceeded` always phrases it `Exceeded <key> (<n>)`, but a
+      // rephrasing upstream has to degrade honestly. Still reported as `bounds`
+      // (the class is not in doubt) and never as a syntax fault, which is the
+      // exact mislabel this entrance exists to stop — but with `limit: null`
+      // rather than a guessed key, and with no AST to admit, so the pushdown
+      // path fails closed on it in either position of the switch.
       return {
         ok: false,
         kind: 'bounds',
         message,
-        overrun: { limit: 'maxAstNodes', limitValue: DEFAULT_LIMITS.maxAstNodes, measured: null, summary },
+        overrun: { limit: null, limitValue: null, measured: null, summary },
         unboundedAst: null,
       };
     }
+    const limitValue = DEFAULT_LIMITS[limit];
     let unboundedAst: CelAstNode | null = null;
     let measured: number | null = null;
     if (opts.admitOverLimit) {

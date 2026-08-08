@@ -172,13 +172,19 @@ function warnOverLimitPushdown(source: string, overrun: CelBoundsOverrun): void 
   if (warnedOverLimit.has(source)) return;
   if (warnedOverLimit.size >= WARNED_OVER_LIMIT_MAX) warnedOverLimit.clear();
   warnedOverLimit.add(source);
-  const measure = overrun.measured === null
-    ? `over ${overrun.limitValue * CEL_BOUNDS_MEASURE_CAP_FACTOR} (measurement capped)`
-    : String(overrun.measured);
+  // `limit` / `limitValue` are non-null on this path by construction: a bounds
+  // fault whose key could not be named yields no unbounded AST, so it never
+  // reaches the grace window. The fallbacks keep the sentence readable rather
+  // than printing `null` if that ever stops being true.
+  const measure = overrun.measured !== null
+    ? String(overrun.measured)
+    : overrun.limitValue === null
+      ? 'over the measurement cap'
+      : `over ${overrun.limitValue * CEL_BOUNDS_MEASURE_CAP_FACTOR} (measurement capped)`;
   const shown = source.length > 200 ? `${source.slice(0, 197)}...` : source;
   hostConsole()?.warn?.(
-    `[cel-to-filter] pushdown predicate exceeds the platform CEL bound ${overrun.limit} ` +
-      `(limit ${overrun.limitValue}, this predicate measures ${measure}): ${overrun.summary}. ` +
+    `[cel-to-filter] pushdown predicate exceeds the platform CEL bound ${overrun.limit ?? '(unnamed)'} ` +
+      `(limit ${overrun.limitValue ?? 'unknown'}, this predicate measures ${measure}): ${overrun.summary}. ` +
       `It still compiles during 17.0.0-rc.x; at v17 GA it will be REFUSED (parse-error) and the ` +
       `RLS/sharing pushdown path will fail closed (RLS_DENY_FILTER). Split it or move the logic ` +
       `to a hook/action body before upgrading. Predicate: ${shown}`,
