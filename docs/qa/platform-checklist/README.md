@@ -112,11 +112,13 @@ Design notes:
 `coverage.json` makes "凡是有的能力, 都要测试" mechanical instead of aspirational. The
 universe of capabilities is **derived, not hand-kept**: every metadata kind with a
 `packages/spec/liveness/<kind>.json` ledger (the ADR-0049 governed set) must be mapped
-to at least one checklist item, or waived with a written reason. The validator enforces
-both directions — an unmapped kind fails CI (the platform grew a capability the
-checklist doesn't test), and a mapped kind whose liveness ledger disappeared fails too
-(the entry outlived the capability). This is the `examples/app-showcase/src/coverage.ts`
-demonstrated-or-waived ratchet, applied to testing instead of demonstration.
+to at least one checklist item, or waived with a written reason. The validator
+(`pnpm check:platform-checklist`, run on the manual cadence below — **not** wired into
+CI) reports both directions — an unmapped kind is flagged (the platform grew a
+capability the checklist doesn't test), and a mapped kind whose liveness ledger
+disappeared is flagged too (the entry outlived the capability). This is the
+`examples/app-showcase/src/coverage.ts` demonstrated-or-waived ratchet, applied to
+testing instead of demonstration.
 
 Enumerable surfaces *inside* a capability (49 field types, 20 chart types, flow node
 types, query operators, decision actions, …) are covered by `variants` matrices on the
@@ -135,20 +137,20 @@ authored against with an `enumSource` field:
 
 The validator extracts the enum's *current* member count from that source (comment-
 stripped, deduped) and fails when it no longer equals `expect`. So when the platform
-grows a 50th field type or a 21st chart type, this item's next CI run goes red with a
-precise instruction: revise the variants matrix, bump the item revision, set `expect`
-to the new count. This closes the automation gap the coverage ratchet alone left — the
+grows a 50th field type or a 21st chart type, the next `check:platform-checklist` run
+goes red with a precise instruction: revise the variants matrix, bump the item revision,
+set `expect` to the new count. This closes the gap the coverage ratchet alone left — the
 kind-level ratchet catches a *new metadata kind*, `enumSource` catches a *new value in
-an existing kind's enum* — so "spec grew a variant" becomes a checklist-blocking event
-instead of a silent drift the showcase `coverage.test.ts` only catches indirectly.
-Items currently pinned: field types, chart types, action locations, webhook triggers,
-flow node types. Pin more as matrices are added.
+an existing kind's enum* — so "spec grew a variant" is caught by the manual check
+instead of drifting silently (the showcase `coverage.test.ts` only catches it
+indirectly). Items currently pinned: field types, chart types, action locations, webhook
+triggers, flow node types. Pin more as matrices are added.
 
 A waiver is a debt marker, not an exemption: it names what fixture or surface is
 missing, so paying it down is a matter of adding the fixture and flipping the entry to
 `items`.
 
-### Variants freshness — spec enum drift fails CI on the item itself
+### Variants freshness — spec enum drift is caught on the item itself
 
 Matrix items may pin the spec enum their `variants` were authored against:
 
@@ -158,19 +160,39 @@ Matrix items may pin the spec enum their `variants` were authored against:
 
 The validator extracts the enum's CURRENT member count from the spec source at check
 time (comment-stripped, deduped) and fails with `VARIANTS STALE` when it no longer
-equals `expect` — so a PR that adds a 50th field type cannot merge without revising the
-matrix (or consciously bumping `expect` with a revision). This closes the loop the
-kind-level ratchet leaves open: new *kinds* are caught by the liveness-derived universe,
-new *members of an existing kind* are caught by these pins. Enums declared inline
-(anonymous `z.enum` inside an object literal) cannot be pinned by export name — those
-matrices still rely on the showcase `coverage.test.ts` demonstrability gate.
+equals `expect` — so the next `check:platform-checklist` run after a 50th field type
+lands flags the matrix as stale (revise it, or consciously bump `expect` with a
+revision). This closes the loop the kind-level ratchet leaves open: new *kinds* are
+caught by the liveness-derived universe, new *members of an existing kind* by these pins.
+Enums declared inline (anonymous `z.enum` inside an object literal) cannot be pinned by
+export name — those matrices still rely on the showcase `coverage.test.ts`
+demonstrability gate.
 
-### How the checklist keeps itself current (the automation model)
+### Operating cadence — when to run this (it is NOT in CI)
+
+By maintainer decision `check:platform-checklist` is **not** wired into per-PR CI: the
+checklist is a QA ledger, not a code gate, so an unrelated PR is never blocked by
+checklist drift. It runs on a **manual / periodic cadence** instead. Run
+`pnpm check:platform-checklist` (zero-dependency, ~1s, no tokens):
+
+- **before a release** — part of the release sweep below;
+- **after a large platform surface lands** — a new metadata kind, a new enum, a new area;
+- **whenever you touch the checklist** — the structural + coverage check catches a
+  dangling id or a forgotten `revision` bump in your own edit;
+- **alongside a `coverage-sweep`** (find gaps) **or `checklist-run`** (execute items).
+
+The trade-off of staying out of CI: a new capability kind or enum value that lands on
+`main` between runs is caught at the **next** manual run, not the moment it merged. The
+ratchets still detect it — they just aren't a blocking gate. If drift-catching latency
+ever matters more than PR independence, re-adding the one-line CI step
+(`run: pnpm check:platform-checklist`) restores the automatic posture.
+
+### How the checklist keeps itself current
 
 1. **New capability kind** → a `packages/spec/liveness/<kind>.json` ledger appears →
-   coverage ratchet fails CI until the kind is mapped or waived. Automatic.
-2. **New member of an enumerable surface** → `enumSource` pin fails CI on the matrix
-   item. Automatic for pinned enums.
+   the coverage ratchet flags it the next time `check:platform-checklist` runs.
+2. **New member of an enumerable surface** → the `enumSource` pin flags the matrix as
+   stale the next time the check runs (for pinned enums).
 3. **New feature inside an existing kind** → process: the feature PR lands a `since:
    v<current>` item (same discipline as changesets); the release sweep filter catches
    stragglers.

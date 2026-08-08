@@ -604,7 +604,7 @@
         {
           "revision": 3,
           "date": "2026-08-08",
-          "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift now fails CI on this item directly",
+          "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift is caught by the manual check on this item directly",
           "ref": "claude/platform-test-checklist-ocwugl"
         }
       ],
