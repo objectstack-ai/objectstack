@@ -35,6 +35,10 @@ import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+// The async-import row ceiling has exactly one definition, in the spec, whose
+// TSDoc is its public statement (#6535). rest is the only enforcer, so it reads
+// that export rather than re-declaring the literal beside a "mirrors spec" comment.
+import { IMPORT_JOB_MAX_ROWS } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
@@ -1398,8 +1402,6 @@ export function apiAccessDenialFromEnable(
 
 /** Platform object backing async import jobs (see sys-import-job.object.ts). */
 const IMPORT_JOB_OBJECT = 'sys_import_job';
-/** Hard ceiling on rows per async import job (mirrors spec IMPORT_JOB_MAX_ROWS). */
-const IMPORT_JOB_MAX_ROWS = 50_000;
 /** Cap on per-row results persisted on the job (failures first). */
 const IMPORT_JOB_RESULTS_CAP = 500;
 /** Undo (logical rollback) is only recorded for jobs at or under this row

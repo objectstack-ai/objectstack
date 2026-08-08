@@ -25,6 +25,9 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysImportJob } from '@objectstack/platform-objects/audit';
+// #6535: the ONE definition of the async-import row ceiling. The pin below reads it
+// from here so that moving it is observable at the enforcement point.
+import { IMPORT_JOB_MAX_ROWS } from '@objectstack/spec/api';
 import { RestServer } from './rest-server';
 
 // The real backend: better-sqlite3 `:memory:`, constructed the canonical way
@@ -172,12 +175,28 @@ describe('async import job — real engine + protocol integration', () => {
     expect(results._json.results.find((r: any) => !r.ok)).toMatchObject({ field: 'score', code: 'invalid_number' });
   });
 
-  it('rejects a payload above the 50k async ceiling with 413', async () => {
-    const rows = Array.from({ length: 50_001 }, (_, i) => ({ id: `x${i}`, title: 't' }));
+  // #6535: the ceiling has ONE definition — the spec export — and rest is its only
+  // enforcer. So this case derives everything it knows about the ceiling from that
+  // export: how big a payload must be to breach it, and the number the 413 copy is
+  // required to name. Re-spelling 50_000 here would just move the duplicated literal
+  // into a third place and re-open the drift surface the fix closes.
+  //
+  // What this pin buys, precisely: while spec and rest agree (they do today, both
+  // 50_000) it is green against BOTH implementations — there is no live defect to
+  // catch. It goes red the moment they DISAGREE. With a rest that re-declares its own
+  // literal, moving the spec constant down makes this send `spec + 1` rows at a route
+  // still enforcing the stale, larger number: the payload is accepted and no 413 is
+  // produced at all. Under the imported constant the two move together and stay green.
+  it('rejects a payload above the async ceiling the spec declares, with 413', async () => {
+    const rows = Array.from({ length: IMPORT_JOB_MAX_ROWS + 1 }, (_, i) => ({ id: `x${i}`, title: 't' }));
     const res = await callCreate(ctx.create, { format: 'json', rows });
+    // Rejection-class: assert the ADR-0112 envelope (status AND code), never a bare throw.
     expect(res._status).toBe(413);
     expect(res._json.code).toBe('PAYLOAD_TOO_LARGE');
-    expect(String(res._json.error)).toMatch(/50000/);
+    // The wording is contract here — the 413 tells the caller what to split the file
+    // into — so the interpolated number must be the spec's, on top of the envelope.
+    expect(String(res._json.error)).toContain(String(IMPORT_JOB_MAX_ROWS));
+    expect(String(res._json.error)).toContain(`batches of ${IMPORT_JOB_MAX_ROWS}`);
   });
 
   it('lists jobs in history and filters by status', async () => {
