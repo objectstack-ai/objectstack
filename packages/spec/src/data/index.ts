@@ -50,6 +50,14 @@ export * from './autonumber-format';
 export * from './validation.zod';
 export * from './hook.zod';
 export * from './hook-body.zod';
+// The bulk-write hook dispatch contract (ADR-0058 Addendum II) — what a
+// predicate (`multi: true`) write hands a lifecycle hook in BOTH phases: per-row
+// dispatch, per-row `previous`, a batch-scoped payload, and one budget ceiling
+// for before and after alike. Stated apart from `hook.zod.ts`'s shape table on
+// purpose: that table describes the engine as BUILT (pinned in objectql), this
+// one states the contract the engine is being brought to, with a `delivered`
+// flag per event so "not yet" can never read as "yes".
+export * from './bulk-write-hook-conformance';
 export * from './mapping.zod';
 export * from './data-engine.zod';
 export * from './driver.zod';
