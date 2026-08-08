@@ -141,6 +141,32 @@ const SKIP_OBJECTS = new Set<string>([
   'ai_traces',                   // LLM trace telemetry
 ]);
 
+/**
+ * [#5860] The same list, on the REGISTRATION face.
+ *
+ * `SKIP_OBJECTS` above is consulted inside the handlers, where it is invisible
+ * to the engine. That made every audit registration read as GLOBAL, so the
+ * per-object demand gates (#5284's single-id prior-row read on `update()`,
+ * #5038's bulk equivalents) had to answer "yes, a hook covers this object" for
+ * every one of these tables and buy a row read for a handler that returns on
+ * its first line. The knowledge existed; the contract had nowhere to put it
+ * until #5928 / PR #6575 added `excludeObjects`.
+ *
+ * Why the negative face and not `object: [...]` with the complement: the object
+ * universe is OPEN. `/meta` PUT registers new objects into a running engine and
+ * `SchemaRegistry.registerObject` emits no event, so an enumerated allow list
+ * would freeze at boot and silently stop auditing everything created after —
+ * for a compliance plugin, a regression that reports nothing. Subtraction has
+ * no such failure mode: an object nobody had heard of at install time is
+ * audited by default. Pinned in `audit-hook-object-scope.test.ts`.
+ *
+ * DERIVED, never re-typed: the registration face and the handlers' early return
+ * are one list, so neither can drift from the other. The early return stays as
+ * defence in depth — it is what protects every non-hook caller of these
+ * handlers, and it keeps audit behaviour bit-for-bit conserved by this change.
+ */
+const AUDIT_EXCLUDED_OBJECTS: string[] = [...SKIP_OBJECTS];
+
 /** Fields that are noise in diffs (always change, never user-meaningful). */
 const NOISE_FIELDS = new Set<string>([
   'updated_at',
@@ -541,8 +567,11 @@ export function installAuditWriters(
     }
   };
 
-  engine.registerHook('beforeUpdate', captureBefore, { packageId });
-  engine.registerHook('beforeDelete', captureBefore, { packageId });
+  // [#5860] Global MINUS the skip list — see `AUDIT_EXCLUDED_OBJECTS`. The
+  // handler's own `SKIP_OBJECTS` early return is kept (defence in depth), so
+  // what changes here is only what the ENGINE can see about the scope.
+  engine.registerHook('beforeUpdate', captureBefore, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
+  engine.registerHook('beforeDelete', captureBefore, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
 
   /**
    * afterInsert / afterUpdate / afterDelete: write audit_log + activity rows.
@@ -743,9 +772,12 @@ export function installAuditWriters(
     }
   };
 
-  engine.registerHook('afterInsert', writeAudit, { packageId });
-  engine.registerHook('afterUpdate', writeAudit, { packageId });
-  engine.registerHook('afterDelete', writeAudit, { packageId });
+  // [#5860] Same subtraction as the before-phase pair above. `afterUpdate` and
+  // `afterDelete` are the two the bulk gates (#5038) read, and `afterUpdate` is
+  // the one #5284's single-id gate reads.
+  engine.registerHook('afterInsert', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
+  engine.registerHook('afterUpdate', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
+  engine.registerHook('afterDelete', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
 
   /**
    * `enable.feeds` server-side enforcement (#2707). Comments are created
@@ -878,7 +910,11 @@ export function installAuditWriters(
       }
     }
   };
-  engine.registerHook('afterInsert', writeCommentMentions, { packageId });
+  // [#5860] A CLOSED single-name allow list — the handler's first line already
+  // refused every other object, and unlike the skip list above that knowledge
+  // was always expressible. Saying it here is behaviour-conserving and takes
+  // this registration out of every other object's `afterInsert` demand.
+  engine.registerHook('afterInsert', writeCommentMentions, { object: 'sys_comment', packageId });
 }
 
 // Re-export for convenience.
