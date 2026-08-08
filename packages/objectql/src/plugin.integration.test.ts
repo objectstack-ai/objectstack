@@ -1597,7 +1597,7 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       return { objectql, bulkUpdates, getFindCalls: () => findCalls };
     }
 
-    it('rejects the whole batch on a prior-free format rule, with no row fetch', async () => {
+    it('rejects the whole batch on a prior-free format rule (#5574: the row set IS read once)', async () => {
       const { objectql, bulkUpdates, getFindCalls } = await bootWithValidationCapture([], {
         name: 'vr_acct', label: 'VR Acct', datasource: 'vr-capture',
         fields: { email: { name: 'email', label: 'Email', type: 'text' } },
@@ -1609,7 +1609,19 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
         { multi: true, where: { status: 'active' }, context: { userId: 'user-9' } },
       )).rejects.toThrow(/valid email/);
       expect(bulkUpdates.length).toBe(0); // nothing written
-      expect(getFindCalls()).toBe(0);     // format needs no prior state
+      // ⚠️ This asserted `0` until #5574 — "format needs no prior state", and
+      // nothing else on this object demanded the rows either. It is `1` now,
+      // and the extra read is not slack: this is a KERNEL, so objectql's
+      // `sys_stamp_audit_update` builtin is registered on `'*'` for
+      // `beforeUpdate`, and ADR-0058 Addendum II dispatches `before*` once per
+      // MATCHED ROW — which cannot be done without the matched rows. The ADR
+      // prices this consequence in as many words ("the demand becomes
+      // effectively universal"), bounded by the D6 ceiling.
+      //
+      // What the pin protects is unchanged and is why the number is asserted at
+      // all: ONE read, not one per row and not one per consumer. The format
+      // rule still rejects the whole batch before anything is written.
+      expect(getFindCalls()).toBe(1);
     });
 
     it('evaluates a state_machine rule per matched row: one illegal row rejects, all-legal proceeds', async () => {

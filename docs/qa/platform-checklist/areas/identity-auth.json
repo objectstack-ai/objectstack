@@ -1,0 +1,1203 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "identity-auth",
+  "title": "Auth, login, identity",
+  "items": [
+    {
+      "id": "identity-auth.sso-enforced-first-paint",
+      "title": "ssoEnforced login honors SSO on first paint — no password-wall flash",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["anonymous visitor at the login page", "env owner (break-glass password holder)"],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "an env with ssoEnforced configured, cold-started",
+          "ssoEnforced needs an IdP behind it: set auth.ssoOnlyMode: true (or OS_AUTH_SSO_ONLY=true) plus at least one configured oidcProviders[] entry — stock showcase ships neither, so this is a bespoke-env item"
+        ]
+      },
+      "steps": [
+        "configure ssoOnlyMode (or OS_AUTH_SSO_ONLY=true) with one OIDC provider entry and cold-start the server",
+        "BEFORE opening a browser, GET /api/v1/auth/config and record features.ssoEnforced, features.sso, and the socialProviders/oidc provider list — this is the flag the client will honor",
+        "open the login page in a fresh browser context and capture the FIRST paint (screenshot as early as render settles)",
+        "inspect the first paint for: the SSO sign-in surface, the ABSENCE of the email/password form and self-registration, and the PRESENCE of the break-glass 'use a password' link (the spec keeps the break-glass password endpoint enabled — the env owner retains an escape hatch)",
+        "simulate a hung sign-in (e.g. an IdP that never redirects back) and wait out the watchdog window; screenshot the recovery state",
+        "restart the server WITHOUT enforcement (ssoOnlyMode off) and capture the login first paint again as the other side of the gate"
+      ],
+      "acceptance": [
+        {
+          "clause": "the server advertises the enforcement: /api/v1/auth/config features.ssoEnforced is true (server truth for what the client honors)",
+          "oracle": "api",
+          "verify": "GET /api/v1/auth/config on the enforced env returns features.ssoEnforced true with at least one provider listed",
+          "evidence": "the /auth/config response"
+        },
+        {
+          "clause": "the first paint honors ssoEnforced — the password form never flashes before the SSO surface",
+          "oracle": "screenshot",
+          "verify": "the earliest settled screenshot shows the SSO surface and no email/password form; no intermediate frame showed the password wall",
+          "evidence": "first-paint screenshot(s)"
+        },
+        {
+          "clause": "self-registration is hidden under enforcement, but the break-glass password link remains — enforcement hides the local form, it does not brick the env owner",
+          "oracle": "screenshot",
+          "verify": "no sign-up affordance; the 'use a password' break-glass link is present (AuthFeaturesConfigSchema's own contract for ssoEnforced)",
+          "evidence": "annotated login screenshot"
+        },
+        {
+          "clause": "a hung sign-in recovers via the watchdog rather than stranding the page",
+          "oracle": "screenshot",
+          "verify": "after the watchdog window, the page offers a retry path (not a spinner forever)",
+          "evidence": "post-window screenshot"
+        },
+        {
+          "clause": "both sides of the gate: without enforcement the email/password form renders on first paint and features.ssoEnforced is false/absent",
+          "oracle": "api",
+          "verify": "the unenforced env's /auth/config + first-paint screenshot show the password form present",
+          "evidence": "the second /auth/config response + screenshot"
+        }
+      ],
+      "negative": [
+        "a password form flashing for even one settled frame before the SSO redirect/button is the FAIL this item exists for — capture it, do not rationalize it as a hydration artifact without ruling the trap out twice"
+      ],
+      "traps": ["hydration-race"],
+      "source": [
+        "#3358 §6",
+        "packages/spec/src/system/auth-config.zod.ts (ssoOnlyMode + OS_AUTH_SSO_ONLY, break-glass endpoint stays enabled)",
+        "packages/spec/src/api/auth-endpoints.zod.ts (AuthFeaturesConfigSchema.ssoEnforced description)",
+        "packages/spec/src/kernel/public-auth-features.ts (ssoEnforced: login-surface flag; LoginForm hides password form + self-registration, break-glass link remains)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.phone-signin-surfaces",
+      "title": "A phone-based user's number shows across the identity surfaces, and the phone capability is advertised honestly",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a seeded phone persona (Mei Phone — the seed itself failed silently until #3408; if she is absent, that regression has returned)",
+          "the exact seeded identity: usr_showcase_phone_demo / 'Mei Phone (demo)' / phone.demo@example.com / phone_number +8613800138000 (examples/app-showcase/src/security/seed-approval-demo.ts)"
+        ],
+        "knownGaps": [
+          "the seeded persona's sign-in credential is not documented in the seed — driving an actual phone+password sign-in belongs to identity-auth.auth-method-matrix with a user created for that purpose; this item verifies the identity SURFACES"
+        ]
+      },
+      "steps": [
+        "boot the showcase; FIRST verify the seed via the API: GET /api/v1/data/sys_user filtered on phone_number = '+8613800138000' — this is the #3408 regression tripwire, checked before any browser work",
+        "GET /api/v1/auth/config and record features.phoneNumber (the flag that gates the create_user phoneNumber param — the original #2871 fix)",
+        "open the All Users admin list and locate 'Mei Phone (demo)'; screenshot the list row showing the phone number column",
+        "open her record detail and screenshot the highlights showing the number",
+        "as admin, run the create-user action for a NEW phone-carrying user (the phoneNumber param is visible only when features.phoneNumber is true) and screenshot the create-result dialog",
+        "verify the new user via the API read (phone_number persisted, phone_number_verified present as a column)",
+        "if the deployment has the phoneNumber plugin OFF: verify the param is absent from the create-user dialog instead, and record which side of the gate this run exercised"
+      ],
+      "acceptance": [
+        {
+          "clause": "the seeded phone persona exists with the exact seeded number — server truth checked before the browser",
+          "oracle": "api",
+          "verify": "the sys_user read returns usr_showcase_phone_demo with phone_number +8613800138000",
+          "evidence": "the API response"
+        },
+        {
+          "clause": "the phone number renders in all three surfaces: create-result dialog, All Users list row, and record detail",
+          "oracle": "screenshot",
+          "verify": "screenshots of dialog, list row, and detail highlights each showing the number",
+          "evidence": "the three screenshots"
+        },
+        {
+          "clause": "a created phone user PERSISTS the number — the dialog is not a client echo",
+          "oracle": "api",
+          "verify": "API read of the newly created user shows phone_number stored (the better-auth phone-number plugin's unique sys_user.phone_number column)",
+          "evidence": "the post-create API read"
+        },
+        {
+          "clause": "the capability is advertised honestly: features.phoneNumber in /api/v1/auth/config matches whether the plugin is configured, and the create-user phoneNumber param is visible exactly when the flag is true (#2871's gate)",
+          "oracle": "api",
+          "verify": "/auth/config flag vs the create-user dialog's param set (dialog checked only after a screenshot confirms it rendered)",
+          "evidence": "the /auth/config response + dialog screenshot"
+        }
+      ],
+      "negative": [
+        "if the seeded persona is missing, verdict is FAIL on the seed (regression of #3408), not blocked — the boot log will carry the insert error",
+        "the create-user dialog offering a phoneNumber param while features.phoneNumber is false is the #2871 class of failure (UI advertising a capability the runtime lacks) — FAIL"
+      ],
+      "traps": ["seed-data-thin", "wrong-persona"],
+      "source": [
+        "#3358 §6",
+        "#3408",
+        "examples/app-showcase/src/security/seed-approval-demo.ts (PHONE_DEMO_USER)",
+        "packages/spec/src/system/auth-config.zod.ts (phoneNumber plugin: unique phone_number + phone_number_verified columns)",
+        "packages/spec/src/kernel/public-auth-features.ts (phoneNumber gates sys_user.actions.create_user.params.phoneNumber — #2871)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; encoded the #3408 silent-seed-failure as an explicit negative", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.auth-method-matrix",
+      "title": "Every supported auth method signs in when enabled, is absent when disabled, and is advertised exactly as configured",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "per-variant env boots: the matrix flips AuthPluginConfigSchema flags (phoneNumber, twoFactor, deviceAuthorization, oidcProvider) and the socialProviders/oidcProviders maps — each variant names which boot it needs",
+          "an SMS service (@objectstack/service-sms) is required ONLY to make phone-OTP pass; its ABSENCE is itself a tested state (loud NOT_SUPPORTED)"
+        ],
+        "knownGaps": [
+          "magic-link and passkeys: the server flags exist (AuthPluginConfigSchema.magicLink/passkeys) but objectui ships NO login UI for either — advertised-but-unconsumed, tracked in objectui#2514. Run these variants as blocked(dependency, objectui#2514) at the browser lane; the flag-advertisement clause still applies",
+          "the two spec files disagree on the device-flow paths (packages/spec/src/api/auth-endpoints.zod.ts: /device/request, /device/token, /device/approve vs packages/spec/src/system/auth-config.zod.ts: /device/code, /device/token, /device, /device/approve, /device/deny) — the LIVE better-auth surface serves POST /device/code, /device/token, /device/approve, /device/deny and GET /device (auth-route-ledger.ts BETTER_AUTH_MOUNTED_SURFACE); trust the live routes and file the doc divergence",
+          "the password-reset path names ALSO diverge from the spec: AuthEndpointPaths.forgetPassword = '/forget-password' but the live catch-all serves POST /request-password-reset, POST /reset-password and GET /reset-password/:token (BETTER_AUTH_MOUNTED_SURFACE) — trust the live routes (this is the same divergence identity-auth.self-service-password-reset drives)"
+        ]
+      },
+      "steps": [
+        "for each variant: boot with the method configured ON, GET /api/v1/auth/config, and record the advertisement (features.* flag, emailPassword block, socialProviders list)",
+        "email+password: POST /api/v1/auth/sign-up/email (when sign-up enabled), POST /api/v1/auth/sign-in/email, GET /api/v1/auth/get-session, POST /api/v1/auth/sign-out — capture each response and the session cookie lifecycle",
+        "phone+password: create a phone-carrying user with a known password, POST the phone sign-in (better-auth /sign-in/phone-number surface — 'always works' when the plugin is on per the spec), verify get-session identifies the user",
+        "phone OTP with NO SMS service configured: request /phone-number/send-otp and capture the loud NOT_SUPPORTED rejection (never a silent 200, never a hang)",
+        "SSO/OIDC: with an oidcProviders[] entry configured, verify the login page shows the SSO button (features.sso is refined to 'usable' — ≥1 provider); drive the authorization-code round trip or cite the pinned OIDC dogfood test per rule 6",
+        "device authorization: with deviceAuthorization on, drive the RFC 8628 flow (POST /device/code, approve via /device/approve in a signed-in browser, poll /device/token) against the LIVE server's routes, recording which path spelling the server actually serves",
+        "2FA: with twoFactor on, enable it for a user (sys_user enable_two_factor action, gated on features.twoFactor), sign in, and verify the server-driven challenge (ADR-0069) interrupts before a session is granted",
+        "discovery documents: GET /.well-known/openid-configuration and GET /.well-known/oauth-authorization-server (both mounted at the APP ROOT, not under /api/v1/auth — RFC 8414 / OIDC require it, auth-plugin.ts) and record the issuer + advertised endpoints",
+        "self-service identity mutations: POST /api/v1/auth/change-email (authed) and POST /api/v1/auth/delete-user (authed) — capture each, plus the anonymous forge of both",
+        "for each variant: re-boot with the method OFF, then (a) GET /auth/config and confirm the advertisement is gone, (b) screenshot the login page and confirm the affordance is gone, (c) fire the method's endpoint anyway and confirm a server-side refusal",
+        "record the per-variant verdict table (on-side result, off-side result, advertisement parity)"
+      ],
+      "acceptance": [
+        {
+          "clause": "advertisement parity per variant: /api/v1/auth/config reflects the configuration exactly — no method advertised that is off, none hidden that is on",
+          "oracle": "api",
+          "verify": "for every variant, the on-boot and off-boot /auth/config reads match the config that booted them",
+          "evidence": "per-variant /auth/config pairs"
+        },
+        {
+          "clause": "email+password round trip: sign-in issues a session that get-session confirms and sign-out invalidates (a post-sign-out get-session no longer returns the user)",
+          "oracle": "api",
+          "verify": "the four-call sequence with response codes and the session state at each step",
+          "evidence": "the captured sequence"
+        },
+        {
+          "clause": "phone+password signs in when the plugin is on — the number is a first-class identifier, not a display field",
+          "oracle": "api",
+          "verify": "the phone sign-in returns a session for the created user; get-session identifies them",
+          "evidence": "the sign-in + session trace"
+        },
+        {
+          "clause": "phone OTP without a deliverable SMS service fails LOUDLY (NOT_SUPPORTED) — the capability degrades to a named error, never a silent success or a hang",
+          "oracle": "api",
+          "verify": "the send-otp response is a non-2xx carrying the not-supported error; features.phoneNumberOtp is NOT advertised in /auth/config (only advertised when SMS is deliverable, #2780)",
+          "evidence": "the rejection + the /auth/config read"
+        },
+        {
+          "clause": "the login page shows exactly the enabled methods — per-variant presence when on, absence when off",
+          "oracle": "screenshot",
+          "verify": "login screenshots per boot, checked against that boot's /auth/config",
+          "evidence": "the screenshot set"
+        },
+        {
+          "clause": "a disabled method is refused SERVER-SIDE, not merely hidden — UI absence is a client courtesy; the server is the authority (ADR-0057 D10)",
+          "oracle": "api",
+          "verify": "firing each disabled method's endpoint returns a non-2xx (the plugin's routes are absent or refuse)",
+          "evidence": "the forged-request responses"
+        },
+        {
+          "clause": "2FA is a server-driven gate: with 2FA enabled for the user, password sign-in alone does NOT yield a usable session until the challenge completes",
+          "oracle": "api",
+          "verify": "the sign-in response demands the challenge; get-session before completing it does not return an authenticated user",
+          "evidence": "the challenge-flow trace"
+        },
+        {
+          "clause": "the OIDC authorization-code flow is pinned by automation — run the pin and cite its output rather than re-deriving the round trip by hand",
+          "oracle": "test",
+          "verify": "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts passes on this build",
+          "evidence": "the test output"
+        },
+        {
+          "clause": "the discovery documents are served and self-consistent: GET /.well-known/openid-configuration and GET /.well-known/oauth-authorization-server each return 200 JSON whose issuer and endpoint URLs point at the actually-mounted base (mounted at app root, not the /api/v1/auth prefix)",
+          "oracle": "api",
+          "verify": "both documents parse as JSON; issuer + authorization/token/jwks/userinfo endpoints resolve against the live server (e.g. jwks_uri answers the same key set as GET /api/v1/auth/jwks); a bespoke-issuer boot's issuer matches its configured base",
+          "evidence": "the two discovery-document responses + the jwks cross-check"
+        },
+        {
+          "clause": "self-service change-email and delete-user are authed-only mutations: POST /api/v1/auth/change-email and POST /api/v1/auth/delete-user succeed for the signed-in user and are refused for the anonymous forge (better-auth also routes delete-user through GET /api/v1/auth/delete-user/callback confirmation before the row is gone)",
+          "oracle": "api",
+          "verify": "the authed change-email returns 2xx (and, if verification is required, does not flip the address until the confirmation link is followed); both endpoints answer 401 to the anonymous forge",
+          "evidence": "the authed responses + the two anonymous refusals"
+        }
+      ],
+      "negative": [
+        "a silent 200 on any disabled method's endpoint is a FAIL — a gate that only hides the button is not a gate",
+        "phone OTP hanging or returning 2xx with no SMS service is a FAIL (the spec's own contract is 'loudly NOT_SUPPORTED')",
+        "ticking magic-link or passkeys as pass at the browser lane is a false positive — there is no UI to drive (objectui#2514); the honest verdict is blocked",
+        "a discovery document whose issuer/endpoints point at a base the server does not actually mount is a FAIL — a wrong .well-known breaks every downstream RP/relying party silently"
+      ],
+      "variants": [
+        "email+password (POST /api/v1/auth/sign-in/email, /sign-up/email, /sign-out, /get-session)",
+        "phone+password (better-auth phone-number plugin sign-in surface)",
+        "phone OTP sign-in + reset (requires SMS service; loud NOT_SUPPORTED without — #2780)",
+        "enterprise SSO / generic OIDC (oidcProviders[] via genericOAuth; login button gated on usable providers)",
+        "social OAuth (socialProviders map, per-provider enabled)",
+        "device authorization grant (RFC 8628 — CLI/TV login)",
+        "two-factor (server-driven challenge, ADR-0069)",
+        "magic link (flag exists; no login UI — blocked, objectui#2514)",
+        "passkeys (flag exists; no login UI — blocked, objectui#2514)"
+      ],
+      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts" },
+      "traps": ["hydration-race", "dispatcher-vs-hono-route", "wrong-persona"],
+      "source": [
+        "packages/spec/src/system/auth-config.zod.ts (AuthPluginConfigSchema: phoneNumber/twoFactor/deviceAuthorization/magicLink/passkeys; socialProviders; oidcProviders; EmailAndPasswordConfigSchema)",
+        "packages/spec/src/api/auth-endpoints.zod.ts (AuthEndpointPaths; AuthFeaturesConfigSchema; device-flow response schemas)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (BETTER_AUTH_MOUNTED_SURFACE: the live change-email/delete-user + /.well-known/* rows; auth-plugin.ts mounts the two discovery docs at app root)",
+        "packages/spec/src/kernel/public-auth-features.ts (flag semantics, gated inputs, objectui#2513/#2514 known gaps)",
+        "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-method sign-in proof with both-sides gate checks and advertisement parity, grounded in the spec's plugin config + public feature registry", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-08", "change": "added the .well-known/openid-configuration + oauth-authorization-server discovery-document clause (issuer/endpoints match the mounted base, jwks cross-check) and self-service change-email + delete-user clauses; recorded the live-route divergences (device flow, password reset) from the spec paths (PENDING-GAPS §D)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.invitation-scope-gates",
+      "title": "Invitation issuance honors role-scope gates: delegated_admin can invite members but cannot mint admins; a plain member cannot invite at all",
+      "since": "v17",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["delegated_admin org member", "plain member", "tenant admin (setup only)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a multi-org boot with the organization capability on (the sys_invitation actions — invite_user/cancel_invitation/resend_invitation — are gated on features.organization)",
+          "a member holding the delegated_admin org role (the ADR-0105 D8 principal; the pinned dogfood test shows the setup: mint the org, set membership roles via the better-auth-managed writer)"
+        ]
+      },
+      "steps": [
+        "prefer the pin (rule 6): run packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts and capture its output — it proves the three-way contract end to end over real HTTP",
+        "browser lane, as the delegated_admin: open the invite affordance and issue a MEMBER-role invitation; capture the request and the created sys_invitation row via the data API",
+        "as the same principal, attempt an ADMIN-role invitation; capture the refusal",
+        "immediately read sys_invitation via the API and verify NO row (not even a pending one) was left behind by the refused attempt",
+        "as a plain member: verify the invite affordance is absent in the UI, then fire the invitation endpoint directly and capture the server refusal",
+        "as the invited member address, verify the pending invitation is visible/actionable where the product surfaces it, and check its status vocabulary against the spec enum",
+        "exercise cancel_invitation (or resend_invitation) on the pending row as the entitled persona and verify the status/state change via the API",
+        "read the delegable-scope surface that feeds the invite role picker: GET /api/v1/security/my-delegable-scope as the delegated_admin (strictly self-scoped, no target-user parameter — ADR-0090 D12 / ADR-0105 D8) and confirm the returned role set EXCLUDES admin-mintable roles; repeat as a plain member and confirm the scope is empty or the call is denied"
+      ],
+      "acceptance": [
+        {
+          "clause": "a delegated_admin CAN issue a member invitation — the role reaches the endpoint (2xx) and a sys_invitation row exists with status pending",
+          "oracle": "api",
+          "verify": "the invite response + a sys_invitation read showing the pending row with the invitee email and role",
+          "evidence": "response + row read"
+        },
+        {
+          "clause": "the SAME principal issuing role admin is refused — the role cap in beforeCreateInvitation holds (without it, admin-invite → auto-elevation → tenant admin is a four-step privilege escalation)",
+          "oracle": "api",
+          "verify": "the admin-role attempt returns non-2xx",
+          "evidence": "the refusal response"
+        },
+        {
+          "clause": "the refusal is clean: NO invitation row is left behind by the refused attempt — no orphan pending admin invite that could later be accepted",
+          "oracle": "api",
+          "verify": "sys_invitation read immediately after the refusal shows no new row",
+          "evidence": "the read"
+        },
+        {
+          "clause": "a plain member cannot invite AT ALL — proving it was the delegated_admin ROLE that opened the endpoint, not a general loosening",
+          "oracle": "api",
+          "verify": "the member's direct invitation request is refused server-side",
+          "evidence": "the forged-request response"
+        },
+        {
+          "clause": "the UI shows invite affordances only to entitled personas — both sides captured",
+          "oracle": "screenshot",
+          "verify": "delegated_admin sees the invite affordance; plain member does not (screenshot first, then DOM)",
+          "evidence": "the two screenshots"
+        },
+        {
+          "clause": "invitation lifecycle state uses the spec's vocabulary and transitions honestly (pending → accepted/rejected/expired; cancel/resend behave)",
+          "oracle": "api",
+          "verify": "row status is always one of the InvitationStatus enum values; the cancel/resend action's effect is visible in a fresh read",
+          "evidence": "the before/after reads"
+        },
+        {
+          "clause": "the delegable-scope read is the picker's server truth: GET /api/v1/security/my-delegable-scope returns, for the delegated_admin, exactly the roles that principal may mint (admin-mintable roles absent) — so the UI cannot offer an admin invite it would then be refused for; a plain member's scope is empty or the call is denied",
+          "oracle": "api",
+          "verify": "the delegated_admin response's role list contains member but NOT admin; the plain member's response is empty/denied — cross-checked against the admin-role refusal proven above (client method security.describeDelegableScope, rest-route-ledger.ts)",
+          "evidence": "the two /security/my-delegable-scope responses"
+        }
+      ],
+      "negative": [
+        "an admin-role invitation that returns success, or that leaves ANY row behind, is a FAIL of privilege-escalation severity — file immediately, P0-verify per RUNNER rule 7",
+        "UI-only enforcement (affordance hidden but the forged request succeeds) is a FAIL — the server is the authority (ADR-0057 D10)",
+        "my-delegable-scope returning admin (or any role the caller cannot actually mint) is a FAIL — the picker would offer an invite the endpoint then refuses, and worse, a client that trusts the scope could try to mint it"
+      ],
+      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts" },
+      "traps": ["wrong-persona", "dispatcher-vs-hono-route"],
+      "source": [
+        "packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts (ADR-0105 D8 / #3697; the escalation chain the role cap blocks)",
+        "packages/spec/src/identity/organization.zod.ts (InvitationSchema, InvitationStatus enum)",
+        "packages/rest/src/rest-route-ledger.ts (GET /api/v1/security/my-delegable-scope — security.describeDelegableScope, ADR-0090 D12 / ADR-0105 D8, self-scoped read half of the delegated-admin gate)",
+        "packages/spec/src/kernel/public-auth-features.ts (organization feature gates sys_invitation invite/cancel/resend actions)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: invitation scope gates and lifecycle, pinned to the delegated-admin-invite dogfood test", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-08", "change": "added GET /api/v1/security/my-delegable-scope clause (delegated_admin scope excludes admin-mintable roles; plain member empty/denied) — the read half that feeds the invite role picker (PENDING-GAPS §D)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.admin-lifecycle-operations",
+      "title": "Admin user-lifecycle operations (ban/unban, set-password, impersonate, create/set-role/remove, revoke-sessions) enforce, persist, and stay closed to non-admins",
+      "since": "v16",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["platform admin", "target user", "non-admin forger"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the better-auth admin plugin enabled (plugins.admin: true) — it exposes /admin/ban-user, /admin/unban-user, /admin/set-user-password, /admin/impersonate-user, /admin/stop-impersonating, /admin/list-users, /admin/create-user, /admin/set-role, /admin/remove-user, /admin/revoke-user-session(s) under the auth route and augments sys_user with role/banned/ban_reason/ban_expires and sys_session with impersonated_by",
+          "a disposable target user with a known password (create one; do not ban a seeded persona other items depend on)"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/auth/config and confirm features.admin is advertised (opt-in flag; it gates the sys_user ban/unban/set-password/impersonate actions)",
+        "as platform admin, GET /api/v1/auth/admin/list-users and record the roster the admin surface reads from",
+        "create a login-capable user via POST /api/v1/auth/admin/create-user with an EXPLICIT password AND generatePassword:true set (the console dialog sends both — generatePassword defaults true, the input is labelled 'leave empty to generate'); then sign in as that user with the EXPLICIT password to prove it won over the generated one (#3031/#3033)",
+        "as platform admin, ban the target user with a reason via the sys_user action (or POST /api/v1/auth/admin/ban-user); read sys_user back and record banned/ban_reason",
+        "attempt to sign in as the banned user (POST /api/v1/auth/sign-in/email) and capture the refusal",
+        "unban, then verify the same sign-in now succeeds",
+        "set the target's password via the admin set-password (out-of-band recovery); verify the NEW password signs in and the OLD one is refused",
+        "sign the target in to establish a LIVE session, then as admin POST /api/v1/auth/admin/revoke-user-sessions for that target; the target's very next authed request (get-session) must 401 mid-flight — the kill is immediate, not deferred to expiry",
+        "change the target's role via POST /api/v1/auth/admin/set-role and prove the change bites: an operation the new role gates flips outcome (e.g. promote → an admin-only read now 2xx; demote → it now 403)",
+        "impersonate the target from the admin surface; verify via the API that the impersonation session carries impersonated_by, and screenshot the console's impersonation state; stop impersonating and verify the admin's own session is restored",
+        "POST /api/v1/auth/admin/remove-user for a throwaway user that OWNS at least one showcase row (task/note), then read that owned row back: its owner_id is cleared to null (engine referential-integrity FK clear), the row itself survives, and the owner-anchor transfer guard did NOT veto the cascade (#3023/#3048)",
+        "as a NON-admin, fire each of /admin/ban-user, /admin/list-users, /admin/create-user, /admin/set-role, /admin/remove-user, /admin/revoke-user-sessions directly and capture every refusal",
+        "run the audit-trail pin and capture its output for the attribution clause"
+      ],
+      "acceptance": [
+        {
+          "clause": "ban persists, enforces, and is reversible: after ban, sys_user shows banned + ban_reason and the banned user's sign-in is refused with a named error; after unban, the same credentials sign in again — the gate is reversible, not a tombstone",
+          "oracle": "api",
+          "verify": "the sys_user read + refused sign-in after the ban, then the successful sign-in after the unban",
+          "evidence": "row read + the refused sign-in + the post-unban sign-in"
+        },
+        {
+          "clause": "set-user-password rotates the credential: new password works, old password is refused",
+          "oracle": "api",
+          "verify": "both sign-in attempts captured after the rotation",
+          "evidence": "the two responses"
+        },
+        {
+          "clause": "admin create-user mints a login-capable account and explicit-password-wins: a user created with BOTH an explicit password and generatePassword:true signs in with the EXPLICIT password (the generated one was never applied) — and admin/create-user leaves exactly the identity rows it should (sys_user + its credential sys_account)",
+          "oracle": "api",
+          "verify": "the create-user response + a successful sign-in with the explicit password; the generated password (never returned to the caller for an explicit request) does not sign in (#3031/#3033, admin-user-endpoints.ts resolvePassword)",
+          "evidence": "the create response + the two sign-in attempts"
+        },
+        {
+          "clause": "set-role changes gate outcomes, not just a column: after POST /admin/set-role the target's access to a role-gated operation flips (grants what the new role allows, revokes what it removes) — the role write is authoritative for authorization, verified by re-driving the gated call",
+          "oracle": "api",
+          "verify": "the same gated request returns 2xx vs 403 before/after the role change, as the target",
+          "evidence": "the two gated-request responses bracketing the set-role"
+        },
+        {
+          "clause": "revoke-user-sessions kills the target's LIVE session mid-flight: a session that answered get-session a moment earlier now 401s immediately after the admin revoke — not at token expiry",
+          "oracle": "api",
+          "verify": "get-session as the target: 2xx before the admin revoke, 401 on the very next call after it",
+          "evidence": "the before/after get-session pair"
+        },
+        {
+          "clause": "engine cascade exemption (§A5): removing a user who OWNS rows clears owner_id to null on those rows via the engine's referential-integrity FK clear — the owner-anchor transfer guard does NOT veto this system-context cascade write (it rides a server-DERIVED marker, __referentialFieldClear, that cannot be forged from a request), and the owned row survives with owner_id null rather than the delete aborting",
+          "oracle": "api",
+          "verify": "read the owned row after remove-user: it exists, owner_id is null; the remove-user call itself returned 2xx (not a guard-abort). Cross-checked by packages/plugins/plugin-security/src/security-plugin.test.ts '[#3023] an engine referential FK clear … is exempt'",
+          "evidence": "the owned-row read (owner_id null) + the remove-user response"
+        },
+        {
+          "clause": "impersonation is attributed: the impersonated session records impersonated_by, and stop-impersonating returns the admin to their own session",
+          "oracle": "api",
+          "verify": "session read during impersonation shows impersonated_by = the admin; after stopping, get-session returns the admin again",
+          "evidence": "the two session reads"
+        },
+        {
+          "clause": "the console makes the impersonation state visible while it is active — support sessions must not be silent",
+          "oracle": "screenshot",
+          "verify": "screenshot during impersonation shows the impersonated identity (and any impersonation indicator the console renders)",
+          "evidence": "the screenshot"
+        },
+        {
+          "clause": "admin operations leave an attributable audit trail — pinned by automation",
+          "oracle": "test",
+          "verify": "packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts passes on this build",
+          "evidence": "the test output"
+        },
+        {
+          "clause": "the gate holds both ways for EVERY admin operation: a non-admin's direct call to /admin/ban-user, /admin/list-users, /admin/create-user, /admin/set-role, /admin/remove-user and /admin/revoke-user-sessions is each refused server-side (better-auth enforces the platform admin role internally)",
+          "oracle": "api",
+          "verify": "each forged call returns non-2xx and the target's sys_user row (and session, and roster) is unchanged",
+          "evidence": "the six refusals + the unchanged-state reads"
+        }
+      ],
+      "negative": [
+        "a non-admin forged admin operation succeeding is a FAIL of the highest severity — apply RUNNER rule 7 (independent re-derivation) before acting on it",
+        "a ban that hides the user in the UI while their sign-in still works is a FAIL — the sign-in refusal is the enforcement, not the list filter",
+        "revoke-user-sessions that only stops NEW logins while the existing live session keeps answering is a FAIL — the contract is an immediate kill",
+        "remove-user aborting because the owner-anchor guard vetoed the owner_id-null cascade (instead of exempting the engine FK clear) is the #3023 regression returned — FAIL; equally, a create-user that applies the GENERATED password when an explicit one was supplied is the #3031 failure — FAIL"
+      ],
+      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts" },
+      "traps": ["wrong-persona", "shared-browser-tab"],
+      "source": [
+        "packages/spec/src/system/auth-config.zod.ts (admin plugin: endpoint list, sys_user role/banned/ban_reason/ban_expires, sys_session.impersonated_by)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (BETTER_AUTH_MOUNTED_SURFACE admin/* rows: list-users, create-user, set-role, remove-user, revoke-user-session(s))",
+        "packages/plugins/plugin-auth/src/admin-user-endpoints.ts (create-user resolvePassword: explicit password wins over generatePassword — #3031/#3033; leaves sys_user + credential sys_account)",
+        "packages/plugins/plugin-security/src/security-plugin.ts (§A5 #3023 EXEMPTION: __referentialFieldClear owner_id-null cascade rides a server-derived context, the owner-anchor guard must not veto it) + security-plugin.test.ts '[#3023] … engine referential FK clear … is exempt'",
+        "packages/spec/src/kernel/public-auth-features.ts (admin flag gates the sys_user lifecycle actions; SCIM forces it on — ADR-0071)",
+        "packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "new item: admin lifecycle operations with persistence, enforcement, attribution and both-sides gate checks", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-08", "change": "added admin/list-users, create-user (explicit-password-wins §E12 #3031/#3033, signs in), set-role (flips gate outcomes), remove-user, revoke-user-sessions (kills live session mid-flight), each non-admin-refused; plus the §A5 engine cascade exemption clause (delete sys_user → owned rows' owner_id set_null; owner-anchor guard does not veto the system-context cascade, #3023/#3048) (PENDING-GAPS §D + §G)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.session-list-revoke",
+      "title": "Active-session list is owner-scoped, and each revoke primitive terminates exactly the sessions it names",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["user A (two devices)", "user B (unrelated, second live session)", "platform admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "email+password sign-in enabled (stock showcase) so a user can hold two concurrent sessions from two browser contexts",
+          "a second unrelated user (B) signed in, to prove the list is owner-scoped (RLS), not a global session dump",
+          "admin access to the Setup → Sessions surface (nav_sessions, sys_session all_sessions view) for the all-users clause"
+        ]
+      },
+      "steps": [
+        "sign user A in from two independent browser contexts (device-1, device-2), and separately sign user B in once — three live sessions total",
+        "as A, GET /api/v1/auth/list-sessions (client auth.sessions.list) AND load the Account 'Active Sessions' surface (sys_session `mine` view, filter user_id = {current_user_id}); screenshot the list after it renders",
+        "cross-check the data-API read: GET /api/v1/data/sys_session as A returns ONLY A's rows — B's session must be invisible (RLS), even though sys_session is a shared managed-by-better-auth table",
+        "revoke device-2 specifically: POST /api/v1/auth/revoke-session keyed on that session's TOKEN (the object action revoke_session uses recordIdParam:'token' — better-auth keys off the token, not the row id); then issue an authed request from device-2 and capture the 401",
+        "confirm device-1 is untouched: an authed request from device-1 still 2xx",
+        "from device-1, invoke revoke-other-sessions (POST /api/v1/auth/revoke-other-sessions, the 'Sign out other devices' toolbar action): every OTHER session for A dies, device-1 survives; re-read list-sessions and confirm exactly one row (device-1) remains",
+        "as admin, open Setup → Sessions (all_sessions view) and confirm it lists rows across ALL users (A and B both present, user_id column shown), with the revoked_at / revoke_reason fields visible on terminated rows",
+        "attempt a direct write to sys_session via the data API (PATCH/DELETE /api/v1/data/sys_session/{id}) and capture the refusal — the table is read-only over the data API (apiMethods ['get','list'], writes 405 before 403)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the active-session list is owner-scoped: A's list-sessions and the Account sessions view show BOTH of A's sessions and NONE of B's — the shared sys_session table is RLS-filtered to the caller",
+          "oracle": "api",
+          "verify": "GET /api/v1/auth/list-sessions and GET /api/v1/data/sys_session as A return A's two rows only; B's row id (known from B's own read) is absent",
+          "evidence": "A's list responses + B's row id proving the exclusion"
+        },
+        {
+          "clause": "the browser Active Sessions surface renders the owner's sessions (mine view) — screenshot-confirmed before any DOM read",
+          "oracle": "screenshot",
+          "verify": "the Account sessions view shows A's two device rows with ip_address / created_at / expires_at columns; the count matches the API read",
+          "evidence": "the sessions-list screenshot + API count"
+        },
+        {
+          "clause": "revoke-session terminates exactly the named session: after revoking device-2 by token, device-2's next request 401s and device-1 keeps working — the revoke is keyed on the token, one session, not all",
+          "oracle": "api",
+          "verify": "device-2 authed request returns 401 post-revoke; device-1 authed request still 2xx",
+          "evidence": "the two post-revoke request traces"
+        },
+        {
+          "clause": "revoke-other-sessions keeps ONLY the calling session: invoked from device-1, it kills every other session for A and leaves device-1 alive; the post-call list-sessions has exactly one row",
+          "oracle": "api",
+          "verify": "list-sessions after the call returns one row (device-1); a request from any previously-other session 401s",
+          "evidence": "the post-call list + a 401 from a killed session"
+        },
+        {
+          "clause": "the admin Sessions surface lists ALL users' sessions with revoke metadata: the all_sessions view shows rows for both A and B (user_id column) and surfaces revoked_at / revoke_reason on terminated rows",
+          "oracle": "screenshot",
+          "verify": "Setup → Sessions shows cross-user rows; a revoked row shows revoked_at set and a revoke_reason from the {idle_timeout, absolute_max, concurrent_cap, admin} vocabulary",
+          "evidence": "the admin sessions screenshot + a data-API read of a revoked row"
+        },
+        {
+          "clause": "sys_session is read-only over the data API — a forged direct write is refused (405 before 403), so revocation only happens through the auth endpoints, never a raw row edit",
+          "oracle": "api",
+          "verify": "PATCH/DELETE /api/v1/data/sys_session/{id} returns 405 (method not allowed — apiMethods ['get','list'], identity write guard ADR-0092 D2)",
+          "evidence": "the forged-write response"
+        }
+      ],
+      "negative": [
+        "A's session list returning B's rows (or a global session dump) is an RLS-breach FAIL — the shared table must be owner-filtered",
+        "revoke-session that signs A out of BOTH devices (killing device-1 too) is a FAIL — it must terminate exactly the named token",
+        "revoke-other-sessions that also kills the calling session, or that leaves a supposedly-revoked session still answering, is a FAIL",
+        "a revoked session that keeps answering authed requests until token expiry is a FAIL — revocation is immediate, the 401 is the enforcement not the list filter"
+      ],
+      "traps": ["wrong-persona", "shared-browser-tab"],
+      "source": [
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (GET list-sessions=auth.sessions.list, POST revoke-session=auth.sessions.revoke, revoke-other-sessions=auth.sessions.revokeOthers, revoke-sessions=auth.sessions.revokeAll)",
+        "packages/platform-objects/src/identity/sys-session.object.ts (mine view filter user_id={current_user_id}; all_sessions admin view; revoked_at/revoke_reason fields ADR-0069 D4; revoke_session action recordIdParam:'token'; apiMethods ['get','list'] — writes 405 before 403, #1591/ADR-0092 D2)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_sessions → Setup Sessions, objectName sys_session)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: owner-scoped active-session list (RLS) + per-primitive revoke semantics (revoke-session by token, revoke-other-sessions keeps current) + admin all-sessions view with revoked_at/revoke_reason, grounded in the auth route ledger and sys_session object (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.api-key-ui-lifecycle",
+      "title": "Personal API key: minted show-once on Connect-an-Agent, authenticates as its owner, revoke kills it and restore brings it back — mine-view scoped",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["a signed-in member (key owner)", "platform admin", "the key itself (machine caller via x-api-key)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the developer Integrations page (AgentConnectSection) reachable for the signed-in user — POST /api/v1/keys is the mint route (client keys.create) and it is not admin-gated (the key acts as the caller)",
+          "at least one apiEnabled showcase data object to call with the key (e.g. showcase_task)"
+        ]
+      },
+      "steps": [
+        "as a signed-in member, open the developer Integrations page → 'Connect an AI agent (MCP)' (AgentConnectSection), type a key name and click Generate key; screenshot the show-once dialog",
+        "capture the mint response: POST /api/v1/keys returns data.key (the raw secret) exactly once, plus id / name / prefix",
+        "record the raw secret, close the dialog, then re-open the API Keys list (sys_api_key `mine` view) and confirm the row shows only the prefix — the raw key is never shown again (the stored `key` column is hashed + hidden)",
+        "call a data route as the machine caller: GET /api/v1/data/showcase_task with header x-api-key: <raw secret> (NOT a session cookie/Bearer) and capture the 200 + that the rows returned are the OWNER's row-level-security view (the key acts as the user)",
+        "revoke the key via the row action revoke_api_key (PATCH /api/v1/data/sys_api_key/{id} bodyExtra {revoked:true}); immediately re-call the data route with x-api-key and capture the 401",
+        "restore via restore_api_key (PATCH … {revoked:false}); re-call and capture the 200 again — the lifecycle is reversible",
+        "mine-view scoping: sign in as a DIFFERENT member and confirm the sys_api_key `mine` view (filter user_id={current_user_id}) does NOT list the first user's key; then as admin open Setup → API Keys (the `all_keys` view, nav gated on manage_platform_settings) and confirm every user's key is listed",
+        "attempt to read the raw secret back via the data API (GET /api/v1/data/sys_api_key/{id}) and confirm the `key` field is absent/hidden — only the prefix is ever returned"
+      ],
+      "acceptance": [
+        {
+          "clause": "the secret is shown exactly once: the mint response carries data.key and the show-once dialog displays it, but every subsequent read (list row, get-by-id) returns only the prefix — the stored key is hashed",
+          "oracle": "api",
+          "verify": "POST /api/v1/keys response has a raw `key`; a follow-up GET /api/v1/data/sys_api_key/{id} has no raw key, only prefix (the hidden hashed `key` column never serializes)",
+          "evidence": "the mint response + the follow-up read + the dialog screenshot"
+        },
+        {
+          "clause": "the key authenticates as its owner: x-api-key on a data route returns 200 and the row set is the OWNER's RLS view — a machine credential, carrying the user's permissions, not a superuser bypass",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/showcase_task with x-api-key returns 200; the rows match what the owner sees with a session (not more)",
+          "evidence": "the x-api-key request trace + a session-read comparison"
+        },
+        {
+          "clause": "revoke is immediate and enforced server-side: after revoke_api_key the same x-api-key call 401s on the very next request",
+          "oracle": "api",
+          "verify": "the post-revoke x-api-key request returns 401",
+          "evidence": "the revoke PATCH response + the 401"
+        },
+        {
+          "clause": "restore is reversible: restore_api_key flips revoked back to false and the key authenticates again (200)",
+          "oracle": "api",
+          "verify": "the post-restore x-api-key request returns 200",
+          "evidence": "the restore PATCH + the 200"
+        },
+        {
+          "clause": "keys are mine-view scoped: the sys_api_key `mine` view lists only the caller's own keys; a second user cannot see the first's, and only the admin all_keys view (manage_platform_settings) shows every user's keys",
+          "oracle": "api",
+          "verify": "the second member's mine-view read excludes the first key's id; the admin all_keys read includes it",
+          "evidence": "the two mine-view reads + the admin read"
+        },
+        {
+          "clause": "the show-once dialog and the API Keys list render correctly — screenshot-confirmed",
+          "oracle": "screenshot",
+          "verify": "the generate dialog shows the copyable secret with the 'not be shown again' warning; the re-opened list shows the prefix-only row",
+          "evidence": "the two screenshots"
+        }
+      ],
+      "negative": [
+        "the raw secret being readable a second time (in a list row, a get-by-id, or a re-opened dialog) is a FAIL — show-once means the hash is all the server keeps",
+        "a revoked key still returning 200 on a data route is a FAIL — revocation must be enforced at auth, not only hidden in the list",
+        "an api key that reads MORE than its owner's RLS view (a superuser bypass) is a FAIL — the key carries the user's permissions",
+        "one user's key appearing in another user's mine view is an RLS FAIL"
+      ],
+      "traps": ["wrong-persona", "hydration-race"],
+      "source": [
+        "objectui apps/console/src/pages/developer/AgentConnectSection.tsx (ADR-0036 Phase 2b: POST /api/v1/keys mint, show-once dialog, x-api-key connect steps)",
+        "packages/runtime/src/route-ledger.ts (POST /keys → client keys.create)",
+        "packages/platform-objects/src/identity/sys-api-key.object.ts (revoke_api_key/restore_api_key actions PATCH /api/v1/data/sys_api_key/{id} bodyExtra revoked; mine view user_id={current_user_id} vs all_keys; hashed hidden `key`, visible `prefix`; apiMethods ['get','list'])",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_api_keys requiredPermissions ['manage_platform_settings'] — admin all-view)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: personal API key mint (show-once, POST /api/v1/keys) → authenticate-as-owner via x-api-key → revoke 401 → restore 200, plus mine-view vs admin all-view scoping, grounded in AgentConnectSection + sys_api_key object (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.self-service-profile-password",
+      "title": "Self-service profile: name + avatar edits persist through real storage, and password change verifies the current password (passwordless users get set-initial)",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["a signed-in email+password user", "a signed-in passwordless (SSO-only) user"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the Account app Profile page (objectui apps/console ProfilePage.tsx) reachable for a signed-in user",
+          "a working file-storage backend so the avatar upload writes a real object (useUpload → presigned/committed file); if storage is unconfigured the avatar clause is blocked(fixture) not faked",
+          "for the set-initial-password clause: a user with NO local password (signed in via SSO/social) — hasLocalPassword() returns false; on stock showcase this needs a social/OIDC provider, so that clause is blocked(fixture) same class as sso-enforced unless a passwordless user can be provisioned"
+        ],
+        "knownGaps": [
+          "the set-initial-password branch needs a passwordless (SSO-only) user; stock showcase ships no configured IdP, so provision one or run that clause blocked(fixture)"
+        ]
+      },
+      "steps": [
+        "sign in as the email+password user and open the Account Profile page; screenshot the identity card (name, email, role badge)",
+        "change the name field and Save (handleSave → auth.updateUser({name}) → POST /api/v1/auth/update-user); re-read GET /api/v1/auth/get-session and confirm the new name; reload the page and confirm the header/avatar-fallback reflect it (persisted, not just local state)",
+        "upload an avatar (the hidden file input, data-testid profile-avatar-file): useUpload writes the file to storage, then updateUser({image: <url>}); capture the storage write (presigned/commit) and confirm get-session now carries image = that url",
+        "remove the avatar (profile-avatar-remove-btn → updateUser({image:null})); confirm get-session image is cleared and the fallback initials render again",
+        "change the password: enter the correct current password + a new one (PasswordCard → auth.changePassword(current,new) → POST /api/v1/auth/change-password); sign out and sign in with the NEW password (2xx), then confirm the OLD password is refused",
+        "negative: attempt change-password with a WRONG current password and capture the refusal — the current-password check is server-enforced, not just a UI confirm",
+        "confirm email is immutable on this surface (the email input is disabled, 'Email cannot be changed') — self-service email change is a distinct endpoint (identity-auth.auth-method-matrix covers /auth/change-email)",
+        "passwordless branch (if a set-initial-capable user exists): as the SSO-only user, the card renders 'Set Local Password' (hasLocalPassword false) — set an initial password (setInitialPassword → no current-password field) and then sign in with email+password to prove the local credential now exists"
+      ],
+      "acceptance": [
+        {
+          "clause": "a name change persists server-side: after Save, get-session returns the new name and it survives a reload — updateUser wrote it, the header is not just local React state",
+          "oracle": "api",
+          "verify": "GET /api/v1/auth/get-session after the POST /api/v1/auth/update-user shows the new name; a reloaded page shows it too",
+          "evidence": "the update + get-session responses + the reloaded screenshot"
+        },
+        {
+          "clause": "avatar upload is a real storage write, not a data: URL: useUpload commits a file object and updateUser({image}) stores its url; get-session reflects the url and the avatar renders",
+          "oracle": "network",
+          "verify": "the upload network trace shows a storage presign/commit returning a URL; get-session image equals that URL; the rendered <AvatarImage src> matches",
+          "evidence": "the upload trace + get-session + avatar screenshot"
+        },
+        {
+          "clause": "avatar remove clears the image: updateUser({image:null}) empties the stored image and the initials fallback returns",
+          "oracle": "api",
+          "verify": "post-remove get-session image is null/empty; the card shows getUserInitials fallback",
+          "evidence": "the get-session + the screenshot"
+        },
+        {
+          "clause": "password change verifies the CURRENT password and rotates the credential: the correct current password + new one succeeds, the new password then signs in and the old one is refused",
+          "oracle": "api",
+          "verify": "change-password 2xx; sign-in with new password 2xx; sign-in with old password non-2xx",
+          "evidence": "the change response + the two sign-in attempts"
+        },
+        {
+          "clause": "a wrong current password is refused server-side — the verification is real, not a client-only confirm",
+          "oracle": "api",
+          "verify": "change-password with an incorrect current password returns non-2xx and the credential is unchanged (old password still signs in)",
+          "evidence": "the refusal + a subsequent old-password sign-in still working"
+        },
+        {
+          "clause": "a passwordless user gets set-initial-password, not change-password: with hasLocalPassword false the card omits the current-password field, setInitialPassword creates the local credential, and email+password sign-in then works",
+          "oracle": "api",
+          "verify": "the set-initial call 2xx with no current-password; a subsequent email+password sign-in for that user 2xx (was impossible before)",
+          "evidence": "the set-initial response + the new sign-in"
+        }
+      ],
+      "negative": [
+        "a name/avatar 'save' that updates the header but does NOT persist (gone after reload) is a FAIL — updateUser must write server-side",
+        "an avatar stored as an inline data: URL rather than a committed storage object is a FAIL (the item asserts a real storage write)",
+        "change-password succeeding with a WRONG current password is a security FAIL — the current-password check must be server-enforced",
+        "offering the passwordless user a change-password form with a required current password they don't have (locking them out of setting one) is a FAIL — set-initial is the correct branch"
+      ],
+      "traps": ["hydration-race", "stale-console-bundle"],
+      "source": [
+        "objectui apps/console/src/pages/system/ProfilePage.tsx (updateUser name/image; useUpload avatar; PasswordCard changePassword vs setInitialPassword gated on hasLocalPassword; email immutable; data-testids profile-avatar-file/-upload-btn/-remove-btn)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST /api/v1/auth/update-user=auth.updateUser, POST /api/v1/auth/change-password=auth.changePassword, GET /api/v1/auth/get-session=auth.me)",
+        "packages/platform-objects/src/identity/sys-account.object.ts (previous_password_hashes ring — ADR-0069 D1 reuse-prevention backs change-password)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: self-service name + avatar (real storage write, persists) and password change with current-password verification, plus the passwordless set-initial branch, grounded in ProfilePage.tsx + the auth route ledger (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.org-membership-team-management",
+      "title": "Setup Organization page resolves the active org and drives member/invitation/team management through the better-auth org endpoints — non-admins refused server-side",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["tenant admin / org owner", "a target org member", "a non-admin org member (forger)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the organization capability mounted (always mounted per ADR-0081 D1; plugin-auth's default-org bootstrap guarantees an org to manage) and a session with an active organization so {current_org_id} resolves",
+          "at least two members in the org so role changes and removals have a target that is not the admin"
+        ]
+      },
+      "steps": [
+        "sign in as the org owner/admin and open Setup → People & Org → Organization (nav_organization: type object, objectName sys_organization, recordId {current_org_id}, ADR-0081); screenshot the org record page and confirm {current_org_id} resolved to the session's active org (not the list fallback)",
+        "confirm the record page exposes the Members / Invitations / Teams tabs with the better-auth row actions (GET list-members, list-invitations, list-teams feed them)",
+        "change a member's role: POST /api/v1/auth/organization/update-member-role (client organizations.updateMemberRole) to one of the 4-name vocabulary {owner, admin, member, guest}; read the membership back and confirm the new role",
+        "prove the role change bites: an operation the new role gates flips outcome for that member (e.g. promote to admin → an org-admin-only action now permitted; demote → refused)",
+        "rename the organization: POST /api/v1/auth/organization/update (organizations.update) with a new name; re-read GET get-full-organization and confirm the rename persisted and the nav label follows",
+        "remove a member: POST /api/v1/auth/organization/remove-member (organizations.removeMember); confirm the member's org-scoped access SHRINKS — a resource they could read as a member now refuses",
+        "create a team + add members: POST /api/v1/auth/organization/create-team (organizations.teams.create), then POST /api/v1/auth/organization/add-team-member (organizations.teams.addMember) for two users; read sys_team_member and confirm two join rows exist (unique on team_id+user_id)",
+        "both-sides gate: as a NON-admin member, fire update-member-role / remove-member / update / create-team / add-team-member directly and capture each server refusal; screenshot that the management affordances are absent in the non-admin's UI"
+      ],
+      "acceptance": [
+        {
+          "clause": "{current_org_id} resolves to the session's active organization: the Organization nav opens that org's record page (Members/Invitations/Teams tabs), not the raw sys_organization list — the ADR-0081 active-org token is wired",
+          "oracle": "screenshot",
+          "verify": "the org record page renders for the active org id (cross-checked against GET /api/v1/auth/organization/get-active-member / get-full-organization); the three management tabs are present",
+          "evidence": "the org-page screenshot + the get-active/get-full response"
+        },
+        {
+          "clause": "update-member-role writes a role from the 4-name vocabulary and it bites: the membership read shows the new role (one of owner/admin/member/guest) and a role-gated operation flips outcome accordingly",
+          "oracle": "api",
+          "verify": "GET list-members after update-member-role shows the new role; the same gated request returns 2xx vs 403 before/after for that member",
+          "evidence": "the membership read + the bracketing gated requests"
+        },
+        {
+          "clause": "rename via organization/update persists: get-full-organization returns the new name and the surface follows",
+          "oracle": "api",
+          "verify": "GET get-full-organization after the update shows the renamed org",
+          "evidence": "the before/after org reads"
+        },
+        {
+          "clause": "remove-member shrinks access: after removal the ex-member is refused a resource they could reach as a member — removal is an authorization change, not just a roster edit",
+          "oracle": "api",
+          "verify": "an org-scoped request that succeeded for the member returns a refusal after remove-member",
+          "evidence": "the before/after member requests"
+        },
+        {
+          "clause": "create-team + add-team-member land real join rows: sys_team_member has one row per (team, user), created through the better-auth org endpoints (generic CRUD on the managed table is suppressed)",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/sys_team_member (or list-team-members) shows the two membership rows for the new team; the (team_id,user_id) pairs match",
+          "evidence": "the sys_team_member read"
+        },
+        {
+          "clause": "the gate holds both ways: a non-admin's direct update-member-role / remove-member / update / create-team / add-team-member calls are each refused server-side, and the management affordances are absent in the non-admin UI",
+          "oracle": "api",
+          "verify": "each forged non-admin call returns non-2xx and leaves membership/org/team state unchanged; the non-admin org page shows no management actions",
+          "evidence": "the forged-request responses + the non-admin screenshot"
+        }
+      ],
+      "negative": [
+        "an org management surface where the affordance is hidden but the forged endpoint succeeds for a non-admin is a FAIL — the server is the authority (ADR-0057 D10)",
+        "remove-member that drops the roster row but leaves the ex-member's org-scoped access intact is a FAIL — removal must change authorization",
+        "a role written outside the {owner, admin, member, guest} vocabulary, or a role change that does not flip any gate, is a FAIL",
+        "the Organization nav landing on the raw sys_organization list because {current_org_id} did not resolve (when an active org exists) is a FAIL of the ADR-0081 wiring"
+      ],
+      "traps": ["wrong-persona", "dispatcher-vs-hono-route", "hydration-race"],
+      "source": [
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_organization recordId {current_org_id}, ADR-0081; Teams/Invitations always mounted per ADR-0081 D1)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (organization family: update-member-role, remove-member, update, create-team, add-team-member, list-members/teams/invitations, get-active-member, get-full-organization)",
+        "packages/spec/src/identity/organization.zod.ts (MemberSchema role vocabulary: owner/admin/member/guest)",
+        "packages/platform-objects/src/identity/sys-team-member.object.ts (add_team_member/remove_team_member actions → organization/add-team-member; unique team_id+user_id; requiresFeature organization)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: Setup Organization page {current_org_id} resolution (ADR-0081) with Members/Invitations/Teams tabs, update-member-role (4-name vocab)/remove-member/rename, create-team + add-team-member → sys_team_member rows, non-admin refused server-side (PENDING-GAPS §B). Teams membership deep-tested in identity-auth.teams-bu-membership; org-member management stays here", "ref": "claude/platform-test-checklist-ocwugl" }
+    ]
+    },
+    {
+      "id": "identity-auth.teams-bu-membership",
+      "title": "Teams and the Business Unit tree: memberships land real rows, and a BU placement widens/narrows a scoped persona's read along the tree",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["org admin", "two members to place on a team", "a scope-limited persona whose read follows the BU tree"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the organization capability mounted (for the team half — sys_team / sys_team_member via the better-auth org endpoints)",
+          "the sys_business_unit tree available (managedBy 'platform' — writable over the data API, unlike the better-auth identity tables) with at least a root company node to parent a child under",
+          "for the scope-geometry clause: a sharing/scope configuration that actually consumes the BU tree (recipient_type business_unit sharing rules, or a scope-depth persona) — if no showcase geometry consumes BU membership, run that clause blocked(fixture) and record it"
+        ],
+        "knownGaps": [
+          "whether a stock showcase persona's read is scoped BY the business-unit tree depends on the seeded sharing/scope config; if none consumes it, the tree-widening clause is blocked(fixture) — the team-membership and BU-placement clauses still run"
+        ]
+      },
+      "steps": [
+        "create a team via POST /api/v1/auth/organization/create-team (or the sys_team create_team action) and add two members via POST /api/v1/auth/organization/add-team-member; read sys_team_member and confirm two rows (unique team_id+user_id)",
+        "remove one via remove-team-member and confirm the join row is gone (the endpoint keys on the (teamId,userId) pair, not the row id)",
+        "create a CHILD sys_business_unit under an existing root: POST /api/v1/data/sys_business_unit with kind (company|division|department|office|cost_center) and parent_business_unit_id = the root's id; confirm it appears in the Org Chart tree view under its parent",
+        "place a user in the child BU: create a sys_business_unit_member row (business_unit_id, user_id, function_in_business_unit member|lead|deputy, is_primary); confirm the placement via a data-API read",
+        "if BU scope geometry is configured: as the scope-limited persona, record the row set visible BEFORE the placement, then place the persona (or a record they can see) into the child BU and re-read — the visible set should WIDEN or NARROW along the tree per the geometry (cross-ref identity-auth via access-security.scope-depth-asymmetry which owns the depth matrix)",
+        "move the child BU to a different parent (re-parent parent_business_unit_id) and, if geometry consumes it, re-read the scoped persona's rows to confirm the read follows the new tree position",
+        "negative: attempt the team mutations and the BU writes as a non-admin and capture the refusals"
+      ],
+      "acceptance": [
+        {
+          "clause": "team membership lands real rows: create-team + add-team-member produce exactly one sys_team_member per (team,user), and remove-team-member deletes exactly that pair",
+          "oracle": "api",
+          "verify": "sys_team_member reads before/after each mutation; the (team_id,user_id) rows match the two added members and the removal drops exactly one",
+          "evidence": "the sys_team_member reads"
+        },
+        {
+          "clause": "a child business unit attaches to the tree: the new sys_business_unit carries parent_business_unit_id = the root and renders under it in the Org Chart tree view",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/sys_business_unit for the child shows the parent id; the tree view (org_chart) renders it nested (screenshot after render)",
+          "evidence": "the BU read + the org-chart screenshot"
+        },
+        {
+          "clause": "a user placement is a real sys_business_unit_member row with its function/primary attributes",
+          "oracle": "api",
+          "verify": "the sys_business_unit_member read shows business_unit_id + user_id + function_in_business_unit + is_primary",
+          "evidence": "the membership read"
+        },
+        {
+          "clause": "when scope geometry consumes the BU tree, a placement changes a scoped persona's visible rows along the tree — widening (placed higher / into a parent that expands subordinates) or narrowing accordingly; re-parenting moves the read with it",
+          "oracle": "api",
+          "verify": "the scoped persona's row set before vs after the placement/re-parent differs exactly by the subtree the geometry expands; if no geometry consumes BU membership this clause is blocked(fixture) and recorded",
+          "evidence": "the before/after scoped reads (or the recorded block)"
+        },
+        {
+          "clause": "team and BU mutations are admin-gated: a non-admin's create-team/add-team-member and BU writes are refused server-side",
+          "oracle": "api",
+          "verify": "the forged non-admin calls return non-2xx and leave sys_team_member / sys_business_unit(_member) unchanged",
+          "evidence": "the refusals + the unchanged reads"
+        }
+      ],
+      "negative": [
+        "add-team-member that does not create a sys_team_member row (or creates duplicates past the unique team_id+user_id constraint) is a FAIL",
+        "a BU placement that the scope geometry claims to consume but which does NOT move the scoped persona's read is a FAIL — the tree must be load-bearing, not decorative",
+        "silently degrading a BU scope to own/org when an intermediate depth is authored is the ADR-0049 loud-degradation concern — record it (see PENDING-GAPS §H five-depth note), do not tick it green"
+      ],
+      "traps": ["wrong-persona", "seed-data-thin", "hydration-race"],
+      "source": [
+        "packages/platform-objects/src/identity/sys-team-member.object.ts (add_team_member/remove_team_member → organization/add-team-member|remove-team-member; unique team_id+user_id)",
+        "packages/platform-objects/src/identity/sys-business-unit.object.ts (canonical BU tree ADR-0057 D2; kind enum; parent_business_unit_id self-ref; org_chart tree view; managedBy 'platform' — writable over the data API)",
+        "packages/platform-objects/src/identity/sys-business-unit-member.object.ts (user↔BU placement: function_in_business_unit member/lead/deputy, is_primary)",
+        "docs/qa/platform-checklist/areas/access-security.json (access-security.scope-depth-asymmetry — the depth matrix this cross-references for the tree-widening geometry)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: team membership rows (create-team/add/remove) + child business-unit creation and user placement on the sys_business_unit tree, with a scope-geometry-consumes-the-tree clause cross-referencing access-security.scope-depth-asymmetry (PENDING-GAPS §C). Org-member management lives in identity-auth.org-membership-team-management", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.self-service-password-reset",
+      "title": "Forgot-password: request → token captured at the dev mail transport → reset; old password refused, expired/reused token refused loudly",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["anonymous visitor (holds no session)", "the account owner (before and after reset)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "email+password sign-in enabled and an email transport configured — for a hermetic run use the dev `log` mail transport (EMAIL_TRANSPORT_PROVIDERS 'log' → LogTransport) so the reset email (and its token) is captured in the transport output rather than actually sent",
+          "a target user with a known current password"
+        ],
+        "knownGaps": [
+          "capturing the reset TOKEN requires reading it from the dev mail transport (LogTransport) output — if the deployment sends via a real provider with no capture hook, the token-capture step is blocked(fixture); the request/refusal clauses that don't need the token still run"
+        ]
+      },
+      "steps": [
+        "as anonymous, request a reset: POST /api/v1/auth/request-password-reset with the target email (NOTE the live route is request-password-reset / reset-password — the spec's AuthEndpointPaths says /forget-password, a divergence; trust the live server per RUNNER, and file the doc divergence)",
+        "capture the reset email at the dev mail transport (LogTransport) and extract the token (the link is GET /api/v1/auth/reset-password/:token)",
+        "complete the reset: POST /api/v1/auth/reset-password with the token + a new password; capture the response",
+        "sign in with the NEW password (2xx) and confirm the OLD password is now refused",
+        "reuse the SAME token a second time (POST /api/v1/auth/reset-password again) and capture the loud refusal — a consumed token must not reset again",
+        "request a fresh reset, let the token expire (or use a tampered/garbage token) and confirm the reset is refused with a named error, never a silent success",
+        "negative: request-password-reset for an unknown email should not leak whether the account exists (anti-enumeration) — record the response shape",
+        "confirm password-reuse prevention if configured: resetting to the OLD password is refused where password_history_count > 0 (previous_password_hashes ring, ADR-0069 D1)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the request issues a real reset artifact: POST /api/v1/auth/request-password-reset produces an email at the dev transport carrying a reset token/link (GET /api/v1/auth/reset-password/:token)",
+          "oracle": "log",
+          "verify": "the LogTransport output for the request contains the reset link with a token; the request response is a non-leaking 2xx/accepted",
+          "evidence": "the captured transport output"
+        },
+        {
+          "clause": "the token completes the reset and rotates the credential: POST /api/v1/auth/reset-password with the token + new password succeeds, the new password signs in and the old one is refused",
+          "oracle": "api",
+          "verify": "reset 2xx; sign-in new 2xx; sign-in old non-2xx",
+          "evidence": "the reset response + the two sign-in attempts"
+        },
+        {
+          "clause": "a consumed token cannot be reused: a second reset with the same token is refused with a named error",
+          "oracle": "api",
+          "verify": "the second reset-password returns non-2xx (token already used)",
+          "evidence": "the second-attempt response"
+        },
+        {
+          "clause": "an expired or tampered token is refused LOUDLY — never a silent success that leaves the password unchanged while reporting OK",
+          "oracle": "api",
+          "verify": "reset with an expired/garbage token returns a named non-2xx and the credential is unchanged (old password still signs in)",
+          "evidence": "the refusal + a subsequent old-password sign-in"
+        },
+        {
+          "clause": "request does not leak account existence: request-password-reset for an unknown email returns the same non-committal shape as for a known one (anti-enumeration)",
+          "oracle": "api",
+          "verify": "the known-email and unknown-email request responses are indistinguishable in status/body",
+          "evidence": "the two request responses"
+        }
+      ],
+      "negative": [
+        "a reset that returns 2xx but leaves the password unchanged (token not actually honored) is a FAIL — the new password must sign in and the old must not",
+        "a reused or expired token that still resets the password is a security FAIL — tokens are single-use and time-bounded",
+        "request-password-reset returning a DIFFERENT response for known vs unknown emails is an account-enumeration FAIL",
+        "a silent success on a garbage token (no error, no change) is a FAIL — the spec's contract is a loud refusal"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "wrong-persona"],
+      "source": [
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (BETTER_AUTH_MOUNTED_SURFACE: POST /api/v1/auth/request-password-reset, POST /api/v1/auth/reset-password, GET /api/v1/auth/reset-password/:token — the LIVE routes; AuthEndpointPaths.forgetPassword='/forget-password' is the divergent spec name)",
+        "packages/plugins/plugin-email/src/transports/index.ts (EMAIL_TRANSPORT_PROVIDERS 'log' → LogTransport — the dev capture transport)",
+        "packages/platform-objects/src/identity/sys-account.object.ts (previous_password_hashes ring — ADR-0069 D1 reuse-prevention)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: forgot-password round trip (request-password-reset → dev-transport token capture → reset-password), old-password-refused/new-works, single-use + expiry refusals, anti-enumeration, with the token-capture dev-mail dependency recorded as a knownGap (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.oauth-app-consent-loop",
+      "title": "OAuth provider: register an app (secret shown once), run the authorization-code consent loop — approve mints tokens + a consent record, deny mints none",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["an org admin registering the OAuth client", "the resource-owner user granting/denying consent"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the better-auth oidcProvider plugin configured (the oauth2/* routes are gated: auth-route-ledger 'requires: oidcProvider') — stock showcase ships no configured OAuth provider flow, so this item is blocked(fixture) until one is provisioned",
+          "a registered client + a redirect URI to complete the authorization-code round trip"
+        ],
+        "knownGaps": [
+          "sys_oauth_consent is apiEnabled:false (apiMethods []) — the consent ROW is not readable over the data API; verify consent via the auth surface GET /api/v1/auth/oauth2/get-consents (the row's presence implies consent for the listed scopes; the old consent_given boolean was removed)"
+        ]
+      },
+      "blocked": { "by": "fixture", "ref": "no stock showcase oidcProvider flow — needs a configured OAuth provider + client, same fixture class as identity-auth.sso-enforced-first-paint / linked-accounts-social" },
+      "steps": [
+        "as admin, register an OAuth client: POST /api/v1/auth/oauth2/create-client (client oauth.applications.register, requires oidcProvider); capture the response and the client_secret — revealed ONCE at registration",
+        "re-read the client via GET /api/v1/auth/oauth2/get-client and confirm the secret is NOT returned again (only client_id / public metadata)",
+        "begin the authorization-code flow: GET /api/v1/auth/oauth2/authorize with the client_id, redirect_uri, scope and state; as the resource owner, land on the consent page and screenshot the requested-scopes list",
+        "APPROVE: POST /api/v1/auth/oauth2/consent (oauth.consent) accept; follow the redirect, exchange the code at POST /api/v1/auth/oauth2/token, and capture the issued access/refresh tokens",
+        "confirm a consent record now exists: GET /api/v1/auth/oauth2/get-consents shows a consent for this client covering the approved scopes (sys_oauth_consent row — not data-API readable)",
+        "run the flow again for the SAME client+scopes and confirm the consent screen is SKIPPED (the recorded consent short-circuits it)",
+        "DENY path: start a fresh authorize with an added scope (forcing consent), deny it, and confirm NO tokens are issued and NO new consent is recorded",
+        "mine-view scoping: confirm the consent surface shows the CALLER's consents only — another user cannot see this user's oauth2 consents"
+      ],
+      "acceptance": [
+        {
+          "clause": "the client_secret is revealed exactly once at registration: create-client returns it, and get-client afterwards returns only public metadata (no secret)",
+          "oracle": "api",
+          "verify": "the create-client response carries client_secret; the follow-up get-client does not",
+          "evidence": "the create + get responses"
+        },
+        {
+          "clause": "the consent page lists the requested scopes before any token is minted — the user sees what they are authorizing",
+          "oracle": "screenshot",
+          "verify": "the consent screen enumerates the scopes from the authorize request",
+          "evidence": "the consent screenshot"
+        },
+        {
+          "clause": "approve mints tokens AND records consent: the token exchange returns access/refresh tokens and get-consents shows a consent covering the approved scopes for this client",
+          "oracle": "api",
+          "verify": "POST oauth2/token returns tokens; GET oauth2/get-consents lists the client+scopes (the sys_oauth_consent row's existence is the consent — no consent_given flag)",
+          "evidence": "the token response + the get-consents read"
+        },
+        {
+          "clause": "a recorded consent short-circuits the screen: a repeat authorize for the same client+scopes skips consent and proceeds to the redirect",
+          "oracle": "network",
+          "verify": "the second authorize does not render the consent page; it redirects with a code directly",
+          "evidence": "the second-flow trace"
+        },
+        {
+          "clause": "deny mints nothing: denying consent issues no tokens and records no consent — the deny path is a clean no-op on credentials",
+          "oracle": "api",
+          "verify": "no token is exchanged after deny; get-consents shows no new consent for the denied scope set",
+          "evidence": "the deny trace + the get-consents read"
+        },
+        {
+          "clause": "consents are mine-view scoped: get-consents returns only the caller's own consents",
+          "oracle": "api",
+          "verify": "a second user's get-consents does not include this user's consent",
+          "evidence": "the two get-consents reads"
+        }
+      ],
+      "negative": [
+        "the client_secret being retrievable after registration (via get-client or the data API) is a FAIL — it is a show-once credential",
+        "approve that mints tokens but records NO consent (so the screen re-prompts forever) — or deny that still mints tokens — is a FAIL",
+        "one user seeing another user's oauth2 consents is a scoping FAIL"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "wrong-persona", "hydration-race"],
+      "source": [
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (oauth-provider family, requires oidcProvider: oauth2/create-client=oauth.applications.register, get-client, consent=oauth.consent, get-consents, oauth2/authorize, oauth2/token)",
+        "packages/platform-objects/src/identity/sys-oauth-consent.object.ts (row implies consent for listed scopes — consent_given removed; apiEnabled:false so verify via get-consents, not the data API)",
+        "packages/platform-objects/src/identity/sys-oauth-application.object.ts + setup-nav.contributions.ts (nav_oauth_apps → Setup OAuth Applications)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: OAuth client registration (secret once) + authorization-code consent loop (approve mints tokens + consent record, deny mints none, recorded consent short-circuits), mine-view scoped; blocked(fixture) pending a configured oidcProvider flow (PENDING-GAPS §C)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.linked-accounts-social",
+      "title": "Linked accounts: link a social/OIDC identity through the redirect round-trip → a sys_account row appears in mine-view; unlink removes it; provider-less boot degrades honestly",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["a signed-in user linking a second identity", "the same user after unlinking"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "at least one social/OIDC provider configured (socialProviders or oidcProviders) so link_social has a provider to dance with — stock showcase ships none, so this item is blocked(fixture) until a provider is configured",
+          "the Account 'Identity Links' surface (nav_accounts → sys_account) reachable"
+        ]
+      },
+      "blocked": { "by": "fixture", "ref": "no stock showcase social/OIDC IdP — link_social needs a configured provider, same fixture class as identity-auth.sso-enforced-first-paint / oauth-app-consent-loop" },
+      "steps": [
+        "as a signed-in user, open Account → Identity Links (sys_account `mine` view, filter user_id={current_user_id}); screenshot the initial link set",
+        "invoke link_social for a configured provider: the action is type:'url' — GET /api/v1/auth/sign-in/social?provider=<p>&callbackURL=<origin>/_console/apps/account/sys_account (full-page navigation, NOT XHR, so the OAuth 302 dance and link cookie work); complete the provider round-trip and land back on the Identity Links view",
+        "confirm a sys_account row now exists for that provider in the caller's mine-view (provider_id = the provider, user_id = the caller, issuer stamped)",
+        "unlink it: the unlink_account action → POST /api/v1/auth/unlink-account with accountId = the sys_account ROW id (better-auth 1.7 keys on the row id); confirm the row is gone from mine-view",
+        "both-sides / degradation: on a boot with NO provider configured, confirm link_social degrades honestly — the affordance is absent or names the missing provider, rather than offering a link that dead-ends (open-edition honest-degradation posture)",
+        "confirm sys_account is read-only over the data API — a forged direct insert/delete is refused (apiMethods ['get','list'], writes 405)"
+      ],
+      "acceptance": [
+        {
+          "clause": "linking a social identity creates a sys_account row in the caller's mine-view after the redirect round-trip completes",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/sys_account (mine view) after the link shows a new row with provider_id = the provider and user_id = the caller; issuer is stamped",
+          "evidence": "the post-link mine-view read"
+        },
+        {
+          "clause": "the link surface renders the caller's own links only (mine-view scoped) — screenshot-confirmed",
+          "oracle": "screenshot",
+          "verify": "Identity Links shows the caller's provider rows; a different user's links are not present",
+          "evidence": "the Identity Links screenshot"
+        },
+        {
+          "clause": "unlink removes the row: unlink_account keyed on the sys_account row id deletes exactly that link from mine-view",
+          "oracle": "api",
+          "verify": "POST /api/v1/auth/unlink-account with the row's accountId; a follow-up mine-view read no longer contains it",
+          "evidence": "the unlink response + the follow-up read"
+        },
+        {
+          "clause": "a provider-less boot degrades honestly: link_social is absent or names the missing provider — never a link affordance that dead-ends",
+          "oracle": "screenshot",
+          "verify": "with no provider configured, the Identity Links surface shows no dead link action (or an explicit unavailable state)",
+          "evidence": "the provider-less screenshot"
+        },
+        {
+          "clause": "sys_account is read-only over the data API — links are mutated only through the auth endpoints, not raw row writes",
+          "oracle": "api",
+          "verify": "a forged POST/DELETE to /api/v1/data/sys_account returns 405 (apiMethods ['get','list'], identity write guard ADR-0092 D2)",
+          "evidence": "the forged-write response"
+        }
+      ],
+      "negative": [
+        "a link that appears in the UI but does not create a sys_account row (client-only) is a FAIL — the row is the durable identity link",
+        "unlink that hides the row from the list but leaves the sys_account (so the provider still signs the user in) is a FAIL",
+        "one user's identity links appearing in another's mine-view is an RLS FAIL",
+        "a provider-less boot offering a link_social action that navigates to a dead endpoint is a dishonest-degradation FAIL"
+      ],
+      "traps": ["wrong-persona", "dispatcher-vs-hono-route", "hydration-race"],
+      "source": [
+        "packages/platform-objects/src/identity/sys-account.object.ts (link_social type:'url' → /api/v1/auth/sign-in/social?provider=&callbackURL=; unlink_account → /api/v1/auth/unlink-account accountId=row id; mine view user_id={current_user_id} vs all_links; provider options; apiMethods ['get','list'])",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts (POST link-social=auth.accounts.linkSocial, GET list-accounts=auth.accounts.list, POST unlink-account=auth.accounts.unlink)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_accounts → 'Identity Links', objectName sys_account)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: social/OIDC account linking round-trip → sys_account mine-view row, unlink removal, provider-less honest degradation; blocked(fixture) pending a configured IdP (PENDING-GAPS §C)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "identity-auth.identity-import-wizard",
+      "title": "Admin CSV identity import: password-policy auto/temporary drive per-row credentials, imported users sign in, non-admins denied",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["platform admin (running the import)", "an imported user (signing in afterwards)", "a non-admin (forger)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "platform-admin access to the identity Import Wizard (objectui app-shell identityImport.ts wraps the wizard onto POST /api/v1/auth/admin/import-users — the sys_user import cannot use the generic /data import because it must go through better-auth password hashing + credential creation)",
+          "a small scratch CSV of users (email required; the wizard parses it client-side into rows[])",
+          "for the `auto` invite-reachable path: an email/SMS transport so an invitation can be issued (dev `log` transport is sufficient to observe it); unreachable rows fall back to a one-time password"
+        ],
+        "knownGaps": [
+          "observing the `auto` INVITE path needs a transport to capture the invitation; with the dev log transport it is observable, otherwise the invite-vs-fallback split is blocked(fixture). The one-time passwords (auto-fallback + all of temporary) are returned ONLY in the response — the result step must reveal them; they are never persisted"
+        ]
+      },
+      "steps": [
+        "as admin, open the Import Wizard for Users, upload the scratch CSV, map email (and name/phone) — the wizard drives POST /api/v1/auth/admin/import-users in ≤500-row batches with the chosen passwordPolicy",
+        "run with passwordPolicy `auto` (the default, framework#3236): deliverable rows get an invitation (set-your-password email/SMS), unreachable rows fall back to a one-time password revealed once in the result step; capture the per-row result (action + any temporaryPassword) and screenshot the reveal",
+        "run a second import with passwordPolicy `temporary`: EVERY row gets a per-row one-time password (no invitations); confirm each result row carries a temporaryPassword shown once",
+        "sign in as an imported user: for a `temporary` (or auto-fallback) row use the revealed one-time password; for an `auto` invite row, follow the invitation to set a password; confirm email+password sign-in then works",
+        "idempotency: re-run the SAME CSV in upsert mode (matchBy email) and confirm it upserts (updates) rather than duplicating — the endpoint matches on email/phone",
+        "confirm one-time passwords are NOT persisted anywhere: they appear only in the import response/result step, never in a later read of the user or any audit row",
+        "both-sides gate: as a NON-admin, POST /api/v1/auth/admin/import-users directly and capture the refusal (the endpoint is platform-admin-gated)"
+      ],
+      "acceptance": [
+        {
+          "clause": "policy `auto` splits per row: deliverable rows get an invitation, unreachable rows fall back to a one-time password revealed once — the wizard result surfaces both outcomes",
+          "oracle": "api",
+          "verify": "the import response's per-row results show action + (for fallback rows) a temporaryPassword; deliverable rows show an invitation outcome (observed at the dev transport)",
+          "evidence": "the import response + the transport capture + the reveal screenshot"
+        },
+        {
+          "clause": "policy `temporary` forces a per-row one-time password for EVERY row (no invitations)",
+          "oracle": "api",
+          "verify": "every result row under `temporary` carries a temporaryPassword; no invitation is issued",
+          "evidence": "the import response"
+        },
+        {
+          "clause": "an imported user can sign in: the one-time password (temporary/auto-fallback) or the invitation-set password authenticates via email+password",
+          "oracle": "api",
+          "verify": "POST /api/v1/auth/sign-in/email for an imported user with the revealed/one-time credential returns a session",
+          "evidence": "the sign-in trace"
+        },
+        {
+          "clause": "re-import is idempotent on upsert: re-running the same CSV (matchBy email) updates existing users rather than creating duplicates",
+          "oracle": "api",
+          "verify": "sys_user count for the imported emails is unchanged after the second run; the summary shows updated/skipped, not created",
+          "evidence": "the two import summaries + the sys_user read"
+        },
+        {
+          "clause": "one-time passwords are never persisted: they exist only in the import response/result step, absent from any later user read or audit row",
+          "oracle": "api",
+          "verify": "a follow-up read of an imported user (and any audit row) contains no plaintext temporary password",
+          "evidence": "the follow-up reads"
+        },
+        {
+          "clause": "the import is platform-admin-gated: a non-admin's direct POST /api/v1/auth/admin/import-users is refused server-side",
+          "oracle": "api",
+          "verify": "the forged non-admin request returns non-2xx and no users are created",
+          "evidence": "the refusal + the unchanged sys_user read"
+        }
+      ],
+      "negative": [
+        "a `temporary` import that leaves any row WITHOUT a one-time credential (so the user can never sign in) is a FAIL",
+        "a one-time password persisted anywhere server-side (user row, audit log) is a security FAIL — it is response-only",
+        "a re-import that DUPLICATES users instead of upserting on the match key is a FAIL",
+        "a non-admin succeeding at import-users is a privilege FAIL — apply RUNNER rule 7"
+      ],
+      "variants": [
+        "auto (default: invite reachable, one-time-password fallback for unreachable)",
+        "temporary (per-row one-time password for every row)",
+        "invite (force an invitation for every row; unreachable rows fail)",
+        "none (identity only — user sets a password later via OTP / magic link / reset)"
+      ],
+      "traps": ["wrong-persona", "seed-data-thin"],
+      "source": [
+        "objectui packages/app-shell/src/views/identityImport.ts (IdentityPasswordPolicy 'auto'|'none'|'invite'|'temporary'; wraps ImportWizard onto POST /api/v1/auth/admin/import-users; ≤500-row batches; one-time passwords response-only, never persisted; upsert idempotent on email/phone)",
+        "packages/plugins/plugin-auth/src/admin-user-endpoints.ts (POST /api/v1/auth/admin/import-users — platform-admin-gated login-capable account creation; explicit-password/generatePassword resolution)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: admin CSV identity import with password-policy matrix (auto/temporary/invite/none), imported-user sign-in, upsert idempotency, response-only one-time passwords, non-admin denied, grounded in objectui identityImport.ts + admin-user-endpoints.ts (PENDING-GAPS §G)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    }
+  ]
+}

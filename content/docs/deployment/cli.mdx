@@ -1078,6 +1078,40 @@ For CI and other non-interactive contexts, pass email/password directly:
 os login --email user@example.com --password secret
 ```
 
+##### `os login --json` is NDJSON — the one exception
+
+Every other ObjectStack command writes **exactly one JSON document** to stdout
+under `--json`, so `JSON.parse(<entire stdout>)` is the way to read it.
+`os login` is the single declared exception: its `--json` output is **NDJSON**,
+one compact JSON document per line. **Parse it line by line.**
+
+The reason is the device flow: it is two events at two points in time, and the
+verification URL is only useful to a script *before* the user authorizes. So the
+CLI emits it as its own record immediately, then a second record when the poll
+resolves:
+
+```console
+$ os login --json --no-browser
+{"device_code":"…","user_code":"WXYZ-1234","verification_uri":"https://…/activate","verification_uri_complete":"https://…/activate?user_code=WXYZ-1234","expires_in":600}
+{"success":true,"email":"user@example.com","userId":"usr_01H…"}
+```
+
+Read the first record, show the user the URL, then block on the next line:
+
+```bash
+os login --json --no-browser | while IFS= read -r line; do
+  echo "$line" | jq -r 'if .verification_uri_complete then "Approve at: \(.verification_uri_complete)" else "Signed in as \(.email)" end'
+done
+```
+
+Every record is one line, on every path — the `--email`/`--password` result and
+the failure payload (`{"success":false,"error":"…"}`) included, since a failure
+can arrive *after* the verification-URL record has already been written. Records
+that report failure also set exit code `1`.
+
+Before this was declared, `os login --json` wrote a compact record followed by a
+pretty-printed one, which parsed as neither a single document nor as NDJSON.
+
 #### `os logout`
 
 Logout calls `POST /api/v1/auth/sign-out` before deleting local credentials, so

@@ -47,11 +47,22 @@ export interface EmitJsonOptions {
    * Exists so the sweep onto `emitJson` could be a pure truncation fix with no
    * observable output change: roughly half the CLI's `--json` sites were
    * already compact and half indented, and this preserves whichever each one
-   * emitted. The split is accidental rather than designed — `os login --json`
-   * prints a compact payload and then an indented one in the same run — so
-   * unifying it is worth doing, but as its own decision, not as a side effect
-   * of fixing truncated pipes.
+   * emitted.
    *
+   * This comment used to cite `os login --json` — a compact payload followed by
+   * an indented one in the same run — as proof the split was accidental. That
+   * was true, and worse than a formatting inconsistency: two documents on one
+   * stdout parse as neither a single document nor as NDJSON. #6531 fixed it,
+   * and in doing so gave `compact` its one *designed* use. `os login` is the
+   * CLI's sole declared NDJSON command, because its device flow is genuinely
+   * two events over time and the first one has to reach an automation consumer
+   * before the user authorizes; there, one line per document IS the contract,
+   * enforced through a single emitter in `commands/login.ts` and pinned by
+   * `test/login-json-ndjson.e2e.test.ts`.
+   *
+   * Everywhere else `--json` still means exactly one JSON document on stdout
+   * (#6217), so the remaining compact call sites are still only preserving
+   * historical formatting and unifying them stays worth doing on its own.
    * New code should use the default.
    */
   compact?: boolean;

@@ -289,9 +289,89 @@
 >   here: it is a live-behaviour question on a seam another card owns, and this
 >   appendix will not presume the answer. The engine half and #5846 settle it
 >   together, in one edit to one ordering, and record it as an amendment.
+>   **→ Settled in Amendment II.1 below.**
 > - **`scripts/adr-anchors.json`'s `hook-wrappers.ts` invariant still describes
 >   the batch dispatch.** It is TRUE today and must move with the engine half,
->   not before it.
+>   not before it. **→ Moved with #5574's engine half.**
+
+---
+
+> **Amendment II.1 (2026-08, #5574 engine half + #5846 (a)) — the `input.id`
+> reroute lever is RETIRED, and refused loudly.**
+> _Settles the item Addendum II left open by name. Delivered in the same PR that
+> delivered the per-row `before*` dispatch, because it is the same edit to the
+> same ordering._
+>
+> **The capability, stated exactly.** `update()` and `delete()` dispatched their
+> `before*` event FIRST and only then read `hookContext.input.id` to choose the
+> driver call. The id slot therefore doubled as a control lever: a handler
+> assigning `ctx.input.id = undefined` on a by-id call converted the write into
+> a PREDICATE write over the caller's `where`; a handler assigning a different
+> id moved the write to another row (`delete()` supported that explicitly, by
+> re-reading the pre-image for the new target — #5272).
+>
+> **Why it cannot survive the reorder.** A per-row `before*` context is BUILT
+> from the matched row set, so the row set must be in hand before the first
+> dispatch, so the branch that decides whether there IS a row set must be
+> decided before that. #5846's (a) direction lands in the same edit: the by-id
+> path reads its prior row ahead of the dispatch and binds `previous` there. By
+> the time any handler runs, the target is settled — `previous`, the
+> `readonlyWhen` strip and every validation rule have already been computed
+> against the row the ladder chose.
+>
+> **The three options, and the choice.** *Ignore it* — the assignment retargets
+> nothing and says nothing, which is the silent no-op D4 exists to abolish, and
+> here the write still lands on the ORIGINAL row. *Honour it by re-resolving* —
+> the write lands on a row whose pre-image was never read, whose `readonlyWhen`
+> locks were never evaluated and whose rules were checked against a different
+> record: silently weaker enforcement, aimed by a hook. *Refuse* — chosen. The
+> write is rejected with `HookTargetRebindError`
+> (`objectql/src/hook-target-rebind-errors.ts`, code `ERR_HOOK_TARGET_REBIND`,
+> an `ERR_`-prefixed operational code on the error's own bag and deliberately
+> NOT an ADR-0112 wire code, same reasoning as the budget refusal). The message
+> NAMES the retired capability, so an author whose handler stopped working
+> learns what changed instead of watching a write land somewhere unexpected.
+>
+> **Scope, stated precisely, because the two verbs do NOT answer alike.**
+>
+> | | CLEARED id | REBOUND to another id |
+> |---|---|---|
+> | `update()` by-id | refused | refused |
+> | `delete()` by-id | refused | **honoured** (#5272's re-read, unchanged) |
+> | either, per-row | refused (D4) | refused (D4) |
+>
+> The CLEARED column is uniform because the ladder reorder leaves it no answer
+> of its own: clearing worked by falling through to the predicate branch, and
+> that branch is chosen before any handler runs. That is the capability this
+> amendment retires, and it is the one the ruling names.
+>
+> The REBOUND column is not uniform, and the asymmetry is principled rather
+> than an oversight. The case against honouring a rebind is that the write would
+> land on a row whose pre-image, `readonlyWhen` locks and validation rules were
+> never evaluated — and on `delete()` that is simply not true: #5272 already
+> RE-RESOLVES the new target, re-reading its pre-image and rebinding `previous`
+> before `afterDelete` or the summary recompute can see it. `update()` has no
+> such mechanism and would have to grow one, which is the "silently pick
+> re-resolution instead" this ruling forbids. So `update()` refuses and
+> `delete()` keeps honouring, until the delete-side repoint is ruled on as its
+> own question (#6752) — deliberately NOT folded in here as a rider on an
+> ordering change.
+>
+> Premise for the retirement, checked against `origin/main`: the only
+> `ctx.input.id` assignment in the whole repository was one engine test forcing
+> the fail-closed AST assertion, which is now the refusal's own pin.
+>
+> **What replaces it, for each thing it was used for.** Write a different row:
+> `ctx.api` / `ctx.ql` for that row explicitly. Write many rows: have the caller
+> pass `{ multi: true, where: … }`. Stop this write: throw from the handler —
+> the supported way for a `before*` guard to refuse, and the one the per-row
+> `previous` binding exists to enable.
+>
+> **One consequence priced with it.** `ENGINE_UPDATE_REJECT_MESSAGE` /
+> `ENGINE_DELETE_REJECT_MESSAGE` used to be raised AFTER the before phase, so a
+> handler binding `input.id` could convert a rejecting call into a by-id write.
+> That is the same lever pointed the other way; with the ladder resolved first
+> the refusal lands before any handler runs and before anything is read.
 
 ---
 

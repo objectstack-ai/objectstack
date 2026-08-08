@@ -21,6 +21,7 @@
 
 import { SqlDriver, type SqlDriverConfig } from '@objectstack/driver-sql';
 import type { DriverQuery } from '@objectstack/spec/contracts';
+import type { DriverOptions } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
 import { RemoteTransport } from './remote-transport.js';
 import {
@@ -503,13 +504,23 @@ export class TursoDriver extends SqlDriver {
   // ===================================
   // CRUD (remote mode overrides)
   // ===================================
+  //
+  // [#6402] Every `options` parameter in this file is a {@link DriverOptions},
+  // matching `SqlDriver` / `IDataDriver` — the two faces of one driver may not
+  // declare one argument two ways. This was the last `any` axis left in the
+  // overrides: #5181 (PR #6076), #6075 (PR #6210) and #6212 each narrowed
+  // `query`, and each deliberately left `options` alone because it is a
+  // SEPARATE axis whose shape was verbatim-identical across all 17 overrides —
+  // narrowing one would have read as a verdict on the other sixteen. #6402
+  // closed all 17 in one sweep, so there is no half-narrowed state to
+  // interpret. Keep it that way: a new override here declares `DriverOptions`.
 
-  override async find(object: string, query: DriverQuery, options?: any): Promise<any[]> {
+  override async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<any[]> {
     if (this.isRemote) return this.formatRemoteRows(object, await this.remoteTransport!.find(object, this.toRemoteReadQuery(object, query)));
     return super.find(object, query, options);
   }
 
-  override async findOne(object: string, query: DriverQuery, options?: any): Promise<any> {
+  override async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.findOne(object, this.toRemoteReadQuery(object, query, { singleRowLookup: true })));
     return super.findOne(object, query, options);
   }
@@ -520,27 +531,27 @@ export class TursoDriver extends SqlDriver {
   // yielding — the opposite of the memory guarantee it was declared for. This
   // override went with the base method; page `find()` with `limit`/`offset`.
 
-  override async create(object: string, data: Record<string, any>, options?: any): Promise<any> {
+  override async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<any> {
     if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.create(object, this.toRemoteWriteForms(object, data)));
     return super.create(object, data, options);
   }
 
-  override async update(object: string, id: string | number, data: Record<string, any>, options?: any): Promise<any> {
+  override async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<any> {
     if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.update(object, id, this.toRemoteWriteForms(object, data)));
     return super.update(object, id, data, options);
   }
 
-  override async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: any): Promise<Record<string, any>> {
+  override async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, any>> {
     if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.upsert(object, this.toRemoteWriteForms(object, data), conflictKeys));
     return super.upsert(object, data, conflictKeys, options);
   }
 
-  override async delete(object: string, id: string | number, options?: any): Promise<boolean> {
+  override async delete(object: string, id: string | number, options?: DriverOptions): Promise<boolean> {
     if (this.isRemote) return this.remoteTransport!.delete(object, id);
     return super.delete(object, id, options);
   }
 
-  override async count(object: string, query?: DriverQuery, options?: any): Promise<number> {
+  override async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
     if (this.isRemote) return this.remoteTransport!.count(object, this.toRemoteQuery(object, query));
     return super.count(object, query, options);
   }
@@ -550,12 +561,11 @@ export class TursoDriver extends SqlDriver {
    * `SqlDriver.aggregate` this forwards to — the two faces of one driver may not
    * declare one argument two ways.
    *
-   * `options` is deliberately left `any`: it is a SECOND axis, shared verbatim
-   * with the four overrides above it, and narrowing one of five mid-file would
-   * read as a decision about the others. #6210 left the same `options?: any` on
-   * `count` for the same reason.
+   * [#6402] `options` is a {@link DriverOptions} for the same reason, closed as
+   * one sweep across every override in this file rather than one method at a
+   * time — see the block comment above `find()`.
    */
-  override async aggregate(object: string, query: DriverQuery, options?: any): Promise<any> {
+  override async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
     if (this.isRemote) return this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query));
     return super.aggregate(object, query, options);
   }
@@ -957,7 +967,7 @@ export class TursoDriver extends SqlDriver {
   // Bulk Operations (remote mode overrides)
   // ===================================
 
-  override async bulkCreate(object: string, data: any[], options?: any): Promise<any> {
+  override async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<any> {
     if (this.isRemote) {
       const formatted = Array.isArray(data) ? data.map((d) => this.toRemoteWriteForms(object, d)) : data;
       return this.formatRemoteRows(object, await this.remoteTransport!.bulkCreate(object, formatted));
@@ -965,7 +975,7 @@ export class TursoDriver extends SqlDriver {
     return super.bulkCreate(object, data, options);
   }
 
-  override async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: any): Promise<Record<string, any>[]> {
+  override async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, any>[]> {
     if (this.isRemote) {
       const formatted = Array.isArray(updates)
         ? updates.map((u) => ({ ...u, data: this.toRemoteWriteForms(object, u.data) }))
@@ -975,19 +985,19 @@ export class TursoDriver extends SqlDriver {
     return super.bulkUpdate(object, updates, options);
   }
 
-  override async bulkDelete(object: string, ids: Array<string | number>, options?: any): Promise<void> {
+  override async bulkDelete(object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {
     if (this.isRemote) return this.remoteTransport!.bulkDelete(object, ids);
     return super.bulkDelete(object, ids, options);
   }
 
-  override async updateMany(object: string, query: DriverQuery, data: any, options?: any): Promise<number> {
+  override async updateMany(object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
     if (this.isRemote) {
       return this.remoteTransport!.updateMany(object, this.toRemoteQuery(object, query), this.toRemoteWriteForms(object, data));
     }
     return super.updateMany(object, query, data, options);
   }
 
-  override async deleteMany(object: string, query: DriverQuery, options?: any): Promise<number> {
+  override async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
     if (this.isRemote) return this.remoteTransport!.deleteMany(object, this.toRemoteQuery(object, query));
     return super.deleteMany(object, query, options);
   }
@@ -996,7 +1006,7 @@ export class TursoDriver extends SqlDriver {
   // Raw Execution (remote mode override)
   // ===================================
 
-  override async execute(command: any, params?: any[], options?: any): Promise<any> {
+  override async execute(command: any, params?: any[], options?: DriverOptions): Promise<any> {
     if (this.isRemote) return this.remoteTransport!.execute(command, params);
     return super.execute(command, params, options);
   }
@@ -1024,7 +1034,7 @@ export class TursoDriver extends SqlDriver {
   // Schema Management (remote mode overrides)
   // ===================================
 
-  override async syncSchema(object: string, schema: unknown, options?: any): Promise<void> {
+  override async syncSchema(object: string, schema: unknown, options?: DriverOptions): Promise<void> {
     if (this.isRemote) {
       await this.remoteTransport!.syncSchema(object, schema);
       // See initObjects(): populate the read-coercion registries for remote mode.
@@ -1084,7 +1094,7 @@ export class TursoDriver extends SqlDriver {
    * In local/replica mode, falls back to sequential `syncSchema()` calls
    * (Knex + better-sqlite3 is already local, so batching has no benefit).
    */
-  async syncSchemasBatch(schemas: Array<{ object: string; schema: unknown }>, options?: any): Promise<void> {
+  async syncSchemasBatch(schemas: Array<{ object: string; schema: unknown }>, options?: DriverOptions): Promise<void> {
     if (this.isRemote) {
       return this.remoteTransport!.syncSchemasBatch(schemas);
     }
@@ -1094,7 +1104,7 @@ export class TursoDriver extends SqlDriver {
     }
   }
 
-  override async dropTable(object: string, options?: any): Promise<void> {
+  override async dropTable(object: string, options?: DriverOptions): Promise<void> {
     if (this.isRemote) return this.remoteTransport!.dropTable(object);
     return super.dropTable(object, options);
   }

@@ -632,3 +632,222 @@ describe('#6563 — rollbackToPackageCommit inherits the per-item intent', () =>
     expect(fields).not.toContain('due_date');
   });
 });
+
+/**
+ * #6620 — the OTHER limb of the same loop: SOFT-REMOVE states its intent too.
+ *
+ * `revertCommit` has two limbs, and #6563 (above) only fixed the restore one.
+ * The limb that undoes an artifact the commit CREATED stated its intent as a
+ * CONSTANT — `intent: 'override-artifact'`, written into the `repo.delete(...)`
+ * call — and `SysMetadataRepository.delete` opens with the same
+ * `assertAllowed(ref.type, opts.intent)` gate `put` uses. So `object`, which is
+ * not `allowOrgOverride`, was refused on the delete path exactly as it had been
+ * on the restore path, and a commit that CREATED an object could not be
+ * reverted either.
+ *
+ * That is the FIRST-BUILD undo — publish a brand-new app, then undo it — which
+ * is the flow Studio and AI authoring produce most. Every object the commit
+ * created stayed behind, `success` came back `false` with a populated
+ * `failed[]`, and the package was left half-reverted: its overlay-allowed items
+ * removed, its objects not.
+ *
+ * The two causes are different even though the symptom rhymes: #6563 was an
+ * UNSTATED intent falling through to the repository's `?? 'override-artifact'`
+ * default, this one is a literal the caller wrote down. The fix is the same
+ * family shape — derive it per item from `isArtifactBacked`, the way the
+ * sibling delete caller `deleteMetaItem` and the sibling revert caller
+ * `rollbackMetaItem` both already do — so all three delete/revert callers now
+ * agree, and the repository's gate is untouched.
+ */
+
+/** The commit item shape for an artifact this commit CREATED (ADR-0067). */
+const createdItem = (name: string) => ({
+  type: 'object', name, existedBefore: false, prevVersion: null,
+});
+
+/** The first-build shape: authored ONCE, never edited — nothing to restore to. */
+async function seedCreatedObject(protocol: any, name: string, packageId?: string) {
+  await protocol.saveMetaItem({
+    type: 'object', name, ...(packageId ? { packageId } : {}), item: invoiceBody(name),
+  });
+}
+
+const storedRows = (rows: Map<string, any>, name: string) =>
+  Array.from(rows.values()).filter((r) => r.name === name);
+
+describe('#6620 — revertCommit soft-removes a runtime-CREATED `object`', () => {
+  it('a package-bound created object reverts: revertedCount 1, failed [], row gone', async () => {
+    const { protocol, rows, historyRows } = makeRealRepoHarness([objectCommit({
+      id: 'cmt_new',
+      items: [createdItem('myapp_invoice')],
+    })]);
+    await seedCreatedObject(protocol, 'myapp_invoice', APP_PKG);
+    expect(storedRows(rows, 'myapp_invoice')).toHaveLength(1);
+
+    const res = await protocol.revertCommit({ commitId: 'cmt_new' });
+
+    // Pre-fix, verbatim (the issue's measurement): success false, revertedCount
+    // 0, failedCount 1 carrying "[NOT_OVERRIDABLE] 'object' is not
+    // allowOrgOverride in the registry.", and the row still standing.
+    expect(res.failed).toEqual([]);
+    expect(res.success).toBe(true);
+    expect(res.revertedCount).toBe(1);
+    expect(res.reverted[0]).toMatchObject({ type: 'object', name: 'myapp_invoice', action: 'removed' });
+    expect(storedRows(rows, 'myapp_invoice')).toHaveLength(0);
+    // Soft, not hard: ADR-0067 §5 keeps the removal recoverable, so the delete
+    // is an append-only tombstone in history rather than a vanished lineage.
+    const tombstone = historyRows.filter(
+      (h) => h.name === 'myapp_invoice' && h.operation_type === 'delete',
+    );
+    expect(tombstone).toHaveLength(1);
+    expect(tombstone[0].metadata).toBeNull();
+  });
+
+  it('a package-LESS created object reverts identically — the binding was never the cause', async () => {
+    const { protocol, rows } = makeRealRepoHarness([objectCommit({
+      id: 'cmt_new_global',
+      package_id: null,
+      items: [createdItem('global_invoice')],
+    })]);
+    await seedCreatedObject(protocol, 'global_invoice');
+
+    const res = await protocol.revertCommit({ commitId: 'cmt_new_global' });
+
+    expect(res.failed).toEqual([]);
+    expect(res.revertedCount).toBe(1);
+    expect(storedRows(rows, 'global_invoice')).toHaveLength(0);
+  });
+
+  /**
+   * The refusal that must SURVIVE the fix — and the one case the constant got
+   * right by accident, which is why its direction is INVERTED: it was green
+   * before the change and is green after. It cannot go red by removing the fix,
+   * because removing the fix refuses EVERYTHING. What it does go red on is the
+   * wrong fix — hard-coding `'runtime-only'` in place of the old
+   * `'override-artifact'` — which is the mistake a one-line "just make objects
+   * work" edit would make, and which would let a revert tombstone an artifact a
+   * code package genuinely ships.
+   *
+   * Staged the way a real deployment stages it (as in #6563's block): the
+   * overlay row is authored while the name is runtime-only, and the artifact
+   * arrives with the package that later claims it. `registerObject(body, pkg)`
+   * with no `_provenance` is the shape `applyProtection` stamps as `'package'`,
+   * which is what `getArtifactItem` reads and `isArtifactBacked` answers on.
+   *
+   * Envelope note (ADR-0112): `revertCommit` converts a per-item throw into a
+   * `failed[]` record whose DECLARED shape is `{ type, name, error, code? }` —
+   * no `status`. So `code` is asserted here together with the condition's own
+   * first sentence, and the full `{ code, status }` pair belongs to the
+   * throwing surface (`protocol-writepath-object-ownership.test.ts`), exactly
+   * as #6563 split it.
+   */
+  it('still REFUSES soft-removing an artifact-backed object: NOT_OVERRIDABLE, row kept', async () => {
+    const { protocol, registry, rows } = makeRealRepoHarness([objectCommit({
+      id: 'cmt_new_artifact',
+      items: [createdItem('myapp_invoice')],
+    })]);
+    await seedCreatedObject(protocol, 'myapp_invoice', APP_PKG);
+    registry.registerObject(invoiceBody('myapp_invoice') as never, APP_PKG);
+
+    const res = await protocol.revertCommit({ commitId: 'cmt_new_artifact' });
+
+    expect(res.revertedCount).toBe(0);
+    expect(res.failedCount).toBe(1);
+    expect(res.failed[0]).toMatchObject({
+      type: 'object',
+      name: 'myapp_invoice',
+      code: 'NOT_OVERRIDABLE',
+    });
+    expect(res.failed[0].error).toContain(
+      `[NOT_OVERRIDABLE] 'object' is not allowOrgOverride in the registry.`,
+    );
+    // Refused means refused: the artifact-backed row is still there.
+    expect(storedRows(rows, 'myapp_invoice')).toHaveLength(1);
+  });
+
+  /**
+   * PER ITEM, not per call — the half a single-item fixture cannot see, on the
+   * soft-remove limb this time. One commit, two created objects, opposite
+   * verdicts: a loop that hoisted one intent for the batch (which is precisely
+   * what the constant did) has to pick one and be wrong about the other.
+   */
+  it('derives the intent PER ITEM: one created object removed, its artifact-backed neighbour refused', async () => {
+    const { protocol, registry, rows } = makeRealRepoHarness([objectCommit({
+      id: 'cmt_new_mixed',
+      items: [createdItem('myapp_invoice'), createdItem('myapp_quote')],
+    })]);
+    await seedCreatedObject(protocol, 'myapp_invoice', APP_PKG);
+    await seedCreatedObject(protocol, 'myapp_quote', APP_PKG);
+    // Only the quote is claimed by a code artifact.
+    registry.registerObject(invoiceBody('myapp_quote') as never, APP_PKG);
+
+    const res = await protocol.revertCommit({ commitId: 'cmt_new_mixed' });
+
+    expect(res.reverted).toEqual([
+      { type: 'object', name: 'myapp_invoice', action: 'removed' },
+    ]);
+    expect(res.failed).toHaveLength(1);
+    expect(res.failed[0]).toMatchObject({ name: 'myapp_quote', code: 'NOT_OVERRIDABLE' });
+    expect(storedRows(rows, 'myapp_invoice')).toHaveLength(0);
+    expect(storedRows(rows, 'myapp_quote')).toHaveLength(1);
+  });
+
+  /**
+   * A commit that created BOTH an overlay-allowed item and an object is the
+   * half-reverted package the issue describes: pre-fix the view came out and
+   * the object stayed, so `success` was `false` and the package sat in a state
+   * neither before nor after the commit.
+   */
+  it('reverts a mixed-TYPE first build whole: the view and the object both come out', async () => {
+    const { protocol, rows } = makeRealRepoHarness([objectCommit({
+      id: 'cmt_new_build',
+      items: [
+        createdItem('myapp_invoice'),
+        { type: 'view', name: 'myapp_case_grid', existedBefore: false, prevVersion: null },
+      ],
+    })]);
+    await seedCreatedObject(protocol, 'myapp_invoice', APP_PKG);
+    await protocol.saveMetaItem({
+      type: 'view', name: 'myapp_case_grid', packageId: APP_PKG, item: gridBody('Cases'),
+    });
+
+    const res = await protocol.revertCommit({ commitId: 'cmt_new_build' });
+
+    expect(res.failed).toEqual([]);
+    expect(res.success).toBe(true);
+    expect(res.revertedCount).toBe(2);
+    expect(storedRows(rows, 'myapp_invoice')).toHaveLength(0);
+    expect(storedRows(rows, 'myapp_case_grid')).toHaveLength(0);
+  });
+});
+
+/**
+ * #6620 — the inheritance, on the soft-remove limb. `rollbackToPackageCommit`
+ * reverts through the SAME loop, so it carried the same constant.
+ *
+ * As in #6563's inheritance pin, the status cannot show the defect:
+ * `revertCommit` turns a per-item refusal into `failed[]` instead of throwing,
+ * so the rollback recorded the commit as reverted and answered `success: true`
+ * while the created object was never removed. The line that goes red pre-fix is
+ * the STORED ROW.
+ */
+describe('#6620 — rollbackToPackageCommit inherits the per-item soft-remove intent', () => {
+  it('rolls a first build back through the loop — and the created row really went away', async () => {
+    const { protocol, rows } = makeRealRepoHarness([
+      objectCommit({ id: 'cmt_base', items: [], created_at: '2026-08-08T00:00:01.000Z' }),
+      objectCommit({
+        id: 'cmt_build',
+        items: [createdItem('myapp_invoice')],
+        created_at: '2026-08-08T00:00:02.000Z',
+      }),
+    ]);
+    await seedCreatedObject(protocol, 'myapp_invoice', APP_PKG);
+
+    const res = await protocol.rollbackToPackageCommit({ commitId: 'cmt_base' });
+
+    expect(res.revertedCommits).toEqual(['cmt_build']);
+    expect(res.failed).toEqual([]);
+    // `success: true` was ALREADY true pre-fix — this is the line that was not.
+    expect(storedRows(rows, 'myapp_invoice')).toHaveLength(0);
+  });
+});
