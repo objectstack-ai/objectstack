@@ -1975,6 +1975,9 @@ importers:
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server
+      '@objectstack/plugin-sharing':
+        specifier: workspace:*
+        version: link:../plugins/plugin-sharing
       '@objectstack/service-analytics':
         specifier: workspace:*
         version: link:../services/service-analytics
