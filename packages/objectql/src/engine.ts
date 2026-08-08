@@ -2130,7 +2130,7 @@ export class ObjectQL implements IObjectQLEngine {
       const probe = renderAutonumber({ tokens, seq: 0, record, now, timezone });
       const counterKey = `${object}.${name}.${probe.scope}`;
       let next = this.autonumberCounters.get(counterKey);
-      if (next == null) next = await this.seedAutonumber(object, name, probe.prefix, execCtx);
+      if (next == null) next = await this.seedAutonumber(object, name, probe.prefix, probe.suffix, execCtx);
       next += 1;
       this.autonumberCounters.set(counterKey, next);
       record[name] = renderAutonumber({ tokens, seq: next, record, now, timezone }).value;
@@ -2140,9 +2140,39 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * Seed the autonumber counter from the current max in store, scoped to
    * `prefix`. With a non-empty prefix (date/field formats) only rows in the
-   * same scope count, and the counter is the digit-run immediately after the
-   * prefix; with an empty prefix (legacy fixed-prefix formats) the last digit
-   * run of the whole value is used, preserving the original behaviour.
+   * same scope count.
+   *
+   * # Locating the counter inside a stored value (#6468)
+   *
+   * `renderAutonumber` composes `prefix + zero-padded(seq) + suffix`, and
+   * `suffix` is a DECLARED return value: every token after the `{0..0}` slot
+   * renders behind the counter (`{000}-{YYYY}` → `001-2026`). So the counter is
+   * NOT "the digits at the end of the string" — reading it that way took the
+   * year for the counter and seeded `2026` against a true counter of `1`, which
+   * jumps the next issued number to `2027-2026` and burns the band in between.
+   *
+   * Both the rendered `prefix` and the rendered `suffix` therefore come in from
+   * the caller (they are `renderAutonumber`'s own output — this method does not
+   * re-derive any format understanding of its own, and neither does the SQL
+   * driver's `scanMaxNumericTail`, which is handed the same two strings):
+   *
+   *   - **Either one declared ⇒ the slot is ANCHORED**: the counter is the digit
+   *     run at the START of what follows the prefix, after removing the declared
+   *     suffix when this row carries it.
+   *   - **Neither declared ⇒ UNANCHORED**: the legacy reading is kept — the LAST
+   *     digit run of the whole value. A format with no `{0..0}` slot renders a
+   *     bare trailing counter, and values predating any format have no anchor to
+   *     read from, so this stays exactly as it was.
+   *
+   * The suffix is *stripped when it matches*, never *required* to match: a
+   * dynamic suffix renders differently per row (`{000}-{YYYY}` is `-2025` on
+   * last year's rows) while the counter scope is the rendered PREFIX — here `''`
+   * — so those rows share this very counter and must still be counted. Skipping
+   * them would seed BELOW the real max, which is the duplicate-record-number
+   * harm #6249 fixed on the scan side. Reading the leading digit run gets them
+   * right regardless; the strip only adds precision when a suffix begins with a
+   * digit (`{0000}{YYYY}`, whose values are ambiguous by construction — the
+   * compile lint nudges authors to a delimiter).
    *
    * # Why this walks every row in the scope (#6249)
    *
@@ -2183,6 +2213,7 @@ export class ObjectQL implements IObjectQLEngine {
     object: string,
     field: string,
     prefix: string,
+    suffix: string,
     execCtx?: ExecutionContext,
   ): Promise<number> {
     try {
@@ -2203,23 +2234,26 @@ export class ObjectQL implements IObjectQLEngine {
         },
       );
       let max = 0;
+      // Anchored when the format declares text on EITHER side of the slot; see
+      // the "Locating the counter" section above.
+      const anchored = prefix !== '' || suffix !== '';
       for await (const page of walk.pages()) {
         for (const r of page) {
           const v = r?.[field];
           if (v == null) continue;
           const s = String(v);
           if (prefix && !s.startsWith(prefix)) continue;
-          const tail = prefix ? s.slice(prefix.length) : s;
-          // With a prefix the counter is the digit run right after it; without one
-          // (legacy fixed-prefix formats) it is the LAST digit run. Both use the
-          // linear /\d+/g — a backtracking lookahead here is a polynomial-ReDoS
-          // sink on stored values full of zeros (CodeQL js/polynomial-redos).
+          // Both branches use the linear /\d+/ forms — a backtracking lookahead
+          // here is a polynomial-ReDoS sink on stored values full of zeros
+          // (CodeQL js/polynomial-redos).
           let digits: string | undefined;
-          if (prefix) {
-            const head = tail.match(/^\d+/);
+          if (anchored) {
+            let core = s.slice(prefix.length);
+            if (suffix && core.endsWith(suffix)) core = core.slice(0, core.length - suffix.length);
+            const head = core.match(/^\d+/);
             digits = head ? head[0] : undefined;
           } else {
-            const runs = tail.match(/\d+/g);
+            const runs = s.match(/\d+/g);
             digits = runs ? runs[runs.length - 1] : undefined;
           }
           if (digits) max = Math.max(max, parseInt(digits, 10) || 0);
