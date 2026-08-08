@@ -4221,8 +4221,23 @@ export class ObjectStackClient {
         }
 
         // 1. Handle Pagination
-        if (normalizedOptions.top) queryParams.set('top', normalizedOptions.top.toString());
-        if (normalizedOptions.skip) queryParams.set('skip', normalizedOptions.skip.toString());
+        //
+        // [#6485] PRESENCE, not truthiness — the same test the canonical
+        // normalizer directly above already applies (`if (v2.limit != null)`).
+        // Emitting on truthiness made `0` survive the normalizer and then be
+        // discarded here, so `find('task', { limit: 0 })` reached the server
+        // with no `top` param. The GET list route has no default page size, so
+        // an absent `top` returns the ENTIRE match set: the caller who asked
+        // for no records got every record, under a 200 with no warning.
+        // `top=0` is honoured end to end — the protocol normalizer folds it to
+        // `limit: 0` and forwards it, and `SqlDriver.find` paginates on
+        // presence too, so the statement carries `LIMIT 0` and answers empty.
+        // `skip=0` is a consistency change only: it already equals the
+        // server's default, so the request means the same either way — but one
+        // emitter must not hold two rules for one pair.
+        // Mirrored verbatim in `ScopedProjectClient.data.find`.
+        if (normalizedOptions.top != null) queryParams.set('top', normalizedOptions.top.toString());
+        if (normalizedOptions.skip != null) queryParams.set('skip', normalizedOptions.skip.toString());
 
         // 2. Handle Sort
         if (normalizedOptions.sort) {
@@ -4905,8 +4920,10 @@ export class ScopedProjectClient {
         Object.assign(normalizedOptions, options);
       }
 
-      if (normalizedOptions.top) queryParams.set('top', normalizedOptions.top.toString());
-      if (normalizedOptions.skip) queryParams.set('skip', normalizedOptions.skip.toString());
+      // [#6485] Presence, not truthiness — see the twin in
+      // `ObjectStackClient.data.find` for why `0` must reach the wire.
+      if (normalizedOptions.top != null) queryParams.set('top', normalizedOptions.top.toString());
+      if (normalizedOptions.skip != null) queryParams.set('skip', normalizedOptions.skip.toString());
       if (normalizedOptions.sort) {
         if (Array.isArray(normalizedOptions.sort) && typeof normalizedOptions.sort[0] === 'object') {
           queryParams.set('sort', JSON.stringify(normalizedOptions.sort));

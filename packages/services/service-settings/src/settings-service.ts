@@ -7,6 +7,7 @@ import type {
   SettingsNamespacePayload,
   SettingsActionResult,
   SpecifierScope,
+  SpecifierValueDomain,
   SettingsChangeEvent,
   SettingsChangeHandler,
   SettingsUnsubscribe,
@@ -29,6 +30,11 @@ import {
   UnknownKeyError,
   UnknownNamespaceError,
 } from './settings-service.types.js';
+import {
+  firstRejectedDomainMember,
+  knownValueDomain,
+  valueDomainPhrasing,
+} from './value-domains.js';
 import { evaluateVisibility, referencedKeys } from './visibility-eval.js';
 
 const DEFAULT_OBJECT = 'sys_setting';
@@ -405,6 +411,18 @@ interface RegisteredManifest {
    * than "an empty window", which would reject everything.
    */
   bounds: Map<string, DeclaredBounds>;
+  /**
+   * Declared standard value domains (#5712), keyed by specifier key —
+   * recorded only for the domains this side can enforce (see
+   * `knownValueDomain`).
+   *
+   * Precomputed for the same reason and read the same way as `optionTables`:
+   * an ABSENT key means "no domain declared" — for an option-bearing type the
+   * #5131 exhaustive-options check stays the boundary, byte-for-byte unchanged
+   * behaviour — while a PRESENT key moves the enforcement boundary onto the
+   * standard's membership and degrades `options` to a UI convenience list.
+   */
+  valueDomains: Map<string, SpecifierValueDomain>;
 }
 
 /**
@@ -558,6 +576,7 @@ export class SettingsService {
     const defaults = new Map<string, unknown>();
     const optionTables = new Map<string, string[]>();
     const bounds = new Map<string, DeclaredBounds>();
+    const valueDomains = new Map<string, SpecifierValueDomain>();
     const defaultScope = manifest.scope ?? 'tenant';
     for (const spec of manifest.specifiers) {
       if (!spec.key || LAYOUT_ONLY_TYPES.has(spec.type)) continue;
@@ -570,6 +589,14 @@ export class SettingsService {
       // a finite positive spacing records no grid at all (#6199).
       const declared = declaredBounds(spec);
       if (declared) bounds.set(spec.key, declared);
+      // A declared standard value domain (#5712). `knownValueDomain` filters to
+      // the members this side can enforce: `registerManifest` takes manifests
+      // as given (no Zod pass), and a misspelt domain on a hand-built manifest
+      // must fall back to unchanged behaviour — for an option-bearing type
+      // that is the #5131 exhaustive table — rather than either an
+      // unenforceable claim or an accept-everything hole.
+      const domain = knownValueDomain((spec as { valueDomain?: unknown }).valueDomain);
+      if (domain) valueDomains.set(spec.key, domain);
       if (OPTION_BEARING_TYPES.has(spec.type)) {
         // A manifest with no option table cannot say what is legal. The spec
         // refuses that shape at parse time, but `registerManifest` takes
@@ -590,6 +617,7 @@ export class SettingsService {
       actions,
       optionTables,
       bounds,
+      valueDomains,
     });
     this.auditEnvOverrides(manifest.namespace);
   }
@@ -615,10 +643,15 @@ export class SettingsService {
     const reg = this.registry.get(namespace);
     if (!reg) return;
     // Only the keys that declare something enforceable can be rejected, so only
-    // they are worth walking: an option table (#5131/#5204) or a value window
-    // (#5932). `effectiveEnvOverride` does the judging (and the reporting); the
-    // value it returns is of no interest here.
-    const enforceable = new Set([...reg.optionTables.keys(), ...reg.bounds.keys()]);
+    // they are worth walking: an option table (#5131/#5204), a value window
+    // (#5932) or a standard value domain (#5712). `effectiveEnvOverride` does
+    // the judging (and the reporting); the value it returns is of no interest
+    // here.
+    const enforceable = new Set([
+      ...reg.optionTables.keys(),
+      ...reg.bounds.keys(),
+      ...reg.valueDomains.keys(),
+    ]);
     for (const key of enforceable) {
       this.effectiveEnvOverride(reg, namespace, key);
     }
@@ -668,17 +701,39 @@ export class SettingsService {
 
     const value = coerceEnvValue(envRaw, reg.defaults.get(key));
 
-    // A key with no declared table has nothing to enforce — unchanged behaviour.
-    const allowed = reg.optionTables.get(key);
-    if (allowed) {
-      const rejected = firstRejectedOption(allowed, value);
+    // A declared standard value domain (#5712) REPLACES the option table as
+    // the membership boundary: the standard's membership is what the override
+    // is judged against, and `options` is a UI convenience list this door does
+    // not consult. Judged here — the ONE decision point — for the reason #5204
+    // is on file: the same comparison in two places is how the env half came to
+    // disagree with the save half in the first place.
+    const domain = reg.valueDomains.get(key);
+    if (domain) {
+      const rejected = firstRejectedDomainMember(domain, value);
       if (rejected) {
+        const { member, example } = valueDomainPhrasing(domain);
         this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
-          what: 'is not a declared option for',
-          detail: `Allowed values: ${allowed.join(', ')}.`,
-          fix: 'one of the allowed values',
+          what: `is not a valid ${member} for`,
+          detail: `Allowed values: any ${member} (e.g. '${example}').`,
+          fix: `a valid ${member}`,
         });
         return null;
+      }
+    } else {
+      // A key with no declared table has nothing to enforce — unchanged
+      // behaviour (#5131's exhaustive-options semantics, untouched when no
+      // domain is declared).
+      const allowed = reg.optionTables.get(key);
+      if (allowed) {
+        const rejected = firstRejectedOption(allowed, value);
+        if (rejected) {
+          this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
+            what: 'is not a declared option for',
+            detail: `Allowed values: ${allowed.join(', ')}.`,
+            fix: 'one of the allowed values',
+          });
+          return null;
+        }
       }
     }
 
@@ -1213,7 +1268,16 @@ export class SettingsService {
    * - `required` + visible + empty → rejected.
    * - `pattern` (text fields) + non-empty value that mismatches → rejected.
    * - `options` (`select`/`radio`/`multiselect`) + non-empty value outside
-   *   the declared table → rejected (`invalid_option`).
+   *   the declared table → rejected (`invalid_option`) — unless the specifier
+   *   declares a `valueDomain`, which moves the boundary (next bullet).
+   * - `valueDomain` (#5712) + non-empty value that is not a member of the
+   *   declared standard → rejected (`invalid_value`). The domain REPLACES the
+   *   option table as the membership boundary: `options` degrades to a UI
+   *   convenience list, so a value outside `options` but inside the domain is
+   *   accepted. Judged AFTER `pattern` — shape and membership narrow
+   *   independently and a value must satisfy both, but the shape breach is the
+   *   coarser, more actionable fact (same one-error-per-key ordering argument
+   *   as window-before-grid).
    * - `min` / `max` / `minLength` / `maxLength` + non-empty value outside the
    *   declared window → rejected (`min_value` / `max_value` / `min_length` /
    *   `max_length`, #5932).
@@ -1304,6 +1368,15 @@ export class SettingsService {
         continue;
       }
 
+      // A declared standard value domain (#5712) moves the enforcement
+      // boundary off the option table: `options` is a UI convenience list for
+      // a domain-bearing specifier, so the exhaustive check below is skipped
+      // and the domain's membership is judged instead (after `pattern`, in its
+      // own branch). `knownValueDomain` filters to enforceable members, so a
+      // misspelt domain on a hand-built manifest leaves the #5131 semantics
+      // in force rather than opening an accept-everything hole.
+      const domain = knownValueDomain(spec.valueDomain);
+
       // A `select`/`radio`/`multiselect` value must be a member of the option
       // table the manifest declares. Until this check existed the `options`
       // list was a front-end convention only — the console dropdown emitted
@@ -1311,7 +1384,7 @@ export class SettingsService {
       // so a script, a migration or AI-authored bootstrap code could write
       // `provider: 'sendgrid'` into a namespace that has no such provider and
       // the write would succeed silently, leaving each consumer to improvise.
-      if (!empty && OPTION_BEARING_TYPES.has(type)) {
+      if (!empty && OPTION_BEARING_TYPES.has(type) && !domain) {
         const allowed = declaredOptionValues(spec.options);
         // A manifest with no option table cannot say what is legal. The spec
         // refuses that shape at parse time, but `registerManifest` takes
@@ -1364,6 +1437,44 @@ export class SettingsService {
             // The declared pattern, so a client can format its own message
             // rather than parsing ours (`FieldError.constraint`, ADR-0114).
             constraint: { pattern: spec.pattern },
+          });
+          continue;
+        }
+      }
+
+      // A declared standard value domain is enforced at save time (#5712).
+      // `pattern` has already spoken above — shape and membership narrow
+      // independently and a value must satisfy both — so what arrives here is
+      // shape-valid, and the question is purely whether the standard's
+      // membership admits it (`Mars/Olympus` is a shape-valid time zone that
+      // does not exist; `ZZ` matches `^[A-Za-z]{2}$` and is assigned to
+      // nobody). No `FieldErrorCode` member names a standard-domain breach, so
+      // it takes `invalid_value` — the catalog's declared slot for "rejected
+      // for a reason no other member names" (ADR-0114), the same verdict the
+      // step grid reached in #6199. `invalid_option` would be a lie about
+      // which set was consulted: the declared options are exactly the list a
+      // domain-bearing value may legitimately be outside of.
+      if (!empty && domain) {
+        const rejected = firstRejectedDomainMember(domain, value);
+        if (rejected) {
+          const offending = rejected.value;
+          const { member, example } = valueDomainPhrasing(domain);
+          // Same redaction rule as `invalid_option`, same reason: a domain
+          // member is not a secret, but `encrypted` is authorable on any
+          // specifier and this message travels back through the API and into
+          // logs.
+          const secret = reg.encryptedKeys.has(key);
+          const got = secret ? '' : ` Received '${String(offending)}'.`;
+          errors.push({
+            field: key,
+            code: 'invalid_value',
+            message: `${label} must be a valid ${member} (e.g. '${example}').${got}`,
+            label,
+            // The declared domain, spelled by the property it comes from
+            // (`FieldError.constraint`, ADR-0114), so a client can branch on
+            // WHICH membership refused without parsing the sentence.
+            constraint: { valueDomain: domain },
+            ...(secret ? {} : { value: String(offending) }),
           });
           continue;
         }

@@ -75,9 +75,9 @@ Chart over an object’s aggregated data. Bind objectName + aggregate; the axes 
 | `drillDown` | `{ enabled?: boolean; filter?: Record<string, unknown>; title?: string; target?: 'drawer' \| 'dialog' \| 'navigate'; columns?: string[]; maxRows?: number }` | binding |  | Click a segment to open the underlying records, filtered by the clicked category, in a drawer (or 'dialog', or 'navigate' to open the object's full list page instead — that arm needs host drill navigation and falls back to the drawer without it). Present = on; {} is enough. `filter`/`title` support ${event.*} interpolation; omit `filter` to derive it from aggregate.groupBy. Declared by ChartDrillDownSchema — NOT a dashboard widget key (a dataset-bound widget drills through the semantic layer instead), and not ReportSchema.drilldown (that is lowercase, boolean, report-only). |
 | `filter` | `FilterArray` | controlled |  | ObjectQL filter scoping the data; drive from React state. |
 | `type` | `'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| 'metric' \| 'kpi' \| 'bullet' \| 'radar' \| 'table' \| 'pivot'` | data | ✓ |  |
-| `title` | `string` | data |  | Chart title |
-| `subtitle` | `string` | data |  | Chart subtitle |
-| `description` | `string` | data |  | Accessibility description — announced to screen readers as the chart’s label |
+| `title` | `string \| object` | data |  | Chart title |
+| `subtitle` | `string \| object` | data |  | Chart subtitle |
+| `description` | `string \| object` | data |  | Accessibility description — announced to screen readers as the chart’s label |
 | `height` | `number` | data |  | Fixed plot height in pixels (overrides the container default) |
 | `xAxis` | `object` | data |  | X-Axis configuration |
 | `yAxis` | `object[]` | data |  | Y-Axis configuration (support dual axis) |

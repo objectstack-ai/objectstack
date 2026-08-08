@@ -7,33 +7,55 @@
  * canonical key **`visibleWhen`** across data fields, view form sections/fields,
  * and page components. The deprecated spellings — `visibleOn` (view form) and
  * `visibility` (page component) — stay accepted and are folded into `visibleWhen`
- * at the schema boundary (a zod `.transform()`).
+ * before this file ever sees them.
  *
- * **The fold does NOT happen during `parse()` (measured, #6073).** This header
- * used to say it did, and that running on the pre-parse (normalized) stack was
- * therefore enough to see what the author wrote. It is not: the ADR-0087 D2
- * conversions `view-visibleOn-to-visibleWhen` and
- * `page-component-visibility-to-visibleWhen` rename the key INSIDE
- * `normalizeStackInput` — whose output *is* the normalized tier. On all three
- * spec-valid alias sites (`views[].form.*`, `views[].formViews.*`,
- * `pages[].regions[].components[]`) `visibility-alias-deprecated` therefore
- * reports ZERO through every CLI door, `os lint` on a raw config included. The
- * only shape on which it still fires is `views[].sections[]` — the shape the
- * unit tests below use, and the one strict `ViewSchema` refuses. The author is
- * not left silent (the D2 conversion emits its own, better-worded notice naming
- * the protocol-16 retirement), so nothing is broken for a user today; #6318
- * carries the per-site table and the retire-or-rewire question.
+ * ## Why there is no alias-KEY rule here any more (#6318, retired)
  *
- * The other two rules in this file judge the predicate's **value**, which the
- * fold carries into `visibleWhen` intact — both still report normally on the
- * normalized tier, and neither is affected by the above.
+ * This file used to carry a fourth rule, `visibility-alias-deprecated`, whose
+ * whole job was to report the alias KEY. It was **unreachable on every real
+ * input shape** and is gone. The measurement, re-run at retirement time:
  *
- * One advisory rule pair (both `warning` — nothing is broken, the alias still
- * works and a mis-rooted predicate just never matches) plus TWO **gating** rules
- * (`error` — the predicate can never evaluate at all):
+ * | alias site | rule fed the RAW authored object | rule fed the `normalized` tier |
+ * |---|---|---|
+ * | `views[].form.sections[]` | 1 finding | **0** |
+ * | `views[].formViews.edit.sections[]` | 1 finding | **0** |
+ * | `pages[].regions[].components[]` | 1 finding | **0** |
  *
- * - `visibility-alias-deprecated` — a `visibleOn` / `visibility` key in authored
- *   source. Autofix intent: rename the key to `visibleWhen` (same value).
+ * The `normalized` tier is what all three commands hand this rule family
+ * (`authoring-rules.ts`, `input: 'normalized'`), and the ADR-0087 D2 conversions
+ * `view-visibleOn-to-visibleWhen` / `page-component-visibility-to-visibleWhen`
+ * rename the key INSIDE `normalizeStackInput` — whose output *is* that tier. So
+ * the key was always already gone. The one shape the rule did still fire on,
+ * `views[].sections[]` (a view CONTAINER with top-level sections), is the shape
+ * its own unit tests used and the one strict `ViewSchema` refuses outright:
+ * "Unrecognized key(s) on this view container: `sections`". A green unit test
+ * over a fixture production can never send — the #4984 / #6251 signature.
+ *
+ * **The surface is still guarded, and better.** The same D2 conversion shouts
+ * through `warnConversionNotice` in `defineStack`, with wording this rule never
+ * had — it names the site, the conversion, and the retirement window:
+ *
+ * ```
+ * defineStack: views[0].form.sections[0].visibleWhen: 'visibleOn' -> 'visibleWhen'
+ *   (converted at load; conversion 'view-visibleOn-to-visibleWhen', retires in protocol 16).
+ *   Update the source to the canonical shape — the conversion stops running then.
+ * ```
+ *
+ * So no working app lost a signal when the rule went: authors were never hearing
+ * this rule, and they do hear the conversion notice. Retired under ADR-0049
+ * (declared ≠ enforced) rather than re-anchored, because re-anchoring would have
+ * had to change `runAuthoringRules`' external input contract — a `packages/lint`
+ * public-API question that is the maintainer's to settle, not this file's.
+ * `authoring-rule-input-tier.test.ts` (premise 3) holds the regression pins.
+ *
+ * The three rules that remain judge the predicate's **value**, which the fold
+ * carries into `visibleWhen` intact — all three report normally on the
+ * normalized tier, and none was affected by the retirement.
+ *
+ * One advisory rule (`warning` — nothing is broken, a mis-rooted predicate just
+ * never matches) plus TWO **gating** rules (`error` — the predicate can never
+ * evaluate at all):
+ *
  * - `visibility-predicate-syntax` (**error**, #6253) — a predicate the canonical
  *   CEL front end refuses outright (`country === "USA"` — `===` is not CEL). See
  *   the §Syntax block below for why this surface has to say it and who owns the
@@ -205,7 +227,6 @@ import type { CelAstNode } from '@objectstack/formula';
 
 import { walkPageComponents } from './page-walk.js';
 
-export const VISIBILITY_ALIAS_DEPRECATED = 'visibility-alias-deprecated';
 export const VISIBILITY_ROOT_MISLAYERED = 'visibility-root-mislayered';
 export const VISIBILITY_BARE_IDENTIFIER = 'visibility-bare-identifier';
 export const VISIBILITY_PREDICATE_SYNTAX = 'visibility-predicate-syntax';
@@ -227,12 +248,12 @@ export interface VisibilityOptions {
 
 export interface VisibilityFinding {
   /**
-   * `warning` for the two ADR-0089 D3b advisories; `error` for the two rules
-   * that gate — `visibility-predicate-syntax` and `visibility-bare-identifier`
-   * (see module note).
+   * `warning` for the ADR-0089 D3b advisory (`visibility-root-mislayered`);
+   * `error` for the two rules that gate — `visibility-predicate-syntax` and
+   * `visibility-bare-identifier` (see module note).
    */
   severity: VisibilitySeverity;
-  /** Diagnostic rule id, e.g. `visibility-alias-deprecated`. */
+  /** Diagnostic rule id, e.g. `visibility-root-mislayered`. */
   rule: string;
   /** Human-readable location, e.g. `view "contact_form"`. */
   where: string;
@@ -246,9 +267,13 @@ export interface VisibilityFinding {
 
 type AnyRec = Record<string, unknown>;
 
-/** The canonical key and its two deprecated aliases (ADR-0089). */
+/**
+ * The canonical predicate key (ADR-0089). The two deprecated spellings
+ * (`visibleOn` / `visibility`) are read inline in `checkElement`, canonical-first
+ * — the `ALIASES` list that used to sit here existed only to iterate the retired
+ * alias-KEY rule, and went with it (#6318).
+ */
 const CANONICAL = 'visibleWhen';
-const ALIASES = ['visibleOn', 'visibility'] as const;
 
 /**
  * Every record in a collection authored either as an array or as a name-keyed
@@ -516,9 +541,13 @@ const MISLAYER_BY_LAYER: Record<
 };
 
 /**
- * Inspect one element carrying a visibility predicate. Emits the alias-deprecated
- * finding (when an alias key is present) and the mis-layered-root finding (when
- * the effective predicate's binding root does not match `layer`).
+ * Inspect one element carrying a visibility predicate. Emits the mis-layered-root
+ * finding (when the effective predicate's binding root does not match `layer`),
+ * the syntax finding, and the bare-identifier finding.
+ *
+ * There is no alias-KEY step here: `visibility-alias-deprecated` was retired
+ * under #6318 (see the module note for the per-site measurement and for the D2
+ * conversion notice that guards the surface instead).
  */
 function checkElement(
   el: AnyRec,
@@ -527,25 +556,19 @@ function checkElement(
   layer: VisibilityLayer,
   findings: VisibilityFinding[],
 ): void {
-  // (1) deprecated alias key present → steer to `visibleWhen`.
-  for (const alias of ALIASES) {
-    if (el[alias] !== undefined) {
-      findings.push({
-        severity: 'warning',
-        rule: VISIBILITY_ALIAS_DEPRECATED,
-        where,
-        path: `${path}.${alias}`,
-        message:
-          `\`${alias}\` is the deprecated spelling of the conditional-visibility ` +
-          `predicate (ADR-0089). It still works — it is normalized to \`visibleWhen\` ` +
-          `at parse — but the canonical key is \`visibleWhen\`.`,
-        hint: `Rename the key \`${alias}\` → \`visibleWhen\` (same CEL value).`,
-      });
-    }
-  }
-
-  // (2) mis-layered binding root — check the effective predicate (canonical wins)
+  // (1) mis-layered binding root — check the effective predicate (canonical wins)
   // against the root expected for this layer.
+  //
+  // The two alias limbs STAY, and are not the thing #6318 retired. That issue is
+  // about the alias KEY as a verdict; this is the predicate VALUE, and the value
+  // is what all three surviving rules judge. Through the three CLI commands the
+  // limbs are already unreachable (the D2 fold renamed the key one layer up), but
+  // `validateVisibilityPredicates` is a PUBLISHED export that a caller — this
+  // package's own unit tests included — may hand a raw authored object, and on
+  // that door an alias-spelled predicate must still be judged rather than skipped
+  // silently. Ordering is canonical-first per ADR-0089, so an alias can never
+  // override a `visibleWhen` that is present: the limbs can only ever add
+  // coverage, never change a verdict.
   const raw = el[CANONICAL] ?? el.visibleOn ?? el.visibility;
   const source = predicateSource(raw);
   const rule = MISLAYER_BY_LAYER[layer];
@@ -560,7 +583,7 @@ function checkElement(
     });
   }
 
-  // (3) #6253 — the canonical CEL front end refuses the source outright. GATES,
+  // (2) #6253 — the canonical CEL front end refuses the source outright. GATES,
   // at the severity every other predicate surface already applies to a syntax
   // fault (ADR-0032 via `validateExpression`); this surface is the one that had
   // no such gate, so a `===` shipped clean and then failed OPEN in the console.
@@ -586,13 +609,13 @@ function checkElement(
     });
   }
 
-  // (4) #6128 — a reference no binding root can resolve. Unlike (2) this one
+  // (3) #6128 — a reference no binding root can resolve. Unlike (1) this one
   // GATES: a mis-rooted predicate is at least a statement about a namespace
   // someone binds somewhere, while a bare identifier resolves nowhere, on no
   // layer, under neither a total nor a sparse record (#4953) — so there is no
   // reading of the metadata under which it was going to work.
   //
-  // Skipped when (3) fired: the declaredness check needs an AST, and a source
+  // Skipped when (2) fired: the declaredness check needs an AST, and a source
   // that does not parse has none. Written as an explicit `else` rather than
   // relying on `firstBareIdentifier`'s own null-AST guard, so the one-finding
   // -per-broken-predicate property is visible at the call site instead of
@@ -680,12 +703,17 @@ function formViewSites(
 }
 
 /**
- * Validate conditional-visibility keys across authored views and pages.
+ * Validate conditional-visibility predicates across authored views and pages.
  *
- * Runs on the **pre-parse** (normalized) stack so it can see the deprecated
- * `visibleOn` / `visibility` aliases before the schema folds them into
- * `visibleWhen`. Returns findings (empty = clean). The two ADR-0089 D3b rules
- * are advisory (`warning`); `visibility-predicate-syntax` (#6253) and
+ * Every rule here judges the predicate's **VALUE**, which survives both the
+ * ADR-0087 D2 alias fold and the Zod parse intact — so the registered
+ * `normalized` tier sees exactly what a `parsed` one would. (It is registered
+ * `normalized` for the tier's surviving reason, not the retired one: a
+ * normalized-tier finding still reaches the author when an unrelated schema
+ * error elsewhere would have stopped the parse. See `AuthoringRuleInputTier`.)
+ *
+ * Returns findings (empty = clean). `visibility-root-mislayered` is advisory
+ * (`warning`); `visibility-predicate-syntax` (#6253) and
  * `visibility-bare-identifier` (#6128) are `error` and the caller is expected to
  * fail the build on them.
  *
@@ -693,7 +721,7 @@ function formViewSites(
  * `opts.layer = 'metadata'` when linting a `*.form.ts` metadata-editing form (so a
  * `record.`-rooted predicate is flagged), or leave it at the `'runtime'` default for
  * `*.view.ts` / `*.page.ts` surfaces (so a `data.`-rooted predicate is flagged). The
- * alias-deprecated check is layer-agnostic.
+ * syntax and bare-identifier checks are layer-agnostic.
  */
 export function validateVisibilityPredicates(
   stack: AnyRec,

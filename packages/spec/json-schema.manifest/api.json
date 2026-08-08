@@ -174,7 +174,6 @@
     "api/GetLocalesResponse",
     "api/GetMetaItemCachedRequest",
     "api/GetMetaItemCachedResponse",
-    "api/GetMetaItemLayeredResponse",
     "api/GetMetaItemRequest",
     "api/GetMetaItemResponse",
     "api/GetMetaItemsRequest",

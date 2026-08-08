@@ -264,11 +264,11 @@ directory rather than per file.
 | Dir | Sites |
 |---|---|
 | `ai/` | 77 |
-| `api/` | 393 |
+| `api/` | 391 |
 | `cloud/` | 83 |
 | `identity/` | 33 |
 | `integration/` | 10 |
 | `kernel/` | 319 |
 | `qa/` | 6 |
 | `shared/` | 20 |
-| `system/` | 361 |
+| `system/` | 362 |

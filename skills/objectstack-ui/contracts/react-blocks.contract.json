@@ -336,21 +336,21 @@
         },
         {
           "name": "title",
-          "type": "string",
+          "type": "string | object",
           "kind": "data",
           "required": false,
           "description": "Chart title"
         },
         {
           "name": "subtitle",
-          "type": "string",
+          "type": "string | object",
           "kind": "data",
           "required": false,
           "description": "Chart subtitle"
         },
         {
           "name": "description",
-          "type": "string",
+          "type": "string | object",
           "kind": "data",
           "required": false,
           "description": "Accessibility description — announced to screen readers as the chart’s label"

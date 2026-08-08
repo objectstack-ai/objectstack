@@ -236,13 +236,15 @@ function checkCondition(value: any, condition: any): boolean {
                 if (target === true && value != null) return false;
                 if (target === false && value == null) return false;
                 break;
-            case '$regex':
-                try {
-                    const re = new RegExp(target, condition.$options || '');
-                    if (!re.test(String(value))) return false;
-                } catch (e) { return false; }
-                break;
-
+            // [#5702] The `$regex` arm that stood here is GONE. It was the only
+            // real regex evaluator in the repo, and the reason #4706 retired the
+            // operator rather than standardising it: `new RegExp(target)` read
+            // `a.b` as a pattern (so it also matched `axb`) where every SQL
+            // backend read it as a literal, and its `catch { return false }`
+            // answered an ILLEGAL pattern with "no rows" — a silent wrong
+            // answer, not an error. Both spellings are refused by
+            // `filter-refusal.ts`'s vocabulary gate before this evaluator runs;
+            // `$icontains` is the replacement the refusal prescribes.
             default:
                 // [#5324] Unreachable through `match`: the shape gate refuses an
                 // operator this driver does not evaluate, with the same

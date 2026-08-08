@@ -76,9 +76,41 @@ describe('matchesHaving — the unknown-operator refusal', () => {
       .toThrow(/Unsupported operator '\$nand'/);
   });
 
-  it('accepts $regex with $options as its sibling, not an operator', () => {
-    expect(matchesHaving({ k: 'Alpha' }, { k: { $regex: '^alp', $options: 'i' } })).toBe(true);
-  });
+  /**
+   * [#5702] REPLACED. This case read `accepts $regex with $options as its
+   * sibling, not an operator` and asserted `matchesHaving({ k: 'Alpha' },
+   * { k: { $regex: '^alp', $options: 'i' } }) === true` — HAVING running a real
+   * `RegExp`, with `$options` skipped as its flags.
+   *
+   * #4706 retired both spellings and #5710 flipped their last producer, so
+   * there is no true/false answer left to assert: HAVING is the fifth of the
+   * five refusal sites `RETIRED_FILTER_OPERATORS` names, and it now refuses.
+   * The old arm also answered an ILLEGAL pattern with `return false` — "this
+   * row does not match" for a filter that could not run at all — which is the
+   * silent wrong answer the retirement is about, on the one evaluation face no
+   * conformance table drives.
+   */
+  for (const [label, condition, mustMention] of [
+    ['a bare $regex', { k: { $regex: '^alp' } }, ["'$regex'", '$icontains']],
+    ['a bare $options', { k: { $options: 'i' } }, ["'$options'", '$icontains']],
+    [
+      '$regex with $options — one mistake, one fix',
+      { k: { $regex: '^alp', $options: 'i' } },
+      ["'$regex'", "'$options'", '$icontains'],
+    ],
+  ] as const) {
+    it(`REFUSES the retired ${label}, naming the replacement`, () => {
+      let err: Error | undefined;
+      try {
+        matchesHaving({ k: 'Alpha' }, condition);
+      } catch (e) {
+        err = e as Error;
+      }
+      expect(err, 'expected `having` to refuse a retired operator').toBeInstanceOf(Error);
+      expect(err!.message).toContain('RETIRED');
+      for (const mention of mustMention) expect(err!.message).toContain(mention);
+    });
+  }
 });
 
 /**
