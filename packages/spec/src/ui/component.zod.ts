@@ -110,6 +110,17 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 // component-level `visibleWhen` (ADR-0089) — that one is a page to rewrite, not
 // a key to declare.
 //
+// "The rest of that inventory" was one pair short, and how the shortfall
+// happened is the reusable part: #5775's ruling named its keys individually, so
+// the two `element:record_picker` shorthands the renderer reads through the
+// SAME `ds.x ?? props.x` line as the keys that were named — `sort` and `limit`
+// — fell outside it and stayed undeclared. #6276 declared them on the same
+// #5611 rule (maintainer ruling 2026-08-08, direction A). The lesson for the
+// next divergence sweep: enumerate by the RENDERER'S read pattern, not by the
+// key list a previous ruling happened to quote. Retiring the flat family
+// wholesale in favour of `dataSource` is the standing alternative, deferred to
+// v18 as #6590 — not rejected.
+//
 // ── #5068: THE GATE IS WIRED — read the flip precisely ─────────────────────
 //
 // `packages/lint/src/validate-component-props.ts` dispatches on the component's
@@ -170,6 +181,10 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { retiredKey } from '../shared/retired-key';
+// `element:record_picker`'s flat `sort` shorthand is the SAME contract as
+// `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
+// shared source rather than re-spelled here (#6276).
+import { SortItemSchema } from '../shared/enums.zod';
 const EmptyProps = z.object({});
 
 /**
@@ -667,6 +682,35 @@ export const ElementFormPropsSchema = lazySchema(() => z.object({
  * enforce-or-remove: the control is a single-select `Select` with no search
  * box, so both were capability claims nothing kept (#5021 / #4988 precedent).
  * Either may return the day it is implemented; a declaration is not a roadmap.
+ *
+ * ⚠️ #6276 finished the same inventory one key-pair later, and the finding is
+ * worth stating as a rule rather than as two more keys. The renderer resolves
+ * its query from FOUR keys through one identical pattern — `dataSource` first,
+ * the flat `properties` shorthand second:
+ *
+ * ```ts
+ * const object = ds.object ?? props.object;
+ * const filter = ds.filter ?? props.filter;
+ * const sort   = ds.sort   ?? props.sort;
+ * const limit  = ds.limit  ?? props.limit ?? 50;
+ * ```
+ *
+ * After #5775 two of those four shorthands were declared (`object`, `filter`)
+ * and two were not, so one renderer read half a contract and half a trapdoor:
+ * an author who inferred `properties.limit: 20` from the `object`/`filter`
+ * spelling got the renderer's default 50 with zero diagnostics — ADR-0078, on
+ * the same element that had just been rewritten to remove it. The maintainer's
+ * ruling (2026-08-08, direction A) declares the other two, so all four flat
+ * shorthands are contract. Direction B — retiring the whole flat family and
+ * making `dataSource` the single data-binding door — was NOT dropped: it is a
+ * cross-element decision (`element:form` / `element:filter` carry the same flat
+ * `object`), tracked as #6590 for v18, and A does not block it. When B lands
+ * these two retire alongside `object` / `filter` under ADR-0087, together.
+ *
+ * Both keys are declared in the shape `ElementDataSourceSchema` already uses
+ * for its own `sort` / `limit`, deliberately: they are the SAME contract read
+ * through a second spelling, so a divergent shape here would be a third
+ * dialect rather than a shorthand.
  */
 export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
   object: z.string().describe('Object to pick records from'),
@@ -681,6 +725,24 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
   /** Control label rendered above the select. */
   label: I18nLabelSchema.optional().describe('Control label rendered above the select'),
   filter: FilterConditionSchema.optional().describe('Filter criteria for available records'),
+  /**
+   * Row order (#6276). The flat shorthand for `dataSource.sort`, and the same
+   * shape — `SortItemSchema[]`, the pairs the renderer forwards to the query as
+   * `$orderby`. `dataSource.sort` wins when both are written
+   * (`ds.sort ?? props.sort`).
+   */
+  sort: z.array(SortItemSchema).optional()
+    .describe('Row order — synonym of the component-level `dataSource.sort`, which takes precedence when both are set'),
+  /**
+   * Row cap (#6276). The flat shorthand for `dataSource.limit`, same shape.
+   * `dataSource.limit` wins when both are written, and with neither the
+   * renderer queries `$top: 50` (`ds.limit ?? props.limit ?? 50`) — that 50 is
+   * the renderer's fallback, not a schema default, so it is documented here
+   * rather than declared: declaring it would materialize a `limit: 50` on every
+   * parsed picker and turn an unset key into an authored one.
+   */
+  limit: z.number().int().positive().optional()
+    .describe('Max records offered — synonym of the component-level `dataSource.limit`, which takes precedence when both are set (renderer default 50)'),
   targetVariable: z.string().optional().describe('Page variable to bind selected record ID(s)'),
   placeholder: I18nLabelSchema.optional().describe('Placeholder text'),
   /** Shown in place of the row list when the query returns nothing. */

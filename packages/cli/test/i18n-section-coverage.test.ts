@@ -217,7 +217,7 @@ describe('authored record-page sections', () => {
                   properties: {
                     sections: [
                       { name: 'overview', label: 'Overview', fields: ['name'] },
-                      { name: 'timeline', title: 'Timeline', fields: ['close_date'] },
+                      { name: 'timeline', label: 'Timeline', fields: ['close_date'] },
                     ],
                   },
                 },
@@ -236,9 +236,28 @@ describe('authored record-page sections', () => {
     ]);
   });
 
-  it('reads `title` as the source text too — that is what `record:details` renders', () => {
+  it('reads `label` as the source text', () => {
     const timeline = sectionEntries({ pages: [slottedPage] }).find((e) => e.path[3] === 'timeline');
     expect(timeline?.inline).toBe('Timeline');
+  });
+
+  it('does NOT read an off-spec `title` as the source text — the key is still emitted, empty', () => {
+    // #5730: `label` is the only heading spelling `RecordDetailsProps.sections[]`
+    // declares (#5611). The walk keys sections off `name`, so a `title`-only
+    // section STILL contributes its expected key — what it must not contribute
+    // is source text, because scaffolding `"Timeline"` into a bundle from an
+    // off-spec key is how the second spelling would become self-documenting.
+    // Asserting the key survives is what keeps this non-vacuous: the entry is
+    // present and its `inline` is empty, not absent because nothing was walked.
+    const titled = JSON.parse(JSON.stringify(slottedPage));
+    const sections = titled.slots.tabs.properties.items[0].children[0].properties.sections;
+    sections[1] = { name: 'timeline', title: 'Timeline', fields: ['close_date'] };
+
+    const entries = sectionEntries({ pages: [titled] });
+    expect(entries.map((e) => e.path.join('.'))).toContain(
+      'objects.crm_opportunity._sections.timeline.label',
+    );
+    expect(entries.find((e) => e.path[3] === 'timeline')?.inline).toBeUndefined();
   });
 
   it('reaches the plain `regions[].components[]` shape, and never mines a page REGION name', () => {

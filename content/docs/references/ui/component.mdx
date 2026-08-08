@@ -147,6 +147,8 @@ const result = AIChatWindowProps.parse(data);
 | **valueField** | `string` | optional | Field whose value is written into the bound page variable (default `id`) |
 | **label** | `string \| Record<string, string>` | optional | Control label rendered above the select |
 | **filter** | `any` | optional | Filter criteria for available records |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order — synonym of the component-level `dataSource.sort`, which takes precedence when both are set |
+| **limit** | `integer` | optional | Max records offered — synonym of the component-level `dataSource.limit`, which takes precedence when both are set (renderer default 50) |
 | **targetVariable** | `string` | optional | Page variable to bind selected record ID(s) |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
 | **emptyText** | `string \| Record<string, string>` | optional | Text shown when the query returns no records (default "No records") |

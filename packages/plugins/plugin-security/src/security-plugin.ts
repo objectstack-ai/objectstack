@@ -758,8 +758,19 @@ export class SecurityPlugin implements Plugin {
         dismissAudienceBindingSuggestion: (callerContext: any, id: string) =>
           dismissAudienceBindingSuggestion(suggestionDeps, callerContext, id),
       };
-      ctx.registerService('security', securityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, canExport, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / #3544 / #3547');
+      // [ADR-0106 D7] The metadata-plane readable-field query, registered as an
+      // EXTENSION of the published contract rather than inside the typed
+      // literal above: `ISecurityService` lives in `packages/spec`, and the
+      // seat for this method there is a separate change (consumers already
+      // feature-detect, which is exactly why a partial surface degrades instead
+      // of lying). `Object.assign` keeps the literal type-checked against the
+      // contract while the extension stays visible as an extension.
+      const registeredSecurityService = Object.assign(securityService, {
+        getMetadataReadableFields: (object: string, context?: any) =>
+          this.getMetadataReadableFields(object, context),
+      });
+      ctx.registerService('security', registeredSecurityService);
+      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -2548,6 +2559,40 @@ export class SecurityPlugin implements Plugin {
    * `isSystem` skip.
    */
   async getReadableFields(object: string, context?: any): Promise<string[] | undefined> {
+    return this.computeReadableFields(object, context, { fallbackOnEmptySets: false });
+  }
+
+  /**
+   * [ADR-0106 D7] The METADATA-PLANE variant of {@link getReadableFields}.
+   *
+   * Identical in every respect but one: a caller that resolves to **zero**
+   * permission sets goes through the same fallback-set resolution
+   * `/auth/me/permissions` uses ({@link fallbackPermissionSet}, default
+   * `member_default`) instead of falling open to the full field set.
+   *
+   * Why the two differ rather than converge. `getReadableFields` mirrors the
+   * engine middleware, which skips its whole gate for a caller with no
+   * permission sets — reporting a narrowing the data path would not enforce is
+   * its own kind of drift, so on the DATA plane falling open is the correct,
+   * drift-free answer. The metadata plane has no such symmetry to preserve: the
+   * question there is disclosure, and ADR-0106 D7 rules that a public/guest
+   * deployment's schema exposure must be a deliberate permission-set decision
+   * rather than an accidental everything-default. Anonymous callers on a
+   * `requireAuth` deployment are blocked before any of this.
+   *
+   * Still falls open when the fallback set itself resolves to nothing (no
+   * `member_default` in the deployment at all) — that is the "no FLS posture
+   * here" tier, not a restricted caller.
+   */
+  async getMetadataReadableFields(object: string, context?: any): Promise<string[] | undefined> {
+    return this.computeReadableFields(object, context, { fallbackOnEmptySets: true });
+  }
+
+  private async computeReadableFields(
+    object: string,
+    context: any,
+    options: { fallbackOnEmptySets: boolean },
+  ): Promise<string[] | undefined> {
     const objectName = String(object ?? '');
     if (!objectName) return undefined;
     // The field universe — the SAME source the RLS field pass uses (ObjectQL's
@@ -2559,7 +2604,14 @@ export class SecurityPlugin implements Plugin {
     // System operations bypass FLS (mirrors the middleware's isSystem skip).
     if (context?.isSystem) return allFields;
 
-    const permissionSets = await this.resolvePermissionSetsForContext(context);
+    let permissionSets = await this.resolvePermissionSetsForContext(context);
+    if (permissionSets.length === 0 && options.fallbackOnEmptySets) {
+      // [ADR-0106 D7] `resolvePermissionSetsForContext` applies the baseline
+      // only for a caller carrying `userId`, so a guest/anonymous caller lands
+      // here with nothing. Resolve the configured fallback set explicitly —
+      // the same two-step `/auth/me/permissions` performs.
+      permissionSets = await this.resolveFallbackPermissionSets();
+    }
     // No sets resolved (e.g. unauthenticated) → no field mask applies, exactly
     // as the middleware (getFieldPermissions([]) === {} → nothing deleted).
     if (permissionSets.length === 0) return allFields;
@@ -2713,6 +2765,32 @@ export class SecurityPlugin implements Plugin {
       );
     }
     return permissionSets;
+  }
+
+  /**
+   * [ADR-0106 D7] Resolve the configured fallback permission set on its own —
+   * the second step `/auth/me/permissions` takes when a caller's own names
+   * resolve to nothing (`resolved.length === 0 && fallbackName`).
+   *
+   * Distinct from the post-resolution fallback inside
+   * {@link resolvePermissionSetsForContext}, which is gated on `context.userId`
+   * (it exists to close an RLS fail-open for AUTHENTICATED callers whose
+   * positions map to no set). D7 needs the same resolution for a caller with no
+   * principal at all, so that a guest-facing deployment's metadata exposure is
+   * a permission-set decision rather than an accidental everything-default.
+   *
+   * Returns `[]` when no fallback set is configured or it does not resolve.
+   */
+  private async resolveFallbackPermissionSets(): Promise<PermissionSet[]> {
+    const fallback = this.fallbackPermissionSet;
+    if (!fallback) return [];
+    return this.permissionEvaluator.resolvePermissionSets(
+      [fallback],
+      this.metadata,
+      this.bootstrapPermissionSets,
+      this.dbLoader,
+      { logger: this.logger },
+    );
   }
 
   /**
