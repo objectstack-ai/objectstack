@@ -4194,8 +4194,14 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    if (query.limit) builder.limit(query.limit);
-    if (query.offset) builder.offset(query.offset);
+    // PRESENCE, not truthiness — the same test `findRows()` makes (#6577).
+    // `limit: 0` means "return no records" (#6485), and `0` is falsy, so
+    // `if (query.limit)` dropped the clause and answered a request for NOTHING
+    // with the WHOLE table. Measured on `main` before this line changed: three
+    // rows seeded, `{ limit: 0 }` returned 3 here and 0 through `find()` — one
+    // driver, two answers to one `QueryAST`.
+    if (query.limit !== undefined) builder.limit(query.limit);
+    if (query.offset !== undefined) builder.offset(query.offset);
 
     return await builder;
   }
@@ -4234,8 +4240,15 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    if (query.limit) builder.limit(query.limit);
-    if (query.offset) builder.offset(query.offset);
+    // PRESENCE, not truthiness — see `findWithWindowFunctions()` above (#6577).
+    // The stake is different here and no smaller: this door returns a PLAN, and
+    // a plan is only worth reading if it explains the statement `find()` would
+    // actually run. Measured on `main` before this line changed: `{ limit: 0 }`
+    // compiled to `select * from `orders`` while `find()` sent
+    // `select * from `orders` order by `id` asc limit ?` — an EXPLAIN for a
+    // different query, which is the one thing an EXPLAIN must never be.
+    if (query.limit !== undefined) builder.limit(query.limit);
+    if (query.offset !== undefined) builder.offset(query.offset);
 
     const sql = builder.toSQL();
     const client = (this.config as any).client;

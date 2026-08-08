@@ -1482,9 +1482,27 @@ export class RemoteTransport {
     }
 
     // PAGINATION
+    //
+    // SQLite's grammar is `LIMIT expr [OFFSET expr]` — an OFFSET cannot stand
+    // alone. This compiler emitted the two clauses independently, so
+    // `find(obj, { offset: N })` with no `limit` assembled `... OFFSET ?` and
+    // the server answered `near "OFFSET": syntax error` — for EVERY N, not a
+    // boundary value. The local transport never had it: knex synthesises the
+    // no-limit sentinel, compiling `.offset(3)` to `limit ? offset ?` bound
+    // `[-1, 3]` (measured). So this is the same statement knex would have
+    // built, and the two transports now answer a bare offset the same way
+    // instead of one working and one throwing (#6577, surfaced by the
+    // `PAGINATION_ZERO_LIMIT_CASES` control that reads with an offset alone).
+    //
+    // `-1` is SQLite's documented "no limit", not a magic number: a negative
+    // LIMIT means unbounded, which is exactly what "the caller gave no limit"
+    // has to compile to once the clause is mandatory.
     if (query.limit !== undefined) {
       sql += ` LIMIT ?`;
       allArgs.push(query.limit);
+    } else if (query.offset !== undefined) {
+      sql += ` LIMIT ?`;
+      allArgs.push(-1);
     }
     if (query.offset !== undefined) {
       sql += ` OFFSET ?`;

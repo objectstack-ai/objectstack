@@ -82,6 +82,19 @@ export const en: TranslationData = {
         nav_permission_sets: { label: 'Permission Sets' },
         nav_sharing_rules: { label: 'Sharing Rules' },
         nav_record_shares: { label: 'Record Shares' },
+        // `nav_sso_providers` is contributed by `@objectstack/plugin-auth` only
+        // when the external-IdP RP is wired (`OS_SSO_ENABLED`, or the cloud
+        // per-env `planAllowsSso`), so it is the one Setup entry
+        // `pnpm check:app-nav-i18n` structurally cannot judge: that gate boots
+        // ONE composition, and a contribution gated off in it is never merged
+        // and therefore never checked (see the gate header's bound #1). Its
+        // absence here was invisible for exactly that reason (#6659) — a
+        // deployment with SSO wired showed `SSO Providers` in English inside an
+        // otherwise translated menu. The pin that keeps this row honest lives
+        // in `setup-nav-dead-key-tombstone.test.ts`. Wording follows the
+        // object's own `pluralLabel` per locale (`sys_sso_provider`), since the
+        // entry opens that object's list view.
+        nav_sso_providers: { label: 'SSO Providers' },
         nav_api_keys: { label: 'API Keys' },
         nav_connect_agent: { label: 'Connect an Agent' },
 
