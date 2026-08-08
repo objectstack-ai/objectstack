@@ -44,6 +44,7 @@
     "HttpRequestSchema (const)",
     "IsolationLevel (type)",
     "IsolationLevelEnum (const)",
+    "KeySetGuidance (interface)",
     "MAP_SUPPORTED_FIELDS (const)",
     "METADATA_ALIASES (const)",
     "MapSupportedField (type)",
@@ -89,6 +90,7 @@
     "TemplateExpressionInput (type)",
     "TemplateExpressionInputSchema (const)",
     "VISIBILITY_ALIAS_KEYS (const)",
+    "VISIBILITY_STRICT_OPTIONS (const)",
     "ViewName (type)",
     "ViewNameParsed (type)",
     "ViewNameSchema (const)",
@@ -100,6 +102,7 @@
     "formatSuggestion (function)",
     "formatZodError (function)",
     "formatZodIssue (function)",
+    "keySetMatches (function)",
     "lazySchema (function)",
     "levenshteinDistance (function)",
     "normalizeMetadataCollection (function)",
@@ -113,7 +116,6 @@
     "safeParsePretty (function)",
     "singularToPlural (function)",
     "strictUnknownKeyError (function)",
-    "strictVisibilityError (const)",
     "suggestFieldType (function)",
     "tmpl (function)"
   ]

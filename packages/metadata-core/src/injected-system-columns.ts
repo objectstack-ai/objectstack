@@ -44,13 +44,13 @@
  * (2026-08-08) is Option B: the read serves the EFFECTIVE runtime schema, and
  * the overlay-backed minority path converges on the registry-backed majority.
  *
- * ## The one key this table deliberately does NOT carry: `indexed`
+ * ## The key that used to sit beside this table: `indexed` (#6810, closed)
  *
- * `applySystemFields` stamps `indexed: <multiTenant>` onto its `organization_id`
- * definition, for the MongoDB driver's schema builder (the only consumer;
- * `driver-mongodb/src/mongodb-schema.ts`). `indexed` is **not a `FieldSchema`
- * key** — it was removed in the 16.x line (#2377, ADR-0049) and `FieldSchema` is
- * `strictObject`, so an object document carrying it is rejected BY NAME:
+ * `applySystemFields` used to stamp `indexed: <multiTenant>` on top of
+ * {@link TENANT_SCOPE_FIELD_DEF}, for the MongoDB driver's schema builder — the
+ * only consumer. `indexed` is **not a `FieldSchema` key**: it was removed in the
+ * 16.x line (#2377, ADR-0049) and `FieldSchema` is `strictObject`, so an object
+ * document carrying it is rejected BY NAME:
  *
  * ```
  * Unrecognized key(s) on this field: `indexed`.
@@ -58,13 +58,18 @@
  * ```
  *
  * Measured on `origin/main` (2026-08-08): a registry-backed `/meta` object read
- * therefore already answers `_diagnostics: { valid: false }` on exactly that
- * key, in BOTH multiTenant modes — filed as #6810, and deliberately not
- * inherited here. Converging the overlay-backed exit onto a key the object
- * schema refuses would spread that defect rather than close #6562's; the field
- * SET and every spec-authorable key converge, and the DDL hint stays where the
- * DDL is. `multiTenant` is also the *only* thing that key depends on, which is
- * why nothing in this module takes a `multiTenant` input: per
+ * therefore answered `_diagnostics: { valid: false }` on exactly that key, in
+ * BOTH multiTenant modes — filed as #6810, and deliberately not inherited here,
+ * since converging the overlay-backed exit onto a key the object schema refuses
+ * would have spread that defect rather than closed #6562's.
+ *
+ * #6810 closed it at the injection site rather than here: the tenant index is
+ * declared in the object's `indexes[]` — the one surface an index is declared on
+ * — and no served field carries `indexed` on either exit any more. What this
+ * table carries is unchanged; there is simply nothing spread on top of it now.
+ *
+ * `multiTenant` was the *only* thing that key depended on, which is still why
+ * nothing in this module takes a `multiTenant` input: per
  * `resolveInjectedSystemColumns`' own measurement, the flag changes whether
  * `organization_id` is INDEXED, never whether it EXISTS.
  */
@@ -131,9 +136,9 @@ export const AUDIT_FIELD_DEFS = {
 /**
  * `organization_id` — THE tenant scope anchor, in its **authorable** shape.
  *
- * ⚠️ `applySystemFields` spreads `indexed: opts.multiTenant` on top of this when
- * it provisions the physical column; see the module header for why that key
- * lives at the injection site and never in a served document.
+ * Spread verbatim by `applySystemFields` — nothing is layered on top of it.
+ * (#6810 removed the `indexed: opts.multiTenant` that used to be; the tenant
+ * index is declared in the object's `indexes[]` instead. See the module header.)
  */
 export const TENANT_SCOPE_FIELD_DEF: Readonly<Record<string, unknown>> = {
   type: 'lookup',

@@ -226,17 +226,23 @@ describe.each([true, false])('[#6562] /meta object read — effective schema (mu
     it('the injected columns carry the SAME metadata the registry answer carries', async () => {
         const { registryBacked, overlayBacked } = await bothAnswers();
 
-        // The whole disagreement, computed. `organization_id.indexed` is the ONE
-        // residual entry and it is not this issue's: `indexed` is not a
-        // `FieldSchema` key at all — removed in the 16.x line (#2377, ADR-0049)
-        // and rejected BY NAME by the strict schema — so `applySystemFields`
-        // stamping it is why a registry-backed read already answers
-        // `_diagnostics: { valid: false }` (pinned below, filed as #6810). Its
-        // only consumer is `driver-mongodb`'s schema builder, which reads the
-        // REGISTERED schema and never a served document. Converging the served
-        // answer onto a key the object schema refuses would have spread that
-        // defect instead of closing this one.
-        expect(divergences(registryBacked, overlayBacked)).toEqual(['organization_id.indexed']);
+        // The whole disagreement, computed — and it is now EMPTY.
+        //
+        // [#6810 — FLIPPED, deliberately] This read `['organization_id.indexed']`
+        // when #6562 landed. That entry was never this issue's: `indexed` is not
+        // a `FieldSchema` key at all — removed in the 16.x line (#2377,
+        // ADR-0049) and rejected BY NAME by the strict schema — so
+        // `applySystemFields` stamping it was why a registry-backed read
+        // answered `_diagnostics: { valid: false }` (pinned below). #6562
+        // deliberately did NOT converge onto it, because converging onto a key
+        // the object schema refuses spreads that defect rather than closing this
+        // one, and pinned the residual in both directions so the fix at the
+        // injection site had to come back and flip it rather than leave a stale
+        // expectation behind. #6810 did exactly that: the tenant index is
+        // declared in the object's `indexes[]` now, the field definition carries
+        // only authorable keys, and the two producers agree on every key of
+        // every field.
+        expect(divergences(registryBacked, overlayBacked)).toEqual([]);
 
         // …and the markers the `engine-audit-anchor-write` pin is about, spelled
         // out so a failure names the contract rather than a key list.
@@ -261,10 +267,35 @@ describe.each([true, false])('[#6562] /meta object read — effective schema (mu
         // `injected-system-columns-parity.test.ts` pins it for the injection
         // pass; this is the same fact one layer up, on the SERVED document —
         // which is why nothing in the read path takes a `multiTenant` input.
+        //
+        // [#6810 — FLIPPED] The index used to be read off the field
+        // (`registryBacked.fields.organization_id.indexed === multiTenant`). It
+        // is declared in `indexes[]` now, so the same fact is read there, and
+        // `multiTenant: false` is the ABSENCE of a declaration rather than one
+        // whose value is false. NO field on either answer carries `indexed` any
+        // more — asserted, because that key's presence is the whole of #6810.
         const { registryBacked, overlayBacked } = await bothAnswers();
         expect(namesOf(registryBacked)).toContain('organization_id');
         expect(overlayBacked.fields.organization_id.indexed).toBeUndefined();
-        expect(registryBacked.fields.organization_id.indexed).toBe(multiTenant);
+        expect(registryBacked.fields.organization_id.indexed).toBeUndefined();
+
+        const tenantIndexes = (doc: any) =>
+            (doc.indexes ?? []).filter(
+                (i: any) => Array.isArray(i?.fields) && i.fields.length === 1
+                    && i.fields[0] === 'organization_id',
+            );
+        expect(tenantIndexes(registryBacked)).toEqual(multiTenant ? [{ fields: ['organization_id'] }] : []);
+
+        // The one residual this fix leaves, recorded rather than left to be
+        // rediscovered: the DECLARATION does not converge the way the field set
+        // does. `divergences()` above compares fields, and the overlay-backed
+        // answer is rebuilt from the stored body, which declares no indexes. It
+        // is inert on this surface — a driver materializes from the REGISTERED
+        // schema, never from a served document (the same reasoning #6562 used to
+        // leave the flag at the injection site), and both answers parse green
+        // either way. If a served-document consumer of `indexes[]` ever appears,
+        // this is the line that says so.
+        expect(tenantIndexes(overlayBacked)).toEqual([]);
     });
 
     it('the served correction never becomes a phantom customization', async () => {
@@ -283,19 +314,25 @@ describe.each([true, false])('[#6562] /meta object read — effective schema (mu
             .toContain('organization_id');
     });
 
-    it('[residual, filed as #6810] only the registry-backed answer fails its own schema', async () => {
-        // Not a defect this PR introduces and not one it papers over: the
-        // registry stamps `indexed`, `FieldSchema` rejects it by name, so the
-        // registry-backed exit has been answering `valid: false` on every
-        // multi-tenant-capable object since #4001 closed the schema. Pinned in
-        // both directions so #6810's fix at the injection site has to come back
-        // and flip these lines, rather than leave a stale expectation behind.
+    it('[#6810, closed] BOTH answers now pass their own schema', async () => {
+        // [#6810 — FLIPPED, deliberately. Do not read the old text as history to
+        // restore.] This block used to assert the inverse:
+        //
+        //   expect(overlayBacked._diagnostics).toEqual({ valid: true });
+        //   expect(registryBacked._diagnostics.valid).toBe(false);
+        //   expect(registryBacked._diagnostics.errors[0]).toMatchObject({
+        //       path: 'fields.organization_id', code: 'unrecognized_keys' });
+        //
+        // The registry stamped `indexed`, `FieldSchema` rejected it by name, and
+        // the registry-backed exit had been answering `valid: false` on every
+        // multi-tenant-capable object since #4001 closed the schema. #6562
+        // pinned that in BOTH directions precisely so the fix at the injection
+        // site could not quietly forget it; #6810 moved the declaration to
+        // `indexes[]` and the verdict inverted. Asserted as the whole object, not
+        // `.valid` alone: a fix that left an `errors` array behind a `true`
+        // verdict would be a different defect.
         const { registryBacked, overlayBacked } = await bothAnswers();
         expect(overlayBacked._diagnostics).toEqual({ valid: true });
-        expect(registryBacked._diagnostics.valid).toBe(false);
-        expect(registryBacked._diagnostics.errors[0]).toMatchObject({
-            path: 'fields.organization_id',
-            code: 'unrecognized_keys',
-        });
+        expect(registryBacked._diagnostics).toEqual({ valid: true });
     });
 });

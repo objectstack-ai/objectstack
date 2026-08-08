@@ -404,17 +404,54 @@ export function applySystemFields(
   // Platform-owned field settings that must WIN over a declared field, rather
   // than lose to it like `additions` does (#4447).
   const overrides: Record<string, any> = {};
+  // Platform-owned index declarations, appended to the object's `indexes[]` —
+  // the ONE surface an index is declared on in this system (#6810, below).
+  const indexAdditions: Array<{ fields: string[] }> = [];
 
   if (wantTenant && !schema.fields?.organization_id) {
-    // [#6562] The authorable shape is the shared table's; `indexed` is spread on
-    // top HERE and only here. It is the one key of this definition that is not a
-    // `FieldSchema` key at all — removed in the 16.x line (#2377, ADR-0049), and
-    // `FieldSchema` is `strictObject`, so a document carrying it is rejected by
-    // name ("never a FieldSchema key; a field-level index flag built no index").
-    // Its only consumer is `driver-mongodb`'s schema builder, which reads the
-    // REGISTERED schema and never a served `/meta` document — so it stays at the
-    // injection site and the served answer converges on everything else.
-    additions.organization_id = { ...TENANT_SCOPE_FIELD_DEF, indexed: opts.multiTenant };
+    // [#6562] The authorable shape is the shared table's, spread verbatim.
+    //
+    // [#6810] Nothing is spread ON TOP of it any more. This line used to read
+    // `{ ...TENANT_SCOPE_FIELD_DEF, indexed: opts.multiTenant }`, and `indexed`
+    // is the one key that was never a `FieldSchema` key at all — removed in the
+    // 16.x line (#2377, ADR-0049) because a field-level index flag built no
+    // index, and `FieldSchema` is a `strictObject`, so a document carrying it is
+    // rejected BY NAME ("never a FieldSchema key; a field-level index flag built
+    // no index"). #6562's reasoning for leaving it here — that its only consumer
+    // reads the REGISTERED schema, never a served document — held for the
+    // consumer and not for the document: `registerObject` runs this function
+    // BEFORE storing and `getItem('object', …)` serves that post-injection
+    // document, so the key reached `/meta`, where `decorateMetadataItem`
+    // re-parsed the served body and stamped `_diagnostics: { valid: false,
+    // errors: [{ path: 'fields.organization_id', code: 'unrecognized_keys' }] }`
+    // on EVERY registry-backed object — both tenancy modes, both read exits. A
+    // defect report the platform wrote about its own column, on a document the
+    // author never wrote and could not fix, in the channel Studio renders
+    // invalid-metadata banners from.
+    additions.organization_id = { ...TENANT_SCOPE_FIELD_DEF };
+
+    // [#6810] So the tenant index is declared where every other index in this
+    // system is declared: the object's `indexes[]`.
+    //
+    // This is also the first time the intent is actually ENFORCED. The sole
+    // reader of the old flag was one line in `driver-mongodb`
+    // (`mongodb-schema.ts`), while `driver-sql` — which every walled deployment
+    // runs — only ever materialized `indexes[]`, so the wall's hottest predicate
+    // ran unindexed no matter what the flag said.
+    //
+    // No `name`: each driver derives its own (SQL's `buildIndexName` is
+    // table-qualified, which a hardcoded name could not be without colliding
+    // across tables on Postgres; Mongo's index names are per-collection).
+    // `unique` is left at its default `false` — a plain lookup index, never a
+    // constraint.
+    //
+    // `multiTenant: false` declares NO index rather than a false one: on an
+    // unwalled stack nothing filters by organization, so the index is dead
+    // weight — the same intent the old flag's value carried, expressed as
+    // presence instead of a boolean.
+    if (opts.multiTenant && !declaresTenantIndex(schema)) {
+      indexAdditions.push({ fields: ['organization_id'] });
+    }
   }
 
   if (wantAudit) {
@@ -496,14 +533,49 @@ export function applySystemFields(
     additions[OWNING_BUSINESS_UNIT_FIELD] = { ...OWNING_BUSINESS_UNIT_FIELD_DEF };
   }
 
-  if (Object.keys(additions).length === 0 && Object.keys(overrides).length === 0) return schema;
+  if (
+    Object.keys(additions).length === 0 &&
+    Object.keys(overrides).length === 0 &&
+    indexAdditions.length === 0
+  ) {
+    return schema;
+  }
 
   return {
     ...schema,
     // `additions` LOSE to an author's field (a declared `owner_id` is theirs);
     // `overrides` WIN over it (the audit family's governance is not authorable).
     fields: { ...additions, ...(schema.fields ?? {}), ...overrides },
+    // [#6810] Author-declared indexes keep their position; the platform's
+    // tenant index is APPENDED, never merged into or reordering theirs.
+    ...(indexAdditions.length > 0
+      ? { indexes: [...((schema as any).indexes ?? []), ...indexAdditions] }
+      : {}),
   };
+}
+
+/**
+ * [#6810] Is the tenant index already declared on this object?
+ *
+ * The append is the one part of this injection that is not naturally
+ * idempotent — the field injection re-runs harmlessly because
+ * `!schema.fields?.organization_id` stops it, an array push does not — so an
+ * author who hand-wrote `indexes: [{ fields: ['organization_id'] }]` must not
+ * end up with the platform's duplicate beside it.
+ *
+ * Matched on the single-column shape this function emits, deliberately: an
+ * author's composite (`['organization_id', 'code']`) is a leading-column match
+ * on some dialects and not on others, so it is not treated as a substitute.
+ */
+function declaresTenantIndex(schema: ServiceObject): boolean {
+  const declared = (schema as any).indexes;
+  if (!Array.isArray(declared)) return false;
+  return declared.some(
+    (idx: any) =>
+      Array.isArray(idx?.fields) &&
+      idx.fields.length === 1 &&
+      idx.fields[0] === 'organization_id',
+  );
 }
 
 /**
