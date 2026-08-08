@@ -163,7 +163,41 @@ export interface StrictObjectDeclaration {
   readonly shape: z.ZodRawShape;
 }
 
-const DECLARATIONS: StrictObjectDeclaration[] = [];
+/**
+ * The registry array, owned by a HOISTED function declaration.
+ *
+ * ⚠️ **Deliberately not a module-level `const`, and this is load-bearing.**
+ * `strictObject` is called at MODULE SCOPE by schemas that sit inside the
+ * `field.zod` ↔ `suggestions.zod` ↔ this module import cycle, so under
+ * `OS_EAGER_SCHEMAS=1` it can run while this module is still initializing. A
+ * `const` is in its temporal dead zone until its own line executes, so the call
+ * throws `ReferenceError: Cannot access 'DECLARATIONS' before initialization`
+ * at IMPORT time — before a single test body runs. A hoisted `function`
+ * declaration is fully initialized from the first instruction of module
+ * evaluation, which is the same property `automation/flow.zod.ts`'s
+ * `flowNodeObject()` relies on for its own cycle (#4415, and its docblock says
+ * so out loud).
+ *
+ * Measured, not assumed. On `main` the cycle happened to be entered through
+ * `field.zod` first, which resolves this module fully before anything calls
+ * into it. #5593 moved `automation/`'s schemas from `strictUnknownKeyError` to
+ * this helper, and that one edge reordered the entry: the `automation` barrel
+ * now reaches THIS module first, then `suggestions.zod`, then `field.zod`,
+ * whose own module-scope `strictObject(…)` call lands here mid-initialization.
+ *
+ * ⚠️ The failure mode is why this is written down rather than left to the
+ * types. `lazySchema` defers construction behind a Proxy, so an ordinary
+ * `vitest run` never evaluates a schema at import time and stays GREEN; the
+ * eager subprocess dies before any test body runs, and vitest cannot even
+ * format the stack, so the owning file reports *no result at all*. What caught
+ * it was CI's `check-test-completeness` gate noticing that
+ * `automation/flow-region-cycle.test.ts` was counted and never reported. Pinned
+ * from this side too, in `strict-object.test.ts`.
+ */
+function declarationStore(): StrictObjectDeclaration[] {
+  const self = declarationStore as unknown as { list?: StrictObjectDeclaration[] };
+  return (self.list ??= []);
+}
 
 /**
  * Every authoring shape {@link strictObject} has built **so far in this
@@ -187,7 +221,7 @@ const DECLARATIONS: StrictObjectDeclaration[] = [];
  * nothing judges, and that must fail loudly rather than pass quietly.
  */
 export function strictObjectDeclarations(): readonly StrictObjectDeclaration[] {
-  return DECLARATIONS;
+  return declarationStore();
 }
 
 /**
@@ -251,7 +285,7 @@ export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptio
     }))(issue);
   };
 
-  DECLARATIONS.push({ options, shape });
+  declarationStore().push({ options, shape });
 
   return z.object(shape, { error }).strict();
 }
