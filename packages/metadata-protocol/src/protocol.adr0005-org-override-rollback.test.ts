@@ -179,10 +179,12 @@ const BODIES: Record<string, Record<string, unknown>> = {
     skill: { name: 'probe_item', label: 'Probe', description: 'p', instructions: 'do it', tools: [] },
 };
 
-const ROLLED_BACK = Object.keys(BODIES);
+type RegistryType = (typeof DEFAULT_METADATA_TYPE_REGISTRY)[number]['type'];
+
+const ROLLED_BACK = Object.keys(BODIES) as RegistryType[];
 
 /** The control specimens: the three types ADR-0005 whitelists (✅ row). */
-const CONTROLS = ['view', 'dashboard', 'report'];
+const CONTROLS = ['view', 'dashboard', 'report'] as const satisfies readonly RegistryType[];
 
 const VIEW = {
     name: 'probe_view',
