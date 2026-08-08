@@ -12,6 +12,7 @@
 // message owes the reader: the CONSEQUENCE and the FIX.
 
 import { describe, it, expect } from 'vitest';
+import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
 
@@ -97,7 +98,7 @@ describe('ObjectQL.syncSchemas() — DDL failure is an error, not a silent swall
     const rec = recordingLogger();
     const engine = new ObjectQL({ logger: rec.logger } as any);
     engine.registerDriver(failingDriver('default', 'boom') as any);
-    engine.registerObject({ name: 'invoice', label: 'Invoice', fields: { id: { type: 'text' } } } as any);
+    engine.registerObject({ name: 'invoice', label: 'Invoice', fields: { id: { type: 'text' } } });
 
     await engine.syncSchemas();
 
@@ -120,7 +121,7 @@ describe('ObjectQL.syncSchemas() — DDL failure is an error, not a silent swall
         return [];
       },
     } as any);
-    engine.registerObject({ name: 'invoice', label: 'Invoice', fields: { id: { type: 'text' } } } as any);
+    engine.registerObject({ name: 'invoice', label: 'Invoice', fields: { id: { type: 'text' } } });
 
     await engine.syncSchemas();
 
@@ -130,12 +131,12 @@ describe('ObjectQL.syncSchemas() — DDL failure is an error, not a silent swall
 
 describe('ObjectQLPlugin.syncRegisteredSchemas() — per-object and summary levels (#4632)', () => {
   /** Drive the private sync pass directly: the level is the unit under test. */
-  async function runSync(driver: unknown, objects: Array<Record<string, unknown>>) {
+  async function runSync(driver: unknown, objects: Array<ServiceObject>) {
     const rec = recordingLogger();
     const plugin = new ObjectQLPlugin();
     const engine = new ObjectQL({ logger: rec.logger } as any);
     engine.registerDriver(driver as any);
-    for (const obj of objects) engine.registerObject(obj as any);
+    for (const obj of objects) engine.registerObject(obj);
     (plugin as any).ql = engine;
     await (plugin as any).syncRegisteredSchemas({ logger: rec.logger });
     return rec;

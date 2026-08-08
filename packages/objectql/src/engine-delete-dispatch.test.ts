@@ -53,7 +53,7 @@ async function makeEngine() {
   const { driver, calls } = makeRecordingDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject({ name: 'task', fields: { title: { type: 'text' } } } as any);
+  engine.registry.registerObject({ name: 'task', fields: { title: { type: 'text' } } });
   return { engine, calls };
 }
 

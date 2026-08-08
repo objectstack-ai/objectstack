@@ -103,7 +103,7 @@ describe('filter → where folds on every engine method (#4346)', () => {
         stores = stub.stores;
         engine.registerDriver(stub.driver, true);
         await engine.init();
-        engine.registry.registerObject(task as any);
+        engine.registry.registerObject(task);
         // The issue's repro set: one open row, two done rows.
         a = await engine.insert('task', { title: 'A', status: 'open' });
         b = await engine.insert('task', { title: 'B', status: 'done' });

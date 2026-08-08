@@ -477,7 +477,7 @@ async function bootEngine(hooks: Hook[]): Promise<ObjectQL> {
   const engine = new ObjectQL();
   engine.registerDriver(makeStubDriver(), true);
   await engine.init();
-  engine.registry.registerObject(taskObject as any);
+  engine.registry.registerObject(taskObject);
   bindHooksToEngine(engine, hooks, { packageId: 'app:test', logger: silentLogger });
   return engine;
 }

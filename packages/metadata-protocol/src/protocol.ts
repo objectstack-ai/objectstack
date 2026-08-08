@@ -12,8 +12,20 @@ import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/type
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { MetadataHostEngine } from './host-engine.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
+// [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
+// ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
+import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
-import { ConflictError, assertProtocolCompat, applyAuditFieldGovernance, type MetadataItem } from '@objectstack/metadata-core';
+import {
+    ConflictError,
+    assertProtocolCompat,
+    applyAuditFieldGovernance,
+    // [#6562] The injection/strip pair over the shared injected-column
+    // definition table — see {@link governServedItem} / {@link stripServedSystemColumns}.
+    applyInjectedSystemColumns,
+    stripInjectedSystemColumns,
+    type MetadataItem,
+} from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
 // `@objectstack/metadata` (#5108). See `rethrowUnlessMetadataStoreUnprovisioned`.
@@ -137,30 +149,76 @@ function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T 
 }
 
 /**
- * [#4513] The last thing every `/meta` read does to an OBJECT document before
- * it leaves this service: make the field metadata it reports agree with what
- * the engine enforces on the write path.
+ * The last thing every `/meta` read does to an OBJECT document before it leaves
+ * this service: make the field metadata it reports agree with what the engine
+ * enforces on the write path — in BOTH of the ways it used to disagree.
  *
  * The mismatch this closes is structural, not incidental. A `/meta` object read
  * resolves through `sys_metadata` overlay → MetadataService → SchemaRegistry,
- * and only the last of those three has been through `applySystemFields` — so
- * the two stored layers answered with whatever the artifact/overlay body
- * happened to declare, while `ObjectQL.update` was stripping caller writes to
- * the audit family off the registry's post-injection schema. `created_at` read
- * `readonly: false` and wrote as read-only, on the same field, at the same
- * moment, from the one face a client can actually see (#4447 fixed the write
- * half; this is the read half).
+ * and only the last of those three has been through `applySystemFields`, so the
+ * answer a caller got depended on which link produced it — with nothing in the
+ * response saying which one had. Two halves, filed and ruled separately:
+ *
+ *  - **[#4513] the VALUE half.** The two stored layers answered with whatever
+ *    the artifact/overlay body happened to declare, while `ObjectQL.update` was
+ *    stripping caller writes to the audit family off the registry's
+ *    post-injection schema. `created_at` read `readonly: false` and wrote as
+ *    read-only, on the same field, at the same moment, from the one face a
+ *    client can actually see (#4447 fixed the write half; this is the read
+ *    half). {@link applyAuditFieldGovernance} normalizes a DECLARED audit field.
+ *  - **[#6562] the PRESENCE half.** The stored layers reported the platform's
+ *    own injected columns — `created_at`, `owner_id`, `organization_id`,
+ *    `owning_business_unit_id`, … — as simply ABSENT, so an author reading an
+ *    overlay-backed object reasonably concluded the columns do not exist, while
+ *    every one of them is real in the database, filterable, orderable and
+ *    enforced read-only on write. Maintainer ruling (2026-08-08), Option B: the
+ *    read serves the EFFECTIVE runtime schema and the overlay-backed minority
+ *    converges on the registry-backed majority.
+ *    {@link applyInjectedSystemColumns} adds an UNDECLARED injected column.
+ *
+ * The two are composed rather than folded, because they do different things to
+ * different fields: governance rewrites what the author declared, injection only
+ * ever adds what nobody declared. Both return their input by reference when
+ * nothing was needed, so the registry-sourced path (injected AND governed at
+ * registration) and every non-object type pay a comparison and no copy.
  *
  * Applied per EXIT rather than inside `decorateMetadataItem`: decoration is a
  * diagnostics concern whose output `stripReadDecorations` deliberately removes
- * again on write, and governance is neither — it is what the document means.
+ * again on write, and neither of these is that — they are what the document
+ * means. The read exits are also the ONLY place injection may happen (ruling
+ * constraint 1): `getMetaItemLayered` calls this on `effective` and never on
+ * `overlay`, so Studio's "what you customised" diff keeps showing the row the
+ * author actually stored.
  *
- * `applyAuditFieldGovernance` returns its input by reference when nothing needed
- * forcing, so the registry-sourced path (already governed at registration) and
- * every non-object type pay a comparison and no copy.
+ * ⛔ The write path owes this function a counterpart. See
+ * {@link stripServedSystemColumns} — without it the standard Studio GET → edit →
+ * PUT round-trip would persist the injected columns into `sys_metadata`, and the
+ * #4326 byte-identical invariant would break the day this shipped.
  */
 function governServedItem<T>(type: string, item: T): T {
-    return canonicalMetaType(type) === 'object' ? applyAuditFieldGovernance(item) : item;
+    if (canonicalMetaType(type) !== 'object') return item;
+    return applyInjectedSystemColumns(applyAuditFieldGovernance(item));
+}
+
+/**
+ * [#6562] The write-path counterpart of {@link governServedItem}'s injection
+ * half: take the injected-but-undeclared system columns back off a body on its
+ * way IN, so a served document handed straight back still persists byte-identical.
+ *
+ * Exactly the shape, and exactly the reason, of the `stripReadDecorations` call
+ * beside it in `saveMetaItem` (#4326) — the write path persists the request body
+ * verbatim by design (ADR-0005 §Validation), so anything the READ adds must come
+ * off again on the way in or it is baked into `sys_metadata.metadata`, into its
+ * checksum, and into every history diff. Kept a SEPARATE strip from that one
+ * rather than folded into `METADATA_READ_DECORATIONS`, because the two lists are
+ * different in kind: a read decoration is derived diagnostics no schema accepts,
+ * whereas an injected column is a real, spec-valid field declaration an author
+ * may legitimately write — so this strip removes only a field byte-identical to
+ * the platform's own definition, and a declared `owner_id` carrying the author's
+ * own label survives untouched.
+ */
+function stripServedSystemColumns<T>(type: string, item: T): T {
+    return canonicalMetaType(type) === 'object' ? stripInjectedSystemColumns(item) : item;
 }
 
 /**
@@ -2623,13 +2681,25 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * One-time guard for ensuring the overlay-uniqueness UNIQUE INDEX exists
-     * on `sys_metadata`. ADR-0005: scopes overlays by
-     * `(type, name, organization_id, environment_id, scope)` for active rows only.
-     * Idempotent SQL — safe to attempt on every protocol instance.
+     * One-time guard for ensuring the overlay-uniqueness UNIQUE INDEXes exist
+     * on `sys_metadata`. ADR-0005 (revised 2026-05) + ADR-0048: per-env DBs
+     * replace the old "per-project" isolation, so `environment_id` is no longer
+     * a discriminator — overlay uniqueness is
+     * `(type, name, organization_id, COALESCE(package_id, ''))`, enforced once
+     * among ACTIVE rows and once among DRAFT rows. Idempotent SQL — safe to
+     * attempt on every protocol instance.
      *
-     * Inlined here (rather than importing from @objectstack/metadata/migrations)
-     * to avoid a circular dependency: metadata already depends on objectql.
+     * ⚠️ This method resolves a raw-SQL seam and nothing more. The DDL, its
+     * ORDER and its reporting live in `./migrations/overlay-index.ts` (#6418),
+     * which replaced the DROP-then-CREATE sequence that used to sit here: the
+     * drop always succeeded and a failing create left `sys_metadata` with no
+     * unique index at all, silently, because both `catch` blocks were empty.
+     * See that module's header for why the order is now probe-first and why the
+     * dialect fallback must stay NON-unique.
+     *
+     * Kept in this package (rather than imported from
+     * `@objectstack/metadata/migrations`) to avoid a circular dependency:
+     * metadata already depends on objectql.
      */
     private overlayIndexEnsured = false;
     private async ensureOverlayIndex(): Promise<void> {
@@ -2660,66 +2730,15 @@ export class ObjectStackProtocolImplementation implements
                     throw new Error('driver has neither raw nor execute');
                 }
             };
-            // ADR-0005 (revised 2026-05) + ADR-0048: per-env DBs replace the old
-            // "per-project" isolation, so `environment_id` is no longer a
-            // discriminator. Overlay uniqueness is `(type, name,
-            // organization_id, COALESCE(package_id,''))` filtered to active
-            // rows — `package_id` is in the key so two installed packages
-            // shipping the same name each get their own overlay, while
-            // `COALESCE(...,'')` keeps the package-less (global) rows unique
-            // among themselves (a plain unique index would treat NULLs as
-            // distinct and allow duplicate globals). Drop the legacy composite
-            // index first so the new partial UNIQUE can claim the same name —
-            // DROP INDEX IF EXISTS is idempotent.
-            try { await exec("DROP INDEX IF EXISTS idx_sys_metadata_overlay_active"); } catch { /* best-effort */ }
-            const partialSql =
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active " +
-                "ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) " +
-                "WHERE state = 'active'";
-            const fallbackSql =
-                "CREATE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active " +
-                "ON sys_metadata (type, name, organization_id, package_id)";
-            try {
-                await exec(partialSql);
-            } catch (err: any) {
-                const msg = err instanceof Error ? err.message : String(err);
-                if (/partial|where clause|syntax/i.test(msg)) {
-                    try {
-                        await exec(fallbackSql);
-                    } catch {
-                        // ignore — non-essential optimization
-                    }
-                }
-                // "already exists" or anything else: best-effort
-            }
-            // Mirror the same partial-UNIQUE for draft rows so a second
-            // simultaneous draft cannot be inserted for the same
-            // (type,name,org,package). The unique-active index above already
-            // guards published rows; the two never collide because the
-            // `state` predicate disambiguates them. DROP first so an existing
-            // legacy 3-column draft index is replaced in-place (ADR-0048).
-            try { await exec("DROP INDEX IF EXISTS idx_sys_metadata_overlay_draft"); } catch { /* best-effort */ }
-            const draftPartialSql =
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_draft " +
-                "ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) " +
-                "WHERE state = 'draft'";
-            try {
-                await exec(draftPartialSql);
-            } catch (err: any) {
-                const msg = err instanceof Error ? err.message : String(err);
-                if (/partial|where clause|syntax/i.test(msg)) {
-                    try {
-                        await exec(
-                            "CREATE INDEX IF NOT EXISTS idx_sys_metadata_overlay_draft " +
-                            "ON sys_metadata (type, name, organization_id, package_id)",
-                        );
-                    } catch {
-                        // ignore — best effort
-                    }
-                }
-            }
+            // `console` satisfies the logger surface structurally; this class
+            // carries no injected logger, and its own diagnostics go to
+            // `console.warn` throughout (see `emitMetadataMutation`).
+            await ensureMetadataOverlayIndexes(exec, console);
         } catch {
-            // ignore — index is an optimization, not a correctness invariant
+            // A boot must never fail over an index. Note this arm is now only
+            // reachable for driver RESOLUTION failures: every DDL failure past
+            // this point is classified and reported by the migration itself,
+            // instead of vanishing into an empty catch (#6418).
         }
     }
 
@@ -3507,7 +3526,11 @@ export class ObjectStackProtocolImplementation implements
                     if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
                         (data as any)._packageId = recPkg;
                     }
-                    return { data, packageId: recPkg };
+                    // [#6602] The row's own scope travels with its body. The
+                    // merged set below is env-wide rows PLUS this org's rows,
+                    // and the two are only distinguishable here, at the row.
+                    const recOrg = (record as { organization_id?: string | null }).organization_id ?? null;
+                    return { data, packageId: recPkg, organizationId: recOrg };
                 });
 
                 // ADR-0048 (#1828) — package-aware merge: a package-scoped row
@@ -3532,9 +3555,22 @@ export class ObjectStackProtocolImplementation implements
                 // shared {@link hydrateOverlayIntoRegistry} that both callers
                 // use: a read and a write that register differently would put
                 // the registry in two different states for the same row.
+                //
+                // [#6602] The kernel gate below is only half the rule, and the
+                // half that was missing is the ROW's: `overlays` is the MERGED
+                // env-wide + org-scoped set, so this loop used to graft this
+                // caller's org bodies into the registry every other org in the
+                // process reads from — one listing call was enough, and it also
+                // undid the write-side gate for anything already saved. The
+                // per-row verdict now lives in the shared hydrator, which each
+                // row's own `organizationId` answers to; the merged LIST above
+                // is unchanged, so org readers still get their overlays.
                 if (this.environmentId === undefined) {
-                    for (const { data, packageId: recPkg } of overlays) {
-                        this.hydrateOverlayIntoRegistry(request.type, data, recPkg);
+                    for (const { data, packageId: recPkg, organizationId: recOrg } of overlays) {
+                        this.hydrateOverlayIntoRegistry(request.type, data, {
+                            packageId: recPkg,
+                            organizationId: recOrg,
+                        });
                     }
                 }
             }
@@ -7704,14 +7740,52 @@ export class ObjectStackProtocolImplementation implements
      * so a colliding overlay no longer grafts the first-registered package's
      * provenance/lock onto another package's row.
      *
-     * Returns whether anything was registered (bodies without a `name`, and
-     * registry doubles without `registerItem`, are no-ops).
+     * ── [#6602] THE ROW-SCOPE GATE LIVES HERE, AND ITS ARGUMENT IS REQUIRED ──
+     *
+     * ADR-0005 (revised 2026-05): **only env-wide rows
+     * (`organization_id IS NULL`) enter the process-wide SchemaRegistry.**
+     * Per-org overlays are served on demand by `getMetaItem` /
+     * `getMetaItems` and never grafted into the shared registry, because that
+     * registry has exactly one plain key per `(type, name)` and no org
+     * dimension to hold them apart.
+     *
+     * Boot already obeyed this — `loadMetaFromDb` filters
+     * `organization_id: null` and states the rule in its own comment — but
+     * the two RUNTIME seams did not: {@link applyRegistryWriteThrough} gated
+     * on `environmentId` alone (its TSDoc claimed the rule and the code said
+     * nothing about org), and the `getMetaItems` hydration loop walked the
+     * merged env-wide + org record set. Measured on an unscoped kernel, an
+     * org-scoped `view` write landed in the registry under the plain key, and
+     * one org-scoped listing call did the same — so org B's next listing
+     * started from org A's body (#6602).
+     *
+     * `organizationId` is therefore a REQUIRED parameter and not an optional
+     * one: an omitted org would default to "env-wide" and reinstate the exact
+     * hole, whereas a required one makes every caller state the row's scope.
+     * Declared = enforced, at the ONE choke point all three hydration callers
+     * (boot, read-side, write-through) already share — a fourth caller cannot
+     * forget a gate it has to answer to compile.
+     *
+     * The KERNEL-scope gate (`environmentId === undefined`) deliberately
+     * stays with the callers: that is a fact about the kernel this protocol
+     * instance serves, not about the row in hand.
+     *
+     * Returns whether anything was registered (org-scoped rows, bodies
+     * without a `name`, and registry doubles without `registerItem`, are
+     * no-ops).
      */
-    private hydrateOverlayIntoRegistry(type: string, data: unknown, packageId?: string | null): boolean {
+    private hydrateOverlayIntoRegistry(
+        type: string,
+        data: unknown,
+        options: { packageId?: string | null; organizationId: string | null },
+    ): boolean {
+        // [#6602] ADR-0005 — a per-org overlay is served on demand, never
+        // grafted into the registry every org in this process shares.
+        if (options.organizationId !== null && options.organizationId !== undefined) return false;
         if (!data || typeof data !== 'object' || !('name' in data)) return false;
         const registry: any = (this.engine as any)?.registry;
         if (!registry || typeof registry.registerItem !== 'function') return false;
-        const artifact = this.lookupArtifactItem(type, (data as any).name, packageId ?? undefined);
+        const artifact = this.lookupArtifactItem(type, (data as any).name, options.packageId ?? undefined);
         registry.registerItem(type, mergeArtifactProtection(data, artifact), 'name' as any);
         return true;
     }
@@ -7748,15 +7822,43 @@ export class ObjectStackProtocolImplementation implements
      * gate the read-side hydration carries: a project-scoped row must not be
      * registered into a registry that unscoped (control-plane) callers share.
      * The write must not be more permissive about that than the read is.
+     *
+     * [#6602] That sentence was true of the ENVIRONMENT dimension and false
+     * of the ORGANIZATION one: the gate above says nothing about
+     * `organization_id`, so on an unscoped kernel a per-org overlay write
+     * hydrated straight into the process-wide registry under the plain key —
+     * the designed per-org overlay leaking out of its org. `organizationId`
+     * is now part of this request and is handed to
+     * {@link hydrateOverlayIntoRegistry}, which owns the row-scope verdict
+     * for all three hydration paths. Callers pass the SAME `orgId` they wrote
+     * the row with, so the registry's view cannot disagree with the row's
+     * scope.
      */
-    private applyRegistryWriteThrough(request: { type: string; name: string; item?: any; packageId?: string | null }): void {
+    private applyRegistryWriteThrough(request: {
+        type: string;
+        name: string;
+        item?: any;
+        packageId?: string | null;
+        /** The row's org scope — `null` for an env-wide row. [#6602] */
+        organizationId: string | null;
+    }): void {
         if (request.type === 'object' || request.type === 'objects') {
+            // NOT org-gated, deliberately: an `object` is `allowOrgOverride:
+            // false` (ADR-0005) and its physical TABLE is env-wide, so the
+            // registry entry backing it is env-wide too — `assertObjectRegistered`
+            // fails CLOSED on a missing entry, and refusing to register here
+            // would make a runtime-created object unreachable for data CRUD
+            // rather than merely un-listed. This branch has never carried the
+            // `environmentId` gate either, for the same reason.
             this.applyObjectRegistryMutation(request);
             return;
         }
         if (this.environmentId !== undefined) return;
         try {
-            this.hydrateOverlayIntoRegistry(request.type, request.item, request.packageId ?? undefined);
+            this.hydrateOverlayIntoRegistry(request.type, request.item, {
+                packageId: request.packageId ?? undefined,
+                organizationId: request.organizationId,
+            });
         } catch (err: any) {
             // Best-effort, exactly like the object branch: the row is already
             // persisted, so a registry hiccup must not fail the write that
@@ -7974,6 +8076,18 @@ export class ObjectStackProtocolImplementation implements
         // Placed first so the destructive-change diff, the schema gate, the
         // authoring gate and the persisted body all see the same document.
         request.item = stripReadDecorations(request.item);
+        // [#6562] …and OUR OWN injected system columns, for the same reason and
+        // at the same moment. `governServedItem` now serves the EFFECTIVE object
+        // schema, so the very same Studio round-trip would otherwise persist
+        // `created_at` / `owner_id` / `organization_id` / … into a body whose
+        // author declared none of them — turning the platform's own columns into
+        // a phantom customization in `sys_metadata`, in the checksum, in every
+        // history diff, and in the layered read's `overlay` layer. Placed
+        // alongside the decoration strip so the destructive-change diff, the
+        // schema gate, the authoring gate and the persisted body all still see
+        // one document. See {@link stripServedSystemColumns} for why this is a
+        // separate strip from the decoration list and not another entry in it.
+        request.item = stripServedSystemColumns(request.type, request.item);
         // Per-item lifecycle (ADR-0005 §"Drafts"). Default is `'publish'`
         // (legacy semantics — save goes straight live) to keep callers
         // that predate the draft/publish split working. Studio's
@@ -8448,6 +8562,9 @@ export class ObjectStackProtocolImplementation implements
                     name: request.name,
                     item: request.item,
                     packageId: request.packageId ?? null,
+                    // [#6602] The SAME scope the row was just written with —
+                    // a per-org overlay stays out of the shared registry.
+                    organizationId: orgId,
                 });
                 await this.ensureObjectStorage(request.type, request.name);
             }
@@ -9079,6 +9196,8 @@ export class ObjectStackProtocolImplementation implements
             name: args.name,
             item: args.body,
             packageId: args.packageId,
+            // [#6602] The promoted draft carries the org it was drafted in.
+            organizationId: args.orgId,
         });
         // Create the object's table now so it's CRUD-able without a restart.
         await this.ensureObjectStorage(args.requestType, args.name);
@@ -10330,6 +10449,18 @@ export class ObjectStackProtocolImplementation implements
      * artifact is restored to its pre-commit `prevVersion`. The revert is itself
      * recorded as a NEW commit (operation='revert'), so history stays
      * append-only and the revert is itself revertible.
+     *
+     * [#6621] BOTH limbs refresh the SchemaRegistry, so a revert that answers
+     * `success: true` is one the running process has already acted on. The
+     * restore limb writes the restored body through ({@link
+     * applyRegistryWriteThrough}, the #4521 rule the sibling
+     * {@link rollbackMetaItem} has always carried); the soft-remove limb runs
+     * the same three-tier heal the sibling {@link deleteMetaItem} runs after
+     * its own `repo.delete` ({@link restoreArtifactRegistryView}). Before
+     * this, a batch revert persisted its change and left the runtime
+     * dispatching the reverted-away body until restart —
+     * {@link rollbackToPackageCommit} inherited it, so a whole-package
+     * rollback could report success and change nothing the process could see.
      */
     async revertCommit(request: {
         commitId: string;
@@ -10399,9 +10530,8 @@ export class ObjectStackProtocolImplementation implements
                     // Sibling limb: #6563 (PR #6642) did the same for the
                     // restore branch below, where the intent was UNSTATED and
                     // fell through to `restoreVersion`'s `?? 'override-artifact'`
-                    // default. Still not addressed here, filed with its own
-                    // measurement: neither limb refreshes the SchemaRegistry the
-                    // way `rollbackMetaItem` does (#6621).
+                    // default. The registry half of both limbs is #6621, fixed
+                    // here and below.
                     const intent: 'override-artifact' | 'runtime-only' =
                         this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
                     if (current) {
@@ -10412,6 +10542,50 @@ export class ObjectStackProtocolImplementation implements
                             intent,
                             state: 'active',
                         });
+                    }
+                    // [#6621] The registry must stop serving what the revert
+                    // just removed — the #4521 rule on the DELETE side of it.
+                    //
+                    // Measured on `origin/main` before this line existed: a
+                    // first-build undo of a created `object` answered
+                    // `success: true`, left `sys_metadata` with zero rows for
+                    // the name, and `SchemaRegistry` kept serving the body —
+                    // the same split the restore limb below showed, one limb
+                    // over. Same for an overlay `view` on a control-plane
+                    // kernel, where the plain-key entry `saveMetaItem`'s
+                    // write-through had put there simply stayed.
+                    //
+                    // WHICH heal, and why not a bare unregister: this is the
+                    // #6687 three-tier walk the sibling delete caller
+                    // {@link deleteMetaItem} runs after its own `repo.delete`,
+                    // and the tiers are the point. A soft-removed overlay that
+                    // shadows a packaged artifact must fall BACK to the
+                    // artifact (tier 1, ADR-0005 reset), not vanish; only when
+                    // no layer serves the name at all is the plain-key entry
+                    // retired (tier 3, #5079). A flat `removeOverlayEntry`
+                    // here would delete names a code package still ships. Both
+                    // delete/revert callers now run the same walk, exactly as
+                    // both now derive the same per-item intent.
+                    //
+                    // Run for the no-row case too, deliberately: that is the
+                    // self-heal branch `deleteMetaItem` documents — a stale
+                    // shadow can outlive the row it came from, and this limb's
+                    // contract is "this artifact is not here after the revert",
+                    // not "a row was deleted".
+                    //
+                    // [#6602] ORG GATE, and it is asymmetric ON PURPOSE. Only
+                    // an env-wide revert may mutate the process-wide registry:
+                    // an org-scoped row never entered it (ADR-0005, the rule
+                    // {@link hydrateOverlayIntoRegistry} owns), so healing on
+                    // its behalf would un-shadow or retire an entry that
+                    // belongs to the env-wide row every other org reads. The
+                    // write-through's object branch is deliberately NOT
+                    // org-gated, and that carve-out does not transfer here: it
+                    // is argued from `assertObjectRegistered` failing CLOSED,
+                    // which licenses registering broadly and never retiring
+                    // broadly. Register wide, retire narrow.
+                    if (orgId === null) {
+                        await this.restoreArtifactRegistryView(it.type, it.name);
                     }
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
                 } else if (it.prevVersion !== null && it.prevVersion !== undefined) {
@@ -10437,17 +10611,64 @@ export class ObjectStackProtocolImplementation implements
                     //
                     // The soft-remove limb above stated the same intent as a
                     // CONSTANT and was fixed the same way (#6620), so both limbs now
-                    // derive it. One neighbour is still open, filed with its own
-                    // measurement: neither limb refreshes the SchemaRegistry the way
-                    // `rollbackMetaItem` does, so a restored body is persisted but not
-                    // yet dispatched on (#6621).
+                    // derive it. The registry half of both is #6621, below.
                     const intent: 'override-artifact' | 'runtime-only' =
                         this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
-                    await repo.restoreVersion(ref, it.prevVersion, {
+                    // [#6621 / #4636] The ownership key the write-through needs,
+                    // read from the ROW rather than from the request — the sibling
+                    // revert caller {@link rollbackMetaItem} reads it exactly this
+                    // way, and for the same reason: `revertCommit` has no
+                    // `packageId` parameter either, and inventing one would let a
+                    // caller re-key an artifact it does not own. Left unpassed, a
+                    // row bound to `app.<slug>` re-registers under the
+                    // `'sys_metadata'` sentinel and `registerObject` throws
+                    // `already owned by package "app.<slug>"` into a best-effort
+                    // `console.warn` — a revert that reports success while the
+                    // registry keeps the body it was supposed to revert.
+                    //
+                    // Read BEFORE the restore, deliberately (#4636 again): the row
+                    // exists at this point and a read failure still fails this ITEM
+                    // cleanly into `failed[]`. Read afterwards it would be a
+                    // fallible query downstream of a write that already succeeded —
+                    // the shape that ends in a `catch {}` swallowing a real outage
+                    // (#4867). Per ITEM, because a batch mixes bindings.
+                    const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, orgId);
+                    const restored = await repo.restoreVersion(ref, it.prevVersion, {
                         actor,
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
                         intent,
+                    });
+                    // [#6621] #4521 — a revert is a live write like any other: the
+                    // restored body must be the one the runtime dispatches on
+                    // immediately, not after someone lists the type.
+                    //
+                    // Measured on `origin/main` before this call existed, with the
+                    // real `SysMetadataRepository`: an `object` saved twice and then
+                    // reverted answered `{ success: true, revertedCount: 1,
+                    // failed: [] }`, the stored row came back to `["name","amount"]`
+                    // — and `SchemaRegistry.getObject(...)` still carried
+                    // `due_date`. `success: true` while CRUD dispatches on the body
+                    // the operator just reverted away, healing only at the next
+                    // restart. Type-agnostic: an overlay `view` on a control-plane
+                    // kernel showed the same split (`stored 'Cases'` vs
+                    // `registry 'Renamed'`).
+                    //
+                    // The registry key is the SINGULAR type — the spelling
+                    // `saveMetaItem`'s own write-through registered under — while
+                    // the repo-facing reads above keep `it.type`, which is the
+                    // spelling the row is stored with. Two different keys, on
+                    // purpose.
+                    this.applyRegistryWriteThrough({
+                        type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
+                        name: it.name,
+                        item: restored.item.body,
+                        packageId: restorePackageId,
+                        // [#6602] The row's OWN scope, per item. An org-scoped row
+                        // is refused by {@link hydrateOverlayIntoRegistry} and never
+                        // reaches the registry every org in this process shares —
+                        // inherited, not re-decided here.
+                        organizationId: orgId,
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
                 }
@@ -10633,6 +10854,9 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 item: result.item.body,
                 packageId: rollbackPackageId,
+                // [#6602] A rollback restores the row IN ITS OWN SCOPE — an
+                // org-scoped restore must not graft the body process-wide.
+                organizationId: orgId,
             });
             return {
                 success: true,
@@ -11224,10 +11448,21 @@ export class ObjectStackProtocolImplementation implements
                         // When artifacts load after this hydration the merge
                         // finds nothing and the row registers unchanged — same
                         // as before, scoped or not.
+                        //
+                        // [#6602] The org argument states what the WHERE
+                        // clause above already selected for. It is a no-op
+                        // today by construction — and that is the point: the
+                        // rule this branch's comment states ("hydrate only
+                        // env-wide rows") stops depending on a query filter
+                        // staying correct, because the hydrator refuses an
+                        // org-scoped row whatever selected it.
                         this.hydrateOverlayIntoRegistry(
                             normalizedType,
                             data,
-                            (record as { package_id?: string | null }).package_id ?? undefined,
+                            {
+                                packageId: (record as { package_id?: string | null }).package_id ?? undefined,
+                                organizationId: (record as { organization_id?: string | null }).organization_id ?? null,
+                            },
                         );
                     }
                     loaded++;
