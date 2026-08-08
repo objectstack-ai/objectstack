@@ -278,6 +278,21 @@ export const ShowcaseTranslationBundle = {
           split_task: { label: '任务' },
           split_schedule: { label: '排期' },
         },
+        // The filter-preset tab bar of `ui/pages/task-triage.page.ts` — four
+        // tabs carrying a `filter` and no `view`, which is the shape that had
+        // no translation slot at all until `_tabs` landed (#5377). Born
+        // translated rather than ratcheted into the baseline as new debt.
+        //
+        // Wording is the vocabulary this bundle already uses for the same
+        // ideas: each tab filters on a `status` / `priority` value whose option
+        // label is right above, so the tab reads the same word as the cell it
+        // filters by.
+        _tabs: {
+          in_progress: { label: '进行中' },
+          urgent: { label: '紧急' },
+          in_review: { label: '评审中' },
+          done: { label: '已完成' },
+        },
       },
       showcase_account: {
         label: '客户',
