@@ -142,6 +142,10 @@ import {
   collectFlowGraphs,
 } from '@objectstack/spec/automation';
 import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
+// [#5659] The Filter Protocol's boolean identity reduction — the same predicate
+// driver-sql, driver-mongodb and driver-memory execute. This linter asks it
+// rather than hand-writing a fourth copy; see {@link filterCarriesNoCondition}.
+import { reduceFilterVerdict } from '@objectstack/spec/data';
 import { stripRegions } from './flow-walk.js';
 
 export interface FlowLintFinding {
@@ -779,46 +783,90 @@ function scanBranchRouting(
  * #5482 — is this AUTHORED `filter` provably carrying no condition at all, so
  * that the write it is supposed to bound is bounded by nothing?
  *
- * Exactly two shapes answer `true`, and the narrowness is the point — a warning
- * that says "this is the whole object" has to be right about it:
+ * The question is "does this filter reduce to TRUE", and #5659 stopped it being
+ * answered by hand. Three shapes answer `true`:
  *
  *  - the key is **absent** (`undefined` / `null`). The executor substitutes `{}`
  *    (`resolveNodeFilter(cfg.filter ?? {}, …)` in `crud-nodes.ts`).
  *  - a plain object with **zero own keys** (`{}`), which the executor passes
  *    through unchanged.
+ *  - anything the shared identity reduction resolves to TRUE — `{ $and: [] }`
+ *    (the AND identity: a conjunction of zero conditions constrains nothing) and
+ *    `{ $or: [{}] }` (a TRUE disjunct absorbs its `$or`) are the two that occur
+ *    in authored metadata, and both were INVISIBLE here until #5659.
  *
- * Both arrive at the engine as `where: {}`, which `resolveEngineDeleteDispatch`
- * classifies as `multi` (its case-set lists `multi with no predicate at all` as
- * legal) and the driver reads as every row — `driver-memory`'s matcher opens
- * with `if (!filter || Object.keys(filter).length === 0) return true`.
+ * All of them arrive at the engine as an unbounded write:
+ * `resolveEngineDeleteDispatch` classifies `where: {}` as `multi` (its case-set
+ * lists `multi with no predicate at all` as legal) and every driver reads a
+ * TRUE-reducing filter as every row.
+ *
+ * ## Why the third bullet is a CALL and not a third `if`
+ *
+ * This function used to end at the second bullet, and said so in a paragraph
+ * that is now this change's own justification: the empty combinators were left
+ * alone not because their answer was unclear — #5322/#5134 ruled it — but
+ * because deciding which is which requires the identity REDUCTION, and that
+ * reduction existed three times over (`reduceFilterNode` in driver-sql, in
+ * driver-mongodb, and the matcher's algebra in driver-memory). "Hand-writing a
+ * fourth copy inside a linter is how the scan and the validator come to answer
+ * with two different predicates." #5659 removed the reason to choose: the
+ * reduction is `@objectstack/spec`'s {@link reduceFilterVerdict} now, proven
+ * against `FILTER_LOGIC_CASES`, and all four consumers read it.
+ *
+ * What the reduction does NOT warn about matters as much as what it does:
+ * `{ $or: [] }` is FALSE (matches NOTHING — the opposite of a whole-object
+ * write) and `{ $not: {} }` is FALSE likewise. A hand-written "is it an empty
+ * combinator" test would have warned about both; the shared verdict cannot,
+ * because it is the same verdict the drivers execute.
  *
  * Everything else is left alone, deliberately:
  *
- *  - **any object with ≥1 key** — including an authored `{token}` that will
- *    interpolate to nothing. That is the #3810 guard's fact, judged at run time
- *    against the interpolation result, and this rule must not pre-empt it: at
- *    authoring time the condition IS written.
- *  - **an empty combinator array** (`{ $and: [] }`, `{ $or: [] }`). Not because
- *    the answer is unclear — #5322/#5134 ruled it and every driver implements
- *    it: empty `$and` is TRUE (so `{ $and: [] }` on a `multi` write IS the whole
- *    object), empty `$or` is FALSE (so `{ $or: [] }` matches NOTHING and must
- *    never be warned about), `$not` of an empty group is FALSE. Deciding which
- *    is which requires the identity REDUCTION, and that reduction already exists
- *    three times (`reduceFilterNode` in driver-sql, driver-mongodb, and the
- *    matcher/refusal walk in driver-memory). Hand-writing a fourth copy inside a
- *    linter is how the scan and the validator come to answer with two different
- *    predicates — the failure `engine-delete-dispatch.ts` was extracted to
- *    prevent. Filed separately, to be done from one shared predicate.
+ *  - **any node carrying a real predicate** (verdict `'clause'`) — including an
+ *    authored `{token}` that will interpolate to nothing. That is the #3810
+ *    guard's fact, judged at run time against the interpolation result, and this
+ *    rule must not pre-empt it: at authoring time the condition IS written.
  *  - **a non-object `filter`** (string, array, number). `DeleteRecordConfigSchema`
  *    /`UpdateRecordConfigSchema` type it `z.record(z.string(), z.unknown())`, so
  *    the node is refused BY NAME at execute time (`parseNodeConfig`). Warning
  *    "the object is unbounded" about metadata the schema already rejects would
- *    describe a run that never happens.
+ *    describe a run that never happens. Kept as a guard HERE rather than left to
+ *    the reduction: the shared predicate takes a node, and a linter that hands
+ *    it a string would be asking a question the schema already answered.
  */
 function filterCarriesNoCondition(filter: unknown): boolean {
   if (filter === undefined || filter === null) return true;
   if (typeof filter !== 'object' || Array.isArray(filter)) return false;
-  return Object.keys(filter as AnyRec).length === 0;
+  // Hookless: this linter refuses nothing. A shape the reduction cannot resolve
+  // answers `'clause'`, i.e. no warning — the conservative direction for a rule
+  // whose message asserts "every row of this object is written".
+  return reduceFilterVerdict(filter as AnyRec) === 'true';
+}
+
+/**
+ * #5659 — name the shape the author actually wrote, for a message that has to be
+ * right about "this is the whole object".
+ *
+ * The two combinator spellings get their own wording rather than being folded
+ * into "an EMPTY `filter`": `{ $and: [] }` is not empty, it is a conjunction of
+ * zero conditions, and an author told their non-empty filter is "empty" will
+ * look for a typo instead of reading the identity. Only reached for a filter
+ * {@link filterCarriesNoCondition} already resolved to TRUE.
+ */
+function describeUnboundedFilter(filter: unknown): string {
+  if (filter === undefined || filter === null) return 'no `filter` key';
+  if (Object.keys(filter as AnyRec).length === 0) return 'an EMPTY `filter`';
+  return `a \`filter\` that REDUCES TO TRUE (\`${previewFilter(filter)}\`)`;
+}
+
+/** A short, non-throwing rendering of the offending filter for the message. */
+function previewFilter(filter: unknown): string {
+  try {
+    const json = JSON.stringify(filter);
+    if (typeof json !== 'string') return typeof filter;
+    return json.length > 80 ? `${json.slice(0, 77)}...` : json;
+  } catch {
+    return typeof filter;
+  }
 }
 
 /**
@@ -877,13 +925,14 @@ function scanUnboundedBulkWrites(
     if (!filterCarriesNoCondition(cfg.filter)) continue;
 
     const objectName = typeof cfg.objectName === 'string' && cfg.objectName ? cfg.objectName : '(unnamed object)';
-    const filterState = cfg.filter === undefined || cfg.filter === null ? 'no `filter` key' : 'an EMPTY `filter`';
+    const filterState = describeUnboundedFilter(cfg.filter);
     findings.push({
       where: `${at} · node '${String(node.id)}' (${nodeType})`,
       message:
         `declares \`multi: true\` with ${filterState} — this is a WHOLE-OBJECT write, by declaration: every ` +
-        `row of '${objectName}' is ${consequence.verb} on every run. The executor forwards \`where: {}\` plus the ` +
-        `bulk intent, ${consequence.dispatchNote}, and it lands on \`${consequence.engineCall}\` with no predicate. ` +
+        `row of '${objectName}' is ${consequence.verb} on every run. The executor forwards the filter as \`where\` ` +
+        `(an absent key becomes \`{}\`) plus the bulk intent, ${consequence.dispatchNote}, and it lands on ` +
+        `\`${consequence.engineCall}\` bounded by nothing — a filter that reduces to TRUE constrains no row. ` +
         `Nothing refuses it at run time, so the only feedback is the step's \`acted\` row count — reported ` +
         `AFTER the rows are gone.`,
       hint:

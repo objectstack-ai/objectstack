@@ -26,6 +26,16 @@
 import type { Filter } from 'mongodb';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import { StandardErrorCode } from '@objectstack/spec/api';
+// [#5659] The Filter Protocol's boolean identity reduction, shared with
+// driver-sql, driver-memory and the flow linter and proven against the same
+// `FILTER_LOGIC_CASES` table this driver's conformance suite runs. This file
+// supplies only its own refusals — see `reduceFilterNode` below.
+import {
+  reduceFilterVerdict,
+  reduceFilterKeyVerdict,
+  type FilterVerdict as SharedFilterVerdict,
+  type FilterVerdictHooks,
+} from '@objectstack/spec/data';
 import {
   coerceTemporalValue,
   type TemporalFieldKind,
@@ -64,8 +74,12 @@ function matchNothing(): Filter<any> {
  * - `'true'`  — matches every document; the translator emits no condition.
  * - `'false'` — matches no document; the translator emits {@link matchNothing}.
  * - `'clause'` — carries at least one real predicate; translate it normally.
+ *
+ * [#5659] The vocabulary is `@objectstack/spec`'s now, because the REDUCTION
+ * that produces it is — see {@link reduceFilterNode}. Kept as a local alias so
+ * every use site below still reads `FilterVerdict`.
  */
-type FilterVerdict = 'true' | 'false' | 'clause';
+type FilterVerdict = SharedFilterVerdict;
 
 /**
  * [#5239] Is `value` a Filter Protocol NODE — the shape `FilterConditionSchema`
@@ -135,51 +149,56 @@ function assertFilterNodeList(value: unknown, key: string, path: string): assert
  * emitted document came out empty, is the point. "Nothing was emitted" cannot
  * distinguish "the author wrote an empty group" from "something failed to
  * translate"; a structural verdict has no such blind spot.
+ *
+ * ## [#5659] The algebra is `@objectstack/spec`'s; the REFUSALS are this driver's
+ *
+ * Every paragraph above describes a ruling four consumers had to agree on and
+ * implemented four times — here, in `driver-sql` (whose copy this one was
+ * written to mirror, down to the variable names), in `driver-memory`'s matcher,
+ * and nearly a fifth time inside `@objectstack/lint`. It lives once now, in
+ * {@link reduceFilterVerdict}, proven against the same `FILTER_LOGIC_CASES`
+ * table this driver's conformance suite runs. What stays here is WHICH shapes
+ * this translator refuses and how it words them, handed over as
+ * {@link MONGO_FILTER_VERDICT_HOOKS} and invoked from exactly the positions
+ * they were invoked from before.
  */
 function reduceFilterNode(node: Record<string, unknown>, path: string): FilterVerdict {
-  let sawFalse = false;
-  let sawClause = false;
-  for (const [key, value] of Object.entries(node)) {
-    const verdict = reduceFilterKey(key, value, path);
-    if (verdict === 'false') sawFalse = true;
-    else if (verdict === 'clause') sawClause = true;
-  }
-  return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
+  return reduceFilterVerdict(node, { ...MONGO_FILTER_VERDICT_HOOKS, path });
 }
 
 /** [#5239] The verdict of ONE key of a filter node. */
 function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdict {
-  const here = path ? `${path}.${key}` : key;
+  return reduceFilterKeyVerdict(key, value, { ...MONGO_FILTER_VERDICT_HOOKS, path });
+}
 
-  if (key === '$and' || key === '$or') {
-    assertFilterNodeList(value, key, here);
-    let sawTrue = false;
-    let sawFalse = false;
-    let sawClause = false;
-    value.forEach((element, index) => {
-      const elementPath = `${here}[${index}]`;
-      assertFilterNode(element, elementPath);
-      const verdict = reduceFilterNode(element, elementPath);
-      if (verdict === 'true') sawTrue = true;
-      else if (verdict === 'false') sawFalse = true;
-      else sawClause = true;
-    });
-    // `$and: []` → no FALSE, no clause → TRUE (the AND identity).
-    if (key === '$and') return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
-    // `$or: []` → no TRUE, no clause → FALSE (the OR identity). MongoDB itself
-    // answers neither: it rejects the empty array outright
-    // (`$and/$or/$nor must be a nonempty array`), so this filter used to be a
-    // 500-shaped throw rather than a verdict.
-    return sawTrue ? 'true' : sawClause ? 'clause' : 'false';
-  }
+/**
+ * [#5659] This translator's half of the reduction: the shape refusals, at the
+ * positions the shared walk visits them.
+ *
+ * The two `assert*` functions are wrapped in arrows rather than passed by
+ * reference because they are TypeScript assertion functions, whose narrowing is
+ * meaningless through a property reference. Nothing else about the call changes.
+ */
+const MONGO_FILTER_VERDICT_HOOKS: FilterVerdictHooks = {
+  assertNodeList: (value, key, path) => assertFilterNodeList(value, key, path),
+  assertNode: (value, path) => assertFilterNode(value, path),
+  classifyKey: (key, value, here) => classifyFilterKey(key, value, here),
+};
 
-  if (key === '$not') {
-    assertFilterNode(value, here);
-    const inner = reduceFilterNode(value, here);
-    // NOT TRUE ≡ FALSE — so `{ $not: {} }` matches nothing.
-    return inner === 'true' ? 'false' : inner === 'false' ? 'true' : 'clause';
-  }
-
+/**
+ * [#5239] The verdict of ONE **non-combinator** key — and this translator's gate
+ * on what a field constraint may not be.
+ *
+ * `here` is the already-joined path of the key, exactly as the reduction hands
+ * it over; the three combinator arms this used to open with are the shared
+ * walk's now.
+ *
+ * MongoDB's own answer to an empty combinator is worth keeping written down,
+ * because the reduction is what spares this driver from it: `$and`/`$or` with an
+ * empty array is rejected outright (`$and/$or/$nor must be a nonempty array`),
+ * so `{ $or: [] }` used to be a 500-shaped throw rather than a verdict.
+ */
+function classifyFilterKey(key: string, value: unknown, here: string): FilterVerdict {
   // Query-level keys carry no predicate; the emitter skips them and so does the
   // verdict, so the two never disagree about what this node is worth.
   if (QUERY_LEVEL_KEYS.has(key)) return 'true';
