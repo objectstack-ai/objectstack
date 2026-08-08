@@ -340,14 +340,19 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
    * (`rule-validator.ts`, fail-closed since #4761), lifecycle hook `condition`s,
    * and field `requiredWhen` (#4811).
    *
-   * Totality is the whole criterion, not a detail: on a total binding `has()` is
-   * uniformly true and `!= null` is the fix, while on a SPARSE one `has()` is a
-   * genuine guard and `!= null` faults with `No such key` — so pointing this gate
-   * at a sparse-bound surface would reject correct metadata and prescribe a fix
-   * that breaks it. `validate-null-guards.ts` carries the measured evidence table
-   * and the per-surface ledger (action predicates, flow conditions, field
-   * `readonlyWhen`, sharing rules and `Field.formula` are each excluded there with
-   * a traced reason). Read it before extending this call.
+   * Totality is the criterion that can DISQUALIFY a surface: on a total binding
+   * `has()` is uniformly true and `!= null` is the fix, while on a SPARSE one
+   * `has()` is a genuine guard and `!= null` faults with `No such key` — so
+   * pointing this gate at a sparse-bound surface would reject correct metadata
+   * and prescribe a fix that breaks it. It is not by itself a licence to cover:
+   * since #6454 field `readonlyWhen` is total and still excluded, by clause 3 of
+   * the #4953 ruling (the gate widens only once BOTH server-side seams are
+   * total, and the flow trigger-record half is not wired yet).
+   * `validate-null-guards.ts` carries the measured evidence table and the
+   * per-surface ledger (action predicates, flow conditions, field
+   * `readonlyWhen`, sharing rules and `Field.formula` are each excluded there
+   * with a traced reason, and the reasons are no longer all the same one). Read
+   * it before extending this call.
    */
   const checkNullGuards = (
     where: string,
@@ -790,7 +795,8 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // unconditionally, so it is immune to that ambiguity.
       //
       // The real blocker is totality. `record-change-trigger.ts` seeds the flow's
-      // record as `{ ...inputDoc, ...after }` with no `materializeDeclaredFields`,
+      // record as `{ ...(inputData ?? {}), ...after }` (spelled `inputDoc` until
+      // #5671 dropped that alias read) with no `materializeDeclaredFields`,
       // so a declared column the write never mentioned is an ABSENT key, not a
       // null one — and there `record.x != null` faults (`No such key`) exactly
       // like the comparison it was meant to guard. The gate's prescription is
@@ -956,12 +962,16 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // required and the write sails through. Validation rules at least
       // reject fail-closed since #4761.
       //
-      // `readonlyWhen` is deliberately NOT included even though it sits on
-      // the same field: it is evaluated by `stripReadonlyWhenFields`, which
-      // builds `{ ...previous, ...data }` and never materializes, so its
-      // binding is sparse and `!= null` would be the wrong prescription
-      // there. Same for `conditionalRequired` / `visibleWhen`, which have no
-      // record-scoped total binding of their own. See the surface ledger in
+      // `readonlyWhen` is still NOT included even though it sits on the same
+      // field — but no longer because its binding is sparse. Since #6454
+      // `readonlyWhenBindings` runs both roots through
+      // `materializeDeclaredFields`, so `!= null` IS the right prescription
+      // there now; what holds the wiring back is clause 3 of the #4953 ruling
+      // (both server-side seams first — the flow trigger-record half is
+      // outstanding). When it is wired it needs `'fail-open'`, like
+      // `requiredWhen` above and unlike the validation-rule surface. Same for
+      // `conditionalRequired` / `visibleWhen`, which have no record-scoped
+      // total binding of their own. See the surface ledger in
       // `validate-null-guards.ts`.
       checkNullGuards(
         `object '${objectName}' · field '${fname}' requiredWhen`,
