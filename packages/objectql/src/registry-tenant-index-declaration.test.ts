@@ -28,8 +28,10 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { SchemaRegistry } from './registry.js';
-import { applySystemFields } from './registry.js';
+// [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
+// below cannot accept a call ObjectQL refuses.
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { SchemaRegistry, applySystemFields } from './registry.js';
 
 /** A plain business object — one authored field, nothing else. */
 const LEAD = { name: 'lead', label: 'Lead', fields: { first_name: { type: 'text' } } } as any;
@@ -47,8 +49,14 @@ function metaSurface(multiTenant: boolean) {
     find: async () => [],
     findOne: async () => null,
     insert: async () => ({ id: 'x' }),
-    update: async () => ({ id: 'x' }),
-    delete: async () => ({ deleted: 0 }),
+    update: async (_t: string, data: Record<string, unknown>, opts?: Record<string, unknown>) => {
+      assertEngineUpdateDispatch(data, opts);
+      return { id: 'x' };
+    },
+    delete: async (_t: string, opts?: Record<string, unknown>) => {
+      assertEngineDeleteDispatch(opts);
+      return { deleted: 0 };
+    },
     count: async () => 0,
     aggregate: async () => [],
   } as any;
