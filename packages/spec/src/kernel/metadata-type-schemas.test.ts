@@ -359,7 +359,16 @@ describe('#4001 — registered-type closure is derived, not tallied', () => {
     // stored rows carrying `packageId` / `state`, so closing it breaks the
     // load-time backstop and the publish gate. Closed count is therefore
     // unchanged at 23 while the registered total moves to 25.
-    expect(closed.length).toBe(23);
-    expect(types.length).toBe(25);
+    //
+    // 25 → 26 on 2026-08-08: `capability` JOINED the registry (#5961), under
+    // the same template `api` used. Unlike `api` it lands CLOSED —
+    // `CapabilityDeclarationSchema` is only an AUTHORING surface, so
+    // `strict()` cost nothing: nothing re-parses a stored `sys_capability` row
+    // through it (`bootstrapDeclaredCapabilities` reads named fields off the
+    // body via `capabilityRowFields`), which is exactly the property `api`
+    // lacks. So the closed count moves with the total, 23 → 24, and
+    // `STILL_STRIP` does not grow.
+    expect(closed.length).toBe(24);
+    expect(types.length).toBe(26);
   });
 });
