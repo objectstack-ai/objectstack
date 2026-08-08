@@ -79,7 +79,20 @@ export const ComponentGalleryPage = definePage({
             ],
           },
         },
-        { type: 'element:button', properties: { label: 'Create Task', actionName: 'showcase_new_task' } },
+        // The page's primary CTA. `element:button` carries an **inline** action
+        // (`action`, an InlineActionSchema) — it is NOT a by-name reference to a
+        // registered object action; that is `action:button`. This block used to
+        // author `actionName: 'showcase_new_task'`, a key `ElementButtonPropsSchema`
+        // never declared: the strip-mode parse dropped it, the renderer reads only
+        // `props.action`, and its `handleClick` opens with `if (!action) return` —
+        // so the button rendered, was clickable, and the click did nothing at all
+        // (no request, no dialog, no navigation). #6597.
+        //
+        // `type: 'modal'` + a string `target` is resolved page-first, then object
+        // (objectui `useActionModal.resolveModalTarget`); `showcase_task` names no
+        // page, so it lands on the object and opens the Task create form — which is
+        // what a button labelled "Create Task" should do.
+        { type: 'element:button', properties: { label: 'Create Task', icon: 'plus', action: { name: 'showcase_new_task', type: 'modal', target: 'showcase_task', refreshAfter: true } } },
       ],
     },
     {
