@@ -448,6 +448,32 @@ jobs:
       - name: Engine test-double contract gate
         run: pnpm check:engine-double-contract
 
+      # Paired kernel-hook pin gate (#5282, from #5170 / #5257 / #5274). The two
+      # kernels — ObjectKernel (production) and LiteKernel (vitest / serverless /
+      # edge) — run the same plugin code and the same hook vocabulary, but do NOT
+      # share a class: ObjectKernel does not extend ObjectKernelBase, so each
+      # keeps its own hooks map. #5282 shared the two dispatch LOOPS
+      # (packages/core/src/hook-dispatch.ts); this gate covers what sharing them
+      # cannot: three consecutive bugs were all "one hook name means opposite
+      # things on the two kernels" (kernel:ready swallowed on one side and fatal
+      # on the other; kernel:listening swallowing a failed server.listen() behind
+      # a cheerful "Bootstrap complete"; kernel:shutdown skipping every destroy()
+      # in the other direction), and each was caught by a human noticing the
+      # asymmetry. What held the kernels together afterwards was a pair of
+      # hand-written tests — a convention, not a mechanism: a fifth lifecycle
+      # hook gets no pairing automatically and nothing goes red when it is
+      # missing. So every kernel:* hook DISPATCHED in packages/core/src must be
+      # named in a test title in BOTH kernel.test.ts and lite-kernel.test.ts, and
+      # a missing pair fails naming the hook and the side that lacks it.
+      # Subscriptions (ctx.hook) are deliberately not dispatches. Static AST over
+      # five files, no build needed, so it belongs in this job. Runs its own
+      # --self-test first: the detector can be broken while every hook is fine,
+      # and a scan that stops matching would report OK while reading nothing
+      # (#4868's family). Measured against main's corpus before being pinned
+      # here: 4 dispatched hooks, 0 problems.
+      - name: Paired kernel-hook pin gate
+        run: pnpm check:kernel-hook-pairs
+
       # Resume-authority declaration gate (#5561, from #3823). The #3801 resume
       # gate keys on the SUSPENDED NODE, so it covers a pausing node type exactly
       # when that type's author remembered to declare `resumeAuthority`. #3823 is
