@@ -4,7 +4,12 @@ import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack } from '@objectstack/core';
-import { readEnvWithDeprecation } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/types';
+// [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
+// `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
+// this question with it is a bug (cloud#1020, #5233) — so the posture, and only
+// the posture, is what the runtime authoring gate is told.
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { MetadataHostEngine } from './host-engine.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
@@ -2419,10 +2424,42 @@ export class ObjectStackProtocolImplementation implements
      * strictly better information than the CLI's single-package view — the
      * inversion #4463 D2 points out: the same rule can be more decisive here
      * than it can be at build time.
+     *
+     * [#6285 / #6155 Q3=A] It also supplies the two DEPLOYMENT facts the CLI
+     * cannot know and the shared registry therefore must not read: the
+     * organization partition this write lands in, and whether this deployment
+     * enforces an organization wall. Both are gathered here — the impure side —
+     * and passed as arguments, so `evaluateRuntimeAuthoringGate` stays a pure
+     * function of its inputs and a test can drive both postures without
+     * mutating the process.
      */
     private assertRuntimeAuthoringRules(evt: {
         type: string; name: string; state: 'draft' | 'active'; body: unknown; source?: string;
+        /**
+         * The organization partition of this write (`saveMetaItem`'s
+         * `organizationId`). Absent = a platform-level / environment write,
+         * which is one limb of the #6285 refusal combination.
+         */
+        organizationId?: string | null;
     }): void {
+        // Environment writes only. `environmentId === undefined` is the
+        // package author's own control-plane channel — the same carve-out the
+        // ADR-0005 authorization gate and the #3050 authoring gate below both
+        // make, and pinned as deliberate by `protocol.runtime-authoring-gate.
+        // test.ts` ("does not gate control-plane (package-author) writes").
+        //
+        // [#6285] Measured before adding a guardrail behind it, because the
+        // dispatch asked whether the short-circuit makes the new refusal
+        // unreachable in the deployment shape it protects: it does not. Every
+        // serving path binds an environment id — `os dev` / `os start` default
+        // to `env_local` (`cli/src/commands/dev.ts:225`, `start.ts:197`), the
+        // standalone artifact stack to `proj_local`
+        // (`runtime/src/standalone-stack.ts:378`), and a cloud per-project
+        // kernel to its own — so a multi-organization deployment reaches this
+        // gate. What sits behind the short-circuit is the control-plane
+        // bootstrap kernel, which authors no tenant metadata. Widening it is
+        // therefore not this issue's business (and would change the blast
+        // radius of all 26 shared rules, not just this one).
         if (this.environmentId === undefined) return;
         if (evt.state !== 'active') return;
         // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
@@ -2461,8 +2498,42 @@ export class ObjectStackProtocolImplementation implements
             state: evt.state,
             body: evt.body,
             objects,
+            ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
+            orgWallEnforced: this.orgWallEnforced(),
         });
         if (err) throw err;
+    }
+
+    /**
+     * [#6285] Does this deployment enforce an organization wall (ADR-0105 D1)?
+     *
+     * The authoritative reading, and the only one:
+     * `postureEnforcesWall(resolveTenancyPosture())`. `resolveMultiOrgEnabled()`
+     * is the demoted legacy input — a deployment that sets only the canonical
+     * `OS_TENANCY_POSTURE` reads `false` there while genuinely running a walled
+     * posture, which is the bug shape cloud#1020 and #5233 already paid for.
+     *
+     * Read per call rather than memoised: `resolveTenancyPosture()` reads
+     * `process.env` live by contract, and a gate that cached the answer at
+     * construction would disagree with every other consumer for the life of the
+     * process.
+     *
+     * `resolveTenancyPosture()` THROWS on an unrecognized `OS_TENANCY_POSTURE`
+     * — deliberately, so a typo cannot silently remove the wall. That refusal
+     * belongs at boot, not on a metadata write, so it is caught here and read
+     * as WALLED. Fail-closed is the direction ADR-0105 argues for on exactly
+     * this input ("refusing to boot rather than silently falling back to a
+     * posture with no organization wall"), and it costs nothing in practice: a
+     * deployment in that state does not boot, and even when reached it only
+     * arms a guardrail — a publish still has to match every other limb of the
+     * refusal combination to be turned away.
+     */
+    private orgWallEnforced(): boolean {
+        try {
+            return postureEnforcesWall(resolveTenancyPosture());
+        } catch {
+            return true;
+        }
     }
 
     /**
@@ -2793,6 +2864,34 @@ export class ObjectStackProtocolImplementation implements
             ai: 'ai',
             i18n: 'i18n',
             'file-storage': 'storage',
+            // [#6633] The package-management surface. `package` is NOT a
+            // CoreServiceName slot, so it must not enter SERVICE_CONFIG — a
+            // non-slot row there is the shape of the retired `graphql` defect,
+            // and it would also fabricate a `services` availability entry whose
+            // remedy line lies. Its route flows through the
+            // NON_SLOT_SERVICE_ROUTES loop below instead: same gate
+            // (registered service), same mapping table, one hop over.
+            package: 'packages',
+        };
+
+        // [#6633] Routes advertised for registered services that are not
+        // CoreServiceName slots. Advertised iff the service is registered —
+        // the same convention every SERVICE_CONFIG row uses, and for `package`
+        // it is exactly the predicate that decides the mount on both real host
+        // types: the @objectstack/rest direct-mount registrar is gated on this
+        // same service (`direct-mount-composition.ts`), and the runtime
+        // dispatcher — whose `/packages` domain is unconditional — answers
+        // discovery from its own `getDiscoveryInfo()`, never from this
+        // builder.
+        //
+        // `datasources` is deliberately NOT here (same reasoning as `mcp`,
+        // #5679): the federation mount belongs to the REST host, which this
+        // builder cannot see, and the runtime dispatcher serves no
+        // `/datasources` domain at all — advertising it from here would be the
+        // advertise-the-unmounted half of ADR-0076 D12. The REST discovery
+        // endpoint advertises it from its recorded direct mounts.
+        const NON_SLOT_SERVICE_ROUTES: Record<string, string> = {
+            package: '/api/v1/packages',
         };
 
         const optionalRoutes: Partial<ApiRoutes> = {};
@@ -2802,6 +2901,16 @@ export class ObjectStackProtocolImplementation implements
         for (const [serviceName, config] of Object.entries(SERVICE_CONFIG)) {
             const route = advertisedRoute(serviceName, config.route);
             if (registeredServices.has(serviceName) && route) {
+                const routeKey = serviceToRouteKey[serviceName];
+                if (routeKey) {
+                    optionalRoutes[routeKey] = route;
+                }
+            }
+        }
+
+        // [#6633] Same flow for the non-slot routed services declared above.
+        for (const [serviceName, route] of Object.entries(NON_SLOT_SERVICE_ROUTES)) {
+            if (registeredServices.has(serviceName)) {
                 const routeKey = serviceToRouteKey[serviceName];
                 if (routeKey) {
                     optionalRoutes[routeKey] = route;
@@ -5791,7 +5900,55 @@ export class ObjectStackProtocolImplementation implements
         // listener never breaks the write (the engine catches + logs).
         const dropped: DroppedFieldsEvent[] = [];
         opts.onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push(e); };
-        const result = await this.engine.update(request.object, request.data, opts);
+        // [#6479] At THIS ingress the row is the one the caller named — `request.id`,
+        // the path `:id` — and nothing in the payload gets to move it.
+        //
+        // The engine's dispatch reads the PAYLOAD first: a truthy scalar `data.id`
+        // outranks `options.where.id` (`engine-update-dispatch.ts`, case *"a SCALAR
+        // data.id still wins over a scalar where.id"* — `expectId: 'rec_1'`). That
+        // rule is correct and deliberate for a caller who hands ObjectQL a payload
+        // and nothing else (#5748 / PR #5919, ruling A); it is a HOLE here, because
+        // this caller has already named the row twice — in the URL and in `where` —
+        // and the three gates around this line all judge THAT row:
+        //
+        //   probe   → `probeRecord(object, request.id)`      (existence, #4435)
+        //   OCC     → `assertVersionOf(…, request.id, …)`    (If-Match / expectedVersion)
+        //   receipt → `{ id: request.id, record: result }`
+        //
+        // Passing `request.data` verbatim let a body `{"id":"rec_2"}` on
+        // `PATCH /data/task/rec_1` bind rec_2: probed rec_1, OCC-checked rec_1,
+        // WROTE rec_2, and answered `id: rec_1` beside rec_2's readback. rec_2 was
+        // never probed and never version-checked, so a client that GETs a record,
+        // edits it and PUTs the whole body back — with the wrong row's id picked up
+        // from a mis-clicked list or a stale refresh — performed a silent cross-row
+        // write past its own `If-Match`.
+        //
+        // The fix is the shape the BULK ingress has always used for the same
+        // question (`rest-server.ts`, batch `update`: `ql.update(op.object,
+        // { ...data, id }, …)` — the operation's id after the spread, so it wins).
+        // Two ingresses, one answer (#4550 / #4434). It changes no engine verdict:
+        // the call still dispatches `by-id`, on the id `where` already carried.
+        //
+        // Deliberately NOT route B (400 on mismatch) or route C (ban `id` in
+        // `UpdateDataRequestSchema`) — both were rejected by the 2026-08-08 triage
+        // ruling on #6479; B installs a new rejection on a shipped API and C
+        // changes the accepted request shape.
+        //
+        // A non-record payload is passed through UNTOUCHED (`undefined`, `null`, an
+        // array): the engine reads `data.id` unguarded on purpose, so `undefined`
+        // is its `TypeError`, and an ingress that answered a non-record payload
+        // more kindly than the producer would be the very looseness
+        // `engine-update-dispatch.ts` exists to prevent. Those shapes carry no
+        // scalar `id` to outrank `where.id` either, so the invariant holds for them
+        // through `opts.where` alone.
+        const writeData = (
+            request.data !== null
+            && typeof request.data === 'object'
+            && !Array.isArray(request.data)
+        )
+            ? { ...(request.data as Record<string, unknown>), id: request.id }
+            : request.data;
+        const result = await this.engine.update(request.object, writeData, opts);
         return {
             object: request.object,
             id: request.id,
@@ -8208,6 +8365,10 @@ export class ObjectStackProtocolImplementation implements
             state: mode === 'draft' ? 'draft' : 'active',
             body: request.item,
             source: writeSource,
+            // [#6285] The write's organization partition. It was always here;
+            // it simply never travelled to the gate, which is the whole reason
+            // the "platform-level flow" limb could not be judged before.
+            organizationId: request.organizationId ?? null,
         });
 
         // Pre-persistence authoring gate (#3050): a domain plugin may veto the
@@ -8924,6 +9085,10 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 state: 'active',
                 body: draftForGate.body,
+                // [#6285] Same partition the draft is being promoted in. Without
+                // it the draft door would be a bypass for this refusal alone,
+                // which is the exact hole #4463 D1 closed for the other 26.
+                organizationId: orgId,
             });
         }
 
@@ -10293,12 +10458,46 @@ export class ObjectStackProtocolImplementation implements
                 const current = await repo.get(ref, { state: 'active' });
                 if (!it.existedBefore) {
                     // Created by this commit → soft-remove (metadata only; table stays).
+                    //
+                    // [#6620] The write INTENT is derived per item, exactly as
+                    // the sibling DELETE caller {@link deleteMetaItem} derives
+                    // it (and as the sibling revert caller
+                    // {@link rollbackMetaItem} derives its own) — all three now
+                    // agree. Stated as the CONSTANT `'override-artifact'` this
+                    // limb used to carry, `SysMetadataRepository.delete` opened
+                    // with `assertAllowed(ref.type, opts.intent)` — the same
+                    // gate `put` uses — which refuses every type that is not
+                    // `allowOrgOverride`, `object` among them. So a commit that
+                    // CREATED an object could not be reverted at all: the
+                    // first-build undo (publish a brand-new app, then undo it)
+                    // left every created object behind, answered `success:
+                    // false` with a populated `failed[]`, and left the package
+                    // half-reverted — its overlay-allowed items removed, its
+                    // objects not.
+                    //
+                    // Per ITEM, not per call: one first-build commit routinely
+                    // creates a runtime object beside a packaged-artifact name,
+                    // so a hoisted intent has to pick one and be wrong about
+                    // the other. A genuinely artifact-backed item still
+                    // resolves to `'override-artifact'` and is still refused
+                    // with `NOT_OVERRIDABLE` — the derivation states the
+                    // caller's case, it does not widen the repository's gate,
+                    // which is unchanged and right.
+                    //
+                    // Sibling limb: #6563 (PR #6642) did the same for the
+                    // restore branch below, where the intent was UNSTATED and
+                    // fell through to `restoreVersion`'s `?? 'override-artifact'`
+                    // default. Still not addressed here, filed with its own
+                    // measurement: neither limb refreshes the SchemaRegistry the
+                    // way `rollbackMetaItem` does (#6621).
+                    const intent: 'override-artifact' | 'runtime-only' =
+                        this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
                     if (current) {
                         await repo.delete(ref, {
                             parentVersion: current.hash,
                             actor,
                             source: 'protocol.revertCommit',
-                            intent: 'override-artifact',
+                            intent,
                             state: 'active',
                         });
                     }
@@ -10324,12 +10523,12 @@ export class ObjectStackProtocolImplementation implements
                     // resolves to `'override-artifact'` and is still refused — the
                     // derivation states the case, it does not widen the gate.
                     //
-                    // Two neighbours are deliberately NOT changed here, each filed
-                    // with its own measurement: the soft-remove limb above states the
-                    // same intent as a CONSTANT, so a commit that CREATED an object
-                    // still cannot be reverted (#6620); and neither limb refreshes the
-                    // SchemaRegistry the way `rollbackMetaItem` does, so a restored
-                    // body is persisted but not yet dispatched on (#6621).
+                    // The soft-remove limb above stated the same intent as a
+                    // CONSTANT and was fixed the same way (#6620), so both limbs now
+                    // derive it. One neighbour is still open, filed with its own
+                    // measurement: neither limb refreshes the SchemaRegistry the way
+                    // `rollbackMetaItem` does, so a restored body is persisted but not
+                    // yet dispatched on (#6621).
                     const intent: 'override-artifact' | 'runtime-only' =
                         this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
                     await repo.restoreVersion(ref, it.prevVersion, {

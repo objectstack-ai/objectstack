@@ -218,8 +218,12 @@ const TOP_LEVEL_ENUM_WIDTH_LIMIT = 160;
  * A union's width is variant COUNT times variant WIDTH, so neither enum budget
  * above can reach it: `ui/app.mdx`'s `App.navigation` prints
  * `{ id: string; label: string; icon?: string; order?: number; … }` nine times,
- * seven of them character-identical, for 582 characters of correct-but-repeated
- * type. The maintainer's ruling on #6226 chose a cap on the count that prints
+ * eight of the nine being one character-identical spelling (the ninth is
+ * `{ type: 'separator'; … }`), for 582 characters of correct-but-repeated
+ * type. (The repetition itself is #6569's subject, ruled after this cap landed
+ * and handled by the dedupe at the call site; this constant governs only how
+ * many DISTINCT spellings are worth reading.) The ruling on #6226 chose a cap
+ * on the count that prints
  * how many variants it hid, over a whole-cell character budget degrading to
  * `object` and over restoring `$ref` links: those lose more information, and a
  * SECOND elision style in the same table is worse than the width it would fix.
@@ -420,8 +424,9 @@ function elideEnum(values: unknown[], budget: number | null): { body: string; hi
  *
  * Shared by all three elisions (#6225/#6226 reuse what #5340 measured): the
  * enum-body budget, the top-level vocabulary relocation, and the `anyOf`
- * variant cap. They differ in what they count, never in whether a marker is
- * worth printing.
+ * variant cap — which since #6569 also counts variants withheld for spelling a
+ * string the cell already prints. They differ in what they count, never in
+ * whether a marker is worth printing.
  *
  * Re-measured on the corpus with both new limits in place, by regenerating with
  * this guard forced to return `elided` unconditionally: it refuses **54** of the
@@ -544,14 +549,86 @@ function renderType(prop: any, ctx: TypeContext | undefined, depth: number): str
 
   if (prop.anyOf || prop.oneOf) {
     const variants = prop.anyOf || prop.oneOf;
-    const rendered = variants.map((v: any) => renderType(v, ctx, depth));
+    const rendered: string[] = variants.map((v: any) => renderType(v, ctx, depth));
     const full = rendered.join(' | ');
-    if (rendered.length <= VARIANT_LIMIT) return full;
+
+    // A cell spells each DISTINCT variant rendering once, and counts every
+    // variant it did not spell — repeats included (#6569).
+    //
+    // Two independent facts decide what a union cell shows, and this is one
+    // expression of both. `VARIANT_LIMIT` caps how many spellings are worth
+    // reading; the dedupe drops spellings that carry nothing because the cell
+    // already prints them character for character. They compose into a single
+    // marker rather than stacking two elisions, so the invariant a reader can
+    // rely on stays one sentence: SPELLINGS SHOWN + THE COUNT = THE UNION'S
+    // ARITY, whichever rule withheld a variant.
+    //
+    // Identical spellings are not new here, but #6374 made them common: with
+    // `SHAPE_DEPTH_LIMIT` in force every all-object union below a summary
+    // prints `object` per variant, so `object | object | object | object`
+    // appeared on 9 cells across 5 shipped reference pages, and
+    // `kernel/manifest.mdx`'s `Manifest.navigationContributions` spelled four
+    // of them and then counted `… +5 more` identical ones behind them. Those
+    // pages are the authoritative input for AI authors (ADR-0033), where a
+    // cell that reads as a rendering bug costs more than a wide one.
+    //
+    // 9 and not the 11 #6569 was filed with, because a SUBSTRING count of
+    // `object | object` also matches the two cells that spell
+    // `object | object[]` (`ui/page.mdx`'s `slots`,
+    // `automation/state-machine.mdx`'s `states`) — two spellings, which the
+    // rule below deliberately never collapses. Worth knowing before grepping:
+    // re-deriving 11 that way and concluding the dedupe missed two cells is
+    // the wrong conclusion from a correct observation. Counting all duplicate
+    // spellings rather than only `object` ones, the rule moves 14 cells on 7
+    // pages; the extra 5 repeat a SHAPE spelling (`ui/app.mdx`,
+    // `data/validation.mdx`).
+    //
+    // WHY THE COUNT STAYS. Collapsing to a bare `object` would drop the union's
+    // ARITY, which after the depth budget is the only fact that cell still
+    // carries — "choose one of N shapes" degraded to "some object". #6226 ruled
+    // that a union elision must self-report what it hid; a dedupe that reports
+    // nothing re-decides that ruling by the back door.
+    //
+    // WHY NO NEW NOTATION. The count is `… +N more`, the marker the table
+    // already uses for elided enum members (#5340), relocated vocabularies
+    // (#6225) and capped variants (#6226) — not a multiplicity sigil like
+    // `object ×4`. #6226's ruling turned on exactly this: a SECOND omission
+    // style in one table is worse than the width it would fix. `N` counts
+    // variants-not-spelled in every one of the four positions, so the marker
+    // keeps meaning one thing.
+    //
+    // WHY EQUALITY IS ON THE RENDERED STRING, and why it is not restricted to
+    // ADJACENT runs. This renderer judges what a reader sees, so two variants
+    // are interchangeable here exactly when their cells are byte-identical —
+    // `object | object[]` (`ui/page.mdx`'s `Page.slots`) is two spellings and
+    // never collapses, however alike the schemas are. Adjacency was measured
+    // and rejected: `App.navigation` — #6226's own filed instance — renders
+    // seven identical nav-item shapes, then `{ type: 'separator'; … }`, then an
+    // EIGHTH copy of the nav-item shape. A `uniq`-style adjacent rule leaves
+    // that eighth copy spelled a second time, i.e. it leaves the defect in the
+    // one cell the family was filed on. It is the only corpus site where the
+    // two rules differ (3 of 554 union renderings, all three that cell on its
+    // three pages).
+    //
+    // THE PAY-FOR-YOUR-MARKER GUARD APPLIES UNCHANGED — not exempted, and its
+    // refusals are correct. Under it a run of identical spellings only
+    // collapses once the count is cheaper than the repetition: `object |
+    // object` would GROW by 3 characters and `object | object | object` saves
+    // 6 against a 12-character marker footprint, so both keep their repeats;
+    // four is the first width at which `object` repeats pay (15 saved).
+    // Measured on the corpus: 554 union renderings, 14 carry a duplicate
+    // spelling, and the guard accepts all 14 — no corpus cell sits in the
+    // refusal band today, which is why the refusal is pinned by unit test
+    // rather than by a page.
+    const spelled = [...new Set(rendered)];
+    const shown = spelled.slice(0, VARIANT_LIMIT);
+    const hidden = rendered.length - shown.length;
+    if (hidden === 0) return full;
     // The variants a reader does not see are counted, never silently dropped —
     // the principle #5340 established for enum members, applied to the other
     // axis a cell grows along (#6226). `elideWithMarker` keeps the count from
     // costing more than the spellings it replaces.
-    const elided = elideWithMarker(rendered.slice(0, VARIANT_LIMIT), rendered.length - VARIANT_LIMIT, full.length);
+    const elided = elideWithMarker(shown, hidden, full.length);
     return elided ?? full;
   }
 

@@ -1060,22 +1060,31 @@ export class ObjectStackClient {
    * catalog and importing tables as federated objects. 503
    * [external_service_unavailable] without the `external-datasource`
    * service. (#3587 gap closure)
+   *
+   * [#6633] The family base comes from `getRoute('datasources')`: a connected
+   * client follows the server's advertised `routes.datasources` (the REST
+   * discovery endpoint derives it from its recorded mounts, ADR-0076 D12);
+   * an unconnected client — or one talking to a server that advertises no
+   * `datasources` key — falls back to the `/api/v1/datasources` convention,
+   * byte-identical to the pre-#6633 hardcode.
    */
   datasources = {
     external: {
         /** List remote tables on a datasource, optionally by `schema`. */
         listTables: async (name: string, opts?: { schema?: string }): Promise<any> => {
             const qs = opts?.schema ? `?schema=${encodeURIComponent(opts.schema)}` : '';
+            const route = this.getRoute('datasources');
             const res = await this.fetch(
-                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/tables${qs}`,
+                `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/tables${qs}`,
             );
             return this.unwrapResponse<any>(res);
         },
 
         /** Generate an Object draft (structured + `*.object.ts` source) from a remote table. */
         draft: async (name: string, remoteTable: string, opts?: Record<string, any>): Promise<any> => {
+            const route = this.getRoute('datasources');
             const res = await this.fetch(
-                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/draft`,
+                `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/draft`,
                 { method: 'POST', body: JSON.stringify(opts ?? {}) },
             );
             return this.unwrapResponse<any>(res);
@@ -1086,8 +1095,9 @@ export class ObjectStackClient {
          * Object"). 400 [external_import_error] when refused.
          */
         import: async (name: string, remoteTable: string, opts?: Record<string, any>): Promise<any> => {
+            const route = this.getRoute('datasources');
             const res = await this.fetch(
-                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/import`,
+                `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/tables/${encodeURIComponent(remoteTable)}/import`,
                 { method: 'POST', body: JSON.stringify(opts ?? {}) },
             );
             return this.unwrapResponse<any>(res);
@@ -1095,8 +1105,9 @@ export class ObjectStackClient {
 
         /** Refresh and return the cached remote-catalog snapshot. */
         refreshCatalog: async (name: string): Promise<any> => {
+            const route = this.getRoute('datasources');
             const res = await this.fetch(
-                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/refresh-catalog`,
+                `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/refresh-catalog`,
                 { method: 'POST', body: JSON.stringify({}) },
             );
             return this.unwrapResponse<any>(res);
@@ -1104,8 +1115,9 @@ export class ObjectStackClient {
 
         /** Validate this datasource's federated objects against the remote schema. */
         validate: async (name: string): Promise<any> => {
+            const route = this.getRoute('datasources');
             const res = await this.fetch(
-                `${this.baseUrl}/api/v1/datasources/${encodeURIComponent(name)}/external/validate`,
+                `${this.baseUrl}${route}/${encodeURIComponent(name)}/external/validate`,
                 { method: 'POST', body: JSON.stringify({}) },
             );
             return this.unwrapResponse<any>(res);
@@ -4792,6 +4804,14 @@ export class ObjectStackClient {
       // which suits `mcp` exactly: `/mcp` is mounted bare, so even a
       // project-scoped discovery response advertises the unscoped path.
       mcp: '/api/v1/mcp',
+      // [#6633] `datasources` became a declared `ApiRoutes` key (the base of
+      // the `datasources/:name/external/*` federation-admin family), and this
+      // map is TOTAL over declared keys by design. `/api/v1/datasources` is
+      // not a guess: it is where `@objectstack/rest` mounts the family today,
+      // so an unconnected client builds byte-identical URLs to the pre-#6633
+      // hardcode — the fallback agrees with the mount instead of competing
+      // with it.
+      datasources: '/api/v1/datasources',
     };
     
     return routeMap[type] || `/api/v1/${type}`;
