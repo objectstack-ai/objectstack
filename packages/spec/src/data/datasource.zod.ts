@@ -345,6 +345,7 @@ const sslUnknownKeyError = strictUnknownKeyError({
 });
 
 export const DriverType = z.string().describe('Underlying driver identifier');
+export type DriverType = z.input<typeof DriverType>;
 
 /**
  * Driver Definition Schema

@@ -25,7 +25,7 @@ no longer constrains authored flows — plugins extend the vocabulary.
 
 ```typescript
 import { FlowSchema, FlowEdgeSchema, FlowNodeSchema, FlowNodeAction, FlowVariableSchema, FlowVersionHistorySchema } from '@objectstack/spec/automation';
-import type { Flow, FlowEdge, FlowNode, FlowVersionHistory } from '@objectstack/spec/automation';
+import type { Flow, FlowEdge, FlowNode, FlowNodeAction, FlowVersionHistory } from '@objectstack/spec/automation';
 
 // Validate data
 const result = FlowSchema.parse(data);

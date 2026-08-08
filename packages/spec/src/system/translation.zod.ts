@@ -10,6 +10,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const LocaleSchema = lazySchema(() => z.string().describe('BCP-47 Language Tag (e.g. en-US, zh-CN)'));
+export type Locale = z.input<typeof LocaleSchema>;
 
 /**
  * Shared history sentence for every shape in this file (#4001).
