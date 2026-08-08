@@ -37,6 +37,8 @@ every row. An empty or non-string comparand is refused on the validating walk
 `lower()` folds ASCII only, which IS the contract (#4706 Q1 = A): `$icontains:
 'café'` does not match `CAFÉ`.
 
+<!-- adr-0087: registered filter-regex-options-retired -->
+
 `driver-mongodb`'s unknown-operator arm was throwing a bare `Error` with no
 `code` and no `status`, three lines from the helper in its own file that sets
 `INVALID_FILTER` / 400 — a 500-shaped body for a 400-class client mistake. It
