@@ -7318,14 +7318,34 @@ export class ObjectQL implements IObjectQLEngine {
           bindPreImage(priorRecord);
         }
         await this.triggerHooks('beforeDelete', hookContext);
-        // [#5574] The retired lever, refused. `previous` — and the summary
-        // recompute that rides it — were computed against the row the ladder
-        // chose, so a handler moving the id would delete a row none of that
-        // ever saw. It used to be honoured by RE-READING the pre-image for the
-        // new target (and, for a CLEARED id, by falling through to the
-        // predicate branch); ADR-0058 Addendum II's settlement of the same
-        // lever on `update()` applies here verbatim, and one rule beats two.
-        if (hookContext.input.id !== id) {
+        // A `beforeDelete` hook may still REPOINT the target id, and #5272's
+        // answer to that is unchanged: the pre-image bound above describes the
+        // OLD id, so it must not ride into `afterDelete` — or into the summary
+        // recompute — as though it described the new target. Re-read it.
+        //
+        // [#5574] What this PR does NOT do, deliberately: retire the repoint.
+        // The `update()` twin below refuses a rebind, and the asymmetry is
+        // principled rather than an oversight — `delete()` has a working
+        // RE-RESOLUTION for the new target (this block, delivered by #5272 with
+        // its own pins), so nothing stale reaches a consumer, while `update()`
+        // has none and would have to grow one. Building that is exactly the
+        // "silently pick re-resolution instead" the ruling forbids, so the two
+        // paths answer differently until the repoint itself is ruled on. Filed
+        // as #6752; do not fold it in as a rider here.
+        if (wantsPreImage && hookContext.input.id !== id && hookContext.input.id) {
+          priorRecord = await readPreImage(hookContext.input.id);
+          bindPreImage(priorRecord);
+        }
+        // CLEARING the id is a different question and this PR does settle it,
+        // because the ladder reorder leaves it no answer of its own: it used to
+        // convert the write into a PREDICATE delete over the caller's `where`
+        // by falling through to the branch below, and the ladder is now decided
+        // before any handler runs (a per-row `before*` context is built from the
+        // matched row set, so it must be). Ignoring it would delete the
+        // ORIGINAL row while the handler believes it cancelled the targeting;
+        // honouring it has nothing left to honour. Refused by name — ADR-0058
+        // Amendment II.1, the capability the ruling names.
+        if (!hookContext.input.id) {
           throw new HookTargetRebindError({
             object, event: 'beforeDelete', path: 'by-id',
             expectedId: id, observedId: hookContext.input.id,

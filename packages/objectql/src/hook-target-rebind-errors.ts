@@ -42,6 +42,27 @@
  * with `id` ALREADY bound to its row, and rebinding it retargets nothing — so
  * one error serves both paths.
  *
+ * ## What this error does NOT cover: `delete()`'s by-id REPOINT
+ *
+ * The two verbs answer a rebind differently on the by-id path, and the
+ * asymmetry is a scope decision rather than an oversight — read it before
+ * "fixing" it either way.
+ *
+ * `delete()` has had a working RE-RESOLUTION for a repointed target since
+ * #5272: when a `beforeDelete` handler moves `input.id`, the engine re-reads
+ * that row's pre-image and rebinds `previous`, so nothing stale reaches
+ * `afterDelete` or the summary recompute. The second bullet above simply is not
+ * true there. `update()` has no such mechanism, and building one would be the
+ * "silently pick re-resolution instead" the ruling forbids — so `update()`
+ * refuses a rebind and `delete()` keeps honouring one, until the repoint itself
+ * is ruled on as its own question (#6752).
+ *
+ * A CLEARED id is a different question and both verbs answer it the same way,
+ * because the ladder reorder leaves it no answer of its own: clearing used to
+ * convert the write into a PREDICATE write over the caller's `where`, and the
+ * ladder is now resolved before any handler runs. That is the capability the
+ * ruling names, and it is what this error is for on the `delete()` path.
+ *
  * ## Why `code` is an `ERR_`-prefixed operational code, not a wire code
  *
  * Same reasoning as {@link BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE} next door:

@@ -707,13 +707,12 @@ describe('[#5574 / D4] `input.id` is not a reroute lever, and is refused loudly'
     expect((await engine.findOne('task', { where: { id: row.id } }) as any).status).toBe('todo');
   });
 
-  it('REFUSES a by-id `beforeDelete` handler that repoints the target', async () => {
-    // `delete()` used to HONOUR this, by re-reading the pre-image for the new
-    // target (#5272). ADR-0058 Amendment II.1 settles both verbs the same way:
-    // `previous` and the summary recompute were computed against the row the
-    // ladder chose, so honouring a repoint would delete a row none of that saw.
-    const { engine } = await boot([hook('repoint', 'beforeDelete', (ctx) => {
-      (ctx.input as any).id = 'other_row';
+  it('REFUSES a by-id `beforeDelete` handler that CLEARS the id', async () => {
+    // The clear is uniform across both verbs, because the ladder reorder leaves
+    // it no answer of its own: it used to work by falling through to the
+    // predicate branch, and that branch is now chosen before any handler runs.
+    const { engine } = await boot([hook('clear', 'beforeDelete', (ctx) => {
+      (ctx.input as any).id = undefined;
     })]);
     const row: any = await engine.insert('task', { title: 'a', status: 'todo' });
 
@@ -724,7 +723,41 @@ describe('[#5574 / D4] `input.id` is not a reroute lever, and is refused loudly'
     expect(err).toBeInstanceOf(HookTargetRebindError);
     expect(err.event).toBe('beforeDelete');
     expect(err.path).toBe('by-id');
+    expect(err.message).toContain('PREDICATE write');
     expect(await engine.count('task', {})).toBe(1);
+  });
+
+  it('still HONOURS a by-id `beforeDelete` REPOINT — deliberately not retired here', async () => {
+    // ⚠️ The one place the two verbs answer a rebind differently, pinned so the
+    // asymmetry is a decision on the record rather than something a later
+    // reader "tidies up" in either direction.
+    //
+    // The case against honouring a rebind is that the write lands on a row
+    // whose pre-image and rules were never evaluated. On `delete()` that is not
+    // true: #5272 RE-RESOLVES the new target — re-reads its pre-image and
+    // rebinds `previous` — before `afterDelete` or the summary recompute can
+    // see it. `update()` has no such mechanism and refusing there is what keeps
+    // this PR from inventing one (the ruling forbids picking re-resolution
+    // silently). Retiring the delete-side repoint is its own question, filed as
+    // #6752.
+    const seen: unknown[] = [];
+    const { engine } = await boot([
+      hook('repoint', 'beforeDelete', (ctx) => {
+        if ((ctx.previous as any)?.title === 'decoy') (ctx.input as any).id = String(target.id);
+      }),
+      hook('observe', 'afterDelete', (ctx) => { seen.push((ctx.previous as any)?.title); }, undefined, 'task', { priority: 200 }),
+    ]);
+    const decoy: any = await engine.insert('task', { title: 'decoy', status: 'todo' });
+    const target: any = await engine.insert('task', { title: 'target', status: 'todo' });
+
+    await engine.delete('task', { where: { id: decoy.id } });
+
+    // The REPOINTED row is the one that went…
+    const left: any[] = await engine.find('task', {});
+    expect(left.map((r) => r.title)).toEqual(['decoy']);
+    // …and `previous` was re-read for it, so the after phase describes the row
+    // actually deleted rather than the one the caller named.
+    expect(seen).toEqual(['target']);
   });
 
   it('leaves an untouched `input.id` alone — the refusal is not a trap', async () => {

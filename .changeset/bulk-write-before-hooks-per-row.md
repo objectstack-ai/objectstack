@@ -34,17 +34,29 @@ field that the single-id path refuses.
   therefore out of contract: it widens to the whole batch rather than scoping
   itself. Per-row `previous` is supplied so a guard can REFUSE, not so a rewrite
   can be aimed.
-- **The `input.id` reroute lever is retired and now refuses.** Clearing
-  `ctx.input.id` in a `beforeUpdate` handler used to convert a by-id write into a
-  predicate write over the caller's `where`; rebinding it moved the write to
-  another row (`delete()` honoured that by re-reading the pre-image). The
-  dispatch ladder is now resolved **before** the before phase — it has to be,
-  since per-row contexts are built from the matched row set — so a rebind
-  retargets nothing. Rather than ignore it (a silent no-op) or honour it (writing
-  a row whose pre-image, `readonlyWhen` locks and validation rules were never
-  evaluated), the write is rejected with `HookTargetRebindError`
+- **The `input.id` reroute lever is retired and now refuses.** The dispatch
+  ladder is resolved **before** the before phase — it has to be, since per-row
+  contexts are built from the matched row set — so the id slot can no longer
+  steer the write. Rather than ignore an assignment (a silent no-op) or honour
+  it blindly, the write is rejected with `HookTargetRebindError`
   (`ERR_HOOK_TARGET_REBIND`), whose message names the retired capability and the
-  three supported replacements. Recorded as ADR-0058 Amendment II.1.
+  three supported replacements. Recorded as ADR-0058 Amendment II.1. Precisely:
+
+  | | CLEARED id | REBOUND to another id |
+  |---|---|---|
+  | `update()` by-id | refused | refused |
+  | `delete()` by-id | refused | **honoured, unchanged** (#5272's re-read) |
+  | either, per-row | refused (D4) | refused (D4) |
+
+  Clearing is uniform because it worked by falling through to the predicate
+  branch, and that branch is now chosen before any handler runs. Rebinding is
+  not uniform, deliberately: the case against honouring it is that the write
+  lands on a row whose pre-image and rules were never evaluated, and on
+  `delete()` that is simply not true — #5272 already re-resolves the new target
+  before `afterDelete` or the summary recompute sees it. `update()` has no such
+  mechanism and building one would be the "silently pick re-resolution instead"
+  the ruling forbids. Retiring the delete-side repoint is its own question,
+  filed as #6752 rather than ridden in on an ordering change.
 
 **Also in this change.**
 
@@ -74,9 +86,10 @@ field that the single-id path refuses.
   rejecting the batch. `HookConditionError` itself is unchanged — an unevaluable
   condition still aborts the operation (#4775).
 
-**Migrating.** A handler that cleared or rebound `ctx.input.id` must instead
-write through `ctx.api` / `ctx.ql` for the row it means, have the caller pass
-`{ multi: true, where: … }`, or throw to refuse the write. A `beforeUpdate` hook
+**Migrating.** A handler that cleared `ctx.input.id` — or rebound it on an
+`update()` — must instead write through `ctx.api` / `ctx.ql` for the row it
+means, have the caller pass `{ multi: true, where: … }`, or throw to refuse the
+write. A `beforeDelete` handler that repoints the target is unaffected. A `beforeUpdate` hook
 with side effects on an object that receives bulk writes should expect to run
 per row; a batch-wide effect belongs in a payload rewrite, which is still
 batch-scoped.

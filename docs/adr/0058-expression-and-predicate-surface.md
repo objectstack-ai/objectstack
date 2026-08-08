@@ -332,13 +332,34 @@
 > NAMES the retired capability, so an author whose handler stopped working
 > learns what changed instead of watching a write land somewhere unexpected.
 >
-> **Scope: both verbs, both by-id and per-row.** D4 already stated the per-row
-> half. The by-id half is stated here, and it applies to `delete()` as well as
-> `update()` — including the repoint `delete()` used to honour by re-reading.
-> One rule beats two, and the delete-side re-read had no in-repo consumer (the
-> premise was checked against `origin/main`: the only `ctx.input.id` assignment
-> in the whole repository was one engine test forcing the fail-closed AST
-> assertion, which is now the refusal's own pin).
+> **Scope, stated precisely, because the two verbs do NOT answer alike.**
+>
+> | | CLEARED id | REBOUND to another id |
+> |---|---|---|
+> | `update()` by-id | refused | refused |
+> | `delete()` by-id | refused | **honoured** (#5272's re-read, unchanged) |
+> | either, per-row | refused (D4) | refused (D4) |
+>
+> The CLEARED column is uniform because the ladder reorder leaves it no answer
+> of its own: clearing worked by falling through to the predicate branch, and
+> that branch is chosen before any handler runs. That is the capability this
+> amendment retires, and it is the one the ruling names.
+>
+> The REBOUND column is not uniform, and the asymmetry is principled rather
+> than an oversight. The case against honouring a rebind is that the write would
+> land on a row whose pre-image, `readonlyWhen` locks and validation rules were
+> never evaluated — and on `delete()` that is simply not true: #5272 already
+> RE-RESOLVES the new target, re-reading its pre-image and rebinding `previous`
+> before `afterDelete` or the summary recompute can see it. `update()` has no
+> such mechanism and would have to grow one, which is the "silently pick
+> re-resolution instead" this ruling forbids. So `update()` refuses and
+> `delete()` keeps honouring, until the delete-side repoint is ruled on as its
+> own question (#6752) — deliberately NOT folded in here as a rider on an
+> ordering change.
+>
+> Premise for the retirement, checked against `origin/main`: the only
+> `ctx.input.id` assignment in the whole repository was one engine test forcing
+> the fail-closed AST assertion, which is now the refusal's own pin.
 >
 > **What replaces it, for each thing it was used for.** Write a different row:
 > `ctx.api` / `ctx.ql` for that row explicitly. Write many rows: have the caller
