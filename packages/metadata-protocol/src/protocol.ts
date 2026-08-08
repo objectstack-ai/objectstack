@@ -8,7 +8,7 @@ import { readEnvWithDeprecation } from '@objectstack/types';
 import type { MetadataHostEngine } from './host-engine.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
-import { ConflictError, assertProtocolCompat, type MetadataItem } from '@objectstack/metadata-core';
+import { ConflictError, assertProtocolCompat, applyAuditFieldGovernance, type MetadataItem } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
 // `@objectstack/metadata` (#5108). See `rethrowUnlessMetadataStoreUnprovisioned`.
@@ -128,6 +128,33 @@ function canonicalMetaType(type: string): string {
 function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T {
     const type = canonicalMetaType(request.type);
     return type === request.type ? request : { ...request, type };
+}
+
+/**
+ * [#4513] The last thing every `/meta` read does to an OBJECT document before
+ * it leaves this service: make the field metadata it reports agree with what
+ * the engine enforces on the write path.
+ *
+ * The mismatch this closes is structural, not incidental. A `/meta` object read
+ * resolves through `sys_metadata` overlay → MetadataService → SchemaRegistry,
+ * and only the last of those three has been through `applySystemFields` — so
+ * the two stored layers answered with whatever the artifact/overlay body
+ * happened to declare, while `ObjectQL.update` was stripping caller writes to
+ * the audit family off the registry's post-injection schema. `created_at` read
+ * `readonly: false` and wrote as read-only, on the same field, at the same
+ * moment, from the one face a client can actually see (#4447 fixed the write
+ * half; this is the read half).
+ *
+ * Applied per EXIT rather than inside `decorateMetadataItem`: decoration is a
+ * diagnostics concern whose output `stripReadDecorations` deliberately removes
+ * again on write, and governance is neither — it is what the document means.
+ *
+ * `applyAuditFieldGovernance` returns its input by reference when nothing needed
+ * forcing, so the registry-sourced path (already governed at registration) and
+ * every non-object type pay a comparison and no copy.
+ */
+function governServedItem<T>(type: string, item: T): T {
+    return canonicalMetaType(type) === 'object' ? applyAuditFieldGovernance(item) : item;
 }
 
 /**
@@ -3553,7 +3580,11 @@ export class ObjectStackProtocolImplementation implements
                         (it as any)?.name,
                         packageId ?? ((it as any)?._packageId as string | undefined),
                     );
-                    return mergeArtifactProtection(it, a) as any;
+                    // [#4513] Same governance as the single-item read — the list
+                    // is the other exit a client reads field metadata from, and
+                    // an overlay row wins over the (already-governed) registry
+                    // entry in the merge above, so it carries the same lie.
+                    return governServedItem(request.type, mergeArtifactProtection(it, a)) as any;
                 }),
             ),
         };
@@ -3614,7 +3645,11 @@ export class ObjectStackProtocolImplementation implements
                         if (recPkg && (draftItem as any)._packageId === undefined) (draftItem as any)._packageId = recPkg;
                         (draftItem as any)._draft = true;
                     }
-                    return { type: request.type, name: request.name, item: decorateMetadataItem(request.type, draftItem) };
+                    return {
+                        type: request.type,
+                        name: request.name,
+                        item: decorateMetadataItem(request.type, governServedItem(request.type, draftItem)),
+                    };
                 }
             } catch (error) {
                 // [#5532] Falling through to the active read here would answer
@@ -3704,7 +3739,11 @@ export class ObjectStackProtocolImplementation implements
                 err.status = 404;
                 throw err;
             }
-            return { type: request.type, name: request.name, item: decorateMetadataItem(request.type, item) };
+            return {
+                type: request.type,
+                name: request.name,
+                item: decorateMetadataItem(request.type, governServedItem(request.type, item)),
+            };
         }
 
         // 2. MetadataService (runtime-registered items: HMR-updated view/page/
@@ -3799,7 +3838,7 @@ export class ObjectStackProtocolImplementation implements
         const artifactItem = this.lookupArtifactItem(request.type, request.name, request.packageId);
         let decorated = decorateMetadataItem(
             request.type,
-            mergeArtifactProtection(item, artifactItem),
+            governServedItem(request.type, mergeArtifactProtection(item, artifactItem)),
         );
         // ADR-0047 — list views additionally get reference-integrity
         // diagnostics (userFilters/tabs fields must exist on the source
@@ -4060,7 +4099,16 @@ export class ObjectStackProtocolImplementation implements
             this.rethrowUnlessMetadataStoreUnprovisioned(error);
         }
 
-        const effective: unknown | null = overlay ?? code;
+        // [#4513] `effective` is documented above as "what `getMetaItem` would
+        // return", and the response's `_diagnostics` is computed from it — so it
+        // carries the same audit-family governance that read now applies, or the
+        // sentence stops being true the moment the overlay declares a writable
+        // `created_at`. `code` and `overlay` are deliberately left RAW: they are
+        // the diagnostic's whole point (what the package shipped vs what was
+        // customised), and a Studio diff showing `code`'s declaration next to
+        // `effective`'s governed value is the platform override made visible,
+        // not a defect.
+        const effective: unknown | null = governServedItem(request.type, overlay ?? code);
 
         const _diagnostics =
             effective !== null && effective !== undefined

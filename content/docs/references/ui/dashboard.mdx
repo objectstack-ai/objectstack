@@ -30,15 +30,15 @@ const result = DashboardSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Dashboard unique name |
-| **label** | `string` | ✅ | Dashboard label |
-| **description** | `string` | optional | Dashboard description |
-| **header** | `{ showTitle: boolean; showDescription: boolean; actions?: { label: string; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[] }` | optional | Dashboard header configuration |
-| **widgets** | `{ id: string; title?: string; description?: string; type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; … }[]` | ✅ | Widgets to display |
+| **label** | `string \| Record<string, string>` | ✅ | Dashboard label |
+| **description** | `string \| Record<string, string>` | optional | Dashboard description |
+| **header** | `{ showTitle: boolean; showDescription: boolean; actions?: { label: string \| Record<string, string>; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[] }` | optional | Dashboard header configuration |
+| **widgets** | `{ id: string; title?: string \| Record<string, string>; description?: string \| Record<string, string>; type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; … }[]` | ✅ | Widgets to display |
 | **columns** | `integer` | optional | Number of grid columns (default 12) |
 | **gap** | `integer` | optional | Grid gap in Tailwind spacing units |
 | **refreshInterval** | `number` | optional | Auto-refresh interval in seconds |
 | **dateRange** | `{ field?: string; defaultRange: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| … +8 more>; allowCustomRange: boolean }` | optional | Global dashboard date range filter configuration |
-| **globalFilters** | `{ name?: string; field: string; label?: string; type?: Enum<'text' \| 'select' \| 'date' \| 'number' \| 'lookup'>; … }[]` | optional | Global filters that apply to all widgets in the dashboard |
+| **globalFilters** | `{ name?: string; field: string; label?: string \| Record<string, string>; type?: Enum<'text' \| 'select' \| 'date' \| 'number' \| 'lookup'>; … }[]` | optional | Global filters that apply to all widgets in the dashboard |
 | **aria** | `never` | optional | [REMOVED] `dashboard.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no dashboard renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. |
 | **performance** | `never` | optional | [REMOVED] `dashboard.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; dashboard performance tuning was never implemented. Delete the key. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this dashboard. |
@@ -63,7 +63,7 @@ Dashboard header configuration
 | :--- | :--- | :--- | :--- |
 | **showTitle** | `boolean` | ✅ | Show dashboard title in header |
 | **showDescription** | `boolean` | ✅ | Show dashboard description in header |
-| **actions** | `{ label: string; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[]` | optional | Header action buttons |
+| **actions** | `{ label: string \| Record<string, string>; actionUrl: string; actionType?: Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>; icon?: string }[]` | optional | Header action buttons |
 
 
 ---
@@ -76,7 +76,7 @@ Dashboard header action
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **label** | `string` | ✅ | Action button label |
+| **label** | `string \| Record<string, string>` | ✅ | Action button label |
 | **actionUrl** | `string` | ✅ | URL or target for the action |
 | **actionType** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Type of action |
 | **icon** | `string` | optional | Icon identifier for the action button |
@@ -91,10 +91,10 @@ Dashboard header action
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique widget identifier (snake_case) |
-| **title** | `string` | optional | Widget title |
-| **description** | `string` | optional | Widget description text below the header |
+| **title** | `string \| Record<string, string>` | optional | Widget title |
+| **description** | `string \| Record<string, string>` | optional | Widget description text below the header |
 | **type** | `Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| 'funnel' \| 'scatter' \| 'treemap' \| 'sankey' \| 'combo' \| 'gauge' \| 'solid-gauge' \| … +6 more>` | ✅ | Visualization type |
-| **chartConfig** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; title?: string; subtitle?: string; description?: string; … }` | optional | Chart visualization configuration |
+| **chartConfig** | `{ type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| … +13 more>; title?: string \| Record<string, string>; subtitle?: string \| Record<string, string>; description?: string \| Record<string, string>; … }` | optional | Chart visualization configuration |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Widget color variant for theming |
 | **requiresObject** | `string` | optional | Hide the widget unless the named object is registered |
 | **requiresService** | `string` | optional | Hide the widget unless the named kernel service is registered |
@@ -164,9 +164,9 @@ Widget configuration — declared query keys + open renderer extras
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Stable filter name (variable key); defaults to field |
 | **field** | `string` | ✅ | Field name to filter on |
-| **label** | `string` | optional | Display label for the filter |
+| **label** | `string \| Record<string, string>` | optional | Display label for the filter |
 | **type** | `Enum<'text' \| 'select' \| 'date' \| 'number' \| 'lookup'>` | optional | Filter input type |
-| **options** | `{ value: string \| number \| boolean; label: string }[]` | optional | Static filter options |
+| **options** | `{ value: string \| number \| boolean; label: string \| Record<string, string> }[]` | optional | Static filter options |
 | **optionsFrom** | `{ object: string; valueField: string; labelField: string; filter?: any }` | optional | Dynamic filter options from object |
 | **defaultValue** | `string \| number \| boolean` | optional | Default filter value |
 | **scope** | `Enum<'dashboard' \| 'widget'>` | ✅ | Filter application scope |

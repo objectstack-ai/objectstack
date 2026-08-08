@@ -1289,6 +1289,12 @@ export type Iso684 = Assert<Eq< z.input< typeof M160.DatasetSchema >, z.infer< t
 // ui/i18n.zod.ts
 export type Iso686 = Assert<Eq< z.input< typeof M161.I18nLabelSchema >, z.infer< typeof M161.I18nLabelSchema > >>;
 export type Iso687 = Assert<Eq< z.input< typeof M161.AriaPropsSchema >, z.infer< typeof M161.AriaPropsSchema > >>;
+// #5728 — the second arm of the widened `I18nLabelSchema`. A record of plain
+// strings under a key-format constraint: the regex narrows which keys PARSE, it
+// does not transform one, so the two shapes coincide and an `InlineLocaleMapParsed`
+// would be a permanent synonym. Give any entry a `.default()` and this line goes
+// red with the alias named — which is the point.
+export type Iso759 = Assert<Eq< z.input< typeof M161.InlineLocaleMapSchema >, z.infer< typeof M161.InlineLocaleMapSchema > >>;
 
 // ui/notification.zod.ts
 export type Iso690 = Assert<Eq< z.input< typeof M162.NotificationTypeSchema >, z.infer< typeof M162.NotificationTypeSchema > >>;
@@ -1400,141 +1406,141 @@ export type Iso754 = Assert<Eq< z.input< typeof M173.DecisionConditionSchema >, 
 // ---------------------------------------------------------------------------
 
 // ai/conversation.zod.ts
-export type Iso759 = Assert<Eq< z.input< typeof M1.FileContentSchema >, z.infer< typeof M1.FileContentSchema > >>;
-export type Iso760 = Assert<Eq< z.input< typeof M1.TextContentSchema >, z.infer< typeof M1.TextContentSchema > >>;
+export type Iso760 = Assert<Eq< z.input< typeof M1.FileContentSchema >, z.infer< typeof M1.FileContentSchema > >>;
+export type Iso761 = Assert<Eq< z.input< typeof M1.TextContentSchema >, z.infer< typeof M1.TextContentSchema > >>;
 
 // api/analytics.zod.ts
-export type Iso761 = Assert<Eq< z.input< typeof M11.GetAnalyticsMetaRequestSchema >, z.infer< typeof M11.GetAnalyticsMetaRequestSchema > >>;
+export type Iso762 = Assert<Eq< z.input< typeof M11.GetAnalyticsMetaRequestSchema >, z.infer< typeof M11.GetAnalyticsMetaRequestSchema > >>;
 
 // api/endpoint.zod.ts
-export type Iso762 = Assert<Eq< z.input< typeof M174.ApiMappingSchema >, z.infer< typeof M174.ApiMappingSchema > >>;
+export type Iso763 = Assert<Eq< z.input< typeof M174.ApiMappingSchema >, z.infer< typeof M174.ApiMappingSchema > >>;
 
 // api/metadata.zod.ts
-export type Iso763 = Assert<Eq< z.input< typeof M24.MetadataBulkUnregisterRequestSchema >, z.infer< typeof M24.MetadataBulkUnregisterRequestSchema > >>;
-export type Iso764 = Assert<Eq< z.input< typeof M24.MetadataValidateRequestSchema >, z.infer< typeof M24.MetadataValidateRequestSchema > >>;
+export type Iso764 = Assert<Eq< z.input< typeof M24.MetadataBulkUnregisterRequestSchema >, z.infer< typeof M24.MetadataBulkUnregisterRequestSchema > >>;
+export type Iso765 = Assert<Eq< z.input< typeof M24.MetadataValidateRequestSchema >, z.infer< typeof M24.MetadataValidateRequestSchema > >>;
 
 // api/realtime.zod.ts
-export type Iso765 = Assert<Eq< z.input< typeof M31.SubscriptionEventSchema >, z.infer< typeof M31.SubscriptionEventSchema > >>;
+export type Iso766 = Assert<Eq< z.input< typeof M31.SubscriptionEventSchema >, z.infer< typeof M31.SubscriptionEventSchema > >>;
 
 // automation/approval.zod.ts
-export type Iso766 = Assert<Eq< z.input< typeof M37.ApproverType >, z.infer< typeof M37.ApproverType > >>;
+export type Iso767 = Assert<Eq< z.input< typeof M37.ApproverType >, z.infer< typeof M37.ApproverType > >>;
 
 // automation/flow.zod.ts
-export type Iso767 = Assert<Eq< z.input< typeof M175.FlowNodeAction >, z.infer< typeof M175.FlowNodeAction > >>;
+export type Iso768 = Assert<Eq< z.input< typeof M175.FlowNodeAction >, z.infer< typeof M175.FlowNodeAction > >>;
 
 // automation/state-machine.zod.ts
-export type Iso768 = Assert<Eq< z.input< typeof M42.GuardRefSchema >, z.infer< typeof M42.GuardRefSchema > >>;
-export type Iso769 = Assert<Eq< z.input< typeof M42.StateNodeSchema >, z.infer< typeof M42.StateNodeSchema > >>;
+export type Iso769 = Assert<Eq< z.input< typeof M42.GuardRefSchema >, z.infer< typeof M42.GuardRefSchema > >>;
+export type Iso770 = Assert<Eq< z.input< typeof M42.StateNodeSchema >, z.infer< typeof M42.StateNodeSchema > >>;
 
 // data/analytics.zod.ts
-export type Iso770 = Assert<Eq< z.input< typeof M55.AggregationMetricType >, z.infer< typeof M55.AggregationMetricType > >>;
-export type Iso771 = Assert<Eq< z.input< typeof M55.DimensionType >, z.infer< typeof M55.DimensionType > >>;
-export type Iso772 = Assert<Eq< z.input< typeof M55.TimeUpdateInterval >, z.infer< typeof M55.TimeUpdateInterval > >>;
+export type Iso771 = Assert<Eq< z.input< typeof M55.AggregationMetricType >, z.infer< typeof M55.AggregationMetricType > >>;
+export type Iso772 = Assert<Eq< z.input< typeof M55.DimensionType >, z.infer< typeof M55.DimensionType > >>;
+export type Iso773 = Assert<Eq< z.input< typeof M55.TimeUpdateInterval >, z.infer< typeof M55.TimeUpdateInterval > >>;
 
 // data/context-tokens.zod.ts
-export type Iso773 = Assert<Eq< z.input< typeof M176.ContextTokenPlaceholderSchema >, z.infer< typeof M176.ContextTokenPlaceholderSchema > >>;
+export type Iso774 = Assert<Eq< z.input< typeof M176.ContextTokenPlaceholderSchema >, z.infer< typeof M176.ContextTokenPlaceholderSchema > >>;
 
 // data/data-engine.zod.ts
-export type Iso774 = Assert<Eq< z.input< typeof M56.DataEngineExecuteRequestSchema >, z.infer< typeof M56.DataEngineExecuteRequestSchema > >>;
-export type Iso775 = Assert<Eq< z.input< typeof M56.DataEngineInsertRequestSchema >, z.infer< typeof M56.DataEngineInsertRequestSchema > >>;
-export type Iso776 = Assert<Eq< z.input< typeof M56.DataEngineVectorFindRequestSchema >, z.infer< typeof M56.DataEngineVectorFindRequestSchema > >>;
+export type Iso775 = Assert<Eq< z.input< typeof M56.DataEngineExecuteRequestSchema >, z.infer< typeof M56.DataEngineExecuteRequestSchema > >>;
+export type Iso776 = Assert<Eq< z.input< typeof M56.DataEngineInsertRequestSchema >, z.infer< typeof M56.DataEngineInsertRequestSchema > >>;
+export type Iso777 = Assert<Eq< z.input< typeof M56.DataEngineVectorFindRequestSchema >, z.infer< typeof M56.DataEngineVectorFindRequestSchema > >>;
 
 // data/datasource.zod.ts
-export type Iso777 = Assert<Eq< z.input< typeof M57.DriverType >, z.infer< typeof M57.DriverType > >>;
+export type Iso778 = Assert<Eq< z.input< typeof M57.DriverType >, z.infer< typeof M57.DriverType > >>;
 
 // data/date-macros.zod.ts
-export type Iso778 = Assert<Eq< z.input< typeof M177.DateMacroPlaceholderSchema >, z.infer< typeof M177.DateMacroPlaceholderSchema > >>;
+export type Iso779 = Assert<Eq< z.input< typeof M177.DateMacroPlaceholderSchema >, z.infer< typeof M177.DateMacroPlaceholderSchema > >>;
 
 // data/driver/common.zod.ts
-export type Iso779 = Assert<Eq< z.input< typeof M61.DriverSslToggleSchema >, z.infer< typeof M61.DriverSslToggleSchema > >>;
+export type Iso780 = Assert<Eq< z.input< typeof M61.DriverSslToggleSchema >, z.infer< typeof M61.DriverSslToggleSchema > >>;
 
 // data/field-value.zod.ts
-export type Iso780 = Assert<Eq< z.input< typeof M178.AddressValueSchema >, z.infer< typeof M178.AddressValueSchema > >>;
-export type Iso781 = Assert<Eq< z.input< typeof M178.CalendarDateValueSchema >, z.infer< typeof M178.CalendarDateValueSchema > >>;
-export type Iso782 = Assert<Eq< z.input< typeof M178.ClockTimeValueSchema >, z.infer< typeof M178.ClockTimeValueSchema > >>;
-export type Iso783 = Assert<Eq< z.input< typeof M178.FileLikeValueSchema >, z.infer< typeof M178.FileLikeValueSchema > >>;
-export type Iso784 = Assert<Eq< z.input< typeof M178.FileReferenceIdValueSchema >, z.infer< typeof M178.FileReferenceIdValueSchema > >>;
-export type Iso785 = Assert<Eq< z.input< typeof M178.FileValueSchema >, z.infer< typeof M178.FileValueSchema > >>;
-export type Iso786 = Assert<Eq< z.input< typeof M178.InstantValueSchema >, z.infer< typeof M178.InstantValueSchema > >>;
-export type Iso787 = Assert<Eq< z.input< typeof M178.LocationValueSchema >, z.infer< typeof M178.LocationValueSchema > >>;
-export type Iso788 = Assert<Eq< z.input< typeof M178.ReferenceIdValueSchema >, z.infer< typeof M178.ReferenceIdValueSchema > >>;
+export type Iso781 = Assert<Eq< z.input< typeof M178.AddressValueSchema >, z.infer< typeof M178.AddressValueSchema > >>;
+export type Iso782 = Assert<Eq< z.input< typeof M178.CalendarDateValueSchema >, z.infer< typeof M178.CalendarDateValueSchema > >>;
+export type Iso783 = Assert<Eq< z.input< typeof M178.ClockTimeValueSchema >, z.infer< typeof M178.ClockTimeValueSchema > >>;
+export type Iso784 = Assert<Eq< z.input< typeof M178.FileLikeValueSchema >, z.infer< typeof M178.FileLikeValueSchema > >>;
+export type Iso785 = Assert<Eq< z.input< typeof M178.FileReferenceIdValueSchema >, z.infer< typeof M178.FileReferenceIdValueSchema > >>;
+export type Iso786 = Assert<Eq< z.input< typeof M178.FileValueSchema >, z.infer< typeof M178.FileValueSchema > >>;
+export type Iso787 = Assert<Eq< z.input< typeof M178.InstantValueSchema >, z.infer< typeof M178.InstantValueSchema > >>;
+export type Iso788 = Assert<Eq< z.input< typeof M178.LocationValueSchema >, z.infer< typeof M178.LocationValueSchema > >>;
+export type Iso789 = Assert<Eq< z.input< typeof M178.ReferenceIdValueSchema >, z.infer< typeof M178.ReferenceIdValueSchema > >>;
 
 // data/mapping.zod.ts
-export type Iso789 = Assert<Eq< z.input< typeof M179.TransformType >, z.infer< typeof M179.TransformType > >>;
+export type Iso790 = Assert<Eq< z.input< typeof M179.TransformType >, z.infer< typeof M179.TransformType > >>;
 
 // data/query.zod.ts
-export type Iso790 = Assert<Eq< z.input< typeof M71.AggregationFunction >, z.infer< typeof M71.AggregationFunction > >>;
+export type Iso791 = Assert<Eq< z.input< typeof M71.AggregationFunction >, z.infer< typeof M71.AggregationFunction > >>;
 
 // integration/connector.zod.ts
-export type Iso791 = Assert<Eq< z.input< typeof M78.ConnectorActionSchema >, z.infer< typeof M78.ConnectorActionSchema > >>;
-export type Iso792 = Assert<Eq< z.input< typeof M78.ConnectorTriggerSchema >, z.infer< typeof M78.ConnectorTriggerSchema > >>;
+export type Iso792 = Assert<Eq< z.input< typeof M78.ConnectorActionSchema >, z.infer< typeof M78.ConnectorActionSchema > >>;
+export type Iso793 = Assert<Eq< z.input< typeof M78.ConnectorTriggerSchema >, z.infer< typeof M78.ConnectorTriggerSchema > >>;
 
 // qa/testing.zod.ts
-export type Iso793 = Assert<Eq< z.input< typeof M105.TestActionTypeSchema >, z.infer< typeof M105.TestActionTypeSchema > >>;
-export type Iso794 = Assert<Eq< z.input< typeof M105.TestAssertionTypeSchema >, z.infer< typeof M105.TestAssertionTypeSchema > >>;
-export type Iso795 = Assert<Eq< z.input< typeof M105.TestContextSchema >, z.infer< typeof M105.TestContextSchema > >>;
+export type Iso794 = Assert<Eq< z.input< typeof M105.TestActionTypeSchema >, z.infer< typeof M105.TestActionTypeSchema > >>;
+export type Iso795 = Assert<Eq< z.input< typeof M105.TestAssertionTypeSchema >, z.infer< typeof M105.TestAssertionTypeSchema > >>;
+export type Iso796 = Assert<Eq< z.input< typeof M105.TestContextSchema >, z.infer< typeof M105.TestContextSchema > >>;
 
 // security/sharing.zod.ts
-export type Iso796 = Assert<Eq< z.input< typeof M180.OWDModel >, z.infer< typeof M180.OWDModel > >>;
-export type Iso797 = Assert<Eq< z.input< typeof M180.ShareRecipientType >, z.infer< typeof M180.ShareRecipientType > >>;
-export type Iso798 = Assert<Eq< z.input< typeof M180.SharingLevel >, z.infer< typeof M180.SharingLevel > >>;
-export type Iso799 = Assert<Eq< z.input< typeof M180.SharingRuleType >, z.infer< typeof M180.SharingRuleType > >>;
+export type Iso797 = Assert<Eq< z.input< typeof M180.OWDModel >, z.infer< typeof M180.OWDModel > >>;
+export type Iso798 = Assert<Eq< z.input< typeof M180.ShareRecipientType >, z.infer< typeof M180.ShareRecipientType > >>;
+export type Iso799 = Assert<Eq< z.input< typeof M180.SharingLevel >, z.infer< typeof M180.SharingLevel > >>;
+export type Iso800 = Assert<Eq< z.input< typeof M180.SharingRuleType >, z.infer< typeof M180.SharingRuleType > >>;
 
 // shared/connector-auth.zod.ts
-export type Iso800 = Assert<Eq< z.input< typeof M109.ConnectorInstanceAPIKeyAuthSchema >, z.infer< typeof M109.ConnectorInstanceAPIKeyAuthSchema > >>;
-export type Iso801 = Assert<Eq< z.input< typeof M109.ConnectorInstanceBasicAuthSchema >, z.infer< typeof M109.ConnectorInstanceBasicAuthSchema > >>;
-export type Iso802 = Assert<Eq< z.input< typeof M109.ConnectorInstanceBearerAuthSchema >, z.infer< typeof M109.ConnectorInstanceBearerAuthSchema > >>;
-export type Iso803 = Assert<Eq< z.input< typeof M109.ConnectorInstanceNoAuthSchema >, z.infer< typeof M109.ConnectorInstanceNoAuthSchema > >>;
+export type Iso801 = Assert<Eq< z.input< typeof M109.ConnectorInstanceAPIKeyAuthSchema >, z.infer< typeof M109.ConnectorInstanceAPIKeyAuthSchema > >>;
+export type Iso802 = Assert<Eq< z.input< typeof M109.ConnectorInstanceBasicAuthSchema >, z.infer< typeof M109.ConnectorInstanceBasicAuthSchema > >>;
+export type Iso803 = Assert<Eq< z.input< typeof M109.ConnectorInstanceBearerAuthSchema >, z.infer< typeof M109.ConnectorInstanceBearerAuthSchema > >>;
+export type Iso804 = Assert<Eq< z.input< typeof M109.ConnectorInstanceNoAuthSchema >, z.infer< typeof M109.ConnectorInstanceNoAuthSchema > >>;
 
 // studio/plugin.zod.ts
-export type Iso804 = Assert<Eq< z.input< typeof M119.PanelLocationSchema >, z.infer< typeof M119.PanelLocationSchema > >>;
+export type Iso805 = Assert<Eq< z.input< typeof M119.PanelLocationSchema >, z.infer< typeof M119.PanelLocationSchema > >>;
 
 // system/core-services.zod.ts
-export type Iso805 = Assert<Eq< z.input< typeof M124.KernelServiceMapSchema >, z.infer< typeof M124.KernelServiceMapSchema > >>;
-export type Iso806 = Assert<Eq< z.input< typeof M124.ServiceConfigSchema >, z.infer< typeof M124.ServiceConfigSchema > >>;
-export type Iso807 = Assert<Eq< z.input< typeof M124.ServiceCriticalitySchema >, z.infer< typeof M124.ServiceCriticalitySchema > >>;
+export type Iso806 = Assert<Eq< z.input< typeof M124.KernelServiceMapSchema >, z.infer< typeof M124.KernelServiceMapSchema > >>;
+export type Iso807 = Assert<Eq< z.input< typeof M124.ServiceConfigSchema >, z.infer< typeof M124.ServiceConfigSchema > >>;
+export type Iso808 = Assert<Eq< z.input< typeof M124.ServiceCriticalitySchema >, z.infer< typeof M124.ServiceCriticalitySchema > >>;
 
 // system/metadata-persistence.zod.ts
-export type Iso808 = Assert<Eq< z.input< typeof M138.MetadataStateSchema >, z.infer< typeof M138.MetadataStateSchema > >>;
+export type Iso809 = Assert<Eq< z.input< typeof M138.MetadataStateSchema >, z.infer< typeof M138.MetadataStateSchema > >>;
 
 // system/migration.zod.ts
-export type Iso809 = Assert<Eq< z.input< typeof M140.DeleteObjectOperation >, z.infer< typeof M140.DeleteObjectOperation > >>;
-export type Iso810 = Assert<Eq< z.input< typeof M140.ExecuteSqlOperation >, z.infer< typeof M140.ExecuteSqlOperation > >>;
-export type Iso811 = Assert<Eq< z.input< typeof M140.MigrationDependencySchema >, z.infer< typeof M140.MigrationDependencySchema > >>;
-export type Iso812 = Assert<Eq< z.input< typeof M140.ModifyFieldOperation >, z.infer< typeof M140.ModifyFieldOperation > >>;
-export type Iso813 = Assert<Eq< z.input< typeof M140.RemoveFieldOperation >, z.infer< typeof M140.RemoveFieldOperation > >>;
-export type Iso814 = Assert<Eq< z.input< typeof M140.RenameObjectOperation >, z.infer< typeof M140.RenameObjectOperation > >>;
+export type Iso810 = Assert<Eq< z.input< typeof M140.DeleteObjectOperation >, z.infer< typeof M140.DeleteObjectOperation > >>;
+export type Iso811 = Assert<Eq< z.input< typeof M140.ExecuteSqlOperation >, z.infer< typeof M140.ExecuteSqlOperation > >>;
+export type Iso812 = Assert<Eq< z.input< typeof M140.MigrationDependencySchema >, z.infer< typeof M140.MigrationDependencySchema > >>;
+export type Iso813 = Assert<Eq< z.input< typeof M140.ModifyFieldOperation >, z.infer< typeof M140.ModifyFieldOperation > >>;
+export type Iso814 = Assert<Eq< z.input< typeof M140.RemoveFieldOperation >, z.infer< typeof M140.RemoveFieldOperation > >>;
+export type Iso815 = Assert<Eq< z.input< typeof M140.RenameObjectOperation >, z.infer< typeof M140.RenameObjectOperation > >>;
 
 // system/translation.zod.ts
-export type Iso815 = Assert<Eq< z.input< typeof M152.LocaleSchema >, z.infer< typeof M152.LocaleSchema > >>;
+export type Iso816 = Assert<Eq< z.input< typeof M152.LocaleSchema >, z.infer< typeof M152.LocaleSchema > >>;
 
 // ui/action.zod.ts
-export type Iso816 = Assert<Eq< z.input< typeof M155.ActionType >, z.infer< typeof M155.ActionType > >>;
+export type Iso817 = Assert<Eq< z.input< typeof M155.ActionType >, z.infer< typeof M155.ActionType > >>;
 
 // ui/component.zod.ts
-export type Iso817 = Assert<Eq< z.input< typeof M170.ElementNumberPropsSchema >, z.infer< typeof M170.ElementNumberPropsSchema > >>;
-export type Iso818 = Assert<Eq< z.input< typeof M170.ElementRecordPickerPropsSchema >, z.infer< typeof M170.ElementRecordPickerPropsSchema > >>;
-export type Iso819 = Assert<Eq< z.input< typeof M170.RecordHighlightsField >, z.infer< typeof M170.RecordHighlightsField > >>;
-export type Iso820 = Assert<Eq< z.input< typeof M170.RecordPathProps >, z.infer< typeof M170.RecordPathProps > >>;
+export type Iso818 = Assert<Eq< z.input< typeof M170.ElementNumberPropsSchema >, z.infer< typeof M170.ElementNumberPropsSchema > >>;
+export type Iso819 = Assert<Eq< z.input< typeof M170.ElementRecordPickerPropsSchema >, z.infer< typeof M170.ElementRecordPickerPropsSchema > >>;
+export type Iso820 = Assert<Eq< z.input< typeof M170.RecordHighlightsField >, z.infer< typeof M170.RecordHighlightsField > >>;
+export type Iso821 = Assert<Eq< z.input< typeof M170.RecordPathProps >, z.infer< typeof M170.RecordPathProps > >>;
 
 // ui/page.zod.ts
-export type Iso821 = Assert<Eq< z.input< typeof M163.PageComponentType >, z.infer< typeof M163.PageComponentType > >>;
+export type Iso822 = Assert<Eq< z.input< typeof M163.PageComponentType >, z.infer< typeof M163.PageComponentType > >>;
 
 // ui/report.zod.ts
-export type Iso822 = Assert<Eq< z.input< typeof M164.ReportType >, z.infer< typeof M164.ReportType > >>;
+export type Iso823 = Assert<Eq< z.input< typeof M164.ReportType >, z.infer< typeof M164.ReportType > >>;
 
 // ui/responsive.zod.ts
-export type Iso823 = Assert<Eq< z.input< typeof M165.BreakpointColumnMapSchema >, z.infer< typeof M165.BreakpointColumnMapSchema > >>;
-export type Iso824 = Assert<Eq< z.input< typeof M165.BreakpointOrderMapSchema >, z.infer< typeof M165.BreakpointOrderMapSchema > >>;
+export type Iso824 = Assert<Eq< z.input< typeof M165.BreakpointColumnMapSchema >, z.infer< typeof M165.BreakpointColumnMapSchema > >>;
+export type Iso825 = Assert<Eq< z.input< typeof M165.BreakpointOrderMapSchema >, z.infer< typeof M165.BreakpointOrderMapSchema > >>;
 
 // ui/view.zod.ts
-export type Iso825 = Assert<Eq< z.input< typeof M167.CalendarConfigSchema >, z.infer< typeof M167.CalendarConfigSchema > >>;
-export type Iso826 = Assert<Eq< z.input< typeof M167.GanttConfigSchema >, z.infer< typeof M167.GanttConfigSchema > >>;
-export type Iso827 = Assert<Eq< z.input< typeof M167.GanttQuickFilterSchema >, z.infer< typeof M167.GanttQuickFilterSchema > >>;
-export type Iso828 = Assert<Eq< z.input< typeof M167.KanbanConfigSchema >, z.infer< typeof M167.KanbanConfigSchema > >>;
-export type Iso829 = Assert<Eq< z.input< typeof M167.NavigationModeSchema >, z.infer< typeof M167.NavigationModeSchema > >>;
-export type Iso830 = Assert<Eq< z.input< typeof M167.TreeConfigSchema >, z.infer< typeof M167.TreeConfigSchema > >>;
-export type Iso831 = Assert<Eq< z.input< typeof M167.ViewItemNameSchema >, z.infer< typeof M167.ViewItemNameSchema > >>;
+export type Iso826 = Assert<Eq< z.input< typeof M167.CalendarConfigSchema >, z.infer< typeof M167.CalendarConfigSchema > >>;
+export type Iso827 = Assert<Eq< z.input< typeof M167.GanttConfigSchema >, z.infer< typeof M167.GanttConfigSchema > >>;
+export type Iso828 = Assert<Eq< z.input< typeof M167.GanttQuickFilterSchema >, z.infer< typeof M167.GanttQuickFilterSchema > >>;
+export type Iso829 = Assert<Eq< z.input< typeof M167.KanbanConfigSchema >, z.infer< typeof M167.KanbanConfigSchema > >>;
+export type Iso830 = Assert<Eq< z.input< typeof M167.NavigationModeSchema >, z.infer< typeof M167.NavigationModeSchema > >>;
+export type Iso831 = Assert<Eq< z.input< typeof M167.TreeConfigSchema >, z.infer< typeof M167.TreeConfigSchema > >>;
+export type Iso832 = Assert<Eq< z.input< typeof M167.ViewItemNameSchema >, z.infer< typeof M167.ViewItemNameSchema > >>;
 // ---------------------------------------------------------------------------
 // Representative spot-checks on the phase-2 FLIP.
 //
@@ -1597,7 +1603,10 @@ export type AFamilyParsedIsParseState = Assert<
 // ---------------------------------------------------------------------------
 
 describe('ADR-0122 type-alias convention', () => {
-  it('still declares all 751 isomorphic pins', () => {
+  // The title tracks the assertion below; it had been left at 751 when #6037
+  // moved the count to 754, so it is corrected here rather than left two
+  // numbers behind.
+  it('still declares all 755 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1678,7 +1687,16 @@ describe('ADR-0122 type-alias convention', () => {
     // here, exactly as it is to the four surface ratchets. Recompute from the
     // file; never from the changelog.
     //
-    // 748 -> 821 is #4593's documented-schema alias backfill — the largest
+    // 748 -> 749 is #5728's `InlineLocaleMapSchema`, the second arm of the
+    // widened `I18nLabelSchema`. Same RISE case: a `z.record` of plain strings
+    // whose KEY carries a format constraint. A regex narrows which keys parse;
+    // it never rewrites one, so nothing in the tree produces an output shape
+    // the input does not already have. (Its receipt was written twice before
+    // landing — as 755 -> 756 against the pre-sweep count — and recomputed
+    // here after the sweep's -7 merged in; the file, not the history, is the
+    // operand.)
+    //
+    // 749 -> 822 is #4593's documented-schema alias backfill — the largest
     // single RISE this file has taken, and the one where the arithmetic is most
     // worth stating because the +73 is NOT "the gap the ratchet reports".
     // `docs-import-surface.baseline.json` listed 136 documented schemas whose
@@ -1703,14 +1721,18 @@ describe('ADR-0122 type-alias convention', () => {
     //        the two names is wrong, and choosing which is a rename decision,
     //        not a backfill — the baseline line stays until it is made.
     //
-    // 136 - 17 - 40 - 5 - 1 = 73, and 748 + 73 = 821. Isomorphism here was
+    // 136 - 17 - 40 - 5 - 1 = 73, and 749 + 73 = 822. Isomorphism here was
     // MEASURED — a probe file asserting `Eq< z.input, z.infer >` over all 114
     // non-synonym candidates, compiled by tsc — not inferred from "it is an
     // enum". 40 of those 114 came back `false`, which is why the -40 above is a
-    // measurement rather than an estimate.
+    // measurement rather than an estimate. The subtrahend moved once in flight:
+    // #5728 landed its +1 on `main` while this branch was open, so the 73 was
+    // re-added to 749 rather than to the 748 it was computed against — the same
+    // rebase discipline the -7 entry above records, applied in the other
+    // direction.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(821);
+    expect(pins).toHaveLength(822);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {

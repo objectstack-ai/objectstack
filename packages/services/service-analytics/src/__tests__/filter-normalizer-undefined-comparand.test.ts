@@ -469,17 +469,24 @@ describe('[#6386] what the sweep deliberately leaves alone', () => {
     }
   });
 
-  it('a non-$ SIBLING of an operator is still dropped — a different defect, not this one', () => {
-    // `{d: {$eq: 1, nested: <anything>}}` ignores `nested` whatever its value, so
-    // this is not an `undefined` reading and is out of scope here. Pinned so the
-    // measurement is on the record rather than mistaken for coverage: filed
-    // separately per Prime Directive #10.
-    expect(treeFor({ d: { $eq: 1, nested: undefined } })).toEqual({
-      kind: 'leaf', member: 'd', operator: 'equals', values: [1],
-    });
-    expect(treeFor({ d: { $eq: 1, nested: 'x' } })).toEqual({
-      kind: 'leaf', member: 'd', operator: 'equals', values: [1],
-    });
+  it('a non-$ SIBLING of an operator is now REFUSED — the pin this case held flipped (#6444)', () => {
+    // ⚠️ FLIPPED, not deleted. Until #6444 this case PINNED the measurement
+    // that `{d: {$eq: 1, nested: <anything>}}` silently dropped `nested` — a
+    // different defect from #6386's, filed separately per Prime Directive #10
+    // and ruled Option A (refuse) on 2026-08-08. The full position list, the
+    // two-rewrite message contract and the pure-shape control groups live in
+    // `filter-normalizer-mixed-wrapper.test.ts`; this case keeps the SAME two
+    // inputs the pin measured, so the record of what changed stays readable:
+    // both rows compiled to `d equals [1]` then, both refuse now, and the
+    // `undefined` row is why the refusal is value-INDEPENDENT — the drop never
+    // read the sibling's value, and neither does the gate that replaced it.
+    for (const where of [{ d: { $eq: 1, nested: undefined } }, { d: { $eq: 1, nested: 'x' } }]) {
+      const err = refusalFor(where);
+      expect(err, 'the non-$ sibling was silently dropped again — #6444 regressed').toBeInstanceOf(Error);
+      expect(String(err?.message)).toContain('"d" mixes $-operator keys ($eq) with non-$ sibling key(s) "nested"');
+      expect(err?.code).toBe('INVALID_FILTER');
+      expect(err?.status).toBe(400);
+    }
   });
 
   it('every ACCEPTED shape the module already had still compiles identically', () => {

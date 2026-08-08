@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { validateExpression, introspectScope, expectedDialect, inferExpressionType } from './validate';
+import { firstUndeclaredReference } from './cel-engine';
 
 describe('validateExpression (ADR-0032)', () => {
   describe('predicates (CEL)', () => {
@@ -342,6 +343,51 @@ describe('validateExpression (ADR-0032)', () => {
       expect(scope.fields).toContain('rating');
       expect(scope.roots).toContain('record');
       expect(scope.functions).toContain('daysFromNow');
+    });
+
+    /**
+     * [#6290] The package must give ONE answer about what a root is.
+     *
+     * `introspectScope` is the roots list this package HANDS an author (and the
+     * agent authoring tool); `firstUndeclaredReference` is the strict env that
+     * JUDGES what an author wrote, off `cel-engine.ts`'s `SCOPE_ROOTS`. Nothing
+     * kept the two in step, and they had drifted on exactly the root ADR-0068
+     * D1 calls canonical: `current_user` was advertised here and read as a bare
+     * field reference there — so the one spelling the ADR blesses was the one
+     * spelling the validator refused, while its two aliases (`user`, `ctx`)
+     * passed.
+     *
+     * Pinned as behaviour rather than as list equality: `SCOPE_ROOTS` is a
+     * generous baseline and stays free to declare MORE than it advertises (it
+     * carries `trigger`, `step`, `parent`, … for sites this introspection does
+     * not describe). What it may never do again is advertise a root it then
+     * faults on. Delete `'current_user'` from `SCOPE_ROOTS` and this goes red.
+     */
+    it('every root `introspectScope` advertises really resolves in the strict env (#6290)', () => {
+      const advertised = introspectScope('predicate').roots;
+      expect(advertised).toContain('current_user');
+      const faulting = advertised.filter((root) => firstUndeclaredReference(`${root}.x`) !== null);
+      expect(faulting).toEqual([]);
+    });
+
+    /**
+     * [#6290] The same drift, seen from `checkRoleCatalog`'s side: its four
+     * position-membership regexes accept `current_user` / `user` / `ctx.user`
+     * as the user subject, so a role-catalog verdict on a `current_user`
+     * predicate was only ever reachable at sites that do not run the
+     * `record`-scope bare-ref check. All three spellings now reach it.
+     */
+    it('a role-catalog verdict is reachable through every ADR-0068 user spelling (#6290)', () => {
+      for (const subject of ['current_user', 'user', 'ctx.user']) {
+        const r = validateExpression('predicate', `'org_admni' in ${subject}.positions`, {
+          scope: 'record',
+          roleCatalog: ['org_admin', 'org_member'],
+        });
+        expect(r.ok).toBe(false);
+        // The role typo is the finding — not a bare reference to the subject.
+        expect(r.errors.map((e) => e.message).join('\n')).toContain('unknown role `org_admni`');
+        expect(r.errors.map((e) => e.message).join('\n')).not.toContain('bare reference');
+      }
     });
   });
 });

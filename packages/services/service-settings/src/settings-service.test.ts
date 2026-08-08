@@ -7,6 +7,7 @@ import { NoopCryptoAdapter } from './crypto-adapter.js';
 import { mailSettingsManifest, mailTestActionHandler } from './manifests/mail.manifest.js';
 import { aiSettingsManifest } from './manifests/ai.manifest.js';
 import { authSettingsManifest } from './manifests/auth.manifest.js';
+import { localizationSettingsManifest } from './manifests/localization.manifest.js';
 import { brandingSettingsManifest } from './manifests/branding.manifest.js';
 import { featureFlagsSettingsManifest } from './manifests/feature-flags.manifest.js';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
@@ -1960,5 +1961,329 @@ describe('SettingsService — Phase 3 sys_secret + crypto provider + audit', () 
     expect(h2.version).toBe(h1.version + 1);
     expect(h2.ciphertext).not.toBe(h1.ciphertext);
     expect(await provider.decrypt(h2, ctx)).toBe('hello');
+  });
+});
+
+/**
+ * #5712 — a declared `valueDomain` moves the enforcement boundary onto the
+ * standard's membership, save-time half.
+ *
+ * The 2026-08-06 ruling (reading 1): the curated `options` tables on
+ * `localization.timezone` / `localization.currency` are UI convenience lists;
+ * the boundary is the STANDARD domain (IANA / ISO 4217). #5131's
+ * exhaustive-options semantics survive untouched wherever no domain is
+ * declared — that regression pin lives in this block too, because the
+ * registry-backed tables (`mail.provider`, `sms.provider`) are exactly the
+ * shape that must NOT loosen.
+ */
+describe('SettingsService — a declared valueDomain is the save-time boundary (#5712)', () => {
+  const localizationService = () => {
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(localizationSettingsManifest);
+    return svc;
+  };
+
+  it("accepts the card's own repro: Europe/Zurich and CHF through the write door", async () => {
+    const svc = localizationService();
+    await expect(
+      svc.setMany('localization', { timezone: 'Europe/Zurich', currency: 'CHF' }),
+    ).resolves.toBeDefined();
+    expect((await svc.get('localization', 'timezone')).value).toBe('Europe/Zurich');
+    expect((await svc.get('localization', 'currency')).value).toBe('CHF');
+  });
+
+  it('accepts the probe edges supportedValuesOf would have rejected', async () => {
+    // The #5933 trap, exercised end to end: `UTC` is the manifest's own
+    // default, `Asia/Kolkata` a curated option, `Europe/Kyiv` the current
+    // IANA spelling ICU still lists under its old name.
+    const svc = localizationService();
+    for (const tz of ['UTC', 'Asia/Kolkata', 'Europe/Kyiv']) {
+      await expect(
+        svc.setMany('localization', { timezone: tz }),
+        `${tz} is a legal IANA zone and must be accepted`,
+      ).resolves.toBeDefined();
+    }
+  });
+
+  it('still accepts every curated option value on both keys', async () => {
+    // Degrading `options` to a suggestion list must not reject anything the
+    // dropdown itself offers.
+    const svc = localizationService();
+    const specs = localizationSettingsManifest.specifiers as any[];
+    for (const key of ['timezone', 'currency']) {
+      for (const opt of specs.find((s) => s.key === key).options) {
+        await expect(
+          svc.setMany('localization', { [key]: opt.value }),
+          `curated ${key} option ${opt.value} must stay accepted`,
+        ).resolves.toBeDefined();
+      }
+    }
+  });
+
+  it('refuses garbage loudly, with the code and the domain in the constraint', async () => {
+    const svc = localizationService();
+    for (const tz of ['Mars/Olympus', 'ZZ']) {
+      await expect(svc.setMany('localization', { timezone: tz })).rejects.toMatchObject({
+        code: 'SETTINGS_VALIDATION',
+        fields: [
+          {
+            field: 'timezone',
+            // No `FieldErrorCode` member names a standard-domain breach, so it
+            // takes `invalid_value` — the catalog's slot for "rejected for a
+            // reason no other member names" (ADR-0114), the #6199 precedent.
+            // NOT `invalid_option`: the declared options are exactly the list
+            // a domain-bearing value may legitimately be outside of.
+            code: 'invalid_value',
+            label: 'Default timezone',
+            constraint: { valueDomain: 'iana_time_zone' },
+            value: tz,
+          },
+        ],
+      });
+    }
+    await expect(svc.setMany('localization', { currency: 'XYZ' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [
+        { field: 'currency', code: 'invalid_value', constraint: { valueDomain: 'iso_4217_currency' } },
+      ],
+    });
+    // Atomic: nothing landed.
+    expect((await svc.get('localization', 'timezone')).source).toBe('default');
+  });
+
+  it('default_country: the domain refuses what the pattern admits (#5712 third case)', async () => {
+    const svc = localizationService();
+    // In the domain, outside any curated list — accepted.
+    await expect(svc.setMany('localization', { default_country: 'CH' })).resolves.toBeDefined();
+    // Shape-valid, assigned to nobody: `ZZ` passes `^[A-Za-z]{2}$`, the domain
+    // refuses it. `UK` is the CLDR alias that is not an ISO 3166-1 code.
+    for (const cc of ['ZZ', 'UK']) {
+      await expect(svc.setMany('localization', { default_country: cc })).rejects.toMatchObject({
+        fields: [
+          { field: 'default_country', code: 'invalid_value', constraint: { valueDomain: 'iso_3166_alpha2' } },
+        ],
+      });
+    }
+    // Shape breach still speaks FIRST, in `pattern`'s own vocabulary — the
+    // coarser, more actionable fact (the window-before-grid ordering argument).
+    await expect(svc.setMany('localization', { default_country: 'ZZZ' })).rejects.toMatchObject({
+      fields: [{ field: 'default_country', code: 'invalid_format' }],
+    });
+  });
+
+  it('a specifier WITHOUT valueDomain keeps exhaustive options — the #5131 regression pin', async () => {
+    // The registry-backed shape (`mail.provider`, `sms.provider`): its table
+    // IS the supported set, and declaring no domain must keep it that way,
+    // byte-for-byte. Pinned on the mail manifest itself plus a localization
+    // key that deliberately declares no domain.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(mailSettingsManifest);
+    await expect(svc.setMany('mail', { provider: 'sendgrid' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'provider', code: 'invalid_option' }],
+    });
+
+    const loc = localizationService();
+    await expect(loc.setMany('localization', { first_day_of_week: 'thursday' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'first_day_of_week', code: 'invalid_option' }],
+    });
+  });
+
+  it('an unenforceable domain on a hand-built manifest falls back to #5131, not to accept-everything', async () => {
+    // `registerManifest` takes manifests as given (no Zod pass). A misspelt
+    // domain must leave the exhaustive-options check in force — the safe side
+    // of the fork — never open the select to arbitrary strings.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'typo', version: 1, label: 'Typo', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'select', key: 'zone', label: 'Zone', required: false,
+          valueDomain: 'iana_timezone', // not a vocabulary member
+          options: [{ value: 'UTC', label: 'UTC' }] },
+      ],
+    } as any);
+    await expect(svc.setMany('typo', { zone: 'UTC' })).resolves.toBeDefined();
+    await expect(svc.setMany('typo', { zone: 'Europe/Zurich' })).rejects.toMatchObject({
+      fields: [{ field: 'zone', code: 'invalid_option' }],
+    });
+  });
+
+  it('judges a multiselect element-wise against the domain', async () => {
+    // No shipped manifest authors this shape yet; covered anyway because the
+    // alternative is that the first one to do so re-opens the hole (the same
+    // reason OPTION_BEARING_TYPES covers radio/multiselect).
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'multi', version: 1, label: 'Multi', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'multiselect', key: 'currencies', label: 'Currencies', required: false,
+          valueDomain: 'iso_4217_currency',
+          options: [{ value: 'USD', label: 'USD' }] },
+      ],
+    } as any);
+    await expect(svc.setMany('multi', { currencies: ['USD', 'CHF'] })).resolves.toBeDefined();
+    await expect(svc.setMany('multi', { currencies: ['USD', 'XYZ'] })).rejects.toMatchObject({
+      fields: [{ field: 'currencies', code: 'invalid_value', value: 'XYZ' }],
+    });
+  });
+
+  it('never echoes the rejected value for an encrypted specifier', async () => {
+    // Same redaction rule as `invalid_option` and the #6199 grid, same reason.
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest({
+      namespace: 'vaultdom', version: 1, label: 'Vault domain', scope: 'tenant',
+      readPermission: 'setup.access', writePermission: 'setup.access',
+      specifiers: [
+        { type: 'text', key: 'region_code', label: 'Region code', encrypted: true,
+          valueDomain: 'iso_3166_alpha2' },
+      ],
+    } as any);
+    const err = await svc.setMany('vaultdom', { region_code: 'ZZ' }).catch((e) => e);
+    expect(err.code).toBe('SETTINGS_VALIDATION');
+    expect(err.fields[0]).toMatchObject({ field: 'region_code', code: 'invalid_value' });
+    expect(err.fields[0].value).toBeUndefined();
+    expect(err.message).not.toContain('ZZ');
+    // The domain still travels, so the caller learns what to do.
+    expect(err.fields[0].constraint).toMatchObject({ valueDomain: 'iso_3166_alpha2' });
+  });
+
+  it('checks the domain only when the patch TOUCHES the key', async () => {
+    // The #5131/#5932/#6199 gate, inherited by construction: a stored value
+    // that pre-dates enforcement must not lock the workspace out of its
+    // unrelated settings.
+    const svc = new SettingsService({ env: {} });
+    // Register a domain-less shape of the manifest, store a value the domain
+    // would refuse, then swap the real (domain-bearing) manifest in.
+    svc.registerManifest({
+      ...localizationSettingsManifest,
+      specifiers: (localizationSettingsManifest.specifiers as any[]).map((s) =>
+        s.key === 'timezone' ? { ...s, valueDomain: undefined, options: [...s.options, { value: 'Mars/Olympus', label: 'Mars' }] } : s,
+      ),
+    } as any);
+    await svc.setMany('localization', { timezone: 'Mars/Olympus' });
+    svc.registerManifest(localizationSettingsManifest);
+
+    // The stale value is still there …
+    expect((await svc.get('localization', 'timezone')).value).toBe('Mars/Olympus');
+    // … and a patch that never mentions it is not rejected on its account.
+    await expect(svc.setMany('localization', { currency: 'CHF' })).resolves.toBeDefined();
+    // Only re-writing the key itself is refused.
+    await expect(svc.setMany('localization', { timezone: 'Mars/Olympus' })).rejects.toMatchObject({
+      fields: [{ field: 'timezone', code: 'invalid_value' }],
+    });
+  });
+});
+
+/**
+ * #5712, env half — the domain is judged at the ONE decision point
+ * (`effectiveEnvOverride`), for the reason #5204 is on file: the same
+ * comparison in two places is how the env half came to disagree with the save
+ * half in the first place. Loud error + fallback, never silent (#5204's
+ * contract, unchanged).
+ */
+describe('SettingsService — env overrides are judged against the declared valueDomain (#5712)', () => {
+  const spyLogger = () => {
+    const errors: string[] = [];
+    return { errors, logger: { error: (m: string) => void errors.push(m) } };
+  };
+
+  it("honors the card's env repro: OS_LOCALIZATION_TIMEZONE=Europe/Zurich wins the cascade", async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_TIMEZONE: 'Europe/Zurich' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+
+    const r = await svc.get('localization', 'timezone');
+    expect(r.value).toBe('Europe/Zurich');
+    expect(r.source).toBe('env');
+    expect(r.locked).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('honors OS_LOCALIZATION_CURRENCY=CHF the same way', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_CURRENCY: 'CHF' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+
+    const r = await svc.get('localization', 'currency');
+    expect(r.value).toBe('CHF');
+    expect(r.source).toBe('env');
+    expect(errors).toHaveLength(0);
+  });
+
+  it('ignores garbage loudly and resolves the next cascade layer instead', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_TIMEZONE: 'Mars/Olympus' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+
+    const r = await svc.get('localization', 'timezone');
+    expect(r.value).toBe('UTC'); // the manifest default, not the garbage
+    expect(r.source).toBe('default');
+    // Not in force, so it pins nothing either — read and write agree (#5204).
+    expect(r.locked).toBe(false);
+    expect(r.cascadeChain?.some((e) => e.scope === 'env')).toBe(false);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_LOCALIZATION_TIMEZONE');
+    expect(errors[0]).toContain('is not a valid IANA time zone identifier');
+    expect(errors[0]).toContain("Rejected value: 'Mars/Olympus'");
+    expect(errors[0]).toContain('IGNORED');
+    expect(errors[0]).toContain('does NOT take effect');
+  });
+
+  it('rejects OS_LOCALIZATION_CURRENCY=XYZ loudly, once, at registration', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_CURRENCY: 'XYZ' }, logger });
+    expect(errors).toHaveLength(0);
+    svc.registerManifest(localizationSettingsManifest);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('ISO 4217');
+    for (let i = 0; i < 5; i++) await svc.get('localization', 'currency');
+    expect(errors).toHaveLength(1); // said ONCE (#5204 dedupe)
+  });
+
+  it('a REJECTED override pins nothing — the key stays editable', async () => {
+    const { logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_TIMEZONE: 'Mars/Olympus' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+
+    expect((await svc.get('localization', 'timezone')).locked).toBe(false);
+    await expect(svc.setMany('localization', { timezone: 'Europe/Zurich' })).resolves.toBeDefined();
+    expect((await svc.get('localization', 'timezone')).value).toBe('Europe/Zurich');
+  });
+
+  it('env door for a domain-less select keeps exhaustive options — the #5131/#5204 regression pin', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({ env: { OS_LOCALIZATION_DATE_FORMAT: 'DD>MM>YYYY' }, logger });
+    svc.registerManifest(localizationSettingsManifest);
+
+    const r = await svc.get('localization', 'date_format');
+    expect(r.value).toBe('YYYY-MM-DD'); // the default — the override is not in force
+    expect(r.source).toBe('default');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('is not a declared option for');
+  });
+
+  it('env door checks default_country membership too — the third case, both doors', async () => {
+    const { errors, logger } = spyLogger();
+    const svc = new SettingsService({
+      env: { OS_LOCALIZATION_DEFAULT_COUNTRY: 'ZZ' }, logger,
+    });
+    svc.registerManifest(localizationSettingsManifest);
+
+    const r = await svc.get('localization', 'default_country');
+    expect(r.value).toBe('US'); // the manifest default
+    expect(r.source).toBe('default');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('ISO 3166-1');
+
+    // And a legal non-default is honored.
+    const { logger: okLogger, errors: okErrors } = spyLogger();
+    const ok = new SettingsService({ env: { OS_LOCALIZATION_DEFAULT_COUNTRY: 'CH' }, logger: okLogger });
+    ok.registerManifest(localizationSettingsManifest);
+    expect((await ok.get('localization', 'default_country')).value).toBe('CH');
+    expect(okErrors).toHaveLength(0);
   });
 });

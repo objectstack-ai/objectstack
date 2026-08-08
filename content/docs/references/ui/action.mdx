@@ -61,7 +61,7 @@ const result = ActionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Machine name (lowercase snake_case) |
-| **label** | `string` | ✅ | Display label |
+| **label** | `string \| Record<string, string>` | ✅ | Display label |
 | **objectName** | `string` | optional | Target object this action belongs to. When set, the action is auto-merged into the object's actions array by defineStack(). |
 | **icon** | `string` | optional | Icon name |
 | **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section' \| 'global_nav'>[]` | optional | Locations where this action is visible |
@@ -71,15 +71,15 @@ const result = ActionSchema.parse(data);
 | **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
 | **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]; timeoutMs?: integer; … }` | optional | Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. |
 | **execute** | `never` | optional | [REMOVED] `execute` was removed in @objectstack/spec 17 (#3855) — use `target`. Rename the key; the value (a handler / flow / URL ref) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically. |
-| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string; … }[]` | optional | Input parameters required from user |
+| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user |
 | **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional | Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent) |
 | **order** | `number` | optional | Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order. |
-| **confirmText** | `string` | optional | Confirmation message before execution |
-| **successMessage** | `string` | optional | Success message to show after execution |
-| **errorMessage** | `string` | optional | Error message to show when the action fails (overrides the raw error). |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution |
+| **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
+| **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional | Refresh view after execution |
 | **undoable** | `boolean` | optional | Offer an Undo affordance after this single-record update action succeeds. |
-| **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
+| **resultDialog** | `{ title?: string \| Record<string, string>; description?: string \| Record<string, string>; acknowledge?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>; … }` | optional | Render API response in a one-shot reveal dialog (suppresses successMessage when set). |
 | **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is offered when it evaluates TRUE. Omit = always visible. |
 | **requiresFeature** | `Enum<'twoFactor' \| 'passkeys' \| 'magicLink' \| 'organization' \| 'multiOrgEnabled' \| 'degradedTenancy' \| 'oidcProvider' \| 'sso' \| 'ssoEnforced' \| 'deviceAuthorization' \| … +3 more>` | optional | Public auth feature flag gating this action; lowered into `visible` at parse time. |
 | **disabled** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Disabled predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is shown but refused when it evaluates TRUE. Omit = never disabled. |
@@ -95,7 +95,7 @@ const result = ActionSchema.parse(data);
 | **mode** | `Enum<'create' \| 'edit' \| 'delete' \| 'custom'>` | optional | Semantic mode of the action. |
 | **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
 | **newTabUrl** | `string` | optional | Direct new-tab URL template (`{recordId}` placeholder). When set with opensInNewTab, the renderer navigates the pre-opened tab here immediately — no action POST. The endpoint must enforce auth itself. |
-| **aria** | `{ ariaLabel?: string; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+| **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
@@ -163,10 +163,10 @@ const result = ActionSchema.parse(data);
 | **name** | `string` | optional |  |
 | **field** | `string` | optional | Snake case identifier (lowercase with underscores only) |
 | **objectOverride** | `string` | optional | Snake case identifier (lowercase with underscores only) |
-| **label** | `string` | optional | Display label (plain string; i18n keys are auto-generated by the framework) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional |  |
 | **required** | `boolean` | optional |  |
-| **options** | `{ label: string; value: string; visibleWhen?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }[]` | optional |  |
+| **options** | `{ label: string \| Record<string, string>; value: string; visibleWhen?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }[]` | optional |  |
 | **placeholder** | `string` | optional |  |
 | **helpText** | `string` | optional |  |
 | **defaultValue** | `any` | optional |  |
@@ -271,14 +271,14 @@ const result = ActionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional | Action functionality type |
 | **name** | `string` | optional | Machine name (lowercase snake_case) |
-| **label** | `string` | optional | Display label |
+| **label** | `string \| Record<string, string>` | optional | Display label |
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
 | **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
 | **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
-| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string; … }[]` | optional | Input parameters required from user |
-| **confirmText** | `string` | optional | Confirmation message before execution |
-| **successMessage** | `string` | optional | Success message to show after execution |
-| **errorMessage** | `string` | optional | Error message to show when the action fails (overrides the raw error). |
+| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution |
+| **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
+| **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional | Refresh view after execution |
 | **opensInNewTab** | `boolean` | optional | Open the action result in a new tab. The renderer pre-opens the tab synchronously on click (popup-blocker-safe) and navigates it to the handler's redirectUrl. |
 
