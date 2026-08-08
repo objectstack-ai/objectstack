@@ -1104,12 +1104,22 @@ const CLONE_STRIP_FIELDS: readonly string[] = [
  * would silently delete the value a historical import is entitled to keep,
  * BEFORE the engine could apply the whitelist. Author-declared `readonly` on
  * every other type is untouched — the #3043 strip is exactly as wide as it was.
+ *
+ * SCOPE, third boundary — `preserveAudit` IS NOT READ HERE, DELIBERATELY (#6640).
+ * The historical-import exemption (#3493) is an **UPDATE-path rule only**; see
+ * {@link warnPreserveAuditIgnoredOnInsert} for the ruling, the reason, and the
+ * loud signal a non-system INSERT gets for asking.
  */
 function stripReadonlyForInsert(schema: any, data: any, context: any): any {
     if (context?.isSystem) return data;
     if (!schema || schema.managedBy || String(schema.name ?? '').startsWith('sys_')) return data;
     const fields = schema?.fields;
     if (!fields || data == null) return data;
+    // [#6640] The UNION of names actually removed, across every row of a batch —
+    // the same aggregation `mergeDroppedFieldEvents` applies, and for the same
+    // reason: the strip is schema-uniform, so one signal per ingress call is
+    // faithful where one per row would be noise.
+    const stripped = new Set<string>();
     const stripRow = (row: any): any => {
         if (row == null || typeof row !== 'object') return row;
         let out = row;
@@ -1121,10 +1131,85 @@ function stripReadonlyForInsert(schema: any, data: any, context: any): any {
             if (!(name in out)) continue;
             if (out === row) out = { ...row };
             delete out[name];
+            stripped.add(name);
         }
         return out;
     };
-    return Array.isArray(data) ? data.map(stripRow) : stripRow(data);
+    const result = Array.isArray(data) ? data.map(stripRow) : stripRow(data);
+    if (context?.preserveAudit && stripped.size > 0) {
+        warnPreserveAuditIgnoredOnInsert(String(schema.name ?? ''), Array.from(stripped));
+    }
+    return result;
+}
+
+/**
+ * [#6640] THE loud half of the `preserveAudit` ruling — a non-system INSERT that
+ * asks for the historical-import exemption is TOLD it does not exist here.
+ *
+ * ## The contradiction this closes
+ *
+ * `FieldSchema.readonly`'s `.describe()` promised the `preserveAudit` exemption
+ * (#3493) on BOTH write paths, and `docs/protocol/objectql/security.mdx` agreed.
+ * Only UPDATE ever implemented it: `stripReadonlyFields` (objectql's
+ * rule-validator) consults `isPreservableUnderAudit`, while this INSERT ingress
+ * has never read `preserveAudit` at all — `isSystem` is its only exemption. REST
+ * import's `treatAsHistorical` (`rest/src/import-runner.ts`) puts
+ * `preserveAudit: true` on the write context and creates through `createData`,
+ * i.e. through exactly this seam. So ONE historical import PRESERVED an
+ * author-declared `readonly` business column (`closed_at`, `resolved_by`) on the
+ * rows it updated and SILENTLY DROPPED it on the rows it created.
+ *
+ * ## Which half the ruling kept (maintainer, 2026-08-08 — option 2)
+ *
+ * The **enforcement** is the truth and the **contract** was narrowed to it: the
+ * exemption is UPDATE-only, and this entry keeps honouring `isSystem` alone.
+ * Honouring `preserveAudit` here instead would have handed a NON-system caller —
+ * `treatAsHistorical` arrives on an ordinary REST import request — the ability to
+ * seed the approval/status columns #3043 exists to protect, in one POST. That is
+ * the #3043 threat model reversed, for a capability with no measured consumer:
+ * replaying archival readonly facts on INSERT is available today, from a system
+ * context, which is what the in-repo importer can run as.
+ *
+ * ## Why it is a WARNING and not a throw — measured, not assumed
+ *
+ * The ruling made loudness binding and left the SHAPE to whichever one can be
+ * both loud and non-breaking. A throw cannot: `runImport`'s per-row writer
+ * collects a write error into `toFailedResult(rowNo, res.error)` rather than
+ * aborting the run, so refusing here would not stop a historical import — it
+ * would convert every row it CREATES into a failed row, while the rows it
+ * updates still succeed. And the trigger is not exotic: the audit family itself
+ * (`created_at` / `created_by` / `updated_at` / `updated_by`) is `readonly: true`
+ * in the registry's `AUDIT_FIELD_DEFS`, so an ordinary export→historical-import
+ * round-trip carries readonly columns on every row. Measured on this branch, a
+ * throwing variant took the historical import of 2 new rows from
+ * `{created: 2, errors: 0}` to `{created: 0, errors: 2}`. Breaking the shipped
+ * `treatAsHistorical` flow for new rows is precisely the condition under which
+ * the ruling names the loud WARNING — strip still applied — as the
+ * containment-correct landing.
+ *
+ * The silence this replaces was specific: the drop itself already surfaces
+ * through `droppedFields` (#3431), but a caller who EXPLICITLY asked for the
+ * exemption could not tell "your fields were stripped by the ordinary #3043
+ * rule" from "the exemption you requested does not exist on this path". This
+ * says the second one, by name. It fires ONLY when `preserveAudit` was requested
+ * AND something was actually removed — a request that loses nothing has nothing
+ * to report, and the ordinary non-`preserveAudit` strip is left exactly as quiet
+ * as #3043 designed it.
+ *
+ * Family precedent #5714/#5931: a declared key silently ignored on one branch
+ * joins the loud set by default. Those two could reject outright because they
+ * judge AUTHORING input, before anything runs; this one sits on a live write
+ * path, which is what moves it from throw to warn.
+ */
+function warnPreserveAuditIgnoredOnInsert(object: string, fields: readonly string[]): void {
+    console.warn(
+        `[Protocol] preserveAudit is UPDATE-only and was IGNORED on this INSERT` +
+        `${object ? ` (object '${object}')` : ''}: the historical-import exemption (#3493) applies when a ` +
+        `record is UPDATED, never when it is created, so the readonly field(s) ${fields.join(', ')} were ` +
+        `STRIPPED from this create rather than preserved. To replay archival readonly facts on INSERT, ` +
+        `write from a system context (\`context.isSystem\`) — a non-system create may not seed a readonly ` +
+        `column (#3043/#6640).`,
+    );
 }
 
 /**
