@@ -59,9 +59,12 @@
 //     carries no translation for a removed nav id; the same assertion here
 //     would delete the labels of conditionally-contributed entries, because a
 //     gated-off contribution is indistinguishable from a dead key when all you
-//     have is one runtime composition. The dead `apps.setup.navigation` keys
-//     that exist today are tracked separately rather than removed on a verdict
-//     this gate cannot honestly reach.
+//     have is one runtime composition. So Setup's reverse direction is decided
+//     per id by a human instead, in the two hand-kept lists of
+//     `setup-nav-dead-key-tombstone.test.ts`: the four keys that were dead were
+//     removed there under #6660, and `nav_sso_providers` — labelled in #6659
+//     although no composition this gate boots ever merges it — is pinned as the
+//     converse case. Neither verdict is one this gate could honestly reach.
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
