@@ -565,7 +565,7 @@ function checkElement(
   // fault (ADR-0032 via `validateExpression`); this surface is the one that had
   // no such gate, so a `===` shipped clean and then failed OPEN in the console.
   const syntaxFault = source ? celSyntaxFault(source) : null;
-  if (syntaxFault) {
+  if (source && syntaxFault) {
     findings.push({
       severity: 'error',
       rule: VISIBILITY_PREDICATE_SYNTAX,
@@ -573,7 +573,7 @@ function checkElement(
       path,
       message:
         `visibility predicate is not valid CEL — ${syntaxFault.detail} ` +
-        `(predicate: \`${quoteSource(source!)}\`). A predicate that does not parse can never ` +
+        `(predicate: \`${quoteSource(source)}\`). A predicate that does not parse can never ` +
         `evaluate, and the console falls OPEN: the element renders unconditionally and looks ` +
         `exactly like one with no predicate at all (#5149).`,
       hint: syntaxFault.token
