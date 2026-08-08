@@ -388,27 +388,36 @@ const expenseReports = defineSeed(ExpenseReport, {
   ],
 });
 
+/**
+ * Every line carries BOTH temporal shapes — `incurred_on` (calendar day) and
+ * `incurred_at` (instant) — and every `incurred_at` has a NON-ZERO time
+ * component on purpose (objectui#3569). A wall clock of `00:00` would make the
+ * defect invisible: a renderer that drops the time would look identical to one
+ * that keeps it. `daysAgo(n)` is a calendar-day function resolving to UTC
+ * midnight, so the clock is added with the sub-day idiom the formula stdlib
+ * documents for exactly this — `<timestamp> + duration("Nh…")`.
+ */
 const expenseLines = defineSeed(ExpenseLine, {
   mode: 'upsert',
   externalId: 'merchant',
   records: [
     // EXP-2001 → total 1500.50 · approved 960 · reimbursable 512 · rejected 0 · over$500 2
-    { merchant: 'United Airlines', expense_report: 'EXP-2001', category: 'travel', amount: 620, billable: false, status: 'approved', incurred_on: cel`daysAgo(9)` },
-    { merchant: 'Marriott Downtown', expense_report: 'EXP-2001', category: 'lodging', amount: 340, billable: false, status: 'approved', incurred_on: cel`daysAgo(8)` },
-    { merchant: 'Chipotle', expense_report: 'EXP-2001', category: 'meals', amount: 28.5, billable: false, status: 'submitted', incurred_on: cel`daysAgo(8)` },
-    { merchant: 'AWS', expense_report: 'EXP-2001', category: 'software', amount: 512, billable: true, status: 'submitted', incurred_on: cel`daysAgo(7)` },
+    { merchant: 'United Airlines', expense_report: 'EXP-2001', category: 'travel', amount: 620, billable: false, status: 'approved', incurred_on: cel`daysAgo(9)`, incurred_at: cel`daysAgo(9) + duration("6h20m")` },
+    { merchant: 'Marriott Downtown', expense_report: 'EXP-2001', category: 'lodging', amount: 340, billable: false, status: 'approved', incurred_on: cel`daysAgo(8)`, incurred_at: cel`daysAgo(8) + duration("15h05m")` },
+    { merchant: 'Chipotle', expense_report: 'EXP-2001', category: 'meals', amount: 28.5, billable: false, status: 'submitted', incurred_on: cel`daysAgo(8)`, incurred_at: cel`daysAgo(8) + duration("19h45m")` },
+    { merchant: 'AWS', expense_report: 'EXP-2001', category: 'software', amount: 512, billable: true, status: 'submitted', incurred_on: cel`daysAgo(7)`, incurred_at: cel`daysAgo(7) + duration("2h10m")` },
     // EXP-2002 → total 917 · approved 825 · reimbursable 825 · rejected 1 · over$500 1
-    { merchant: 'Delta Air Lines', expense_report: 'EXP-2002', category: 'travel', amount: 780, billable: true, status: 'approved', incurred_on: cel`daysAgo(15)` },
-    { merchant: 'Uber', expense_report: 'EXP-2002', category: 'travel', amount: 45, billable: true, status: 'approved', incurred_on: cel`daysAgo(14)` },
-    { merchant: 'Staples', expense_report: 'EXP-2002', category: 'supplies', amount: 92, billable: false, status: 'rejected', incurred_on: cel`daysAgo(14)` },
+    { merchant: 'Delta Air Lines', expense_report: 'EXP-2002', category: 'travel', amount: 780, billable: true, status: 'approved', incurred_on: cel`daysAgo(15)`, incurred_at: cel`daysAgo(15) + duration("7h35m")` },
+    { merchant: 'Uber', expense_report: 'EXP-2002', category: 'travel', amount: 45, billable: true, status: 'approved', incurred_on: cel`daysAgo(14)`, incurred_at: cel`daysAgo(14) + duration("21h50m")` },
+    { merchant: 'Staples', expense_report: 'EXP-2002', category: 'supplies', amount: 92, billable: false, status: 'rejected', incurred_on: cel`daysAgo(14)`, incurred_at: cel`daysAgo(14) + duration("11h15m")` },
     // EXP-2003 (draft) → total 225.75 · approved 0 · reimbursable 0 · rejected 0 · over$500 0
-    { merchant: 'Hilton Garden Inn', expense_report: 'EXP-2003', category: 'lodging', amount: 210, billable: false, status: 'submitted', incurred_on: cel`daysAgo(3)` },
-    { merchant: 'Starbucks', expense_report: 'EXP-2003', category: 'meals', amount: 15.75, billable: false, status: 'submitted', incurred_on: cel`daysAgo(2)` },
+    { merchant: 'Hilton Garden Inn', expense_report: 'EXP-2003', category: 'lodging', amount: 210, billable: false, status: 'submitted', incurred_on: cel`daysAgo(3)`, incurred_at: cel`daysAgo(3) + duration("14h30m")` },
+    { merchant: 'Starbucks', expense_report: 'EXP-2003', category: 'meals', amount: 15.75, billable: false, status: 'submitted', incurred_on: cel`daysAgo(2)`, incurred_at: cel`daysAgo(2) + duration("8h05m")` },
     // EXP-DEMO → total 8900 (≥ $5000, trips the committee-quorum threshold)
-    { merchant: 'Dreamforce Conference', expense_report: 'EXP-DEMO', category: 'other', amount: 3200, billable: true, status: 'submitted', incurred_on: cel`daysAgo(4)` },
-    { merchant: 'Lufthansa', expense_report: 'EXP-DEMO', category: 'travel', amount: 2400, billable: true, status: 'submitted', incurred_on: cel`daysAgo(4)` },
-    { merchant: 'Grand Hyatt', expense_report: 'EXP-DEMO', category: 'lodging', amount: 1800, billable: true, status: 'submitted', incurred_on: cel`daysAgo(3)` },
-    { merchant: 'Apple Store', expense_report: 'EXP-DEMO', category: 'software', amount: 1500, billable: true, status: 'submitted', incurred_on: cel`daysAgo(3)` },
+    { merchant: 'Dreamforce Conference', expense_report: 'EXP-DEMO', category: 'other', amount: 3200, billable: true, status: 'submitted', incurred_on: cel`daysAgo(4)`, incurred_at: cel`daysAgo(4) + duration("9h40m")` },
+    { merchant: 'Lufthansa', expense_report: 'EXP-DEMO', category: 'travel', amount: 2400, billable: true, status: 'submitted', incurred_on: cel`daysAgo(4)`, incurred_at: cel`daysAgo(4) + duration("5h25m")` },
+    { merchant: 'Grand Hyatt', expense_report: 'EXP-DEMO', category: 'lodging', amount: 1800, billable: true, status: 'submitted', incurred_on: cel`daysAgo(3)`, incurred_at: cel`daysAgo(3) + duration("17h55m")` },
+    { merchant: 'Apple Store', expense_report: 'EXP-DEMO', category: 'software', amount: 1500, billable: true, status: 'submitted', incurred_on: cel`daysAgo(3)`, incurred_at: cel`daysAgo(3) + duration("13h40m")` },
   ],
 });
 

@@ -164,6 +164,22 @@ export const ExpenseLine = ObjectSchema.create({
         { label: 'Rejected', value: 'rejected', color: '#EF4444' },
       ],
     }),
+    /**
+     * The exact instant on the receipt — a meal at 19:45, a cab at 07:12.
+     *
+     * Deliberately a `datetime` sitting NEXT TO the `date` below: the two are
+     * the inline grid's temporal-type fixture (objectui#3569). A renderer that
+     * folds `datetime` onto the `date` control does not merely hide the clock —
+     * `<input type="date">` emits a bare `YYYY-MM-DD`, so a user correcting the
+     * DAY writes the time out of the record. Nothing in showcase could catch
+     * that before, because no inline-grid child carried a datetime at all.
+     *
+     * Keep both columns: the pair is what makes the distinction observable.
+     * With seven editable fields the grid's six-column default budget parks one
+     * of them in the column chooser (`incurred_on`, by declaration order) — that
+     * is the intended "personalize columns" behaviour, not a dropped field.
+     */
+    incurred_at: Field.datetime({ label: 'Incurred At' }),
     incurred_on: Field.date({ label: 'Incurred On' }),
   },
 });
