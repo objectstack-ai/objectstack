@@ -1,5 +1,235 @@
 # @objectstack/platform-objects
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- d42a92f: chore(platform-objects): drop four dead `apps.setup.navigation` translation keys (#6660)
+
+  Four ids kept a Setup nav label in the hand-written locale bundles long after
+  the nav item that declared them was removed. No composition renders them, so
+  nothing was broken — but a translated key with no declaring nav item is the
+  shape `app-nav-translation-parity.test.ts` already refuses for Studio: it reads
+  as coverage. `nav_workflows` outlived its Studio menu entry in all four locales
+  the same way, and nothing said so until that reverse assertion was written.
+
+  Removed, with the reason each one is gone:
+
+  | id                       | why it has no nav item                                                                                                                 |
+  | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+  | `nav_approval_processes` | the approval process engine was retired in favour of the approval flow node (#1408, ADR-0019 P4/P5)                                    |
+  | `nav_verifications`      | `sys_verification` omits `list` from `apiMethods`                                                                                      |
+  | `nav_device_codes`       | `sys_device_code` likewise — both hold sensitive, ephemeral secrets, so a browse entry could only ever render "failed to load" (#2266) |
+  | `nav_metadata`           | moved to Studio as `nav_metadata_directory` when the Studio app was split out                                                          |
+
+  14 key/label pairs in total, not 16: `zh-CN` never carried `nav_verifications`
+  or `nav_device_codes`.
+
+  Each id was checked **individually** against a repo-wide grep for a declaring
+  `id: '<key>'` — zero hits each, against a control probe (`nav_webhooks`) that
+  returns five. That is deliberately not the same claim as a runtime diff: from a
+  single booted composition a dead key and a conditionally-contributed one are
+  indistinguishable (`plugin-auth` contributes `nav_sso_providers` only when an
+  external IdP is wired), which is why `pnpm check:app-nav-i18n` still refuses the
+  reverse direction and why this change removes exactly four named ids rather than
+  "everything the merged app did not declare".
+
+  A tombstone test pins the four so they cannot drift back in without their nav
+  item. Re-adding `nav_verifications` / `nav_device_codes` remains a security
+  decision — it means enabling `list` on the object first.
+
+- 51d74ad: fix(platform-objects): translate the Setup app's runtime-contributed navigation, and gate it on the merged app instead of a static walk (#5750)
+
+  Under `zh-CN`, four of the Setup app's ~50 sidebar entries rendered in English —
+  `Packages`, `Delegations (OOO)`, `Webhooks`, `HTTP Deliveries` — and it was not a
+  client-side fallback: the server's own merged `app` metadata carried the English
+  literals. Sitting in a screen of Chinese menu items, they read like words that
+  were simply never meant to be translated.
+
+  Two different causes, both now fixed:
+
+  - **`nav_packages` was translated in the wrong app's namespace.** A
+    `nav_packages: { label: '软件包' }` existed under `apps.studio.navigation`.
+    Setup contributes an entry with the same id (package administration is an
+    operator concern, ADR-0084) and looks it up under
+    `apps.setup.navigation.nav_packages` — a different subtree, so the lookup
+    missed and the author's `'Packages'` literal won. Both entries are legitimate;
+    the Setup one has been added and the Studio one left alone.
+  - **The other three had no translation anywhere.** `nav_approval_delegations`
+    (`@objectstack/plugin-approvals`), `nav_webhooks` and `nav_http_deliveries`
+    (`@objectstack/plugin-webhooks`) are contributed at runtime by the capability
+    plugins that own the objects, and no locale file carried a label for them.
+
+  Four more were found by the new gate below, invisible to the one-locale browser
+  session that reported this: `nav_capabilities`, `nav_settings_localization`,
+  `nav_settings_company` and `nav_datasources` were translated in `zh-CN` **only**,
+  so `ja-JP` and `es-ES` menus showed English there too. All eight ids are now
+  labelled in all four locales (`en`, `zh-CN`, `ja-JP`, `es-ES`).
+
+  **Why nothing caught it, which is the part worth keeping.** The Setup app is a
+  shell of empty group anchors whose entries arrive at runtime (ADR-0029 D7), so a
+  static walk sees none of them. Both existing gates knew this and each named the
+  _other_ as the owner: `app-nav-translation-parity.test.ts` excluded Setup and
+  deferred to "the coverage ratchet", while `platform-objects`' extract config
+  deferred the same labels to that ratchet "baselined at 0 for this package". The
+  ratchet runs `os lint` over **static** stack configs, so its 0 meant "not looked
+  at here", not "checked, clean" — and it reported OK the whole time.
+
+  A new gate closes the handoff — `pnpm check:app-nav-i18n`
+  (`packages/cli/scripts/check-app-nav-i18n.mjs`, wired into `lint.yml`). It boots
+  the real composition, merges the navigation contributions through the same
+  `applyNavContributions` path the `/api/v1/meta/app` read uses, and asserts every
+  merged nav id carries a label in every locale the platform bundle declares — so
+  the next plugin-contributed entry cannot leak the same way. It also fails when a
+  declared contributor lands no nav id at all, because fewer merged ids means
+  fewer ids checked: a contributor that silently stops contributing would
+  otherwise make the gate greener rather than redder. The two comments that
+  delegated to the ratchet now say what actually owns these labels.
+
+  No authoring change: plugin nav `label` values stay plain English literals, and
+  translations continue to live in `apps.setup.navigation` in this package.
+
+- e787608: Translate the Setup app's `nav_sso_providers` navigation entry in all four
+  locales.
+
+  `@objectstack/plugin-auth` contributes an **SSO Providers** entry into Setup's
+  Access Control group (`sys_sso_provider`, priority 250), but no locale bundle
+  carried a label for it: measured on `origin/main` `ea1d9165d`, a grep for
+  `nav_sso_providers` over `en` / `zh-CN` / `ja-JP` / `es-ES` returned **0 each**,
+  against a control probe (`nav_positions`) that returned 1 each. A deployment
+  with an external IdP wired therefore rendered `SSO Providers` in English inside
+  an otherwise fully translated Setup menu.
+
+  | locale  | label            |
+  | ------- | ---------------- |
+  | `en`    | SSO Providers    |
+  | `zh-CN` | SSO 提供方       |
+  | `ja-JP` | SSO プロバイダー |
+  | `es-ES` | Proveedores SSO  |
+
+  Each one matches that locale's existing `sys_sso_provider.pluralLabel`, since
+  the nav entry opens exactly that object's list view.
+
+  **Why no gate caught it.** `pnpm check:app-nav-i18n` (#5750) boots the real
+  composition and asserts every _merged_ Setup nav id carries a label in every
+  locale — and `plugin-auth` spreads its `navigationContributions` in only when
+  `authManager.isSsoWired()` is true. In the composition that gate boots, this
+  entry is never contributed, never merged, and so never judged; the gate's header
+  already declared that bound. This id is consequently the one Setup entry no
+  boot-time check can reach, so it is pinned by hand instead, next to the dead-key
+  tombstone (#6660) it is the converse of: one list holds ids whose label must be
+  **gone**, the other ids whose label must **stay**. Making the gate itself
+  union-aware was considered and deliberately left unbuilt — a separate
+  maintainer-facing call, not a prerequisite for labelling the ids it cannot see.
+
+- 61282f9: fix(platform-objects): `sys_setting.scope` drops the never-implemented `runtime` option (#6036)
+
+  The `scope` select declared four cascade layers while the platform only ever had
+  three. `SpecifierScopeSchema` (`packages/spec/src/system/settings-manifest.zod.ts`)
+  is `z.enum(['global', 'tenant', 'user'])`, `SettingsService` never mentions the
+  string `'runtime'` anywhere, and its `scopeRank()` switch handles only those same
+  three — so no code path could write such a row and none could read one back. The
+  sibling audit object `sys_setting_audit.scope` already declared only three. This
+  was a declared-but-unenforced value domain of the ADR-0049 kind: nobody could hit
+  it, but the next reader of the object definition would reasonably conclude the
+  platform supports a fourth scope layer.
+
+  Removed rather than implemented — there is no runtime-scope product intent, and
+  the spec enum stays the reference truth for what the cascade's layers are. A new
+  pin (`sys-setting.scope-options.test.ts`) compares the object's option list
+  against `SpecifierScopeSchema` directly, so a future divergence in either
+  direction lands as a red test instead of a second silent one.
+
+  Removal was gated on a measurement, not on the zero-write-path prediction: a real
+  engine booted over the platform objects, driven through the real
+  `/api/settings/:namespace` write path, stored 4 rows (`tenant` 3, `global` 1) and
+  **0** with `scope='runtime'` — with a positive control proving the query does
+  surface such a row when one is injected directly.
+
+  No stored data is affected and no consumer read the option, so this is a
+  definition-only correction.
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [1a53a02]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [3d4c545]
+- Updated dependencies [bb7cb41]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/metadata-core@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

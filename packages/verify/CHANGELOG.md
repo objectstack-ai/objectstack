@@ -1,5 +1,210 @@
 # @objectstack/verify
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- d48aad5: refactor(driver-sql)!: `analyzeQuery` / `findWithWindowFunctions` 不再吃 `any`，窗口门自带扁平形类型 (#6212 批 A+E)
+
+  #5181（PR #6076）收窄了 `IDataDriver` 声明的六个方法，#6075（PR #6210）让五个驱动的实现跟上。收尾漏下的是**驱动自有、不在 `IDataDriver` 上**的那批查询门：它们同样吃 query AST，签名却是 `any`。本次处理 SQL 驱动的两个。
+
+  `any` 在 query 参数上不是「对象名没检查」，而是**检查全关**：`where` 的 filter 方言、`orderBy` 的 sort node 形状、`limit`/`offset` 是不是数字，全部被抹掉——而这两个方法体读的恰恰就是这些字段。`$like` 当年就是从同一个口子活到运行时的（cloud#1030、cloud#1053 实测 20 处）。
+
+  **`analyzeQuery` → `DriverQuery`。** 它是 `explain()` 的实现体，而 `explain()` 本来就声明 `DriverQuery` 并一行转发过来——收窄前这一对是自相矛盾的：契约门声明 AST，它背后的实现声明 `any`。方法体只读 `fields` / `where` / `orderBy` / `limit` / `offset`，全在 `DriverQuery` 内，因此这是一次纯注解：driver-sql 与 driver-sqlite-wasm 实测零报错、零 fixture 改动。
+
+  **`findWithWindowFunctions` → 驱动本地的扁平形类型**，新导出 `SqlWindowFunctionQuery` / `SqlWindowFunctionSpec`：
+
+  ```ts
+  import type { SqlWindowFunctionQuery } from "@objectstack/driver-sql";
+
+  const ranked = await sqlDriver.findWithWindowFunctions("employee", {
+    windowFunctions: [
+      {
+        function: "rank",
+        alias: "salary_rank",
+        partitionBy: ["department"],
+        orderBy: [{ field: "salary", order: "desc" }],
+      },
+    ],
+  });
+  ```
+
+  它**不能**标 `DriverQuery`：`query.windowFunctions` 在 spec 是 `retiredKey()` 墓碑（#4286），`QueryAST['windowFunctions']` 解析为 `undefined`，标上去会让这道门自己已发布文档里的载荷编译不过。类型因此写成 `Omit<DriverQuery, 'windowFunctions'> & { windowFunctions?: SqlWindowFunctionSpec[] }`——契约那一半照旧受检，驱动私有那一半由驱动自己声明。
+
+  类型放在驱动层、**不进 `packages/spec`**，是接着 #4286 的判断往下走：那次删掉 `WindowFunctionNodeSchema` 的理由正是它声明了 `field` / `over` / `frame` 这些门从不读的成员；再往 spec 加一套窗口词汇就是反悔那个判断。spec 的删除注记与 `migrations/registry.ts` 的迁移处方里逐字写着的 `{ function, alias, partitionBy?, orderBy? }`，就是这个类型的出处，三处必须始终说同一句话。请求面的墓碑**没有**被重新打开：`analyzeQuery('o', { windowFunctions: [...] })` 依然是编译错误。
+
+  **顺带（#6212 批 F）**：`@objectstack/verify` 的 `BucketableDriver.aggregate` 从 `query: unknown` 收到 `DriverQuery`。这是一个**已发布**的结构替身，cloud 的 driver-turso 照着它实现——声明 `unknown` 不叫「最小」，叫没检查，并且放任该文件里两处 AST 字面量各自把对象名多写一遍（#5181 的那种冗余）。同时删掉一处 `as never`：那个 cast 只是因为字面量推断把 `'count'` 放宽成了 `string`，注上类型就不需要它了。这里**不预断**驱动自身 `aggregate` 参数类型的收窄（#6212 批 B，排在 #6203 之后）——方法参数按双变比较，驱动那边声明 `any`、`QueryAST` 还是收窄后的类型，都照样满足这个替身。
+
+  **零运行时改动**，全部是类型注解与两处冗余键的删除（实测全仓驱动无一读 `query.object`）。测试：driver-sql 935、driver-sqlite-wasm 254、driver-turso 804、verify 17、dogfood 520 全绿。
+
+  **迁移面**：直接调用这两道门的嵌入方，把内联字面量里编译器指出来的键改对即可（TS2353）。本仓实测非测试生产者为零，两道门只有各自驱动包的测试在用，零处需要改动。标 major 的依据与 #5181 / #6075 一致：**源码级破坏性**（调用点内联字面量与 `BucketableDriver` 的导出形状），运行时行为零变化；`check:api-surface` 只记录导出的存在与否、不记录签名，所以这条说明是该变更唯一的下游载体。
+
+### Patch Changes
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [eb1b231]
+- Updated dependencies [2bc1876]
+- Updated dependencies [1d0faa7]
+- Updated dependencies [ad878e7]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [6f6fec7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [f7d80f4]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [10c4ea9]
+- Updated dependencies [0b63b56]
+- Updated dependencies [8e2bbba]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [de6b7f1]
+- Updated dependencies [01faeb1]
+- Updated dependencies [d92ed03]
+- Updated dependencies [6517448]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [9c82b89]
+- Updated dependencies [c308064]
+- Updated dependencies [24122a9]
+- Updated dependencies [b0d54bf]
+- Updated dependencies [b7d3be4]
+- Updated dependencies [2a0d65e]
+- Updated dependencies [861ee32]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [6029cc1]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [f09a2e7]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [1fe436d]
+- Updated dependencies [59b794f]
+- Updated dependencies [db59e9c]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [53ef057]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [ea1d916]
+- Updated dependencies [465c5fc]
+- Updated dependencies [c804f19]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [c51ffa5]
+- Updated dependencies [babddf6]
+- Updated dependencies [dbe92a7]
+- Updated dependencies [49f208b]
+- Updated dependencies [9e9445b]
+- Updated dependencies [2f59da0]
+- Updated dependencies [114e727]
+- Updated dependencies [83a3b1f]
+- Updated dependencies [1a53a02]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [2604d34]
+- Updated dependencies [cfeb9a0]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [bfe689b]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [1fa224a]
+- Updated dependencies [3cc8676]
+- Updated dependencies [e15bf7e]
+- Updated dependencies [3fb42d2]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [82397b6]
+- Updated dependencies [2c2a212]
+- Updated dependencies [9bc846b]
+- Updated dependencies [773f80a]
+- Updated dependencies [0e043d8]
+- Updated dependencies [72847c5]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [f8fe47e]
+- Updated dependencies [9e9445b]
+- Updated dependencies [d13f627]
+- Updated dependencies [a841151]
+- Updated dependencies [85ec26d]
+- Updated dependencies [4afdd3e]
+- Updated dependencies [9566c38]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [8e13ca8]
+- Updated dependencies [0996899]
+- Updated dependencies [378d8b1]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [3264516]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e218483]
+- Updated dependencies [e787608]
+- Updated dependencies [cca11e9]
+- Updated dependencies [cfb549d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [d86815e]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [2bd4e5e]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [bd5fc38]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+- Updated dependencies [c9bf940]
+- Updated dependencies [a682670]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/objectql@17.0.0-rc.6
+  - @objectstack/service-analytics@17.0.0-rc.6
+  - @objectstack/service-settings@17.0.0-rc.6
+  - @objectstack/runtime@17.0.0-rc.6
+  - @objectstack/rest@17.0.0-rc.6
+  - @objectstack/service-datasource@17.0.0-rc.6
+  - @objectstack/service-automation@17.0.0-rc.6
+  - @objectstack/plugin-security@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/plugin-hono-server@17.0.0-rc.6
+  - @objectstack/plugin-sharing@17.0.0-rc.6
+  - @objectstack/plugin-auth@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

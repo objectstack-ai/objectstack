@@ -1,5 +1,184 @@
 # @objectstack/service-external-datasource
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- 01faeb1: fix(service-datasource): a `pool` block on a `memory` datasource is rejected, not dropped in silence (#5931)
+
+  #5714 made a `pool` block the driver cannot honour a loud authoring error, but
+  its ruling was scoped to the two sqlite arms — `memory` kept dropping it. The
+  `memory` arm hands `InMemoryDriver` nothing but `buildMemoryConfig(spec)`, which
+  reads `spec.config` and never `spec.pool`, so a sized pool reached nothing and
+  said nothing. Measured through the real factory:
+
+  ```text
+  memory   + pool{min:3,max:9}   driver config {"persistence":false}   pool undefined
+  sqlite   + pool{min:3,max:9}   rejected (since #5714)
+  postgres + pool{min:3,max:9}   knex config.pool {"min":3,"max":9}    live {min:3,max:9}
+  ```
+
+  `memory` now joins `POOL_UNSUPPORTED_DRIVER_IDS`, so the same three doors that
+  already rejected sqlite reject it: the Setup wizard's create/update, the
+  boot-time auto-connect pre-pass, and the driver factory itself.
+
+  **Behaviour change.** A datasource declaring `driver: 'memory'` (or `inmemory` /
+  `in-memory` / `mingo`) together with a non-empty `pool` block used to load and
+  run; it now throws at whichever door it arrives through. The fix is the one edit
+  the message names — delete the `pool` block. Nothing is lost by deleting it: it
+  configured nothing before. An absent or empty `pool` is unchanged, and every
+  `memory` datasource without one builds exactly as it did. No declaration in this
+  repo, the example apps included, carried the combination.
+
+  **Its own explanation, not SQLite's.** SQLite is rejected because a second
+  connection to `:memory:` opens a separate, empty database, so sizing the pool
+  would split one datasource across several stores. That reasoning is false for
+  `memory`: there is no connection at all — the store is a plain data structure in
+  this process — so the message says that instead. Telling an author their driver
+  picked a connection strategy for them would send them looking for a knob that
+  does not exist. Reasons are now keyed by driver id, which makes an arm joining
+  the set without writing one a type error.
+
+  Maintainer ruling 2026-08-07, which also set the default for the next sister
+  arm: when a declared key is silently dropped on one arm and an earlier ruling
+  already made it a loud authoring error on a sibling, the new arm joins the
+  existing rejection set rather than queueing for a ruling of its own — unless the
+  original rationale was measured to be arm-specific.
+
+  No API surface is added — `POOL_UNSUPPORTED_DRIVER_IDS`,
+  `driverReadsDeclaredPool`, `unsupportedPoolIssue`, `unsupportedPoolMessage` and
+  `assertDatasourcePoolSupported` keep the signatures #5714 published, and the
+  sqlite arms' rejection text is byte-for-byte unchanged.
+
+- d92ed03: fix(service-datasource): 未构建的工作区不再被当成「配置写错了」(#5794)
+
+  datasource 的 fail-fast 报错原本只有一句收尾建议,不分成因:
+
+  ```
+  ✗ datasource 'default': connect failed — Cannot find module
+    '…/@objectstack/driver-sql/dist/index.mjs' imported from …
+    Fix the datasource configuration, or set OS_ALLOW_DRIVER_CONNECT_FAILURE=1
+    to boot anyway and serve errors until it is reachable.
+  ```
+
+  对「数据库真连不上」——错的 DSN、轮换掉的密码、断掉的网络——这句话是对的。
+  但对**驱动包没构建**这一个成因,两半都是有害建议:
+
+  - **「Fix the datasource configuration」** 把读者支去改一份本来就正确的配置。
+    在那里写什么都变不出一个 `dist/` 目录。
+  - **「set OS_ALLOW_DRIVER_CONNECT_FAILURE=1 to boot anyway」** 比没用更糟:
+    它不是绕过问题,而是**藏起**问题。半个工作区会宣称自己启动成功,然后对每个
+    请求回 `ERR_DATASOURCE_UNAVAILABLE`——比诚实地拒绝启动难查得多。那个开关是
+    为「数据库暂时不可达」准备的(一个关于世界的事实,可能自己好起来);缺构建产物
+    是关于这份 checkout 的事实,不该有任何环境变量能启动越过它。
+
+  而唯一有效的修法(`pnpm build`)一个字都没提。
+
+  现在 connect 失败会按**成因**选收尾句。底层错误是模块解析失败时(ESM `import()`
+  报 `err.code === 'ERR_MODULE_NOT_FOUND'`,CJS `require()` 报 `MODULE_NOT_FOUND`;
+  `code` 被 re-throw 丢掉时退回 `Cannot find module` / `Cannot find package` 文本),
+  消息改成:
+
+  ```
+  The driver package could not be LOADED at all — it is not installed, or its build
+  output is missing. That is a build precondition, not a datasource fault: the
+  configuration is fine, and no boot-time override can make a driver that does not
+  exist answer a query. Run `pnpm install && pnpm build`, then start again.
+  ```
+
+  一个正确修法,只说一次,**不提**那个逃生开关——连「别用它」都不提:一个已经卡住的
+  读者会去找最短的那行看起来能让他继续的话。这与 `datasource-pool-support.ts`
+  (#5714 / #5931)和 `check:dev-prereqs`(#5795)是同一条消息纪律。
+
+  判据复用 `@objectstack/types` 的 `isModuleNotFoundError`(framework#3265 起的唯一
+  所有者),不另起一份;它先看结构化的 `err.code`、再退回文本,而这个结构化信号原本
+  在 `handleFailure` 只收 `reason: string` 时被丢弃了,所以抛出值本身现在也一并传入。
+
+  **纯诊断分类,零行为变化。** fail-fast 的判定、触发时机、抛出的错误类型、保留的
+  连接状态,以及设了 `OS_ALLOW_DRIVER_CONNECT_FAILURE` 时的降级启动路径全部不变;
+  其它成因(真连接失败、驱动不受支持、凭据解析不出)的消息逐字未动。
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

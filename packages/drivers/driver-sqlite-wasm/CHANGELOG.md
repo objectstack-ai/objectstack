@@ -1,5 +1,304 @@
 # @objectstack/driver-sqlite-wasm
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- d367f03: refactor(drivers)!: 五个驱动的 query 参数跟进 `DriverQuery`，休眠的类型谎言就此没有藏身处 (#6075)
+
+  #5181（PR #6076）把 `IDataDriver.find/findOne/count/updateMany/deleteMany/explain` 的 query 参数收窄为 `DriverQuery`（`Omit<QueryAST, 'object'>`），并在同一条 changeset 里写明：「把驱动签名一并迁到 `DriverQuery` 是后续的机械收尾」。这就是那次收尾。
+
+  在此之前，五个驱动的实现仍旧声明 `query: QueryAST`（turso 侧是 `query: any`）。**它不红，也不会红** —— 方法参数按双变比较，实现声明得比契约宽照样满足契约。但调用方现在**有权**省略 `object`，于是这些实现的类型说 `query.object` 是 `string`，运行期却可能是 `undefined`：一句休眠的谎言，没有任何门拦得住下一个照着它写代码的人。
+
+  收尾之后，「驱动读 `query.object`」直接变成编译错误：
+
+  ```ts
+  // 收窄前：编译通过，运行期可能是 undefined —— 谎言
+  // 收窄后：error TS2339: Property 'object' does not exist on type 'DriverQuery'.
+  const name = query.object;
+  ```
+
+  **零运行时改动。** 本次改的全部是类型注解：五个驱动的六个契约方法签名，以及为让类型自洽而必须跟进的少量私有辅助方法参数（mongodb 的 `buildFindOptions` / `buildSortSpec`，sql 的 `findRows` / `orderKeysFor`，turso 的 `toRemoteQuery` / `toRemoteReadQuery`，memory 的 `performAggregation`）—— 它们都只转发或读取 `where` / `orderBy` / `groupBy` 这些字段，本来就不读 `object`。turso 的几处 `query: any` 一并收紧，多拿回一批本已放弃的检查。emit 无差异，测试全绿（memory 524、mongodb 206、sql 906、sqlite-wasm 254、turso 788）。
+
+  **迁移面：删掉驱动调用字面量里的 `object:` 键**，与 #5181 是同一句话，只是现在也覆盖了直接按具体驱动类（`SqlDriver` / `MemoryDriver` / …）而非按 `IDataDriver` 取类型的调用方。编译器会逐处指出来（TS2353 `'object' does not exist in type 'DriverQuery'`）。本仓下游 25 个包实测零处需要改动，改动只落在五个驱动自己的测试里。
+
+  标 major 的依据与 #5181 一致：**源码级破坏性**（调用点内联字面量），运行时行为零变化。`check:api-surface` 只记录导出的存在与否、不记录签名，因此这条说明同样是该变更唯一的下游载体。
+
+  `aggregate` / `distinct` / `syncSchemasBatch` 不在本次范围内 —— 它们不是 `IDataDriver` 收窄的那六个方法，其中 `syncSchemasBatch` 的条目里 `object` 是被真实读取的必填键，`expand` 条目里的 `object` 同理命名的是关联对象，都不是冗余。
+
+- 62159bd: refactor(driver-sql)!: `SqlDriver.distinct` 的第三参收成裸 `FilterCondition`，一个静默返回全集的写法就此编译不过 (#6320)
+
+  `distinct` 不在 `IDataDriver` 上，所以 #5181（PR #6076）与 #6075（PR #6210）的收窄都没走到它，#6212 批 A+E（#6355）收的是 `analyzeQuery` / `findWithWindowFunctions`，也没覆盖它。它的方法体一直说得很清楚——`applyFilters(builder, filters)` 拿的是**实参本身**，因此它要的是 `find()` 放在 `query.where` 里的那个值，**不是 query 信封**；`filters?: any` 只是没把这句话写进类型里。
+
+  ```ts
+  // 收窄前后都成立，一处调用点都不用改
+  await driver.distinct("orders", "product", { status: "completed" });
+  ```
+
+  **收窄真正买到的东西，是实测出来的，不是推断的。** 三行数据（`Laptop`/`Mouse` 为 `completed`，`Ghost` 为 `pending`），逐个形状喂给 `distinct('orders','product', …)`：
+
+  | 第三参                       | 收窄前                             | 收窄后       |
+  | :--------------------------- | :--------------------------------- | :----------- |
+  | `{ status: 'completed' }`    | 返回 `["Laptop","Mouse"]`          | 不变         |
+  | 省略                         | 返回全集                           | 不变         |
+  | `'completed'`（标量）        | **编译通过，返回全集**             | **编译错误** |
+  | `{ object, where }`（信封）  | 抛 `INVALID_FILTER` / 400          | 不变         |
+  | `['status','=','completed']` | 抛 `INVALID_FILTER` / 400（#5158） | 不变         |
+
+  第三行就是本次消掉的那一格：一个真心想问「completed 订单里有哪些商品」的调用，编译通过，然后拿到**每一个**商品。`applyFilters` 对「真值但非对象、非数组」的 filter 不发射任何谓词（该方法尾注写着这件事），于是过滤条件被整条丢掉。方向是**放宽**——这正是 #6320 与 #5234 同族的那类「静默错答案」。
+
+  **有一格是任何类型都关不上的，本次如实写进注释而不是假装关上了。** `FilterCondition` 的键**就是字段名**，所以它是开放映射（`[key: string]: any`）：`{ object, where }` 在结构上是一个完全合法的 filter——约束两个分别叫 `object` 和 `where` 的列。没有任何注解能把它和正当 filter 分开。#6320 提出的「让反向错配也编译不过」在这个参数上**不可达**，实测确认；能拿到的保证是**运行期响亮失败**：信封里的 `where` 是对象，而没有任何比较值可以是对象，于是 `assertCompilableComparand` 抛 `INVALID_FILTER` / 400。这半边 driver-sql 从来就不是静默的；`driver-memory` 那半边（裸 filter 交给它会静默返回全集）留在 #5499 冻结面内，本次不碰。
+
+  **零运行时改动**：非测试改动 100% 是一个类型注解加一段注释，无逻辑、无行为、无 emit 差异。
+
+  **逐处复核了全部 14 个调用点**（本单正文记的是 3 处，实测偏低）：driver-sql 11 处、driver-sqlite-wasm 3 处、driver-turso 0 处；其中真正传第三参的是 4 处（driver-sql 2 + driver-sqlite-wasm 2），全部本来就写的裸 filter，**零报错、零 fixture 改动**。
+
+  **driver-sqlite-wasm 也标 major**：`SqliteWasmDriver extends SqlDriver` 且不覆写 `distinct`，所以它**已发布的 `.d.ts`** 里这个方法的签名同样收窄，它的使用者看到的是同一个变化。该包读的是 driver-sql 构建后的 `dist/*.d.ts` 而非源码，是一处已知门禁盲区，本次用「往参数类型里临时塞一个调用方不可能满足的成员、重建、看调用点是否逐一变红」证明它确实读到了新 d.ts：driver-sql 6 处红、driver-sqlite-wasm 3 处红，与预判逐一相符。
+
+  ### 迁移
+
+  调用点若把**标量**（或任何非 `FilterCondition` 值）交给第三参，编译器会指出来：
+
+  ```
+  error TS2345: Argument of type 'string' is not assignable to parameter of type 'FilterCondition'.
+  ```
+
+  改法是把它写成它本来就该是的裸 filter 对象（`'completed'` → `{ status: 'completed' }`）。⚠️ 这类调用点在收窄前拿到的是**未过滤的全集**，所以这不是一次等价改写：修完之后返回值会变，而变化后的那个才是调用方本来想要的答案。本仓零处这样的调用点。
+
+  ⚠️ 无类型的 JS 调用方**既不会拿到编译错误、也不会有任何行为变化**（本次零运行时改动）。对他们而言，上面那条是「你一直没在过滤」的**唯一通知渠道** —— 这也是本次记台账条目的理由，见下。
+
+  <!-- adr-0087: registered driver-sql-distinct-bare-filter-typed -->
+
+### Minor Changes
+
+- 82397b6: feat(drivers,objectql): `$regex` / `$options` are refused everywhere, and `$icontains` is implemented on the SQL family (#5702)
+
+  The driver half of the #4706 ruling. #5701 landed the contract (the vocabulary,
+  the `RETIRED_FILTER_OPERATORS` prescriptions, the shared text case-set) and
+  #5710 flipped the last live producer — `plugin-auth`'s ObjectQL adapter, which
+  emitted `$regex` on the authentication path — so the refusal can now land
+  without breaking sign-in.
+
+  **BREAKING for anyone writing `$regex` or `$options` in a filter.** Both are
+  refused on every backend with `INVALID_FILTER` / 400 and a message that names
+  the replacement. `$regex` was never a declared operator: `driver-sql` compiled
+  it to a LIKE-escaped substring (so `a.b` matched only the literal `a.b`),
+  `driver-memory` ran it as a real `RegExp` (so the same filter also matched
+  `axb`, and an _invalid_ pattern was caught and answered `false` — zero rows, in
+  silence), and `objectql`'s `having` did the same. Write `$icontains` for the
+  case-insensitive substring search this was almost always used for, `$contains`
+  for a case-sensitive one; a pattern that genuinely needs a regex has no
+  filter-level replacement.
+
+  **`$icontains` now runs on the SQL family** — `driver-sql`, `driver-sqlite-wasm`,
+  and both of `driver-turso`'s transports (the remote one does not go through
+  knex, so it needed its own). It compiles to `LOWER(col) LIKE LOWER(?) ESCAPE ?`
+  through the same `applyLike` / `pushLike` that carries the `%` / `_` / `\`
+  escaping, as a `fold` parameter rather than a second emitter — a copied emitter
+  is where the escape class would have been dropped, and an unescaped `%` matches
+  every row. An empty or non-string comparand is refused on the validating walk
+  (an empty one matches every row, which widens rather than narrows). On SQLite
+  `lower()` folds ASCII only, which IS the contract (#4706 Q1 = A): `$icontains:
+'café'` does not match `CAFÉ`.
+
+  <!-- adr-0087: registered filter-regex-options-retired -->
+
+  `driver-mongodb`'s unknown-operator arm was throwing a bare `Error` with no
+  `code` and no `status`, three lines from the helper in its own file that sets
+  `INVALID_FILTER` / 400 — a 500-shaped body for a 400-class client mistake. It
+  now speaks the same envelope as its three siblings.
+
+  Two parts of the ruling are deliberately NOT in this change and stay tracked in
+  `scripts/check-driver-conformance.mjs`'s ledger: the `$contains` family's
+  case-sensitivity (#4706 Q2 = A) needs SQLite's `LIKE` replaced by a case-exact
+  construct in the driver, the RLS lowering and the analytics lowering together,
+  or one permission rule compiles to two row sets (#6518); and `$icontains` on the
+  JS evaluation faces needs the spec vocabulary to take the operator, which cannot
+  happen before `driver-memory` has an arm for it (#6520).
+
+- 3172831: fix(drivers): text-operator case folding is the CONTRACT's answer, not the dialect's (#6518)
+
+  The `$contains` family and `$icontains` returned **different rows on different
+  databases** for the same filter, because case sensitivity was decided by whatever
+  `LIKE` happened to mean on the dialect underneath. Both directions **over-matched**
+  — they returned rows the filter excludes, which on an ADR-0021 RLS read scope is
+  over-reach rather than a loose filter (#3948):
+
+  |                              | `$contains` / `$notContains` / `$startsWith` / `$endsWith` — case-SENSITIVE (#4706 Q2 = A) | `$icontains` — folds ASCII ONLY (#4706 Q1 = A) |
+  | :--------------------------- | :----------------------------------------------------------------------------------------- | :--------------------------------------------- |
+  | SQLite / turso / sqlite-wasm | ❌ `LIKE` folds ASCII                                                                      | ✅ `lower()` is ASCII-only                     |
+  | Postgres                     | ✅ `LIKE` is case-exact                                                                    | ❌ `LOWER()` folds all of Unicode              |
+  | MySQL                        | ❌ follows the column's collation                                                          | ❌ `LOWER()` folds all of Unicode              |
+
+  Read across: **each dialect was already right on the half another one got wrong**,
+  which is why neither half could be found from one backend alone.
+
+  ## What now runs
+
+  The construct is chosen per dialect, in one emitter, so the escaping and the fold
+  stay a single code path (an unescaped wildcard is a filter bypass, P0 — #5567):
+
+  - **SQLite family → `GLOB`.** `LIKE`'s ASCII fold cannot be switched off per
+    statement (`PRAGMA case_sensitive_like` is connection-global, so one query would
+    redefine every other query on the connection), and `CAST(col AS BLOB) LIKE ?` was
+    measured to match _nothing at all_. `GLOB` is case-exact and brings its own
+    escaped class — `*`, `?`, `[` as the self-closing classes `[*]`, `[?]`, `[[]`,
+    because SQLite's grammar gives `GLOB` no `ESCAPE` clause. `$icontains` keeps
+    `lower()` on both operands, still ASCII-only.
+  - **Postgres → `LIKE`, unchanged.** Only the fold moved, from `LOWER()` to an
+    explicit `translate()` over the 26 ASCII letters. Measured on a live PostgreSQL
+    16 (ICU database): `LOWER('CAFÉ')` is `'café'` — the over-fold — while the
+    `translate()` form leaves `É` alone.
+  - **MySQL → `LIKE` over `CAST(… AS BINARY)`**, so the comparison is byte-wise and
+    no collation decides the case; `$icontains` folds byte-wise over the same binary
+    rendering, which is ASCII-only because UTF-8 is self-synchronising.
+  - **Any other client** keeps the previous `LIKE` / `LOWER()` shape — it is the only
+    form that still runs there — and is recorded as residue rather than left to be
+    discovered.
+
+  `driver-turso`'s remote transport carries the twin (it compiles filters itself and
+  inherits nothing), and the two transports are now held to the same rows by a
+  parity suite that runs the shared `FILTER_TEXT_CASES` on both.
+
+  ## Behaviour change — read this before upgrading
+
+  A filter whose comparand's case did not match the stored text used to match on
+  SQLite/turso/sqlite-wasm and may have matched on MySQL. It no longer does:
+
+  ```ts
+  // rows: { id: '1', name: 'ACME Corp' }, { id: '2', name: 'acme corp' }
+  {
+    name: {
+      $contains: "acme";
+    }
+  } // was ['1','2'] on SQLite → now ['2'] everywhere
+  {
+    name: {
+      $icontains: "acme";
+    }
+  } // ['1','2'] — unchanged, and now correct on PG/MySQL too
+  {
+    name: {
+      $icontains: "café";
+    }
+  } // was ['3','4'] on PG/MySQL → now ['4'] everywhere
+  ```
+
+  If you were relying on `$contains` to ignore case, **write `$icontains`** — that is
+  the operator for it, and it now folds the same ASCII-only range on every backend.
+  Result sets only ever get NARROWER, never wider, so a filter that was already
+  correct stays correct.
+
+  ## Why `minor` rather than `major`
+
+  No declared surface moves. `$contains` still exists, still takes the same
+  comparand, and `filter.zod.ts` is untouched — the case-sensitivity this delivers
+  was **already published** as the contract by #5701 (`FILTER_TEXT_CASES`, one
+  release earlier in this same v17 major), and the drivers were the half that had
+  not caught up. This is Prime Directive #12 applied in the direction it points:
+  declared = enforced. It is graded the way its sibling #5702/#6549 was graded for
+  the same operator family in the same rc cycle, and it registers nothing in the
+  ADR-0087 registries because it retires no authorable key.
+
+  ## What is deliberately NOT in this change
+
+  `driver-memory` and `driver-mongodb` still fold case on their query paths — they
+  are the #5499 frozen family, so their `FILTER_TEXT_CASES` cells stay honest DEBT
+  and are tracked as #6682 (case sensitivity) and #6520 (`$icontains`). The
+  `service-analytics` SQL compilers were measured already compliant: they emit
+  Postgres-shaped statements, where `LIKE` is case-exact, and that assumption is now
+  written down and pinned rather than implied.
+
+### Patch Changes
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [29e28a3]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [6f6fec7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d367f03]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [82397b6]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [3264516]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [62159bd]
+- Updated dependencies [d48aad5]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [3172831]
+- Updated dependencies [939f579]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/driver-sql@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

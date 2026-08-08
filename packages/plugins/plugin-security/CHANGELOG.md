@@ -1,5 +1,366 @@
 # @objectstack/plugin-security
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- 9e9445b: <!-- adr-0087: not-required (no-migration-prescription) what this change removes is a VALUE in one platform-seeded sys_permission_set row, not an authorable key. No spec schema key is retired: object_permissions['*'] stays fully authorable, and admin_full_access / organization_admin / viewer_readonly still ship one. Nothing an app authored becomes invalid, nothing stored fails to parse, and the seeded row itself is rewritten by the boot seeder, so there is no stored shape for `objectstack migrate meta` to rewrite and nothing for the ledger to carry. The Migration section below prescribes a DEPLOYMENT action -- declare the object access you were relying on -- not a consumer code or metadata rewrite. -->
+
+  fix(plugin-security)!: `member_default` no longer grants a `*` wildcard — the platform baseline is explicit-allow (#5491)
+
+  **This is a deliberate, breaking narrowing of the default security posture.
+  Deployments that relied on the implicit wildcard lose that access. That is the
+  intended behaviour change, not a side effect — read the migration below before
+  upgrading.**
+
+  `member_default` is the additive `everyone` baseline: it resolves for **every**
+  authenticated member, in addition to whatever else they hold. It carried
+  `object_permissions["*"] = {allowCreate: true, allowRead: true, allowEdit: true,
+allowDelete: false}`, and object permissions merge most-permissively — so that
+  entry was not a default, it was a **floor no application could get under**. An
+  app's explicit-allow object gate was erased on three of the four axes; only
+  delete stayed profile-driven, because the baseline never granted it.
+
+  HotCRM's 17.0 GA sweep measured the consequence across 5 profiles × 17 objects
+  (188 probes, each user with their own bearer token):
+
+  - **21 of 21 create-DENIAL probes returned `201`** — every profile created on
+    every object once validation passed, including objects the profile explicitly
+    denied;
+  - a `service_agent` profile that declares no edit anywhere edited its own
+    `crm_account`;
+  - on `public_read` objects the wildcard yielded **`200` with ALL rows** for
+    non-holders — real unauthorized reads, not the documented "200 with 0 rows"
+    empty-set pattern;
+  - `security/explain` stated it outright for a profile carrying an all-false
+    deny: _"create on 'crm_opportunity' is granted by [member_default]"_.
+
+  Because app-side authorization suites validate the app's _declarations_, CI
+  stayed green while the runtime posture was default-open — `declared ≠ enforced`
+  inside the security layer itself.
+
+  **The change.** The wildcard is removed on all three live axes. The platform
+  baseline narrows to explicit-allow: object access now comes from OWDs plus
+  profile / permission-set **declarations** only. Deny-precedence merge semantics
+  were considered and rejected — permission sets remain additive capability
+  containers (ADR-0090); the fix is to stop the platform shipping a grant nobody
+  asked for, not to invent a veto.
+
+  What `member_default` still declares, it still enforces, and nothing here is
+  newly granted: read on the better-auth identity tables (their writes stay
+  denied — that door is better-auth), self-service on `sys_user_preference` (now
+  an explicit entry rather than an implicit one; the effective access for a member
+  is byte-identical, and its `sys_user_preference_self` RLS carve-out already
+  declared exactly that intent), and every row-level policy it shipped before —
+  `owner_only_writes`, `owner_only_deletes` and the identity `_self` carve-outs
+  are untouched. The set stays anchor-safe, so its `everyone` binding is
+  unaffected. `admin_full_access`, `organization_admin` and `viewer_readonly` keep
+  their wildcards: those are granted deliberately to a principal, which is exactly
+  what the baseline was not.
+
+  ## Migration
+
+  After upgrading, a member holding **no** application profile has no access to
+  application objects. Restore access by declaring it, in one of two places:
+
+  1. **Ship an app default profile.** Mark a permission set `isDefault: true` and
+     the CLI wires it as the additive per-request baseline (ADR-0056 D7 /
+     ADR-0090 D5). This is the recommended route and what the bundled showcase app
+     already does — list the objects members legitimately touch, with the axes
+     they need.
+  2. **Grant per position / per user.** Bind an ordinary permission set through
+     `sys_position_permission_set` or `sys_user_permission_set`.
+
+  To find what a deployment was silently relying on, ask
+  `GET /api/v1/security/explain?object=<name>&operation=<op>` for a
+  representative member before upgrading: any answer attributing the grant to
+  `[member_default]` on an application object is access that will stop. An app
+  whose own profiles already declare everything its users do is unaffected.
+
+### Minor Changes
+
+- 6029cc1: Explain and enforcement now resolve ONE authorization aggregation (#6352).
+
+  `buildContextForUser()` — the explain API's reconstruction of an arbitrary user's
+  context, behind `explain(request, callerContext)` and the `userId` parameter — was
+  a hand-written second implementation of `@objectstack/core`'s `resolveAuthzContext`
+  aggregation. Its agreement with enforcement was guaranteed by two comments saying
+  it mirrored the resolver ("mirroring the runtime resolver's semantics", "we compute
+  it here with the IDENTICAL rule") and by nothing else: no assertion anywhere in the
+  repo compared the two.
+
+  It did not agree. Measured over identical rows, the mirror dropped:
+
+  | input                                                          | resolver       | explain mirror |
+  | -------------------------------------------------------------- | -------------- | -------------- |
+  | `sys_member` role positions (ADR-0095 D3)                      | `org_admin`, … | —              |
+  | position-bound permission sets (`sys_position_permission_set`) | resolved       | —              |
+  | the `everyone` anchor's bound sets (ADR-0090 D5)               | resolved       | —              |
+  | `platform_admin` position projection (ADR-0068 D2)             | projected      | —              |
+  | `systemPermissions` / `posture` / `email` / `ai_seat`          | resolved       | —              |
+
+  The user-visible consequence: permission sets are resolved BY NAME from
+  `context.positions ∪ context.permissions`, and a set carried by a POSITION only
+  becomes a name inside the resolver. So for any user whose grants arrive through a
+  position — the ordinary way an org grants access — the explain panel resolved fewer
+  sets than enforcement and reported a denial the runtime never made. A security UI
+  that says "you have no access" about access you have is worse than no panel.
+
+  `buildContextForUser` now calls `resolveUserAuthzGrants` (core's userId-driven
+  resolver core, already the same entry point `runAs:'user'` automation runs use) and
+  adds presentation only: the ADR-0091 expired-grant and `delegated_from` annotations
+  the resolver correctly discards, and `hasPlatformAdminGrant`, which is now read
+  back off the resolver's own posture verdict instead of recomputed. The returned
+  context additionally carries `systemPermissions`, `org_user_ids`, `posture`,
+  `tabPermissions` and `email` — additive; no field was removed or renamed.
+
+  Pinned by a parity suite that runs both implementations over the same fixture rows
+  (org role projection, position-bound sets, the `everyone` anchor, both
+  `platform_admin` polarities, `organization_admin` → `TENANT_ADMIN`, ADR-0091
+  windows) and asserts each case's concrete expected output, so the pin cannot pass
+  by both sides resolving to nothing. Restoring the mirror turns 9 of those cases
+  red.
+
+- a954634: feat(meta): object schemas served by `/meta` and `/metadata` are masked per caller (ADR-0106, #3682)
+
+  The data plane has enforced field-level security everywhere it matters for
+  several releases — list reads mask values, exports project columns, and the
+  write path 403s forbidden fields. The **metadata** plane did not: any
+  authenticated caller who asked `GET /meta/object/:name` received the full object
+  schema, including fields they have no read access to at all.
+
+  That is more than a list of names. A field carries its label, type, **picklist
+  option values** (often a sensitive operational taxonomy), its **formula**
+  expression (pricing and scoring IP), its `visibleWhen` predicate, its
+  `defaultValue`, and — via ADR-0066 D3 — the `requiredPermissions` capability
+  names guarding it. For a customer running a dealer, supplier or patient portal
+  on ObjectStack, the only remediation available in their own tier was modelling
+  discipline: keep sensitive fields off portal-visible objects, or split one
+  business entity into an internal object and a portal object and synchronize
+  them. This is a platform-side fix, so every deployment inherits it.
+
+  **What changes.** Serving an object schema now projects `fields` onto the set
+  the caller may read, and a field outside that set is removed **whole** — no
+  name, no label, no options, no formula, no `requiredPermissions`. Partial
+  redaction was rejected: keeping the name still leaks existence and invites
+  clients to render ghost columns. Masking keys on the `readable` bit only; a
+  readable-but-not-editable field stays in the schema, because the UI must render
+  it and the `editable` affordance is already served per caller by
+  `/auth/me/permissions`.
+
+  Every outlet that serves an object schema goes through one shared projection,
+  so coverage is not a per-route promise:
+
+  - `GET /meta/object/:name` — the cached branch (the default) **and** the
+    uncached branch, which is what `?state=draft`, `?preview=draft` and
+    `?package=` take;
+  - `GET /meta/object/:name?layers=true` — the layered diagnostic view, all three
+    of `code` / `overlay` / `effective`;
+  - `GET /meta/:type/:section/:name` — the compound-name read;
+  - `GET /meta/object` — the list read, each item projected independently;
+  - the runtime `/metadata` catch-all — the protocol-backed, registry-backed and
+    last-ditch single reads, the `/metadata/objects` list (protocol and registry),
+    and the legacy one-segment `/metadata/:objectName` spelling.
+
+  **Caching is unchanged in cost and correct per cohort.** The shared metadata
+  cache still stores one full schema per (type, name, locale, environment) — no
+  caller dimension in the key — and the mask runs after retrieval. What varies
+  per caller is the validator: a stable hash of the caller's _denied_ field set is
+  folded into the ETag. A caller who can read everything denies nothing, so their
+  fingerprint is empty and both their ETag and their response body are
+  **byte-identical** to previous releases. Callers in one permission cohort share
+  `304`s; a permission change moves the fingerprint and self-invalidates the stale
+  `304`, so nothing needs purging after a permission-set edit.
+
+  **Exemptions** are a property of the caller, not of the route: `isSystem` and
+  platform-admin callers (holders of `studio.access` / `setup.access`, the same
+  judgement the app filter uses) receive the full schema on any route, because
+  Studio and Setup authoring cannot work against a projected schema.
+
+  **Failure posture is explicit and three-tiered.** With no `security` service
+  registered the schema is served unmasked — that deployment has no FLS posture at
+  all and tightening only the metadata plane would be theater. When field
+  visibility cannot be _determined_ (a registry-hydration window), the schema is
+  served unmasked but loudly: a structured warning, a new
+  `objectstack_meta_field_visibility_undetermined_total` counter, and a response
+  downgraded to `Cache-Control: private, no-store` with no shared ETag. Failing
+  closed there would brick every render of the object for every user and can
+  deadlock console bootstrap, since permission sets are themselves metadata. When
+  permission evaluation **throws**, the request fails with `503
+FIELD_VISIBILITY_UNRESOLVED` — an unhealthy security service must not auto-open
+  a disclosure hole, and an empty-fields `200` would be both a silently wrong UI
+  and cacheable poison.
+
+  **Guest and public deployments** get a deliberate posture rather than an
+  accidental one: `@objectstack/plugin-security` gains
+  `getMetadataReadableFields`, which resolves the configured fallback permission
+  set (`security.fallbackPermissionSet`, default `member_default`) for a caller
+  who resolves to zero sets, exactly as `/auth/me/permissions` does.
+  `getReadableFields` is unchanged — on the data plane, mirroring the engine
+  middleware's fall-open is what keeps it drift-free.
+
+  **Escape hatch.** Masking is the platform default. A deployment that explicitly
+  wants an unmasked metadata plane sets `OS_ALLOW_UNMASKED_OBJECT_METADATA=1`, or
+  `metadata.maskObjectFields: false` on the REST server. Toggling it changes
+  disclosure only: the console reads every field affordance from
+  `/auth/me/permissions`, so UI correctness is unaffected either way.
+
+  Operators fronting the runtime with a CDN or reverse proxy should read the new
+  "CDN / reverse-proxy caching of `/meta` object schemas" section in the
+  production-readiness guide before tuning anything — in particular, do not
+  configure a proxy to ignore `Cache-Control: private`, and do not strip or
+  rewrite `ETag` on these routes.
+
+- 9e9445b: fix(plugin-security): the row-level write gate honours `modifyAllRecords` and `edit`-level record shares (#5492)
+
+  HotCRM's 17.0 GA acceptance sweep measured two declared write-widening
+  mechanisms as completely inert. A manager profile carrying `viewAllRecords` +
+  `modifyAllRecords` got `403 … (row-level security)` on **every** cross-owner
+  write — update and delete, four objects — while its reads widened exactly as
+  declared (43/43, 9/9). And all three `edit`-level sharing rules materialised
+  into `sys_record_share` correctly and widened reads exactly, yet a `PATCH` by
+  the share target was refused every time. Read-level shares correctly denied
+  writes, so the machinery distinguished the levels on paper and the write gate
+  then ignored the distinction.
+
+  **One root cause.** Row-level write access was two authorities AND-ed together
+  with no knowledge of each other. `ISharingService` reads all three declared
+  wideners (ownership at write DEPTH, `sys_record_share.access_level`, the
+  `modifyAllRecords` bypass); the security plugin's by-id write pre-image gate
+  read only RLS — and sitting inside that RLS is the platform's own ownership
+  floor, `owner_only_writes` / `owner_only_deletes` (`created_by ==
+current_user.id`, applicability `positions: ['org_member']`). That floor is a
+  second implementation of "ownership", and it is the one blind to every widener.
+  Every member resolves it additively from the `member_default` baseline — a
+  manager is an org member too — so the widener-blind copy always won.
+
+  **The fix is composition by provenance, not a new bypass.** The pre-image gate
+  now asks the authority that owns those mechanisms for its tri-state verdict
+  (`ISharingService.checkEdit` / `checkDelete`, the contract added in #6428):
+
+  - `allow` — a positive basis exists, so the declared authority **replaces** the
+    platform floor;
+  - `abstain` — record sharing does not enforce on this row at all (a `public`
+    object, an object with no owner field, a platform internal), so the floor
+    **stays**: it is the only row-level write gate such rows have;
+  - `deny` — the floor stays; the refusal belongs to the sharing middleware that
+    produced the verdict.
+
+  The action boundary is inherited rather than restated (ADR-0111 D3): update asks
+  `checkEdit`, delete asks `checkDelete`, so an `edit` share widens update and
+  still does not confer delete. `modifyAllRecords` covers both verbs
+  (`MODIFY_ALL_WRITE_KEYS`).
+
+  **What is deliberately unchanged.** Layer 0's tenant wall and every
+  **app-authored** RLS policy are untouched — only the policies the platform
+  itself ships are replaceable, matched by the same `(object, name, using)`
+  provenance key ADR-0105 D3 uses for tenant policies, so an app policy spelling
+  the identical predicate keeps refusing (ADR-0049: a declared security property
+  stays declared). This is therefore not `modifyAllRecords` bypassing write-side
+  RLS on an ordinary business posture, which ADR-0066 ① withholds and this change
+  leaves withheld; it is the platform's floor deferring to the platform's own
+  ownership authority. The on-behalf-of (ADR-0090 D10) path keeps both principals'
+  floors, matching `hasWriteBypass`, which already fails closed for a delegated
+  context. A deployment without `@objectstack/plugin-sharing` sees no change at
+  all: with nothing to consult, the gate abstains and the floor decides.
+
+  Net effect for deployments: a Modify All Data holder can now correct, reassign
+  and clean up records they did not create, and an `edit`-share recipient can
+  finally edit the record shared with them. Nothing that was refused for lack of a
+  grant becomes permitted — read-share targets are still denied writes, `edit`
+  shares still cannot delete, and a member with neither is still refused.
+
+### Patch Changes
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [e9b5265]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [6965160]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/formula@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

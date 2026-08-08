@@ -1,5 +1,118 @@
 # @objectstack/plugin-reports
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- 2c2a212: fix(reports): owner-gate the saved-report schedule routes (#2980)
+
+  The report read/run/delete routes are owner-isolated (a caller may only touch a
+  report they own, denied as `REPORT_NOT_FOUND` to avoid leaking that the id
+  exists), but the two schedule routes bypassed that gate: `unscheduleReport` and
+  `listSchedules` took the caller `context` as `_context` and never consulted it,
+  querying under the system context (RLS-bypassing). Any authenticated caller
+  could therefore delete another owner's report schedule — a cross-owner
+  destructive write — or list another owner's schedules (leaking recipient
+  addresses and cron), by supplying an id.
+
+  Both now resolve the schedule's parent report and require the caller to own it,
+  mirroring the sibling routes:
+
+  - **`unscheduleReport`** loads the schedule, then its report, and deletes only
+    when `canAccessReport` holds; a cross-owner attempt throws `REPORT_NOT_FOUND`
+    (mapped to `404` by the REST layer, deny-as-404 anti-enumeration), while a
+    genuinely-absent schedule stays idempotent. `scheduleReport` (create) was
+    already gated via `getReport`, so only the delete/list doors were open.
+  - **`listSchedules`** returns an empty list to any non-system caller who cannot
+    access the report it is scoped to — the same non-leaking posture as
+    `listReports`. The scheduler's system context still sees every schedule.
+
+  No authoring-surface or metadata change; existing owner-path behavior is
+  unchanged.
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

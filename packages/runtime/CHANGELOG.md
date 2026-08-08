@@ -1,5 +1,769 @@
 # @objectstack/runtime
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- a954634: feat(meta): object schemas served by `/meta` and `/metadata` are masked per caller (ADR-0106, #3682)
+
+  The data plane has enforced field-level security everywhere it matters for
+  several releases — list reads mask values, exports project columns, and the
+  write path 403s forbidden fields. The **metadata** plane did not: any
+  authenticated caller who asked `GET /meta/object/:name` received the full object
+  schema, including fields they have no read access to at all.
+
+  That is more than a list of names. A field carries its label, type, **picklist
+  option values** (often a sensitive operational taxonomy), its **formula**
+  expression (pricing and scoring IP), its `visibleWhen` predicate, its
+  `defaultValue`, and — via ADR-0066 D3 — the `requiredPermissions` capability
+  names guarding it. For a customer running a dealer, supplier or patient portal
+  on ObjectStack, the only remediation available in their own tier was modelling
+  discipline: keep sensitive fields off portal-visible objects, or split one
+  business entity into an internal object and a portal object and synchronize
+  them. This is a platform-side fix, so every deployment inherits it.
+
+  **What changes.** Serving an object schema now projects `fields` onto the set
+  the caller may read, and a field outside that set is removed **whole** — no
+  name, no label, no options, no formula, no `requiredPermissions`. Partial
+  redaction was rejected: keeping the name still leaks existence and invites
+  clients to render ghost columns. Masking keys on the `readable` bit only; a
+  readable-but-not-editable field stays in the schema, because the UI must render
+  it and the `editable` affordance is already served per caller by
+  `/auth/me/permissions`.
+
+  Every outlet that serves an object schema goes through one shared projection,
+  so coverage is not a per-route promise:
+
+  - `GET /meta/object/:name` — the cached branch (the default) **and** the
+    uncached branch, which is what `?state=draft`, `?preview=draft` and
+    `?package=` take;
+  - `GET /meta/object/:name?layers=true` — the layered diagnostic view, all three
+    of `code` / `overlay` / `effective`;
+  - `GET /meta/:type/:section/:name` — the compound-name read;
+  - `GET /meta/object` — the list read, each item projected independently;
+  - the runtime `/metadata` catch-all — the protocol-backed, registry-backed and
+    last-ditch single reads, the `/metadata/objects` list (protocol and registry),
+    and the legacy one-segment `/metadata/:objectName` spelling.
+
+  **Caching is unchanged in cost and correct per cohort.** The shared metadata
+  cache still stores one full schema per (type, name, locale, environment) — no
+  caller dimension in the key — and the mask runs after retrieval. What varies
+  per caller is the validator: a stable hash of the caller's _denied_ field set is
+  folded into the ETag. A caller who can read everything denies nothing, so their
+  fingerprint is empty and both their ETag and their response body are
+  **byte-identical** to previous releases. Callers in one permission cohort share
+  `304`s; a permission change moves the fingerprint and self-invalidates the stale
+  `304`, so nothing needs purging after a permission-set edit.
+
+  **Exemptions** are a property of the caller, not of the route: `isSystem` and
+  platform-admin callers (holders of `studio.access` / `setup.access`, the same
+  judgement the app filter uses) receive the full schema on any route, because
+  Studio and Setup authoring cannot work against a projected schema.
+
+  **Failure posture is explicit and three-tiered.** With no `security` service
+  registered the schema is served unmasked — that deployment has no FLS posture at
+  all and tightening only the metadata plane would be theater. When field
+  visibility cannot be _determined_ (a registry-hydration window), the schema is
+  served unmasked but loudly: a structured warning, a new
+  `objectstack_meta_field_visibility_undetermined_total` counter, and a response
+  downgraded to `Cache-Control: private, no-store` with no shared ETag. Failing
+  closed there would brick every render of the object for every user and can
+  deadlock console bootstrap, since permission sets are themselves metadata. When
+  permission evaluation **throws**, the request fails with `503
+FIELD_VISIBILITY_UNRESOLVED` — an unhealthy security service must not auto-open
+  a disclosure hole, and an empty-fields `200` would be both a silently wrong UI
+  and cacheable poison.
+
+  **Guest and public deployments** get a deliberate posture rather than an
+  accidental one: `@objectstack/plugin-security` gains
+  `getMetadataReadableFields`, which resolves the configured fallback permission
+  set (`security.fallbackPermissionSet`, default `member_default`) for a caller
+  who resolves to zero sets, exactly as `/auth/me/permissions` does.
+  `getReadableFields` is unchanged — on the data plane, mirroring the engine
+  middleware's fall-open is what keeps it drift-free.
+
+  **Escape hatch.** Masking is the platform default. A deployment that explicitly
+  wants an unmasked metadata plane sets `OS_ALLOW_UNMASKED_OBJECT_METADATA=1`, or
+  `metadata.maskObjectFields: false` on the REST server. Toggling it changes
+  disclosure only: the console reads every field affordance from
+  `/auth/me/permissions`, so UI correctness is unaffected either way.
+
+  Operators fronting the runtime with a CDN or reverse proxy should read the new
+  "CDN / reverse-proxy caching of `/meta` object schemas" section in the
+  production-readiness guide before tuning anything — in particular, do not
+  configure a proxy to ignore `Cache-Control: private`, and do not strip or
+  rewrite `ETag` on these routes.
+
+- 0996899: fix(runtime): a `/share-links` permission denial answers 403, not 500 (#6649)
+
+  The dispatcher's `/share-links` domain ended in a hand-written catch that read
+  one status channel:
+
+  ```
+  return sendErr(err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? '…');
+  ```
+
+  Every refusal `ShareLinkService` raises itself carries `status` (its `makeError`
+  sets `status` + `code`), which is why the 403 `FORBIDDEN` and 422
+  `SHARING_NOT_ENABLED` answers were always correct. But the refusals that come
+  out of the **security middleware** do not come from that service. Creating a
+  link performs a visibility read — `svc.createLink` calls
+  `engine.find(object, { context })` — and when the caller's permission sets grant
+  no `allowRead` on the object, the CRUD gate throws
+  `PermissionDeniedError { code = 'PERMISSION_DENIED'; statusCode = 403 }`, a class
+  with **no `status` field at all** (`plugin-security/src/errors.ts`; runtime's own
+  mirror in `security/resolve-execution-context.ts` has the same shape).
+  `ShareLinkService` does not catch it, so it reached the domain catch, `err?.status`
+  was `undefined`, and a 403-class refusal left as **HTTP 500** while `error.code`
+  faithfully read `PERMISSION_DENIED`.
+
+  That envelope contradicted itself, and the contradiction is load-bearing on the
+  client: 5xx is retryable to many SDKs and browser clients, so a permanent
+  authorization answer was being retried, and a caller branching on the status saw
+  "the server is broken" where the truth was "you may not read this record". It is
+  reproducible on either tenancy posture, and — because `registerShareLinkRoutes:
+false` makes this domain the ONLY share-link surface on cloud's per-environment
+  kernels — it is the primary surface there, not a fallback one.
+
+  The catch now exits through `deps.errorFromThrown`, the dispatcher's shared
+  thrown-error mapper that `/meta`, `/actions` and `/mcp` already use. It reads
+  `status` **or** `statusCode`, and it carries a thrown error's structured
+  `issues` / `fields` details through instead of collapsing them to a message.
+  Reaching for the shared mapper — rather than widening the hand-written chain to
+  `err?.status ?? err?.statusCode ?? 500` — is the part that stops this exit
+  re-diverging: a second hand-written copy is how the two drifted apart in the
+  first place.
+
+  Two wire-visible consequences, both corrections:
+
+  - A permission denial on `POST` / `GET` / `DELETE /share-links` answers **403
+    `PERMISSION_DENIED`** where it answered 500 `PERMISSION_DENIED`. Clients
+    treating 5xx as retryable stop retrying a permanent refusal.
+  - A throw carrying neither status channel nor a code answers **500
+    `INTERNAL_ERROR`** where it answered 500 `INTERNAL`. `'INTERNAL'` was never
+    registered for `@objectstack/runtime` in `ERROR_CODE_LEDGER` (only `rest`,
+    `service-storage`, `service-i18n` and `plugin-sharing` register it, and the
+    ledger's per-package rows are provenance) — so this domain was emitting a code
+    it had not registered, and the required field is now filled by the catalogued
+    derivation every other dispatcher exit uses (ADR-0112).
+
+  Refusals that already carried `status` are untouched: the mapper reads that
+  channel on the same first branch the old chain did.
+
+- cca11e9: **`createStandaloneStack` now dispatches `libsql://` / Turso URLs** instead of refusing them as an unsupported scheme (#5820).
+
+  `detectDriverFromUrl()` recognised `memory://`, `postgres://`, `mongodb://` and `file:`, and threw on everything else — while `resolveDatabaseUrl()` listed `TURSO_DATABASE_URL` as one of its URL sources. A host that set it got the URL read in and then rejected on the way out. Since the CLI wired `libsql://` for `os serve` / `os start` (#5602), the same `OS_DATABASE_URL=libsql://…` booted under `os start` and failed under `os migrate`, which comes through this stack.
+
+  What changed:
+
+  - `libsql://…` and `http(s)://*.turso.…` resolve to the `turso` driver kind — the same two spellings the CLI classifies, kept identical on purpose.
+  - `databaseDriver: 'turso'` (and `OS_DATABASE_DRIVER=turso`) is accepted by the config schema.
+  - The driver comes from `@objectstack/driver-turso`, an **optional** install: it drags `@libsql/client` and its native bindings, so it is not a dependency of `@objectstack/runtime`. It is loaded lazily, only for a selection that asks for libSQL, and injected through the driver-factory seam `DefaultDatasourcePlugin` already exposes — so the connect path, the `bootCritical` fail-fast verdict, `OS_ALLOW_DRIVER_CONNECT_FAILURE` and the retained Setup → Datasources status are identical to every other kind.
+  - Package missing? The boot fails **loudly**, carrying the exact install command (`npm install @objectstack/driver-turso`) as data as well as prose. There is no SQLite fallback: a silent step-down would open an empty local database while your libSQL data stays untouched, and every write — including an `os migrate` DDL — would land in the wrong place (#3276).
+  - `databaseAuthToken` is no longer declared-and-ignored: the `turso` kind reads it, falling back to `OS_DATABASE_AUTH_TOKEN` and then the vendor's own `TURSO_AUTH_TOKEN` — the same precedence `os serve` uses.
+
+  Unknown schemes still throw, and the message now lists `libsql://` among the supported ones.
+
+- cfb549d: **`createStandaloneStack` now dispatches `mysql://`, and an unknown `OS_DATABASE_DRIVER` value is refused instead of silently becoming SQLite** (#6265).
+
+  Two halves of one defect family: a driver selection this stack could not dispatch.
+
+  **`mysql://` — the #5820 split with a different scheme.** The CLI has classified `mysql://` / `mysql2://` as the `mysql` kind since forever (`inferDriverTypeFromUrl`), the shared datasource factory has always been able to build it (`SqlDriver` on the `mysql2` client), and `content/docs/data-modeling/drivers.mdx` lists it in the URL-inference table — only `detectDriverFromUrl()` in this package had no arm. So one `OS_DATABASE_URL=mysql://…` booted under `os start` and hard-failed under `os migrate` (which boots through this stack) with `Unsupported database URL scheme`.
+
+  - `mysql://…` and `mysql2://…` resolve to the `mysql` kind, matched by character-for-character the same regex the CLI uses — the two functions answer the same question about the same URL, so a divergence between them _is_ the bug.
+  - The stack declares `{ driver: 'mysql', config: { url } }` and the shared factory builds it, exactly like `postgres`. No optional package and no new dependency: `mysql2` is already an optional peer of `@objectstack/driver-sql`, the same posture `pg` has, so a missing client surfaces at connect like it always did.
+  - `databaseDriver: 'mysql'` and `OS_DATABASE_DRIVER=mysql` are accepted; `sqliteFile` stays `null` for a MySQL target, so `os migrate`'s occupancy probe does not read a DSN as a file path.
+
+  **`OS_DATABASE_DRIVER` is validated now.** `databaseDriver` in config was parsed by a zod enum (loud rejection) while the env var was a bare `as` cast — an assertion that checks nothing at runtime. An unrecognised value matched no dispatch arm and landed in the chain's trailing `else`: SQLite, in silence. `OS_DATABASE_DRIVER=mysql` with no URL therefore created a local `standalone.db` while the operator believed they were talking to MySQL, and a typo (`mysq1`, `postgress`) did the same; with a URL set it surfaced as the doubly-misleading "sqlite driver was selected but the URL does not look like a file path" for someone who never selected sqlite. This is the #3276 class.
+
+  - Both paths now read **one** declaration (`StandaloneDatabaseDriverSchema`): the config key parses it, the env value parses it, the `ResolvedDriverKind` union is inferred from it, and the refusal enumerates its options rather than repeating them in a hand-written list.
+  - An unknown value throws, naming the value and every legal driver: `sqlite, sqlite-wasm, memory, postgres, mysql, mongodb, turso`. The env value is lower-cased first, matching the CLI's reader of the same variable; the accepted vocabulary is the enum and nothing else.
+  - The dispatch chain's trailing `else` is no longer "sqlite" — it is a `never` guard, so the _next_ kind added to the enum without a dispatch arm is a compile error rather than a wrong database.
+
+  Unknown URL schemes still throw (the message now lists `mysql://`), and the "unknown driver" and "unknown URL scheme" refusals stay distinguishable.
+
+- bd5fc38: fix(cli,runtime): one shared default-database resolution for `os dev` / `os start` / `os migrate` (#6469)
+
+  Three commands used to resolve three different default databases in the same
+  project directory — `os dev` → `.objectstack/data/dev.db`, `os start` →
+  `.objectstack/data/objectstack.db`, `os migrate *` →
+  `.objectstack/data/standalone.db` — and none consulted the project config.
+  Measured harm (hotcrm 17.0.0-rc.5): after `os start` + seed, `os migrate plan`
+  opened a fresh empty `standalone.db` it had just created and reported **22
+  tables of drift against a healthy database** — the inverted failure direction,
+  pointing an operator at rolling back a database that was fine.
+
+  Per the maintainer ruling (2026-08-08, archived on #6469), all three commands
+  now resolve through **one** shared function
+  (`resolveProjectDatabaseUrl`, exported from `@objectstack/runtime`):
+
+  1. explicit `--database` / `--database-url` / programmatic `databaseUrl`;
+  2. `OS_DATABASE_URL` / legacy `DATABASE_URL` / vendor `TURSO_DATABASE_URL`;
+  3. explicit in-memory driver selection (`--database-driver memory` /
+     `OS_DATABASE_DRIVER=memory`) — no file default is imposed;
+  4. the datasource the project config declares as its default home (a
+     `datasourceMapping` rule `{ default: true, datasource: <name> }` naming a
+     declared datasource whose connection is URL-derivable);
+  5. the **unified default file `objectstack.db`** under the state dir
+     (`OS_HOME` → `<projectRoot>/.objectstack` → `~/.objectstack`).
+
+  **Compatibility — an existing environment never looks like data loss.** When
+  the unified `objectstack.db` does not exist but a legacy `dev.db` or
+  `standalone.db` does, the command **reads the legacy file** and prints one
+  loud line naming exactly which file is being read and the `mv` command that
+  converges it on the unified name. No interactive prompt (CI-safe), nothing is
+  deleted or renamed automatically, and the probe order
+  (`objectstack.db` → `dev.db` → `standalone.db`) is identical across all three
+  commands — `dev.db` first among the legacies because it holds real dev data,
+  while `standalone.db` is most likely an empty artifact of the very fork this
+  fixes. An explicit `OS_DATABASE_URL` pins any file forever, unchanged.
+
+  Also per the ruling: `sqlite://` is now accepted as an alias of `file:` in
+  database-URL parsing (`sqlite://…` used to die under `os migrate` with
+  `Unsupported database URL scheme`); genuinely unsupported schemes keep their
+  precise refusal. Behavioural side effects of unification: `os dev` now honours
+  `OS_HOME` / `TURSO_DATABASE_URL` for its default like the other two commands
+  already did, `os dev --fresh`'s ephemeral file is named `objectstack.db`, and
+  `os db clean` targets the same unified resolution. The #3917
+  `sqlite-occupancy` guard's primary scenario (a dev server and `os migrate`
+  contending for one file) is now real under default paths — previously the two
+  never opened the same file, so the guard could not fire in the very scenario
+  its comment described.
+
+  The new cross-command pin (`unified-db-resolution.pin.test.ts`) asserts
+  `dev` / `start` / `migrate` resolve the SAME URL for the same project root in
+  every fallback state — the test whose absence let the fork live.
+
+### Patch Changes
+
+- f7d80f4: fix(runtime): `callData` no longer has a `batch` arm that answers a silent, empty success (#5856)
+
+  `callData`'s `action === 'batch'` arm returned `{ object, results: [] }` — an
+  HTTP 200 whose body a consumer cannot tell apart from "the batch ran and matched
+  nothing" — while opening no transaction and writing nothing. It was the only arm
+  in that function answering an unimplemented action with **success**: every other
+  unhandled action throws `400 Unknown data action: …`, and `aggregate` throws
+  `503` when the engine cannot serve it. Retry, idempotency and audit logic all
+  read a 200 + empty result set as one successful empty operation.
+
+  Nothing could reach it, and that is the point: its safety lived **upstream**, in
+  a route table that happens not to spell `batch`, not in any guard of its own —
+  the ADR-0115 Evidence 5 / #4451 shape, where one route-table extension silently
+  turns a dormant branch into a live "successfully did nothing". Every entry point
+  was enumerated before removal (`/data` compares `parts[1]` against the literal
+  `'query'` and otherwise reads it as a record id; the MCP bridge, the actions
+  domain and `invokeBusinessAction` pass literals; the declarative endpoint
+  executor is bounded by `ApiEndpointSchema.objectParams.operation`, a closed enum
+  of find/get/create/update/delete; and `callData` is not part of this package's
+  export surface), so the arm is removed under ADR-0049 enforce-or-remove rather
+  than converted to a 501 nobody would ever receive.
+
+  **Behaviour on every live path is unchanged** — no reachable request produced
+  that response. What changed is the answer waiting for the first caller who ever
+  does spell `batch`: a loud `400 Unknown data action: batch`, identical to any
+  other unknown action, instead of a silent success. Batching itself is untouched
+  and keeps its single owner: `@objectstack/rest`'s `registerBatchEndpoints`
+  mounts both `POST /batch` (atomic, cross-object) and `POST /data/:object/batch`
+  (per-object, ADR-0119) — which is exactly why a host serving only the
+  dispatcher reports `capabilities.transactionalBatch: false` (#5672).
+
+- 2a2a9fb: fix(spec,metadata-protocol,runtime): one place decides what an unset `NODE_ENV` advertises (#5936)
+
+  A deployment whose operator never exported `NODE_ENV` must not describe itself as
+  `development` on `/discovery`: `environment` is a machine-readable field, a client
+  reads it to answer "am I talking to production?", and it may skip production warnings
+  or loosen a destructive action's confirmation on the answer. #5673 ruled that in and
+  fixed it — but only for one of the two producers, because that dispatch put
+  `packages/spec` out of scope. The other one, `MetadataProtocol.getDiscovery()` (served
+  by `@objectstack/rest`), went on answering `development` for exactly that input.
+
+  The default now lives in the shared mapper, `resolveDiscoveryEnvironment`: an absent —
+  or blank — value resolves to `production`, and both producers pass the operator's value
+  through as they read it, neither carrying a default of its own. That is what makes it
+  one decision instead of two copies, and it means the next discovery producer inherits
+  the right answer without anyone remembering to copy a line. Patching only
+  metadata-protocol would have left a second copy of the default — precisely the drift the
+  shared table was created to prevent (#4828).
+
+  "Unset" includes a blank value: `NODE_ENV=` exports an empty string, the runtime's
+  `getEnv` has always folded that into its default, and had the mapper treated blank as
+  "anything else" the two producers would have drifted again on that one input.
+
+  **#4828's rule is untouched, and it points the other way on purpose.** A value that IS
+  set but is not a spelling this repo recognises (`qa`, `preview`) still degrades to
+  `development`, so nothing ever claims `production` on a guess. Absence is not a guess —
+  it is the host declining to say.
+
+  Behaviour change to expect: a host that exports no `NODE_ENV` and serves `/discovery`
+  through `@objectstack/rest` now advertises `environment: "production"` where it
+  previously advertised `"development"`. A deployment that genuinely is development should
+  say so — `NODE_ENV=development` — which is what the runtime dispatcher has already
+  required since #5673.
+
+  The mapping table above `NODE_ENV_TO_DISCOVERY_ENVIRONMENT` is corrected in the same
+  pass: its `unset / anything else -> development` row had been false for the runtime
+  caller since #5673 and is now two rows, one per rule.
+
+- c8d6f6e: fix(spec,runtime): `functions: [{ name, handler }]` survives `objectstack build` (#6238)
+
+  The array form of the top-level `functions` collection could not pass its own
+  build. `lowerCallables` has lowered the array branch the whole time — it rewrites
+  both `handler` and `name` to the emitted ref — but the array member of the
+  `functions` union in `stack.zod.ts` still demanded `handler: z.function()`. So
+  `objectstack build` produced
+  `[{ name: 'syncBilling', handler: 'syncBilling', effect: 'writes' }]` and then
+  rejected it, with `invalid_union: Invalid input` and a path stopping at
+  `functions`: no entry named, no key named, no reason given.
+
+  This is the third time the same seam has parted, and the first two fixes are why
+  this one only looks small. #4343 taught the union the bare lowered ref; #4976
+  taught it the lowered _declaration_. Both only ever touched the **map** member —
+  the array member is a separate inline record (an array entry names itself, so it
+  carries `name` and an optional `packageId` and cannot be `FlowFunctionEntrySchema`
+  in a list), and widening one never widened the other.
+
+  **The fix.** The array member's `handler` now accepts the lowered string ref
+  beside the authored callable. One widening covers both array spellings at once,
+  unlike the map form's two separate members: `effect` is already optional on an
+  array entry, so the bare and the declared entry differ only in whether that key
+  is present. All four cells of map/array × bare/declared now round-trip.
+
+  **The load seam, which the fix made reachable.** `mergeRuntimeModule` re-attaches
+  each callable from the sibling ESM module to the declaration the JSON carried.
+  Its array branch fell through to a map rebuild — `existing` was `{}` whenever
+  `bundle.functions` was an array — so the merged bundle came back as a bare
+  `{ name: callable }` map with `effect: 'writes'` dropped on the floor. The
+  function still registered and still ran, and its writes were counted as none:
+  #4396's silent un-declaring arriving by the other door, and exactly the state
+  that keeps #4354's broken-sweep alert quiet on the one run that needed it. Since
+  the parse rejected the array form until now, no built artifact had ever reached
+  that branch; it is fixed in the same change rather than shipped as a live trap.
+  The array shape is preserved, callables are attached per entry `name`, and a
+  module function the artifact declared no entry for still registers — the map
+  branch keeps those, and the array branch must not ship fewer functions than the
+  bundle was built with.
+
+  Authoring is unchanged and nothing narrows: this widens what the artifact form
+  accepts. The map form is still the preferred spelling.
+
+- db59e9c: hooks: drop the last three `doc` / `previousDoc` alias reads on a hook context — read the engine's own keys only
+
+  Behaviour is unchanged: every one of these limbs guarded against a producer that
+  has never existed, so none of them could be reached.
+
+  - `service-storage` attachment lifecycle read `ctx.result ?? ctx.input.doc ?? ctx.input.data`
+  - `plugin-sharing` primary-BU projection read `(ctx.input.data ?? ctx.input.doc).user_id`
+  - `runtime`'s hook sandbox read `engineCtx.input ?? engineCtx.doc` and `engineCtx.previous ?? engineCtx.previousDoc`
+
+  Every ObjectQL write context spells the payload `data` — measured and pinned by
+  `hook-input-shape-contract.test.ts` in `@objectstack/objectql` ("insert carries
+  `data` — never `doc`", #5273). The top-level pair is the same family one level
+  up: `HookContextSchema` declares `input` / `result` / `previous` and neither a
+  `doc` nor a `previousDoc`, and `engine.ts` — the sole producer of a HookContext
+  — builds neither. The limbs survived only because the old `HookContext.input`
+  contract table documented insert as `{ doc, options }`; that table was corrected
+  in #5668, and the same alias was removed from `trigger-record-change` in #5671.
+  These are the remainder (#5906), removed rather than left as a second de-facto
+  contract (PD #12).
+
+- c51ffa5: sandbox: `ScriptContext.user` 由 `unknown` 收窄为命名联合 `ScriptUser`(#5521)
+
+  沙箱接缝 `ScriptContext`(`packages/runtime/src/sandbox/script-runner.ts`)把交给 hook /
+  action body 的调用者声明为 `user?: unknown`,类型系统对这个字段一无所知 —— 第四个
+  dispatch 面明天再手搓一个 user 字面量,编译器不会说一句话。而"三个 dispatcher 手搓出三种
+  形状"正是 #5372 的成因:它能存在几个版本,部分原因就是没有任何声明可以违背。
+
+  现在它是 `user?: ScriptUser`,`ScriptUser = ActorUser | HookContext['user']` —— 两个**实测
+  的真实生产者形状**的联合,与 33 行外的姊妹字段 `ScriptSession`(#5613 / #5991)同构:
+
+  - action body 收 `ActorUser`(`security/actor-user.ts`,#5372 起的唯一生产者,#6011 后
+    `positions` 为唯一拼法);
+  - hook body 收 `HookContext['user']`(ObjectQL `buildUser()` 的 `session.userId` 快捷方式:
+    `id` / `name` / `email` / `organizationId`,全部可选)。
+
+  刻意**不**收成单一类型:hook 快捷方式不带 `positions` / `permissions` / `systemPermissions`,
+  收成 `ActorUser` 会在 hook 面断言一套它从未生产过的授权词汇;也**不**收成 spec 的
+  `EvalUser`(issue 选项 1)—— 实测 `buildUser()` 根本不产 `positions`,而 `EvalUser` 要求它,
+  那是套着 spec 外衣的同一种过度声明。
+
+  行为零变化:两个写入方从 `any` 引擎上下文赋值,唯一的 VM 侧读取方收 `unknown`。TS 消费者
+  可见,故走 patch。`ActorUser` 同时作为**类型**从包入口导出,使联合的两支都可被消费者命名。
+
+- 1fa224a: feat(plugin-auth): the fixed-window counter gets its own `./rate-limit-storage` entry (#6040)
+
+  `rate-limit-storage.ts` is the repo's ONE fixed-window counter —
+  `incrementFixedWindow` / `createLazyCounterStore` / `InProcessCounterStore`,
+  ADR-0069 D2 — and #4790's cross-reference asks later arrivals to reuse it
+  rather than write a third copy. They did, and from outside auth:
+  `@objectstack/runtime` counts inbound requests and endpoint policy through it,
+  and `@objectstack/service-sms` counts its daily SMS budget through it (#2814).
+
+  `@objectstack/plugin-auth` published exactly one entry, `"."`, whose `export *`
+  chain takes **value** imports on `better-auth/adapters`
+  (`objectql-adapter.ts`) and `@better-auth/core/db` (`backfill-account-issuer.ts`).
+  Value imports are evaluated eagerly, so reaching those ~90 lines of counting
+  loaded `better-auth` + `@better-auth/{core,oauth-provider,scim,sso}` + `jose` +
+  `@noble/hashes` + `@objectstack/rest` + `@objectstack/platform-objects` first.
+  Measured against the built package: `require('@objectstack/plugin-auth')` puts
+  109 modules in `require.cache`; the counter needs one.
+
+  So the counter is now published on its own:
+
+  ```ts
+  // before — 109 modules, the whole better-auth family
+  import { incrementFixedWindow } from "@objectstack/plugin-auth";
+  // after — 1 module, 3.7 KB
+  import { incrementFixedWindow } from "@objectstack/plugin-auth/rate-limit-storage";
+  ```
+
+  `tsup` emits the second entry with `splitting: false`, so it is a self-contained
+  bundle rather than a nominal split: `dist/rate-limit-storage.mjs` is 3.71 KB
+  against `dist/index.mjs`'s 330.28 KB, contains zero top-level imports and zero
+  occurrences of the string `better-auth`. The one better-auth reference that
+  survives is `import type { BetterAuthRateLimitStorage }`, which is erased at
+  build and costs a consumer nothing at runtime.
+
+  **Nothing is removed.** The root still re-exports every one of these symbols, so
+  existing `@objectstack/plugin-auth` imports keep working unchanged — this is a
+  new entry point, which is why it is `minor` rather than breaking. The `patch` on
+  `runtime` and `service-sms` is the import-specifier switch in those packages;
+  their behaviour is identical.
+
+  `src/rate-limit-storage-isolation.test.ts` pins the invariant from both sides,
+  in the shape `packages/types/src/node-isolation.test.ts` (#4700) established for
+  the `./node` split: it walks the real import graph from the subpath entry and
+  fails on any better-auth **value** import or any undeclared external package,
+  it fails if a consumer reaches the counter through the package root again, and
+  it fails if the root ever _stops_ pulling better-auth eagerly — because at that
+  point the split stopped buying anything and deserves re-measuring rather than a
+  suite that passes for the wrong reason.
+
+- 0e043d8: feat(automation)!: 未声明 `resumeAuthority` 的暂停节点改为 fail-closed —— 通用 resume 路由从「默认开门」变成「显式 `'any'` 才开门」(#5561 第二步)
+
+  <!-- adr-0087: registered action-descriptor-resume-authority-default-flip -->
+
+  **BREAKING**(仅影响注册了暂停型节点、且描述符未声明 `resumeAuthority` 的执行器 ——
+  本仓内为零)。`AutomationEngine.resolveResumeAuthority` 对缺省值的解析由 `'any'` 翻成
+  `'service'`:一个从未声明「谁可以续跑它产生的暂停」的节点类型,其暂停在通用路由
+  `POST /automation/:name/runs/:runId/resume` 上被拒绝(`PERMISSION_DENIED` / 403),
+  直到它的描述符把话说出来。通用 resume 门从此是描述符**主动 opt-in** 的一扇门,不是每个
+  暂停节点**继承**来的默认。
+
+  这是 ADR-0044 2026-07-28 修正案里「记录但刻意不在此建造」的第一项,分两步落地。
+  第一步(#5561 / PR #5725,非 breaking)把 `ActionDescriptorSchema.resumeAuthority`
+  的 Zod `.default('any')` 摘成 `.optional()`。那个默认值的问题不只是取值不对,而是它
+  **抹掉了事实**:`defineActionDescriptor` 在任何消费者看到对象之前就把 key 填上了,于是
+  「作者选了 `'any'`」和「作者从没考虑过」parse 出逐字节相同的描述符,遗漏根本无法被观测。
+  默认值摘掉之后「缺省」才重新可见,注册告警与 `check:resume-authority-declared` CI 门也
+  才写得出来。第二步就是本次改动:让缺省真正意味着 fail-closed。
+
+  ### 为什么往「拒绝」这个方向猜
+
+  两种猜错的代价不对称,这就是全部理由。猜 `'any'`,会让一次 resume 走过一个**没有任何
+  记录的决策**,而且悄无声息 —— #3823 就是这么发生的:ADR-0044 把审批的 `revise` 边指向
+  了通用 `wait`,`wait` 本身声明 `'any'` 完全正确,而站在「服务持有」位置上的那个暂停
+  继承了一个没人选过的 fail-open 值;实测代价是一次未经审计的重新提交,外加一个被销毁的
+  远程 run。猜 `'service'`,则是返回一次拒绝,并把修好它的那一行原样交回作者手里。
+  两种错误里只有一种能被犯错的人自己发现。
+
+  ### 迁移:`resumeAuthority` 未声明 → 显式声明(一行)
+
+  只有**注册暂停型节点的插件作者**需要动手,处方是在描述符上加一行:
+
+  ```ts
+  // FROM —— 依赖旧默认值,暂停可被通用路由续跑
+  defineActionDescriptor({
+    type: "my_pause",
+    version: "1.0.0",
+    name: "My Pause",
+    supportsPause: true,
+  });
+
+  // TO —— 通用路由确实是这个暂停的正门时(screen 式收集输入、signal wait 式外部生产者)
+  defineActionDescriptor({
+    type: "my_pause",
+    version: "1.0.0",
+    name: "My Pause",
+    supportsPause: true,
+    resumeAuthority: "any",
+  });
+
+  // TO —— 续跑是「某个服务必须先授权并记录的决策」的尾巴时
+  defineActionDescriptor({
+    type: "my_pause",
+    version: "1.0.0",
+    name: "My Pause",
+    supportsPause: true,
+    resumeAuthority: "service",
+  });
+  ```
+
+  两个值都被接受,**只有沉默改变了含义**。三条运行时通道会指着同一件事说话:注册时按类型
+  去重的一次告警、resume 被拒时那条点名缺省字段并给出处方的错误消息,以及本仓自有执行器的
+  `check:resume-authority-declared` CI 门。
+
+  ⚠️ `supportsPause` 本身是一个没有任何执行路径强制的声明(#5703)—— run 会暂停是因为
+  `execute()` 返回了 `suspend: true`。所以一个「会暂停但把 `supportsPause` 留成 false」
+  的执行器,注册告警与 CI 门**都看不见它**,只有 resume 时的拒绝消息会带上同一份处方。
+  请按同一条规则手工核一遍这类执行器。
+
+  ### 仓内零行为变化
+
+  在册的六个暂停类型全部已显式声明:`screen` / `wait` / `subflow` / `map` 声明 `'any'`
+  (第一步补齐),`approval` / `approval_revise` 声明 `'service'`。解析器测试与端到端测试
+  都把这份清单和它们的解析结果一起断言 —— 一个只靠「什么都没注册」而变绿的零点名,和真的
+  零点名是两回事。
+
+  `@objectstack/runtime` 只是注释与路由账本(`route-ledger`)的记述同步,无行为改动。
+
+- f8fe47e: feat(runtime,rest,plugin-auth,service-i18n,service-storage): route-ledger 条目类型加可选 `responseSchema` (#5791)
+
+  #3877 的「最小首步」，维护者 2026-08-06 已批。**纯增量、零行为变更**：五个 route
+  ledger 的现有条目一行未改，字段缺省即「未声明」。
+
+  ## 为什么是这一步
+
+  #3877 量到的洞不是「发出的和声明的不一致」，而是**大多数路由根本没有可对账的声明**：
+  237 条已挂载路由里 215 条是 `sdk` 面，而携带 schema 引用的是 **0 条**。于是同一单
+  里裁定了两件事——Stage C（批量补 ~190 条响应 schema）**永不排期**（一条响应 schema
+  是「这个端点承诺什么」的产品决定，批量生产正是 #3676 / #3833 / #3847 / #3870 四个
+  缺陷的成因），以及先把「这条路由声明了什么」变成**可查询数据**，让 Stage D 的棘轮
+  将来有东西可棘。本次落地的就是后者。
+
+  ## 字段语义
+
+  `responseSchema` 是 `@objectstack/spec/api` 导出名，指向该路由**响应载荷**的声明：
+  路由套 `{ success, data }` 信封时指 `data`，不套时指整个 body。信封本身不归它管，
+  由 `pnpm check:route-envelope` 结构化守住——一个字段无法同时诚实地描述两层。
+
+  五个 ledger 是五个各自独立声明、按约定同形的 interface，因此是五处同名同措辞的可选
+  字段，**不是**新建共享类型包。三个 ledger 明确要求保持 import-free（客户端守卫按
+  相对**源文件**编译它们），且 `zod` 并非每个持有 ledger 的包的依赖，故字段存的是
+  **名字**而非 live schema 对象，解析放在能 import spec 的守卫里。
+
+  ## 已填的两条（实证，不是批量）
+
+  只填 #5682 已给出双断言覆盖（safeParse 判**值** + 键集判**键**）的 discovery 族两条，
+  且刻意分处两个 ledger，以证明一个字段形状确实服务五个独立声明的条目类型：
+
+  - `packages/runtime` `GET /discovery` → `DiscoverySchema`（走信封，指 `data`）
+  - `packages/rest` `GET /api/v1/discovery` → `DiscoverySchema`（裸发，指整个 body）
+
+  `GET /api/v1` 这条 bare-base 别名**故意不填**：它与上面那条共用同一个
+  `discoveryHandler` 闭包，但 #5682 的测试只驱动 `/api/v1/discovery`，「同一个 handler
+  所以同一个形状」是对代码的论证而非对代码的测量。没有覆盖就不填。
+
+  ## 新增守卫
+
+  - `packages/client/src/route-ledger-response-schema.test.ts` —— 五个 ledger 的并集里
+    每一个 `responseSchema` 都到**活的** `@objectstack/spec/api` 导出里解析，并且真的
+    调用一次 `safeParse`（spec 的 schema 是 `lazySchema()` 代理，只查属性存在会被代理
+    陷阱满足）。含否定对照（少一个字母的名字、空串、导出了但不是 schema）与反空转下界。
+  - `discovery-schema-conformance.test.ts`（runtime / rest 各一）—— 钉住 ledger 报的
+    schema 就是该套件实际解析用的**同一个对象**，并各自测量了载荷所在的层级。
+
+- d13f627: fix(objectql): the discrete transaction trio joins an open ambient transaction, so a sandbox body no longer opens a second one (#6406)
+
+  #6168 taught the callback face (`ctx.api.transaction(fn)` on `ScopedContext`)
+  the ADR-0067 D2 join. It could not reach the SANDBOX face: a QuickJS hook or
+  action body's `ctx.api.transaction(fn)` is VM-side sugar over three host leaves
+  (`__txBegin` / `__txCommit` / `__txRollback`) that drive `ScopedContext`'s
+  discrete `beginTransaction` / `commitTransaction` / `rollbackTransaction` trio —
+  a different method, which had no join branch of its own. So a body running
+  inside a host `engine.transaction()` still opened a SECOND driver transaction:
+
+  1. it asked the pool for a second connection — the deadlock D2 exists to avoid
+     on a single-connection pool (knex/SQLite); and
+  2. it committed itself, so its writes SURVIVED the outer rollback. The caller
+     was told the unit of work had been undone while some of its rows were still
+     there — no error, no log.
+
+  `beginTransaction()` now makes the same first move as both callback faces:
+  before looking a driver up it reads the engine's ambient transaction store, and
+  where one is open it returns THAT handle in a child context, with `owned: false`
+  in its result (#5696's signal, in the shape this face can carry it).
+  `commitTransaction` and `rollbackTransaction` abstain for such a handle, so the
+  outer caller keeps the one and only commit/rollback. An explicit rollback of a
+  joined handle performs no driver rollback: that is the same answer the callback
+  faces give, where the joined branch has no rollback either and a throw
+  propagates to the outer owner, which rolls the whole unit back. In the sandbox
+  that path is exact — the sugar's catch reaches `__txRollback` and RE-THROWS, so
+  the body's failure travels out to the host owner.
+
+  The abstention lives on `ScopedContext`, not in the caller, so no trio caller
+  can close a transaction it does not own. The QuickJS runner additionally
+  honours the `owned` bit at all three of its close paths (commit leaf, rollback
+  leaf, and the teardown cleanup that rolls back a transaction a timed-out body
+  left open) — the runner closes what the runner opened.
+
+  Measured, not assumed: at `__txBegin` time the engine's ambient store IS
+  readable from the sandbox leaf (the leaf runs on a chain awaited down from the
+  host's `txStore.run`), which is why no separate capture mechanism is needed.
+  What the trio still cannot do is PUBLISH — with no closure spanning
+  begin→commit there is nothing to hand `txStore.run` — so a transaction it opens
+  itself stays invisible to ambient readers, exactly as before, and the #6167
+  surface (handles the engine cannot attribute) is unchanged.
+
+- 378d8b1: Dispatcher-face `/share-links` enforcement now receives the caller's complete resolved `ExecutionContext` (#6551 — the dispatcher half of #6206). The domain handler used to rebuild a two-field `{ userId, tenantId }` subset and hand it to `createLink` / `listLinks` / `revokeLink`, dropping `accessible_org_ids`, `positions`, `permissions`, `org_user_ids`, `systemPermissions`, `posture` and `tabPermissions` on the way into enforcement. Under the `group` tenancy posture the Layer 0 wall reads `accessible_org_ids` and an absent set denies (fail closed), so creating a link answered 403 for records the caller reads fine elsewhere; a record visible only through a position-bound permission set was likewise refused even under the `single` posture. The envelope is now passed through whole per the #6511 contract; the routes' own 401 gate still reads only `userId`.
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [29e28a3]
+- Updated dependencies [259459d]
+- Updated dependencies [ad878e7]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [6f6fec7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [e0f300b]
+- Updated dependencies [10c4ea9]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [e9b5265]
+- Updated dependencies [04476e7]
+- Updated dependencies [de6b7f1]
+- Updated dependencies [01faeb1]
+- Updated dependencies [d92ed03]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [262e40d]
+- Updated dependencies [d367f03]
+- Updated dependencies [9c82b89]
+- Updated dependencies [b7d3be4]
+- Updated dependencies [2a0d65e]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [6029cc1]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [dba7747]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [f09a2e7]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [53ef057]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [ea1d916]
+- Updated dependencies [465c5fc]
+- Updated dependencies [c804f19]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [6965160]
+- Updated dependencies [dbe92a7]
+- Updated dependencies [9e9445b]
+- Updated dependencies [2f59da0]
+- Updated dependencies [114e727]
+- Updated dependencies [83a3b1f]
+- Updated dependencies [1a53a02]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [7c6261a]
+- Updated dependencies [1da39f5]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [7e1b480]
+- Updated dependencies [bfe689b]
+- Updated dependencies [4bb6f01]
+- Updated dependencies [e39dd66]
+- Updated dependencies [bed427f]
+- Updated dependencies [b70e534]
+- Updated dependencies [252f71b]
+- Updated dependencies [a5d2573]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [1fa224a]
+- Updated dependencies [3fb42d2]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [82397b6]
+- Updated dependencies [2c2a212]
+- Updated dependencies [9bc846b]
+- Updated dependencies [773f80a]
+- Updated dependencies [2873eb9]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [75e6871]
+- Updated dependencies [e6025e9]
+- Updated dependencies [486d526]
+- Updated dependencies [f8fe47e]
+- Updated dependencies [9e9445b]
+- Updated dependencies [d13f627]
+- Updated dependencies [a841151]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [3264516]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [62159bd]
+- Updated dependencies [d48aad5]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [d86815e]
+- Updated dependencies [be87153]
+- Updated dependencies [3172831]
+- Updated dependencies [939f579]
+- Updated dependencies [2bd4e5e]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [3d4c545]
+- Updated dependencies [bb7cb41]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+- Updated dependencies [c9bf940]
+- Updated dependencies [a682670]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/driver-sql@17.0.0-rc.6
+  - @objectstack/objectql@17.0.0-rc.6
+  - @objectstack/metadata-protocol@17.0.0-rc.6
+  - @objectstack/formula@17.0.0-rc.6
+  - @objectstack/rest@17.0.0-rc.6
+  - @objectstack/service-datasource@17.0.0-rc.6
+  - @objectstack/driver-memory@17.0.0-rc.6
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.6
+  - @objectstack/plugin-security@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/plugin-auth@17.0.0-rc.6
+  - @objectstack/metadata-core@17.0.0-rc.6
+  - @objectstack/metadata@17.0.0-rc.6
+  - @objectstack/service-i18n@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+  - @objectstack/observability@17.0.0-rc.6
+  - @objectstack/service-cluster@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

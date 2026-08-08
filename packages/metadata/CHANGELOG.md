@@ -1,5 +1,181 @@
 # @objectstack/metadata
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- 7c6261a: refactor(metadata): peel the stored envelope before an `api` row is parsed as an endpoint (#5309)
+
+  Internal refactor — no authored format changes, no observable acceptance change
+  for the shapes the platform stores today.
+
+  A metadata _type name_ is worn by two different documents: the **authored
+  declaration** (exactly its spec vocabulary) and the **stored row** (that
+  declaration plus the metadata layer's own bookkeeping — `packageId`, `state`,
+  `version`, `publishedDefinition`, `publishedAt`, `publishedBy`, written by
+  `MetadataManager.register` / `publishPackage` and read back by `publishPackage`'s
+  package filter). Both `ApiEndpointSchema` parse sites — `buildEndpointIndex` (the
+  load-time backstop) and `gateApiItemsForPublish` (the publish gate) — used to hand
+  the whole stored row to the schema, and only its unknown-key _stripping_ kept the
+  bookkeeping from being judged as endpoint vocabulary.
+
+  `peelStoredEnvelope` (`packages/metadata/src/stored-envelope.ts`) now takes the
+  envelope off first, so the schema sees the authored body and nothing else:
+
+  - a row carrying a `metadata` value IS an envelope around it — the body is that
+    value, everything beside it is bookkeeping. This is the `data.metadata ?? data`
+    rule the publish gate, `publishedDefinition` and `getPublished` already shared;
+  - otherwise the body is the row minus the declared bookkeeping keys.
+
+  The peel returns views and never mutates the row, so every existing envelope
+  reader (`publishPackage`'s `packageId` filter, `query`'s `state` / `packageId`
+  filters, `revertPackage`) is untouched, and `publishedDefinition` still snapshots
+  `data.metadata ?? data` verbatim.
+
+  One consequence worth naming: `buildEndpointIndex` was the last reader that did
+  NOT follow the layer's body-selection rule, so a publish envelope
+  (`{ name, packageId, state, metadata: {…} }`) used to pass the publish gate and
+  then be excluded from the endpoint index — its route answered 404. The two doors
+  now read the same document.
+
+  This is the prerequisite for tightening `ApiEndpointSchema` (#5384): with the
+  schema flipped to `strictObject` locally, `packages/metadata` went from 11 failing
+  tests to 1, and the one left is an authored non-vocabulary key being refused by
+  name — which is what that tightening is for.
+
+- 1da39f5: fix(metadata): `isMissingTableError` no longer reads Postgres' write-path missing-COLUMN message as a missing TABLE (#6347)
+
+  `isMissingTableError` is the single predicate that licenses a caller to treat a
+  failed read as "the table is not provisioned yet, so there are genuinely no
+  rows". Its own docblock names `column "x" does not exist` (SQLSTATE 42703) as a
+  real failure that must stay loud — "a case where 'start numbering at 1' would be
+  the wrong answer against a table that may be full of rows" — and the code did
+  not honour that, in one direction only.
+
+  Postgres has **two** missing-column phrasings:
+
+  | path                              | message                                                | judged                        |
+  | :-------------------------------- | :----------------------------------------------------- | :---------------------------- |
+  | read (`SELECT`)                   | `column "bogus" does not exist`                        | correctly NOT a missing table |
+  | write (`INSERT`/`UPDATE`/`ALTER`) | `column "label" of relation "sys_team" does not exist` | **wrongly** a missing table   |
+
+  The write-path phrase contains a complete, legal missing-table phrase —
+  `relation "sys_team" does not exist` — as a substring, so the table-scoped
+  message test matched it. The code channel did not rescue it either: the matcher
+  is a sequential OR, so an error carrying `code: '42703'` falls past both code
+  lines and is decided by its message. The same superstring covers every other
+  sub-object of a relation Postgres phrases this way, e.g.
+  `constraint "uq_x" of relation "sys_team" does not exist` (42704).
+
+  A message regex can never exclude a superstring, so the repair is a
+  **front-exclusion** evaluated before any positive test: the column-level
+  SQLSTATEs the docblock already names (`42703`, `42704`, `3D000`) and the
+  `"x" of relation "y"` sub-object phrasing. Recognising one ends the question
+  with `false` — it does not descend into `cause`, because an error that
+  identifies as "a column of an existing relation" is that error whatever it
+  wraps.
+
+  What changes for you: a driver error of that shape now propagates instead of
+  being silenced. Every consumer of the predicate is affected the same way, and
+  all of them get louder rather than quieter — `DatabaseLoader.nextEventSeq` and
+  `SysMetadataRepository`'s history counters no longer restart `event_seq` at 1,
+  `ObjectQLEngine`'s autonumber seed no longer reseeds from 0, and the metadata
+  loaders no longer answer "nothing declared". The set of errors judged benign
+  shrinks; nothing that was loud becomes quiet. Genuine missing-table detection is
+  unchanged for PostgreSQL, MySQL/MariaDB and the SQLite family.
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [1a53a02]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [3d4c545]
+- Updated dependencies [bb7cb41]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/metadata-core@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+  - @objectstack/metadata-fs@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

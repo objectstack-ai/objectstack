@@ -1,5 +1,480 @@
 # @objectstack/cli
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- a36db28: i18n label contract: inline locale maps are authorized, and filter-preset tabs get a translation slot
+
+  **`I18nLabelSchema` accepts two forms, not one (#5728).** It declared a plain
+  `z.string()` while three published platform pages authored 31 inline
+  `{ en, 'zh-CN', 'ja-JP', 'es-ES' }` maps that objectui resolves through
+  `pickLocalized` — so the authoritative document was the wrong one, and the
+  #5068 component-props gate reported 42 findings against the platform's own
+  pages. The schema is now a union of the default-language string and an inline
+  locale map. `ElementTextPropsSchema.content` was declared a bare `z.string()`
+  and therefore out of that union's reach; it moves onto `I18nLabelSchema` in the
+  same change, which is the other 8 of the 42. The gate now reports **0**.
+
+  This does not reverse #4667 / #5055. What those retired was the _key-reference_
+  dialect (`{ key, defaultValue }`) — a shape with **no resolver**, whose label
+  reached the screen as a raw key or not at all. What is authorized here is the
+  inline locale map, which has a live resolver and which the CLI's `i18n-extract`
+  already understands. Same "declared = enforced" principle, applied in both
+  directions: the map's keys are constrained to BCP-47 tags (plus `default`), so
+  `{ key, defaultValue }` stays a parse error rather than becoming "a locale map
+  whose locales are named `key` and `defaultValue`".
+
+  Zero breaking: every previously-valid label is still valid. The
+  translation-bundle channel remains the direction that scales and is unchanged.
+
+  **Filter-preset tab labels are translatable (#5377).** `ObjectTranslationData`
+  gains `_tabs`, addressed by `ViewTabSchema.name`, and `resolveTabLabel` reads
+  it — explicit `_tabs` translation, then the referenced view's `_views.*.label`
+  for a tab that carries `view` (the path that already worked, preserved), then
+  the authored literal. A tab carrying only a `filter` referenced nothing to
+  inherit from and had no key of its own, so its label rendered in the source
+  language above a fully localized grid with no authoring workaround. `os i18n
+extract` scaffolds the new keys, so the slot, the resolver and the extractor
+  land together.
+
+  `I18nLabelSchema`'s description no longer claims "i18n keys are auto-generated
+  by the framework" — none are. `AriaPropsSchema.ariaLabel` now states that no
+  translation-bundle slot addresses it.
+
+- bd5fc38: fix(cli,runtime): one shared default-database resolution for `os dev` / `os start` / `os migrate` (#6469)
+
+  Three commands used to resolve three different default databases in the same
+  project directory — `os dev` → `.objectstack/data/dev.db`, `os start` →
+  `.objectstack/data/objectstack.db`, `os migrate *` →
+  `.objectstack/data/standalone.db` — and none consulted the project config.
+  Measured harm (hotcrm 17.0.0-rc.5): after `os start` + seed, `os migrate plan`
+  opened a fresh empty `standalone.db` it had just created and reported **22
+  tables of drift against a healthy database** — the inverted failure direction,
+  pointing an operator at rolling back a database that was fine.
+
+  Per the maintainer ruling (2026-08-08, archived on #6469), all three commands
+  now resolve through **one** shared function
+  (`resolveProjectDatabaseUrl`, exported from `@objectstack/runtime`):
+
+  1. explicit `--database` / `--database-url` / programmatic `databaseUrl`;
+  2. `OS_DATABASE_URL` / legacy `DATABASE_URL` / vendor `TURSO_DATABASE_URL`;
+  3. explicit in-memory driver selection (`--database-driver memory` /
+     `OS_DATABASE_DRIVER=memory`) — no file default is imposed;
+  4. the datasource the project config declares as its default home (a
+     `datasourceMapping` rule `{ default: true, datasource: <name> }` naming a
+     declared datasource whose connection is URL-derivable);
+  5. the **unified default file `objectstack.db`** under the state dir
+     (`OS_HOME` → `<projectRoot>/.objectstack` → `~/.objectstack`).
+
+  **Compatibility — an existing environment never looks like data loss.** When
+  the unified `objectstack.db` does not exist but a legacy `dev.db` or
+  `standalone.db` does, the command **reads the legacy file** and prints one
+  loud line naming exactly which file is being read and the `mv` command that
+  converges it on the unified name. No interactive prompt (CI-safe), nothing is
+  deleted or renamed automatically, and the probe order
+  (`objectstack.db` → `dev.db` → `standalone.db`) is identical across all three
+  commands — `dev.db` first among the legacies because it holds real dev data,
+  while `standalone.db` is most likely an empty artifact of the very fork this
+  fixes. An explicit `OS_DATABASE_URL` pins any file forever, unchanged.
+
+  Also per the ruling: `sqlite://` is now accepted as an alias of `file:` in
+  database-URL parsing (`sqlite://…` used to die under `os migrate` with
+  `Unsupported database URL scheme`); genuinely unsupported schemes keep their
+  precise refusal. Behavioural side effects of unification: `os dev` now honours
+  `OS_HOME` / `TURSO_DATABASE_URL` for its default like the other two commands
+  already did, `os dev --fresh`'s ephemeral file is named `objectstack.db`, and
+  `os db clean` targets the same unified resolution. The #3917
+  `sqlite-occupancy` guard's primary scenario (a dev server and `os migrate`
+  contending for one file) is now real under default paths — previously the two
+  never opened the same file, so the guard could not fire in the very scenario
+  its comment described.
+
+  The new cross-command pin (`unified-db-resolution.pin.test.ts`) asserts
+  `dev` / `start` / `migrate` resolve the SAME URL for the same project root in
+  every fallback state — the test whose absence let the fork live.
+
+### Patch Changes
+
+- caeac67: fix(cli): `os doctor` stops guessing the installed-package ledger directory when the authority export is missing (#5996)
+
+  Hardens a diagnosis boundary; not a live defect. `DEFAULT_INSTALLED_PACKAGES_DIR` — `@objectstack/cloud-connection`'s export, the single authority on what the ledger directory is called — exists in every version ever shipped, so the consumer-side `??` fallback this change deletes had never fired. It sat two lines above the #5413 comment forbidding exactly that tolerant read (Prime Directive #12), and it answered the wrong state: a reader that LOADS without declaring the export would have doctor silently reading a hard-coded path while the runtime keeps reading wherever the package decides — two reports, potentially two directories, no line saying so.
+
+  Three changes, one authority:
+
+  - The `??` fallback is gone. The export is type-checked before `path.join()` ever sees it, which also retires the old misreport where a non-string export was absorbed by the config `catch` and surfaced as "Could not load config for analysis".
+  - A reader that loads without declaring the directory (as a string) is now its own named report row — "The installed-package ledger reader does not declare the ledger directory (installed packages NOT checked)" — the last cell of the edge #5644 carved: that issue split "present but unloadable" out of absence's silence; this row is "loaded but unrecognizable". While it shows, doctor reads no directory at all — guessed or otherwise — and the ADR-0120 D5e advisory withholds its `✓ Unique scope` line, because its ledger half never ran.
+  - `installedPackageLedgerSkippedEntriesCheck`'s fix now quotes the directory doctor actually read — resolved from the real export and carried on the reading — instead of re-hardcoding the `` Under `.objectstack/installed-packages/`: `` literal, which was the same guess in prose.
+
+- bd01263: fix(cli): `os doctor`'s ledger-failure row names the directory it actually read (#6643)
+
+  Removes divergence surface; not a live defect. `DEFAULT_INSTALLED_PACKAGES_DIR` — `@objectstack/cloud-connection`'s export, the single authority on what the installed-package ledger directory is called — exists in every version ever shipped and has never changed value, so the literal this change deletes currently agrees with it. What it buys is that the agreement stops being a coincidence nobody would notice breaking.
+
+  The residue of #5996, which fixed the same restatement one row over (`installedPackageLedgerSkippedEntriesCheck`) and enumerated the rest rather than widening in place:
+
+  - `installedPackageLedgerFailureCheck` takes the resolved `dir` — already carried on the reading since #5996 — and quotes it. Its `fix` used to open with a re-hardcoded `.objectstack/installed-packages/` "under the project root", which was the consumer restating a value only the producer decides, and a vaguer answer than the one doctor was holding: the reading's `dir` is `cwd`-joined and absolute. Under `--verbose` the row now reads `` The ledger is `/srv/app/.objectstack/installed-packages`; `` and drops the now-redundant project-root hedge. The parameter is required, so the row cannot quietly fall back to a guess.
+  - `os package install`'s post-install hint keeps its literal, now with the reasons written down. That sentence describes the **remote** runtime host's directory: the CLI never touches that disk, the host's directory is configurable (`MarketplaceInstallLocalPlugin` builds `new LocalManifestSource(config.storageDir)`, so the export is only its default), and the install response carries no `storageDir` to quote. Resolving it locally would state this machine's default as an observed fact about another one — so the literal stays, marked as the description of a convention rather than a consumer read.
+
+- be91adf: fix(cli): `os login --json` is a parseable NDJSON stream (#6531)
+
+  `os login --json` produced output that no consumer could read in any shape. The
+  device flow wrote its RFC 8628 device-authorization payload compact and, once
+  the token poll resolved, the result payload 2-space indented — two JSON
+  documents on one stdout. Driven against a live device endpoint, that stream
+  failed `JSON.parse(<entire stdout>)` with `Unexpected non-whitespace character
+after JSON at position 200`, and read as NDJSON it failed on 5 of its 6 lines,
+  because the second document spanned five of them. The same two-document shape
+  appeared on the failure path, where an error payload could follow a
+  device-authorization record that had already been written.
+
+  `os login --json` is now a **newline-delimited JSON stream**: one compact
+  document per line, on every path — the device-authorization record, the
+  `--email`/`--password` result, the already-logged-in notice, and the
+  `{"success":false,"error":"…"}` failure record alike. Every line parses on its
+  own, and the verification-URL record still arrives _before_ the user
+  authorizes, which is what makes the device flow usable from a script at all.
+
+  This is the CLI's **one declared exception** to "`--json` means exactly one JSON
+  document on stdout" (#6217), and it is declared rather than silent: the
+  `--json` flag's `--help` text says so, and so do the CLI reference page and the
+  device-flow section of the authentication docs. Parse this command's stdout
+  line by line.
+
+  Bumped as a patch: no interface is added or removed and nothing that previously
+  worked stops working. The device-flow output was unparseable before, so it had
+  no consumers to break; the only other observable change is that the
+  email/password result is compact rather than indented, which `JSON.parse` reads
+  identically. Human-mode output is untouched.
+
+- 2b641dd: fix(cli): `--json` now owns stdout — kernel boot logs move to stderr (#6217)
+
+  Every `os migrate` / `os meta` subcommand that boots a kernel wrote its
+  machine-readable payload into a stream it shared with ~60 INFO lines. The
+  kernel logger routes `debug`/`info`/`warn` to stdout and only `error`/`fatal`
+  to stderr, so `os migrate recorded-by --json | jq .` failed with `parse error:
+Invalid numeric literal` while stderr sat completely empty — a `--json` flag
+  whose only audience is a program, handing that program something it cannot
+  parse.
+
+  With this change, a `--json` run reserves stdout for its payload: everything
+  the kernel and its plugins write goes to **stderr** instead, including the
+  `[StandaloneStack] no compiled artifact …` notice that never went through the
+  logger at all. `JSON.parse(<entire stdout>)` now succeeds with no heuristic
+  extraction, and no diagnostic is lost — every line an operator used to see is
+  still printed, on the stream diagnostics belong on.
+
+  Covers the whole family that shares the boot seam: `os migrate plan` / `apply`
+  / `resume` / `recorded-by` / `summary-nulls` / `value-shapes` /
+  `files-to-references`, `os migrate meta --stored`, and `os meta resync`.
+  Human-mode runs are unchanged.
+
+- 83df2fd: fix(cli): `os migrate --json` no longer exits with its own runtime as the status code (#4873)
+
+  A **successful** `os migrate recorded-by --json` returned a different non-zero
+  exit code on every invocation — 208, 171, 176, 163, 62, 19, 48, 57 — while
+  printing correct JSON, printing `✅ Graceful shutdown complete`, and leaving
+  stderr completely empty. `os migrate resume --json` had it too. Nothing that an
+  author reads was wrong; the only thing that was wrong is the only thing a CI
+  step, a `set -e` script, a Makefile, or a container entrypoint reads. `--json`
+  exists for programs, and the first thing a program consumes is the exit status.
+
+  **Root cause.** `emitJson(payload, exitCode, opts)` takes its exit code as the
+  second positional argument, and both commands were passing `timer.elapsed()`
+  there — a duration in milliseconds. So a run that took 531 ms set
+  `process.exitCode = 531`, and the shell saw `531 & 0xFF` = 19. The codes looked
+  random because they _were_ the run's duration, and no two runs take the same
+  number of milliseconds.
+
+  It was not what it looked like from the outside: no native `abort` during
+  teardown, no libsql/sqlite handle, no `safeExit`, and not a leftover of #4813
+  (whose 120-second hang is fixed and unrelated — the random codes predate and
+  survive it).
+
+  **What changed.**
+
+  - Both commands now report their duration where every other `--json` command in
+    this CLI already reports it — inside the payload, as `duration`. A successful
+    run exits `0`; a failing one still exits `1`, unchanged.
+  - `emitJson` / `emitText` narrow that parameter from `number` to
+    `CliExitCode = 0 | 1`, so handing a duration (or any other stray number) to
+    the exit-code slot is now a compile error instead of a silent false failure.
+
+  **Payload change.** `os migrate recorded-by --json` and `os migrate resume
+--json` gained a `duration` key (milliseconds). Consumers that were reading the
+  exit status of these two commands should note that a zero now means what it
+  says.
+
+- 8599c21: i18n section headings: read only the declared `label` spelling, never `title`
+
+  `record:details` sections and form-view sections declare exactly one heading key —
+  `label` (`RecordDetailsProps.sections[]` and `FormSectionSchema`; #5611 settled this
+  by declaring `label` and deliberately NOT declaring `title`). Two consumers still
+  read `label ?? title`:
+
+  - `os i18n extract` / `os lint`'s coverage walk (`i18n-extract.ts`) scaffolded
+    `objects.<object>._sections.<name>.label` from a `title`;
+  - the `translation-section-name-missing` lint rule accepted a `title` as the
+    heading it reports on.
+
+  Both now read `label` only. Per Prime Directive #12 the tolerance was the bug: a
+  consumer that reads an undeclared spelling turns it into a second de-facto contract,
+  and here it did so on the loudest possible surface — the extractor would seed a
+  translation bundle key from a spelling the schema rejects, teaching the wrong key to
+  every translator downstream.
+
+  FROM → TO: a section authored as `{ name: 'timeline', title: 'Timeline' }` becomes
+  `{ name: 'timeline', label: 'Timeline' }`. No migration is expected in practice —
+  every `record:details` section in this repo and in `packages/platform-objects`
+  already authors `label` (~12 sections, zero `title`).
+
+  Behaviour change if you do author `title`: the heading is treated as absent. The
+  extractor still emits the section's expected key (it is derived from `name`) but
+  seeds it with the section name instead of your `title` text, and the lint rule no
+  longer reports that section. Rename the key to `label` — which is also what the
+  schema itself will tell you, since `title` is not a declared key there.
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [29e28a3]
+- Updated dependencies [259459d]
+- Updated dependencies [eb1b231]
+- Updated dependencies [2bc1876]
+- Updated dependencies [1d0faa7]
+- Updated dependencies [ad878e7]
+- Updated dependencies [0f8d16a]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [6f6fec7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [f7d80f4]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [e0f300b]
+- Updated dependencies [ec3dfd7]
+- Updated dependencies [466c503]
+- Updated dependencies [10c4ea9]
+- Updated dependencies [0b63b56]
+- Updated dependencies [8e2bbba]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [379b749]
+- Updated dependencies [0c49b50]
+- Updated dependencies [e9b5265]
+- Updated dependencies [04476e7]
+- Updated dependencies [de6b7f1]
+- Updated dependencies [01faeb1]
+- Updated dependencies [d92ed03]
+- Updated dependencies [6517448]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [262e40d]
+- Updated dependencies [d367f03]
+- Updated dependencies [9c82b89]
+- Updated dependencies [c308064]
+- Updated dependencies [24122a9]
+- Updated dependencies [b0d54bf]
+- Updated dependencies [b7d3be4]
+- Updated dependencies [2a0d65e]
+- Updated dependencies [861ee32]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [6029cc1]
+- Updated dependencies [881a3cc]
+- Updated dependencies [e48d861]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [01fd9e1]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [dba7747]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [f09a2e7]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [1fe436d]
+- Updated dependencies [59b794f]
+- Updated dependencies [db59e9c]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [53ef057]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [ea1d916]
+- Updated dependencies [465c5fc]
+- Updated dependencies [c804f19]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [c51ffa5]
+- Updated dependencies [d06b3dc]
+- Updated dependencies [a5ca08d]
+- Updated dependencies [6ce10bd]
+- Updated dependencies [7618ee8]
+- Updated dependencies [6965160]
+- Updated dependencies [ecff951]
+- Updated dependencies [babddf6]
+- Updated dependencies [dbe92a7]
+- Updated dependencies [49f208b]
+- Updated dependencies [5c2716b]
+- Updated dependencies [9e9445b]
+- Updated dependencies [932d7e2]
+- Updated dependencies [2f59da0]
+- Updated dependencies [114e727]
+- Updated dependencies [83a3b1f]
+- Updated dependencies [1a53a02]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [7c6261a]
+- Updated dependencies [1da39f5]
+- Updated dependencies [2604d34]
+- Updated dependencies [cfeb9a0]
+- Updated dependencies [f1850d8]
+- Updated dependencies [eb91eba]
+- Updated dependencies [17d0954]
+- Updated dependencies [643b7c7]
+- Updated dependencies [7e1b480]
+- Updated dependencies [bfe689b]
+- Updated dependencies [4bb6f01]
+- Updated dependencies [e39dd66]
+- Updated dependencies [bed427f]
+- Updated dependencies [b70e534]
+- Updated dependencies [252f71b]
+- Updated dependencies [a5d2573]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [1fa224a]
+- Updated dependencies [3cc8676]
+- Updated dependencies [e15bf7e]
+- Updated dependencies [3fb42d2]
+- Updated dependencies [78f0be8]
+- Updated dependencies [cd584d5]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [82397b6]
+- Updated dependencies [2c2a212]
+- Updated dependencies [9bc846b]
+- Updated dependencies [773f80a]
+- Updated dependencies [2873eb9]
+- Updated dependencies [0e043d8]
+- Updated dependencies [72847c5]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [75e6871]
+- Updated dependencies [e6025e9]
+- Updated dependencies [486d526]
+- Updated dependencies [f8fe47e]
+- Updated dependencies [9e9445b]
+- Updated dependencies [d13f627]
+- Updated dependencies [a841151]
+- Updated dependencies [85ec26d]
+- Updated dependencies [4afdd3e]
+- Updated dependencies [9566c38]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [8e13ca8]
+- Updated dependencies [0996899]
+- Updated dependencies [378d8b1]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [3264516]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e218483]
+- Updated dependencies [62159bd]
+- Updated dependencies [d48aad5]
+- Updated dependencies [e787608]
+- Updated dependencies [cca11e9]
+- Updated dependencies [cfb549d]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [d86815e]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [8599c21]
+- Updated dependencies [3172831]
+- Updated dependencies [939f579]
+- Updated dependencies [2bd4e5e]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [bd5fc38]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [3d4c545]
+- Updated dependencies [bb7cb41]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+- Updated dependencies [92e13a0]
+- Updated dependencies [c9bf940]
+- Updated dependencies [a682670]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/driver-sql@17.0.0-rc.6
+  - @objectstack/objectql@17.0.0-rc.6
+  - @objectstack/service-analytics@17.0.0-rc.6
+  - @objectstack/service-settings@17.0.0-rc.6
+  - @objectstack/plugin-audit@17.0.0-rc.6
+  - @objectstack/metadata-protocol@17.0.0-rc.6
+  - @objectstack/runtime@17.0.0-rc.6
+  - @objectstack/formula@17.0.0-rc.6
+  - @objectstack/lint@17.0.0-rc.6
+  - @objectstack/client@17.0.0-rc.6
+  - @objectstack/console@17.0.0-rc.6
+  - @objectstack/rest@17.0.0-rc.6
+  - @objectstack/service-datasource@17.0.0-rc.6
+  - @objectstack/service-automation@17.0.0-rc.6
+  - @objectstack/driver-memory@17.0.0-rc.6
+  - @objectstack/driver-mongodb@17.0.0-rc.6
+  - @objectstack/driver-sqlite-wasm@17.0.0-rc.6
+  - @objectstack/plugin-security@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/plugin-hono-server@17.0.0-rc.6
+  - @objectstack/service-storage@17.0.0-rc.6
+  - @objectstack/plugin-sharing@17.0.0-rc.6
+  - @objectstack/plugin-auth@17.0.0-rc.6
+  - @objectstack/mcp@17.0.0-rc.6
+  - @objectstack/service-messaging@17.0.0-rc.6
+  - @objectstack/metadata@17.0.0-rc.6
+  - @objectstack/service-sms@17.0.0-rc.6
+  - @objectstack/plugin-reports@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/verify@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+  - @objectstack/account@17.0.0-rc.6
+  - @objectstack/setup@17.0.0-rc.6
+  - @objectstack/cloud-connection@17.0.0-rc.6
+  - @objectstack/observability@17.0.0-rc.6
+  - @objectstack/plugin-approvals@17.0.0-rc.6
+  - @objectstack/plugin-email@17.0.0-rc.6
+  - @objectstack/plugin-webhooks@17.0.0-rc.6
+  - @objectstack/service-cache@17.0.0-rc.6
+  - @objectstack/service-job@17.0.0-rc.6
+  - @objectstack/service-package@17.0.0-rc.6
+  - @objectstack/service-queue@17.0.0-rc.6
+  - @objectstack/service-realtime@17.0.0-rc.6
+  - @objectstack/trigger-api@17.0.0-rc.6
+  - @objectstack/trigger-record-change@17.0.0-rc.6
+  - @objectstack/trigger-schedule@17.0.0-rc.6
+  - @objectstack/plugin-pinyin-search@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

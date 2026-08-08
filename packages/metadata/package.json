@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/metadata",
-  "version": "17.0.0-rc.5",
+  "version": "17.0.0-rc.6",
   "license": "Apache-2.0",
   "description": "Metadata loading, saving, and persistence for ObjectStack",
   "type": "module",

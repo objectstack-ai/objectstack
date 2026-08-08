@@ -1,5 +1,242 @@
 # @objectstack/driver-mongodb
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- 262e40d: refactor(drivers)!: memory / mongodb 的 `aggregate` / `distinct` 也收进 `DriverQuery`，契约没覆盖的方法不再要求把对象名写两遍 (#6212 批 C)
+
+  #6210 的 changeset 结尾专门留了一句：`aggregate` / `distinct` **不在**那次范围内，因为它们不是 `IDataDriver` 收窄的那六个方法。#6212 记下了这笔账，本次结清 memory 与 mongodb 这两个包的部分。
+
+  这批方法的第一个实参**已经是对象名**，query 里却仍旧要求再写一遍：
+
+  | 位置                                        | 收窄前                              | 收窄后                                 |
+  | :------------------------------------------ | :---------------------------------- | :------------------------------------- |
+  | `MongoDBDriver.aggregate`                   | `query: QueryAST`                   | `query: DriverQuery`                   |
+  | `InMemoryDriver.distinct`                   | `query?: QueryInput`                | `query?: DriverQuery`                  |
+  | `InMemoryDriver.aggregate`                  | `Record<string, any>[] \| QueryAST` | `Record<string, any>[] \| DriverQuery` |
+  | `InMemoryDriver.performAggregation`（私有） | `Omit<QueryInput, 'object'>`        | `DriverQuery`                          |
+
+  因为 `QueryAST` / `QueryInput` 都把 `object` 声明成**必填**，一个手上只有 `where` 的调用方根本叫不出这个类型的名字，于是伸手去拿 `as any` —— 连 `where` / `orderBy` / `limit` 的检查一起关掉。这正是 #5181 记过账的那笔代价（cloud#1053 实测 20 处，cloud#1030 的 `$like` 就是从这个口子活到运行时的）。收窄之后调用方可以直接写字面量：
+
+  ```ts
+  // 收窄前：object 是必填，这句编译不过，于是 ... as any
+  // 收窄后：直接过，且 where / orderBy / aggregations 逐个受检
+  await driver.aggregate("order", {
+    groupBy: ["region"],
+    aggregations: [{ function: "sum", field: "amount", alias: "total" }],
+  });
+  ```
+
+  同一次改动收回了 4 处已经多余的 `as any`（memory 2、mongodb 2），`check:query-options-erasure` 的测试面因此从 267 降到 263，baseline 已按门禁要求同 PR `--update`。
+
+  **`InMemoryDriver.aggregate` 的联合刻意保留。** 两条分支都有活体生产者：mongo 管线数组那支由 `memory-analytics.ts` 喂，AST 那支由 objectql 引擎与 `@objectstack/verify` 的日期分桶探针喂。退役任何一支都会打断其中一条。
+
+  **顺带把 `#6212` 正文的一处归因证伪了**：正文说 `performAggregation` 当初选 `Omit<QueryInput, 'object'>` 是被 `groupBy` 的元素类型差异逼的。实测 `QueryInput` 与 `QueryAST` 在 `groupBy` 上**逐字相同**，差异只在 `search` / `orderBy` / `expand`；直接换 `DriverQuery` 零报错。所以那不是被迫的选择，契约优先取 `DriverQuery`，不再引入第二个查询类型家族。
+
+  **零运行时改动。** 非测试改动 100% 是类型注解，无逻辑、无行为、无 emit 差异（`as` 断言在编译期即被抹除）。测试全绿：memory 532、mongodb 206（另 137 条需真实 mongod，按既有 opt-in 规则跳过）。这也是 #5499 冻结面上被允许的处置口径 —— 与 #6210 在同一批驱动上走的是同一条。
+
+  **迁移面：删掉调用字面量里的 `object:` 键**，与 #5181 / #6210 同一句话，现在覆盖到 `aggregate` / `distinct`。编译器会逐处指出来：
+
+  ```
+  error TS2353: Object literal may only specify known properties,
+                and 'object' does not exist in type 'DriverQuery'.
+  ```
+
+  本仓实测只有一处需要改（`memory-driver.test.ts` 的 `distinct` 用例），且它写的值与第一实参逐字相等，纯冗余。
+
+  标 major 的依据与 #5181 / #6210 一致：**源码级破坏性**（调用点内联字面量），运行时行为零变化。`check:api-surface` 只记录导出的存在与否、不记录签名，因此这条说明同样是该变更唯一的下游载体。
+
+- d367f03: refactor(drivers)!: 五个驱动的 query 参数跟进 `DriverQuery`，休眠的类型谎言就此没有藏身处 (#6075)
+
+  #5181（PR #6076）把 `IDataDriver.find/findOne/count/updateMany/deleteMany/explain` 的 query 参数收窄为 `DriverQuery`（`Omit<QueryAST, 'object'>`），并在同一条 changeset 里写明：「把驱动签名一并迁到 `DriverQuery` 是后续的机械收尾」。这就是那次收尾。
+
+  在此之前，五个驱动的实现仍旧声明 `query: QueryAST`（turso 侧是 `query: any`）。**它不红，也不会红** —— 方法参数按双变比较，实现声明得比契约宽照样满足契约。但调用方现在**有权**省略 `object`，于是这些实现的类型说 `query.object` 是 `string`，运行期却可能是 `undefined`：一句休眠的谎言，没有任何门拦得住下一个照着它写代码的人。
+
+  收尾之后，「驱动读 `query.object`」直接变成编译错误：
+
+  ```ts
+  // 收窄前：编译通过，运行期可能是 undefined —— 谎言
+  // 收窄后：error TS2339: Property 'object' does not exist on type 'DriverQuery'.
+  const name = query.object;
+  ```
+
+  **零运行时改动。** 本次改的全部是类型注解：五个驱动的六个契约方法签名，以及为让类型自洽而必须跟进的少量私有辅助方法参数（mongodb 的 `buildFindOptions` / `buildSortSpec`，sql 的 `findRows` / `orderKeysFor`，turso 的 `toRemoteQuery` / `toRemoteReadQuery`，memory 的 `performAggregation`）—— 它们都只转发或读取 `where` / `orderBy` / `groupBy` 这些字段，本来就不读 `object`。turso 的几处 `query: any` 一并收紧，多拿回一批本已放弃的检查。emit 无差异，测试全绿（memory 524、mongodb 206、sql 906、sqlite-wasm 254、turso 788）。
+
+  **迁移面：删掉驱动调用字面量里的 `object:` 键**，与 #5181 是同一句话，只是现在也覆盖了直接按具体驱动类（`SqlDriver` / `MemoryDriver` / …）而非按 `IDataDriver` 取类型的调用方。编译器会逐处指出来（TS2353 `'object' does not exist in type 'DriverQuery'`）。本仓下游 25 个包实测零处需要改动，改动只落在五个驱动自己的测试里。
+
+  标 major 的依据与 #5181 一致：**源码级破坏性**（调用点内联字面量），运行时行为零变化。`check:api-surface` 只记录导出的存在与否、不记录签名，因此这条说明同样是该变更唯一的下游载体。
+
+  `aggregate` / `distinct` / `syncSchemasBatch` 不在本次范围内 —— 它们不是 `IDataDriver` 收窄的那六个方法，其中 `syncSchemasBatch` 的条目里 `object` 是被真实读取的必填键，`expand` 条目里的 `object` 同理命名的是关联对象，都不是冗余。
+
+### Minor Changes
+
+- 82397b6: feat(drivers,objectql): `$regex` / `$options` are refused everywhere, and `$icontains` is implemented on the SQL family (#5702)
+
+  The driver half of the #4706 ruling. #5701 landed the contract (the vocabulary,
+  the `RETIRED_FILTER_OPERATORS` prescriptions, the shared text case-set) and
+  #5710 flipped the last live producer — `plugin-auth`'s ObjectQL adapter, which
+  emitted `$regex` on the authentication path — so the refusal can now land
+  without breaking sign-in.
+
+  **BREAKING for anyone writing `$regex` or `$options` in a filter.** Both are
+  refused on every backend with `INVALID_FILTER` / 400 and a message that names
+  the replacement. `$regex` was never a declared operator: `driver-sql` compiled
+  it to a LIKE-escaped substring (so `a.b` matched only the literal `a.b`),
+  `driver-memory` ran it as a real `RegExp` (so the same filter also matched
+  `axb`, and an _invalid_ pattern was caught and answered `false` — zero rows, in
+  silence), and `objectql`'s `having` did the same. Write `$icontains` for the
+  case-insensitive substring search this was almost always used for, `$contains`
+  for a case-sensitive one; a pattern that genuinely needs a regex has no
+  filter-level replacement.
+
+  **`$icontains` now runs on the SQL family** — `driver-sql`, `driver-sqlite-wasm`,
+  and both of `driver-turso`'s transports (the remote one does not go through
+  knex, so it needed its own). It compiles to `LOWER(col) LIKE LOWER(?) ESCAPE ?`
+  through the same `applyLike` / `pushLike` that carries the `%` / `_` / `\`
+  escaping, as a `fold` parameter rather than a second emitter — a copied emitter
+  is where the escape class would have been dropped, and an unescaped `%` matches
+  every row. An empty or non-string comparand is refused on the validating walk
+  (an empty one matches every row, which widens rather than narrows). On SQLite
+  `lower()` folds ASCII only, which IS the contract (#4706 Q1 = A): `$icontains:
+'café'` does not match `CAFÉ`.
+
+  <!-- adr-0087: registered filter-regex-options-retired -->
+
+  `driver-mongodb`'s unknown-operator arm was throwing a bare `Error` with no
+  `code` and no `status`, three lines from the helper in its own file that sets
+  `INVALID_FILTER` / 400 — a 500-shaped body for a 400-class client mistake. It
+  now speaks the same envelope as its three siblings.
+
+  Two parts of the ruling are deliberately NOT in this change and stay tracked in
+  `scripts/check-driver-conformance.mjs`'s ledger: the `$contains` family's
+  case-sensitivity (#4706 Q2 = A) needs SQLite's `LIKE` replaced by a case-exact
+  construct in the driver, the RLS lowering and the analytics lowering together,
+  or one permission rule compiles to two row sets (#6518); and `$icontains` on the
+  JS evaluation faces needs the spec vocabulary to take the operator, which cannot
+  happen before `driver-memory` has an arm for it (#6520).
+
+### Patch Changes
+
+- 3510e4a: refactor(spec,drivers,lint): one implementation of the filter identity reduction (#5659)
+
+  `{ $and: [] }` matches every row, `{ $or: [] }` matches none, `{}` is a TRUE
+  disjunct that absorbs its `$or`, `{ $not: {} }` is FALSE. That is a ruling
+  (#5322/#5134) pinned for every backend by the four identity cases in
+  `FILTER_LOGIC_CASES` — and it was implemented four times over: `reduceFilterNode`
+  in `driver-sql`, the same function again in `driver-mongodb`, the
+  `every`/`some`/truthiness algebra of `driver-memory`'s matcher, and nearly a
+  fifth hand-written copy inside `@objectstack/lint`, which declined to write one
+  and filed this issue instead.
+
+  **New in `@objectstack/spec` (`@objectstack/spec/data`): `reduceFilterVerdict`**,
+  beside the case table that proves it. It answers `'true' | 'false' | 'clause'`
+  for a filter node and never throws on its own; each backend's own refusals — the
+  undeclared `$`-combinator and the `undefined` comparand in `driver-sql`, the
+  query-level keys and the `$null` comparand in `driver-mongodb` — are passed in as
+  `FilterVerdictHooks` and are invoked from exactly the positions they were invoked
+  from before. `reduceFilterKeyVerdict` answers the same question for one key, which
+  is what both SQL and MongoDB emitters consult while walking a node.
+
+  **No behaviour changes in the three drivers.** The move is mechanical: the shared
+  algebra replaces each private copy, the refusals stay where they were, and the
+  `FILTER_LOGIC_CASES` conformance suites are green on both sides of the change —
+  including the SQL-inheriting `driver-sqlite-wasm` and `driver-turso`.
+
+  **`@objectstack/lint` gains two warnings it was structurally blind to.** The
+  `multi: true` unbounded-bulk-write rule (#5482) asked "does this filter have zero
+  keys", so a `delete_record` bounded by `filter: { $and: [] }` or
+  `filter: { $or: [{}] }` — a whole-object write by the ruling every driver executes
+  — passed silently. It now asks the reduction, and it warns about both while
+  staying quiet on `{ $or: [] }` and `{ $not: {} }`, which match nothing. The
+  message names the shape it saw (`a filter that REDUCES TO TRUE ({"$and":[]})`)
+  rather than calling a non-empty filter "empty".
+
+  If you have a flow declaring a bulk write bounded by one of those two shapes, the
+  lint will now tell you so — the write was already unbounded at run time; only the
+  feedback is new.
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes
