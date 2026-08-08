@@ -471,7 +471,7 @@ describe('[#5574 / D1] a bulk write fires before-hooks once per matched row', ()
       { title: 'c', status: 'todo' },
     ]);
 
-    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
 
     expect(seen).toHaveLength(3);
     expect(seen.sort()).toEqual(rows.map((r) => String(r.id)).sort());
@@ -490,7 +490,7 @@ describe('[#5574 / D1] a bulk write fires before-hooks once per matched row', ()
     ]);
     const doomed = rows.filter((r) => r.status === 'stale').map((r) => String(r.id));
 
-    await engine.delete('task', { multi: true, where: { status: 'stale' } } as any);
+    await engine.delete('task', { multi: true, where: { status: 'stale' } });
 
     expect(seen.sort()).toEqual(doomed.sort());
   });
@@ -503,7 +503,7 @@ describe('[#5574 / D1] a bulk write fires before-hooks once per matched row', ()
     const { engine } = await boot([hook('per_row_before', 'beforeUpdate', () => { seen.push('x'); })]);
     await seedTasks(engine, [{ title: 'a', status: 'done' }]);
 
-    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'nothing_matches' } } as any);
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'nothing_matches' } });
 
     expect(seen).toEqual([]);
   });
@@ -520,7 +520,7 @@ describe('[#5574 / D1] a bulk write fires before-hooks once per matched row', ()
     ]);
 
     await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
-    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
 
     expect(withPrevious).toHaveLength(2);
     expect(withoutPrevious).toHaveLength(2);
@@ -531,7 +531,7 @@ describe('[#5574 / D1] a bulk write fires before-hooks once per matched row', ()
     const { engine } = await boot([hook('per_row_before', 'beforeUpdate', () => { seen.push('x'); })]);
     const row: any = await engine.insert('task', { title: 'a', status: 'todo' });
 
-    await engine.update('task', { status: 'done' }, { where: { id: row.id } } as any);
+    await engine.update('task', { status: 'done' }, { where: { id: row.id } });
 
     expect(seen).toEqual(['x']);
   });
@@ -553,7 +553,7 @@ describe('[#5574 / D2] the per-row before context is the SINGLE-RECORD shape', (
       { title: 'b', status: 'todo', owner: 'u2' },
     ]);
 
-    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
 
     expect(seen).toHaveLength(2);
     for (const { id, prev } of seen) {
@@ -578,12 +578,12 @@ describe('[#5574 / D2] the per-row before context is the SINGLE-RECORD shape', (
     ]);
 
     await expect(
-      engine.update('task', { status: 'done' }, { multi: true, where: {} } as any),
+      engine.update('task', { status: 'done' }, { multi: true, where: {} }),
     ).rejects.toThrow(/row is locked/);
 
     // The guard fired BEFORE the write, so nothing was written at all — the
     // refusal covers the whole batch, not just the offending row.
-    expect(await engine.count('task', { where: { status: 'done' } } as any)).toBe(0);
+    expect(await engine.count('task', { where: { status: 'done' } })).toBe(0);
   });
 
   it('carries NO `result` — the before phase has no post-state', async () => {
@@ -591,7 +591,7 @@ describe('[#5574 / D2] the per-row before context is the SINGLE-RECORD shape', (
     const { engine } = await boot([hook('probe', 'beforeUpdate', (ctx) => { seen.push(ctx.result); })]);
     await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
 
-    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
 
     expect(seen).toEqual([undefined, undefined]);
   });
@@ -605,7 +605,7 @@ describe('[#5574 / D3] the payload stays BATCH-scoped, and that IS the merge rul
     })]);
     await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
 
-    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
 
     expect(payloads).toHaveLength(2);
     // Reference identity, deliberately. Copies are what a reconciliation step
@@ -623,11 +623,11 @@ describe('[#5574 / D3] the payload stays BATCH-scoped, and that IS the merge rul
       { title: 'b', status: 'todo', owner: 'u2' },
     ]);
 
-    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
 
     // Both rows got it, including the one whose dispatch did not make it. This
     // is the contract, not a leak: one `updateMany` carries one SET clause.
-    const rows: any[] = await engine.find('task', {} as any);
+    const rows: any[] = await engine.find('task', {});
     expect(rows.map((r) => r.owner)).toEqual(['stamped', 'stamped']);
   });
 
@@ -646,10 +646,10 @@ describe('[#5574 / D3] the payload stays BATCH-scoped, and that IS the merge rul
       { title: 'c', status: 'todo' },
     ]);
 
-    await engine.update('task', { title: '', status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+    await engine.update('task', { title: '', status: 'done' }, { multi: true, where: { status: 'todo' } });
 
     // Three dispatches, three appends, one payload — every row gets '+++'.
-    const rows: any[] = await engine.find('task', {} as any);
+    const rows: any[] = await engine.find('task', {});
     expect(rows.map((r) => r.title)).toEqual(['+++', '+++', '+++']);
   });
 
@@ -677,7 +677,7 @@ describe('[#5574 / D4] `input.id` is not a reroute lever, and is refused loudly'
     await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
 
     const err = await engine
-      .update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any)
+      .update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } })
       .then(() => null, (e) => e);
 
     expect(err).toBeInstanceOf(HookTargetRebindError);
@@ -687,7 +687,7 @@ describe('[#5574 / D4] `input.id` is not a reroute lever, and is refused loudly'
     expect(err.observedId).toBe('somewhere_else');
     // Refused, not ignored — a silent no-op is the failure this family exists
     // to abolish. And nothing was written.
-    expect(await engine.count('task', { where: { status: 'done' } } as any)).toBe(0);
+    expect(await engine.count('task', { where: { status: 'done' } })).toBe(0);
   });
 
   it('REFUSES a by-id handler that clears `input.id` — the retired conversion', async () => {
@@ -697,14 +697,14 @@ describe('[#5574 / D4] `input.id` is not a reroute lever, and is refused loudly'
     const row: any = await engine.insert('task', { title: 'a', status: 'todo' });
 
     const err = await engine
-      .update('task', { status: 'done' }, { where: { id: row.id } } as any)
+      .update('task', { status: 'done' }, { where: { id: row.id } })
       .then(() => null, (e) => e);
 
     expect(err).toBeInstanceOf(HookTargetRebindError);
     expect(err.path).toBe('by-id');
     expect(err.expectedId).toBe(row.id);
     expect(err.message).toContain('RETIRED');
-    expect((await engine.findOne('task', { where: { id: row.id } } as any) as any).status).toBe('todo');
+    expect((await engine.findOne('task', { where: { id: row.id } }) as any).status).toBe('todo');
   });
 
   it('REFUSES a by-id `beforeDelete` handler that repoints the target', async () => {
@@ -718,13 +718,13 @@ describe('[#5574 / D4] `input.id` is not a reroute lever, and is refused loudly'
     const row: any = await engine.insert('task', { title: 'a', status: 'todo' });
 
     const err = await engine
-      .delete('task', { where: { id: row.id } } as any)
+      .delete('task', { where: { id: row.id } })
       .then(() => null, (e) => e);
 
     expect(err).toBeInstanceOf(HookTargetRebindError);
     expect(err.event).toBe('beforeDelete');
     expect(err.path).toBe('by-id');
-    expect(await engine.count('task', {} as any)).toBe(1);
+    expect(await engine.count('task', {})).toBe(1);
   });
 
   it('leaves an untouched `input.id` alone — the refusal is not a trap', async () => {
@@ -755,12 +755,12 @@ describe('[#5574 / D5] equivalence with the single-id path', () => {
     const bulkSeen: unknown[] = [];
     const bulk = await boot([hook('probe', 'beforeUpdate', (ctx) => { bulkSeen.push(shapeOf(ctx)); })]);
     await seedTasks(bulk.engine, [{ title: 'a', status: 'todo' }]);
-    await bulk.engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+    await bulk.engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
 
     const singleSeen: unknown[] = [];
     const single = await boot([hook('probe', 'beforeUpdate', (ctx) => { singleSeen.push(shapeOf(ctx)); })]);
     const row: any = await single.engine.insert('task', { title: 'a', status: 'todo' });
-    await single.engine.update('task', { status: 'done' }, { where: { id: row.id } } as any);
+    await single.engine.update('task', { status: 'done' }, { where: { id: row.id } });
 
     // The declared differences (D5) are `input.options` carrying `multi`/`where`,
     // the affected COUNT, the aggregate event and D4 — none of which this
@@ -778,7 +778,7 @@ describe('[#5574 / D6] one ceiling, BOTH phases, checked before the first dispat
     await seedTasks(engine, Array.from({ length: over }, (_, i) => ({ title: `t${i}`, status: 'todo' })));
 
     const err = await engine
-      .update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any)
+      .update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } })
       .then(() => null, (e) => e);
 
     expect(err.code).toBe(BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE);
@@ -789,7 +789,7 @@ describe('[#5574 / D6] one ceiling, BOTH phases, checked before the first dispat
     expect(err.message).toContain('NOT silently downgraded');
     // Refusal BEFORE the first dispatch — not after running `over` of them.
     expect(fired).toEqual([]);
-    expect(await engine.count('task', { where: { status: 'todo' } } as any)).toBe(over);
+    expect(await engine.count('task', { where: { status: 'todo' } })).toBe(over);
   });
 
   it('refuses an over-ceiling bulk DELETE on the before phase too', async () => {
@@ -798,13 +798,13 @@ describe('[#5574 / D6] one ceiling, BOTH phases, checked before the first dispat
     await seedTasks(engine, Array.from({ length: over }, (_, i) => ({ title: `t${i}`, status: 'stale' })));
 
     const err = await engine
-      .delete('task', { multi: true, where: { status: 'stale' } } as any)
+      .delete('task', { multi: true, where: { status: 'stale' } })
       .then(() => null, (e) => e);
 
     expect(err.code).toBe(BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE);
     expect(err.event).toBe('beforeDelete');
     expect(fired).toEqual([]);
-    expect(await engine.count('task', {} as any)).toBe(over);
+    expect(await engine.count('task', {})).toBe(over);
   });
 
   it('ADMITS a batch exactly AT the ceiling, in both phases', async () => {
@@ -845,7 +845,7 @@ describe('[#5574 / D7] the matched row set is read ONCE, and serves everything',
     ]);
 
     driver.findCalls.length = 0;
-    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
 
     // Four rows, eight dispatches, ONE query. The ruling forbids a second fetch
     // in as many words.
@@ -860,7 +860,7 @@ describe('[#5574 / D7] the matched row set is read ONCE, and serves everything',
     await seedTasks(engine, [{ title: 'a', status: 'stale' }, { title: 'b', status: 'stale' }]);
 
     driver.findCalls.length = 0;
-    await engine.delete('task', { multi: true, where: { status: 'stale' } } as any);
+    await engine.delete('task', { multi: true, where: { status: 'stale' } });
 
     expect(driver.findCalls).toHaveLength(1);
   });
@@ -872,7 +872,7 @@ describe('[#5574 / D7] the matched row set is read ONCE, and serves everything',
     await seedTasks(engine, [{ title: 'a', status: 'todo' }]);
 
     driver.findCalls.length = 0;
-    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
 
     expect(driver.findCalls).toHaveLength(0);
   });
@@ -882,7 +882,7 @@ describe('[#5574 / D7] the matched row set is read ONCE, and serves everything',
     await seedTasks(engine, [{ title: 'a', status: 'todo' }]);
 
     driver.findCalls.length = 0;
-    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
 
     expect(driver.findCalls).toHaveLength(1);
   });

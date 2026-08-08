@@ -152,6 +152,19 @@ const noopLogger: HookDiagnosticsLogger = {
  * The `HookConditionError` that carried them is NOT retired — an unevaluable
  * or uncompilable condition still aborts the operation (#4775). Only the
  * bulk-write branch of its diagnosis is gone.
+ *
+ * ## What did NOT change with them: no discriminator here is ever `error.code`
+ *
+ * `limitation` was deliberately not named `code`, and that rule OUTLIVES it —
+ * it governs every field this class carries now (`reason`, `fault`,
+ * `missingKey`) and any future one. ADR-0112 makes `error.code` a CLOSED wire
+ * vocabulary (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`, both declared in
+ * `packages/spec/src/api/`), and `rest-server.ts` promotes a thrown error's
+ * `.code` straight onto the response envelope. A `.code` added here would
+ * therefore mint an unregistered wire code by SIDE EFFECT — the exact
+ * `declared ≠ enforced` shape that vocabulary exists to prevent. If one of
+ * these facts ever needs to travel on the wire it goes through the ledger, as a
+ * decision, not as a property that happens to be named `code`.
  */
 export class HookConditionError extends Error {
   override readonly name = 'HookConditionError';
