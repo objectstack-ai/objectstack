@@ -1099,7 +1099,36 @@ const step17: MigrationStep = {
     + 'selected nothing extra while reporting success. Either returns the day the capability '
     + 'is implemented (#5021 / #4988). Not in scope, and deliberately: `page:card.visible` is a '
     + 'component-level visibility predicate written into `properties` and hoisted by the '
-    + 'renderer — a page to rewrite onto the ADR-0089 `visibleWhen`, not a key to declare.',
+    + 'renderer — a page to rewrite onto the ADR-0089 `visibleWhen`, not a key to declare.\n\n'
+    + 'Finally it narrows the aggregation vocabulary: `array_agg` and `string_agg` leave '
+    + '`AggregationFunction` (#6188, ADR-0049). The enum declared eight functions and the SQL '
+    + 'family compiles five — `SqlDriver.mapAggregateFunc` and the Turso '
+    + '`RemoteTransport.aggregate` each lower `count`/`sum`/`avg`/`min`/`max` and route the rest '
+    + 'to one refusal — so three were declared-but-unenforced against the backends this platform '
+    + 'targets. What makes these two worse than an ordinary inert declaration is that another '
+    + 'package had to carry a denylist for them: `service-analytics` subtracted `array_agg` and '
+    + '`string_agg` by name in `UNSUPPORTED_AGGREGATES`, because without that subtraction they '
+    + "reached the Cube strategy's `default` and returned `COUNT(*)` — a row count in place of "
+    + 'the requested value, with no error and no log. The maintainer SPLIT the three rather than '
+    + 'retiring them as a block (2026-08-07), and the split is the point: `count_distinct` STAYS '
+    + 'and takes the enforce leg — one portable lowering (`COUNT(DISTINCT x)`), a dashboard '
+    + 'staple, already lowered by `service-analytics` — with its SQL implementation following on '
+    + 'its own card, so that declaration leads its implementation by decision rather than by '
+    + 'drift. These two take the remove leg: display conveniences with no measured pull, and '
+    + '`string_agg` never had one shape to lower to (the delimiter is a second argument in '
+    + 'PostgreSQL, a `SEPARATOR` clause in MySQL, a differently named function in SQL Server). '
+    + 'This is an enum VALUE, not a key, so — as with `crypto.hash` above — there is no '
+    + '`retiredKey()` tombstone: the enum error map carries the prescription, keyed on the '
+    + 'received value so only the two spellings that used to be legal are told they "were '
+    + 'removed". Of the two authoring surfaces only one is stored metadata: the conversion '
+    + 'rewrites `dataset.measures[].aggregate`, dropping the measure outright (a measure with '
+    + 'neither `aggregate` nor `derived` fails the dataset\'s own refinement, so stripping just '
+    + 'the key would emit an item that cannot parse) plus any derived measure the drop strands, '
+    + 'with a notice each. Nothing is lost: `compileDataset` refused both by name already, so '
+    + 'such a measure never produced a number. `QueryAST.aggregations[].function` is a request '
+    + 'surface with no stored source — one semantic TODO below. The mongodb and in-memory '
+    + 'backends that implemented these two are inside the #5499 freeze and are untouched; their '
+    + 'code is simply no longer reachable through a spec-valid request.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1149,6 +1178,7 @@ const step17: MigrationStep = {
     'record-picker-display-field-to-label-field',
     'record-picker-inert-keys-removed',
     'page-card-body-to-children',
+    'dataset-measure-array-string-agg-removed',
   ],
   semantic: [
     {
@@ -1439,6 +1469,35 @@ const step17: MigrationStep = {
         + 'deduplication goes through `groupBy` / `count_distinct` / the drivers\' `distinct()` '
         + 'door. A query still carrying the key fails to parse with the removal prescription, '
         + 'and the REST list response reports a real `total` for queries that used to send it.',
+    },
+    {
+      id: 'query-array-string-agg-retired',
+      surface: "data.query.aggregations[].function ('array_agg' / 'string_agg')",
+      replacement:
+        'an ordinary `fields` query, shaped in the caller — or a stored field that materialises '
+        + 'the roll-up. For a deduplicated COUNT the live spelling is unchanged: '
+        + '`count_distinct` stays declared',
+      reason:
+        'The stored half of this retirement is a conversion '
+        + '(`dataset-measure-array-string-agg-removed`); this entry is the REQUEST half. '
+        + '`QueryAST` is never stored in stack metadata — it is the client SDK builder\'s output '
+        + 'and the `POST /data/:object/query` body — so there is no source for the chain to '
+        + 'rewrite and callers move their own queries. Both values were declared-but-unlowered '
+        + 'on the SQL family: `SqlDriver.mapAggregateFunc` and the Turso '
+        + '`RemoteTransport.aggregate` compile five functions and refuse the rest, so a caller '
+        + 'following the schema against a SQL datasource got a refusal, not an array. They did '
+        + 'run on `driver-mongodb` and on the engine\'s in-memory fallback, which is what makes '
+        + 'this the one narrowing in the batch that removes reachable behaviour: an aggregation '
+        + 'that worked on one backend and failed on another is exactly the unpredictability the '
+        + 'ruling ended, and #5499 has both of those backends frozen. `count_distinct` was '
+        + 'deliberately NOT retired with them (maintainer, 2026-08-07) — it takes ADR-0049\'s '
+        + 'enforce leg, and its SQL lowering is a separate drivers-side card. ADR-0049, #6188.',
+      acceptanceCriteria:
+        'No caller sends `array_agg` or `string_agg` in `aggregations[].function`; list-style '
+        + 'roll-ups are assembled by the caller from an ordinary `fields` query, or materialised '
+        + 'as a stored field. A query still carrying either value fails to parse with the '
+        + 'removal prescription naming it, and authoring it is a `tsc` error at the call site; '
+        + '`count_distinct` continues to parse and is unaffected.',
     },
     {
       id: 'workflow-service-slot-retired',

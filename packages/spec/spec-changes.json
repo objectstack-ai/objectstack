@@ -309,6 +309,12 @@
         "toMajor": 17
       },
       {
+        "surface": "dataset.measures[].aggregate",
+        "to": "dataset measure aggregates 'array_agg' / 'string_agg' removed (#6188 — no SQL backend compiled them and the v1 dataset runtime refused them by name, so a measure declaring one never produced a value; the measure is dropped, and with it any derived measure left referencing it)",
+        "conversionId": "dataset-measure-array-string-agg-removed",
+        "toMajor": 17
+      },
+      {
         "surface": "connector.rateLimitConfig",
         "to": "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; the runtime's only token bucket limits INBOUND requests, so every knob here was inert while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)",
         "conversionId": "connector-rate-limit-config-removed",
@@ -525,6 +531,13 @@
         "migrationId": "query-distinct-retired",
         "toMajor": 17,
         "rationale": "The `distinct` flag promised SELECT DISTINCT and no driver ever rendered it — but it was MIS-WIRED rather than merely dead (the harsher ADR-0078 class): the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate, so the caller got duplicate rows AND worse pagination metadata, and a side effect that \"confirmed\" the flag was doing something. It had a shipped public producer (`QueryBuilder.distinct()`, removed with the key). The count suppression is deleted in the same change — `total` is truthful for those queries again. A REQUEST surface, never stored; nothing to rewrite. ADR-0049 / ADR-0078, #4286."
+      },
+      {
+        "surface": "data.query.aggregations[].function ('array_agg' / 'string_agg')",
+        "replacement": "an ordinary `fields` query, shaped in the caller — or a stored field that materialises the roll-up. For a deduplicated COUNT the live spelling is unchanged: `count_distinct` stays declared",
+        "migrationId": "query-array-string-agg-retired",
+        "toMajor": 17,
+        "rationale": "The stored half of this retirement is a conversion (`dataset-measure-array-string-agg-removed`); this entry is the REQUEST half. `QueryAST` is never stored in stack metadata — it is the client SDK builder's output and the `POST /data/:object/query` body — so there is no source for the chain to rewrite and callers move their own queries. Both values were declared-but-unlowered on the SQL family: `SqlDriver.mapAggregateFunc` and the Turso `RemoteTransport.aggregate` compile five functions and refuse the rest, so a caller following the schema against a SQL datasource got a refusal, not an array. They did run on `driver-mongodb` and on the engine's in-memory fallback, which is what makes this the one narrowing in the batch that removes reachable behaviour: an aggregation that worked on one backend and failed on another is exactly the unpredictability the ruling ended, and #5499 has both of those backends frozen. `count_distinct` was deliberately NOT retired with them (maintainer, 2026-08-07) — it takes ADR-0049's enforce leg, and its SQL lowering is a separate drivers-side card. ADR-0049, #6188."
       },
       {
         "surface": "CoreServiceName 'workflow' / IWorkflowService / WorkflowProtocol / discovery routes.workflow / RestApiRouteCategory workflow",
@@ -1089,6 +1102,12 @@
           "toMajor": 17
         },
         {
+          "surface": "dataset.measures[].aggregate",
+          "to": "dataset measure aggregates 'array_agg' / 'string_agg' removed (#6188 — no SQL backend compiled them and the v1 dataset runtime refused them by name, so a measure declaring one never produced a value; the measure is dropped, and with it any derived measure left referencing it)",
+          "conversionId": "dataset-measure-array-string-agg-removed",
+          "toMajor": 17
+        },
+        {
           "surface": "connector.rateLimitConfig",
           "to": "connector key 'rateLimitConfig' removed (#4911 — no outbound rate-limiting engine exists; the runtime's only token bucket limits INBOUND requests, so every knob here was inert while reading like a configured cap. The whole ConnectorRateLimitConfig shape went with it)",
           "conversionId": "connector-rate-limit-config-removed",
@@ -1235,6 +1254,13 @@
           "migrationId": "query-distinct-retired",
           "toMajor": 17,
           "rationale": "The `distinct` flag promised SELECT DISTINCT and no driver ever rendered it — but it was MIS-WIRED rather than merely dead (the harsher ADR-0078 class): the REST list path treated a distinct query as not countable and silently degraded `total`/`hasMore` to a page-local estimate, so the caller got duplicate rows AND worse pagination metadata, and a side effect that \"confirmed\" the flag was doing something. It had a shipped public producer (`QueryBuilder.distinct()`, removed with the key). The count suppression is deleted in the same change — `total` is truthful for those queries again. A REQUEST surface, never stored; nothing to rewrite. ADR-0049 / ADR-0078, #4286."
+        },
+        {
+          "surface": "data.query.aggregations[].function ('array_agg' / 'string_agg')",
+          "replacement": "an ordinary `fields` query, shaped in the caller — or a stored field that materialises the roll-up. For a deduplicated COUNT the live spelling is unchanged: `count_distinct` stays declared",
+          "migrationId": "query-array-string-agg-retired",
+          "toMajor": 17,
+          "rationale": "The stored half of this retirement is a conversion (`dataset-measure-array-string-agg-removed`); this entry is the REQUEST half. `QueryAST` is never stored in stack metadata — it is the client SDK builder's output and the `POST /data/:object/query` body — so there is no source for the chain to rewrite and callers move their own queries. Both values were declared-but-unlowered on the SQL family: `SqlDriver.mapAggregateFunc` and the Turso `RemoteTransport.aggregate` compile five functions and refuse the rest, so a caller following the schema against a SQL datasource got a refusal, not an array. They did run on `driver-mongodb` and on the engine's in-memory fallback, which is what makes this the one narrowing in the batch that removes reachable behaviour: an aggregation that worked on one backend and failed on another is exactly the unpredictability the ruling ended, and #5499 has both of those backends frozen. `count_distinct` was deliberately NOT retired with them (maintainer, 2026-08-07) — it takes ADR-0049's enforce leg, and its SQL lowering is a separate drivers-side card. ADR-0049, #6188."
         },
         {
           "surface": "CoreServiceName 'workflow' / IWorkflowService / WorkflowProtocol / discovery routes.workflow / RestApiRouteCategory workflow",

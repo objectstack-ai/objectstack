@@ -65,10 +65,39 @@ export const SortNodeSchema = lazySchema(() => strictObject(
   },
 ));
 
+// Retired-VALUE prescriptions. Declared with `//` (never `/** */`) and ABOVE the
+// enum's JSDoc deliberately: `build-docs.ts` takes a file's FIRST JSDoc as the
+// reference page's blurb, so a doc comment here would displace the function
+// table below. (The `crypto.hash` / `HookBodyCapability` precedent,
+// `data/hook-body.zod.ts`, which is the other enum-value retirement in tree.)
+const AGG_RETIRED_MIDDLE =
+  ' was removed from `AggregationFunction` in @objectstack/spec 17 (#6188, ADR-0049 '
+  + 'enforce-or-remove) — no SQL backend ever compiled it. `SqlDriver.mapAggregateFunc` and '
+  + '`RemoteTransport.aggregate` each lower the same five functions and refuse the rest, and '
+  + "the v1 dataset runtime had to subtract this one by name to stop it reaching a `COUNT(*)` "
+  + 'fallback that returns a row count in place of the value asked for. On the backend family '
+  + 'this platform targets it was a declaration that could only fail. ';
+const AGG_RETIRED_TAIL =
+  'There is no replacement in the query vocabulary: read the rows with an ordinary `fields` '
+  + 'query and shape them in the caller, or model the roll-up as a stored field. It returns '
+  + 'only WITH a portable lowering — ADR-0049\'s enforce leg, implementation first. '
+  + 'Run `os migrate meta --from 16` to rewrite it automatically.';
+
+const ARRAY_AGG_RETIRED =
+  '`array_agg`' + AGG_RETIRED_MIDDLE
+  + 'Delete the aggregation, or the dataset measure that declared it. ' + AGG_RETIRED_TAIL;
+
+const STRING_AGG_RETIRED =
+  '`string_agg`' + AGG_RETIRED_MIDDLE
+  + 'Its dialect divergence is the widest of the family — the delimiter is a second argument '
+  + 'in PostgreSQL, a `SEPARATOR` clause in MySQL and a differently-named function in SQL '
+  + 'Server — so there was never one shape to lower it to. Delete the aggregation, or the '
+  + 'dataset measure that declared it. ' + AGG_RETIRED_TAIL;
+
 /**
  * Aggregation Function Enum
  * Standard aggregation functions for data analysis.
- * 
+ *
  * Supported Functions:
  * - **count**: Count rows (SQL: COUNT(*) or COUNT(field))
  * - **sum**: Sum numeric values (SQL: SUM(field))
@@ -76,9 +105,17 @@ export const SortNodeSchema = lazySchema(() => strictObject(
  * - **min**: Minimum value (SQL: MIN(field))
  * - **max**: Maximum value (SQL: MAX(field))
  * - **count_distinct**: Count unique values (SQL: COUNT(DISTINCT field))
- * - **array_agg**: Aggregate values into array (SQL: ARRAY_AGG(field))
- * - **string_agg**: Concatenate values (SQL: STRING_AGG(field, delimiter))
- * 
+ *
+ * `array_agg` and `string_agg` were REMOVED in 17 (#6188). They were declared
+ * here from the day the enum was written and compiled by no SQL backend, while
+ * `service-analytics` carried a hand-written subtraction list naming exactly
+ * these two. `count_distinct` is deliberately kept on the other side of that
+ * split (maintainer ruling, 2026-08-07): a dashboard staple with one portable
+ * lowering (`COUNT(DISTINCT x)`), it takes ADR-0049's ENFORCE leg — the SQL
+ * implementation is its own card and the declaration stays ahead of it by
+ * decision, not by drift. Authoring a retired value is a `tsc` error and a
+ * parse error carrying the prescription above.
+ *
  * Performance Considerations:
  * - COUNT(*) is typically faster than COUNT(field) as it doesn't check for nulls
  * - COUNT DISTINCT may require additional memory for tracking unique values
@@ -107,8 +144,19 @@ export const SortNodeSchema = lazySchema(() => strictObject(
  */
 export const AggregationFunction = z.enum([
   'count', 'sum', 'avg', 'min', 'max',
-  'count_distinct', 'array_agg', 'string_agg'
-]);
+  'count_distinct'
+], {
+  // Only the two spellings that USED to be legal get the retirement message.
+  // Telling the author of `arry_agg` that their value "was removed" would
+  // misinform, so everything else keeps zod's own enum error, which already
+  // lists the legal functions. (`crypto.hash`, and the `managedBy: 'system'`
+  // precedent one level up in object.zod.ts.)
+  error: (issue) => {
+    if (issue.input === 'array_agg') return ARRAY_AGG_RETIRED;
+    if (issue.input === 'string_agg') return STRING_AGG_RETIRED;
+    return undefined;
+  },
+});
 
 /**
  * Date Granularity Enum

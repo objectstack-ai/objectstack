@@ -567,13 +567,21 @@ function undeclaredAggregateFunctionError(func: string): Error {
  * [#5907] Class 2 — a DECLARED function this backend cannot compile.
  *
  * Distinct from {@link undeclaredAggregateFunctionError} on purpose, and this is
- * the half that must not be collapsed into it: `count_distinct`, `array_agg` and
- * `string_agg` are declared by `AggregationFunction` and implemented by other
- * backends (`driver-mongodb` compiles all three, `driver-memory`'s analytics
- * face compiles `count_distinct`), so telling a dashboard author their
+ * the half that must not be collapsed into it: `count_distinct` is declared by
+ * `AggregationFunction` and implemented by other backends (`driver-mongodb`,
+ * and `driver-memory`'s analytics face), so telling a dashboard author their
  * `count_distinct` is a typo would be false — the same line #5345 drew in
  * `driver-memory`'s `filter-refusal.ts` between `unknownFieldOperatorError` and
  * `uncompilableFieldOperatorError`.
+ *
+ * `array_agg` and `string_agg` used to belong to this class too. #6188 retired
+ * both from `AggregationFunction` (ADR-0049 — declared by the spec, compiled by
+ * no SQL backend), so they now fall to class 1 and answer 400: the protocol no
+ * longer has those names, which is a different fact from "this backend cannot
+ * lower them" and deserves the different answer. `count_distinct` was
+ * deliberately kept and takes the enforce leg instead — lowering it here to
+ * `COUNT(DISTINCT x)` is its own card, and until that lands it is the only
+ * inhabitant of this class.
  *
  * `NOT_IMPLEMENTED` / 501 is the answer, from the ADR-0112 STANDARD catalog
  * ("Feature not yet implemented"), whose own `HttpStatusErrorCodeMap` pairs it
