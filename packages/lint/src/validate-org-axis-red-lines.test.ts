@@ -10,8 +10,8 @@ import {
   RowLevelSecurityPolicySchema,
   ShareRecipientType,
   SharingRuleSchema,
-  type PermissionSetInput,
-  type SharingRuleInput,
+  type PermissionSet,
+  type SharingRule,
 } from '@objectstack/spec/security';
 
 import {
@@ -42,7 +42,7 @@ const rules = (stack: unknown) => validateOrgAxisRedLines(stack).map((f) => f.ru
  * (`input: 'parsed'`): `condition` arrives as the `{ dialect, source }`
  * envelope, not the authored string.
  */
-function sharingRule(input: SharingRuleInput): Record<string, unknown> {
+function sharingRule(input: SharingRule): Record<string, unknown> {
   const result = SharingRuleSchema.safeParse(input);
   if (!result.success) {
     const detail = result.error.issues
@@ -66,7 +66,7 @@ function sharingRule(input: SharingRuleInput): Record<string, unknown> {
  * keeps that from quietly coming back: a fixture for a surface the spec does
  * not have now fails HERE.
  */
-function permissionSet(input: PermissionSetInput): Record<string, unknown> {
+function permissionSet(input: PermissionSet): Record<string, unknown> {
   const result = PermissionSetSchema.safeParse(input);
   if (!result.success) {
     throw new Error(
@@ -104,14 +104,14 @@ describe('sharing-rule fixtures track the spec surface (meta-test, #4984)', () =
         name: 'hq_rollup',
         object: 'work_order',
         criteria: { parent_organization_id: 'org_hq' },
-      } as unknown as SharingRuleInput),
+      } as unknown as SharingRule),
     ).toThrow(/not spec-valid/);
     expect(() =>
       sharingRule({
         name: 'plant_team',
         object: 'work_order',
         sharedTo: { type: 'business_unit', id: 'bu_plant_a' },
-      } as unknown as SharingRuleInput),
+      } as unknown as SharingRule),
     ).toThrow(/not spec-valid/);
   });
 
@@ -124,7 +124,7 @@ describe('sharing-rule fixtures track the spec surface (meta-test, #4984)', () =
         // `id` is an alias of `value`, rejected by `sharingRecipientUnknownKeyError`.
         sharedWith: { type: 'business_unit', id: 'bu_plant_a' },
         condition: 'true',
-      } as unknown as SharingRuleInput),
+      } as unknown as SharingRule),
     ).toThrow(/not spec-valid/);
   });
 
@@ -411,7 +411,7 @@ describe('validateOrgAxisRedLines — undeclared keys are the schema’s job, no
         objectName: 'material_catalog',
         sharedWith: { type: 'business_unit', value: 'bu' },
         condition: 'true',
-      } as unknown as SharingRuleInput),
+      } as unknown as SharingRule),
     ).toThrow(/not spec-valid/);
     // ② therefore never needs a fallback for the rule's target object.
     expect(
@@ -454,7 +454,7 @@ describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal'
         object: 'material_catalog',
         sharedWith: { type: recipientType, value: 'bu_plant_a' },
         condition: 'true',
-      } as unknown as SharingRuleInput),
+      } as unknown as SharingRule),
     ],
   });
 
@@ -570,7 +570,7 @@ describe('validateOrgAxisRedLines — ② business-unit trees stay org-internal'
               object: 'material_catalog',
               sharedWith: { type: recipientType, value: 'buyer' },
               condition: 'true',
-            } as unknown as SharingRuleInput),
+            } as unknown as SharingRule),
           ],
         }),
       ).toEqual([]);

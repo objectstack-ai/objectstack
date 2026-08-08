@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 // Fixtures below are AUTHORED objects — what a developer writes before the
-// schema applies its defaults — so they are annotated with `ServiceObjectInput`
+// schema applies its defaults — so they are annotated with `ServiceObject`
 // (`z.input`), not `ServiceObject` (`z.infer`, defaults already materialised).
 // Under `z.infer` every fixture owes `isSystem`, `datasource`, `searchable`,
 // `activities`, … and the annotation stops being a contract check at all. This
 // only became visible when tsconfig.test.json put these files in front of tsc
 // (#5286).
-import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, resolveCrudAffordances, type ServiceObjectInput } from './object.zod';
+import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, resolveCrudAffordances, type ServiceObject } from './object.zod';
 import type { StateMachineValidation } from './validation.zod';
 
 describe('ObjectCapabilities', () => {
@@ -288,7 +288,7 @@ describe('IndexSchema retired keys (#5248 / #4943)', () => {
 describe('ObjectSchema', () => {
   describe('Basic Object Properties', () => {
     it('should accept minimal valid object', () => {
-      const validObject: ServiceObjectInput = {
+      const validObject: ServiceObject = {
         name: 'account',
         fields: {},
       };
@@ -323,7 +323,7 @@ describe('ObjectSchema', () => {
 
   describe('Object with Fields', () => {
     it('should accept object with multiple fields', () => {
-      const objectWithFields: ServiceObjectInput = {
+      const objectWithFields: ServiceObject = {
         name: 'contact',
         label: 'Contact',
         pluralLabel: 'Contacts',
@@ -481,7 +481,7 @@ describe('ObjectSchema', () => {
 
   describe('Object Metadata', () => {
     it('should accept object with full metadata', () => {
-      const fullObject: ServiceObjectInput = {
+      const fullObject: ServiceObject = {
         name: 'opportunity',
         label: 'Opportunity',
         pluralLabel: 'Opportunities',
@@ -504,7 +504,7 @@ describe('ObjectSchema', () => {
 
   describe('Object with Indexes', () => {
     it('should accept object with indexes', () => {
-      const objectWithIndexes: ServiceObjectInput = {
+      const objectWithIndexes: ServiceObject = {
         name: 'user',
         fields: {
           email: {
@@ -539,7 +539,7 @@ describe('ObjectSchema', () => {
 
   describe('Object Capabilities', () => {
     it('should accept object with custom capabilities', () => {
-      const objectWithCapabilities: ServiceObjectInput = {
+      const objectWithCapabilities: ServiceObject = {
         name: 'case',
         fields: {},
         enable: {
@@ -574,7 +574,7 @@ describe('ObjectSchema', () => {
 
   describe('Complete Real-World Examples', () => {
     it('should accept CRM Account object', () => {
-      const accountObject: ServiceObjectInput = {
+      const accountObject: ServiceObject = {
         name: 'account',
         label: 'Account',
         pluralLabel: 'Accounts',
@@ -639,7 +639,7 @@ describe('ObjectSchema', () => {
     });
 
     it('should accept Task object with parent relationship', () => {
-      const taskObject: ServiceObjectInput = {
+      const taskObject: ServiceObject = {
         name: 'task',
         label: 'Task',
         pluralLabel: 'Tasks',
@@ -935,23 +935,32 @@ describe('ObjectSchema.create()', () => {
     // ADR-0117 (Accepted, D1/D3 scoped) reserves a fourth tier,
     // `ownership: 'business_unit'`, whose contract is: NO `owner_id`, and a
     // kernel-stamped `owning_business_unit_id` instead (D1's table). The
-    // protocol name is already registered —
-    // `SystemFieldName.OWNING_BUSINESS_UNIT_ID` — but the VALUE must not be
-    // added here yet, because `applySystemFields` decides owner injection with
-    // a DENY-list (`packages/objectql/src/registry.ts`):
+    // protocol name is registered (`SystemFieldName.OWNING_BUSINESS_UNIT_ID`)
+    // and, since #5677, open-core INJECTS the column — but the enum VALUE is
+    // still not added here.
     //
-    //   wantOwner = ownership !== 'org' && ownership !== 'none' && …
+    // ⚠️ The ORIGINAL reason recorded here has EXPIRED, and the pin outlived it.
+    // It read: `applySystemFields` decides owner injection with a DENY-list
+    // (`wantOwner = ownership !== 'org' && ownership !== 'none' && …`), so a
+    // fourth value would fall through and be stamped with `owner_id` — the exact
+    // INVERSE of what D1 declares. #5677 flipped that judgement to an ALLOW-list
+    // (`packages/objectql/src/registry.ts`, and the shared derivation
+    // `resolveInjectedSystemColumns` in `./injected-system-columns.ts`), so the
+    // engine now implements D1's `business_unit` row correctly and the inverse-
+    // stamping hazard is gone. Do NOT re-derive the old argument from this pin.
     //
-    // so a fourth value would fall through to the default branch and be
-    // stamped with `owner_id` — the exact INVERSE of what D1 declares. Adding
-    // the value alone therefore converts today's loud rejection into a silent
-    // wrong result: ADR-0049's "spec must not declare what the runtime does not
-    // enforce", in miniature.
+    // What survives is the plain sequencing fact: extending the acceptance
+    // surface is its own change, tracked as #5678 (protocol seat). Until it
+    // lands, the value is rejected, and the rejection is the honest answer — a
+    // tier an author cannot write is not a tier the schema should advertise.
     //
-    // The enum member lands in the SAME PR that flips `wantOwner` to an
-    // allow-list and injects the column. Until then this pin holds the line —
-    // and when that PR arrives, this test failing is the intended signal to
-    // rewrite it (not to delete the guard).
+    // When #5678 arrives, this test failing is the intended signal to REWRITE it
+    // (not to delete the guard) — assert the fourth value is accepted and that a
+    // fifth is still rejected naming four legal values. Co-update targets in the
+    // same PR, both of which currently state "still rejected" in prose:
+    //   • `packages/spec/src/system/constants/system-names.ts` — the
+    //     `OWNING_BUSINESS_UNIT_ID` JSDoc (its "not authorable yet" paragraph);
+    //   • the `systemFields` JSDoc in this directory's `object.zod.ts`.
     //
     // NOTE the direction: 'business_unit' was ALREADY rejected before #4611 —
     // this test does not change behaviour, it PINS the pre-existing rejection
@@ -1509,6 +1518,73 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
         fields: { name: { type: 'text' } },
       }),
     ).toThrow(/removed from @objectstack\/spec after v15\.0/);
+  });
+});
+
+/**
+ * Message ORDER on `strictTenancyError` (#6416, applying #5955's ruling).
+ *
+ * A hand-written `$ZodErrorMap`: it never calls `strictUnknownKeyError`, so
+ * #5955's reorder of the shared template did not reach it, and it is not one of
+ * the 44 direct call sites #5593 migrates to `strictObject` either. Its
+ * explanatory sentence is the standing two-modes explainer, and its FIX channel
+ * is the per-key `  • ` bullets built just above it — the tombstone that tells
+ * an upgrading author what to write instead. Those bullets used to sit BEHIND
+ * ~160 characters of standing background, which is past the front of the
+ * single-line renders several consumers use (`os validate`'s `• where: message`,
+ * CI logs).
+ *
+ * ORDER pins, not presence checks. Every `toContain` in the block above stays
+ * green under either order — that is exactly why they cannot carry this fact.
+ */
+describe('strictTenancyError message order — bullets before the explainer (#6416)', () => {
+  const EXPLAINER =
+    'The two supported tenancy modes are: database-per-tenant = environment-level ' +
+    'deployment (no object config); row-level isolation = `tenancy.enabled` + ' +
+    '`tenancy.tenantField`.';
+
+  const messageFor = (body: Record<string, unknown>) => {
+    const res = TenancyConfigSchema.safeParse({ enabled: true, ...body });
+    expect(res.success).toBe(false);
+    const unknown = res.error!.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(unknown).toBeDefined();
+    return unknown!.message;
+  };
+
+  it('names the wrong key first, then the tombstone bullet, then the explainer', () => {
+    const m = messageFor({ strategy: 'isolated' });
+    // 1. which key is wrong — and nothing before it
+    expect(m.startsWith('Unrecognized key(s) on `tenancy`: `strategy`.\n')).toBe(true);
+    // 2. the fix channel: the per-key bullet, on the line right after
+    expect(m).toContain('\n  • `tenancy.strategy` was removed from @objectstack/spec after v15.0');
+    // 3. the explainer, verbatim, last — moved, never dropped
+    expect(m.indexOf('Delete the key.')).toBeLessThan(m.indexOf(EXPLAINER));
+    expect(m.endsWith(` ${EXPLAINER}`)).toBe(true);
+  });
+
+  it('keeps EVERY per-key bullet ahead of the explainer, not just the first', () => {
+    // One issue names every offending key, so the explainer is a per-MESSAGE
+    // sentence: a reorder that put it after the first bullet would bury the rest.
+    const m = messageFor({ strategy: 'isolated', crossTenantAccess: true, tenantfield: 'org_id' });
+    for (const bullet of [
+      '`tenancy.strategy` was removed',
+      '`tenancy.crossTenantAccess` was removed',
+      '`tenantfield` is not a `tenancy` key.',
+    ]) {
+      expect(m).toContain(bullet);
+      expect(m.indexOf(bullet), bullet).toBeLessThan(m.indexOf(EXPLAINER));
+    }
+    expect(m.split(EXPLAINER)).toHaveLength(2);
+    expect(m.endsWith(` ${EXPLAINER}`)).toBe(true);
+  });
+
+  it('is a full-message pin for the plain unknown-key case', () => {
+    // Any stray separator, dropped newline or duplicated clause fails here.
+    expect(messageFor({ tenantfield: 'org_id' })).toBe(
+      'Unrecognized key(s) on `tenancy`: `tenantfield`.\n' +
+      '  • `tenantfield` is not a `tenancy` key. ' +
+      EXPLAINER,
+    );
   });
 });
 

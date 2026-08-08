@@ -43,7 +43,7 @@ export const PresenceStatus = z.enum([
   'offline',  // User is disconnected
 ]);
 
-export type PresenceStatus = z.infer<typeof PresenceStatus>;
+export type PresenceStatus = z.input<typeof PresenceStatus>;
 
 // ==========================================
 // Shared Realtime Actions
@@ -61,7 +61,7 @@ export const RealtimeRecordAction = z.enum([
   'deleted',
 ]);
 
-export type RealtimeRecordAction = z.infer<typeof RealtimeRecordAction>;
+export type RealtimeRecordAction = z.input<typeof RealtimeRecordAction>;
 
 // ==========================================
 // Shared Base Presence Schema
@@ -97,4 +97,4 @@ export const BasePresenceSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom presence data (e.g., current page, custom status)'),
 }));
 
-export type BasePresence = z.infer<typeof BasePresenceSchema>;
+export type BasePresence = z.input<typeof BasePresenceSchema>;

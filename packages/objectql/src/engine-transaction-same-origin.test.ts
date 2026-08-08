@@ -370,13 +370,61 @@ describe('a BUSINESS write across drivers inside a transaction is refused (#5696
     ).rejects.toMatchObject({ transactionDatasource: 'primary' });
   });
 
-  it('refuses from ScopedContext.transaction too (ctx.api.transaction in a sandboxed hook body)', async () => {
+  it('refuses from ScopedContext.transaction too (ctx.api.transaction in a hook body)', async () => {
     const { engine } = await splitEngine();
     const scoped = (engine as any).createContext({ userId: 'u1' }) as ScopedContext;
 
     await expect(
       scoped.transaction(async () => { await engine.insert('ledger', { name: 'from sandbox' }); }),
     ).rejects.toBeInstanceOf(CrossDatasourceTransactionWriteError);
+  });
+
+  it('refuses from a ScopedContext.transaction that JOINED the outer one, against the OUTER owner (#6168)', async () => {
+    const { engine } = await splitEngine();
+
+    // #6168 made `ctx.api.transaction` join an ambient transaction instead of
+    // opening a second one. The joined callback is handed the OUTER handle, so
+    // the same-origin gate attributes it to the outer scope by identity
+    // (`transactionCoversDriverFor`) and judges the write exactly as it judges
+    // a write made directly in the outer call: refused, and refused naming the
+    // OUTER datasource. The join changes which transaction the write is in, not
+    // how #5351 measures it — there is no new interaction between the two.
+    const err = await rejection<CrossDatasourceTransactionWriteError>(
+      engine.transaction(async (outerCtx: any) => {
+        const scoped = (engine as any).createContext({
+          userId: 'u1',
+          transaction: outerCtx.transaction,
+        }) as ScopedContext;
+        await scoped.transaction(async (trxCtx: any) => {
+          await trxCtx.object('ledger').insert({ name: 'joined' });
+        });
+      }),
+    );
+
+    expect(err).toBeInstanceOf(CrossDatasourceTransactionWriteError);
+    expect(err.transactionDatasource).toBe('primary');
+    expect(err.operation).toBe('insert');
+  });
+
+  it('carves an audit row out of a JOINED ScopedContext.transaction the same way (#6168)', async () => {
+    const { engine, telemetry, carveOutNotes } = await splitEngine();
+
+    // The carve-out half of the same ruling, measured through the joined
+    // surface: a system ledger still executes OUTSIDE the transaction, on its
+    // own connection, with no foreign handle.
+    await engine.transaction(async (outerCtx: any) => {
+      const scoped = (engine as any).createContext({
+        userId: 'u1',
+        transaction: outerCtx.transaction,
+      }) as ScopedContext;
+      await scoped.transaction(async (trxCtx: any) => {
+        await trxCtx.object('sys_audit_log').insert({ action: 'joined audit' });
+      });
+    });
+
+    expect(telemetry.writes).toHaveLength(1);
+    expect(telemetry.writes[0].transaction).toBeUndefined();
+    expect(carveOutNotes()).toHaveLength(1);
   });
 
   it('does NOT refuse a mapped write made outside any transaction — no false positive', async () => {

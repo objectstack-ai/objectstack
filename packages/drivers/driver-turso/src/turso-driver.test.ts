@@ -151,7 +151,7 @@ describe('TursoDriver (SQLite Integration)', () => {
   });
 
   it('should count records', async () => {
-    const count = await driver.count('users', { object: 'users', where: { age: 17 } });
+    const count = await driver.count('users', { where: { age: 17 } });
     expect(count).toBe(2);
   });
 
@@ -752,7 +752,7 @@ describe('TursoDriver Remote Mode (via @libsql/client)', () => {
   });
 
   it('should count records with filter', async () => {
-    const count = await driver.count('users', { object: 'users', where: { age: 17 } });
+    const count = await driver.count('users', { where: { age: 17 } });
     expect(count).toBe(2);
   });
 

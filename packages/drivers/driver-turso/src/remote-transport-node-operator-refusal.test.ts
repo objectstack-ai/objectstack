@@ -122,6 +122,14 @@ const UNDECLARED: Array<[label: string, where: unknown, key: string, path: strin
   ['$nor at the top level', { $nor: [{ stage: 'won' }] }, '$nor', 'where.$nor'],
   ['$expr at the top level', { $expr: { $eq: ['$stage', 'won'] } }, '$expr', 'where.$expr'],
   ['$elemMatch at the top level', { $elemMatch: { stage: 'won' } }, '$elemMatch', 'where.$elemMatch'],
+  // [#5702] `$regex` MOVED here from the misplaced-field-operator table below.
+  // It sat there because it was a field operator this transport compiled ("and
+  // `$regex` because better-auth's adapter really emits it"); #4706 retired it,
+  // so at the node position it is no longer one level too high — it names
+  // nothing this protocol declares at any level, which is the tail this table
+  // asserts. Re-spelling the row rather than deleting it keeps the shape's
+  // answer pinned; only which of the two tails it takes has changed.
+  ['$regex at the top level', { $regex: 'wo' }, '$regex', 'where.$regex'],
   ['$where inside $or', { $or: [{ $where: 'x' }] }, '$where', 'where.$or[0].$where'],
   ['$nor inside $and', { $and: [{ $nor: [{ stage: 'won' }] }] }, '$nor', 'where.$and[0].$nor'],
   ['$expr inside $not', { $not: { $expr: 1 } }, '$expr', 'where.$not.$expr'],
@@ -140,8 +148,13 @@ const UNDECLARED: Array<[label: string, where: unknown, key: string, path: strin
  * hand-written or AI-authored filter produces when the field name is dropped,
  * and every one of them compiled to a predicate on a column named after the
  * operator. `$between` is included even though this transport never compiles it
- * (TursoDriver lowers it first) — misplaced is misplaced — and `$regex` because
- * better-auth's adapter really emits it.
+ * (TursoDriver lowers it first) — misplaced is misplaced — and `$icontains`
+ * because this transport compiles it (#5702) even though `FILTER_OPERATORS`
+ * does not list it yet.
+ *
+ * [#5702] `$regex` LEFT this table for the undeclared one above: it is retired,
+ * so it is not a field operator at any level and its author must not be told to
+ * write `{ field: { $regex: … } }`.
  */
 const MISPLACED: Array<[label: string, where: unknown, key: string]> = [
   ['$eq', { $eq: 'won' }, '$eq'],
@@ -157,7 +170,7 @@ const MISPLACED: Array<[label: string, where: unknown, key: string]> = [
   ['$notContains', { $notContains: 'wo' }, '$notContains'],
   ['$startsWith', { $startsWith: 'w' }, '$startsWith'],
   ['$endsWith', { $endsWith: 'n' }, '$endsWith'],
-  ['$regex', { $regex: 'wo' }, '$regex'],
+  ['$icontains', { $icontains: 'wo' }, '$icontains'],
   ['$null', { $null: true }, '$null'],
   ['$exists', { $exists: true }, '$exists'],
 ];
@@ -493,7 +506,7 @@ describe('[#5769] a refused node-position $-key touches no rows', () => {
     expect(await ids({})).toEqual(['d_lost', 'd_open', 'd_won']);
     expect(await ids({ $and: [] })).toEqual(['d_lost', 'd_open', 'd_won']);
     expect(await ids({ $or: [] })).toEqual([]);
-    expect(await driver.count('deal', { object: 'deal', where: { stage: 'won' } })).toBe(1);
+    expect(await driver.count('deal', { where: { stage: 'won' } })).toBe(1);
   });
 });
 
@@ -552,10 +565,10 @@ describe('[#5769] local and remote give the same verdict', () => {
   for (const [label, where] of PARITY) {
     it(`${label}: both transports refuse with INVALID_FILTER / 400`, async () => {
       const l = (await local
-        .find('deal', { object: 'deal', where } as unknown as QueryAST)
+        .find('deal', { where } as unknown as QueryAST)
         .catch((e) => e)) as WireBearingError;
       const r = (await remote
-        .find('deal', { object: 'deal', where } as unknown as QueryAST)
+        .find('deal', { where } as unknown as QueryAST)
         .catch((e) => e)) as WireBearingError;
       expect(l, `local resolved ${label}`).toBeInstanceOf(Error);
       expect(r, `remote resolved ${label}`).toBeInstanceOf(Error);
@@ -567,8 +580,8 @@ describe('[#5769] local and remote give the same verdict', () => {
   }
 
   it('and both still answer a well-formed filter identically', async () => {
-    const l = (await local.find('deal', { object: 'deal', where: { stage: 'won' } })) as any[];
-    const r = (await remote.find('deal', { object: 'deal', where: { stage: 'won' } })) as any[];
+    const l = (await local.find('deal', { where: { stage: 'won' } })) as any[];
+    const r = (await remote.find('deal', { where: { stage: 'won' } })) as any[];
     expect(l.map((x) => x.id)).toEqual(['d_won']);
     expect(r.map((x) => x.id)).toEqual(['d_won']);
   });

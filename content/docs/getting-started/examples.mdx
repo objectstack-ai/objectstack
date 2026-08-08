@@ -306,6 +306,15 @@ import TodoApp from '../examples/app-todo/objectstack.config';
 export default composeStacks([CrmApp, TodoApp]);
 ```
 
+Single-valued configuration keys — `i18n`, `api`, `server`, `runtimeModule` —
+are neither overridden nor merged: identical declarations pass through, and two
+stacks declaring *different* values throw an error naming both stacks. The two
+apps above ship different `i18n.supportedLocales` (CRM `['en','zh-CN']`, Todo
+`['en','zh-CN','ja-JP']`), so composing them means reconciling the two `i18n`
+blocks first — make them identical, or declare `i18n` in only one of the
+stacks. Composition never picks a locale set for you: each stack's
+`translations` bundles are written against the locales that stack declares.
+
 ### Short Names Are Canonical
 
 Each app declares a `namespace` in its manifest, but **the short object name is what you use everywhere** — in `engine.find()`, hooks, formulas, lookups, REST URLs, and physical tables. The namespace is internal metadata used only for package provenance and cross-package disambiguation.

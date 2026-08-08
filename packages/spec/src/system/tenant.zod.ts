@@ -26,7 +26,7 @@ export const TenantIsolationLevel = z.enum([
   'isolated_db',      // Separate database per tenant (maximum isolation)
 ]);
 
-export type TenantIsolationLevel = z.infer<typeof TenantIsolationLevel>;
+export type TenantIsolationLevel = z.input<typeof TenantIsolationLevel>;
 
 /**
  * Database Provider Enum
@@ -38,7 +38,7 @@ export const DatabaseProviderSchema = lazySchema(() => z.enum([
   'memory',    // In-memory (testing/development only)
 ]).describe('Database provider for tenant data'));
 
-export type DatabaseProvider = z.infer<typeof DatabaseProviderSchema>;
+export type DatabaseProvider = z.input<typeof DatabaseProviderSchema>;
 
 /**
  * Tenant Connection Config Schema
@@ -53,7 +53,7 @@ export const TenantConnectionConfigSchema = lazySchema(() => z.object({
   group: z.string().optional().describe('Turso database group name'),
 }).describe('Tenant database connection configuration'));
 
-export type TenantConnectionConfig = z.infer<typeof TenantConnectionConfigSchema>;
+export type TenantConnectionConfig = z.input<typeof TenantConnectionConfigSchema>;
 
 /**
  * Tenant Quota Schema
@@ -96,7 +96,7 @@ export const TenantQuotaSchema = lazySchema(() => z.object({
   maxStorageBytes: z.number().int().positive().optional().describe('Maximum storage in bytes'),
 }));
 
-export type TenantQuota = z.infer<typeof TenantQuotaSchema>;
+export type TenantQuota = z.input<typeof TenantQuotaSchema>;
 
 /**
  * Tenant Usage Schema
@@ -119,7 +119,7 @@ export const TenantUsageSchema = lazySchema(() => z.object({
   lastUpdatedAt: z.string().datetime().optional().describe('Last usage update time'),
 }).describe('Current tenant resource usage'));
 
-export type TenantUsage = z.infer<typeof TenantUsageSchema>;
+export type TenantUsage = z.input<typeof TenantUsageSchema>;
 /** Post-parse shape of {@link TenantUsage} — defaults applied, transforms run (ADR-0122). */
 export type TenantUsageParsed = z.infer<typeof TenantUsageSchema>;
 
@@ -140,7 +140,7 @@ export const QuotaEnforcementResultSchema = lazySchema(() => z.object({
   message: z.string().optional().describe('Human-readable quota message'),
 }).describe('Quota enforcement check result'));
 
-export type QuotaEnforcementResult = z.infer<typeof QuotaEnforcementResultSchema>;
+export type QuotaEnforcementResult = z.input<typeof QuotaEnforcementResultSchema>;
 
 /**
  * Tenant Schema
@@ -223,7 +223,7 @@ export const TenantSchema = lazySchema(() => z.object({
   quotas: TenantQuotaSchema.optional(),
 }));
 
-export type Tenant = z.infer<typeof TenantSchema>;
+export type Tenant = z.input<typeof TenantSchema>;
 
 /**
  * Tenant Isolation Strategy Documentation
@@ -327,10 +327,9 @@ export const RowLevelIsolationStrategySchema = lazySchema(() => z.object({
   }).optional().describe('Performance settings'),
 }));
 
-export type RowLevelIsolationStrategy = z.infer<typeof RowLevelIsolationStrategySchema>;
+export type RowLevelIsolationStrategy = z.input<typeof RowLevelIsolationStrategySchema>;
 /** Post-parse shape of {@link RowLevelIsolationStrategy} — defaults applied, transforms run (ADR-0122). */
 export type RowLevelIsolationStrategyParsed = z.infer<typeof RowLevelIsolationStrategySchema>;
-export type RowLevelIsolationStrategyInput = z.input<typeof RowLevelIsolationStrategySchema>;
 
 /**
  * Schema-Level Isolation Strategy (isolated_schema)
@@ -447,10 +446,9 @@ export const SchemaLevelIsolationStrategySchema = lazySchema(() => z.object({
   }).optional().describe('Performance settings'),
 }));
 
-export type SchemaLevelIsolationStrategy = z.infer<typeof SchemaLevelIsolationStrategySchema>;
+export type SchemaLevelIsolationStrategy = z.input<typeof SchemaLevelIsolationStrategySchema>;
 /** Post-parse shape of {@link SchemaLevelIsolationStrategy} — defaults applied, transforms run (ADR-0122). */
 export type SchemaLevelIsolationStrategyParsed = z.infer<typeof SchemaLevelIsolationStrategySchema>;
-export type SchemaLevelIsolationStrategyInput = z.input<typeof SchemaLevelIsolationStrategySchema>;
 
 /**
  * Database-Level Isolation Strategy (isolated_db)
@@ -604,10 +602,9 @@ export const DatabaseLevelIsolationStrategySchema = lazySchema(() => z.object({
   }).optional().describe('Encryption configuration'),
 }));
 
-export type DatabaseLevelIsolationStrategy = z.infer<typeof DatabaseLevelIsolationStrategySchema>;
+export type DatabaseLevelIsolationStrategy = z.input<typeof DatabaseLevelIsolationStrategySchema>;
 /** Post-parse shape of {@link DatabaseLevelIsolationStrategy} — defaults applied, transforms run (ADR-0122). */
 export type DatabaseLevelIsolationStrategyParsed = z.infer<typeof DatabaseLevelIsolationStrategySchema>;
-export type DatabaseLevelIsolationStrategyInput = z.input<typeof DatabaseLevelIsolationStrategySchema>;
 
 /**
  * Tenant Isolation Configuration Schema
@@ -621,7 +618,7 @@ export const TenantIsolationConfigSchema = lazySchema(() => z.discriminatedUnion
   DatabaseLevelIsolationStrategySchema,
 ]));
 
-export type TenantIsolationConfig = z.infer<typeof TenantIsolationConfigSchema>;
+export type TenantIsolationConfig = z.input<typeof TenantIsolationConfigSchema>;
 /** Post-parse shape of {@link TenantIsolationConfig} — defaults applied, transforms run (ADR-0122). */
 export type TenantIsolationConfigParsed = z.infer<typeof TenantIsolationConfigSchema>;
 
@@ -718,7 +715,6 @@ export const TenantSecurityPolicySchema = lazySchema(() => z.object({
   }).optional().describe('Compliance requirements'),
 }));
 
-export type TenantSecurityPolicy = z.infer<typeof TenantSecurityPolicySchema>;
+export type TenantSecurityPolicy = z.input<typeof TenantSecurityPolicySchema>;
 /** Post-parse shape of {@link TenantSecurityPolicy} — defaults applied, transforms run (ADR-0122). */
 export type TenantSecurityPolicyParsed = z.infer<typeof TenantSecurityPolicySchema>;
-export type TenantSecurityPolicyInput = z.input<typeof TenantSecurityPolicySchema>;

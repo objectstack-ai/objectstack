@@ -8,7 +8,7 @@ import { readEnvWithDeprecation } from '@objectstack/types';
 import type { MetadataHostEngine } from './host-engine.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
-import { ConflictError, assertProtocolCompat, type MetadataItem } from '@objectstack/metadata-core';
+import { ConflictError, assertProtocolCompat, applyAuditFieldGovernance, type MetadataItem } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
 // `@objectstack/metadata` (#5108). See `rethrowUnlessMetadataStoreUnprovisioned`.
@@ -30,7 +30,7 @@ import {
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
-    type DroppedFieldsEvent, type QueryAST, type EngineQueryOptions,
+    type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
@@ -128,6 +128,33 @@ function canonicalMetaType(type: string): string {
 function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T {
     const type = canonicalMetaType(request.type);
     return type === request.type ? request : { ...request, type };
+}
+
+/**
+ * [#4513] The last thing every `/meta` read does to an OBJECT document before
+ * it leaves this service: make the field metadata it reports agree with what
+ * the engine enforces on the write path.
+ *
+ * The mismatch this closes is structural, not incidental. A `/meta` object read
+ * resolves through `sys_metadata` overlay → MetadataService → SchemaRegistry,
+ * and only the last of those three has been through `applySystemFields` — so
+ * the two stored layers answered with whatever the artifact/overlay body
+ * happened to declare, while `ObjectQL.update` was stripping caller writes to
+ * the audit family off the registry's post-injection schema. `created_at` read
+ * `readonly: false` and wrote as read-only, on the same field, at the same
+ * moment, from the one face a client can actually see (#4447 fixed the write
+ * half; this is the read half).
+ *
+ * Applied per EXIT rather than inside `decorateMetadataItem`: decoration is a
+ * diagnostics concern whose output `stripReadDecorations` deliberately removes
+ * again on write, and governance is neither — it is what the document means.
+ *
+ * `applyAuditFieldGovernance` returns its input by reference when nothing needed
+ * forcing, so the registry-sourced path (already governed at registration) and
+ * every non-object type pay a comparison and no copy.
+ */
+function governServedItem<T>(type: string, item: T): T {
+    return canonicalMetaType(type) === 'object' ? applyAuditFieldGovernance(item) : item;
 }
 
 /**
@@ -2897,6 +2924,15 @@ export class ObjectStackProtocolImplementation implements
             name,
             /** @deprecated Use `name`. Removed in protocol 18 (#4828). */
             apiName: name,
+            // [#5936] The operator's value, passed as read — no local default.
+            // What an ABSENT `NODE_ENV` advertises is decided once, inside
+            // `resolveDiscoveryEnvironment` (`production`, per the 2026-08-07
+            // ruling, direction 1), so this producer and the runtime dispatcher
+            // cannot drift on it. Before that ruling the default lived at the
+            // dispatcher's own call site and this producer had no equivalent, so
+            // a deployment that forgot the variable was told `development` here
+            // and `production` there — the exact drift the shared mapper exists
+            // to prevent (#4828). Do not re-introduce a default here.
             environment: resolveDiscoveryEnvironment(
                 (globalThis as { process?: { env?: Record<string, string | undefined> } })
                     .process?.env?.NODE_ENV,
@@ -3544,7 +3580,11 @@ export class ObjectStackProtocolImplementation implements
                         (it as any)?.name,
                         packageId ?? ((it as any)?._packageId as string | undefined),
                     );
-                    return mergeArtifactProtection(it, a) as any;
+                    // [#4513] Same governance as the single-item read — the list
+                    // is the other exit a client reads field metadata from, and
+                    // an overlay row wins over the (already-governed) registry
+                    // entry in the merge above, so it carries the same lie.
+                    return governServedItem(request.type, mergeArtifactProtection(it, a)) as any;
                 }),
             ),
         };
@@ -3605,7 +3645,11 @@ export class ObjectStackProtocolImplementation implements
                         if (recPkg && (draftItem as any)._packageId === undefined) (draftItem as any)._packageId = recPkg;
                         (draftItem as any)._draft = true;
                     }
-                    return { type: request.type, name: request.name, item: decorateMetadataItem(request.type, draftItem) };
+                    return {
+                        type: request.type,
+                        name: request.name,
+                        item: decorateMetadataItem(request.type, governServedItem(request.type, draftItem)),
+                    };
                 }
             } catch (error) {
                 // [#5532] Falling through to the active read here would answer
@@ -3695,7 +3739,11 @@ export class ObjectStackProtocolImplementation implements
                 err.status = 404;
                 throw err;
             }
-            return { type: request.type, name: request.name, item: decorateMetadataItem(request.type, item) };
+            return {
+                type: request.type,
+                name: request.name,
+                item: decorateMetadataItem(request.type, governServedItem(request.type, item)),
+            };
         }
 
         // 2. MetadataService (runtime-registered items: HMR-updated view/page/
@@ -3790,7 +3838,7 @@ export class ObjectStackProtocolImplementation implements
         const artifactItem = this.lookupArtifactItem(request.type, request.name, request.packageId);
         let decorated = decorateMetadataItem(
             request.type,
-            mergeArtifactProtection(item, artifactItem),
+            governServedItem(request.type, mergeArtifactProtection(item, artifactItem)),
         );
         // ADR-0047 — list views additionally get reference-integrity
         // diagnostics (userFilters/tabs fields must exist on the source
@@ -4051,7 +4099,16 @@ export class ObjectStackProtocolImplementation implements
             this.rethrowUnlessMetadataStoreUnprovisioned(error);
         }
 
-        const effective: unknown | null = overlay ?? code;
+        // [#4513] `effective` is documented above as "what `getMetaItem` would
+        // return", and the response's `_diagnostics` is computed from it — so it
+        // carries the same audit-family governance that read now applies, or the
+        // sentence stops being true the moment the overlay declares a writable
+        // `created_at`. `code` and `overlay` are deliberately left RAW: they are
+        // the diagnostic's whole point (what the package shipped vs what was
+        // customised), and a Studio diff showing `code`'s declaration next to
+        // `effective`'s governed value is the platform override made visible,
+        // not a defect.
+        const effective: unknown | null = governServedItem(request.type, overlay ?? code);
 
         const _diagnostics =
             effective !== null && effective !== undefined
@@ -4140,7 +4197,7 @@ export class ObjectStackProtocolImplementation implements
             // `.strict()`), which left this query running ascending — the
             // OLDEST `limit` audit events, i.e. the beginning of an object's
             // life and never its recent changes (#4674). The `as any` is gone
-            // for the same reason: `EngineQueryOptions` rejects the wrong key,
+            // for the same reason: `EngineQueryOptionsParsed` rejects the wrong key,
             // and erasing the type is what let it through.
             const rows = await this.engine.find('sys_metadata_audit', {
                 where,
@@ -4201,9 +4258,17 @@ export class ObjectStackProtocolImplementation implements
             // For now, just keep them roughly in order they appear in schema or priority list
             
             return {
+                // [#5948] `object` sits on the CONTAINER, not on the view member.
+                // `ViewSchema` declares it here ("Object this container binds to")
+                // and `ListViewSchema` / `FormViewSchema` are `strictObject` that
+                // never declared it — so the old member-level copy made the real
+                // response fail its own declared schema with `unrecognized_keys`.
+                // Nothing read it (measured: `useView` passes the body through as
+                // `any`, objectui never calls `meta.getView`), so this is a
+                // relocation, not a removal: readers move up one level.
+                object: request.object,
                 list: {
                     type: 'grid' as const,
-                    object: request.object,
                     label: schema.label || schema.name,
                     columns: columns.map(f => ({
                         field: f,
@@ -4237,10 +4302,14 @@ export class ObjectStackProtocolImplementation implements
                 }));
 
              return {
+                // [#5948] Same relocation as the list branch above. The dropped
+                // `label` is NOT relocated: it was `Edit ${…}` — a rendered UI
+                // string, not metadata, and `FormViewSchema` deliberately has no
+                // `label`. The caller already knows the object it asked for, so
+                // the heading is the UI's to compose.
+                object: request.object,
                 form: {
                     type: 'simple' as const,
-                    object: request.object,
-                    label: `Edit ${schema.label || schema.name}`,
                     sections: [
                         {
                             label: 'General Information',
@@ -5517,6 +5586,31 @@ export class ObjectStackProtocolImplementation implements
         throw recordNotFoundError(request.object, request.id);
     }
 
+    /**
+     * Validate-only (#6037 — #4633 ruling D): report the write path's verdict
+     * on candidate rows without persisting any of them.
+     *
+     * Deliberately thin. The verdict comes from `engine.validate()`, which
+     * calls the same `validateRecord` / `evaluateValidationRules` that
+     * `insert()` calls — so "the preview agrees with the write" is guaranteed
+     * by construction rather than by a mirror kept in step by hand. That
+     * mirror is what this replaces: `rest/src/import-coerce.ts` re-implemented
+     * a slice of the engine's rules and structurally could not predict the
+     * rest of the family (ADR-0104 value shapes, `format`, object-level
+     * `validations`, the state machine).
+     *
+     * Same object-existence gate as every other data entry point (#3770), so
+     * an unknown object fails the same way here as it would on the real write
+     * — a preview that 404s differently from its write is a mirror again.
+     */
+    async validateData(request: { object: string, data: any, mode?: 'insert' | 'update', context?: any }) {
+        this.assertObjectRegistered(request.object);
+        return this.engine.validate(request.object, request.data, {
+            ...(request.mode !== undefined ? { mode: request.mode } : {}),
+            ...(request.context !== undefined ? { context: request.context } : {}),
+        });
+    }
+
     async createData(request: { object: string, data: any, context?: any }) {
         this.assertObjectRegistered(request.object); // [#3770]
         // [#3043] Ingress-level static-`readonly` strip — a non-system caller
@@ -5971,7 +6065,7 @@ export class ObjectStackProtocolImplementation implements
                 // truncated away the recently-edited records a searcher is most
                 // likely to want (#4674). Typed rather than `any` so the
                 // contract rejects the wrong key at the call site.
-                const opts: EngineQueryOptions = {
+                const opts: EngineQueryOptionsParsed = {
                     where,
                     limit: perObject,
                     orderBy: [{ field: 'updated_at', order: 'desc' }],
@@ -10457,6 +10551,20 @@ export class ObjectStackProtocolImplementation implements
         }
 
         const singularTypeForRepo = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // #5927 — the fact the four delete receipts below have to tell the
+        // truth about, hoisted to method scope because it is read by BOTH
+        // delete paths (repository and legacy raw-engine) and by `intent`.
+        //
+        // It is the SAME fact the repo path already computed inline for
+        // `intent: 'override-artifact' | 'runtime-only'` — this binding
+        // replaces that call rather than adding one, so the receipt split
+        // costs zero new registry reads. (The two-tier authorization block
+        // above computes it a second time under `request.type`; that one is
+        // block-scoped to `environmentId !== undefined` and cannot be reused
+        // here. Both spellings agree: `canonicalizeMetaRequestType` already
+        // folded `request.type` to singular at the top of this method, which
+        // makes `singularTypeForRepo` a no-op re-fold — see #4432.)
+        const artifactBacked = this.isArtifactBacked(singularTypeForRepo, request.name);
         const overlayAllowedForRepoDel = ObjectStackProtocolImplementation.isOverlayAllowed(singularTypeForRepo);
         const runtimeCreateAllowedForRepoDel = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularTypeForRepo);
         const useRepoPath = overlayAllowedForRepoDel || runtimeCreateAllowedForRepoDel;
@@ -10493,9 +10601,18 @@ export class ObjectStackProtocolImplementation implements
                     return {
                         success: true,
                         reset: false,
+                        // #5927 — "already at artifact default" presumes an
+                        // artifact default EXISTS to be at. When nothing is
+                        // shipped under this (type, name), the absent overlay
+                        // row is the absence of the whole item, and the miss
+                        // says that instead of naming a baseline that was
+                        // never there. The draft leg claimed neither and is
+                        // unchanged, verbatim.
                         message: targetState === 'draft'
                             ? `No pending draft for ${request.type}/${request.name}.`
-                            : `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`,
+                            : artifactBacked
+                                ? `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`
+                                : `No ${singularTypeForRepo} '${request.name}' found — nothing to delete.`,
                     };
                 }
 
@@ -10511,7 +10628,10 @@ export class ObjectStackProtocolImplementation implements
                     // #4556 — NULL, not 'system', for an actor-less delete.
                     actor: request.actor ?? null,
                     source: 'protocol.deleteMetaItem',
-                    intent: this.isArtifactBacked(singularTypeForRepo, request.name)
+                    // #5927 — was an inline `this.isArtifactBacked(...)` call
+                    // with these exact arguments; now reads the method-scoped
+                    // binding the receipts share. Same fact, one call fewer.
+                    intent: artifactBacked
                         ? 'override-artifact'
                         : 'runtime-only',
                     state: targetState,
@@ -10566,9 +10686,30 @@ export class ObjectStackProtocolImplementation implements
                     reset: true,
                     seq: result.seq,
                     ...(deleteProjection ? { projectionApplied: deleteProjection } : {}),
+                    // #5927 — the same split #5265/PR #5926 made on the save
+                    // side, on the reset path. `artifactBacked` is exactly the
+                    // difference between the two things a delete can be:
+                    //
+                    //   • override-artifact — a code-shipped artifact sits
+                    //     under this (type, name). Removing the row really
+                    //     does lift a customization layer and really does
+                    //     leave the packaged default in force; the sentence is
+                    //     literally true and is unchanged, byte for byte.
+                    //   • runtime-only — nothing is underneath. The row WAS
+                    //     the item, and after this delete it does not exist in
+                    //     any layer. Telling an admin who just deleted an
+                    //     `object`/`flow`/`hook` they created that it was
+                    //     "reset to artifact default" points them at a
+                    //     baseline that has never existed.
+                    //
+                    // The draft leg discards a pending draft and never claimed
+                    // a reset, so it is unchanged. `[seq=…]` stays on every
+                    // branch — HMR cursors read it.
                     message: (request.state === 'draft')
                         ? `Draft discarded — ${request.type}/${request.name}. [seq=${result.seq}]`
-                        : `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`,
+                        : artifactBacked
+                            ? `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`
+                            : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists. [seq=${result.seq}]`,
                 };
             } catch (err: any) {
                 if (err instanceof ConflictError) {
@@ -10625,7 +10766,10 @@ export class ObjectStackProtocolImplementation implements
                 return {
                     success: true,
                     reset: false,
-                    message: `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`,
+                    // #5927 — same split as the repository path's miss above.
+                    message: artifactBacked
+                        ? `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`
+                        : `No ${singularTypeForRepo} '${request.name}' found — nothing to delete.`,
                 };
             }
             await this.engine.delete('sys_metadata', { where: { id: existing.id } });
@@ -10645,7 +10789,14 @@ export class ObjectStackProtocolImplementation implements
             return {
                 success: true,
                 reset: true,
-                message: `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default.`,
+                // #5927 — same split as the repository path's success above.
+                // This branch carries no `[seq=…]`: it writes no history row
+                // and emits no watch event (see the block comment opening this
+                // path), so there is no cursor to report. That asymmetry is
+                // pre-existing and deliberate — the split does not touch it.
+                message: artifactBacked
+                    ? `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default.`
+                    : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists.`,
             };
         } catch (err: any) {
             const e = new Error(`Failed to delete customization overlay: ${err.message}`);
@@ -10760,9 +10911,23 @@ export class ObjectStackProtocolImplementation implements
                         // the very next write with `not_overridable`. An app the user
                         // had just built became un-editable at the first kernel
                         // rebuild (cloud#970).
+                        //
+                        // The ownership key is the row's REAL package binding
+                        // (#4636 PR2). These rows come off `engine.find`, so
+                        // their columns are snake_case — `package_id`, never
+                        // `packageId`, exactly as `getMetaItems` and the
+                        // sibling branch below already read them. Reading the
+                        // camelCase key made the expression `undefined ||
+                        // 'sys_metadata'`, so every boot registered even a
+                        // package-bound object under the sentinel and the
+                        // sidebar's `getAllObjects(packageId)` filter lost it
+                        // across a restart. `||` and not `??`, symmetric with
+                        // the write path's `request.packageId || 'sys_metadata'`:
+                        // an empty binding is "no package", and the sentinel
+                        // marks exactly that one thing.
                         this.engine.registry.registerObject(
                             { ...(data as Record<string, unknown>), _provenance: 'org' } as any,
-                            record.packageId || 'sys_metadata',
+                            (record as { package_id?: string | null }).package_id || 'sys_metadata',
                         );
                     } else {
                         // Same rule as the getMetaItems read-side hydration and

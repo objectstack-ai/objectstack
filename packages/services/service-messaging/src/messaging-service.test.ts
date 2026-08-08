@@ -592,3 +592,393 @@ describe('MessagingService — inbox read API (ADR-0030)', () => {
         expect(await svc.listInbox('')).toEqual({ notifications: [], unreadCount: 0 });
     });
 });
+
+/**
+ * `n` inbox rows for one user, oldest first. `created_at` carries a padded
+ * millisecond index so the fake engine's lexicographic `desc` sort is the real
+ * newest-first order for any `n` — the window tests below all depend on
+ * knowing exactly WHICH rows a truncated window holds.
+ */
+function seedInbox(
+    userId: string,
+    n: number,
+    topicAt: (i: number) => string = () => 'task.assigned',
+): Array<Record<string, unknown>> {
+    return Array.from({ length: n }, (_, i) => ({
+        id: `m${i + 1}`,
+        user_id: userId,
+        notification_id: `n${i + 1}`,
+        topic: topicAt(i),
+        title: `Notification ${i + 1}`,
+        body_md: 'body',
+        created_at: `2026-01-01T00:00:00.${String(i).padStart(3, '0')}Z`,
+    }));
+}
+
+/** An inbox receipt in a read state, for the message `seedInbox` numbered `i`. */
+function readReceipt(userId: string, i: number): Record<string, unknown> {
+    return { id: `r${i}`, notification_id: `n${i}`, user_id: userId, channel: 'inbox', state: 'read' };
+}
+
+/**
+ * Record every `find` an existing engine is asked to run, in order. Wraps the
+ * double rather than declaring another one: the cost claims below are about how
+ * many reads `listInbox` issues, which is only observable at the call site.
+ */
+function recordFinds(engine: any): Array<{ object: string; query: any }> {
+    const calls: Array<{ object: string; query: any }> = [];
+    const real = engine.find.bind(engine);
+    engine.find = async (object: string, query: any = {}) => {
+        calls.push({ object, query });
+        return real(object, query);
+    };
+    return calls;
+}
+
+/**
+ * [#6363] `ListNotificationsResponseSchema.unreadCount` is published into the
+ * API reference as "Total number of unread notifications". It was counted
+ * inside `rows.map(...)`, i.e. over the `limit`-truncated window, so the badge
+ * saturated at the window size forever: measured on a real stack with 60
+ * unread, the route answered `unreadCount: 50` unfiltered and `10` at
+ * `?limit=10`. Maintainer ruling (2026-08-07, Option A): make the declaration
+ * true — count the total — and leave the list itself windowed.
+ *
+ * The fixtures below are the issue's measured shape (60 unread, `limit=10`).
+ */
+describe('[#6363] listInbox — unreadCount is the TOTAL unread, not the fetched window', () => {
+    const logger = silentLogger();
+
+    it('counts every unread message when the window truncates the inbox', async () => {
+        const engine = inboxEngine({ inbox: seedInbox('u1', 60) });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        // No `limit`: the default clamp windows the LIST at 50 — unchanged.
+        const unfiltered = await svc.listInbox('u1');
+        expect(unfiltered.notifications).toHaveLength(50);
+        expect(unfiltered.unreadCount).toBe(60); // was 50 — the window's size
+
+        // `?limit=10`: the list shrinks with the window, the badge does not.
+        const windowed = await svc.listInbox('u1', { limit: 10 });
+        expect(windowed.notifications).toHaveLength(10);
+        expect(windowed.unreadCount).toBe(60); // was 10 — the window's size
+    });
+
+    it('subtracts read-state across the whole inbox, not just inside the window', async () => {
+        // The 20 read messages are the OLDEST, so none of them is inside a
+        // newest-first `limit=10` window: a window-scoped count cannot see
+        // them, and a total that ignored receipts would answer 60.
+        const engine = inboxEngine({
+            inbox: seedInbox('u1', 60),
+            receipts: Array.from({ length: 20 }, (_, i) => readReceipt('u1', i + 1)),
+        });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const res = await svc.listInbox('u1', { limit: 10 });
+        expect(res.notifications).toHaveLength(10);
+        expect(res.notifications.every((n) => n.read === false)).toBe(true); // window is all-unread
+        expect(res.unreadCount).toBe(40);
+    });
+
+    it('counts rows carrying no notification_id — never receipted, so never read', async () => {
+        const inbox = seedInbox('u1', 60);
+        // A synthetic/legacy row with no event id keys no receipt at all.
+        for (const row of inbox.slice(0, 5)) row.notification_id = null;
+        const engine = inboxEngine({ inbox });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect((await svc.listInbox('u1', { limit: 10 })).unreadCount).toBe(60);
+    });
+
+    it('answers the `type` filter it was asked, over the whole inbox', async () => {
+        // 60 messages alternating between two topics ⇒ 30 of each.
+        const engine = inboxEngine({
+            inbox: seedInbox('u1', 60, (i) => (i % 2 === 0 ? 'deal.won' : 'task.assigned')),
+        });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const res = await svc.listInbox('u1', { type: 'deal.won', limit: 10 });
+        expect(res.notifications).toHaveLength(10);
+        expect(res.notifications.every((n) => n.type === 'deal.won')).toBe(true);
+        expect(res.unreadCount).toBe(30);
+    });
+
+    it('counts only the addressed user, at any window size', async () => {
+        const engine = inboxEngine({ inbox: [...seedInbox('u1', 60), ...seedInbox('u2', 7)] });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect((await svc.listInbox('u1', { limit: 10 })).unreadCount).toBe(60);
+        expect((await svc.listInbox('u2', { limit: 10 })).unreadCount).toBe(7);
+    });
+
+    it('the `read` filter narrows the list and never the badge', async () => {
+        const engine = inboxEngine({
+            inbox: seedInbox('u1', 60),
+            receipts: Array.from({ length: 20 }, (_, i) => readReceipt('u1', i + 1)),
+        });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        // Asking for the READ half does not mean the unread badge is zero.
+        const readOnly = await svc.listInbox('u1', { read: true, limit: 10 });
+        expect(readOnly.notifications).toEqual([]); // the newest 10 are all unread
+        expect(readOnly.unreadCount).toBe(40);
+
+        const unreadOnly = await svc.listInbox('u1', { read: false, limit: 10 });
+        expect(unreadOnly.notifications).toHaveLength(10);
+        expect(unreadOnly.unreadCount).toBe(40);
+    });
+
+    it('a window that came back SHORT costs no second read', async () => {
+        // Nothing was truncated, so the window count already IS the total and
+        // the reverse join would re-read what the first `find` returned.
+        const engine = inboxEngine({ inbox: seedInbox('u1', 3) });
+        const calls = recordFinds(engine);
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const res = await svc.listInbox('u1');
+        expect(res.unreadCount).toBe(3);
+        expect(calls.filter((c) => c.object === 'sys_inbox_message')).toHaveLength(1);
+    });
+
+    it('the total read is one narrow projection, unwindowed, over the same predicate', async () => {
+        const engine = inboxEngine({ inbox: seedInbox('u1', 60) });
+        const calls = recordFinds(engine);
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        await svc.listInbox('u1', { type: 'task.assigned', limit: 10 });
+
+        const inboxReads = calls.filter((c) => c.object === 'sys_inbox_message');
+        expect(inboxReads).toHaveLength(2);
+        const [windowRead, totalRead] = inboxReads;
+        expect(windowRead.query.limit).toBe(10);
+        // Same predicate as the windowed read — the count answers the same
+        // question, minus the window — and one column, so the extra work stays
+        // the same order as the receipt scan `listInbox` already performs.
+        expect(totalRead.query.where).toEqual(windowRead.query.where);
+        expect(totalRead.query.limit).toBeUndefined();
+        expect(totalRead.query.fields).toEqual(['notification_id']);
+    });
+
+    it('a failing total read is NOT swallowed into a window-sized answer', async () => {
+        // The receipt read degrades (different object, may be absent from a
+        // minimal stack); this one re-reads the object whose `find` just
+        // succeeded, so a failure is a data-layer outage — not a licence to
+        // quietly re-tell the window-sized lie.
+        const engine = inboxEngine({ inbox: seedInbox('u1', 60) });
+        const real = engine.find.bind(engine);
+        engine.find = async (object: string, query: any = {}) => {
+            if (object === 'sys_inbox_message' && query.fields) throw new Error('connection lost');
+            return real(object, query);
+        };
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        await expect(svc.listInbox('u1', { limit: 10 })).rejects.toThrow('connection lost');
+    });
+
+    /* ------------------------------------------------------------------ */
+    /*  The other half of the ruling: the LIST window is unchanged.        */
+    /* ------------------------------------------------------------------ */
+
+    it('the list keeps its window: default 50, hard cap 200, floor 1, newest first', async () => {
+        const engine = inboxEngine({ inbox: seedInbox('u1', 250) });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const dflt = await svc.listInbox('u1');
+        expect(dflt.notifications).toHaveLength(50);
+        expect(dflt.notifications[0].id).toBe('n250'); // newest first, still
+        expect(dflt.unreadCount).toBe(250);
+
+        expect((await svc.listInbox('u1', { limit: 500 })).notifications).toHaveLength(200);
+        expect((await svc.listInbox('u1', { limit: 0 })).notifications).toHaveLength(1);
+        expect((await svc.listInbox('u1', { limit: 120 })).notifications).toHaveLength(120);
+    });
+});
+
+/**
+ * [#6436] `markAllRead` swept `listInbox(userId, { read: false, limit: 200 })`
+ * — one page of the LIST — and `200` is that list's hard cap, so the route
+ * documented as "mark **every** currently-unread inbox message as read"
+ * cleared at most 200 receipts per call.
+ *
+ * #6363 did not introduce this; it removed the cover. While `unreadCount` was
+ * counted over the window the truncation was self-consistent and invisible
+ * (clear 200, poll, see a window with nothing unread in it, badge 0). Now that
+ * the badge is the true total, one response pair states the contradiction on
+ * its own: `POST /read/all → { readCount: 200 }` then
+ * `GET /notifications → { unreadCount: 150 }`.
+ *
+ * Route C — redefine "all" as "the current window" — was excluded by the
+ * maintainer's #6363 Option A ruling (make the declaration true). The sweep now
+ * reads the unread SET directly instead of a page of the list.
+ */
+describe('[#6436] markAllRead — sweeps the whole inbox, not one 200-row window', () => {
+    const logger = silentLogger();
+
+    it("clears an inbox holding more unread than the list's hard cap (the issue's 350)", async () => {
+        const engine = inboxEngine({ inbox: seedInbox('u1', 350) });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const res = await svc.markAllRead('u1');
+        // Before: `readCount: 200`, and 150 messages still unread behind a
+        // badge that — since #6363 — reported them correctly.
+        expect(res).toEqual({ success: true, readCount: 350 });
+        expect((await svc.listInbox('u1')).unreadCount).toBe(0);
+
+        // Persisted read-state, not a view-layer computation: one receipt per
+        // notification, every one of them `read`.
+        const receipts = engine.store.sys_notification_receipt;
+        expect(receipts).toHaveLength(350);
+        expect(receipts.every((r: any) => r.state === 'read')).toBe(true);
+    });
+
+    it('marks the older unread even when the newest 200 are already read', async () => {
+        // The sharper face of the same defect, and the reason "loop `listInbox`
+        // until it comes back empty" is not merely costly but WRONG: the window
+        // is `created_at desc` over ALL rows and the `read` filter is applied
+        // in memory AFTER the truncation. An inbox whose newest 200 are read
+        // therefore handed the sweep an EMPTY id list — it marked nothing at
+        // all, however much older unread sat behind it, and a paging loop would
+        // have exited on that same empty first page. Reading the unread SET
+        // makes a message's position in the inbox stop mattering.
+        const engine = inboxEngine({
+            inbox: seedInbox('u1', 350),
+            // m151…m350 are the NEWEST 200 (created_at .150 … .349).
+            receipts: Array.from({ length: 200 }, (_, i) => readReceipt('u1', i + 151)),
+        });
+        const svc = new MessagingService({ logger, getData: () => engine });
+        expect((await svc.listInbox('u1')).unreadCount).toBe(150);
+
+        expect((await svc.markAllRead('u1')).readCount).toBe(150); // before: 0
+        expect((await svc.listInbox('u1')).unreadCount).toBe(0);
+    });
+
+    it('a small inbox behaves exactly as before — only the unread flip', async () => {
+        const engine = inboxEngine({
+            inbox: seedInbox('u1', 10),
+            receipts: [readReceipt('u1', 1), readReceipt('u1', 2)],
+        });
+        const before = engine.store.sys_notification_receipt.map((r: any) => ({ ...r }));
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect(await svc.markAllRead('u1')).toEqual({ success: true, readCount: 8 });
+        expect((await svc.listInbox('u1')).unreadCount).toBe(0);
+
+        // The two already-read receipts are not re-stamped: an inbox smaller
+        // than the old window is the case that was never broken, and it must
+        // not start doing extra writes to prove it.
+        const after = engine.store.sys_notification_receipt;
+        expect(after).toHaveLength(10);
+        expect(after.slice(0, 2)).toEqual(before);
+    });
+
+    it('costs a fixed two reads however large the inbox is — no paging loop', async () => {
+        for (const n of [10, 350]) {
+            const engine = inboxEngine({ inbox: seedInbox('u1', n) });
+            const calls = recordFinds(engine);
+            const svc = new MessagingService({ logger, getData: () => engine });
+
+            await svc.markAllRead('u1');
+
+            expect(calls, `inbox of ${n}`).toHaveLength(2);
+            const inboxRead = calls.find((c) => c.object === 'sys_inbox_message')!;
+            // Unwindowed, unordered and one column wide — the same projection
+            // #6363's `countUnreadTotal` already reads to answer the badge, so
+            // the sweep asks the data layer for nothing the bell poll does not
+            // ask it on every saturated page.
+            expect(inboxRead.query.where).toEqual({ user_id: 'u1' });
+            expect(inboxRead.query.fields).toEqual(['notification_id']);
+            expect(inboxRead.query.limit).toBeUndefined();
+            expect(inboxRead.query.orderBy).toBeUndefined();
+            expect(calls.filter((c) => c.object === 'sys_notification_receipt')).toHaveLength(1);
+        }
+    });
+
+    it('touches only the addressed user', async () => {
+        const engine = inboxEngine({
+            inbox: [
+                ...seedInbox('u1', 350),
+                { id: 'x1', user_id: 'u2', notification_id: 'xn1', title: 'X', body_md: 'x', created_at: '2026-01-01T00:00:00.900Z' },
+                { id: 'x2', user_id: 'u2', notification_id: 'xn2', title: 'Y', body_md: 'y', created_at: '2026-01-01T00:00:00.901Z' },
+            ],
+        });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect((await svc.markAllRead('u1')).readCount).toBe(350);
+        expect((await svc.listInbox('u2')).unreadCount).toBe(2);
+        expect(engine.store.sys_notification_receipt.every((r: any) => r.user_id === 'u1')).toBe(true);
+    });
+
+    it('is idempotent — a second sweep writes nothing and reports 0', async () => {
+        const engine = inboxEngine({ inbox: seedInbox('u1', 350) });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect((await svc.markAllRead('u1')).readCount).toBe(350);
+        expect((await svc.markAllRead('u1')).readCount).toBe(0);
+        expect(engine.store.sys_notification_receipt).toHaveLength(350);
+    });
+
+    it('counts a notification once when several inbox rows materialize it', async () => {
+        // `readCount` reports NOTIFICATIONS flipped, and the receipt is keyed
+        // `(notification_id, user_id, channel)` — one row per notification
+        // however many inbox rows point at it. Feeding the id twice would have
+        // counted a second upsert that wrote nothing new.
+        const inbox = seedInbox('u1', 3);
+        inbox[2].notification_id = 'n1'; // m3 re-materializes n1
+        const engine = inboxEngine({ inbox });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect((await svc.markAllRead('u1')).readCount).toBe(2);
+        expect(engine.store.sys_notification_receipt).toHaveLength(2);
+        expect((await svc.listInbox('u1')).unreadCount).toBe(0);
+    });
+
+    it('reads the receipt spine best-effort, exactly as listInbox does', async () => {
+        // Read-state lives on a DIFFERENT object which a minimal stack may not
+        // have registered (`listInbox` degrades to "everything unread" for the
+        // same reason). Degrading to "sweep them all" is the safe direction:
+        // re-marking a read message is idempotent, skipping an unread one is
+        // the defect this issue is about.
+        const engine = inboxEngine({
+            inbox: seedInbox('u1', 3),
+            receipts: [readReceipt('u1', 1)],
+        });
+        const real = engine.find.bind(engine);
+        engine.find = async (object: string, query: any = {}) => {
+            if (object === 'sys_notification_receipt') throw new Error('receipts unavailable');
+            return real(object, query);
+        };
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect((await svc.markAllRead('u1')).readCount).toBe(3);
+    });
+
+    it('skips rows carrying no event id — they key no receipt at all', async () => {
+        // Recorded, NOT endorsed. Read-state is keyed by the EVENT id
+        // (ADR-0030) and the inbox channel writes no receipt for a row without
+        // one, so there is nothing this sweep can write for it. The old code
+        // fed `markRead` the inbox ROW id (`listInbox` views it as `nid ??
+        // String(m.id)`), which inserted a receipt the join never reads back —
+        // it could not make the row read and still counted itself into
+        // `readCount`. Skipping it keeps `readCount` honest; #6363's count goes
+        // on reporting the row as unread, which is the true state. Whether such
+        // a row should be readable at all is #6448 — a gap in the receipt KEY,
+        // not in this sweep, and dormant: the single `emit()` ingress always
+        // carries an event id, so only data written around it can be null.
+        const inbox = seedInbox('u1', 3);
+        inbox[0].notification_id = null;
+        const engine = inboxEngine({ inbox });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect((await svc.markAllRead('u1')).readCount).toBe(2);
+        expect(engine.store.sys_notification_receipt).toHaveLength(2);
+        expect((await svc.listInbox('u1')).unreadCount).toBe(1);
+    });
+
+    it('still degrades to a no-op without a data engine or user id', async () => {
+        const noData = new MessagingService({ logger });
+        expect(await noData.markAllRead('u1')).toEqual({ success: true, readCount: 0 });
+
+        const svc = new MessagingService({ logger, getData: () => inboxEngine({ inbox: seedInbox('u1', 3) }) });
+        expect(await svc.markAllRead('')).toEqual({ success: true, readCount: 0 });
+    });
+});

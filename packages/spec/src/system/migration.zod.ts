@@ -100,10 +100,10 @@ export const ChangeSetSchema = lazySchema(() => z.object({
   rollback: z.array(MigrationOperationSchema).optional().describe('Operations to reverse this migration')
 }).describe('A versioned set of atomic schema migration operations'));
 
-export type ChangeSet = z.infer<typeof ChangeSetSchema>;
+export type ChangeSet = z.input<typeof ChangeSetSchema>;
 /** Post-parse shape of {@link ChangeSet} — defaults applied, transforms run (ADR-0122). */
 export type ChangeSetParsed = z.infer<typeof ChangeSetSchema>;
-export type MigrationOperation = z.infer<typeof MigrationOperationSchema>;
+export type MigrationOperation = z.input<typeof MigrationOperationSchema>;
 /** Post-parse shape of {@link MigrationOperation} — defaults applied, transforms run (ADR-0122). */
 export type MigrationOperationParsed = z.infer<typeof MigrationOperationSchema>;
 
@@ -197,7 +197,7 @@ export const DataMigrationFlagSchema = lazySchema(() => z.object({
   details: z.string().optional()
     .describe('JSON-encoded counts from the last run, for diagnostics'),
 }).describe('Deployment-level record that a data migration ran here and its self-check passed — the evidence gate consumers read instead of the platform version'));
-export type DataMigrationFlag = z.infer<typeof DataMigrationFlagSchema>;
+export type DataMigrationFlag = z.input<typeof DataMigrationFlagSchema>;
 
 /**
  * Does a flag row authorise its consumers? The ONE arbiter for both current
@@ -279,7 +279,7 @@ export const MigrationJournalEventSchema = lazySchema(() => z.object({
     .describe('JSON-encoded payload — the chunk plan on run_started, the error on run_failed / a failed compensation'),
   created_at: z.string().datetime().optional().describe('Wall-clock stamp, for humans. Never the ordering authority — that is seq'),
 }).describe('One event in a migration run journal — the durable trace that lets a killed run be resumed forward or compensated back, with rows proving which'));
-export type MigrationJournalEvent = z.infer<typeof MigrationJournalEventSchema>;
+export type MigrationJournalEvent = z.input<typeof MigrationJournalEventSchema>;
 
 /**
  * What a crashed run should do when it is rediscovered.

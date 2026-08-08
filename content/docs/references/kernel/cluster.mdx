@@ -8,19 +8,13 @@ description: Cluster protocol schemas
 # Cluster Protocol
 
 Defines the runtime semantics required for ObjectStack to behave correctly
-
 when more than one Node.js process is involved. The protocol layer codifies
-
 **intent** (scope, delivery, leadership); concrete implementations
-
 (`memory`, `redis`, `postgres`, `nats`) live in `@objectstack/service-cluster`.
 
 The full design rationale is in
-
 `content/docs/kernel/cluster.mdx`. Read it before changing
-
 any of the enums here — every value has a precise contract that other
-
 subsystems depend on.
 
 <Callout type="info">

@@ -20,6 +20,16 @@
  * these cases pin the analytics half of that answer, and pin the tiering that
  * keeps it from over-reaching (ADR-0112: a driver error class is never the
  * `error.code` for a caller-shaped mistake).
+ *
+ * [#5918] The DOTTED spelling has since left this gate. A dotted measure is
+ * refused at the MINT — `mintableMeasureKey`, maintainer ruling 2026-08-07 —
+ * because stripping the prefix answered the wrong question in both directions:
+ * it named `sum` to a caller who wrote `total.sum`, and where the stripped tail
+ * happened to be a real column it produced no verdict at all, silently
+ * aggregating the base table under a relation-shaped label. Same code, same
+ * status, same request key; different layer, and the message now names what the
+ * caller actually sent. The case below pins that hand-off from this side; the
+ * rule's own file is `dotted-measure-refusal.test.ts`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -105,14 +115,40 @@ describe('#4437 — measure source-field gate', () => {
         expect(err.message).not.toMatch(/Valid measures:[^.]*ghost_sum/);
     });
 
-    it('refuses the dotted spelling the same way, naming what it stripped to', async () => {
-        // `total.sum` prefix-strips to `sum`, which infers `SUM(sum)` — a column
-        // named `sum` that does not exist. Same 500 pre-fix, same 400 now.
+    it('[#5918] refuses the dotted spelling by NAMING IT, not by naming what it stripped to', async () => {
+        // Rewritten from "…naming what it stripped to". Until #5918 `total.sum`
+        // prefix-stripped to `sum`, inferred `SUM(sum)`, and THIS gate refused it
+        // as a missing column: `{field: 'sum', measure: 'total.sum'}` — honest
+        // about what reached SQL, but naming a string the caller never wrote, and
+        // silently right for the sibling spelling whose tail DID exist
+        // (`owner.region_count_distinct` over a real `region` column — #5918's
+        // measured defect). The maintainer ruled on 2026-08-07 that a dotted
+        // measure is refused at the MINT instead, naming the caller's own
+        // spelling; `dotted-measure-refusal.test.ts` is that rule's own file.
+        //
+        // What this case still pins, and why it belongs in #4437's file: the
+        // dotted spelling is refused with the SAME wire shape (`INVALID_FIELD` /
+        // 400 / `param: 'measures'`), and it still never reaches the driver. What
+        // changed is WHICH layer answers — so the verdict no longer carries this
+        // gate's `field`, which is exactly how the two are told apart (the same
+        // distinction #5716 drew for the strategy's own refusals).
         const { service, aggregated } = makeService();
 
-        await expect(
-            service.query({ cube: 'showcase_invoice', measures: ['total.sum'] } as any),
-        ).rejects.toMatchObject({ ...INVALID_FIELD, field: 'sum', measure: 'total.sum' });
+        const err = await service.query({ cube: 'showcase_invoice', measures: ['total.sum'] } as any).then(
+            () => { throw new Error('expected the dotted measure to be refused'); },
+            (e) => e as Error & { code?: string; status?: number; field?: string; member?: string; param?: string },
+        );
+
+        expect(err.code).toBe('INVALID_FIELD');
+        expect(err.status).toBe(400);
+        expect(err.param).toBe('measures');
+        // The caller's own spelling, verbatim.
+        expect(err.member).toBe('total.sum');
+        expect(err.message).toMatch(/Measure 'total\.sum'/);
+        // Not this gate's verdict: it names a missing base COLUMN in `field`, and
+        // `sum` is not a column anyone asked about.
+        expect(err.field).toBeUndefined();
+        expect(err.message).not.toMatch(/aggregates field 'sum'/);
 
         expect(aggregated).toEqual([]);
     });

@@ -26,7 +26,7 @@ export const ServiceStatus = z.enum([
   + 'unavailable = not installed, degraded = partial, stub = placeholder that returns 501'
 );
 
-export type ServiceStatus = z.infer<typeof ServiceStatus>;
+export type ServiceStatus = z.input<typeof ServiceStatus>;
 
 /**
  * Service Status in Discovery Response
@@ -107,7 +107,7 @@ export const ServiceSelfInfoSchema = lazySchema(() => z.object({
   message: z.string().optional().describe('Human-readable explanation, e.g. what to install for the full implementation'),
 }));
 
-export type ServiceSelfInfo = z.infer<typeof ServiceSelfInfoSchema>;
+export type ServiceSelfInfo = z.input<typeof ServiceSelfInfoSchema>;
 
 /**
  * Reads the standardized self-description marker off a registered service
@@ -281,7 +281,7 @@ export const DiscoveryEnvironmentSchema = lazySchema(() => z
     + 'environment (that is `sys_environment` / EnvironmentTypeSchema, a richer 7-member taxonomy).'
   ));
 
-export type DiscoveryEnvironment = z.infer<typeof DiscoveryEnvironmentSchema>;
+export type DiscoveryEnvironment = z.input<typeof DiscoveryEnvironmentSchema>;
 
 /**
  * `NODE_ENV` spellings accepted for each declared discovery environment (#4828).
@@ -311,11 +311,32 @@ export type DiscoveryEnvironment = z.infer<typeof DiscoveryEnvironmentSchema>;
  * | `development`, `dev`    | `development`  | exact / short spelling |
  * | `test`                  | `development`  | ephemeral developer-class run (vitest/CI), not a provisioned pre-production copy |
  * | `staging`               | `sandbox`      | pre-production and production-LIKE; certainly not `production`, and `sandbox` is the enum's pre-production member |
- * | unset / anything else   | `development`  | preserves the pre-existing `getEnv('NODE_ENV', 'development')` default, and never CLAIMS production on a guess |
+ * | unset / blank           | `production`   | the host declined to say; every other reader of that absence already says `production`, and of the two ways to be wrong, calling a real production deployment `development` is the dangerous one (#5673, #5936) |
+ * | anything else           | `development`  | an unrecognised spelling is a GUESS, and this function never claims `production` on a guess (#4828) |
  *
- * The last row is the safety-relevant one: an unknown spelling degrades to
- * `development`, so this function can never advertise `production` for an
- * environment it failed to recognise.
+ * The last two rows carry the whole safety argument, and they point opposite
+ * ways on purpose. An unrecognised spelling (`qa`, `preview`) degrades to
+ * `development`, so nothing here ever advertises `production` for an
+ * environment it failed to recognise. **Absence is not a guess** — it is the
+ * host declining to answer, and the conservative response to that is
+ * `production`: `environment` is machine-readable, and a client may skip
+ * production warnings or loosen a destructive action's confirmation on it.
+ *
+ * The unset row moved from `development` to `production` in #5673 (maintainer
+ * ruling 2026-08-06) and moved HERE, into the shared mapper, in #5936 (ruling
+ * 2026-08-07, direction 1). #5673 could only reach its own producer — the
+ * runtime dispatcher, which flipped the default at its call site — so the
+ * second producer (`getDiscovery()` in `@objectstack/metadata-protocol`, served
+ * by `@objectstack/rest`) went on passing a genuinely absent `NODE_ENV` in and
+ * answering `development`. One default in one place is what stops that: a
+ * producer cannot forget to copy a line it never has to write, so the next
+ * discovery producer inherits the right answer.
+ *
+ * "Unset" includes a **blank** value, not only an absent one. `NODE_ENV=`
+ * exports an empty string, and the runtime's `getEnv('NODE_ENV', …)` has always
+ * folded that into its default (it tests with `||`). Had this treated blank as
+ * "anything else" the two producers would have drifted again on exactly that
+ * input — the drift this consolidation exists to end.
  */
 const NODE_ENV_TO_DISCOVERY_ENVIRONMENT: Readonly<Record<string, DiscoveryEnvironment>> = {
   production: 'production',
@@ -335,12 +356,20 @@ const NODE_ENV_TO_DISCOVERY_ENVIRONMENT: Readonly<Record<string, DiscoveryEnviro
  * `serviceUnavailableMessage` / `inProcessServiceMessage` live in
  * `@objectstack/spec/system` rather than in each builder.
  *
- * @param raw the operator-supplied value, typically `process.env.NODE_ENV`
+ * **The unset default is part of the mapping, not the caller's business**
+ * (#5936). Callers pass the operator's value through as they read it and pass
+ * nothing when the operator set nothing; they do not substitute a default of
+ * their own. A caller that supplies one is re-opening the drift this function
+ * exists to close.
+ *
+ * @param raw the operator-supplied value, typically `process.env.NODE_ENV`;
+ *   `undefined`, `null` and a blank string all mean "the host did not say"
  * @returns a value guaranteed to satisfy {@link DiscoveryEnvironmentSchema}
  */
 export function resolveDiscoveryEnvironment(raw?: string | null): DiscoveryEnvironment {
-  if (typeof raw !== 'string') return 'development';
-  return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[raw.trim().toLowerCase()] ?? 'development';
+  const spelling = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (spelling === '') return 'production';
+  return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[spelling] ?? 'development';
 }
 
 // ============================================================================
@@ -462,7 +491,7 @@ export const WellKnownCapabilitiesSchema = lazySchema(() => z.object({
   i18n: z.boolean().describe('Whether the backend serves the i18n surface (translations, locale negotiation)'),
 }).describe('Well-known capability flags for frontend intelligent adaptation'));
 
-export type WellKnownCapabilities = z.infer<typeof WellKnownCapabilitiesSchema>;
+export type WellKnownCapabilities = z.input<typeof WellKnownCapabilitiesSchema>;
 
 /**
  * The capability vocabulary as a key list, derived from
@@ -494,7 +523,7 @@ export const CapabilityDescriptorSchema = lazySchema(() => z.object({
     .describe('Human-readable capability description'),
 }));
 
-export type CapabilityDescriptor = z.infer<typeof CapabilityDescriptorSchema>;
+export type CapabilityDescriptor = z.input<typeof CapabilityDescriptorSchema>;
 
 /**
  * `capabilities` as a CLOSED object over the vocabulary — one required entry
@@ -612,9 +641,9 @@ export const DiscoverySchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom metadata key-value pairs for extensibility'),
 }));
 
-export type DiscoveryResponse = z.infer<typeof DiscoverySchema>;
-export type ApiRoutes = z.infer<typeof ApiRoutesSchema>;
-export type ServiceInfo = z.infer<typeof ServiceInfoSchema>;
+export type DiscoveryResponse = z.input<typeof DiscoverySchema>;
+export type ApiRoutes = z.input<typeof ApiRoutesSchema>;
+export type ServiceInfo = z.input<typeof ServiceInfoSchema>;
 
 // ============================================================================
 // Route Health Report
@@ -648,7 +677,7 @@ export const RouteHealthEntrySchema = lazySchema(() => z.object({
   message: z.string().optional().describe('Diagnostic message'),
 }));
 
-export type RouteHealthEntry = z.infer<typeof RouteHealthEntrySchema>;
+export type RouteHealthEntry = z.input<typeof RouteHealthEntrySchema>;
 
 /**
  * Route Health Report Schema
@@ -672,4 +701,4 @@ export const RouteHealthReportSchema = lazySchema(() => z.object({
   routes: z.array(RouteHealthEntrySchema).describe('Per-route health entries'),
 }));
 
-export type RouteHealthReport = z.infer<typeof RouteHealthReportSchema>;
+export type RouteHealthReport = z.input<typeof RouteHealthReportSchema>;

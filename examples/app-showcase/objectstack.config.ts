@@ -214,23 +214,21 @@ export default defineStack({
   // `sweepProjectHealth` — the handler `HealthSweepJob` names — lives here too.
   // It is the case the pure contract does not cover: a nightly sweep has no
   // downstream declarative node to persist for it, so it writes over an engine
-  // handle captured at `onEnable`.
+  // handle captured at `onEnable`. That is why it is spelled the DECLARED way
+  // (#4396) — an undeclared writer is counted as having written nothing, which
+  // is indistinguishable from the broken sweep #4354 exists to detect.
   //
-  // ⚠️ Do NOT rewrite this as `{ handler: sweepProjectHealth, effect: 'writes' }`.
-  // That declared form (#4396) is the honest spelling for a writer and is what
-  // this entry wants — but it cannot survive `objectstack build` today: the CLI
-  // lowers it to `{ handler: 'sweepProjectHealth', effect: 'writes' }` and
-  // `FlowFunctionEntrySchema` accepts a bare callable, a declaration whose
-  // `handler` is a CALLABLE, or a bare string ref — never a declaration whose
-  // handler has been lowered to a string. `pnpm build` fails with
-  // `functions: invalid_union`. Filed as #4976; switch back once it lands.
-  // Nothing is lost at runtime meanwhile: `effect` has exactly one consumer,
-  // the `script` node's `unmeasuredEffect` metric, and the JOB path drops it
-  // (`collectBundleFunctions` keeps only the handler).
+  // This entry authored the bare form until #4976, not because the bare form was
+  // right but because the declared one could not survive `objectstack build`:
+  // the CLI lowers it to `{ handler: 'sweepProjectHealth', effect: 'writes' }`
+  // and `FlowFunctionEntrySchema` had no member for a declaration whose handler
+  // is a ref, so `pnpm build` failed with `functions: invalid_union`. #4976
+  // added that member; the honest spelling is back, and this app is the
+  // end-to-end proof that it builds.
   functions: {
     summarizeCompletedTask: ({ input }: { input: Record<string, unknown> }) =>
       `Completed: ${String(input.title ?? 'task')} (priority ${String(input.priority ?? 'normal')}).`,
-    sweepProjectHealth,
+    sweepProjectHealth: { handler: sweepProjectHealth, effect: 'writes' as const },
   },
   jobs: allJobs,
   emailTemplates: allEmails,

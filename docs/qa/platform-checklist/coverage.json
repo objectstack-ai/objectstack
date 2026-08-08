@@ -180,6 +180,11 @@
       "items": [
         "integration-system.webhook-lifecycle"
       ]
+    },
+    "capability": {
+      "items": [
+        "access-security.capability-declaration-lifecycle"
+      ]
     }
   }
 }

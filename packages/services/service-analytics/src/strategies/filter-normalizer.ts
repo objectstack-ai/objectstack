@@ -238,19 +238,124 @@
  * refused — the refusal set is pinned input-by-input in
  * `filter-refusal-envelope.test.ts` precisely so that stays true.
  *
+ * # An `undefined` COMPARAND is refused, not read seven different ways (#6386)
+ *
+ * #6050 ruled on 2026-08-07 (ruling B) that `undefined` sitting where a
+ * comparand belongs is REFUSED, and landed that on `driver-sql` / `driver-turso`.
+ * #6125 pushed it to this package's OTHER door, `read-scope-sql.ts` (PR #6390).
+ * This door — the `where` the CALLER writes — had never been named by any of
+ * those rulings, and it read the one shape seven ways. Measured on `origin/main`
+ * (`5faa23ca3`) by calling `normalizeAnalyticsFilterTree({ where })` directly:
+ *
+ *   | `where`                       | normalized to                        | reading |
+ *   |---|---|---|
+ *   | `{d: undefined}`              | `null`                               | the WHOLE where dropped — the query ran with NO filter |
+ *   | `{stage:'won', d: undefined}` | `stage equals 'won'`                 | the `d` conjunct vanished in silence |
+ *   | `{$not: {d: undefined}}`      | `NOT (d set)`, i.e. `d IS NULL`      | a predicate the author never wrote |
+ *   | `{d: {$eq: undefined}}`       | `d equals [null]`                    | a value comparison, NOT `$eq: null`'s `notSet` |
+ *   | `{d: {$gt: undefined}}`       | `d gt [null]`                        | ditto |
+ *   | `{d: {$in: [undefined]}}`     | `d in [null]`                        | ditto |
+ *   | `{d: {$ne: undefined}}`       | `d notSet OR d notEquals [null]`     | ditto |
+ *
+ * The first three are the whole argument. They WIDEN — which is the failure mode
+ * the note at {@link MONGO_TO_CUBE_OP}'s miss branch has forbidden in this very
+ * function since #4128 ("NEVER drop: a missing predicate does not narrow the
+ * query, it WIDENS it … That failure mode is #3650's"). `buildNode`'s first line
+ * was `if (raw === undefined) continue;`: the module did, at its entry, the exact
+ * thing its own body refuses to do a few dozen lines further down.
+ *
+ * Row three is the strangest and is worth stating separately, because it is not
+ * "one conjunct fewer": the #5146 rewrite splits the leaf into `{d: {$null:
+ * false}} AND {d: undefined}`, the entry gate dropped the second half, and the
+ * surviving guard was then negated — so a predicate GREW OUT of a discarded leaf.
+ *
+ * ⚠️ The direction is silently WRONG RESULTS, not a permission bypass. Read
+ * scope is compiled by the other door (`read-scope-sql.ts` → `applyReadScope`)
+ * and never passes through here, so a caller still saw only rows it was entitled
+ * to — just more of them than it asked for. What was lost is the ANSWER: an
+ * analytics figure, a report total, an aggregate, wrong with nothing to read.
+ *
+ * The refusal is {@link undefinedComparandError}, in this module's existing
+ * envelope (`INVALID_FILTER` / 400) — the opposite attribution from
+ * `read-scope-sql`'s 500, and deliberately so: that door compiles a platform
+ * artifact, this one receives what the CALLER wrote.
+ *
+ * ⛔ `null` does not move, and that is the way this change could do harm: the two
+ * live one `===` apart in every polarity table here. `{d: null}`, `{$eq: null}`,
+ * `{$ne: null}`, `{$null: …}`, `{$exists: …}` and `$contains: null`'s `%null%`
+ * (#5526) keep their exact lowering, pinned as a control group in
+ * `filter-normalizer-undefined-comparand.test.ts`.
+ *
+ * # A field wrapper cannot MIX $-operators with non-$ members (#6444)
+ *
+ * The value-independent sibling of the #6386 defect, in the same function, ruled
+ * Option A (refuse) by the maintainer on 2026-08-08. A field constraint object
+ * that carries `$`-operator keys AND non-`$` keys at once used to compile its
+ * operators and silently DROP every non-`$` sibling — `fieldLeaves`'s
+ * `if (opKeys.length > 0) { …; return out; }` arm never looked at them, and the
+ * nested-relation flatten sits after that early return. Measured on
+ * `origin/main` (`1a53a0253`):
+ *
+ *   | `where`                            | normalized to                    | reading |
+ *   |---|---|---|
+ *   | `{d: {$eq: 1, nested: 'x'}}`       | `d equals [1]`                   | the `nested` conjunct vanished in silence |
+ *   | `{amount: {gte: 10, $lte: 20}}`    | `amount lte 20`                  | the missing-`$` typo: the LOWER BOUND silently gone |
+ *   | `{$not: {d: {$null: true, nested: 'x'}}}` | `NOT(d set AND d notSet)` | a contradiction that negates to TRUE — EVERY row |
+ *
+ * Row two is the likeliest producer — a dropped `$` is a canonical agent typo —
+ * and row three is the strangest: the #5146 guard was computed while the sibling
+ * still existed (`requireValue`), the sibling then vanished inside
+ * `fieldLeaves`, and the surviving conjunction was contradictory, so the
+ * negation widened to the whole dataset. All three WIDEN — the #3650 failure
+ * mode the note at {@link MONGO_TO_CUBE_OP}'s miss branch forbids in this very
+ * function.
+ *
+ * The refusal is {@link mixedFieldWrapperError} via
+ * {@link assertUnmixedFieldWrapper}, in this module's one envelope
+ * (`INVALID_FILTER` / 400, #5352). The message must do one thing more than the
+ * module's other refusals: the shape has TWO legitimate repairs answering two
+ * intents this module cannot tell apart — an operator missing its `$`
+ * (`gte` → `$gte`) and a nested-relation member that needs a wrapper of its own
+ * — so the message names the offending key(s) and shows BOTH rewrites (ruling
+ * requirement, #6444).
+ *
+ * Option B — flattening the non-`$` siblings as nested paths next to the
+ * operators — was REJECTED by the same ruling: it would compile the likely-real
+ * cause (a dropped `$`) into a predicate on a non-existent member `amount.gte`,
+ * turning a diagnosable mistake into a harder one.
+ *
+ * ⛔ What does not move: a wrapper that is ALL non-`$` keys keeps flattening to
+ * the dotted member (`{d: {nested: 'x'}}` → `d.nested`); a wrapper that is ALL
+ * `$`-operators compiles exactly as before; `$null` / `$exists` flag semantics
+ * (#5526 / #5332 / #5347) and {@link comparand} are untouched. The sibling door
+ * `read-scope-sql.ts` already fails closed on this exact shape
+ * (`compileField`'s non-`$`-key check) and is not touched — this change makes
+ * the two doors give one answer.
+ *
  * Row-result cover: `filter-operator-coverage.test.ts` for the operator
  * vocabulary, `native-sql-filter-logic-conformance.test.ts`, which runs the
  * SHARED combinator table (`FILTER_LOGIC_CASES`, #3774) that the SQL compiler,
  * the in-memory matcher, `formula` and `read-scope-sql` are already held to,
  * `filter-normalizer-not-null-safe.test.ts` for the two squares that table
  * deliberately does not carry (NULL handling, boolean identities),
- * `filter-array-lowering.test.ts` for the array door (#5334), and
+ * `filter-array-lowering.test.ts` for the array door (#5334),
  * `filter-value-type-fidelity.test.ts` for what each comparand TYPE binds on both
- * consumers (#5526, carrying #5528's cases forward as end-to-end assertions).
+ * consumers (#5526, carrying #5528's cases forward as end-to-end assertions),
+ * `filter-normalizer-undefined-comparand.test.ts` for the `undefined` refusal and
+ * its `null` control group (#6386), and
+ * `filter-normalizer-mixed-wrapper.test.ts` for the mixed `$`/non-`$` wrapper
+ * refusal and its pure-shape control groups (#6444).
  */
 
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
+import {
+  isBindableComparand,
+  isRenderableTextComparand,
+  TEXT_PATTERN_OPERATORS,
+  unbindableListMemberMessage,
+  unrenderableTextComparandMessage,
+} from '../comparand-shape.js';
 
 export interface NormalizedAnalyticsFilter {
   member: string;
@@ -330,6 +435,22 @@ const MONGO_TO_CUBE_OP: Record<string, string> = {
  * leaf, not to `notSet`. Only `=== null` is the null PREDICATE (#5332's identity
  * test, which this module reads at the operator branch, above this function),
  * and widening it to `== null` here would re-decide that ruling sideways.
+ *
+ * ## Addendum (#6386): the `undefined` arm is now UNREACHABLE from this door
+ *
+ * {@link assertDefinedComparands} refuses an `undefined` before any comparand is
+ * read, and it covers every call site of this function — the `$between` bounds,
+ * the operator value and its array members, the bare-array `$in` and the implicit
+ * `=` — so nothing can arrive here holding `undefined` any more. The refusal
+ * tests enumerate exactly that set of positions, which is what makes the claim
+ * checkable rather than asserted.
+ *
+ * ⛔ It is left in place ON PURPOSE, code untouched. Both statements this
+ * function makes were RULED — `undefined` → `null` by #5526, and "only `=== null`
+ * is the null predicate" by #5332 — and #6386 refuses an INPUT without reopening
+ * either. Deleting a now-dead arm would be a semantic edit smuggled in as a
+ * cleanup: it is #5526's call whether the normalisation still earns its place
+ * once its last caller is gated, and that is a separate decision from this one.
  */
 function comparand(v: unknown): unknown {
   return v === undefined ? null : v;
@@ -416,6 +537,269 @@ function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
 }
 
 /**
+ * [#5234] The comparand-SHAPE gate for the analytics `where` door.
+ *
+ * This runs before a leaf exists, which is the whole reason it is here rather
+ * than at the three emitters. {@link fieldLeaves} is the ONLY producer of leaf
+ * nodes in this package, so one refusal here covers all three consumers of the
+ * tree at once — `NativeSQLStrategy.buildFilterClause` (the statement that
+ * executes), `ObjectQLStrategy.buildFilterClauseSql` (the `/analytics/sql` echo)
+ * and `ObjectQLStrategy.convertFilter` (the engine path). Guarding the emitters
+ * instead would have been three guards, three envelopes, and one of them —
+ * `convertFilter`'s `String(v0)` — would still have LAUNDERED the object into
+ * `'[object Object]'` before any driver could refuse it, so a strict driver
+ * downstream could never see the shape it was strict about.
+ *
+ * Prime Directive #12, applied literally: refuse at the door, do not tolerate at
+ * the consumer. `read-scope-sql.ts` is this package's OTHER door — it compiles a
+ * `FilterCondition` that never passes through here — and carries the same two
+ * checks in its own fail-closed envelope.
+ *
+ * Only the two shapes #5234 measured are refused; `$eq` and friends keep binding
+ * an object as JSON (`toSqlBindValue`), which is a separate account.
+ */
+function assertCompilableComparand(opKey: string, field: string, value: unknown): void {
+  if (TEXT_PATTERN_OPERATORS.has(opKey)) {
+    // An array reaches this door as `values[0]` — i.e. every member after the
+    // first is silently DROPPED — while `read-scope-sql` and `driver-sql`
+    // stringify the whole array. That split is why an array is refused and not
+    // merely stringified consistently.
+    if (!isRenderableTextComparand(value)) {
+      throw invalidFilterError(`[analytics] ${unrenderableTextComparandMessage(opKey, field, value)}`);
+    }
+    return;
+  }
+  if ((opKey === '$in' || opKey === '$nin') && Array.isArray(value)) {
+    value.forEach((member, index) => {
+      if (!isBindableComparand(member)) {
+        throw invalidFilterError(`[analytics] ${unbindableListMemberMessage(opKey, field, member, index)}`);
+      }
+    });
+  }
+}
+
+/**
+ * [#6386, on #6050's ruling B] `undefined` in a COMPARAND position.
+ *
+ * ONE wording for every position (#5240 — one condition, one wording); only
+ * `path` varies, because only the position does. The wording names BOTH measured
+ * consequences rather than one, which is where this differs from
+ * `read-scope-sql`'s twin: there all four cells failed the same way (a silent
+ * NULL bind), here the same input is read two different ways depending on where
+ * it sits — the key is DROPPED in the three positions `buildNode` used to skip,
+ * and compiled as a comparison against `null` in the four {@link comparand}
+ * normalises. An author who hits either one needs to be told which of their keys
+ * is unreadable, and both halves of what it would otherwise have done.
+ *
+ * ## Why 400 here and 500 on the sibling door
+ *
+ * `read-scope-sql.ts` refuses the same shape as `READ_SCOPE_COMPILE_FAILED` /
+ * 500 because a read scope is compiled by the PLATFORM from CEL and stored
+ * policy — billing the caller for it would be wrong. This door is the mirror
+ * image: `where` is what the caller itself passed to `AnalyticsService.query`,
+ * so it is a 400-class mistake and takes the envelope every other refusal in
+ * this module already carries (#5352).
+ *
+ * ## Why the producer named is the CALLER, and what shape to look for
+ *
+ * `undefined` cannot cross JSON, so neither REST door can carry it: it can only
+ * come from in-process code building the object — `{ owner_id: ctx.user?.id }`,
+ * the shape #6050 proved reachable on `driver-sql`. Note the platform's OWN
+ * answer to that need is already fail-closed and is not this shape: a
+ * `{current_user_id}` placeholder in a dataset / widget / report filter is
+ * resolved by `resolveFilterTokens` (`@objectstack/core`), which throws
+ * `FILTER_TOKEN_UNRESOLVED` / 400 rather than emitting `undefined`.
+ */
+function undefinedComparandError(field: string, path: string): Error {
+  return invalidFilterError(
+    `[analytics] comparand at ${path} is undefined — refusing to compile this filter. ` +
+    `@objectstack/spec FieldOperatorsSchema declares no undefined comparand, and in JavaScript a key ` +
+    `whose value is undefined cannot be told apart from an ABSENT key — yet the two mean OPPOSITE ` +
+    `things (a predicate versus no constraint at all), so there is no reading of it that is not a ` +
+    `guess. It used to compile, two ways: in a FIELD position the key was dropped outright, so a ` +
+    `single-key where ran with no filter at all and the chart was drawn over every row (#3650's ` +
+    `widening, which this module refuses everywhere else); in an OPERATOR or list position it ` +
+    `became a comparison against null, which is UNKNOWN for every row and charts nothing. ` +
+    `Write null if the null predicate was meant ({ "${field}": null } or { "${field}": { "$null": true } }), ` +
+    `or omit the key entirely when the value is genuinely absent — an omitted key is the same "no ` +
+    `constraint" without the ambiguity. The producer to fix is whoever BUILT this where: undefined ` +
+    `cannot cross JSON, so it is in-process code spreading a possibly-absent value into a filter ` +
+    `object (#6050 ruling B, pushed down to this door by #6386).`,
+  );
+}
+
+/**
+ * [#6386] Refuse every `undefined` sitting in a comparand position of ONE field
+ * constraint.
+ *
+ * The positions are enumerated rather than swept, because "comparand" is a
+ * POSITION and not a type:
+ *
+ *   - the DIRECT comparand — `{d: undefined}`, the implicit `=`. Reached for a
+ *     nested relation too, because {@link fieldLeaves} recurses into one with the
+ *     DOTTED member name, so `{profile: {verified: undefined}}` is refused as
+ *     `"profile.verified"` — the member the leaf would have carried, not the
+ *     relation. (`read-scope-sql`'s twin has no such case: it refuses nested
+ *     relations outright.)
+ *   - a MEMBER of the bare-array implicit `$in` — `{d: [1, undefined]}`. The
+ *     array itself is a legitimate comparand here, so its elements are comparands
+ *     in their own right. This is the deliberate divergence from that twin, which
+ *     refuses a bare array as a whole and so must not relabel it.
+ *   - an OPERATOR's comparand — `{d: {$gt: undefined}}`, `$eq`, `$ne`, the LIKE
+ *     family, every other single-value operator;
+ *   - a MEMBER of a list operator's array — `{d: {$in: [undefined]}}`, `$nin`,
+ *     and `$between`'s two bounds.
+ *
+ * `$null` / `$exists` are deliberately NOT swept, exactly as on the twin: their
+ * comparand is a declared BOOLEAN — a flag, not a value to compare against — so
+ * `undefined` there is not a comparand at all. ⚠️ This module reads that flag by
+ * IDENTITY (`=== true` / `=== false`, see {@link fieldLeaves}) where the twin
+ * reads it by truthiness, so `{$null: undefined}` lowers here to `set`
+ * (`IS NOT NULL`). That is the boolean-DOMAIN question #5347 / #5369 opened and
+ * #6387 is measuring on the sibling door; it is a different cell and is not
+ * decided as a rider on this one.
+ *
+ * ## Why the gate sits HERE, and what that decides for `{$not: {d: undefined}}`
+ *
+ * {@link fieldLeaves} is the only producer of leaf nodes in this module, so one
+ * gate covers all three consumers of the tree at once — the same argument
+ * {@link assertCompilableComparand} makes one function below.
+ *
+ * That places it DOWNSTREAM of {@link nullSafeNegationOperand}, and for row three
+ * of the header's table that choice is the whole question: a gate on the far side
+ * of the #5146 rewrite refuses, while a rewrite that could swallow the leaf first
+ * would leave a CHANGED SHAPE for the gate to bless. Measured rather than
+ * assumed, because the same trap cost PR #6390 a lap on the sibling door — and
+ * the reasoning there does NOT transfer, since the two modules' polarity tables
+ * are spelled differently (that one is uniformly `=== null`; this one mixes
+ * `=== null` for `$eq`/`$ne` with IDENTITY reads for `$null`/`$exists`). What the
+ * measurement shows here is that the rewrite never drops a leaf: every guard
+ * disposition — `requireValue` pushes `{k: {$null: false}}, {k: spec}`,
+ * `allowNull` pushes `{$or: [{k: {$null: true}}, {k: spec}]}`, `none` writes
+ * `out[k] = spec` — carries `spec` through by reference, so the author's
+ * `undefined` always reaches this gate and always throws. Pinned in
+ * `filter-normalizer-undefined-comparand.test.ts` as its own block: one case per
+ * rewrite path that can carry a SWEPT comparand (`requireValue`, `allowNull`, and
+ * the nested-relation recursion), plus the measured reason there is no third —
+ * `none` needs every operator to satisfy {@link operatorIsNullTotal}, which is
+ * false for an `undefined` comparand on every operator this gate sweeps, so the
+ * only field specs that reach it holding one are the `$null` / `$exists` flags it
+ * deliberately does not sweep.
+ */
+function assertDefinedComparands(field: string, spec: unknown): void {
+  const root = `"${field}"`;
+  if (spec === undefined) throw undefinedComparandError(field, root);
+  if (Array.isArray(spec)) {
+    spec.forEach((member, index) => {
+      if (member === undefined) throw undefinedComparandError(field, `${root}[${index}]`);
+    });
+    return;
+  }
+  if (!isFilterObject(spec)) return;
+  for (const [op, opValue] of Object.entries(spec)) {
+    if (!op.startsWith('$') || op === '$null' || op === '$exists') continue;
+    const opPath = `${root}.${op}`;
+    if (opValue === undefined) throw undefinedComparandError(field, opPath);
+    if (!Array.isArray(opValue)) continue;
+    opValue.forEach((member, index) => {
+      if (member === undefined) throw undefinedComparandError(field, `${opPath}[${index}]`);
+    });
+  }
+}
+
+/**
+ * [#6444, ruled Option A on 2026-08-08] A field wrapper mixing `$`-operator
+ * keys with non-`$` sibling keys.
+ *
+ * ONE wording whatever the mix (#5240 — one condition, one wording); only the
+ * field and the two key lists vary, because only those do. Where this message
+ * has to do MORE than the module's other refusals: the shape has two
+ * legitimate repairs answering two different intents, and the module cannot
+ * tell which one the author held — that inability is exactly why the shape is
+ * refused rather than read. So the message must present BOTH (ruling
+ * requirement):
+ *
+ *   - an OPERATOR missing its `$` — the canonical agent typo
+ *     `{amount: {gte: 10, $lte: 20}}` — repaired by the prefixed spelling
+ *     (`"gte" → "$gte"`);
+ *   - a NESTED-RELATION member that strayed into an operator wrapper —
+ *     repaired by giving it a wrapper of its own (`{ "d": { "nested": … } }`
+ *     compiles to the member `d.nested`), ANDed with the operator constraint
+ *     explicitly, since one JSON object cannot spell the same field key twice.
+ *
+ * Option B — flattening the sibling as a nested path beside the operators —
+ * was rejected by the same ruling: it would compile the missing-`$` typo into
+ * a predicate on a non-existent member `amount.gte`, converting a diagnosable
+ * mistake into a harder one.
+ */
+function mixedFieldWrapperError(field: string, opKeys: string[], nonOpKeys: string[]): Error {
+  const offending = nonOpKeys.map((k) => `"${k}"`).join(', ');
+  const rewrites = nonOpKeys.map((k) => `"${k}" → "$${k}"`).join(', ');
+  const example = nonOpKeys[0];
+  return invalidFilterError(
+    `[analytics] "${field}" mixes $-operator keys (${opKeys.join(', ')}) with non-$ sibling key(s) ` +
+    `${offending} in ONE field constraint — refusing to compile this filter. A $-prefixed key is an ` +
+    `OPERATOR and a bare key is a NESTED-RELATION member; the two readings of ${offending} lead to ` +
+    `different predicates and this module cannot tell which was meant, so any silent choice is a ` +
+    `guess. If an operator missing its "$" was meant — the usual authoring slip — spell it with the ` +
+    `prefix: ${rewrites}, as in { "${field}": { "$${example}": ... } }. If a nested-relation member ` +
+    `was meant, give it a wrapper of its OWN with no $ siblings — { "${field}": { "${example}": ... } } ` +
+    `compiles to the member "${field}.${example}" — and AND it with the operator constraint ` +
+    `explicitly: { "$and": [{ "${field}": { "$op": ... } }, { "${field}": { "${example}": ... } }] }. ` +
+    `This shape used to compile by silently DROPPING every non-$ sibling, and a dropped conjunct ` +
+    `does not narrow the query, it WIDENS it: the chart included rows the author excluded, with ` +
+    `nothing to read (#3650's failure mode, which this module refuses everywhere else). The sibling ` +
+    `door in this package (read-scope-sql.ts) already fails closed on this exact shape — one shape, ` +
+    `one answer (#6444).`,
+  );
+}
+
+/**
+ * [#6444] Refuse ONE field wrapper that mixes `$`-operator keys with non-`$`
+ * sibling keys — the value-independent sibling of {@link assertDefinedComparands}.
+ *
+ * What made the mix silent: {@link fieldLeaves}'s operator arm iterates
+ * `opKeys` only and returns, and the nested-relation flatten sits after that
+ * early return — so with even one `$` key present, every non-`$` sibling was
+ * simply never visited. Dropping a conjunct WIDENS (#3650), and inside a `$not`
+ * it did worse than widen by one conjunct: {@link nullGuardForFieldSpec} judged
+ * the wrapper while the sibling still existed (a non-`$` key never satisfies
+ * {@link operatorIsNullTotal}, so the disposition was `requireValue` or
+ * `allowNull`, never `none`), the sibling then vanished here, and for a
+ * null-predicate operator the surviving guard was CONTRADICTORY —
+ * `{$not: {d: {$null: true, nested: 'x'}}}` compiled to `NOT(d set AND d
+ * notSet)`, which is TRUE for every row. That same never-`none` fact is what
+ * guarantees the #5146 rewrite carries a mixed wrapper to this gate by
+ * reference instead of swallowing it — pinned in
+ * `filter-normalizer-mixed-wrapper.test.ts`'s rewrite block.
+ *
+ * ## Ordering against the neighbouring gates
+ *
+ * Runs in {@link fieldLeaves}'s wrapper arm, after the #5240 zero-operator
+ * refusal (disjoint by construction: `{}` has no keys of either kind) and
+ * after {@link assertDefinedComparands} at the function's entry — so
+ * `{d: {$eq: undefined, nested: 'x'}}` is refused as an undefined comparand,
+ * not as a mix. Both are refusals in the same envelope, so the REST face
+ * answers 400 either way; the ordering is pinned as a measured fact, not a
+ * contract.
+ *
+ * ## What is deliberately not judged here
+ *
+ * A wrapper that is ALL `$`-operators or ALL non-`$` members passes untouched —
+ * this gate moves the refusal set by exactly the mixed shape. Whether a non-`$`
+ * KEY is a real member of the modeled object is the schema's question at a
+ * different layer, not this compiler's.
+ */
+function assertUnmixedFieldWrapper(field: string, wrapper: Record<string, unknown>): void {
+  const keys = Object.keys(wrapper);
+  const opKeys = keys.filter((k) => k.startsWith('$'));
+  if (opKeys.length === 0) return;
+  const nonOpKeys = keys.filter((k) => !k.startsWith('$'));
+  if (nonOpKeys.length === 0) return;
+  throw mixedFieldWrapperError(field, opKeys, nonOpKeys);
+}
+
+/**
  * Compile one `field: value | { $op: … }` entry into its leaves.
  *
  * Multiple operators on one field AND together — the rule
@@ -423,6 +807,12 @@ function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
  * `{ $gte, $lte }` depends on.
  */
 function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
+  // [#6386] `undefined` in a comparand position, refused before any leaf exists.
+  // First statement of the only leaf producer, so no consumer of the tree can be
+  // handed one — see {@link assertDefinedComparands} for the position list and
+  // for why this side of the `$not` rewrite is the load-bearing choice.
+  assertDefinedComparands(key, raw);
+
   const out: NormalizedFilterNode[] = [];
   const leaf = (operator: string, values: unknown[]): void => {
     out.push({ kind: 'leaf', member: key, operator, values });
@@ -450,6 +840,12 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         `shape refused on every backend.`,
       );
     }
+    // [#6444] A wrapper mixing $-operator keys with non-$ siblings is refused
+    // BEFORE the operator arm below gets to iterate `opKeys` only and return —
+    // that early return is exactly how the non-$ siblings used to vanish. See
+    // {@link assertUnmixedFieldWrapper} for the two-intent message contract and
+    // the `$not` interaction.
+    assertUnmixedFieldWrapper(key, wrapper);
     const opKeys = Object.keys(wrapper).filter((k) => k.startsWith('$'));
     if (opKeys.length > 0) {
       for (const opKey of opKeys) {
@@ -558,6 +954,10 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
           );
         }
         const v = wrapper[opKey];
+        // [#5234] The comparand SHAPE gate runs before anything reads `v` — see
+        // {@link assertCompilableComparand} for why this door and not the three
+        // emitters downstream of it.
+        assertCompilableComparand(opKey, key, v);
         const values = Array.isArray(v) ? v.map(comparand) : [comparand(v)];
         // [#5298] The operators that carry their own negation are NULL-safe,
         // here as everywhere else — see the module header's section on it.
@@ -607,8 +1007,22 @@ function buildNode(cond: Record<string, unknown>): NormalizedFilterNode | null {
   const children: NormalizedFilterNode[] = [];
 
   for (const [key, raw] of Object.entries(cond)) {
-    if (raw === undefined) continue;
-
+    // [#6386] What used to be here — `if (raw === undefined) continue;` — was
+    // the entry gate doing the one thing the rest of this file forbids: a key
+    // dropped without trace, which does not narrow the query, it WIDENS it (see
+    // the module header's table and the note at MONGO_TO_CUBE_OP's miss branch).
+    // Removing it does NOT create four new refusals; every key kind now reaches
+    // the branch that already had the truest thing to say about it:
+    //
+    //   {d: undefined}      → `fieldLeaves` → `assertDefinedComparands` (#6386)
+    //   {$and|$or: undefined} → "requires an array of filter objects, got undefined"
+    //   {$not: undefined}     → "requires a filter object, got undefined"
+    //   {$other: undefined}   → "Unsupported top-level filter operator"
+    //
+    // ⚠️ An absent `where` is untouched and still means "no constraint":
+    // `lowerAnalyticsWhere` answers `null` for `{where: undefined}` before this
+    // function runs. The refusal is about a KEY INSIDE a `where`, where dropping
+    // it silently changes which rows the author gets.
     if (key === '$and' || key === '$or') {
       if (!Array.isArray(raw)) {
         throw invalidFilterError(

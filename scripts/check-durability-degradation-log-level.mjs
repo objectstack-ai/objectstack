@@ -350,8 +350,12 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //   - the `try` block performs a READ (a driver/engine `find`/`findOne`/`count`,
 //     or a same-file wrapper over one — see `MAX_READ_WRAPPER_DEPTH`);
 //   - the `catch` contains NO log call at any level, helpers followed;
-//   - some path out of the `catch` `return`s an EMPTY/ZERO value for that
-//     method (`[]`, `false`, `null`, `undefined`, `{}`, `''`, `0`, `1`);
+//   - some path out of the `catch` `return`s an INVENTED ANSWER, which is two
+//     criteria judged independently against the same paths:
+//       (a) EMPTY/ZERO for that method (`[]`, `false`, `null`, `undefined`,
+//           `{}`, `''`, `0`, `1`) — see `inventedEmptyValue`; or
+//       (b) IDENTITY PASS-THROUGH (#6451) — one of the enclosing function's own
+//           PARAMETERS, handed straight back — see `identityPassThrough`;
 //   - and that path was NOT reached by discriminating the error's TYPE.
 //
 // The last clause is the exemption, and it is the shape #4825 and #5108 left
@@ -359,6 +363,71 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // a module that exists specifically to export it across packages). A `catch`
 // that asks by error type and returns the empty value ONLY on the benign branch
 // is answering truthfully — there really are no rows — and passes.
+//
+// ## The IDENTITY PASS-THROUGH criterion (#6451, from #6116)
+//
+// #6116 is the fourth member of the family and the first the rule SURVEYED and
+// still could not fail on. `ObjectQL.resolveFileReferences` hydrates `sys_file`
+// ids into `{ id, name, size, mimeType, url }`; its batched read failed into
+// `catch { return records; }`. The seam was counted in the census the whole
+// time and the gate reported `✓ … none invents an unreported empty answer`,
+// because `records` is the function's own PARAMETER and no parameter is in the
+// empty-value table. It was found by a human reading code, like the three
+// before it.
+//
+// The harm is identical to `[]`'s and it is the SAME harm, not an analogy: the
+// read did not happen, and the caller receives an answer it cannot tell apart
+// from a legitimate one. For an enrichment function the un-enriched input is
+// ALSO what a successful read with nothing to hydrate returns (`resolveFile-
+// References` returns `records` unchanged from six happy-path guards), so the
+// two are literally the same bytes. The consumer rendered a bare id as "this
+// record has no attachment" (ADR-0110 D3). The rule's name says "invention",
+// but what it protects is DISTINGUISHABILITY — not whether the returned value
+// is spelled like a zero.
+//
+// This is a SEPARATE criterion, not another row in the empty-value table, and
+// the distinction is load-bearing: `inventedEmptyValue` judges an expression on
+// its own, while this one needs the enclosing function's parameter list. Merged,
+// the empty-value table would silently acquire a context dependency.
+//
+// ## Measured before it was added — 收窄先行 applied to a criterion (#6451)
+//
+// The maintainer's 2026-08-06 ruling makes the measurement mandatory and the
+// extension conditional, so the false-positive surface was measured across the
+// three scan roots BEFORE this was written, not after:
+//
+//   - 78 production files, 292 `catch` clauses, 63 read seams;
+//   - exactly 2 catches in the whole scope return one of their own parameters,
+//     and only 1 of those guards a read at all (the other, `effectiveWindow-
+//     Ms`'s `catch { return fallbackMs }` in lifecycle-service.ts, parses a
+//     duration string — the READ vocabulary is what excludes it);
+//   - BOTH already log, so both are absorbed by the existing "any log at all"
+//     exemption. The true new red set is ZERO: adding this criterion reddens
+//     nothing on `main` and adds no baseline entry.
+//
+// Zero is the strongest possible answer to "is the red set controllable?", and
+// it is not the "declared ≠ enforced" shape this file rejects elsewhere. That
+// objection is about VOCABULARY entries — a NAME in a Map that no seam
+// consumes, which the staleness checks below actively fail on. This adds no
+// name to any Map. It is a structural criterion, exercised in BOTH directions
+// by fixtures reproducing #6116 as it read before and after its fix, exactly as
+// #5186 itself landed: a ratchet over a family whose three known instances were
+// already repaired when the rule was written.
+//
+// ## Why a PARAMETER, and not "any identifier the catch returns"
+//
+// Measured on the same corpus: 10 `catch` blocks in scope return a bare
+// identifier, and 8 of them return a LOCAL — an accumulated `report`, a partial
+// `unbound` set, a caught `err` re-returned by a test helper. Those are values
+// the function BUILT; judging them would drag every partial-result accumulator
+// into the rule. A parameter is different in kind: it is a value the function
+// already had before the read, so handing it back cannot be a result OF the
+// read. That line is syntactic, it needs no type information, and it is where
+// the harm actually lives.
+//
+// Destructured parameters count too (`({ records })`), on the same reasoning
+// the empty-value table admits `undefined`/`{}`/`''`: they cost nothing today
+// and close a spell-it-differently hole.
 //
 // ## Why "no log at all", and not "no LOUD log"
 //
@@ -398,6 +467,27 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //   3. **Exemption is by DECLARED predicate only.** A seam that discriminates
 //      correctly but through its own hand-rolled test is flagged, and that is
 //      deliberate (see `READ_FAILURE_DISCRIMINATORS`), not a false positive.
+//   4. **It cannot tell "pass-through as CONTRACT" from "pass-through
+//      swallowing a fault"** (#6451). For an enrichment/decoration function,
+//      returning the input unchanged is its declared happy path — `resolveFile-
+//      References` passes inline blobs and external URL strings straight
+//      through on purpose, from six guards before the read. Separating the two
+//      needs the function's declared semantics, which a syntactic rule cannot
+//      see. This is a DIFFERENT blind spot from limitation 1, not the same one:
+//      limitation 1 is a shape the rule cannot MATCH, this is two meanings the
+//      rule cannot TELL APART once matched.
+//
+//      The rule does not try to tell them apart, and deliberately does not need
+//      to. It never judges the pass-through itself — only a pass-through that
+//      is also SILENT and also undiscriminated. Both readings are satisfied by
+//      the same one-line answer: say something, or ask the error's type. That
+//      is precisely what #6116's fix did while keeping fail-open pass-through
+//      on both branches, and it is why this criterion does not re-redden the
+//      seam it was written for. A contractual pass-through that genuinely has
+//      nothing to report and cannot discriminate belongs in
+//      `durability-read-invention.baseline.json` as `reviewed-legitimate`, next
+//      to `referenceExists` — an entry that says a human read it, not a rule
+//      that guesses.
 
 /**
  * Where the read-seam rule looks. Narrowed on purpose — see above.
@@ -654,6 +744,46 @@ function enclosingFunctionName(node) {
 }
 
 /**
+ * The parameter names of the function enclosing `node` — the values it already
+ * had before its body ran. Used by `identityPassThrough` (#6451).
+ *
+ * NEAREST function-like wins, and every function-like counts, including an
+ * arrow: a catch inside `rows.map(r => { try … catch … })` is guarding that
+ * arrow's read and answering with that arrow's parameters, not the method's.
+ *
+ * Destructured parameters contribute their bound element names, for the reason
+ * given in the header: same value, different spelling.
+ */
+function enclosingFunctionParameters(node) {
+    const names = new Set();
+    for (let n = node.parent; n; n = n.parent) {
+        if (
+            !ts.isFunctionDeclaration(n) &&
+            !ts.isMethodDeclaration(n) &&
+            !ts.isArrowFunction(n) &&
+            !ts.isFunctionExpression(n) &&
+            !ts.isConstructorDeclaration(n) &&
+            !ts.isGetAccessorDeclaration(n) &&
+            !ts.isSetAccessorDeclaration(n)
+        ) {
+            continue;
+        }
+        for (const p of n.parameters ?? []) {
+            if (ts.isIdentifier(p.name)) {
+                names.add(p.name.text);
+                continue;
+            }
+            // `{ records }` / `[first]` — take the bound element names.
+            for (const el of p.name.elements ?? []) {
+                if (el.name && ts.isIdentifier(el.name)) names.add(el.name.text);
+            }
+        }
+        return names;
+    }
+    return names;
+}
+
+/**
  * Does `node`'s SAME-TICK subtree contain a declared propagation call of one of
  * the accepted kinds? Returns the matched declaration, so the caller can record
  * which site entry was actually load-bearing.
@@ -884,6 +1014,40 @@ function inventedEmptyValue(expr) {
     if (ts.isNumericLiteral(expr) && (expr.text === '0' || expr.text === '1')) return expr.text;
     if (ts.isStringLiteral(expr) && expr.text === '') return "''";
     return undefined;
+}
+
+/**
+ * Is this `return`ed expression an IDENTITY PASS-THROUGH — one of the enclosing
+ * function's own parameters, handed straight back as the answer to a read that
+ * did not happen? (#6451, from #6116.)
+ *
+ * The second invention criterion, judged on the same paths as
+ * `inventedEmptyValue` and against the same two exemptions. See the header
+ * section "The IDENTITY PASS-THROUGH criterion" for why a parameter and not any
+ * identifier, and limitation 4 for what it deliberately cannot tell apart.
+ *
+ * Unwrapping matches `inventedEmptyValue`'s: parentheses, `as T`, `satisfies`,
+ * and `!` are spellings, not answers.
+ *
+ * Matching is by NAME, so a block-scoped local that shadows a parameter would
+ * be read as the parameter. That is the conservative direction this file takes
+ * everywhere ("cannot prove" reads as "not exempt"), the escape is one `warn`
+ * or one type discrimination, and measured over the scan scope no such shadow
+ * exists — the alternative, a scope-accurate resolver, is a type-checker.
+ *
+ * @returns The parameter name, or `undefined` if this is not a pass-through.
+ */
+function identityPassThrough(expr, paramNames) {
+    if (!expr || paramNames.size === 0) return undefined;
+    let e = expr;
+    for (;;) {
+        if (ts.isParenthesizedExpression(e)) e = e.expression;
+        else if (ts.isAsExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
+        else if (ts.isNonNullExpression(e)) e = e.expression;
+        else break;
+    }
+    if (!ts.isIdentifier(e)) return undefined;
+    return paramNames.has(e.text) ? e.text : undefined;
 }
 
 /** Strip `await` / parentheses / `as T` so the underlying call is visible. */
@@ -1155,13 +1319,28 @@ function analyzeReadSeams(sf, relPath, findings, seams, options = {}) {
         const catchBlock = node.catchClause.block;
         const logs = collectLoggedLevels(catchBlock, functionBodies, lineOf);
 
-        // 2. On which paths does it invent an empty answer?
+        // 2. On which paths does it invent an answer? TWO criteria over the
+        //    same exits — an EMPTY/ZERO value, or the function's own input
+        //    handed back (#6451). Independent: a seam may trip either or both,
+        //    and the report names which, because the fixes read differently.
         const exits = [];
         walkBenignPaths(catchBlock, false, ctx, exits);
-        const invented = exits
-            .map((e) => ({ ...e, value: inventedEmptyValue(e.expr) }))
-            .filter((e) => e.value !== undefined);
+        const paramNames = enclosingFunctionParameters(node);
+        const invented = [];
+        for (const e of exits) {
+            const empty = inventedEmptyValue(e.expr);
+            if (empty !== undefined) {
+                invented.push({ ...e, kind: 'empty', value: empty });
+                continue;
+            }
+            const param = identityPassThrough(e.expr, paramNames);
+            if (param !== undefined) invented.push({ ...e, kind: 'identity', value: param });
+        }
         const unguarded = invented.filter((e) => !e.benign);
+
+        const label = (e) =>
+            `${e.kind === 'identity' ? `pass-through \`${e.value}\`` : e.value}@${lineOf(e.node)}` +
+            (e.benign ? ' (type-discriminated)' : '');
 
         const seam = {
             file: relPath,
@@ -1170,7 +1349,7 @@ function analyzeReadSeams(sf, relPath, findings, seams, options = {}) {
             catchLine: lineOf(node.catchClause),
             fn: enclosingFunctionName(node),
             logs: logs.map((l) => `${l.level}@${l.line}${l.viaHelper ? ` via ${l.viaHelper}()` : ''}`),
-            invents: invented.map((e) => `${e.value}@${lineOf(e.node)}${e.benign ? ' (type-discriminated)' : ''}`),
+            invents: invented.map(label),
         };
         seams.push(seam);
 
@@ -1181,7 +1360,7 @@ function analyzeReadSeams(sf, relPath, findings, seams, options = {}) {
 
         findings.push({
             ...seam,
-            unguarded: unguarded.map((e) => ({ value: e.value, line: lineOf(e.node) })),
+            unguarded: unguarded.map((e) => ({ kind: e.kind, value: e.value, line: lineOf(e.node) })),
         });
     });
 
@@ -1471,13 +1650,20 @@ function runReadSeamRule({ list = false } = {}) {
     if (violations.length > 0) {
         failed = true;
         console.error(
-            `\n✗ ${violations.length} read seam(s) invent an empty answer for a read that failed, and tell nobody (AGENTS.md → "Absence must be loud", #5186; family: #4728 / #4825 / #5108):\n`,
+            `\n✗ ${violations.length} read seam(s) invent an answer for a read that failed, and tell nobody (AGENTS.md → "Absence must be loud", #5186; family: #4728 / #4825 / #5108 / #6116):\n`,
         );
         for (const v of violations) {
+            const passThrough = v.unguarded.filter((u) => u.kind === 'identity');
             console.error(`  ${v.file}:${v.catchLine}  (in ${v.fn ?? '<anonymous>'}())`);
             console.error(`    guards  : ${v.callee}() at line ${v.calleeLine} — ${DRIVER_READ_CALLEES.get(v.callee) ?? 'a storage read'}`);
             console.error(
-                `    found   : catch logs nothing at all and returns ${v.unguarded.map((u) => `\`${u.value}\` at line ${u.line}`).join(', ')}`,
+                `    found   : catch logs nothing at all and returns ${v.unguarded
+                    .map((u) =>
+                        u.kind === 'identity'
+                            ? `its own parameter \`${u.value}\` unchanged at line ${u.line}`
+                            : `\`${u.value}\` at line ${u.line}`,
+                    )
+                    .join(', ')}`,
             );
             console.error(
                 '    consequence: the read did not happen, yet the caller is handed an answer it cannot tell\n' +
@@ -1486,12 +1672,29 @@ function runReadSeamRule({ list = false } = {}) {
                 '                 reads the outage as "the author declared none"; some then fail open and some\n' +
                 '                 fail closed, and both look healthy from outside (ADR-0110 D3).',
             );
+            if (passThrough.length > 0) {
+                console.error(
+                    '                 For a pass-through specifically (#6451, from #6116): the un-enriched input is\n' +
+                    '                 ALSO what a successful read with nothing to hydrate returns, so failure and\n' +
+                    '                 success are literally the same bytes — an un-hydrated file id renders as\n' +
+                    '                 "this record has no attachment".',
+                );
+            }
             console.error(
-                '    fix     : discriminate by error TYPE, and return the empty value ONLY on the benign branch:\n' +
+                '    fix     : discriminate by error TYPE, and return the invented value ONLY on the benign branch:\n' +
                 "                 import { isMissingTableError } from '@objectstack/metadata/errors';\n" +
                 '                 catch (error) { if (isMissingTableError(error)) return []; throw error; }\n' +
                 '              or delegate to a rethrowing guard (DatabaseLoader.rethrowUnlessTableUnprovisioned,\n' +
-                '              MetadataProtocol.rethrowUnlessMetadataStoreUnprovisioned) — this checker follows both.\n' +
+                '              MetadataProtocol.rethrowUnlessMetadataStoreUnprovisioned) — this checker follows both.',
+            );
+            if (passThrough.length > 0) {
+                console.error(
+                    '              A pass-through that must stay fail-open on BOTH branches keeps returning the input\n' +
+                    '              and adds ONE log naming the consequence, which is what #6116 did — the rule asks\n' +
+                    '              that the failure be distinguishable, never that the value change.',
+                );
+            }
+            console.error(
                 '    OR      : if the seam is a REVIEWED, legitimate degradation, add an entry naming why to\n' +
                 '              scripts/durability-read-invention.baseline.json (shrink-only, hand-edited).\n',
             );
@@ -1526,9 +1729,11 @@ function runReadSeamRule({ list = false } = {}) {
         const discriminated = seams.filter(
             (s) => s.invents.length > 0 && s.invents.every((i) => i.includes('type-discriminated')),
         ).length;
+        const passThrough = seams.filter((s) => s.invents.some((i) => i.startsWith('pass-through'))).length;
         console.log(
-            `✓ read-seam invention (#5186, ${READ_SEAM_SCAN_ROOTS.length} package roots): ${seams.length} read seam(s), none invents an unreported empty answer` +
-                (discriminated > 0 ? ` (${discriminated} return an empty value on a type-discriminated benign branch)` : '') +
+            `✓ read-seam invention (#5186 + #6451, ${READ_SEAM_SCAN_ROOTS.length} package roots): ${seams.length} read seam(s), none invents an unreported answer` +
+                (discriminated > 0 ? ` (${discriminated} answer on a type-discriminated benign branch)` : '') +
+                (passThrough > 0 ? ` (${passThrough} pass an input through, reported)` : '') +
                 (allowed.size > 0 ? ` (${allowed.size} baselined)` : '') +
                 '.',
         );
@@ -2471,15 +2676,26 @@ function selfTestReadSeams() {
             expectSeams: 0,
         },
         {
-            name: 'passes: the catch returns a REAL answer, not an invented empty one',
+            // Re-spelled by #6451, and the re-spelling is the point. It used to
+            // take its fallback as a PARAMETER (`list(type, cached)`), which the
+            // identity criterion now reads as a pass-through — correctly, see
+            // the `expectInvents` case below. What this fixture was ever pinning
+            // is that a NON-EMPTY answer is not an empty-value invention, and
+            // the parameter was incidental to that; sourcing the fallback from a
+            // local restores the original assertion and, as a bonus, pins the
+            // measured majority shape (8 of the 10 bare-identifier returns in
+            // the scan scope return a local the function BUILT).
+            name: 'passes: the catch returns a REAL answer it built, not an invented empty one',
             code: `
                 class L {
-                    async list(type: string, cached: string[]) {
+                    async list(type: string) {
+                        const cached = this.warmCache.get(type);
                         try { return await this.driver.find('m', { where: { type } }); }
                         catch { return cached; }
                     }
                 }`,
             expectViolation: false,
+            expectInvents: [],
         },
         {
             // Documented exclusion: in a `Promise< void >` method a bare
@@ -2577,6 +2793,173 @@ function selfTestReadSeams() {
             expectViolation: true,
             expectCount: 1,
         },
+
+        // ── IDENTITY PASS-THROUGH (#6451) — the fourth recurrence, #6116 ──────
+        //
+        // Same discipline as the block above: the fixtures are the real seam as
+        // it read before and after its fix, so the criterion is pinned in both
+        // directions. Note the `expectInvents` on the PASSING cases — without
+        // it, "no violation" is satisfied by a criterion that was deleted.
+        {
+            // #6116 verbatim: the batched `sys_file` hydrate read, failing into
+            // a bare `return records`. The census counted this seam the whole
+            // time and the gate still printed a green line, because `records`
+            // is a parameter and no parameter is in the empty-value table.
+            name: 'flags: #6116 pre-fix — the catch hands back its own `records` parameter, silently',
+            code: `
+                class E {
+                    private async resolveFileReferences(objectName: string, records: any[]) {
+                        if (!records || records.length === 0) return records;
+                        let fileRows: any[] = [];
+                        try {
+                            fileRows = (await this.find('sys_file', { where: { id: { $in: ids } } })) ?? [];
+                        } catch {
+                            return records; // sys_file unregistered / unreadable — leave ids as-is
+                        }
+                        return records;
+                    }
+                }`,
+            expectViolation: true,
+            expectCount: 1,
+            expectInvents: ['pass-through \`records\`'],
+        },
+        {
+            // #6116 post-fix. Fail-open pass-through is UNCHANGED on both
+            // branches — what changed is that the non-benign reason now says so
+            // once. The criterion asks for distinguishability, never for a
+            // different value, so the fixed seam must be green.
+            name: 'passes: #6116 post-fix — the same pass-through, now reported once (log-level rule\'s question)',
+            code: `
+                class E {
+                    private async resolveFileReferences(objectName: string, records: any[]) {
+                        try {
+                            const rows = await this.find('sys_file', { where: { id: { $in: ids } } });
+                            return this.hydrate(records, rows);
+                        } catch (error) {
+                            if (!isMissingTableError(error)) {
+                                this.logger.warn('sys_file lookup failed; file fields keep their raw ids', { objectName });
+                            }
+                            return records;
+                        }
+                    }
+                }`,
+            expectViolation: false,
+            expectInvents: ['pass-through \`records\`'],
+        },
+        {
+            // The other exemption, on this criterion: pass the input through on
+            // the benign branch ONLY, and rethrow everything else. No log needed
+            // — there is genuinely nothing to hydrate against.
+            name: 'passes: the pass-through is reached only on a type-discriminated benign branch',
+            code: `
+                class E {
+                    private async hydrate(records: any[]) {
+                        try { return this.merge(records, await this.driver.find('sys_file', {})); }
+                        catch (error) {
+                            if (isMissingTableError(error)) return records;
+                            throw error;
+                        }
+                    }
+                }`,
+            expectViolation: false,
+            expectInvents: ['pass-through \`records\` (type-discriminated)'],
+            expectDiscriminatorsUsed: ['isMissingTableError'],
+        },
+        {
+            // Discrimination is not a password. Asking the type and then passing
+            // the input through on EVERY branch leaves a connection drop
+            // indistinguishable from "nothing to hydrate" — the same trap the
+            // empty-value criterion pins two sections above.
+            name: 'flags: discriminated, but the input is passed through on the non-benign branch too',
+            code: `
+                class E {
+                    private async hydrate(records: any[]) {
+                        try { return this.merge(records, await this.driver.find('sys_file', {})); }
+                        catch (error) { if (isMissingTableError(error)) { this.noteFirstBoot(); } return records; }
+                    }
+                }`,
+            expectViolation: true,
+            expectCount: 1,
+            expectInvents: ['pass-through \`records\`'],
+        },
+        {
+            // A caller-supplied fallback is still a value the function already
+            // had, so silence about a failed read is still silence. This is the
+            // shape the re-spelled fixture above used to carry, kept here with
+            // the verdict the criterion actually gives it rather than dropped.
+            name: 'flags: a caller-supplied fallback parameter returned silently is a pass-through too',
+            code: `
+                class L {
+                    async list(type: string, cached: string[]) {
+                        try { return await this.driver.find('m', { where: { type } }); }
+                        catch { return cached; }
+                    }
+                }`,
+            expectViolation: true,
+            expectInvents: ['pass-through \`cached\`'],
+        },
+        {
+            name: 'flags: a DESTRUCTURED parameter is the same value under another spelling',
+            code: `
+                class E {
+                    private async hydrate({ records }: { records: any[] }) {
+                        try { return this.merge(records, await this.driver.find('sys_file', {})); }
+                        catch { return records; }
+                    }
+                }`,
+            expectViolation: true,
+            expectInvents: ['pass-through \`records\`'],
+        },
+        {
+            name: 'flags: `as` / `!` are spellings of the pass-through, not answers',
+            code: `
+                class E {
+                    private async a(records: any[]) {
+                        try { return await this.driver.find('sys_file', {}); } catch { return records as any[]; }
+                    }
+                    private async b(records: any[]) {
+                        try { return await this.driver.find('sys_file', {}); } catch { return records!; }
+                    }
+                }`,
+            expectViolation: true,
+            expectCount: 2,
+            expectInvents: ['pass-through \`records\`', 'pass-through \`records\`'],
+        },
+        {
+            // Nearest function-like wins: the catch lives in the arrow, so the
+            // arrow's parameter is what it already had. Reading the METHOD's
+            // parameter list here would answer a question nobody asked.
+            name: 'flags: a catch inside a callback answers with the CALLBACK\'s own parameter',
+            code: `
+                class E {
+                    private async hydrateEach(records: any[]) {
+                        return Promise.all(records.map(async (record: any) => {
+                            try { return this.merge(record, await this.driver.findOne('sys_file', {})); }
+                            catch { return record; }
+                        }));
+                    }
+                }`,
+            expectViolation: true,
+            expectCount: 1,
+            expectInvents: ['pass-through \`record\`'],
+        },
+        {
+            // The measured majority (8 of 10 bare-identifier returns in scope):
+            // a value the function BUILT is not a pass-through, whatever its
+            // shape. Judging accumulators would drag every partial-result seam
+            // into this rule.
+            name: 'passes: a partial result the catch ACCUMULATED is not a pass-through',
+            code: `
+                class E {
+                    private async audit(objectName: string) {
+                        const report = { scanned: 0, dangling: [] as string[] };
+                        try { return this.summarize(await this.driver.find(objectName, {}), report); }
+                        catch { return report; }
+                    }
+                }`,
+            expectViolation: false,
+            expectInvents: [],
+        },
     ];
 
     let failures = 0;
@@ -2589,6 +2972,20 @@ function selfTestReadSeams() {
         const got = findings.length > 0;
         const countMismatch = c.expectCount !== undefined && findings.length !== c.expectCount;
         const seamMismatch = c.expectSeams !== undefined && seams.length !== c.expectSeams;
+        // `expectInvents` pins the EXACT set of invented answers reported for
+        // the fixture, line numbers stripped. It exists because
+        // `expectViolation: false` is a vacuous assertion for the cases that
+        // pass BECAUSE an exemption fired: delete the criterion that found the
+        // invention and the case still passes, having tested nothing. Asserting
+        // the reported set instead goes red the moment the criterion stops
+        // seeing the answer, whether or not the verdict changes (#6451).
+        const inventLabels = seams
+            .flatMap((s) => s.invents)
+            .map((i) => i.replace(/@\d+/g, ''))
+            .sort();
+        const inventsMismatch =
+            c.expectInvents !== undefined &&
+            JSON.stringify(inventLabels) !== JSON.stringify([...c.expectInvents].sort());
         // Pins the bookkeeping the vocabulary-staleness check runs on: an
         // exemption entry that exempts nothing must be reported and deleted, so
         // "was this entry load-bearing?" has to be recorded accurately.
@@ -2596,16 +2993,18 @@ function selfTestReadSeams() {
         const discriminatorMismatch =
             c.expectDiscriminatorsUsed !== undefined &&
             JSON.stringify(usedList) !== JSON.stringify([...c.expectDiscriminatorsUsed].sort());
-        if (got !== c.expectViolation || countMismatch || seamMismatch || discriminatorMismatch) {
+        if (got !== c.expectViolation || countMismatch || seamMismatch || discriminatorMismatch || inventsMismatch) {
             failures++;
             console.error(
                 `  ✗ ${c.name}: expected violation=${c.expectViolation}` +
                     (c.expectCount !== undefined ? ` count=${c.expectCount}` : '') +
                     (c.expectSeams !== undefined ? ` seams=${c.expectSeams}` : '') +
+                    (c.expectInvents !== undefined ? ` invents=${JSON.stringify([...c.expectInvents].sort())}` : '') +
                     (c.expectDiscriminatorsUsed !== undefined
                         ? ` used=${JSON.stringify(c.expectDiscriminatorsUsed)}`
                         : '') +
                     `, got violation=${got} count=${findings.length} seams=${seams.length}` +
+                    (c.expectInvents !== undefined ? ` invents=${JSON.stringify(inventLabels)}` : '') +
                     (c.expectDiscriminatorsUsed !== undefined ? ` used=${JSON.stringify(usedList)}` : ''),
             );
         } else {

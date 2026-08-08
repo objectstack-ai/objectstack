@@ -81,7 +81,7 @@ export const SupplierSecurityRequirementSchema = lazySchema(() => z.object({
     .describe('Compliance evidence or assessment notes'),
 }).describe('Individual supplier security requirement'));
 
-export type SupplierSecurityRequirement = z.infer<typeof SupplierSecurityRequirementSchema>;
+export type SupplierSecurityRequirement = z.input<typeof SupplierSecurityRequirementSchema>;
 /** Post-parse shape of {@link SupplierSecurityRequirement} — defaults applied, transforms run (ADR-0122). */
 export type SupplierSecurityRequirementParsed = z.infer<typeof SupplierSecurityRequirementSchema>;
 
@@ -241,11 +241,11 @@ export const SupplierSecurityPolicySchema = lazySchema(() => z.object({
 }).describe('Organization-level supplier security management policy per ISO 27001:2022'));
 
 // Type exports
-export type SupplierRiskLevel = z.infer<typeof SupplierRiskLevelSchema>;
-export type SupplierAssessmentStatus = z.infer<typeof SupplierAssessmentStatusSchema>;
-export type SupplierSecurityAssessment = z.infer<typeof SupplierSecurityAssessmentSchema>;
+export type SupplierRiskLevel = z.input<typeof SupplierRiskLevelSchema>;
+export type SupplierAssessmentStatus = z.input<typeof SupplierAssessmentStatusSchema>;
+export type SupplierSecurityAssessment = z.input<typeof SupplierSecurityAssessmentSchema>;
 /** Post-parse shape of {@link SupplierSecurityAssessment} — defaults applied, transforms run (ADR-0122). */
 export type SupplierSecurityAssessmentParsed = z.infer<typeof SupplierSecurityAssessmentSchema>;
-export type SupplierSecurityPolicy = z.infer<typeof SupplierSecurityPolicySchema>;
+export type SupplierSecurityPolicy = z.input<typeof SupplierSecurityPolicySchema>;
 /** Post-parse shape of {@link SupplierSecurityPolicy} — defaults applied, transforms run (ADR-0122). */
 export type SupplierSecurityPolicyParsed = z.infer<typeof SupplierSecurityPolicySchema>;

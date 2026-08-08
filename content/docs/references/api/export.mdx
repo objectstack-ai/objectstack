@@ -8,11 +8,9 @@ description: Export protocol schemas
 Data Export & Import Protocol
 
 Defines schemas for streaming data export, import validation,
-
 template-based field mapping, and scheduled export jobs.
 
 Industry alignment: Salesforce Data Export, Airtable CSV Export,
-
 Dynamics 365 Data Management.
 
 Base path: /api/v1/data/\{object\}/export
@@ -59,7 +57,7 @@ const result = CreateExportJobRequestSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +258 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ jobId: string; status: Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>; estimatedRecords?: integer; createdAt: string }` | ✅ |  |
 
@@ -159,7 +157,7 @@ const result = CreateExportJobRequestSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +258 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ jobId: string; status: Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>; format: Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>; totalRecords?: integer; … }` | ✅ |  |
 
@@ -233,7 +231,7 @@ const result = CreateExportJobRequestSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +258 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ jobId: string; downloadUrl: string; fileName: string; fileSize: integer; … }` | ✅ |  |
 
@@ -451,7 +449,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +258 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ totalRecords: integer; validRecords: integer; invalidRecords: integer; duplicateRecords: integer; … }` | ✅ |  |
 
@@ -490,9 +488,9 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +258 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ jobs: { jobId: string; object: string; status: Enum<'pending' \| 'processing' \| 'completed' \| 'failed' \| 'cancelled' \| 'expired'>; format: Enum<'csv' \| 'json' \| 'jsonl' \| 'xlsx' \| 'parquet'>; … }[]; nextCursor?: string; hasMore: boolean }` | ✅ |  |
+| **data** | `{ jobs: object[]; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 
 ---
@@ -535,7 +533,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **fields** | `string[]` | optional | Fields to include |
 | **filter** | `Record<string, any>` | optional | Record filter criteria |
 | **templateId** | `string` | optional | Export template ID for field mappings |
-| **schedule** | `{ cronExpression: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; timezone?: string }` | ✅ | Schedule timing configuration |
+| **schedule** | `{ cronExpression: string \| object; timezone?: string }` | ✅ | Schedule timing configuration |
 | **delivery** | `{ method: Enum<'email' \| 'storage' \| 'webhook'>; recipients?: string[]; storagePath?: string; webhookUrl?: string }` | ✅ | Export delivery configuration |
 
 
@@ -548,7 +546,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +258 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +257 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ id: string; name: string; enabled: boolean; nextRunAt?: string; … }` | ✅ |  |
 
@@ -569,7 +567,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **fields** | `string[]` | optional | Fields to include |
 | **filter** | `Record<string, any>` | optional | Record filter criteria |
 | **templateId** | `string` | optional | Export template ID for field mappings |
-| **schedule** | `{ cronExpression: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; timezone?: string }` | ✅ | Schedule timing configuration |
+| **schedule** | `{ cronExpression: string \| object; timezone?: string }` | ✅ | Schedule timing configuration |
 | **delivery** | `{ method: Enum<'email' \| 'storage' \| 'webhook'>; recipients?: string[]; storagePath?: string; webhookUrl?: string }` | ✅ | Export delivery configuration |
 | **enabled** | `boolean` | optional | Whether the scheduled export is active |
 | **lastRunAt** | `string` | optional | Last execution timestamp |

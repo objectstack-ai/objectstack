@@ -133,9 +133,23 @@ describe('lintDataModel — fields & objects', () => {
     expect(has(issues, 'object/missing-name-field')).toBe(true);
   });
 
-  it('accepts an object with a name field or primaryField', () => {
+  // #6326 replaced the second assertion here wholesale. It used to read
+  // `{ name: 'b', primaryField: 'code', fields: { code: … } }` and claim to pin
+  // the `primaryField` limb of `object/missing-name-field`. It pinned nothing,
+  // in two independent ways: (1) the fixture is one `ObjectSchema` REJECTS
+  // (`unrecognized_keys: ['primaryField']`), so no author could ever write the
+  // shape it was green about; and (2) `code` is itself in NAME_LIKE_FIELDS, so
+  // the name-like limb accepted the object regardless — the assertion stayed
+  // green with the `primaryField` limb deleted, which is exactly what makes it
+  // a vacuous green rather than coverage. What SURVIVES is the first assertion
+  // (a name-like field is a title face). The replacement below pins the limb
+  // that actually exists — the explicit `nameField` pointer — on a fixture no
+  // other limb can rescue, so it can genuinely fail.
+  it('accepts an object with a name-like field, or an explicit nameField', () => {
     expect(has(lintDataModel([{ name: 'a', fields: { name: { type: 'text' } } }]), 'object/missing-name-field')).toBe(false);
-    expect(has(lintDataModel([{ name: 'b', primaryField: 'code', fields: { code: { type: 'text' } } }]), 'object/missing-name-field')).toBe(false);
+    // `invoice_number` is deliberately NOT in NAME_LIKE_FIELDS: the explicit
+    // ADR-0079 pointer is the only thing that can clear this object.
+    expect(has(lintDataModel([{ name: 'b', nameField: 'invoice_number', fields: { invoice_number: { type: 'text' } } }]), 'object/missing-name-field')).toBe(false);
   });
 
   it('handles array-shaped fields', () => {
@@ -143,6 +157,130 @@ describe('lintDataModel — fields & objects', () => {
       { name: 'invoice_line', fields: [{ name: 'invoice', type: 'master_detail', reference: 'invoice' }] },
     ]);
     expect(has(issues, 'relationship/master-detail-required')).toBe(true);
+  });
+});
+
+// #6108 — `object/missing-name-field` used to read `titleFormat` (retired by
+// ADR-0079, and reported as `title-format-retired` by validate-record-title in
+// the very same package) while never reading `nameField` at all. An author who
+// followed the platform's own migration advice therefore EARNED a suggestion.
+// The fixtures below replicate the downstream control surface measured on
+// hotcrm main (6 hits, 4 of them false positives — hotcrm#715 / #1007).
+describe('lintDataModel — object/missing-name-field (ADR-0079 title face)', () => {
+  const flagged = (objects: any[]) =>
+    lintDataModel(objects)
+      .filter((i) => i.rule === 'object/missing-name-field')
+      .map((i) => i.path);
+
+  // (a) The false positive this fixes. `contract_number` is deliberately NOT in
+  // NAME_LIKE_FIELDS, so the only title face is the explicit pointer.
+  it('accepts an object whose title face is an explicit nameField', () => {
+    const issues = lintDataModel([
+      {
+        name: 'crm_contract',
+        nameField: 'contract_number',
+        fields: { contract_number: { type: 'text' }, amount: { type: 'currency' } },
+      },
+    ]);
+    expect(has(issues, 'object/missing-name-field')).toBe(false);
+  });
+
+  // (b) The true hit must survive: a line item with no title face at all.
+  it('still suggests a name field for an object with no title face', () => {
+    const issues = lintDataModel([
+      {
+        name: 'crm_quote_line_item',
+        fields: {
+          quote: { type: 'master_detail', reference: 'crm_quote' },
+          quantity: { type: 'number' },
+          unit_price: { type: 'currency' },
+        },
+      },
+    ]);
+    expect(has(issues, 'object/missing-name-field')).toBe(true);
+  });
+
+  // (c) #6326 — `primaryField` is NOT a title face, and the limb that read it
+  // is gone. The key is declared nowhere in `packages/spec`: measured on
+  // 17.0.0-rc.5, `ObjectSchema.safeParse` returns
+  // `unrecognized_keys: ['primaryField']` and `ObjectSchema.create()` throws,
+  // so the limb was dead for every object the spec accepts (#4984 family)
+  // while still reading, here and in the skill doc, as a legal escape hatch.
+  //
+  // This fixture is DELIBERATELY off-spec — that is the point. `lintDataModel`
+  // runs over metadata as AUTHORED, before/independently of schema parse, so a
+  // rejected key can physically reach it; the assertion is that the rule
+  // IGNORES the key, not that the key is legal. Do not "fix" the fixture by
+  // making it schema-valid: that would delete the coverage.
+  //
+  // Asserted as the EXACT reported set rather than as the absence of a string,
+  // so it fails in both directions: put the `primaryField` limb back and
+  // `objects[0]` drops out (set becomes `[]`); break the name-like limb and
+  // `objects[1]` joins it. `period_key` is not in NAME_LIKE_FIELDS and carries
+  // no `nameField`, so nothing else can rescue objects[0]; `crm_campaign` has
+  // a `name` field and must stay clean.
+  it('does not treat primaryField as a title face — it is not a declarable key (#6326)', () => {
+    expect(
+      flagged([
+        { name: 'crm_forecast_period', primaryField: 'period_key', fields: { period_key: { type: 'text' } } },
+        { name: 'crm_campaign', fields: { name: { type: 'text' }, budget: { type: 'currency' } } },
+      ]),
+    ).toEqual(['objects[0].fields']);
+  });
+
+  // (d) DELIBERATE FLIP, not a regression: a titleFormat-only object is now
+  // reported. It has no `nameField`, and ADR-0079 wants exactly this object
+  // migrated — `validate-record-title` already reports it twice today
+  // (`title-format-retired` + `title-unresolvable`, pinned in
+  // packages/lint/src/validate-record-title.test.ts). The two rules used to
+  // disagree about the same object; now they agree.
+  it('suggests a name field for a titleFormat-only object (retired key is not a title face)', () => {
+    const issues = lintDataModel([
+      {
+        name: 'crm_pipeline_snapshot',
+        titleFormat: '{issued_on} · {amount}',
+        fields: { issued_on: { type: 'date' }, amount: { type: 'currency' } },
+      },
+    ]);
+    expect(has(issues, 'object/missing-name-field')).toBe(true);
+  });
+
+  // The measured control surface, end to end: the four objects hotcrm declared
+  // a `nameField` on must fall out, the two line items must stay.
+  it('reproduces the hotcrm control surface: 6 objects in, only the 2 line items flagged', () => {
+    const objects = [
+      { name: 'crm_campaign_member', nameField: 'member_number', fields: { member_number: { type: 'text' } } },
+      { name: 'crm_event_attendee', nameField: 'attendee_number', fields: { attendee_number: { type: 'text' } } },
+      { name: 'crm_contract', nameField: 'contract_number', fields: { contract_number: { type: 'text' } } },
+      { name: 'crm_forecast', nameField: 'display_title', fields: { display_title: { type: 'text' } } },
+      { name: 'crm_opportunity_line_item', fields: { quantity: { type: 'number' } } },
+      { name: 'crm_quote_line_item', fields: { quantity: { type: 'number' } } },
+    ];
+    expect(flagged(objects)).toEqual(['objects[4].fields', 'objects[5].fields']);
+  });
+
+  // The suggestion must name the canonical pointer — an author who reads it
+  // and reaches for `titleFormat` lands straight back in the contradiction.
+  // It must equally NOT name `primaryField`: that key is declared nowhere in
+  // `packages/spec`, so `ObjectSchema.create()` rejects it (#6326).
+  //
+  // ⚠️ Honest labelling of the `not.toContain('primaryField')` line: it is a
+  // NEGATIVE assertion and it was already green before #6326 (PR for #6108 had
+  // scrubbed the message text; #6326 only removed the predicate limb, which
+  // this message never mentioned). It is NOT evidence of the removal — the
+  // real pin for that is case (c) above. It is kept because it is paired with
+  // the three positive assertions below, which fail if the message stops
+  // steering to `nameField`/ADR-0079 at all; on its own it would be a bare
+  // vacuous green.
+  it('steers the author to nameField, and names no key the schema rejects', () => {
+    const issue = lintDataModel([
+      { name: 'crm_quote_line_item', fields: { quantity: { type: 'number' } } },
+    ]).find((i) => i.rule === 'object/missing-name-field');
+    expect(issue?.severity).toBe('suggestion');
+    expect(issue?.message).toContain('nameField');
+    expect(issue?.message).not.toContain('primaryField');
+    expect(issue?.fix).toContain('ADR-0079');
+    expect(issue?.fix).toContain('titleFormat');
   });
 });
 

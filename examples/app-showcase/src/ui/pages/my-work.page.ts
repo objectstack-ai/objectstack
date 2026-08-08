@@ -8,7 +8,7 @@ import { definePage } from '@objectstack/spec/ui';
  *   • a KPI hero row of live `object-metric` tiles in an equal-width `grid`;
  *   • a personal work queue — `object-grid` filtered to the signed-in user
  *     via the `{current_user_id}` token (records I own);
- *   • sidebar shortcuts + a per-user `visible`-gated note on `user.email`.
+ *   • sidebar shortcuts + a card gated by component-level `visibleWhen` (ADR-0089).
  */
 export const MyWorkPage = definePage({
   name: 'showcase_my_work',
@@ -71,15 +71,22 @@ export const MyWorkPage = definePage({
             ],
           },
         },
-        // Admin-only card — per-user rendering via `visible` on the signed-in
-        // user (the renderer now feeds `user` into the expression context).
+        // Admin-only card — gated by the ADR-0089 canonical, COMPONENT-LEVEL
+        // `visibleWhen`: a sibling of `properties`, never a key inside it.
+        // `properties` is the widget's own prop bag (`PageCardProps`), which
+        // declares no visibility key; a predicate written there only worked
+        // because objectui's SchemaRenderer hoists `properties` onto the node
+        // before evaluating, i.e. by accident of the renderer rather than by
+        // contract. The predicate binds `current_user` — the identity root
+        // ADR-0089 declares for page-component predicates (`record`,
+        // `current_user`, `page.<var>`).
         {
           type: 'page:card',
+          visibleWhen: "current_user.email == 'admin@objectos.ai'",
           properties: {
             title: 'Leadership View',
-            visible: "user.email == 'admin@objectos.ai'",
             children: [
-              { type: 'element:text', properties: { content: 'Admin-only — shown because user.email matches the card’s visible expression.' } },
+              { type: 'element:text', properties: { content: 'Admin-only — shown because current_user.email matches the card’s visibleWhen predicate.' } },
             ],
           },
         },

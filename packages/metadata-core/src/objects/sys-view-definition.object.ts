@@ -122,17 +122,27 @@ export const SysViewDefinitionObject = ObjectSchema.create({
     // A given view name is unique per (organization, owner) — a shared view
     // (owner NULL) and each user's personal views don't collide.
     //
-    // ⚠️ This entry carried `partial: "state = 'active'"` until #5248 / #4943
-    // retired the key, intending "among ACTIVE rows". No driver ever emitted
-    // the predicate (`syncDeclaredIndexes` builds indexes through knex's
-    // `table.unique()`, which cannot express a `WHERE`), so the index that has
-    // always been created is the unrestricted one below — dropping the key is
-    // a zero-DDL change. Unlike `sys_metadata`, there is NO runtime migration
-    // issuing the partial form for this table, so the active-row scoping is
-    // simply not delivered anywhere today: an archived/reset view still
-    // occupies its (name, organization_id, owner) slot. Tracked separately —
-    // deciding whether this table wants an `ensureOverlayIndex`-style
-    // migration is a behaviour change, out of scope for the key retirement.
+    // ⚠️ This entry is the FALLBACK shape, not the delivered one. It carried
+    // `partial: "state = 'active'"` until #5248 / #4943 retired the key,
+    // intending "among ACTIVE rows"; no driver ever emitted the predicate
+    // (`syncDeclaredIndexes` builds indexes through knex's `table.unique()`,
+    // which cannot express a `WHERE`), so what this declaration produces is the
+    // unrestricted UNIQUE below — and an archived view kept occupying its
+    // (name, organization_id, owner) slot, so a user could not re-create a view
+    // they had just archived.
+    //
+    // #5839 delivers the promised scoping the same way `sys_metadata` always
+    // had it — a runtime migration, not a declaration:
+    // `metadata-protocol`'s `ensureViewDefinitionActiveIndex` issues
+    // `CREATE UNIQUE INDEX idx_sys_view_def_active … WHERE state = 'active'`
+    // in raw SQL at `kernel:ready`, reusing THIS index's name so
+    // `syncDeclaredIndexes` (which skips by name) never re-imposes the
+    // unrestricted form on a later boot.
+    //
+    // Keep this declaration exactly as it is. It is what dialects without
+    // partial indexes (MySQL) and hosts that never run the migration fall back
+    // to, and the migration deliberately leaves it untouched when it cannot
+    // build the partial form — degraded to this behaviour, never below it.
     {
       name: 'idx_sys_view_def_active',
       fields: ['name', 'organization_id', 'owner'],

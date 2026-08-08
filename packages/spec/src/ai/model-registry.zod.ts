@@ -185,29 +185,29 @@ export const ModelSelectionCriteriaSchema = lazySchema(() => z.object({
 }));
 
 // Type exports
-export type ModelProvider = z.infer<typeof ModelProviderSchema>;
-export type ModelCapability = z.infer<typeof ModelCapabilitySchema>;
+export type ModelProvider = z.input<typeof ModelProviderSchema>;
+export type ModelCapability = z.input<typeof ModelCapabilitySchema>;
 /** Post-parse shape of {@link ModelCapability} — defaults applied, transforms run (ADR-0122). */
 export type ModelCapabilityParsed = z.infer<typeof ModelCapabilitySchema>;
-export type ModelLimits = z.infer<typeof ModelLimitsSchema>;
-export type ModelPricing = z.infer<typeof ModelPricingSchema>;
+export type ModelLimits = z.input<typeof ModelLimitsSchema>;
+export type ModelPricing = z.input<typeof ModelPricingSchema>;
 /** Post-parse shape of {@link ModelPricing} — defaults applied, transforms run (ADR-0122). */
 export type ModelPricingParsed = z.infer<typeof ModelPricingSchema>;
-export type ModelConfig = z.infer<typeof ModelConfigSchema>;
+export type ModelConfig = z.input<typeof ModelConfigSchema>;
 /** Post-parse shape of {@link ModelConfig} — defaults applied, transforms run (ADR-0122). */
 export type ModelConfigParsed = z.infer<typeof ModelConfigSchema>;
-export type PromptVariable = z.infer<typeof PromptVariableSchema>;
+export type PromptVariable = z.input<typeof PromptVariableSchema>;
 /** Post-parse shape of {@link PromptVariable} — defaults applied, transforms run (ADR-0122). */
 export type PromptVariableParsed = z.infer<typeof PromptVariableSchema>;
-export type PromptTemplate = z.infer<typeof PromptTemplateSchema>;
+export type PromptTemplate = z.input<typeof PromptTemplateSchema>;
 /** Post-parse shape of {@link PromptTemplate} — defaults applied, transforms run (ADR-0122). */
 export type PromptTemplateParsed = z.infer<typeof PromptTemplateSchema>;
-export type ModelRegistryEntry = z.infer<typeof ModelRegistryEntrySchema>;
+export type ModelRegistryEntry = z.input<typeof ModelRegistryEntrySchema>;
 /** Post-parse shape of {@link ModelRegistryEntry} — defaults applied, transforms run (ADR-0122). */
 export type ModelRegistryEntryParsed = z.infer<typeof ModelRegistryEntrySchema>;
-export type ModelRegistry = z.infer<typeof ModelRegistrySchema>;
+export type ModelRegistry = z.input<typeof ModelRegistrySchema>;
 /** Post-parse shape of {@link ModelRegistry} — defaults applied, transforms run (ADR-0122). */
 export type ModelRegistryParsed = z.infer<typeof ModelRegistrySchema>;
-export type ModelSelectionCriteria = z.infer<typeof ModelSelectionCriteriaSchema>;
+export type ModelSelectionCriteria = z.input<typeof ModelSelectionCriteriaSchema>;
 /** Post-parse shape of {@link ModelSelectionCriteria} — defaults applied, transforms run (ADR-0122). */
 export type ModelSelectionCriteriaParsed = z.infer<typeof ModelSelectionCriteriaSchema>;

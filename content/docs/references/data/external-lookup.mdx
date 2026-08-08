@@ -8,41 +8,24 @@ description: External Lookup protocol schemas
 External Data Source Schema
 
 Configuration for connecting to external data systems.
-
 Similar to Salesforce External Objects for real-time data integration.
 
 @example
-
 ```json
-
-\{
-
-"id": "salesforce-accounts",
-
-"name": "Salesforce Account Data",
-
-"type": "rest-api",
-
-"endpoint": "https://api.salesforce.com/services/data/v58.0",
-
-"authentication": \{
-
-"type": "oauth2",
-
-"config": \{
-
-"clientId": "...",
-
-"clientSecret": "...",
-
-"tokenUrl": "https://login.salesforce.com/services/oauth2/token"
-
-\}
-
-\}
-
-\}
-
+{
+  "id": "salesforce-accounts",
+  "name": "Salesforce Account Data",
+  "type": "rest-api",
+  "endpoint": "https://api.salesforce.com/services/data/v58.0",
+  "authentication": {
+    "type": "oauth2",
+    "config": {
+      "clientId": "...",
+      "clientSecret": "...",
+      "tokenUrl": "https://login.salesforce.com/services/oauth2/token"
+    }
+  }
+}
 ```
 
 <Callout type="info">

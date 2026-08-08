@@ -12,7 +12,6 @@ import {
   type SecurityEventCorrelation,
   type DataClassificationPolicy,
   type SecurityContextConfig,
-  type SecurityContextConfigInput,
 } from './security-context.zod';
 
 describe('ComplianceAuditRequirementSchema', () => {
@@ -186,7 +185,7 @@ describe('SecurityContextConfigSchema', () => {
   });
 
   it('should accept full security context configuration', () => {
-    const config: SecurityContextConfigInput = {
+    const config: SecurityContextConfig = {
       enabled: true,
       complianceAuditRequirements: [
         { framework: 'gdpr', requiredEvents: ['data.delete', 'data.export'], retentionDays: 180 },
@@ -251,7 +250,7 @@ describe('Type exports', () => {
     const context: SecurityContextConfig = {
       enabled: true, enforceOnWrite: true, enforceOnRead: true, failOpen: false,
     };
-    const contextInput: SecurityContextConfigInput = { enabled: true };
+    const contextInput: SecurityContextConfig = { enabled: true };
     expect(audit).toBeDefined();
     expect(encryption).toBeDefined();
     expect(masking).toBeDefined();

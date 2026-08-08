@@ -3,17 +3,26 @@
 // FROZEN bare-literal fixtures for the remaining authoring domains (#2035), so
 // the downstream contract exercises the FULL writable surface, not just a few
 // domains. Authored the way a third party on a published release did, typed with
-// the spec's own input aliases. DO NOT migrate these to the defineX factories
-// and DO NOT edit them to make a failing spec change pass — see the README.
-import type { DatasourceInput, MappingInput, CubeInput, ObjectExtensionInput } from '@objectstack/spec/data';
-import type { ConnectorInput } from '@objectstack/spec/integration';
-import type { SharingRuleInput, PermissionSetInput } from '@objectstack/spec/security';
-import type { PositionInput } from '@objectstack/spec/identity';
-import type { EmailTemplateDefinitionInput, TranslationBundleInput } from '@objectstack/spec/system';
-import type { WebhookInput } from '@objectstack/spec/automation';
-import type { ThemeInput } from '@objectstack/spec/ui';
+// the spec's own author-state aliases. DO NOT migrate these to the defineX
+// factories and DO NOT edit them to make a failing spec change pass — see the
+// README.
+//
+// The annotations moved from `XInput` to the BARE name in protocol 17
+// (ADR-0122 phase 2, #6083) and that is not an exception to the freeze — it is
+// the freeze working. These fixtures pin the AUTHOR state; phase 2 moved the
+// author state onto the bare name and retired `XInput` as a synonym of it, so
+// keeping `XInput` here was not an option and switching to it was not a choice.
+// Every literal below is byte-for-byte what it was: the type each one is
+// checked against did not change, only its spelling.
+import type { Datasource, Mapping, Cube, ObjectExtension } from '@objectstack/spec/data';
+import type { Connector } from '@objectstack/spec/integration';
+import type { SharingRule, PermissionSet } from '@objectstack/spec/security';
+import type { Position } from '@objectstack/spec/identity';
+import type { EmailTemplateDefinition, TranslationBundle } from '@objectstack/spec/system';
+import type { Webhook } from '@objectstack/spec/automation';
+import type { Theme } from '@objectstack/spec/ui';
 
-export const DcDatasource: DatasourceInput = {
+export const DcDatasource: Datasource = {
   name: 'dc_primary',
   label: 'DC Primary',
   driver: 'sqlite',
@@ -21,7 +30,7 @@ export const DcDatasource: DatasourceInput = {
   active: true,
 };
 
-export const DcConnector: ConnectorInput = {
+export const DcConnector: Connector = {
   name: 'dc_hubspot',
   label: 'DC HubSpot',
   type: 'saas',
@@ -43,7 +52,7 @@ export const DcConnector: ConnectorInput = {
   ],
 };
 
-export const DcSharingRule: SharingRuleInput = {
+export const DcSharingRule: SharingRule = {
   type: 'criteria',
   name: 'dc_share_customers',
   label: 'Customers → managers',
@@ -54,13 +63,13 @@ export const DcSharingRule: SharingRuleInput = {
   active: true,
 };
 
-export const DcRole: PositionInput = {
+export const DcRole: Position = {
   name: 'dc_manager',
   label: 'DC Manager',
   description: 'Manager role.',
 };
 
-export const DcPermissionSet: PermissionSetInput = {
+export const DcPermissionSet: PermissionSet = {
   name: 'dc_user',
   label: 'DC User',
   objects: {
@@ -68,7 +77,7 @@ export const DcPermissionSet: PermissionSetInput = {
   },
 };
 
-export const DcEmail: EmailTemplateDefinitionInput = {
+export const DcEmail: EmailTemplateDefinition = {
   name: 'dc.welcome',
   label: 'DC Welcome',
   category: 'marketing',
@@ -80,7 +89,7 @@ export const DcEmail: EmailTemplateDefinitionInput = {
   active: true,
 };
 
-export const DcWebhook: WebhookInput = {
+export const DcWebhook: Webhook = {
   name: 'dc_account_changed',
   label: 'Account Changed',
   object: 'dc_account',
@@ -90,7 +99,7 @@ export const DcWebhook: WebhookInput = {
   isActive: true,
 };
 
-export const DcObjectExtension: ObjectExtensionInput = {
+export const DcObjectExtension: ObjectExtension = {
   extend: 'dc_account',
   label: 'Account (extended)',
   fields: {
@@ -99,7 +108,7 @@ export const DcObjectExtension: ObjectExtensionInput = {
   priority: 210,
 };
 
-export const DcCube: CubeInput = {
+export const DcCube: Cube = {
   name: 'dc_pipeline',
   title: 'DC Pipeline',
   description: 'Account analytics.',
@@ -112,7 +121,7 @@ export const DcCube: CubeInput = {
   },
 };
 
-export const DcMapping: MappingInput = {
+export const DcMapping: Mapping = {
   name: 'dc_csv_import',
   label: 'CSV Import: Accounts',
   sourceFormat: 'csv',
@@ -122,7 +131,7 @@ export const DcMapping: MappingInput = {
   fieldMapping: [{ source: 'Name', target: 'name', transform: 'none' }],
 };
 
-export const DcTheme: ThemeInput = {
+export const DcTheme: Theme = {
   name: 'dc_light',
   label: 'DC Light',
   mode: 'light',
@@ -135,7 +144,7 @@ export const DcTheme: ThemeInput = {
   },
 };
 
-export const DcTranslationBundle: TranslationBundleInput = {
+export const DcTranslationBundle: TranslationBundle = {
   en: {
     objects: { dc_account: { label: 'Account', pluralLabel: 'Accounts' } },
     messages: { 'common.save': 'Save' },

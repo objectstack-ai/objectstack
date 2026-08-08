@@ -3,15 +3,28 @@
 /**
  * Make a record TOTAL over an object's DECLARED fields.
  *
- * Shared by the two places that evaluate a CEL expression against "the
- * record": object-level validation predicates
- * (`validation/rule-validator.ts`, #1871 / #4649) and declarative hook
- * `condition`s (`hook-wrappers.ts`, #4770). They used to disagree — a
- * predicate saw a total record while a hook condition saw only the fields the
- * current write happened to carry — which is precisely the drift this module
- * exists to prevent: an author cannot be expected to know that the same
- * `record.done == true` means two different things depending on which surface
- * reads it.
+ * Shared by the SERVER-side places that evaluate a CEL expression against "the
+ * record": object-level validation predicates + field `requiredWhen` +
+ * option `visibleWhen` (`validation/rule-validator.ts`, #1871 / #4649),
+ * declarative hook `condition`s (`hook-wrappers.ts`, #4770), and the field
+ * `readonlyWhen` strips on the write path (`validation/rule-validator.ts`
+ * `readonlyWhenBindings`, #4953). They used to disagree — a predicate saw a
+ * total record while a hook condition saw only the fields the current write
+ * happened to carry — which is precisely the drift this module exists to
+ * prevent: an author cannot be expected to know that the same `record.done ==
+ * true` means two different things depending on which surface reads it.
+ *
+ * Two bindings are still sparse, and the difference between them matters:
+ *
+ *  - The flow trigger record (`packages/triggers/trigger-record-change`) is a
+ *    server seam the same ruling puts on this list; it is simply not wired yet
+ *    (services lane, #4953 item 1's other half). Do not read its absence as a
+ *    decision.
+ *  - objectui's action `visible` / `disabled` binds whatever record the client
+ *    already fetched. That one is a DECISION (#4953 item 2): making it total
+ *    would mean every REST read padding out all declared columns, so it stays
+ *    sparse and is documented as sparse — an author on that surface guards with
+ *    `has()`, not `!= null`.
  *
  * CEL is strict about missing keys: `record.x` on a record that does not carry
  * the key `x` aborts the whole expression with `No such key`, which is NOT the

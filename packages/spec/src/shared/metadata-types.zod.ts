@@ -17,7 +17,7 @@ import { SnakeCaseIdentifierSchema } from './identifiers.zod';
 import { lazySchema } from './lazy-schema';
 export const MetadataFormatSchema = lazySchema(() => z.enum(['yaml', 'json', 'typescript', 'javascript'])
   .describe('Metadata file format'));
-export type MetadataFormat = z.infer<typeof MetadataFormatSchema>;
+export type MetadataFormat = z.input<typeof MetadataFormatSchema>;
 
 /** Base metadata record fields shared across kernel and system layers */
 export const BaseMetadataRecordSchema = lazySchema(() => z.object({
@@ -26,4 +26,4 @@ export const BaseMetadataRecordSchema = lazySchema(() => z.object({
   name: SnakeCaseIdentifierSchema.describe('Machine name (snake_case)'),
   format: MetadataFormatSchema.optional().describe('Source file format'),
 }).describe('Base metadata record fields shared across kernel and system'));
-export type BaseMetadataRecord = z.infer<typeof BaseMetadataRecordSchema>;
+export type BaseMetadataRecord = z.input<typeof BaseMetadataRecordSchema>;

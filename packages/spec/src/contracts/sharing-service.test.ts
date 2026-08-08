@@ -3,8 +3,10 @@
 import { describe, it, expect } from 'vitest';
 import type {
   HierarchyScopeContext,
+  ISharingService,
   RecordShareRecipientType,
   SharingRuleRecipientType,
+  SharingWriteVerdict,
 } from './sharing-service';
 import { ShareRecipientType } from '../security/sharing.zod';
 
@@ -111,12 +113,17 @@ describe('[#5125] ISharingService write-gate bypass documentation parity', () =>
       'canDelete',
       'canEdit',
       'canManageShares',
+      // [#6428] The tri-state primaries. Enumerated here so a gate can never be
+      // added to this interface without deciding whether it documents the
+      // bypass — the loop below is what that decision is written into.
+      'checkDelete',
+      'checkEdit',
       'grant',
       'listShares',
       'revoke',
     ]);
 
-    for (const gate of ['canEdit', 'canDelete', 'canManageShares'] as const) {
+    for (const gate of ['canEdit', 'canDelete', 'canManageShares', 'checkEdit', 'checkDelete'] as const) {
       expect(docOf.get(gate), `${gate} must document the modifyAllRecords bypass`)
         .toContain('modifyAllRecords');
     }
@@ -157,10 +164,15 @@ describe('[#5858] HierarchyScopeContext tenancy authority', () => {
   it('requires `organizationId` and keeps `tenantId` optional (compile-time)', () => {
     // A caller with no active org states so EXPLICITLY. `null` is a value the
     // contract carries (platform/unscoped), never an omission.
-    const platformScoped: HierarchyScopeContext = { userId: 'usr_1', organizationId: null };
+    const platformScoped: HierarchyScopeContext = {
+      userId: 'usr_1',
+      organizationId: null,
+      posture: 'single',
+    };
     const orgScoped: HierarchyScopeContext = {
       userId: 'usr_1',
       organizationId: 'org_east',
+      posture: 'isolated',
       tenantId: 'env_prod',
     };
 
@@ -170,17 +182,29 @@ describe('[#5858] HierarchyScopeContext tenancy authority', () => {
     // this file carries no entry in `test-typecheck-debt.json` — so its budget
     // is zero and the gate goes red.
     // @ts-expect-error `organizationId` is REQUIRED — omitting it must not compile (#5858)
-    const missingOrg: HierarchyScopeContext = { userId: 'usr_1' };
+    const missingOrg: HierarchyScopeContext = { userId: 'usr_1', posture: 'single' };
 
     // The deprecated alias is NOT a substitute: supplying only `tenantId`
     // leaves the authoritative field unstated, which is the same defect.
     // @ts-expect-error `tenantId` does not satisfy the authoritative field (#5858)
-    const tenantOnly: HierarchyScopeContext = { userId: 'usr_1', tenantId: 'env_prod' };
+    const tenantOnly: HierarchyScopeContext = { userId: 'usr_1', tenantId: 'env_prod', posture: 'single' };
+
+    // [#6139] `posture` is REQUIRED on the same terms, for the symmetrical
+    // reason: without it a resolver cannot tell a legitimately org-less
+    // `single` deployment from a walled one whose organization went missing,
+    // so it must guess. One guess leaks across organizations (#5852); the other
+    // silently retires enterprise DEPTH. Neither is acceptable, so neither is
+    // reachable — the producer states the posture or does not compile.
+    // @ts-expect-error `posture` is REQUIRED — omitting it must not compile (#6139)
+    const missingPosture: HierarchyScopeContext = { userId: 'usr_1', organizationId: null };
 
     expect(platformScoped.organizationId).toBeNull();
+    expect(platformScoped.posture).toBe('single');
     expect(orgScoped.organizationId).toBe('org_east');
+    expect(orgScoped.posture).toBe('isolated');
     expect(missingOrg.userId).toBe('usr_1');
     expect(tenantOnly.tenantId).toBe('env_prod');
+    expect(missingPosture.organizationId).toBeNull();
   });
 
   it('pins WHICH keys are mandatory, in both directions (compile-time)', () => {
@@ -190,7 +214,14 @@ describe('[#5858] HierarchyScopeContext tenancy authority', () => {
       [K in keyof T]-?: object extends Pick<T, K> ? never : K;
     }[keyof T];
 
-    const mandatory: Array<RequiredKeys<HierarchyScopeContext>> = ['userId', 'organizationId'];
+    // [#6139] `posture` joins the mandatory set. It is not decoration on the
+    // side of `organizationId` — the two are read TOGETHER, and a resolver
+    // holding one without the other cannot reach a correct verdict.
+    const mandatory: Array<RequiredKeys<HierarchyScopeContext>> = [
+      'userId',
+      'organizationId',
+      'posture',
+    ];
 
     // The other direction, and the ⛔-not-deleted guard in one: `tenantId` is
     // still a member (a removal breaks the reference below) and still OPTIONAL
@@ -198,7 +229,7 @@ describe('[#5858] HierarchyScopeContext tenancy authority', () => {
     // @ts-expect-error `tenantId` stays optional — it is a deprecated alias, not a second authority (#5858)
     const notMandatory: RequiredKeys<HierarchyScopeContext> = 'tenantId';
 
-    expect(mandatory).toEqual(['userId', 'organizationId']);
+    expect(mandatory).toEqual(['userId', 'organizationId', 'posture']);
     expect(notMandatory).toBe('tenantId');
   });
 
@@ -236,11 +267,21 @@ describe('[#5858] HierarchyScopeContext tenancy authority', () => {
     // Anti-vacuity 1: the enumeration found the real members, so a rename or a
     // deletion cannot quietly empty the assertions. `tenantId` being listed IS
     // the "not removed" pin — its retirement is a separate, deliberate change.
-    expect([...ctx.keys()]).toEqual(['userId', 'organizationId', 'tenantId']);
+    expect([...ctx.keys()]).toEqual(['userId', 'organizationId', 'posture', 'tenantId']);
 
     expect(ctx.get('organizationId')).toContain('AUTHORITATIVE');
     expect(ctx.get('organizationId')).toContain('platform/unscoped');
     expect(ctx.get('organizationId')).toContain('MUST scope its owner set by this field');
+
+    // [#6139] The posture's prose must carry BOTH readings of a `null`
+    // organization, because carrying only one is how the contradiction arose:
+    // the field is useless unless it says what each value licenses.
+    expect(ctx.get('posture')).toContain('REQUIRED');
+    expect(ctx.get('posture')).toContain('ONE implicit tenant');
+    expect(ctx.get('posture')).toContain('MISSING');
+    // …and it must NOT offer `single` as the safe default for an unknown
+    // posture — that is the exact misreading that would re-open #5852.
+    expect(ctx.get('posture')).toContain('strictest');
 
     expect(ctx.get('tenantId')).toContain('@deprecated');
     expect(ctx.get('tenantId')).toContain('Not the authority for hierarchy scoping');
@@ -255,6 +296,17 @@ describe('[#5858] HierarchyScopeContext tenancy authority', () => {
     // A `null` organization is "no org", never "every org".
     expect(resolver.get('resolveOwnerIds')).toContain('Fail CLOSED');
     expect(resolver.get('resolveOwnerIds')).toContain('never widen');
+
+    // [#6139] Both halves of the posture-conditional obligation, pinned
+    // together — stating either alone is what produced two accepted positions
+    // that contradicted each other. The walled half must still read as
+    // unconditional…
+    expect(resolver.get('resolveOwnerIds')).toContain('STRICT');
+    // …and the `single` half must be an explicit MUST NOT refuse, so a
+    // resolver author cannot read "fail closed" as the whole rule and kill
+    // single-posture DEPTH while believing they were being careful.
+    expect(resolver.get('resolveOwnerIds')).toContain('MUST NOT be refused');
+    expect(resolver.get('resolveOwnerIds')).toContain('Read the two fields TOGETHER');
   });
 });
 
@@ -314,5 +366,118 @@ describe('[#5817] ISharingService module header — one gate per write verb', ()
     // still in the header, now attributed to `canDelete()`, so the assertion
     // cannot pass by `delete` having disappeared from the file altogether.
     expect(header).toMatch(/\bdelete\b/);
+  });
+});
+
+/**
+ * [#6428] The write gates are TRI-STATE, and the two-state projection stays.
+ *
+ * `canEdit()` answered one `true` for two different facts — "I permit this
+ * write" and "I do not enforce on this row at all" — which is safe only for a
+ * caller that ADDS this gate to whatever else guards the row. #5492's E2
+ * experiment delegated a pre-image write gate to it and measured the cost: on
+ * objects with **no `owner_id` column**, an ordinary member's cross-creator
+ * UPDATE came back `ok: true` where `main` answers 403, because the platform's
+ * `created_by` ownership floor was that object's only row-level write gate and
+ * an abstaining `true` overrode it.
+ *
+ * Two kinds of pin, because the change has two halves: compile-time ones that
+ * tsc evaluates (`tsconfig.test.json` compiles this file — #5286), and prose
+ * ones, because the compatibility rule ("`canEdit` is `verdict !== 'deny'`")
+ * and the fail-closed rule ("a failed lookup is `deny`, never `abstain`") are
+ * obligations on IMPLEMENTERS that no type can carry.
+ */
+describe('[#6428] ISharingService tri-state write verdict', () => {
+  it('SharingWriteVerdict names exactly allow / abstain / deny (compile-time)', () => {
+    const everyVerdict: SharingWriteVerdict[] = ['allow', 'abstain', 'deny'];
+    // A fourth state would leave a composing caller with a case it cannot map
+    // onto an authorization decision — the union is deliberately closed.
+    // @ts-expect-error `unknown` is not a verdict this contract defines
+    const notAVerdict: SharingWriteVerdict = 'unknown';
+    expect(everyVerdict).toHaveLength(3);
+    expect(notAVerdict).toBe('unknown');
+  });
+
+  it('checkEdit/checkDelete answer the verdict; canEdit/canDelete stay boolean (compile-time)', () => {
+    // THE shape pin. An implementation must offer BOTH forms — the tri-state
+    // primary and the boolean projection existing callers already read — so
+    // the migration can never be "the interface promises a verdict nobody
+    // implements", which is the declared-not-delivered window this card's
+    // cross-domain exception exists to avoid.
+    const gates: Pick<
+      ISharingService,
+      'checkEdit' | 'checkDelete' | 'canEdit' | 'canDelete'
+    > = {
+      checkEdit: async () => 'allow',
+      checkDelete: async () => 'abstain',
+      canEdit: async () => true,
+      canDelete: async () => false,
+    };
+
+    // The projection is ONE-WAY: a boolean cannot stand in for a verdict, or
+    // "I abstain" would be spellable as `true` again.
+    // @ts-expect-error boolean is not assignable to Promise<SharingWriteVerdict>
+    const collapsed: Pick<ISharingService, 'checkEdit'> = { checkEdit: async () => true };
+
+    expect(typeof gates.checkEdit).toBe('function');
+    expect(typeof collapsed.checkEdit).toBe('function');
+  });
+
+  it('the contract writes down the fail-closed rule and the projection rule', async () => {
+    const ts = (await import('typescript')).default;
+    const { readFileSync } = await import('node:fs');
+    const { dirname, resolve } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+
+    const file = resolve(dirname(fileURLToPath(import.meta.url)), 'sharing-service.ts');
+    const source = ts.createSourceFile(
+      file,
+      readFileSync(file, 'utf8'),
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ true,
+    );
+
+    const verdictDoc = source.statements
+      .filter((s): s is import('typescript').TypeAliasDeclaration => ts.isTypeAliasDeclaration(s))
+      .find((s) => s.name.text === 'SharingWriteVerdict')
+      ?.getFullText(source);
+    expect(verdictDoc, 'SharingWriteVerdict must still be declared in this file').toBeDefined();
+
+    // Anti-vacuity: this really is the documented type, not an empty match.
+    expect(verdictDoc).toContain('abstain');
+
+    // THE pin the card names: a failed lookup must NOT be dressed up as "no
+    // opinion", because `abstain` hands the row to another authority while
+    // `deny` ends it. Deleting this sentence turns the contract silent on the
+    // exact confusion that produced the fail-open.
+    expect(verdictDoc).toContain('never `abstain`');
+    // …and `abstain` must be stated as NOT a permission, so a consumer cannot
+    // read "no opinion" as "allowed".
+    expect(verdictDoc).toMatch(/\*\*Not a permission\.\*\*/);
+
+    const iface = source.statements.find(
+      (s): s is import('typescript').InterfaceDeclaration =>
+        ts.isInterfaceDeclaration(s) && s.name.text === 'ISharingService',
+    );
+    const docOf = new Map<string, string>();
+    for (const member of iface!.members) {
+      if (!ts.isMethodSignature(member) || !member.name || !ts.isIdentifier(member.name)) continue;
+      docOf.set(member.name.text, member.getFullText(source));
+    }
+
+    // The compatibility clause, in writing: the boolean form is defined AS the
+    // projection, so an implementer cannot "improve" it into denying an
+    // abstain and silently tighten every existing caller.
+    for (const projection of ['canEdit', 'canDelete'] as const) {
+      expect(docOf.get(projection), `${projection} must declare itself a projection`)
+        .toContain('PROJECTION');
+      expect(docOf.get(projection), `${projection} must say which verdict maps to false`)
+        .toMatch(/not (a )?`deny`/);
+    }
+
+    // Anti-vacuity: the search DISCRIMINATES. `buildReadFilter` contributes a
+    // filter, not a write verdict, and naming the write vocabulary there would
+    // itself be drift.
+    expect(docOf.get('buildReadFilter')).not.toContain('abstain');
   });
 });

@@ -16,11 +16,13 @@
 //     may loosen a type rule; if a test does not compile, that is the finding.
 //
 // `include` deliberately stops at `src`, matching the build config's root.
-// `scripts/` holds nine more test files vitest runs and is in no tsconfig at
-// all — a second, differently-shaped hole (measured at 16 files / 33 errors,
-// mostly config-tier TS5097/TS2593 plus a real TS2339 pile in build-schemas.ts)
-// that wants its own change rather than a rider on this one. None of those
-// files carries a `@ts-expect-error`, so no pin is hiding there.
+// `scripts/` — which vitest also runs, and which holds every generator and gate
+// script — is the sibling `tsconfig.scripts.json` (#5475). It stayed a separate
+// program rather than a wider `include` here for two measured reasons: it needs
+// `allowImportingTsExtensions`, which would buy `src` nothing and would let a
+// `src/**/*.test.ts` import `./x.ts` in a spelling the emitting build config
+// still rejects; and it carries no ledger entries at all, so plain `tsc` is a
+// stricter gate for it than this file's shrink-only debt list.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {

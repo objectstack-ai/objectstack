@@ -602,7 +602,7 @@ escalate to. Decide on **expressibility**; reuse/governance is Level B.
 |:--|:--|
 | one base object + **to-one** joins (`include`, ≤3 hops) | a join that **changes grain** / a **to-many** rollup onto the parent |
 | 0..N dimensions; date-bucket `day/week/month/quarter/year` | a **computed dimension** / CASE bucket / numeric bin |
-| measures `count/sum/avg/min/max/count_distinct` | `array_agg`/`string_agg` or any custom-SQL metric |
+| measures `count/sum/avg/min/max/count_distinct` | list aggregation (collect-into-array / concatenate — retired at #6188, no spelling exists) or any custom-SQL metric |
 | **derived measures** — `ratio/sum/difference/product` of other measures | scalar math on raw fields (`amount*0.8`), aggregate-of-aggregate |
 | WHERE (`$and/$or/$not` on the base object) + measure-scoped filters | **HAVING** (filtering the aggregate result) |
 | `compareTo` (previous period/year) + `totals` (matrix subtotals) | **window** (rank, running total, lag/lead, %-of-total); **union**; reshaping params |
@@ -879,7 +879,7 @@ which contain components.
 | `type`               | Use |
 |:---------------------|:----|
 | `page:header`        | Title + subtitle + breadcrumb + inline `actions: Action[]` |
-| `page:card`          | Bordered/un-bordered card with `body: Component[]` |
+| `page:card`          | Bordered/un-bordered card with `children: Component[]` (plus an optional `footer: Component[]` slot) |
 | `flex`               | Generic styleable box (`properties.children`) — the workhorse for custom layout; style via `responsiveStyles` (see Styling below) |
 | `element:text`       | Text node — `properties.content`; style via `responsiveStyles` |
 | `element:button`     | Button — `properties.label` + `variant`/`size` + optional `action` |

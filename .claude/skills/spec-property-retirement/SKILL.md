@@ -202,14 +202,24 @@ follows. Write both.
       ignored), so `dashboard.aria` registered `ui/FormView:aria` and protocol
       11's `flow.node.type` registered any `.type` at all (#4658). The guarantee
       had lapsed for every common leaf.
+      *The entry also starts the aging clock (#5898):* gate (c) reads the same
+      table to decide when this tombstone's `authorable-surface/` line may be
+      deleted (~two majors), so the major you write it under is the release the
+      clock counts from. Retirements older than the table are **undeclared and
+      therefore not deletable** — nothing could date them honestly (leaf matching
+      dated `data/Index:type` from an unrelated `flow.node.type` at major 11, and
+      the baseline file's own git history starts at 17.0.0-rc.0). To delete one of
+      those lines, establish its true major, add the entry, and say so in the PR.
+      ⚠ Never add a row you cannot date: an estimate here reads as a fact to
+      every later gate.
 - [ ] **`surface` stays prose — it is no longer matched.** Write it the way an
       author writes metadata (`flow.nodes[].outputSchema`), which is what the
       upgrade guide prints. Multi-key conversions still join clauses with exactly
       `' / '` (house style since the tool sweep). Nothing downstream parses it
-      for attribution any more — that job moved to the entry above. ⚠ One
-      consumer still does read the clauses by leaf: gate (c)'s *aged-out
-      tombstone* proof, which adjudicates retirements older than
-      `RETIRED_KEYS_BY_MAJOR` and could not be moved with it (#5898).
+      for attribution any more — that job moved to the entry above. Since #5898
+      that is true of **every** consumer: gate (c)'s *aged-out tombstone* proof
+      was the last leaf matcher and now reads the same exact-key table, so no
+      rule anywhere parses a `surface` for attribution.
 - [ ] **`retiredFromLoadPath: true`** — for a retirement, always. Two distinct
       justifications, and they are not interchangeable: for a *rename* it means
       "no alias window, deliberately" (the tombstone owns the refusal; the entry

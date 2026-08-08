@@ -29,7 +29,7 @@
     "CuratedCollectionSchema (const)",
     "Environment (type)",
     "EnvironmentArtifact (type)",
-    "EnvironmentArtifactInput (type)",
+    "EnvironmentArtifactParsed (type)",
     "EnvironmentArtifactSchema (const)",
     "EnvironmentCredential (type)",
     "EnvironmentCredentialParsed (type)",

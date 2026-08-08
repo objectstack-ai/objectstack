@@ -2,84 +2,171 @@
 
 import { z } from 'zod';
 
-// ⚠️ #4001 批 16 — this file SPLITS across the ledger's classes. Read before editing.
+// ⚠️ #4001 批 16 measured this file as SPLIT across the ledger's classes, and the
+// split is now resolved in BOTH directions. Read before editing.
 //
-// `AriaPropsSchema` is a REAL DOOR and is closed (`strictObject`). Every other
-// shape here is `no door` and must NOT be tightened — see the per-schema notes.
+// KEPT. `AriaPropsSchema` is a REAL DOOR and is closed (`strictObject`): it is
+// carried as `aria:` on ~30 live shapes across six metadata-type roots —
+// `ListViewSchema`, `PageSchema`, `PageComponentSchema`, `ChartConfigSchema`,
+// `ActionSchema`, and 20 SDUI component defs — and a BFS from all 24 roots plus
+// `defineStack` reaches it directly. (`DashboardWidgetSchema` was a seventh
+// carrier when this was measured; its `aria` embed was retired later the same
+// day — #5010, ADR-0049 — because no dashboard renderer applied it. The shape
+// and every carrier above are unaffected.) It was silently stripping: through
+// the `view` root, `aria: { label: 'Accounts', describedBy: 'x' }` parsed CLEAN
+// and returned `aria: {}`, so the accessible name the author wrote simply did
+// not exist. `I18nLabelSchema` is the live label primitive the whole `ui/` tree
+// imports. Both stay, and `i18n.test.ts` pins their survival.
 //
-// The split was measured on 2026-08-04, three independent ways with positive AND
-// negative controls in the same run (`i18n.test.ts` pins both halves):
+// REMOVED. `I18nObjectSchema` / `PluralRuleSchema` / `NumberFormatSchema` /
+// `DateFormatSchema` / `LocaleConfigSchema` — per ADR-0049 enforce-or-remove
+// (#5055, maintainer ruling 2026-08-06; window moved to protocol 17 on
+// 2026-08-07). They had no carrier key anywhere, were unreachable in that same
+// BFS, and were never parsed in objectstack / objectui / cloud outside this
+// file's own tests — all three re-measured on `origin/main` immediately before
+// the removal, controls passing in the same run.
 //
-//  - `AriaPropsSchema` is carried as `aria:` on ~30 live shapes across six
-//    metadata-type roots — `ListViewSchema`, `PageSchema`, `PageComponentSchema`,
-//    `ChartConfigSchema`, `ActionSchema`, and 20 SDUI component defs — and a BFS
-//    from all 24 roots plus `defineStack` reaches it directly. (`DashboardWidgetSchema`
-//    was a seventh carrier when this was measured; its `aria` embed was retired
-//    later the same day — #5010, ADR-0049 — because no dashboard renderer applied
-//    it. The shape and every carrier above are unaffected.)
-//    It was silently stripping: through the `view` root,
-//    `aria: { label: 'Accounts', describedBy: 'x' }` parsed CLEAN and returned
-//    `aria: {}`, so the accessible name the author wrote simply did not exist.
-//  - `I18nObjectSchema` / `PluralRuleSchema` / `NumberFormatSchema` /
-//    `DateFormatSchema` / `LocaleConfigSchema` have no carrier key anywhere, are
-//    unreachable in that same BFS, and are never parsed in `objectstack`,
-//    `objectui` or `cloud` outside this file's own tests. `.strict()` is a
-//    property of a PARSE; with no parse it enforces nothing and only makes a dead
-//    slot look load-bearing (#4583). ADR-0049 enforce-or-remove is #5055.
+// Two things worth keeping straight about what left:
 //
-// Note `NumberFormatSchema` / `DateFormatSchema` DO have a carrier
-// (`LocaleConfig.numberFormat` / `.dateFormat`) — but the carrier is itself
-// doorless, so the whole subtree is `no door`, not `no gate`.
+//  - `NumberFormatSchema` / `DateFormatSchema` DID have a carrier key
+//    (`LocaleConfig.numberFormat` / `.dateFormat`) — but the carrier was itself
+//    doorless, so the subtree was `no door` rather than `no gate` and it goes as
+//    one subtree. Leaving the two leaf shapes behind would strand exported
+//    schemas with no consumer, which reads as a capability to whoever finds them
+//    (#3950).
+//  - `I18nObjectSchema` was a KEY-REFERENCE dialect (`{ key, defaultValue,
+//    params }`) with no resolver: nothing ever looked a `key` up, so the label
+//    an author wrote there reached the screen as the raw key string or not at
+//    all. It stays retired, and #5728's widening below does NOT bring it back —
+//    see the locale-key constraint on {@link InlineLocaleMapSchema}, which is
+//    what keeps `{ key, defaultValue }` a parse error rather than a "locale map"
+//    whose locales happen to be named `key` and `defaultValue`. The live
+//    bundle-based translation surface is `system/translation.zod.ts`.
 //
-// The `z.record` slots stay open ON PURPOSE and are not sites this ratchet can
-// close: `I18nObject.params` is an interpolation bag whose key space is whatever
-// the message template names. Openness there is the contract.
+// ⚠️ Route 3 of the retirement playbook ("nothing parses it → neither"): with no
+// carrier key there is no shape for a `retiredKey()` tombstone to sit on and no
+// author document for an ADR-0087 D2 conversion to rewrite. The declared record
+// is the D3 `SemanticMigration` `ui-widget-i18n-family-retired` plus
+// `RETIRED_DEFS_BY_MAJOR`. Localisation as authorable protocol metadata returns
+// via the ENFORCE route of ADR-0049 through a new ADR — the formatter that reads
+// a `LocaleConfig` first, the vocabulary second.
 
-/**
- * I18n Object Schema
- * Structured internationalization label with translation key and parameters.
- * 
- * @example
- * ```typescript
- * const label: I18nObject = {
- *   key: 'views.task_list.label',
- *   defaultValue: 'Task List',
- *   params: { count: 5 },
- * };
- * ```
- */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
-export const I18nObjectSchema = lazySchema(() => z.object({
-  /** Translation key (e.g., "views.task_list.label", "apps.crm.description") */
-  key: z.string().describe('Translation key (e.g., "views.task_list.label")'),
 
-  /** Default value when translation is not available */
-  defaultValue: z.string().optional().describe('Fallback value when translation key is not found'),
+/**
+ * Display-label and ARIA-label primitives shared by every `ui/` shape.
+ *
+ * A MODULE doc, deliberately, rather than the first declaration's doc doing the
+ * job by accident: `scripts/build-skill-references.ts` headlines this file in
+ * four skill indexes from the first JSDoc it finds, so without one the headline
+ * silently becomes whatever declaration happens to sort first. It did exactly
+ * that when #5728 added `InlineLocaleMapSchema` above `I18nLabelSchema` — the
+ * indexes started describing the file as a BCP-47 key format. Stating the
+ * headline once, on the module, makes it a decision instead of a side effect of
+ * declaration order.
+ *
+ * Declaration order here is load-bearing and cannot simply be flipped back:
+ * `I18nLabelSchema` names `InlineLocaleMapSchema` in its union, and under
+ * `OS_EAGER_SCHEMAS=1` (which `gen:schema` sets) `lazySchema` evaluates its
+ * factory at module load — so a forward reference would be a TDZ crash in the
+ * schema build rather than a lazy lookup.
+ */
 
-  /** Interpolation parameters for dynamic translations */
-  params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe('Interpolation parameters (e.g., { count: 5 })'),
-}));
+/**
+ * The key face of an inline locale map: a BCP-47-shaped language tag (`en`,
+ * `zh`, `zh-CN`, `pt-BR`, `zh-Hans-CN`), plus the literal `default`, which the
+ * renderer's `pickLocalized` reads as the untagged fallback entry.
+ *
+ * ## Why the key is constrained rather than left as `z.string()`
+ *
+ * A bare `z.record(z.string(), z.string())` would re-admit the **retired**
+ * `I18nObjectSchema` dialect through the front door: `{ key: 'views.x.label',
+ * defaultValue: 'Task List' }` is, structurally, a map of strings to strings.
+ * It would parse clean and then reach objectui's `pickLocalized`, whose last
+ * resort is "the first string value in the object" — so the *i18n key itself*
+ * renders as the visible label, in every locale. That is the silent-strip
+ * failure class this file's own header exists to record, arriving through the
+ * one shape #5055 deliberately removed.
+ *
+ * Constraining the key keeps both halves of the #5728 ruling true at once: the
+ * inline locale map the resolver really honours is authorized, and the dead
+ * key-reference dialect stays rejected — declared = enforced in both
+ * directions, which is exactly the #4667 consistency the ruling asks for.
+ * Every inline map authored in this repo (31 of them, across three platform
+ * pages) uses `en` / `zh-CN` / `ja-JP` / `es-ES`, so the constraint costs no
+ * real authoring surface.
+ *
+ * What it rejects is the retired SHAPE, not a list of banned words: the
+ * key-reference form always carried `defaultValue` (required on the old
+ * `I18nObjectSchema`), which cannot be a language tag. A hypothetical map whose
+ * only key is a bare three-letter `key` still parses, because nothing
+ * distinguishes it from a language subtag without an ISO-639 registry — and a
+ * hand-curated deny-list of English words that "look like" tags would be a
+ * claim about languages this schema has no business making.
+ */
+const INLINE_LOCALE_KEY = /^(default|[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*)$/;
 
-export type I18nObject = z.infer<typeof I18nObjectSchema>;
+/**
+ * Inline locale map — the second authorized form of a display label.
+ *
+ * `{ en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー' }`: the author writes
+ * every language inline, and the renderer picks one at display time
+ * (objectui's `pickLocalized`, which the CLI's `i18n-extract` also recognises —
+ * a label already in map form is multilingual, so no bundle key is scaffolded
+ * for it).
+ */
+export const InlineLocaleMapSchema = lazySchema(() => z.record(
+  z.string().regex(
+    INLINE_LOCALE_KEY,
+    'an inline label map is keyed by BCP-47 locale tags (`en`, `zh-CN`, …) or `default` — '
+    + 'not by `key`/`defaultValue`, which was the retired key-reference form (#5055) and resolves to nothing',
+  ),
+  z.string(),
+).describe('Inline locale map: BCP-47 tag → translated string'));
+
+export type InlineLocaleMap = z.input<typeof InlineLocaleMapSchema>;
 
 /**
  * I18n Label Schema
- * 
- * A plain string label for display purposes.
- * i18n translation keys are auto-generated by the framework at registration time
- * based on a standardized naming convention (e.g., `apps.<packageId>.<name>.label`).
- * Developers only need to provide the default-language string; translations are
- * managed through translation files, not inline i18n objects.
- * 
+ *
+ * A display label in one of **two** authorized forms (#5728, maintainer ruling
+ * 2026-08-06):
+ *
+ *  1. **A plain string** — the default-language literal. Its translations live
+ *     in a translation bundle, addressed by the convention for the surface that
+ *     carries the label (`objects.<object>._views.<view>.label`,
+ *     `pages.<page>.components.<id>.label`, …) and resolved by
+ *     `system/i18n-resolver.ts`.
+ *  2. **An inline locale map** — `{ en: 'Members', 'zh-CN': '成员' }`, picked at
+ *     render time. Three published platform pages author 31 of these and
+ *     objectui resolves them (`pickLocalized`), so the map is a delivered
+ *     capability, not a convention the runtime ignores.
+ *
+ * Both are real; neither is deprecated by this schema. The bundle route is the
+ * one that scales (translators never touch `*.page.ts`) and remains the
+ * long-term direction — but a contract that declared only form 1 while the
+ * platform's own pages shipped form 2 was the authoritative document being the
+ * wrong one, which is what this widening fixes.
+ *
+ * ⚠️ NOT auto-generated. An earlier version of this description promised "i18n
+ * keys are auto-generated by the framework at registration time"; no key is
+ * generated for anything (#5377). A plain-string label is translatable exactly
+ * where the resolver and `ObjectTranslationDataSchema` define a slot for it,
+ * and nowhere else.
+ *
  * @example
  * ```typescript
- * const label: I18nLabel = "All Active";
+ * const plain: I18nLabel = 'All Active';
+ * const inline: I18nLabel = { en: 'All Active', 'zh-CN': '全部活跃' };
  * ```
  */
-export const I18nLabelSchema = lazySchema(() => z.string().describe('Display label (plain string; i18n keys are auto-generated by the framework)'));
+export const I18nLabelSchema = lazySchema(() => z.union([
+  z.string(),
+  InlineLocaleMapSchema,
+]).describe('Display label — the default-language string, or an inline locale map ({ en, "zh-CN" }) resolved at render time'));
 
-export type I18nLabel = z.infer<typeof I18nLabelSchema>;
+export type I18nLabel = z.input<typeof I18nLabelSchema>;
 
 // The one closed shape in this file (#4001 批 16). Everything below `AriaProps`
 // stays open on the `no door` verdict recorded at the top.
@@ -150,8 +237,21 @@ export const AriaPropsSchema = lazySchema(() => strictObject({
       + 'Use `ariaLabel` only if a literal accessible name is what you meant; #5058 tracks the gap.',
   },
 }, {
-  /** Accessible label for screen readers */
-  ariaLabel: I18nLabelSchema.optional().describe('Accessible label for screen readers (WAI-ARIA aria-label)'),
+  /**
+   * Accessible label for screen readers.
+   *
+   * Same two authorized forms as any other {@link I18nLabelSchema} label. It is
+   * called out here because #5377 asked whether this key inherited the
+   * "auto-generated i18n keys" claim: it did not carry that sentence itself,
+   * but it did inherit the assumption behind it. There is no generated key for
+   * an `ariaLabel` and no bundle slot addressing one, so a plain-string
+   * `ariaLabel` is announced in the source language in every locale — the
+   * inline map is its only localization route today.
+   */
+  ariaLabel: I18nLabelSchema.optional().describe(
+    'Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — '
+    + 'no translation-bundle slot addresses this key, so a plain string is announced in the source language.',
+  ),
 
   /** ID of element that describes this component */
   ariaDescribedBy: z.string().optional().describe('ID of element providing additional description (WAI-ARIA aria-describedby)'),
@@ -160,134 +260,4 @@ export const AriaPropsSchema = lazySchema(() => strictObject({
   role: z.string().optional().describe('WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert")'),
 }).describe('ARIA accessibility attributes'));
 
-export type AriaProps = z.infer<typeof AriaPropsSchema>;
-
-/**
- * Plural Rule Schema
- *
- * Defines plural forms for a translation key, following ICU MessageFormat / i18next conventions.
- * Supports zero, one, two, few, many, other forms per CLDR plural rules.
- *
- * @see https://unicode.org/reports/tr35/tr35-numbers.html#Language_Plural_Rules
- *
- * @example
- * ```typescript
- * const plural: PluralRule = {
- *   key: 'items.count',
- *   zero: 'No items',
- *   one: '{count} item',
- *   other: '{count} items',
- * };
- * ```
- */
-export const PluralRuleSchema = lazySchema(() => z.object({
-  /** Translation key for the plural form */
-  key: z.string().describe('Translation key'),
-  /** Form for zero quantity */
-  zero: z.string().optional().describe('Zero form (e.g., "No items")'),
-  /** Form for singular (1) */
-  one: z.string().optional().describe('Singular form (e.g., "{count} item")'),
-  /** Form for dual (2) — used in Arabic, Welsh, etc. */
-  two: z.string().optional().describe('Dual form (e.g., "{count} items" for exactly 2)'),
-  /** Form for few (2-4 in Slavic languages) */
-  few: z.string().optional().describe('Few form (e.g., for 2-4 in some languages)'),
-  /** Form for many (5+ in Slavic languages) */
-  many: z.string().optional().describe('Many form (e.g., for 5+ in some languages)'),
-  /** Default/fallback form */
-  other: z.string().describe('Default plural form (e.g., "{count} items")'),
-}).describe('ICU plural rules for a translation key'));
-
-export type PluralRule = z.infer<typeof PluralRuleSchema>;
-
-/**
- * Number Format Schema
- *
- * Defines number formatting rules for localization.
- *
- * @example
- * ```typescript
- * const format: NumberFormat = {
- *   style: 'currency',
- *   currency: 'USD',
- *   minimumFractionDigits: 2,
- * };
- * ```
- */
-export const NumberFormatSchema = lazySchema(() => z.object({
-  style: z.enum(['decimal', 'currency', 'percent', 'unit']).default('decimal')
-    .describe('Number formatting style'),
-  currency: z.string().optional().describe('ISO 4217 currency code (e.g., "USD", "EUR")'),
-  unit: z.string().optional().describe('Unit for unit formatting (e.g., "kilometer", "liter")'),
-  minimumFractionDigits: z.number().optional().describe('Minimum number of fraction digits'),
-  maximumFractionDigits: z.number().optional().describe('Maximum number of fraction digits'),
-  useGrouping: z.boolean().optional().describe('Whether to use grouping separators (e.g., 1,000)'),
-}).describe('Number formatting rules'));
-
-export type NumberFormat = z.infer<typeof NumberFormatSchema>;
-/** Post-parse shape of {@link NumberFormat} — defaults applied, transforms run (ADR-0122). */
-export type NumberFormatParsed = z.infer<typeof NumberFormatSchema>;
-
-/**
- * Date Format Schema
- *
- * Defines date/time formatting rules for localization.
- *
- * @example
- * ```typescript
- * const format: DateFormat = {
- *   dateStyle: 'medium',
- *   timeStyle: 'short',
- *   timeZone: 'America/New_York',
- * };
- * ```
- */
-export const DateFormatSchema = lazySchema(() => z.object({
-  dateStyle: z.enum(['full', 'long', 'medium', 'short']).optional()
-    .describe('Date display style'),
-  timeStyle: z.enum(['full', 'long', 'medium', 'short']).optional()
-    .describe('Time display style'),
-  timeZone: z.string().optional().describe('IANA time zone (e.g., "America/New_York")'),
-  hour12: z.boolean().optional().describe('Use 12-hour format'),
-}).describe('Date/time formatting rules'));
-
-export type DateFormat = z.infer<typeof DateFormatSchema>;
-
-/**
- * Locale Configuration Schema
- *
- * Defines a complete locale configuration including language code,
- * fallback chain, and formatting preferences.
- *
- * @example
- * ```typescript
- * const locale: LocaleConfig = {
- *   code: 'zh-CN',
- *   fallbackChain: ['zh-TW', 'en'],
- *   direction: 'ltr',
- *   numberFormat: { style: 'decimal', useGrouping: true },
- *   dateFormat: { dateStyle: 'medium', timeStyle: 'short' },
- * };
- * ```
- */
-export const LocaleConfigSchema = lazySchema(() => z.object({
-  /** BCP 47 language code (e.g., "en-US", "zh-CN", "ar-SA") */
-  code: z.string().describe('BCP 47 language code (e.g., "en-US", "zh-CN")'),
-
-  /** Ordered fallback chain for missing translations */
-  fallbackChain: z.array(z.string()).optional()
-    .describe('Fallback language codes in priority order (e.g., ["zh-TW", "en"])'),
-
-  /** Text direction */
-  direction: z.enum(['ltr', 'rtl']).default('ltr')
-    .describe('Text direction: left-to-right or right-to-left'),
-
-  /** Default number formatting */
-  numberFormat: NumberFormatSchema.optional().describe('Default number formatting rules'),
-
-  /** Default date formatting */
-  dateFormat: DateFormatSchema.optional().describe('Default date/time formatting rules'),
-}).describe('Locale configuration'));
-
-export type LocaleConfig = z.infer<typeof LocaleConfigSchema>;
-/** Post-parse shape of {@link LocaleConfig} — defaults applied, transforms run (ADR-0122). */
-export type LocaleConfigParsed = z.infer<typeof LocaleConfigSchema>;
+export type AriaProps = z.input<typeof AriaPropsSchema>;

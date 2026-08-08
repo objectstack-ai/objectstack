@@ -735,35 +735,35 @@ export const DataEngineRequestSchema = lazySchema(() => z.discriminatedUnion('me
  * it sat unused under the "legacy/deprecated" heading below, which is why the
  * contract went looking for it and did not find it.)
  */
-export type BaseEngineOptions = z.infer<typeof BaseEngineOptionsSchema>;
-export type EngineQueryOptions = z.infer<typeof EngineQueryOptionsSchema>;
+export type BaseEngineOptions = z.input<typeof BaseEngineOptionsSchema>;
+export type EngineQueryOptions = z.input<typeof EngineQueryOptionsSchema>;
 /** Post-parse shape of {@link EngineQueryOptions} — defaults applied, transforms run (ADR-0122). */
 export type EngineQueryOptionsParsed = z.infer<typeof EngineQueryOptionsSchema>;
-export type EngineUpdateOptions = z.infer<typeof EngineUpdateOptionsSchema>;
-export type DroppedFieldsEvent = z.infer<typeof DroppedFieldsEventSchema>;
-export type EngineDeleteOptions = z.infer<typeof EngineDeleteOptionsSchema>;
-export type EngineAggregateOptions = z.infer<typeof EngineAggregateOptionsSchema>;
-export type EngineCountOptions = z.infer<typeof EngineCountOptionsSchema>;
+export type EngineUpdateOptions = z.input<typeof EngineUpdateOptionsSchema>;
+export type DroppedFieldsEvent = z.input<typeof DroppedFieldsEventSchema>;
+export type EngineDeleteOptions = z.input<typeof EngineDeleteOptionsSchema>;
+export type EngineAggregateOptions = z.input<typeof EngineAggregateOptionsSchema>;
+export type EngineCountOptions = z.input<typeof EngineCountOptionsSchema>;
 
 // --- Legacy: deprecated types (kept for backward compatibility) ---
-export type DataEngineFilter = z.infer<typeof DataEngineFilterSchema>;
+export type DataEngineFilter = z.input<typeof DataEngineFilterSchema>;
 /** @deprecated Use standard `SortNode[]` from QueryAST instead. */
-export type DataEngineSort = z.infer<typeof DataEngineSortSchema>;
+export type DataEngineSort = z.input<typeof DataEngineSortSchema>;
 /** Post-parse shape of {@link DataEngineSort} — defaults applied, transforms run (ADR-0122). */
 export type DataEngineSortParsed = z.infer<typeof DataEngineSortSchema>;
 /** @deprecated Use `EngineQueryOptions` instead. */
-export type DataEngineQueryOptions = z.infer<typeof DataEngineQueryOptionsSchema>;
+export type DataEngineQueryOptions = z.input<typeof DataEngineQueryOptionsSchema>;
 /** Post-parse shape of {@link DataEngineQueryOptions} — defaults applied, transforms run (ADR-0122). */
 export type DataEngineQueryOptionsParsed = z.infer<typeof DataEngineQueryOptionsSchema>;
-export type DataEngineInsertOptions = z.infer<typeof DataEngineInsertOptionsSchema>;
+export type DataEngineInsertOptions = z.input<typeof DataEngineInsertOptionsSchema>;
 /** @deprecated Use `EngineUpdateOptions` instead. */
-export type DataEngineUpdateOptions = z.infer<typeof DataEngineUpdateOptionsSchema>;
+export type DataEngineUpdateOptions = z.input<typeof DataEngineUpdateOptionsSchema>;
 /** @deprecated Use `EngineDeleteOptions` instead. */
-export type DataEngineDeleteOptions = z.infer<typeof DataEngineDeleteOptionsSchema>;
+export type DataEngineDeleteOptions = z.input<typeof DataEngineDeleteOptionsSchema>;
 /** @deprecated Use `EngineAggregateOptions` instead. */
-export type DataEngineAggregateOptions = z.infer<typeof DataEngineAggregateOptionsSchema>;
+export type DataEngineAggregateOptions = z.input<typeof DataEngineAggregateOptionsSchema>;
 /** @deprecated Use `EngineCountOptions` instead. */
-export type DataEngineCountOptions = z.infer<typeof DataEngineCountOptionsSchema>;
-export type DataEngineRequest = z.infer<typeof DataEngineRequestSchema>;
+export type DataEngineCountOptions = z.input<typeof DataEngineCountOptionsSchema>;
+export type DataEngineRequest = z.input<typeof DataEngineRequestSchema>;
 /** Post-parse shape of {@link DataEngineRequest} — defaults applied, transforms run (ADR-0122). */
 export type DataEngineRequestParsed = z.infer<typeof DataEngineRequestSchema>;

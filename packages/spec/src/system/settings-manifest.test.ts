@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   SpecifierType,
+  SpecifierValueDomainSchema,
   SpecifierSchema,
   SettingsManifestSchema,
   ResolvedSettingValueSchema,
@@ -190,6 +191,170 @@ describe('SpecifierSchema — layout-only specifiers', () => {
     expect(() =>
       SpecifierSchema.parse({ type: 'action_button', label: 'Test' })
     ).toThrow(/requires a 'handler'/);
+  });
+});
+
+describe('SpecifierValueDomainSchema — the closed standard-domain vocabulary (#5933)', () => {
+  it('accepts exactly the three domains with measured authoring pull', () => {
+    for (const d of ['iana_time_zone', 'iso_4217_currency', 'iso_3166_alpha2']) {
+      expect(() => SpecifierValueDomainSchema.parse(d)).not.toThrow();
+    }
+    expect(SpecifierValueDomainSchema.options).toEqual([
+      'iana_time_zone',
+      'iso_4217_currency',
+      'iso_3166_alpha2',
+    ]);
+  });
+
+  it('rejects `bcp47_locale` — the proposal member that was deliberately dropped', () => {
+    // #5933's proposal listed a fourth member. Its only candidate key is
+    // `localization.locale`, a `select` whose options ARE the shipped message
+    // catalogs — a registry-backed table, so declaring a domain there would
+    // LOOSEN it (options degrade to a suggestion list) and admit locales that
+    // have no catalog. And BCP-47 has no membership registry to enforce
+    // against: `Intl.getCanonicalLocales('xx-YY')` succeeds, so the "domain"
+    // would only re-check syntax — exactly the weakness `pattern` already has
+    // and this key exists to fix. It is not in the vocabulary; a manifest that
+    // spells it is refused by name rather than silently stripped.
+    expect(() => SpecifierValueDomainSchema.parse('bcp47_locale')).toThrow();
+    expect(() => Intl.getCanonicalLocales('xx-YY')).not.toThrow();
+  });
+
+  it('rejects unknown domains', () => {
+    expect(() => SpecifierValueDomainSchema.parse('iso_9999_unicorn')).toThrow();
+    expect(() => SpecifierValueDomainSchema.parse('')).toThrow();
+  });
+});
+
+describe('Specifier.valueDomain (#5933)', () => {
+  it('SURVIVES the parse — a dropped key is the defect this closes', () => {
+    // #5712's dev measured the current shape by smuggling a `format` key in:
+    // Zod stripped it and `parse()` returned `undefined`, so the manifest had
+    // no way to say "the boundary is a standard". This assertion is that
+    // measurement inverted, and it is the one that must never regress.
+    const parsed = SpecifierSchema.parse({
+      type: 'select',
+      key: 'timezone',
+      label: 'Default timezone',
+      valueDomain: 'iana_time_zone',
+      options: [{ value: 'UTC', label: 'UTC' }],
+    });
+    expect(parsed.valueDomain).toBe('iana_time_zone');
+  });
+
+  it('is optional — an undeclared specifier keeps #5131 exhaustive-options semantics', () => {
+    const parsed = SpecifierSchema.parse({
+      type: 'select',
+      key: 'provider',
+      label: 'Provider',
+      options: [{ value: 'smtp', label: 'SMTP' }],
+    });
+    expect(parsed.valueDomain).toBeUndefined();
+  });
+
+  it('accepts a `text` specifier alongside pattern/length constraints', () => {
+    // Shape and membership are independent narrowings and a value must satisfy
+    // both — `^[A-Za-z]{2}$` is what admits `ZZ` today, which is why the domain
+    // is added rather than the pattern replaced.
+    const parsed = SpecifierSchema.parse({
+      type: 'text',
+      key: 'default_country',
+      label: 'Default country',
+      valueDomain: 'iso_3166_alpha2',
+      pattern: '^[A-Za-z]{2}$',
+      minLength: 2,
+      maxLength: 2,
+    });
+    expect(parsed.valueDomain).toBe('iso_3166_alpha2');
+    expect(parsed.pattern).toBe('^[A-Za-z]{2}$');
+  });
+
+  it('still requires `options` on a select — the list degrades, it does not vanish', () => {
+    expect(() =>
+      SpecifierSchema.parse({
+        type: 'select',
+        key: 'currency',
+        label: 'Default currency',
+        valueDomain: 'iso_4217_currency',
+      })
+    ).toThrow(/requires non-empty 'options'/);
+  });
+
+  it('rejects a valueDomain on a layout-only specifier', () => {
+    expect(() =>
+      SpecifierSchema.parse({
+        type: 'group',
+        label: 'Region',
+        valueDomain: 'iana_time_zone',
+      })
+    ).toThrow(/carries no value, so it must not declare a 'valueDomain'/);
+  });
+
+  it('rejects an unknown domain on an otherwise valid specifier', () => {
+    expect(() =>
+      SpecifierSchema.parse({
+        type: 'text',
+        key: 'default_country',
+        label: 'Default country',
+        valueDomain: 'iso_3166_alpha3',
+      })
+    ).toThrow();
+  });
+});
+
+describe('valueDomain membership definitions — the measurements service-settings must implement', () => {
+  // These pin the TSDoc on `SpecifierValueDomainSchema`. `packages/spec` does
+  // not enforce a domain (Prime Directive #2) — but the two halves have to agree
+  // on WHAT the domain is, and the obvious oracle is the wrong one for two of
+  // the three. A doc nobody re-measures rots; these go red when it does.
+
+  const probeTimeZone = (tz: string): boolean => {
+    try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; }
+  };
+
+  it('iana_time_zone: the Intl.DateTimeFormat probe is the definition', () => {
+    // Same shape as `isValidTimeZone` in
+    // packages/core/src/security/resolve-authz-context.ts.
+    for (const tz of ['UTC', 'Asia/Kolkata', 'Europe/Kyiv', 'Asia/Ho_Chi_Minh', 'US/Eastern', 'GMT', 'Asia/Shanghai']) {
+      expect(probeTimeZone(tz)).toBe(true);
+    }
+    // And it does what `pattern` cannot: a shape-valid zone that does not exist.
+    expect(probeTimeZone('Mars/Olympus')).toBe(false);
+  });
+
+  it('iana_time_zone: Intl.supportedValuesOf is NOT the definition', () => {
+    // Measured on the repo's Node 22 baseline: a CLDR canonical-name subset
+    // that omits values this platform itself ships. If this ever goes green in
+    // the other direction, ICU has changed — re-measure before relaxing the
+    // TSDoc, do not just delete the assertion.
+    const enumerated = Intl.supportedValuesOf('timeZone');
+    for (const shipped of ['UTC', 'Asia/Kolkata']) {
+      expect(probeTimeZone(shipped)).toBe(true);
+      expect(enumerated).not.toContain(shipped);
+    }
+    // It is not merely a subset — it renames: the zones above are present under
+    // legacy spellings, so even a normalising membership test is not free.
+    expect(enumerated).toContain('Asia/Calcutta');
+  });
+
+  it('iso_4217_currency: Intl.supportedValuesOf IS the definition', () => {
+    const currencies = Intl.supportedValuesOf('currency');
+    // The nine curated localization options plus CHF, the canonical "valid but
+    // not curated" value the degraded-options semantics must admit.
+    for (const c of ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'INR', 'AUD', 'CAD', 'BRL', 'CHF']) {
+      expect(currencies).toContain(c);
+    }
+    expect(currencies).not.toContain('XYZ');
+  });
+
+  it('iso_3166_alpha2: Intl.DisplayNames is NOT a membership oracle', () => {
+    // The tempting test is "the display name differs from the input". It admits
+    // `ZZ` — the exact value #5933 cites as slipping past `^[A-Za-z]{2}$` — and
+    // `UK`, which is a CLDR alias and not an ISO 3166-1 code at all. The
+    // enforcing side needs an explicit code list; that list is not spec's.
+    const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+    expect(regionNames.of('ZZ')).not.toBe('ZZ');
+    expect(regionNames.of('UK')).not.toBe('UK');
   });
 });
 

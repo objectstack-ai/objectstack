@@ -78,7 +78,7 @@ describe('[#5041] SqlDriver refuses `$field` cross-field comparison in the ADR-0
   });
 
   const find = (where: unknown) =>
-    driver.find('deal', { object: 'deal', fields: ['id'], where: where as FilterCondition });
+    driver.find('deal', { fields: ['id'], where: where as FilterCondition });
 
   it('the issue repro — `{ amount: { $gt: { $field: "budget" } } }` — carries the full envelope', async () => {
     const err = await refusalOf(() => find({ amount: { $gt: { $field: 'budget' } } }));

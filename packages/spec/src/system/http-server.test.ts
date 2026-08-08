@@ -4,10 +4,6 @@ import {
   RouteHandlerMetadataSchema,
   MiddlewareType,
   MiddlewareConfigSchema,
-  ServerEventType,
-  ServerEventSchema,
-  ServerCapabilitiesSchema,
-  ServerStatusSchema,
 } from './http-server.zod';
 import * as sharedHttp from '../shared/http.zod';
 import { RouterConfigSchema } from '../api/router.zod';
@@ -193,124 +189,74 @@ describe('MiddlewareConfigSchema', () => {
   });
 });
 
-describe('ServerEventType', () => {
-  it('should accept valid event types', () => {
-    const types = ['starting', 'started', 'stopping', 'stopped', 'request', 'response', 'error'];
-
-    types.forEach((type) => {
-      expect(() => ServerEventType.parse(type)).not.toThrow();
-    });
+/**
+ * The rest of `http-server.zod.ts`'s runtime vocabulary was retired in v17
+ * (#5295, ADR-0049 enforce-or-remove) — `ServerEventType` / `ServerEvent`,
+ * `ServerCapabilities` and `ServerStatus`. Same file, same route and the same
+ * absence of an authoring door as #4938 above, so again there is no
+ * `retiredKey()` tombstone to assert against: none of the three was a KEY on
+ * anything, so nobody could author one and nobody can receive a prescription.
+ * What is pinned here is that the exports are gone, that the removal stopped at
+ * the three shapes, and that the ONE doubt which held this card for four days —
+ * "a capability vocabulary may be a reference surface for host implementers" —
+ * was answered by measurement rather than by the absence of a grep hit.
+ *
+ * The unit tests that stood here (event-type enum, event parse, capability
+ * defaults, status states) are deliberately NOT re-pointed at a surviving
+ * schema: they asserted the shapes' own behaviour, and the shapes are the thing
+ * being removed. Replacing them wholesale with the pins below is the third
+ * fixture disposition in the retirement playbook.
+ */
+describe('server runtime vocabulary retirement (#5295)', () => {
+  // All four were runtime VALUES (`z.enum` and `lazySchema` both produce one),
+  // so an `in` check is a real witness. Reverse verification, direction
+  // predicted before running it: pasting any limb back turns exactly these
+  // assertions red — they are `false`-expecting existence checks, so the
+  // restored export is the failure. It is the plain red direction, not one of
+  // the two inverted ones, because nothing downstream COUNTS these names.
+  it.each([
+    'ServerEventType',
+    'ServerEventSchema',
+    'ServerCapabilitiesSchema',
+    'ServerStatusSchema',
+  ])('no longer exports the value `%s`', (name) => {
+    expect(name in httpServer).toBe(false);
   });
 
-  it('should reject invalid event types', () => {
-    expect(() => ServerEventType.parse('invalid')).toThrow();
-  });
-});
-
-describe('ServerEventSchema', () => {
-  it('should accept valid server event', () => {
-    const event = ServerEventSchema.parse({
-      type: 'started',
-      timestamp: '2025-01-01T00:00:00Z',
-    });
-
-    expect(event.type).toBe('started');
-    expect(event.timestamp).toBe('2025-01-01T00:00:00Z');
+  it('does not re-export them from the system barrel either', async () => {
+    const system = await import('./index');
+    for (const name of [
+      'ServerEventType',
+      'ServerEventSchema',
+      'ServerCapabilitiesSchema',
+      'ServerStatusSchema',
+    ]) {
+      expect(name in system).toBe(false);
+    }
   });
 
-  it('should accept event with data', () => {
-    const event = ServerEventSchema.parse({
-      type: 'error',
-      timestamp: '2025-01-01T00:00:00Z',
-      data: { message: 'Connection refused', code: 500 },
-    });
-
-    expect(event.data).toEqual({ message: 'Connection refused', code: 500 });
+  it('stops at the three shapes — the route/middleware half of the file survives', () => {
+    // The file is not retired; its ROUTE-REGISTRATION half has live consumers
+    // (`packages/rest/src/route-manager.ts`, `packages/runtime/src/middleware.ts`).
+    // This is the same "removal is the container, not the file" line #4938 drew,
+    // reasserted one layer in so a later sweep does not read the second
+    // retirement as licence to take the rest.
+    for (const name of [
+      'RouteHandlerMetadataSchema',
+      'MiddlewareType',
+      'MiddlewareConfigSchema',
+      'MiddlewareConfig',
+    ]) {
+      expect(name in httpServer).toBe(true);
+    }
   });
 
-  it('should reject invalid timestamp', () => {
-    expect(() => ServerEventSchema.parse({ type: 'started', timestamp: 'not-a-date' })).toThrow();
-  });
-
-  it('should reject missing required fields', () => {
-    expect(() => ServerEventSchema.parse({})).toThrow();
-    expect(() => ServerEventSchema.parse({ type: 'started' })).toThrow();
-  });
-});
-
-describe('ServerCapabilitiesSchema', () => {
-  it('should accept empty config with defaults', () => {
-    const caps = ServerCapabilitiesSchema.parse({});
-
-    expect(caps.httpVersions).toEqual(['1.1']);
-    expect(caps.websocket).toBe(false);
-    expect(caps.sse).toBe(false);
-    expect(caps.serverPush).toBe(false);
-    expect(caps.streaming).toBe(true);
-    expect(caps.middleware).toBe(true);
-    expect(caps.routeParams).toBe(true);
-    expect(caps.compression).toBe(true);
-  });
-
-  it('should accept full configuration', () => {
-    const caps = ServerCapabilitiesSchema.parse({
-      httpVersions: ['1.1', '2.0'],
-      websocket: true,
-      sse: true,
-      serverPush: true,
-      streaming: false,
-      middleware: false,
-      routeParams: false,
-      compression: false,
-    });
-
-    expect(caps.httpVersions).toEqual(['1.1', '2.0']);
-    expect(caps.websocket).toBe(true);
-    expect(caps.sse).toBe(true);
-  });
-
-  it('should reject invalid HTTP versions', () => {
-    expect(() => ServerCapabilitiesSchema.parse({ httpVersions: ['4.0'] })).toThrow();
-  });
-});
-
-describe('ServerStatusSchema', () => {
-  it('should accept minimal status', () => {
-    const status = ServerStatusSchema.parse({
-      state: 'running',
-    });
-
-    expect(status.state).toBe('running');
-  });
-
-  it('should accept all state values', () => {
-    const states = ['stopped', 'starting', 'running', 'stopping', 'error'];
-
-    states.forEach((state) => {
-      expect(() => ServerStatusSchema.parse({ state })).not.toThrow();
-    });
-  });
-
-  it('should accept full status', () => {
-    const status = ServerStatusSchema.parse({
-      state: 'running',
-      uptime: 3600000,
-      server: { port: 3000, host: '0.0.0.0', url: 'http://localhost:3000' },
-      connections: { active: 10, total: 500 },
-      requests: { total: 1000, success: 990, errors: 10 },
-    });
-
-    expect(status.uptime).toBe(3600000);
-    expect(status.server?.port).toBe(3000);
-    expect(status.connections?.active).toBe(10);
-    expect(status.requests?.total).toBe(1000);
-  });
-
-  it('should reject invalid state', () => {
-    expect(() => ServerStatusSchema.parse({ state: 'invalid' })).toThrow();
-  });
-
-  it('should reject missing required state', () => {
-    expect(() => ServerStatusSchema.parse({})).toThrow();
+  it('does not touch the server config that IS live and authorable', async () => {
+    // `system/stack-server.zod.ts` is the one authoring door for server-level
+    // configuration (#5006) and grows a key at a time, each with its executor.
+    // A reader who sees two server retirements in this file must not conclude
+    // that server configuration itself was retired.
+    const stackServer = await import('./stack-server.zod');
+    expect('StackServerConfigSchema' in stackServer).toBe(true);
   });
 });

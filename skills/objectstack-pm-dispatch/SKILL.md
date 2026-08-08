@@ -173,8 +173,56 @@ invariant is what makes the loop resumable and the board honest.
 ### 0. Backlog sweep — classification is a standing duty, not a request
 
 The maintainer does not pre-sort the backlog. On every round (and every idle
-check-in), sweep issues carrying no `pm:*` / `needs-user-decision` label and
+check-in), sweep every issue matching **any one** of these three disjuncts, and
 classify each:
+
+1. **No `pm:*` / `needs-user-decision` label, and no classification label**
+   either — none of the labels your project reads as "already routed" (area,
+   component, owning team, lane). The plain rule.
+2. **`pm:queue` present, classification label absent** — scoped to the
+   repositories that actually use classification labels (see the caution).
+3. **A classification label present, but no queue state** (`pm:queue`,
+   `pm:dispatched`, any other `pm:*` state your setup defines, or
+   `needs-user-decision`).
+
+Disjuncts 2 and 3 take only cards whose `updated_at` is more than a minute or
+two old; disjunct 1 needs no such floor.
+
+**Why the sweep is a disjunction and not one "unlabeled" filter.** Routing and
+queue state are two independent axes, and a card carrying exactly one of them
+is invisible on **both** views at once: the queue lists by queue state, while
+claimants filter by classification — and a predicate that skips anything
+already carrying a `pm:*` label shuts the last door. Neither half is one
+filer's bad habit; both have standing producers:
+
+- A card can arrive **pre-queued by the protocol itself**. Cross-seat transfer
+  tickets (the handing-off side applies the queue label as part of the
+  transfer) and tickets filed mechanically by a steward automation both carry
+  `pm:queue` on arrival, while a single-producer discipline for classification
+  labels forbids those same producers from applying one. The card then reads as
+  dispatchable on the board and is claimable by nobody.
+- The mirror shape — classified but stateless — comes from anyone who files
+  with an area label out of habit. Writing the discipline down elsewhere does
+  not fix it: a project that had published exactly that rule hours earlier
+  still produced such a card the same day. **The predicate itself has to
+  absorb it.**
+
+⚠️ **Any disjunct keyed on a label's absence must be scoped to the
+repositories where that label exists.** Where it does not exist, its absence is
+universal, so the disjunct matches every open queue card in that repository and
+the sweep becomes its own noise source — the check is whether the label exists
+there at all, not whether some card happens to carry it. Whatever your project
+already excludes from the sweep (parked work, tracking issues, protocol posts)
+stays excluded, and disjunct 3 makes that exclusion list load-bearing: a parked
+card's normal shape is precisely "classified, no queue state".
+
+⏳ **Give the partial-labeling disjuncts an age floor keyed on `updated_at`,
+not `created_at`.** A half-labeled card has two sources: one just filed, and an
+older one that a **label write** has just put into that state — and since
+labels are applied one write at a time, the sweep's own labeling passes through
+the half-labeled shape for a few seconds. `created_at` misses the second
+source; `updated_at` covers both, at the cost of a freshly commented card
+waiting one more round.
 
 - **Auto-queue (`pm:queue`)** — a concrete defect with a named location or
   repro; a scoped tooling or gate fix; a restore-invariant finding; a test-only
@@ -295,6 +343,27 @@ each selected issue, before dispatching, execute in order:
    name exists, you lost — touch nothing of theirs, reply that you are yielding,
    and pick another issue. **First comment wins.**
 
+**Read the claim comment back — GitHub's body sanitizer deletes short `<…>`
+spans in place, and backticks do not protect them.** The shape above is built
+out of placeholders, and the branch name inside it is the key that both the race
+check and the stale-claim reclaim below read. Measured on this loop, writing
+then reading the stored body back: `<!-- dev-report -->` came back as *nothing at
+all*, `expected <n> to be 19` came back as `expected  to be 19`, `git log --
+<path>` came back as `git log -- `. All three were inside code spans. This is
+**not** the truncation shape that step 0's *Repair first* handles: the rest of
+the body survives intact, so there is no truncation point to find, the rendered
+page looks correct, and the API returned success. The first of those spans cost
+the most — it was a report-collection marker, so the instruction to sweep for it
+had been deleted from the very text that carried it.
+
+- Write literal angle brackets as HTML entities (`&lt;` / `&gt;`), or put a
+  space after the `<`. A code span is not protection.
+- After writing any body whose content is load-bearing — a claim comment, a
+  cloud-mode dispatch prompt carrying a report marker, a handover note —
+  **read it back and confirm each such span is still present**. The write side
+  needs this read-back for the same reason the read side needs two readings:
+  "the API returned 200" is not "the stored content is correct".
+
 Developer agents push their branch early — a remote branch is the hardest
 evidence of work in flight, and it closes the gap between "claimed" and "a PR
 exists".
@@ -345,6 +414,43 @@ Non-negotiables for this dispatch:
 Return ONLY the JSON report defined in the operating procedure.
 ```
 
+#### One semantics, N independent implementations — enumerate them in the prompt
+
+**Applicability:** the issue changes a *semantic rule* — how an operator, a
+predicate, a comparison, or an absent/empty value is interpreted — and that rule
+is implemented **more than once**, by compilers or evaluators that share no code.
+Query filters, expression languages, permission predicates and serialization
+formats all tend to grow this shape as a project adds backends.
+
+When it applies, the dispatch prompt carries an **explicit inventory of every
+implementing surface**, and requires the agent to give a verdict **for each one**
+in its PR body: **changed** / **already conformant** (with evidence) /
+**explicitly out of scope** (with a reason). A surface the PR never mentions is
+reviewed as one that was *missed*, not as one that needed no change.
+
+Why this is worth a standing clause instead of case-by-case judgment: the failure
+it prevents is not "implemented it wrong", it is **"implemented part of it and
+believed the work was finished"**. That failure is invisible at review time — the
+diff is correct and the tests are green, while the untouched surfaces keep
+answering the old way until a user hits the divergence. The cost scales with the
+count: a semantics carried by N implementations makes every ruling an N-part
+task, and the parts that get skipped are exactly the ones nobody wrote down.
+
+Two disciplines keep the inventory trustworthy:
+
+- **The inventory is maintained by PR.** Whichever change adds, retires or merges
+  an implementing surface updates the list in that same PR. An inventory going
+  stale is inevitable; an inventory with **no owner** is the defect.
+- **Re-verify before pasting.** Paths move and surfaces get added between
+  rulings, so re-derive the list from the code at dispatch time rather than
+  copying the previous prompt. An inventory that was right last month and is
+  pasted unchecked reintroduces the very miss it exists to prevent.
+
+Surfaces that are **deliberately frozen** (deprecated backends, formats kept only
+for compatibility) stay in the inventory. Their verdict is "out of scope —
+frozen", recorded rather than silently absent: a reader cannot otherwise tell a
+frozen surface from a forgotten one.
+
 #### Dispatch backends
 
 **`mode:subagent` (default).** Sub-agents inside the PM's own session. Reports
@@ -377,6 +483,50 @@ has reported, or a dispatch has been silent for over ~2 h (count it as
 
 **Never treat the absence of a report as success.**
 
+**Write every check-in as criteria, never as a conclusion — scheduled text
+arrives in a future you cannot see.** A check-in armed now is read by a session
+that has lost your context, against a world that has moved on. Measured three
+times in one day on this loop: a scheduled message **still delivered after its
+timer had been cancelled**, carrying text two rounds out of date. One of them
+read "no branch and no report ⇒ judge the agent unreliable and dispatch a fresh
+one"; by delivery time that agent had opened a PR which was already reviewed and
+accepted, so executing the text verbatim would have pushed a duplicate agent
+into a live, finished worktree — the exact collision the claim protocol exists to
+prevent, arriving through the automation instead of through a racing PM. Two
+rules make stale text harmless:
+
+- **Open every check-in with "idempotent — re-read the state before acting"**,
+  and include no imperative that can be executed without that re-read. Once a
+  timer fires nothing on the platform side re-checks its premise for you;
+  putting the re-read into the text is the only mechanism that can expire an
+  obsolete instruction.
+- **State criteria ("if X then Y"), never conclusions ("now do Y").** A
+  criterion re-derives itself on arrival; a conclusion has already discarded the
+  reading it came from. "⇒ re-dispatch", "⇒ judge it unreliable" are the shape to
+  avoid — correct when written, not necessarily correct when delivered. This
+  holds for timers you believe you cancelled too: cancellation is not a guarantee
+  of non-delivery.
+
+**A silence threshold is a collection boundary, not a verdict of death.** The
+~2 h above means "stop waiting this round"; it does not mean the agent is gone,
+and the two must not be swapped, because their costs differ by an order of
+magnitude — waiting one more round costs a round, while concluding death costs a
+**duplicate dispatch into a worktree that may still be live**. Before concluding
+that a dispatched agent is dead, require one of: a direct status query answered
+in a way that shows it is dead, the host reporting the session stopped, or
+**silence past a completion-time baseline you have actually measured**.
+
+Measure that baseline for your own project — dispatch to first pushed branch or
+PR, over a handful of comparable cards — and treat it as local. Two same-day
+samples from this repo's loop show why no single number can be inherited: four
+text-only documentation cards landed at 93 / 96 / ~95 / ~110 min, while four
+mixed cards from the same day spanned ~64 min to ~2 h 50 min (the two long ones
+waiting on CI). Nine cards, one day, one toolchain, a spread from about an hour
+to nearly three. **Silence inside the baseline is not evidence**, and a check-in
+threshold having passed twice is evidence only that time passed. This is the
+same failure as inferring an abort from symptoms: until you know the baseline,
+"working normally, slowly" and "dead" produce identical readings.
+
 ### 7. Review each report
 
 You are the reviewer of record. For each report, verify **against GitHub — not
@@ -390,6 +540,12 @@ against the report's own claims**:
   present.
 - Test evidence in the report shows the **actual commands and passing output**,
   not a bare "tests pass".
+- Rejection-class tests in the diff — those whose point is that bad input is
+  **refused** — assert the error's identity (its `code` and `status`, or
+  whatever fields the project's error envelope declares), not merely that
+  something was thrown. A throw-only assertion is green on any producer that
+  already throws a bare error, which is what an unfixed producer usually does,
+  so it reads as coverage while being unable to fail on the defect it names.
 - The diff plausibly satisfies the issue's acceptance criteria.
 
 Verdict per issue:
@@ -433,13 +589,49 @@ Named non-escalation classes — act immediately:
 - **Sequencing and dependency ordering** between technical tasks.
 - **Verification strategy** — what regression pass a risky-but-decided change
   needs. That is scoping the work, not deciding it.
+- **A declaration silently dropped on a new arm, when a sibling arm already has
+  a ruling.** When a declared key is silently ignored on one arm of a component
+  and an earlier ruling already made that same key a **loud authoring error** on
+  a sibling arm, the new arm **joins the existing rejection set by default** —
+  reuse that ruling, queue it, dispatch it; do not spend a fresh decision on a
+  one-word extension of an answer you already have. Only a genuine **semantic
+  difference between the arms** reopens the question. **State the boundary in the
+  same breath as the default, or the shortcut gets over-applied:** what carries
+  over is the ruling **together with its rationale**, never the verdict alone.
+  When the original rationale was measured to be arm-specific — it held on the
+  face it was ruled on and is disproved on the new one, as a "refusing this would
+  reject usage that already works" argument does the moment the new arm has no
+  such working usage — the default does not apply and the new arm earns its own
+  decision. The test is mechanical: re-check the original rationale against the
+  new arm *before* reusing the verdict. Sharing a key name is not sharing a
+  reason.
+- **Two implementations of one operation.** When one operation has two
+  implementations and they disagree, the side that already carries the
+  **governance** — authorization gates, user consent, de-duplication, audit
+  trail — is the **default survivor**; the other is rebound onto it and deleted.
+  Not reconciled, not kept as a second writer. The ungoverned side wins only
+  when **product semantics explicitly demand** it, and that semantic goes into
+  the decision text rather than being supplied afterwards as justification.
+  Keeping both implementations keeps a path around the gates — exactly what
+  `declared = enforced` exists to close.
 - A developer agent's `needs_decision` that, on review, falls into the classes
   above: answer it yourself with the decision and rationale; do not relay it
   upward.
 
 When something *does* pass the bar:
 
-1. **The decision lives ON the issue it belongs to — never a new issue.** Post
+1. **Refresh the card's premises first — before writing it, and again before
+   re-escalating it.** Every premise a decision card states (an in-flight change
+   has not landed, a capability does not exist yet, a file still has this shape)
+   is a **reading with a shelf life**: an active main branch takes on the order
+   of a dozen or more merges a day, and cross-repository facts move on an hourly
+   scale. Re-check every premise immediately before posting the card — and again
+   before pushing an older card back in front of the maintainer — then rewrite or
+   withdraw whatever no longer holds. **A card that sat overnight untouched is a
+   card whose premises are unverified, not merely a card that is waiting.** An
+   expired premise is worse than no card: the maintainer rules on a world that no
+   longer exists, and nothing on the card shows that this happened.
+2. **The decision lives ON the issue it belongs to — never a new issue.** Post
    the analysis as a comment there, add `needs-user-decision`, drop the issue
    from the active queue. The label is the maintainer's inbox (filter
    `label:needs-user-decision`); when they answer, the label comes off and the
@@ -447,10 +639,10 @@ When something *does* pass the bar:
    `[Decision] <one line saying what must be decided>`, same label) ONLY when
    the decision has no natural anchor — it spans several issues, or arose with
    no issue of its own.
-2. Write the analysis with: background, the precise question, the options, your
+3. Write the analysis with: background, the precise question, the options, your
    recommendation, and the related issues / PRs / branches — **and analyze
    every option on the three fixed axes below.**
-3. If the session is interactive, additionally ask the maintainer directly; the
+4. If the session is interactive, additionally ask the maintainer directly; the
    labeled issue remains the durable record either way. **Never** answer a
    product or architecture question on the maintainer's behalf.
 
@@ -585,6 +777,20 @@ Definition of done, in order:
 - A DRAFT PR to the default branch, body starting "Fixes {backlog_repo}#<n>",
   written in the language the repository's PRs use.
 - Tear down anything you started (dev servers, temporary processes) by PID.
+
+Rejection-class tests assert the envelope, not the throw. For any test whose
+point is that bad input is REFUSED, the minimum assertion set is the error's
+identity — its `code` and its `status`, or whatever fields your project's error
+envelope declares. "It threw" alone (`expect(...).toThrow()`,
+`rejects.toThrow()`) is not a rejection test, and it goes blind in two opposite
+directions. An unfixed producer usually throws ALREADY — a bare error carrying
+neither field — so the assertion stays GREEN on the very defect the test names.
+And a producer that answers instead of throwing fails it with "nothing was
+thrown", naming the absence of a throw rather than the absence of an envelope,
+so it cannot separate "refused with the wrong envelope" from "did not refuse at
+all". Assert the message's wording on top of the envelope fields only where the
+wording is itself contract — never instead of them. A rejection test that
+cannot go red on a missing envelope reads as coverage and is not.
 
 When to STOP instead of coding. If the issue underspecifies a decision that
 shapes a public contract — a schema, API shape, naming, metadata semantics —

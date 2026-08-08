@@ -6,17 +6,12 @@ description: Knowledge Source protocol schemas
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
 Knowledge Source — declarative metadata describing what to index and
-
 which adapter to use.
 
 A KnowledgeSource is the metadata-level equivalent of an
-
 `IDataEngine` driver binding: it pairs a logical source description
-
 (object/file/http) with the *id* of an `IKnowledgeAdapter` plugin
-
 that will actually do the work. The adapter resolves the id at
-
 runtime via `IKnowledgeService.registerAdapter`.
 
 See `content/docs/protocol/knowledge.mdx` for the full design.

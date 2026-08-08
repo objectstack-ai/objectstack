@@ -147,4 +147,6 @@ export const MetadataManagerConfigSchema = lazySchema(() => z.object({
 
 // Export types
 export type MetadataManagerConfig = z.input<typeof MetadataManagerConfigSchema>;
-export type MetadataFallbackStrategy = z.infer<typeof MetadataFallbackStrategySchema>;
+/** Post-parse shape of {@link MetadataManagerConfig} — defaults applied, transforms run (ADR-0122). */
+export type MetadataManagerConfigParsed = z.infer<typeof MetadataManagerConfigSchema>;
+export type MetadataFallbackStrategy = z.input<typeof MetadataFallbackStrategySchema>;

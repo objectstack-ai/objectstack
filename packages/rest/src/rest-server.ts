@@ -7,11 +7,13 @@ import {
 import {
     isMcpServerEnabled,
     looksLikeInternalErrorLeak,
+    isUniqueViolationError,
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
-import { RouteManager } from './route-manager.js';
+import { RouteManager, type RouteEntry } from './route-manager.js';
+import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import type { FieldErrorCode } from '@objectstack/spec/api';
@@ -742,6 +744,62 @@ export function mapDataError(error: any, object?: string): { status: number; bod
         };
     }
 
+    // [#6250] Unique-constraint conflict → 409 `UNIQUE_VIOLATION`.
+    //
+    // The verdict is the shared `isUniqueViolationError` predicate
+    // (`@objectstack/types`), and BOTH halves of that sentence are the fix.
+    //
+    // **Why it moved up here.** This branch used to live *inside* the
+    // `looksLikeInternalErrorLeak(raw)` true-branch below, so a conflict was
+    // recognised only if the message first looked like a server-internals leak
+    // — two unrelated questions, one nested inside the other. MySQL is where
+    // they disagree. `ER_DUP_ENTRY: Duplicate entry 'a@b.com' for key
+    // 'idx_email_unique'` matches not one of the leak heuristic's limbs
+    // (`sqlite_` / `sqlstate` / `constraint failed` / `unique constraint` /
+    // `foreign key` / a leading `insert into `/`update `/`select `/`delete
+    // from `), so it never reached the `if` at all and fell out of
+    // `UNCLASSIFIED_FAULT` as `500 INTERNAL_ERROR` — on EVERY unique conflict
+    // in a MySQL deployment, against an API contract that registers
+    // `UNIQUE_VIOLATION` (`error-code-ledger.zod.ts`). The front end could not
+    // tell "this email is taken" from "the server fell over". SQLite and
+    // Postgres hid it: their prose happens to contain `unique constraint`.
+    //
+    // The fix is deliberately NOT to teach the leak heuristic about MySQL.
+    // That heuristic decides what text is unsafe to echo; widening it to reach
+    // a status mapping would make an information-disclosure rule depend on a
+    // conflict vocabulary, and every future dialect would have to be taught to
+    // both. Asking the conflict question by name, first and independently, is
+    // the #5841 `isMissingTableError` move — and it leaves the leak classifier
+    // byte-identical, so nothing else it guards is reclassified.
+    //
+    // **Why the predicate rather than more substrings.** The message is only
+    // one of the two channels drivers use. Postgres surfaces SQLSTATE `23505`
+    // and mysql2 an `ER_DUP_ENTRY` / `errno 1062` — measured, a Postgres error
+    // carrying the code but a plain message was also a 500 here. The predicate
+    // reads code, errno, message and one step of `cause`; a substring added to
+    // this file would have been the fifth private vocabulary, which is the
+    // defect #6250 is named for.
+    //
+    // **The body says nothing the driver said.** The message is a fixed
+    // sentence and the only interpolated value is the object name the ROUTE
+    // supplied. That is load-bearing, not incidental: MySQL's text embeds the
+    // offending USER DATA (`Duplicate entry 'acme@example.com' …`) and
+    // Postgres' embeds the index and column names, so echoing the driver here
+    // would trade a status-code bug for an information-disclosure one. Pinned
+    // in `rest-unique-violation-dialects.test.ts`. The full text still reaches
+    // the operator: `handleRouteError` / `logWithheldServerFault` log the
+    // original error untouched.
+    if (isUniqueViolationError(error)) {
+        return {
+            status: 409,
+            body: {
+                error: 'A record with this value already exists',
+                code: 'UNIQUE_VIOLATION',
+                ...(object ? { object } : {}),
+            },
+        };
+    }
+
     const raw = String(error?.message ?? error ?? '');
     const lower = raw.toLowerCase();
 
@@ -944,18 +1002,13 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // returned raw SQL to clients. Behaviour here is unchanged; only the
     // predicate's home moved.
     if (looksLikeInternalErrorLeak(raw)) {
-        // Surface unique-constraint violations as a structured 409 so
-        // the UI can map them to "this value already exists".
-        if (lower.includes('unique constraint') || lower.includes('unique violation')) {
-            return {
-                status: 409,
-                body: {
-                    error: 'A record with this value already exists',
-                    code: 'UNIQUE_VIOLATION',
-                    ...(object ? { object } : {}),
-                },
-            };
-        }
+        // [#6250] The unique-constraint 409 used to be nested HERE, keyed on
+        // `unique constraint` / `unique violation`. Both substrings are now
+        // limbs of the shared `isUniqueViolationError` predicate, which runs
+        // far above this line and unconditionally — so this branch cannot
+        // narrow the verdict, and a conflict no longer has to look like a leak
+        // to be recognised as one. What is left here is the original job:
+        // withhold text that would ship driver internals.
         return DATA_STORE_FAULT();
     }
     return UNCLASSIFIED_FAULT();
@@ -1035,7 +1088,7 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // `CLIENT_MESSAGE_MAX` was returned word for word, past `isSqlLeak`,
         // past `looksLikeInternalErrorLeak`, past `Internal data error`.
         //
-        // That is not dormant code. `metadata-protocol` interpolates the raw
+        // That is not dormant code. `metadata-protocol` interpolated the raw
         // driver error into two client-facing 500s — `Failed to persist
         // customization overlay to sys_metadata: ${dbError.message}` and
         // `Failed to delete customization overlay: ${err.message}` — and a real
@@ -1044,6 +1097,16 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // columns) is nowhere near 500 characters, so it arrived intact. Length
         // was never a proxy for leakage; on this side of the bound it failed
         // OPEN.
+        //
+        // [#5264 / #5783] ONE of those two is now gone: `saveMetaItem`'s legacy
+        // raw-engine branch was deleted, taking its `OVERLAY_PERSISTENCE_FAILED`
+        // catch — the persist half — with it, and the code has been unregistered
+        // from the ADR-0112 ledger since nothing could emit it. The DELETE half
+        // is untouched and still live (`deleteMetaItem`'s catch: a 500 assigned
+        // to an already-constructed error, no `code`), which is what
+        // `rest-5xx-message-sanitization.test.ts` §1 walks in process. Read the
+        // paragraph above as the history that produced this branch, not as a
+        // present-tense census of its producers.
         //
         // The cure is structural rather than another predicate: in the 5xx band
         // the message is dropped unconditionally, so there is no phrasing a
@@ -1055,11 +1118,12 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // Sanitising HERE rather than by falling through to `mapDataError` is
         // the point: `mapDataError` derives a status from the message TEXT, so
         // handing it a declared 5xx re-labels the fault as something else
-        // entirely — the two overlay 500s come back as `404 OBJECT_NOT_FOUND`
+        // entirely — the overlay-delete 500 comes back as `404 OBJECT_NOT_FOUND`
         // ("no such table" trips the unknown-object heuristic) and the atomic
         // batch's `501 NOT_IMPLEMENTED` as `404 Object '<name>' is not
-        // registered`, both of which then read as *expected* statuses and stop
-        // being logged at all. Worse, a 5xx whose text matches no heuristic
+        // registered` (its text carries the quoted object name and "cannot"),
+        // both of which then read as *expected* statuses and stop being logged
+        // at all. Worse, a 5xx whose text matches no heuristic
         // falls out of `mapDataError`'s terminal `{ status: 400, error: raw }`
         // — still verbatim, now wearing a client-error status. So: keep the
         // status the producer declared, keep the machine-readable `code` (a
@@ -1067,9 +1131,9 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // on), drop the prose.
         //
         // Accepted cost, recorded so it is not rediscovered as a bug: a
-        // self-authored 500 body — `OVERLAY_PERSISTENCE_FAILED`'s "In-memory
-        // registry was updated but will be lost on restart", the atomic
-        // batch's "retry without options.atomic" — reaches the client as the
+        // self-authored 5xx body — the atomic batch's "retry without
+        // options.atomic, or probe capabilities.transactionalBatch on
+        // /discovery first" (`501 NOT_IMPLEMENTED`) — reaches the client as the
         // generic sentence plus its `code`. The full text still reaches the
         // server log (see `logWithheldServerFault`), which is the side of the
         // boundary that sentence was written for. Producers that owe a caller
@@ -1601,10 +1665,33 @@ export interface RestRequestEnvResolver {
     resolveRequestEnvironmentId(req: unknown): Promise<string | undefined>;
 }
 
+/**
+ * One route this server knows is mounted, and how it got there (#5822).
+ *
+ * `RouteEntry` plus `source`: `route-manager` for the routes this server
+ * registered itself, `direct-mount` for the ones a bypassing registrar mounted
+ * on the same host server and reported through
+ * {@link RestServer.recordDirectMountedRoutes}. Both are equally mounted and
+ * equally documented; the column exists because the route ledger audits them
+ * per source, and because a debugging reader deserves to know which registrar
+ * to look in.
+ */
+export interface MountedRoute extends RouteEntry {
+    readonly source: MountedRouteSource;
+}
+
 export class RestServer {
     private protocol: RestProtocol;
     private config: NormalizedRestServerConfig;
     private routeManager: RouteManager;
+    /**
+     * Routes mounted on the SAME host server by a registrar that bypasses
+     * `RouteManager`, as reported by the composition step that called it
+     * (#5822). Facts, not intentions: a registrar the boot never called
+     * contributes nothing here, so `getRoutes()` and the OpenAPI document stay
+     * silent about it. See `direct-mount.ts`.
+     */
+    private readonly directMountedRoutes: MountedRoute[] = [];
     private kernelManager?: RestKernelManager;
     private envRegistry?: RestEnvRegistry;
     /**
@@ -2216,6 +2303,15 @@ export class RestServer {
      * back to a caller who does not hold the set, and an `org` book came back to
      * an anonymous reader on a publicly-served deployment. Same route, gate
      * enforced on one spelling of it.
+     *
+     * Calling this at each gate is NOT the durable form — #6241 proved it.
+     * Eight days after #3984, the single-item read's cache-branch condition
+     * still excluded `doc`/`book` by literal comparison, so the plural read
+     * skipped the branch that holds the gate and the same authorization hole
+     * came back on the same route. The handlers therefore normalize ONCE at
+     * the top (`const metaType = RestServer.metaTypeSingular(req.params.type)`)
+     * and every gate reads that local: a gate added later has no raw param in
+     * scope to compare against.
      */
     private static metaTypeSingular(type: unknown): string {
         const t = typeof type === 'string' ? type : '';
@@ -2901,12 +2997,16 @@ export class RestServer {
                 responseFormat: api.responseFormat,
             },
             crud: {
-                operations: crud.operations ?? {
-                    create: true,
-                    read: true,
-                    update: true,
-                    delete: true,
-                    list: true,
+                // Per key, not per object: since ADR-0122 `crud.operations` is the
+                // AUTHOR state, so a caller may enable three of the five and leave the
+                // rest to the schema's own per-key `.default(true)`. `??` on the whole
+                // object would only have filled it when it was absent entirely.
+                operations: {
+                    create: crud.operations?.create ?? true,
+                    read: crud.operations?.read ?? true,
+                    update: crud.operations?.update ?? true,
+                    delete: crud.operations?.delete ?? true,
+                    list: crud.operations?.list ?? true,
                 },
                 patterns: crud.patterns,
                 dataPrefix: crud.dataPrefix ?? '/data',
@@ -2916,21 +3016,21 @@ export class RestServer {
                 prefix: metadata.prefix ?? '/meta',
                 enableCache: metadata.enableCache ?? true,
                 cacheTtl: metadata.cacheTtl ?? 3600,
-                endpoints: metadata.endpoints ?? {
-                    types: true,
-                    items: true,
-                    item: true,
-                    schema: true,
+                endpoints: {
+                    types: metadata.endpoints?.types ?? true,
+                    items: metadata.endpoints?.items ?? true,
+                    item: metadata.endpoints?.item ?? true,
+                    schema: metadata.endpoints?.schema ?? true,
                 },
             },
             batch: {
                 maxBatchSize: batch.maxBatchSize ?? 200,
                 enableBatchEndpoint: batch.enableBatchEndpoint ?? true,
-                operations: batch.operations ?? {
-                    createMany: true,
-                    updateMany: true,
-                    deleteMany: true,
-                    upsertMany: true,
+                operations: {
+                    createMany: batch.operations?.createMany ?? true,
+                    updateMany: batch.operations?.updateMany ?? true,
+                    deleteMany: batch.operations?.deleteMany ?? true,
+                    upsertMany: batch.operations?.upsertMany ?? true,
                 },
                 defaultAtomic: batch.defaultAtomic ?? true,
             },
@@ -3287,11 +3387,13 @@ export class RestServer {
                 //    route the router will match: same table, read at request
                 //    time, so the prefix follows `apiPath`, the verbs are the
                 //    registered ones, and a route that is not mounted cannot be
-                //    described. `routeManager.getAll()` is the whole surface —
-                //    the filtering to THIS base (and away from the project-
+                //    described. `getRoutes()` is the whole surface — since
+                //    #5822 that includes the direct-mount registrars' routes,
+                //    but only the ones this boot actually mounted and reported.
+                //    The filtering to THIS base (and away from the project-
                 //    scoped mirror, which gets its own document) is
                 //    `buildBuiltinPaths`'s.
-                const builtin = buildBuiltinPaths(this.routeManager.getAll(), basePath);
+                const builtin = buildBuiltinPaths(this.getRoutes(), basePath);
                 enriched.paths = builtin.paths;
                 // The tag list describes that same section, so it is produced
                 // with it rather than inherited from the artifact — otherwise a
@@ -4182,6 +4284,33 @@ export class RestServer {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
 
+                        // [#3984 / #6241] Normalize the `:type` segment ONCE,
+                        // here at the top, and let every gate below read THIS
+                        // value. The route serves both spellings and Prime
+                        // Directive #3 makes the plural one canonical
+                        // (`/meta/books/:name`), so any gate comparing the raw
+                        // param is a gate the canonical spelling walks past.
+                        //
+                        // #3984 ruled this shape for exactly that reason ("每个
+                        // handler 顶部归一一次,后续所有闸门都用归一后的值"), and
+                        // #6241 is why the ruling is written into the code
+                        // rather than trusted to memory: eight days after
+                        // #3984 landed, the cache-branch condition below still
+                        // excluded `doc`/`book` by LITERAL comparison, so
+                        // `GET /meta/books/:name` took the cached branch and
+                        // the §6.7 audience gate — which lives in the uncached
+                        // branch — never ran at all. Measured on the real
+                        // server, one `{ permissionSet }`-gated book, one
+                        // signed-in caller holding no set:
+                        //
+                        //     singular "book"  :: cachedCalls=0 status=[403]
+                        //     plural   "books" :: cachedCalls=1 status=[]  ← full body served
+                        //
+                        // A new per-type gate added below inherits the
+                        // normalization by default now; there is no raw param
+                        // in scope for it to compare against by accident.
+                        const metaType = RestServer.metaTypeSingular(req.params.type);
+
                         // Phase 3a-layered-get: opt-in 3-state view when client
                         // asks for `?layers=true` (or any non-empty value).
                         // Skips the cache path entirely — layered view is a
@@ -4223,7 +4352,7 @@ export class RestServer {
                         // viewers of the same app schema. Drafts also
                         // bypass cache: the cache is keyed on the
                         // published checksum and drafts are out-of-band.
-                        const isAppType = RestServer.metaTypeSingular(req.params.type) === 'app';
+                        const isAppType = metaType === 'app';
                         const isDraftRead = typeof req.query?.state === 'string'
                             && req.query.state.toLowerCase() === 'draft';
                         // ADR-0033/0037 — `?preview=draft` overlays a pending
@@ -4246,7 +4375,67 @@ export class RestServer {
                         // `doc` and `book` bypass the shared cache: their §6.7
                         // audience gate is per-caller, and a shared ETag would
                         // leak gated content across viewers.
-                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDraftRead && !previewDrafts && !packageScoped && req.params.type !== 'doc' && req.params.type !== 'book') {
+                        //
+                        // [#6241] That sentence was already here while the
+                        // exclusion beneath it compared the RAW param against
+                        // the literals `'doc'` / `'book'`, so the canonical
+                        // plural spelling took the cached branch and shipped
+                        // the gated body. The exclusion is not incidental
+                        // tidying — it is the stated security invariant above,
+                        // and it now reads the normalized `metaType`.
+                        //
+                        // The predicate is ONE named value shared with the §6.7
+                        // gate in the uncached branch (`isAudienceGatedType`),
+                        // so "which types bypass the cache" and "which types
+                        // are audience-gated" can no longer drift apart: the
+                        // bypass exists only to make that gate reachable, and a
+                        // future third gated type joins both sites at once.
+                        //
+                        // [#5881] `dashboard` bypasses it too, and the reason is
+                        // NOT the one above — worth writing down, because the
+                        // obvious reading says a dashboard needn't bypass at all.
+                        // Its ADR-0057 D10 widget gate (`filterDashboardForUser`,
+                        // below) is per-DEPLOYMENT — it asks which optional kernel
+                        // services are registered — never per-caller, so there is
+                        // no cross-viewer leak to avoid. What rules out sharing
+                        // the cached path is the validator itself: the ETag is
+                        // `simpleHash(locale + JSON.stringify(item))` over the
+                        // UNFILTERED document (metadata-protocol `getMetaItemCached`),
+                        // so it cannot express the gate dimension at all, and
+                        // `notModified` is decided inside the protocol before this
+                        // layer could re-judge it. Gating the cached body would
+                        // therefore ship a filtered body under a validator that
+                        // identifies the unfiltered one.
+                        //
+                        // That mismatch is not academic, because the two have
+                        // different lifetimes. Within one boot the registered-service
+                        // set is fixed (`Kernel.use()` throws once bootstrap has
+                        // started, and no deregistration API exists), so the gate
+                        // verdict is stable per process — but `Cache-Control:
+                        // private, no-cache` means the client STORES the body and
+                        // revalidates, and that stored body outlives the process.
+                        // A redeploy that turns the optional service off does not
+                        // change the document, so the ETag is unchanged, every
+                        // revalidation answers 304, and the stale unfiltered body
+                        // stands: the dead tile D10 exists to prevent, now cached
+                        // indefinitely. Bypassing costs nothing to weigh against
+                        // that — `getMetaItemCached` delegates to `getMetaItem`,
+                        // so the server does identical work either way and only
+                        // the 304's saved body bytes are given up.
+                        //
+                        // Compared on the NORMALIZED type, like every other
+                        // exclusion in this condition (`/meta/dashboards/x` is
+                        // the canonical plural spelling under Prime Directive
+                        // #3, and an exclusion it could be spelled around would
+                        // not be an exclusion). The `doc` / `book` literals
+                        // that stood at the end of this condition had exactly
+                        // that hole; #6241 closed it.
+                        const isDashboardType = metaType === 'dashboard';
+                        // ADR-0046 §6.7 — the two audience-gated types. Read by
+                        // the cache exclusion here AND by the gate itself in
+                        // the uncached branch below; one predicate, two sites.
+                        const isAudienceGatedType = metaType === 'book' || metaType === 'doc';
+                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && !isAudienceGatedType) {
                             const cacheRequest = {
                                 ifNoneMatch: req.headers['if-none-match'] as string,
                                 ifModifiedSince: req.headers['if-modified-since'] as string,
@@ -4316,7 +4505,7 @@ export class RestServer {
                             // and never consulted the lock resolver; a caller that
                             // needs the ADR-0008 OCC carriers reads the uncached path.
                             const cachedEnvelope = {
-                                type: RestServer.metaTypeSingular(req.params.type),
+                                type: metaType,
                                 name: req.params.name,
                             };
                             res.json(await this.translateMetaEnvelope(
@@ -4367,7 +4556,18 @@ export class RestServer {
                             // ADR-0057 D10: gate dashboard widgets by `requiresService`
                             // (mirrors the app-nav gate above) so the console never
                             // renders a tile bound to an absent optional service.
-                            if (RestServer.metaTypeSingular(req.params.type) === 'dashboard' && visible) {
+                            //
+                            // [#5881] This is now on the DEFAULT path. It reads as
+                            // ordinary code either way, which is exactly why the
+                            // defect was invisible: `enableCache` defaults to true
+                            // and `dashboard` was not excluded above, so every
+                            // default deployment took the cached branch and this
+                            // gate ran only where an operator had turned the cache
+                            // off. Declared, tested, and never executed in
+                            // production — the exclusion above is what makes the
+                            // ADR's "the server is the authoritative gate" true
+                            // rather than merely written down.
+                            if (isDashboardType && visible) {
                                 const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
                                 const registered = await this.resolveRegisteredServices((ctx as any)?.__kernel, [visible]);
                                 const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
@@ -4380,8 +4580,7 @@ export class RestServer {
                             // it, unclaimed → org). 401 for anonymous, 403 for an
                             // authenticated non-holder; fail closed when holdings
                             // cannot be resolved (ADR-0049).
-                            const audienceGatedType = RestServer.metaTypeSingular(req.params.type);
-                            if ((audienceGatedType === 'book' || audienceGatedType === 'doc') && visible) {
+                            if (isAudienceGatedType && visible) {
                                 const { audienceAllows, docAudienceAllows, resolveDocAudiences } =
                                     await import('@objectstack/spec/system');
                                 // The document under audience test. [#5563] This
@@ -4394,7 +4593,7 @@ export class RestServer {
                                 const target = visible;
                                 let caller: { authenticated: boolean; permissionSets?: string[] };
                                 let allowed: boolean;
-                                if (audienceGatedType === 'book') {
+                                if (metaType === 'book') {
                                     caller = await this.resolveAudienceCaller(environmentId, req, {
                                         needPermissionSets: RestServer.anyPermissionSetAudience([target]),
                                     });
@@ -4436,7 +4635,7 @@ export class RestServer {
                             // ADR-0046 i18n: collapse the doc to the request
                             // locale (label/description/content) and drop the
                             // `translations` map so consumers get one body.
-                            if (audienceGatedType === 'doc' && visible) {
+                            if (metaType === 'doc' && visible) {
                                 const locale = this.extractLocale(req);
                                 const { resolveDocLocale } = await import('@objectstack/spec/system');
                                 visible = resolveDocLocale(visible as any, locale);
@@ -8631,11 +8830,38 @@ export class RestServer {
     getRouteManager(): RouteManager {
         return this.routeManager;
     }
-    
+
     /**
-     * Get all registered routes
+     * Record routes a bypassing registrar mounted on this server's host
+     * `IHttpServer` (#5822).
+     *
+     * Called by the composition step that invoked the registrar
+     * (`mountAndRecordDirectRoutes`), with the array the registrar returned —
+     * which is the array it iterated to mount, so this records what happened
+     * rather than what was intended. Nothing here re-derives, re-checks or
+     * re-orders that fact; a registrar that was never called reports nothing,
+     * which is how "not mounted ⇒ not enumerable" survives.
      */
-    getRoutes() {
-        return this.routeManager.getAll();
+    recordDirectMountedRoutes(routes: readonly DirectMountedRoute[]): void {
+        for (const route of routes) {
+            this.directMountedRoutes.push({ ...route, source: 'direct-mount' });
+        }
+    }
+
+    /**
+     * Get all routes mounted for this boot — the whole surface this server
+     * knows about, RouteManager's table and the recorded direct mounts alike.
+     *
+     * This is the introspection seam: the OpenAPI built-in section
+     * (`buildBuiltinPaths`), the route-ledger conformance guard and every
+     * debugging reader ask exactly this one question. Before #5822 it answered
+     * only for `routeManager`, so nine mounted routes — eight of them SDK
+     * capabilities — were invisible to all three.
+     */
+    getRoutes(): MountedRoute[] {
+        return [
+            ...this.routeManager.getAll().map((route): MountedRoute => ({ ...route, source: 'route-manager' })),
+            ...this.directMountedRoutes,
+        ];
     }
 }

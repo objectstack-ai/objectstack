@@ -21,7 +21,9 @@ import {
   GetDiscoveryResponseSchema,
   WELL_KNOWN_CAPABILITY_KEYS,
 } from '@objectstack/spec/api';
+import * as specApi from '@objectstack/spec/api';
 import { HttpDispatcher } from './http-dispatcher.js';
+import { ROUTE_LEDGER } from './route-ledger.js';
 
 /** The keys the protocol declares for a discovery response (canonical + declared alias). */
 function declaredResponseKeys(): Set<string> {
@@ -273,23 +275,37 @@ describe('[#4828] getDiscoveryInfo() conforms to DiscoverySchema', () => {
       expect(DiscoverySchema.safeParse(info).success).toBe(true);
     });
 
-    // [#5673] The pin for this issue, and the reason it is driven through the
-    // REAL producer rather than through `resolveDiscoveryEnvironment` alone:
-    // the UNSET default is decided at THIS call site (`getEnv`'s second
-    // argument), so a green mapper test in `packages/spec` cannot see it. The
-    // whole setup is deleting the variable — that is precisely the state of a
-    // production deployment whose operator never set it.
+    // [#5673] The pin for that issue: the whole setup is deleting the variable
+    // — precisely the state of a production deployment whose operator never set
+    // it — driven through the REAL producer rather than through
+    // `resolveDiscoveryEnvironment` alone.
     //
-    // Reverse verification, direction predicted BEFORE running: restore the old
-    // `getEnv('NODE_ENV', 'development')` and these two cases go RED (they read
-    // `development`), while every `it.each` row above stays green — the old
-    // default was only ever consulted when NODE_ENV was absent, so nothing that
-    // sets it can detect the change. Measured both ways.
+    // [#5936] It stays here, and driven end-to-end, for a reason that survived
+    // the default moving. When #5673 landed, the default WAS this call site
+    // (`getEnv`'s second argument) and a green mapper test in `packages/spec`
+    // could not have seen it. The 2026-08-07 ruling folded the default into the
+    // mapper, so the spec-side case now covers the decision itself — and this
+    // one covers the wiring: that this producer passes the operator's value
+    // through as read and adds no default of its own. A local default here
+    // would satisfy the mapper's test and still be the drift #5936 removed;
+    // only an end-to-end assertion can tell the two apart. Its sibling in
+    // `@objectstack/metadata-protocol` asserts the same fact about the other
+    // producer, which is the pair that makes "one decision" checkable.
+    //
+    // Reverse verification, direction predicted BEFORE running: restore the
+    // mapper's pre-#5936 `development` default and these two cases go RED
+    // reading `development`, while every `it.each` row above stays green,
+    // because the default is only ever consulted when NODE_ENV is absent. Note
+    // this producer no longer has a second place to be fixed: the call site
+    // carries no default, so the mapper's answer IS this producer's answer.
+    // Measured both ways.
     it.each([
       ['unset', undefined],
-      // `getEnv` collapses `''` to its default (`process.env[key] || default`),
-      // so `NODE_ENV=` is the same absence as never exporting it — and the same
-      // absence `doctorNodeEnv()` and `os serve` already read as production.
+      // `NODE_ENV=` exports an empty string. `getEnv` collapses it to its
+      // default (`process.env[key] || default`) and, since #5936, the mapper
+      // reads a blank string as unset too — so this is the same absence
+      // `doctorNodeEnv()` and `os serve` already read as production, and it
+      // answers the same on both producers.
       ['empty', ''],
     ])('NODE_ENV %s advertises production — never development (#5673)', async (_label, raw) => {
       if (raw === undefined) delete process.env.NODE_ENV;
@@ -316,6 +332,51 @@ describe('[#4828] getDiscoveryInfo() conforms to DiscoverySchema', () => {
         expect(info.environment).toBe('development');
       },
     );
+  });
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // [#5791] The ledger row points AT this suite
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // `route-ledger.ts`'s `GET /discovery` row is one of the two first-ever
+  // filled `responseSchema` values, and the field's rule is that a name may
+  // only be written where the double assertion above already runs. That rule
+  // lives in a JSDoc, which cannot fail a build — so the closing of the loop is
+  // asserted here, in the file the row names: the schema the ledger advertises
+  // is required to be the same object this suite parses with, not merely a name
+  // that resolves. `packages/client/src/route-ledger-response-schema.test.ts`
+  // carries the other half (every name across all five ledgers resolves).
+  describe('[#5791] the ledger declares the schema this suite parses with', () => {
+    it('names `DiscoverySchema`, resolving to the very object asserted above', async () => {
+      const row = ROUTE_LEDGER.find(e => e.route === 'GET /discovery');
+      expect(row, 'the dispatcher discovery row must exist in ROUTE_LEDGER').toBeDefined();
+      expect(row!.responseSchema).toBe('DiscoverySchema');
+
+      // Identity, not just resolvability: a name that resolved to some OTHER
+      // schema would pass the client-side resolver and still describe the wrong
+      // contract.
+      expect((specApi as unknown as Record<string, unknown>)[row!.responseSchema!])
+        .toBe(DiscoverySchema);
+    });
+
+    it('describes the ENVELOPE PAYLOAD — this producer wraps, the REST one does not', async () => {
+      // The whole reason `responseSchema` is defined against the payload rather
+      // than the wire body: these two discovery routes serve the same object at
+      // two different depths. Here `dispatch()` returns `{ success, data }`, so
+      // the ledger's `DiscoverySchema` is a claim about `body.data`; the REST
+      // row's identical value is a claim about the whole body (`res.json`, no
+      // envelope). Measured on both sides rather than asserted once.
+      const result = await dispatcher.dispatch('GET', '/discovery', undefined, {}, { request: {} } as any);
+
+      expect(result.handled).toBe(true);
+      expect(result.response?.body?.success).toBe(true);
+
+      // The envelope itself is NOT this field's business (check:route-envelope
+      // owns that); what matters here is that the thing the ledger names is the
+      // `data`, and that the whole body is NOT it.
+      expect(DiscoverySchema.safeParse(result.response?.body?.data).success).toBe(true);
+      expect(DiscoverySchema.safeParse(result.response?.body).success).toBe(false);
+    });
   });
 
   it('emits the canonical `name`, never the deprecated `apiName` alias', async () => {

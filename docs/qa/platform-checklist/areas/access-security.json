@@ -1765,6 +1765,90 @@
           "ref": "claude/platform-test-checklist-ocwugl"
         }
       ]
+    },
+    {
+      "id": "access-security.capability-declaration-lifecycle",
+      "title": "A package-declared capability bootstraps into sys_capability and resolves across the grant/require three-way (ADR-0066); platform names cannot be shadowed",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin",
+        "a member whose permission set GRANTS the capability",
+        "a member whose set does NOT"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the shipped capability declaration examples/app-showcase/src/security/capabilities.ts (showcase.export_data, org-scoped, defineCapability) — the DEFINE side of ADR-0066",
+          "OpsPermissionSet granting it via systemPermissions (examples/app-showcase/src/security/permission-sets.ts) — the GRANT side"
+        ],
+        "knownGaps": [
+          "no shipped resource REQUIREs showcase.export_data yet (the source note calls it a 'future export endpoint/action') — the require-side enforcement clause needs a scratch resource carrying requiredPermissions:['showcase.export_data'], or is recorded as a knownGap on stock seeds"
+        ]
+      },
+      "variants": [
+        "DEFINE — capability metadata authored via defineCapability, bootstrapped to a sys_capability row",
+        "GRANT — a permission set's systemPermissions carries the capability name",
+        "REQUIRE — a resource's requiredPermissions lists it; denied unless a granted set carries it",
+        "shadow-refusal — a declaration whose name collides with PLATFORM_CAPABILITY_NAMES is refused loudly"
+      ],
+      "steps": [
+        "boot showcase isolated; confirm the declared capability bootstrapped: GET the sys_capability row for showcase.export_data (bootstrap-declared-capabilities.ts upsertPackageCapability writes name/label/description/scope)",
+        "read its fields — label falls back to humanize(name), description to 'Capability <name>.' when absent (capabilityRowFields)",
+        "as the GRANTED member (holding OpsPermissionSet) and as a NON-granted member, exercise a resource that REQUIREs the capability (author a scratch resource with requiredPermissions:['showcase.export_data'] if none ships — see knownGaps): granted passes, non-granted is denied 403",
+        "author a scratch package declaring a capability whose name is in PLATFORM_CAPABILITY_NAMES; boot/validate",
+        "author a scratch capability with a malformed/unvalidated shape and confirm the write door validates it before it reaches the sys_capability upsert (the #5961 concern: an unvalidated row lands directly in the authorization namespace)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the package-declared capability materializes as a sys_capability row at boot with its authored identity (name is the upsert key; label/description apply their documented fallbacks)",
+          "oracle": "api",
+          "verify": "the sys_capability read for showcase.export_data matches the declaration; label/description fallbacks hold when omitted",
+          "evidence": "the row read + the declaration source"
+        },
+        {
+          "clause": "the three-way resolves by NAME: a resource requiring the capability is denied for a member whose granted permission sets do not carry it, and permitted for one that does — both sides",
+          "oracle": "api",
+          "verify": "403 for the non-granted member, 2xx for the OpsPermissionSet holder, on a resource carrying requiredPermissions:['showcase.export_data']",
+          "evidence": "the two responses (scratch resource if none ships — record which)"
+        },
+        {
+          "clause": "a declaration whose name shadows a curated PLATFORM_CAPABILITY_NAME is refused LOUDLY — a package cannot hijack a platform-owned capability name",
+          "oracle": "build",
+          "verify": "the shadow declaration is rejected at authoring/boot with a located error naming the collision (bootstrap-declared-capabilities.ts guard)",
+          "evidence": "the refusal text"
+        },
+        {
+          "clause": "the capability write door validates before the upsert — an unvalidated capability row must never land directly in the authorization namespace (#5961)",
+          "oracle": "build",
+          "verify": "a malformed capability shape is rejected at parse/validate, not silently upserted into sys_capability",
+          "evidence": "the rejection"
+        }
+      ],
+      "negative": [
+        "a shadow declaration silently accepted (overwriting a platform capability) is a FAIL; an unvalidated capability row reaching sys_capability is the #5961 authz-namespace-injection FAIL"
+      ],
+      "traps": [
+        "wrong-persona",
+        "stale-dist"
+      ],
+      "source": [
+        "packages/spec/liveness/capability.json (ADR-0066 D1, #5961 — the kind's own liveness ledger)",
+        "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts (upsertPackageCapability, capabilityRowFields, PLATFORM_CAPABILITY_NAMES guard)",
+        "packages/lint/src/validate-capability-references.ts (authoring lint known-name set)",
+        "examples/app-showcase/src/security/{capabilities.ts,permission-sets.ts} (DEFINE + GRANT fixtures)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "initial — the coverage ratchet caught `capability` as a NEW metadata kind (#5961 landed on main); authored the declaration→bootstrap→grant/require lifecycle + shadow-refusal + the #5961 authz-namespace validation concern",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
     }
   ]
 }

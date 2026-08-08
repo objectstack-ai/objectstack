@@ -18,6 +18,16 @@ import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
+// [#6139] The reference resolver is typed against the REAL contract, not `any`.
+// A fixture that ignores the tenancy fields cannot prove the guarantee this
+// test claims: it would stay green even for a resolver that fails closed on
+// every `null` organization — which is exactly the spec-conformant shape that
+// used to KILL single-posture DEPTH, and exactly what these proofs must catch.
+import type {
+  HierarchyScope,
+  HierarchyScopeContext,
+  IHierarchyScopeResolver,
+} from '@objectstack/spec/contracts';
 
 const OBJ = '/data/showcase_private_note';
 const WHO = ['alice', 'bob', 'carol', 'dave'] as const;
@@ -56,10 +66,26 @@ async function bootScopeWorld(scope: 'unit' | 'unit_and_below' | 'own_and_report
 
   // Reference hierarchy-scope resolver (test fixture; prod = @objectstack/security-enterprise).
   // Inlined (no plugin-sharing import) — proves the IHierarchyScopeResolver seam end-to-end.
-  const refResolver = {
-    async resolveOwnerIds(c: any, sc: string): Promise<string[]> {
-      const meId = c.userId as string;
+  //
+  // [#6139] SPEC-CONFORMANT, and typed as such. It previously took `c: any` and
+  // ignored `organizationId` entirely, which made these 20 single-posture
+  // proofs blind to the contradiction they were supposed to cover: a resolver
+  // obeying the old unconditional "null org ⇒ fail closed" obligation would
+  // have returned owner-only on every single one of these calls (the showcase
+  // stack boots org-less), and this suite would still have been green. It now
+  // implements the posture-conditional rule verbatim, so the guarantee that
+  // enterprise DEPTH works under `single` is actually pinned by the assertions
+  // below rather than assumed.
+  const refResolver: IHierarchyScopeResolver = {
+    async resolveOwnerIds(c: HierarchyScopeContext, sc: HierarchyScope): Promise<string[]> {
+      const meId = c.userId;
       const ids = new Set<string>([meId]);
+
+      // The obligation, both halves. Under a WALLED posture a missing
+      // organization is a missing constraint: fail closed, never widen
+      // (#5852). Under `single` there is no organization dimension at all, so
+      // `null` is the one implicit tenant and DEPTH resolves normally (#6139).
+      if (c.posture !== 'single' && c.organizationId === null) return [meId];
       if (sc === 'own_and_reports') {
         let frontier: string[] = [meId]; const seen = new Set<string>([meId]);
         for (let d = 0; d < 20 && frontier.length; d++) {

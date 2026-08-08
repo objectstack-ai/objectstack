@@ -86,7 +86,7 @@ describe('[#5324] InMemoryDriver.find compiles a document-level $not', () => {
   });
 
   const idsFrom = async (driver: InMemoryDriver, where: unknown): Promise<string[]> => {
-    const rows = await driver.find('deal', { object: 'deal', fields: ['id'], where: where as FilterCondition });
+    const rows = await driver.find('deal', { fields: ['id'], where: where as FilterCondition });
     return (rows as Array<Record<string, unknown>>).map((r) => String(r.id)).sort();
   };
 

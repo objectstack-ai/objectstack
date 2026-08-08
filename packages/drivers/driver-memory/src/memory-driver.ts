@@ -1,8 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { QueryAST, QueryInput, DriverOptions } from '@objectstack/spec/data';
+import type { DriverOptions } from '@objectstack/spec/data';
 import { canonicalAstOperator } from '@objectstack/spec/data';
-import type { IDataDriver } from '@objectstack/spec/contracts';
+import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
 import { getValueByPath } from './memory-matcher.js';
@@ -280,7 +280,7 @@ export class InMemoryDriver implements IDataDriver {
   // CRUD
   // ===================================
 
-  async find(object: string, query: QueryAST, options?: DriverOptions) {
+  async find(object: string, query: DriverQuery, options?: DriverOptions) {
     this.logger.debug('Find operation', { object, query });
     
     const table = this.getTable(object);
@@ -339,7 +339,7 @@ export class InMemoryDriver implements IDataDriver {
   // row — the whole table was already in memory before the first `yield`. Nothing
   // called it. Page through `find()` with `limit`/`offset`.
 
-  async findOne(object: string, query: QueryAST, options?: DriverOptions) {
+  async findOne(object: string, query: DriverQuery, options?: DriverOptions) {
     this.logger.debug('FindOne operation', { object, query });
     
     const results = await this.find(object, { ...query, limit: 1 }, options);
@@ -441,7 +441,7 @@ export class InMemoryDriver implements IDataDriver {
     return true;
   }
 
-  async count(object: string, query?: QueryAST, options?: DriverOptions) {
+  async count(object: string, query?: DriverQuery, options?: DriverOptions) {
     let records = this.getTable(object);
     if (query?.where) {
         const mongoQuery = this.convertToMongoQuery(query.where, object);
@@ -466,7 +466,7 @@ export class InMemoryDriver implements IDataDriver {
     return results;
   }
   
-  async updateMany(object: string, query: QueryAST, data: Record<string, any>, options?: DriverOptions): Promise<number> {
+  async updateMany(object: string, query: DriverQuery, data: Record<string, any>, options?: DriverOptions): Promise<number> {
       this.logger.debug('UpdateMany operation', { object, query });
       
       const table = this.getTable(object);
@@ -499,7 +499,7 @@ export class InMemoryDriver implements IDataDriver {
       return count;
   }
 
-  async deleteMany(object: string, query: QueryAST, options?: DriverOptions): Promise<number> {
+  async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
       this.logger.debug('DeleteMany operation', { object, query });
       
       const table = this.getTable(object);
@@ -609,7 +609,7 @@ export class InMemoryDriver implements IDataDriver {
   /**
    * Get distinct values for a field, optionally filtered.
    */
-  async distinct(object: string, field: string, query?: QueryInput): Promise<any[]> {
+  async distinct(object: string, field: string, query?: DriverQuery): Promise<any[]> {
     let records = this.getTable(object);
     if (query?.where) {
       const mongoQuery = this.convertToMongoQuery(query.where, object);
@@ -650,16 +650,21 @@ export class InMemoryDriver implements IDataDriver {
    *   { $group: { _id: null, avgPrice: { $avg: '$price' } } }
    * ]);
    */
-  async aggregate(object: string, pipeline: Record<string, any>[] | QueryAST, options?: DriverOptions): Promise<any[]> {
+  async aggregate(object: string, pipeline: Record<string, any>[] | DriverQuery, options?: DriverOptions): Promise<any[]> {
     // ObjectQL's engine calls driver.aggregate(object, AST) with the SAME
-    // QueryAST shape find() consumes ({ where, groupBy, aggregations }) — not a
-    // MongoDB pipeline. Passing that object into Mingo's Aggregator crashed
+    // DriverQuery shape find() consumes ({ where, groupBy, aggregations }) — not
+    // a MongoDB pipeline. Passing that object into Mingo's Aggregator crashed
     // with "this[#pipeline].map is not a function" (the analytics fallback path
     // on in-memory environments). Detect the AST shape and serve it through the
     // SAME filtering + performAggregation path find() uses; a real pipeline
     // array keeps the Mingo behavior unchanged.
+    //
+    // BOTH arms of the union have live producers, so neither may be retired:
+    // the pipeline arm is fed by `memory-analytics.ts` (`this.driver.aggregate(
+    // tableName, pipeline)`), the AST arm by objectql's engine and
+    // `@objectstack/verify`'s date-bucket parity probe.
     if (!Array.isArray(pipeline)) {
-      const query = pipeline as QueryAST;
+      const query = pipeline;
       this.logger.debug('Aggregate operation (QueryAST)', {
         object,
         groupBy: (query as any).groupBy,
@@ -997,9 +1002,16 @@ export class InMemoryDriver implements IDataDriver {
           result[op] = store(val);
           break;
         // Evaluated by mingo under the same name. `$exists` is a presence
-        // predicate, `$regex`/`$options` a pattern and its flags — none of them
-        // is a comparand, so none takes the field's storage form (#4047).
-        case '$exists': case '$regex': case '$options':
+        // predicate, not a comparand, so it does not take the field's storage
+        // form (#4047).
+        //
+        // [#5702] `$regex` and `$options` were passed through here too, on the
+        // same line, for the same "not a comparand" reason. Both are RETIRED
+        // (#4706) and refused by the shape gate before this method runs, so the
+        // arm is gone rather than left as an unreachable third name — an
+        // evaluation arm for a refused operator is exactly what let this
+        // driver's two faces answer one `$regex` differently for so long.
+        case '$exists':
           result[op] = val;
           break;
         default:
@@ -1035,7 +1047,7 @@ export class InMemoryDriver implements IDataDriver {
   // Aggregation Logic
   // ===================================
 
-  private performAggregation(records: any[], query: QueryInput): any[] {
+  private performAggregation(records: any[], query: DriverQuery): any[] {
     const { groupBy, aggregations } = query;
     const groups: Map<string, any[]> = new Map();
 

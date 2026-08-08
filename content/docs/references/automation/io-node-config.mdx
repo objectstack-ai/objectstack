@@ -12,79 +12,48 @@ Config contracts for the flat IO builtins — `notify` and `http` (#4045).
 ## Provenance — written from the executors, not from the forms
 
 Each schema here was derived by reading what the executor actually does with
-
 `node.config` (`service-automation/builtin/notify-node.ts`, `http-nodes.ts`),
-
 **not** by transcribing the hand-written `configSchema` literal on the node's
-
 descriptor. That independence is the point: the two artifacts are reconciled
-
 bidirectionally by `io-node-form-zod-ledger.test.ts` in `service-automation`,
-
 and a Zod copied from the form would make that reconciliation a tautology —
-
 it would pass by construction and prove nothing (#4045).
 
 ## What these schemas are wired to (#4277)
 
 Like `LoopConfigSchema` / `ParallelConfigSchema` / `TryCatchConfigSchema`,
-
 these are **live execute-time contracts**: each executor `parse()`s its
-
 config against its schema before running (`service-automation`'s
-
 `parse-config.ts`), so type and `required` violations refuse the node as a
-
 guard (not routable via `fault` edges). `notify` parses the RAW stored
-
-config — its slots are string-typed, so `\{token\}` templates pass and the
-
+config — its slots are string-typed, so `{token}` templates pass and the
 post-interpolation guards still own "resolved to nothing". `http` parses
-
 the INTERPOLATED config, because that is the shape its executor reads —
-
-a `\{token\}` in a typed slot (`timeoutMs`, `durable`) resolves to its real
-
+a `{token}` in a typed slot (`timeoutMs`, `durable`) resolves to its real
 type first.
 
 ## Unknown keys — closed here too, as of #4001 批 9
 
 These contracts used to say "unknown keys are the registration layer's job":
-
 `registerFlow()` rejects keys the descriptor `configSchema` does not declare
-
 (the tightened #4059 check), and this parse merely stripped them. That is one
-
 door, and the #4001 campaign's second recurring finding is that a schema
-
 which strips by default leaves every OTHER door open — whoever writes the
-
 guard is fixing the bug in front of them, not auditing the surface.
 
 The registration check remains the first door a stored flow meets and the
-
 more informative one (it walks NESTED config against the descriptor's JSON
-
 Schema and prints the declared set per path, which a flat key list cannot).
-
 What changes is that a config reaching `parse()` by any OTHER route — a
-
 direct `NotifyConfigSchema.parse()` in tooling, a host that composes the
-
 engine without `registerFlow`, a future executor seam — no longer has its
-
 undeclared keys silently deleted. The two doors are kept in agreement by
-
 `io-node-form-zod-ledger.test.ts`, which reconciles this key set against the
-
 descriptor's in both directions.
 
 `connector_action` has no schema here on purpose: its config contract is
-
 empty. The executor reads only the declared `FlowNodeSchema.connectorConfig`
-
 sibling block — see the descriptor note in
-
 `service-automation/builtin/connector-nodes.ts`.
 
 <Callout type="info">

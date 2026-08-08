@@ -37,7 +37,7 @@ const DRIVERS = [
 
 describe.each(DRIVERS)('read-coercion conformance: $name', ({ make }) => {
   it('reads a stored row back as its declared types (boolean/json/number)', async () => {
-    const problems = await checkReadCoercion(make() as never);
+    const problems = await checkReadCoercion(make());
     expect(problems).toEqual([]);
   });
 });
@@ -53,7 +53,7 @@ describe('checkReadCoercion detects a non-coercing driver', () => {
         return [{ id: '1', name: 'Widget', active: 1, meta: '{"k":1,"arr":[1,2]}', count: '5' }];
       },
     };
-    const problems = await checkReadCoercion(raw as never);
+    const problems = await checkReadCoercion(raw);
     expect(problems).toHaveLength(3);
     expect(problems.join('\n')).toMatch(/boolean not coerced/);
     expect(problems.join('\n')).toMatch(/json not coerced/);

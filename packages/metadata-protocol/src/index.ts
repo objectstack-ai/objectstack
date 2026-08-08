@@ -7,6 +7,26 @@ export { ObjectStackProtocolImplementation, ConcurrentUpdateError, normalizeView
 export { recordNotFoundError } from './protocol.js';
 export { createMetadataProtocolPlugin, assembleMetadataProtocol } from './plugin.js';
 export type { MetadataProtocolPluginOptions } from './plugin.js';
+
+// [#5839] `sys_view_definition`'s active-row uniqueness, delivered as a runtime
+// partial-UNIQUE migration (the `ensureOverlayIndex` paradigm, for the one other
+// table that declared the same intent with nothing behind it).
+export {
+    ensureViewDefinitionActiveIndex,
+    resolveIndexExec,
+    buildActiveIndexSql,
+    classifyIndexFailure,
+    VIEW_DEFINITION_TABLE,
+    VIEW_ACTIVE_INDEX_NAME,
+    VIEW_ACTIVE_PROBE_INDEX_NAME,
+    VIEW_ACTIVE_INDEX_COLUMNS,
+} from './migrations/view-definition-active-index.js';
+export type {
+    IndexExec,
+    EnsureViewIndexLogger,
+    EnsureViewIndexStatus,
+    EnsureViewIndexResult,
+} from './migrations/view-definition-active-index.js';
 export type { UninstallCleanup, UninstallCleanupOutcome } from './protocol.js';
 export type { MetadataMutationEvent, MetadataMutationProjector, MutationProjectionOutcome } from './protocol.js';
 export type { MetadataAuthoringGate, MetadataAuthoringGateContext } from './protocol.js';

@@ -114,6 +114,46 @@ describe('migration chain (ADR-0087 D3)', () => {
     });
   });
 
+  // Same class as the block above, one field over. A `semantic` entry's `reason`
+  // is projected verbatim into `docs/protocol-upgrade-guide.md` and
+  // `spec-changes.json` (ADR-0087 D4), so a falsified premise recorded here is
+  // PUBLISHED advice — not a code comment. This entry (#5015) explained its two
+  // orphans by pointing one level up at #4610, and repeated #4610's stated
+  // evidence: the `./ui` notification wrappers were "deleted for zero consumers".
+  // objectui#3310 disproved that at 17.0.0-rc.1 — `packages/types/src/index.ts`
+  // re-exported both names with `export … from '@objectstack/spec/ui'` and
+  // `NotificationProtocol.ts` consumed them through the `@object-ui/types`
+  // barrel, two hops an import-statement-level scan cannot see (the third miss
+  // of that class, after #4667 / #4709). The RETIREMENT is untouched; only the
+  // sentence that justified it moves.
+  describe('protocol-17 #5015 entry — stops republishing #4610\'s falsified evidence (#5781)', () => {
+    const entry = () =>
+      MIGRATIONS_BY_MAJOR[17]!.semantic.find(
+        (s) => s.id === 'ui-notification-action-embed-config-retired',
+      );
+
+    it('finds the entry, and it still explains the #4610 orphaning (anti-vacuity)', () => {
+      expect(entry()).toBeDefined();
+      expect(entry()!.reason).toMatch(/#4610/);
+      expect(entry()!.reason).toMatch(/NotificationConfigSchema/);
+    });
+
+    it('never asserts the wrappers were deleted for having zero consumers', () => {
+      // Pinned on the ASSERTION, not on the words: the entry may still name the
+      // claim in order to correct it — going quiet about it would leave a reader
+      // who remembers the old guide believing the old reason.
+      expect(entry()!.reason).not.toMatch(/(deleted|removed) for (having )?zero consumers/i);
+    });
+
+    it('names the correction and keeps the removal itself standing', () => {
+      const r = entry()!.reason;
+      expect(r).toMatch(/falsified/);
+      expect(r).toMatch(/#5781/);
+      // ⛔ A correction to the evidence is not an un-retirement.
+      expect(r).toMatch(/removal itself stands/);
+    });
+  });
+
   describe('composition (cross-major is the designed-for case)', () => {
     it('composes only the steps in (from, to]', () => {
       const chain = composeMigrationChain(10, 11);

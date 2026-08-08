@@ -278,6 +278,21 @@ export const ShowcaseTranslationBundle = {
           split_task: { label: '任务' },
           split_schedule: { label: '排期' },
         },
+        // The filter-preset tab bar of `ui/pages/task-triage.page.ts` — four
+        // tabs carrying a `filter` and no `view`, which is the shape that had
+        // no translation slot at all until `_tabs` landed (#5377). Born
+        // translated rather than ratcheted into the baseline as new debt.
+        //
+        // Wording is the vocabulary this bundle already uses for the same
+        // ideas: each tab filters on a `status` / `priority` value whose option
+        // label is right above, so the tab reads the same word as the cell it
+        // filters by.
+        _tabs: {
+          in_progress: { label: '进行中' },
+          urgent: { label: '紧急' },
+          in_review: { label: '评审中' },
+          done: { label: '已完成' },
+        },
       },
       showcase_account: {
         label: '客户',
@@ -537,6 +552,27 @@ export const ShowcaseTranslationBundle = {
         widgets: {
           kpi_paid_rate: { title: '已付比例' },
           table_rate_by_status: { title: '各状态已付比例' },
+        },
+      },
+    },
+    // Page component copy became declared surface with `pages.<name>.components`
+    // (#6080), so these keys are born under the ratchet: leaving any of them
+    // untranslated widens the frozen baseline and fails `check-i18n-coverage`.
+    // The pages' own label/title/subtitle predate the ratchet and stay in the
+    // frozen baseline, same as Revenue Pulse's older widget titles above.
+    pages: {
+      showcase_contact_form: {
+        components: {
+          field_name: { label: '姓名', placeholder: '艾达·洛夫莱斯' },
+          field_email: { label: '邮箱', placeholder: 'ada@example.com' },
+          field_company: { label: '公司', placeholder: '分析机有限公司' },
+          field_message: { label: '留言', placeholder: '我们能帮您什么?' },
+          submit_inquiry: { label: '提交咨询' },
+        },
+      },
+      showcase_page_variables: {
+        components: {
+          project_picker: { label: '项目', placeholder: '选择项目…' },
         },
       },
     },

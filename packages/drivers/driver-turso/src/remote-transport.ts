@@ -14,11 +14,12 @@
 
 import type { Client, InStatement, ResultSet } from '@libsql/client';
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { FILTER_OPERATORS, LOGICAL_OPERATORS } from '@objectstack/spec/data';
+import { FILTER_OPERATORS, LOGICAL_OPERATORS, RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907) — read from the spec so this
 // transport's "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` admits, nor from the local driver's twin.
 import { AggregationFunction } from '@objectstack/spec/data';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { nanoid } from 'nanoid';
 
 /**
@@ -44,8 +45,14 @@ const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
  *
  * It is the spec's `FieldOperatorsSchema` list minus `$between`, which the
  * driver lowers before the filter gets here (see {@link unsupportedOperator}),
- * plus `$regex`, which is not spec-declared but is what better-auth's adapter
- * emits for a substring search and what `SqlDriver` therefore compiles.
+ * plus `$icontains`, which `StringOperatorSchema` declares (#5701) and this
+ * transport compiles (#5702).
+ *
+ * `$regex` was here until #5702 and is now RETIRED: it is not a member, so it
+ * reaches {@link unsupportedOperator} and is refused with the spec's
+ * prescription. Its last live producer — plugin-auth's ObjectQL adapter — was
+ * flipped to `$contains` by #5710 first, which is why the refusal can land at
+ * all.
  */
 const SUPPORTED_FILTER_OPERATORS = [
   '$eq',
@@ -60,7 +67,7 @@ const SUPPORTED_FILTER_OPERATORS = [
   '$notContains',
   '$startsWith',
   '$endsWith',
-  '$regex',
+  '$icontains',
   '$null',
   '$exists',
 ] as const;
@@ -86,16 +93,23 @@ const NODE_COMBINATORS: ReadonlySet<string> = new Set<string>(LOGICAL_OPERATORS)
  * it cannot — both branches of {@link RemoteTransport.undeclaredCombinator}
  * throw `INVALID_FILTER`, they differ only in the repair they suggest.
  *
- * `$regex` is added for the same reason {@link SUPPORTED_FILTER_OPERATORS}
- * carries it: it is not spec-declared but is what better-auth's adapter emits,
- * so a caller really can misplace it. `$between` comes in with the spec list
- * even though this transport never compiles it (TursoDriver lowers it first) —
- * a misplaced `$between` is still a misplaced FIELD operator, and telling its
- * author "unknown combinator" would send them looking for the wrong mistake.
+ * `$icontains` is added for the same reason {@link SUPPORTED_FILTER_OPERATORS}
+ * carries it: `FILTER_OPERATORS` deliberately does not list it yet (#5701
+ * staged the declaration ahead of the implementations), but this transport
+ * compiles it, so a caller really can misplace it. `$between` comes in with the
+ * spec list even though this transport never compiles it (TursoDriver lowers it
+ * first) — a misplaced `$between` is still a misplaced FIELD operator, and
+ * telling its author "unknown combinator" would send them looking for the wrong
+ * mistake.
+ *
+ * The RETIRED spellings are deliberately NOT here (#5702). A node-position
+ * `$regex` is not a misplaced field operator — it is not a field operator at
+ * any level any more — so it takes the "names nothing this protocol declares"
+ * tail, which is the true one.
  */
 const MISPLACED_FIELD_OPERATORS: ReadonlySet<string> = new Set<string>([
   ...FILTER_OPERATORS,
-  '$regex',
+  '$icontains',
 ]);
 
 /**
@@ -246,7 +260,7 @@ type NullGuard = 'none' | 'requireValue' | 'allowNull';
  * `match`, `formula` `matchesFilterCondition`) give a value that is not there?
  *
  * The default is the large positive-comparison family (`$gt`, `$in`,
- * `$contains`, `$startsWith`, `$endsWith`, `$regex`, and any operator this
+ * `$contains`, `$icontains`, `$startsWith`, `$endsWith`, and any operator this
  * transport refuses outright), every member of which answers `false` for a value
  * that is not there.
  */
@@ -568,10 +582,16 @@ function undeclaredAggregateFunctionError(func: string): Error {
  *
  * The twin of `driver-sql`'s `uncompilableAggregateFunctionError`; its docblock
  * carries the full rationale for `NOT_IMPLEMENTED` / 501 and for why the two
- * classes must not be collapsed. In one line: `count_distinct`, `array_agg` and
- * `string_agg` are declared and other backends compile them, so a caller who
- * wrote one has made no mistake — this is the backend's gap, and an error that
- * says otherwise tells a dashboard author to fix a query that is already right.
+ * classes must not be collapsed. In one line: `count_distinct` is declared and
+ * other backends compile it, so a caller who wrote it has made no mistake —
+ * this is the backend's gap, and an error that says otherwise tells a dashboard
+ * author to fix a query that is already right.
+ *
+ * `array_agg` / `string_agg` left this class at #6188, which answered the
+ * question the message below points at: they were retired from
+ * `AggregationFunction` rather than implemented, so they are now undeclared
+ * names and answer 400. `count_distinct` took the other leg of that ruling and
+ * is, until its SQL lowering lands, the whole of this class.
  */
 function uncompilableAggregateFunctionError(func: string): Error {
   const err = new Error(
@@ -591,26 +611,67 @@ function uncompilableAggregateFunctionError(func: string): Error {
  * [#5907] Which refusal a name this transport cannot compile deserves — the
  * twin of `driver-sql`'s `refuseAggregateFunction`.
  *
- * `func` is the name the CALLER wrote, before this transport's `toLowerCase()`.
- * Measured on `origin/main` @ `80f7dc6a3`, the two faces do not normalise alike:
+ * `func` is the name the CALLER wrote — which, since #6203, is also the name
+ * this transport looked up. Judging the caller's own spelling against the
+ * case-sensitive enum is what keeps a miscased name from splitting the envelope:
+ * on a lowercased name this transport would call `COUNT_DISTINCT` a capability
+ * gap (501) while the local driver, reading the name raw, called it undeclared
+ * (400) — one query, two wire identities.
+ *
+ * [#6203] The other half of that fork — the LOOKUP being case-insensitive here
+ * and case-sensitive on the local driver — is now closed too, in this direction:
+ * the `toLowerCase()` in {@link RemoteTransport.aggregate} is gone. Measured on
+ * `origin/main` @ `d367f03d6`, before that removal:
  *
  * ```
- * COUNT           REMOTE -> RESOLVED  ("SELECT count(...)")   LOCAL -> threw
- * COUNT_DISTINCT  REMOTE -> threw "…: count_distinct"         LOCAL -> threw "…: COUNT_DISTINCT"
+ * COUNT   REMOTE -> RESOLVED "SELECT count(\"stage\") …"   LOCAL -> THREW INVALID_QUERY/400
+ * Count   REMOTE -> RESOLVED "SELECT count(\"stage\") …"   LOCAL -> THREW INVALID_QUERY/400
  * ```
  *
- * Judging the CALLER's spelling against the case-sensitive enum is what keeps
- * that pre-existing fork from spreading into the envelope: on the lowercased
- * name this transport would call `COUNT_DISTINCT` a capability gap (501) while
- * the local driver, reading the name raw, called it undeclared (400) — one
- * query, two wire identities, which is the fork this issue exists to close.
- * The normalisation difference itself — `COUNT` compiles here and is refused by
- * the local driver — is untouched by this change and filed as #6203.
+ * `AggregationFunction` is a CASE-SENSITIVE `z.enum` and `COUNT` is a spelling
+ * the Query Protocol never declared, so what this transport used to accept was a
+ * dialect of its own — a lenient consumer, which PD#12 rejects. Both faces now
+ * read only the declared lowercase spelling, and `COUNT` lands on class 1 above
+ * on both.
  */
 function refuseAggregateFunction(func: string): never {
   throw DECLARED_AGGREGATE_FUNCTIONS.includes(func)
     ? uncompilableAggregateFunctionError(func)
     : undeclaredAggregateFunctionError(func);
+}
+
+/**
+ * [#6212] A `groupBy` entry asks for a date BUCKET — the twin of `driver-sql`'s
+ * `refuseDateBucketedGroupBy`, first sentence for first sentence, and the same
+ * NOT_IMPLEMENTED/501 class for the same reason: `DateGranularity` declares the
+ * name, this backend cannot emit it, so it is a capability gap rather than a
+ * mistake in the query (#5907, ADR-0112).
+ *
+ * This transport buckets NOTHING natively, which is exactly what `TursoDriver`
+ * publishes for it — `supports.queryDateGranularity` is `{}` in remote mode (see
+ * the comment there), so the engine buckets every granularity in memory and
+ * never pushes a bucketed item down here. The refusal therefore only fires for a
+ * caller that went around the capability bit and reached this transport
+ * directly, which is the caller this message is written for.
+ *
+ * Before #6212 there was no refusal at all: `groupBy` was read as `string[]`,
+ * a structured item was interpolated as `"[object Object]"` and died in
+ * {@link RemoteTransport.assertSafeIdentifier} — a SQL-injection message for a
+ * capability question.
+ */
+function refuseDateBucketedGroupBy(granularity: string): never {
+  const err = new Error(
+    `Date bucketing by '${granularity}' is not supported by this backend. ` +
+    `Bucketed here: none (Turso remote transport). ` +
+    `The query is spelled correctly and @objectstack/spec DateGranularity declares it — this is ` +
+    `a capability gap in the backend, not a mistake in the query, which is why it answers ` +
+    `NOT_IMPLEMENTED/501 rather than a 400. A driver publishes the granularities it buckets ` +
+    `natively as \`supports.queryDateGranularity\`; the engine reads that record and buckets ` +
+    `in memory for every granularity absent from it, which is always correct (#6212).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
 }
 
 /**
@@ -817,27 +878,78 @@ export class RemoteTransport {
   // yielding, so it never streamed anything either; its only caller was
   // `TursoDriver.findStream`, which went at the same time.
 
-  async aggregate(object: string, query: any): Promise<Record<string, unknown>[]> {
+  /**
+   * [#6212] `query` is a {@link DriverQuery}, not `any` — the same narrowing
+   * `SqlDriver.aggregate` and `TursoDriver.aggregate` took, because all three are
+   * one door and a caller may not be told three different things about it.
+   */
+  async aggregate(object: string, query: DriverQuery): Promise<Record<string, unknown>[]> {
     await this.ensureConnected();
     this.assertSafeIdentifier(object);
 
     const selectParts: string[] = [];
-    const groupBy: string[] = Array.isArray(query?.groupBy) ? query.groupBy : [];
+
+    // [#6212] `groupBy` is `GroupByNode[]` — a UNION of a bare field name and a
+    // structured `{ field, dateGranularity?, alias? }` entry — so reading it as
+    // `string[]` was a type assumption held up by a CAPABILITY BIT rather than by
+    // the type, and only for half of the union:
+    //
+    // - a DATE-BUCKETED item genuinely cannot reach here through the engine,
+    //   because remote mode publishes `queryDateGranularity: {}` and the engine
+    //   falls back to in-memory bucketing (`TursoDriver.supports`). A caller that
+    //   goes around that bit now gets {@link refuseDateBucketedGroupBy} instead
+    //   of `"[object Object]"` rejected as an unsafe identifier.
+    // - a PLAIN structured item (`{ field: 'region' }`, no granularity) is NOT
+    //   guarded by that bit at all: objectql's aggregate dispatch treats it as
+    //   supported by every driver ("plain {field} object is fine") and pushes it
+    //   down. It arrived here, stringified, and died — while the LOCAL face of
+    //   this same driver compiles it as a plain `GROUP BY "region"`. That is the
+    //   #6203 shape again: one query, two answers, decided by a connection
+    //   string. Reading `.field` converges them.
+    //
+    // `alias` is deliberately not read: `SqlDriver.aggregate` does not read it
+    // either, so honouring it here would be the divergence rather than the fix.
+    // That the SQL faces ignore a key the in-memory path honours
+    // (`in-memory-aggregation.ts` projects `g.alias ?? g.field`) is filed
+    // separately — it is not created here.
+    const groupBy: string[] = (Array.isArray(query?.groupBy) ? query.groupBy : []).map((g) => {
+      if (typeof g === 'string') return g;
+      if (g?.dateGranularity) refuseDateBucketedGroupBy(g.dateGranularity);
+      return g?.field;
+    });
 
     for (const field of groupBy) {
       this.assertSafeIdentifier(field);
       selectParts.push(`"${field}"`);
     }
 
-    const aggregations = query?.aggregations || query?.aggregate || [];
+    // [#6321] Was `query?.aggregations || query?.aggregate` — see the twin note
+    // on `SqlDriver.aggregate`. `aggregate` is not a key the Query Protocol ever
+    // declared; its only writers were the two driver packages' own fixtures.
+    const aggregations = query?.aggregations || [];
     for (const agg of aggregations) {
-      // [#5907] `funcWritten` is the caller's spelling — what the refusal quotes
-      // back and what the declared-vocabulary check is judged against; `funcRaw`
-      // is this transport's own normalised lookup key, unchanged.
-      const funcWritten = String(agg.function || agg.func || '');
-      const funcRaw = funcWritten.toLowerCase();
-      const sqlFunc = REMOTE_AGGREGATE_FUNCTIONS.get(funcRaw);
-      if (sqlFunc === undefined) refuseAggregateFunction(funcWritten);
+      // [#5907] The caller's spelling is what the refusal quotes back and what
+      // the declared-vocabulary check is judged against.
+      //
+      // [#6203] It is now also the LOOKUP KEY. This read used to be
+      // `funcWritten.toLowerCase()`, which made `COUNT` compile here while the
+      // local driver — same `TursoDriver`, different `url` — refused it: one
+      // query, two answers, decided by a connection string. `AggregationFunction`
+      // is a case-sensitive `z.enum`, so the lowercased read was accepting a
+      // spelling the Query Protocol never declared; deleting it converges both
+      // faces on the declared spelling rather than fossilising the dialect into
+      // a second contract (PD#12). See {@link refuseAggregateFunction}.
+      //
+      // [#6321] The `|| agg.func` limb is gone — an undeclared spelling this
+      // consumer tolerated — and so is the `|| ''` behind it, which only ever
+      // fired when NEITHER key was written. Coalescing to `''` there made this
+      // face quote `""` back at a caller while the local face quoted
+      // `"undefined"` for the same off-contract input: one condition, two
+      // wordings (#5240). `String()` stays so the quoted spelling is a string
+      // whatever a JS caller put there.
+      const func = String(agg.function);
+      const sqlFunc = REMOTE_AGGREGATE_FUNCTIONS.get(func);
+      if (sqlFunc === undefined) refuseAggregateFunction(func);
       const field = agg.field || '*';
       let fieldSql: string;
       if (field === '*') {
@@ -846,11 +958,14 @@ export class RemoteTransport {
         this.assertSafeIdentifier(field);
         fieldSql = `"${field}"`;
       }
-      // The default alias keeps spelling itself with the normalised NAME
-      // (`count_stage`), unchanged; the emitted SQL uses the lowering table's
-      // value so that table is what decides the statement, not a membership
-      // check beside it. Identical text for all five entries today.
-      const alias = agg.alias || `${funcRaw}_${field === '*' ? 'all' : field}`;
+      // The default alias spells itself with the function NAME (`count_stage`)
+      // while the emitted SQL uses the lowering table's VALUE, so that table is
+      // what decides the statement, not a membership check beside it. Identical
+      // text for all five entries today. Unchanged by #6203: only a name already
+      // in the table reaches this line, and every key there is lowercase, so the
+      // alias this produces is byte-identical to the pre-#6203 one for every
+      // input that still compiles.
+      const alias = agg.alias || `${func}_${field === '*' ? 'all' : field}`;
       this.assertSafeIdentifier(alias);
       selectParts.push(`${sqlFunc}(${fieldSql}) AS "${alias}"`);
     }
@@ -1750,13 +1865,26 @@ export class RemoteTransport {
             // and refusing it in one family while tolerating it in the other
             // would leave the failure mode alive at a different spelling.
             case '$contains':
-            // `$regex` is not spec-declared: it reaches SQL only via the
-            // better-auth adapter, which emits it for a `contains` search (a
-            // plain substring, not a real regex). SqlDriver compiles it as
-            // that substring LIKE, so remote mode must too — otherwise a
-            // Turso-backed auth store answers differently from a local one.
-            case '$regex':
               this.pushLike(clauses, args, column, this.serializeComparand(object, key, op, opValue), 'contains');
+              break;
+            // [#5702] `$icontains` — the case-insensitive twin, and what
+            // `RETIRED_FILTER_OPERATORS` prescribes in place of `$regex`. Same
+            // `pushLike`, so the escape rule cannot fork between the two; the
+            // fold is applied to BOTH operands (see {@link pushLike}).
+            case '$icontains':
+              if (typeof opValue !== 'string' || opValue === '') {
+                throw this.icontainsComparand(object, key, opValue);
+              }
+              this.pushLike(
+                clauses,
+                args,
+                column,
+                this.serializeComparand(object, key, op, opValue),
+                'contains',
+                false,
+                false,
+                true,
+              );
               break;
             case '$notContains':
               // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
@@ -1848,7 +1976,7 @@ export class RemoteTransport {
               // reads exactly like "no rows matched" (#1004). An operator this
               // transport cannot compile is a programming error and must say
               // so.
-              throw this.unsupportedOperator(object, key, op);
+              throw this.unsupportedOperator(object, key, op, Object.keys(value as object));
           }
         }
         if (clauses.length === clausesBefore) {
@@ -1923,10 +2051,23 @@ export class RemoteTransport {
     shape: LikeShape,
     negate = false,
     nullSafe = false,
+    fold = false,
   ): void {
     const escaped = String(value).replace(/[\\%_]/g, '\\$&');
     const pattern = shape === 'starts' ? `${escaped}%` : shape === 'ends' ? `%${escaped}` : `%${escaped}%`;
-    const predicate = `${column} ${negate ? 'NOT LIKE' : 'LIKE'} ? ESCAPE '\\'`;
+    // [#5702] `fold` wraps BOTH operands in `LOWER()` — the `$icontains`
+    // lowering, and a parameter of THIS method rather than a sixth text arm for
+    // the reason the paragraph above gives: one escape rule, one place. Folding
+    // only the comparand would compare a folded needle against a raw column and
+    // silently match only the rows that were already lower-case.
+    //
+    // libSQL is SQLite, whose `lower()` folds ASCII ONLY — which is the
+    // contract (#4706 Q1 = A), not a limitation to work around: `É` does not
+    // fold, so `$icontains: 'café'` must not match `CAFÉ`. The local transport
+    // reaches the same answer through `SqlDriver.applyLike`'s `LOWER()`.
+    const lhs = fold ? `LOWER(${column})` : column;
+    const rhs = fold ? 'LOWER(?)' : '?';
+    const predicate = `${lhs} ${negate ? 'NOT LIKE' : 'LIKE'} ${rhs} ESCAPE '\\'`;
     clauses.push(nullSafe ? this.nullSafeNegative(column, predicate) : predicate);
     args.push(pattern);
   }
@@ -2026,6 +2167,38 @@ export class RemoteTransport {
   }
 
   /**
+   * [#5702] The error for an `$icontains` whose comparand is not a NON-EMPTY
+   * string.
+   *
+   * The remote twin of `driver-sql`'s `icontainsComparandError`, and the two
+   * rejections it covers are one mistake at one position:
+   *
+   * - **empty string** — `LOWER(col) LIKE '%%'` is TRUE of every row with a
+   *   value, i.e. a predicate that constrains nothing. A dropped constraint
+   *   WIDENS a result set, and on an RLS read scope that is a permission bypass
+   *   rather than a degraded filter (#3948) — the widening class this file has
+   *   already paid for from three other directions (#1004, #1058, #1073).
+   * - **non-string** — `StringOperatorSchema` declares `$icontains: z.string()`.
+   *   `pushLike` reaches its comparand through `String(value)`, so a number
+   *   would compile to a text search nobody wrote.
+   *
+   * Guarded in the ARM rather than inside `pushLike`, because `pushLike` serves
+   * the four operators whose comparand rules #1058 already settled; adding a
+   * fifth rule inside it would make one method answer two different questions.
+   */
+  private icontainsComparand(object: string, field: string, value: unknown): Error {
+    const shown = typeof value === 'string' ? 'the empty string' : describeValue(value);
+    return invalidFilterError(
+      `[RemoteTransport] Operator "$icontains" on '${object}.${field}' requires a NON-EMPTY string ` +
+        `comparand. Received ${shown} (${preview(value)}). "$icontains" is a case-insensitive ` +
+        `LITERAL substring search, so its comparand is the text to look for: an empty one matches ` +
+        `every row that has a value (a predicate that constrains nothing), and a non-string one ` +
+        `would be coerced into text this query never asked for. @objectstack/spec ` +
+        `StringOperatorSchema declares $icontains as a string.`,
+    );
+  }
+
+  /**
    * The error for an `$exists` whose comparand is not a boolean (#5369, landed
    * on this face by #5903).
    *
@@ -2075,8 +2248,34 @@ export class RemoteTransport {
    * the rule — so reaching this point means the lowering step was bypassed, and
    * saying which step it was is the whole value of the message.
    */
-  private unsupportedOperator(object: string, field: string, op: string): Error {
+  private unsupportedOperator(
+    object: string,
+    field: string,
+    op: string,
+    siblings: readonly string[] = [],
+  ): Error {
     const target = `'${object}.${field}'`;
+    // [#5702] A RETIRED spelling is not an unknown name — it is one this
+    // transport ANSWERED until #4706 retired it, so its author needs the
+    // replacement rather than the vocabulary list. The prescription is the
+    // spec's `RETIRED_FILTER_OPERATORS[op].why`, printed verbatim so that this
+    // transport, `SqlDriver`, `driver-memory` and `driver-mongodb` say ONE
+    // thing about the same retirement. Every retired SIBLING is named too:
+    // `{ $regex, $options }` is one mistake with one fix.
+    const retired = RETIRED_FILTER_OPERATORS[op];
+    if (retired) {
+      const replacement = retired.to ? ` Write "${retired.to}" instead.` : '';
+      const alsoRetired = siblings.filter((key) => key !== op && RETIRED_FILTER_OPERATORS[key]);
+      const also = alsoRetired.length
+        ? ` The same field constraint also carries the retired ` +
+          `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${retired.to}" replaces the ` +
+          `whole shape, so this is ONE mistake with ONE fix, not one per key.`
+        : '';
+      return invalidFilterError(
+        `[RemoteTransport] Filter operator "${op}" on ${target} is RETIRED and is no longer ` +
+          `compiled in remote mode.${replacement} ${retired.why}${also}`,
+      );
+    }
     if (op === '$between') {
       return invalidFilterError(
         `[RemoteTransport] $between on ${target} must be lowered to $gte/$lte before it reaches the ` +

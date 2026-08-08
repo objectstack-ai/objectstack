@@ -305,8 +305,14 @@ function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
 }
 
 function buildSandboxContext(engineCtx: any, ql: any): ScriptContext {
-  const inputSnapshot = unwrapProxyToPlain(engineCtx?.input ?? engineCtx?.doc);
-  const previousRaw = engineCtx?.previous ?? engineCtx?.previousDoc;
+  // `input` and `previous` are the engine's own spellings, and the only ones:
+  // `HookContextSchema` (`packages/spec/src/data/hook.zod.ts`) declares neither a
+  // top-level `doc` nor a `previousDoc`, and objectql's `engine.ts` — the sole
+  // producer of a HookContext — builds neither. Alias limbs for both sat here for
+  // producers that never existed; removed in #5906 (same family as #5671) rather
+  // than left as a second de-facto contract (PD #12).
+  const inputSnapshot = unwrapProxyToPlain(engineCtx?.input);
+  const previousRaw = engineCtx?.previous;
   return {
     input: inputSnapshot ?? {},
     // Preserve `undefined` for `previous` on insert events so hooks can

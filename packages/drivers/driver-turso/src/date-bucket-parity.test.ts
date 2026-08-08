@@ -40,7 +40,7 @@ describe('TursoDriver date-bucket parity (framework#3773)', () => {
       const driver = new TursoDriver({ url: ':memory:' });
       expect(driver.transportMode).toBe('local');
 
-      const problems = await checkDateBucketParity(driver as never, {
+      const problems = await checkDateBucketParity(driver, {
         createOptions: { bypassTenantAudit: true },
       });
       expect(problems).toEqual([]);
@@ -125,7 +125,7 @@ describe('TursoDriver date-bucket parity (framework#3773)', () => {
         configurable: true,
       });
 
-      const problems = await checkDateBucketParity(driver as never, {
+      const problems = await checkDateBucketParity(driver, {
         createOptions: { bypassTenantAudit: true },
       });
       expect(problems.join('\n')).toMatch(/advertises this granularity but aggregate\(\) threw/);

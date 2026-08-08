@@ -8,9 +8,7 @@ description: Collaboration protocol schemas
 Real-Time Collaboration Protocol
 
 Defines schemas for real-time collaborative editing in ObjectStack.
-
 Supports Operational Transformation (OT), CRDT (Conflict-free Replicated Data Types),
-
 cursor sharing, and awareness state for collaborative applications.
 
 Industry alignment: Google Docs, Figma, VSCode Live Share, Yjs
@@ -104,7 +102,7 @@ const result = AwarenessEventSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **state** | `{ type: 'lww-register'; value: any; timestamp: string; replicaId: string; … } \| { type: 'g-counter'; counts: Record<string, integer> } \| { type: 'pn-counter'; positive: Record<string, integer>; negative: Record<string, integer> } \| { type: 'or-set'; elements: { value: any; timestamp: string; replicaId: string; uid: string; … }[] } \| { type: 'text'; documentId: string; content: string; operations: { operationId: string; replicaId: string; position: integer; insert?: string; … }[]; … }` | ✅ | Merged CRDT state |
+| **state** | `{ type: 'lww-register'; value: any; timestamp: string; replicaId: string; … } \| { type: 'g-counter'; counts: Record<string, integer> } \| { type: 'pn-counter'; positive: Record<string, integer>; negative: Record<string, integer> } \| { type: 'or-set'; elements: object[] } \| … +1 more` | ✅ | Merged CRDT state |
 | **conflicts** | `{ type: string; description: string; resolved: boolean }[]` | optional | Conflicts encountered during merge |
 
 

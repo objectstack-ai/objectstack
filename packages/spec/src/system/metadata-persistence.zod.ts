@@ -140,10 +140,10 @@ export const MetadataRecordSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().optional().describe('Last update timestamp'),
 }));
 
-export type MetadataRecord = z.infer<typeof MetadataRecordSchema>;
+export type MetadataRecord = z.input<typeof MetadataRecordSchema>;
 /** Post-parse shape of {@link MetadataRecord} — defaults applied, transforms run (ADR-0122). */
 export type MetadataRecordParsed = z.infer<typeof MetadataRecordSchema>;
-export type MetadataScope = z.infer<typeof MetadataScopeSchema>;
+export type MetadataScope = z.input<typeof MetadataScopeSchema>;
 
 /**
  * Package Publish Result
@@ -162,7 +162,7 @@ export const PackagePublishResultSchema = lazySchema(() => z.object({
   })).optional().describe('Validation errors if publish failed'),
 }));
 
-export type PackagePublishResult = z.infer<typeof PackagePublishResultSchema>;
+export type PackagePublishResult = z.input<typeof PackagePublishResultSchema>;
 
 // ─── Loader / watch envelope types ───────────────────────────────────────────
 //
@@ -355,18 +355,20 @@ export {
 } from '../kernel/metadata-loader.zod';
 
 export type { MetadataFormat } from '../shared/metadata-types.zod';
-export type MetadataStats = z.infer<typeof MetadataStatsSchema>;
+export type MetadataStats = z.input<typeof MetadataStatsSchema>;
 export type MetadataLoaderContract = z.input<typeof MetadataLoaderContractSchema>;
-export type MetadataLoadOptions = z.infer<typeof MetadataLoadOptionsSchema>;
-export type MetadataLoadResult = z.infer<typeof MetadataLoadResultSchema>;
-export type MetadataSaveOptions = z.infer<typeof MetadataSaveOptionsSchema>;
+/** Post-parse shape of {@link MetadataLoaderContract} — defaults applied, transforms run (ADR-0122). */
+export type MetadataLoaderContractParsed = z.infer<typeof MetadataLoaderContractSchema>;
+export type MetadataLoadOptions = z.input<typeof MetadataLoadOptionsSchema>;
+export type MetadataLoadResult = z.input<typeof MetadataLoadResultSchema>;
+export type MetadataSaveOptions = z.input<typeof MetadataSaveOptionsSchema>;
 /** Post-parse shape of {@link MetadataSaveOptions} — defaults applied, transforms run (ADR-0122). */
 export type MetadataSaveOptionsParsed = z.infer<typeof MetadataSaveOptionsSchema>;
-export type MetadataSaveResult = z.infer<typeof MetadataSaveResultSchema>;
-export type MetadataWatchEvent = z.infer<typeof MetadataWatchEventSchema>;
-export type MetadataCollectionInfo = z.infer<typeof MetadataCollectionInfoSchema>;
+export type MetadataSaveResult = z.input<typeof MetadataSaveResultSchema>;
+export type MetadataWatchEvent = z.input<typeof MetadataWatchEventSchema>;
+export type MetadataCollectionInfo = z.input<typeof MetadataCollectionInfoSchema>;
 export type { MetadataManagerConfig, MetadataFallbackStrategy } from '../kernel/metadata-loader.zod';
-export type MetadataSource = z.infer<typeof MetadataSourceSchema>;
+export type MetadataSource = z.input<typeof MetadataSourceSchema>;
 
 /**
  * Metadata History Record
@@ -449,7 +451,7 @@ export const MetadataHistoryRecordSchema = lazySchema(() => z.object({
   recordedAt: z.string().datetime().describe('Timestamp when this version was recorded'),
 }));
 
-export type MetadataHistoryRecord = z.infer<typeof MetadataHistoryRecordSchema>;
+export type MetadataHistoryRecord = z.input<typeof MetadataHistoryRecordSchema>;
 
 /**
  * Metadata History Query Options
@@ -475,7 +477,7 @@ export const MetadataHistoryQueryOptionsSchema = lazySchema(() => z.object({
   includeMetadata: z.boolean().optional().default(true).describe('Include full metadata payload'),
 }));
 
-export type MetadataHistoryQueryOptions = z.infer<typeof MetadataHistoryQueryOptionsSchema>;
+export type MetadataHistoryQueryOptions = z.input<typeof MetadataHistoryQueryOptionsSchema>;
 /** Post-parse shape of {@link MetadataHistoryQueryOptions} — defaults applied, transforms run (ADR-0122). */
 export type MetadataHistoryQueryOptionsParsed = z.infer<typeof MetadataHistoryQueryOptionsSchema>;
 
@@ -494,7 +496,7 @@ export const MetadataHistoryQueryResultSchema = lazySchema(() => z.object({
   hasMore: z.boolean(),
 }));
 
-export type MetadataHistoryQueryResult = z.infer<typeof MetadataHistoryQueryResultSchema>;
+export type MetadataHistoryQueryResult = z.input<typeof MetadataHistoryQueryResultSchema>;
 
 /**
  * Metadata Diff Result
@@ -529,7 +531,7 @@ export const MetadataDiffResultSchema = lazySchema(() => z.object({
   summary: z.string().optional().describe('Human-readable summary of changes'),
 }));
 
-export type MetadataDiffResult = z.infer<typeof MetadataDiffResultSchema>;
+export type MetadataDiffResult = z.input<typeof MetadataDiffResultSchema>;
 
 /**
  * Metadata History Retention Policy
@@ -549,6 +551,6 @@ export const MetadataHistoryRetentionPolicySchema = lazySchema(() => z.object({
   cleanupIntervalHours: z.number().int().positive().default(24).describe('How often to run cleanup (in hours)'),
 }));
 
-export type MetadataHistoryRetentionPolicy = z.infer<typeof MetadataHistoryRetentionPolicySchema>;
+export type MetadataHistoryRetentionPolicy = z.input<typeof MetadataHistoryRetentionPolicySchema>;
 /** Post-parse shape of {@link MetadataHistoryRetentionPolicy} — defaults applied, transforms run (ADR-0122). */
 export type MetadataHistoryRetentionPolicyParsed = z.infer<typeof MetadataHistoryRetentionPolicySchema>;

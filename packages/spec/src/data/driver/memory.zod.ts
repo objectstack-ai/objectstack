@@ -44,7 +44,7 @@ export const PersistenceAdapterSchema = lazySchema(() => z.object({
   flush: z.function().describe('Flush pending writes and ensure data is persisted. Returns Promise<void>'),
 }).describe('Custom persistence adapter interface'));
 
-export type PersistenceAdapter = z.infer<typeof PersistenceAdapterSchema>;
+export type PersistenceAdapter = z.input<typeof PersistenceAdapterSchema>;
 
 /**
  * Persistence type enum.
@@ -56,7 +56,7 @@ export type PersistenceAdapter = z.infer<typeof PersistenceAdapterSchema>;
  */
 export const PersistenceTypeSchema = lazySchema(() => z.enum(['file', 'local', 'auto']).describe('Persistence backend type'));
 
-export type PersistenceType = z.infer<typeof PersistenceTypeSchema>;
+export type PersistenceType = z.input<typeof PersistenceTypeSchema>;
 
 /**
  * File-system persistence configuration.
@@ -70,7 +70,7 @@ export const FilePersistenceConfigSchema = lazySchema(() => z.object({
   autoSaveInterval: z.number().min(100).default(2000).describe('Auto-save interval in ms'),
 }).describe('File-system persistence configuration'));
 
-export type FilePersistenceConfig = z.infer<typeof FilePersistenceConfigSchema>;
+export type FilePersistenceConfig = z.input<typeof FilePersistenceConfigSchema>;
 /** Post-parse shape of {@link FilePersistenceConfig} — defaults applied, transforms run (ADR-0122). */
 export type FilePersistenceConfigParsed = z.infer<typeof FilePersistenceConfigSchema>;
 
@@ -84,7 +84,7 @@ export const LocalStoragePersistenceConfigSchema = lazySchema(() => z.object({
   key: z.string().optional().describe('localStorage key for persisted data'),
 }).describe('localStorage persistence configuration'));
 
-export type LocalStoragePersistenceConfig = z.infer<typeof LocalStoragePersistenceConfigSchema>;
+export type LocalStoragePersistenceConfig = z.input<typeof LocalStoragePersistenceConfigSchema>;
 
 /**
  * Custom adapter persistence configuration.
@@ -94,7 +94,7 @@ export const CustomPersistenceConfigSchema = lazySchema(() => z.object({
   adapter: PersistenceAdapterSchema,
 }).describe('Custom adapter persistence configuration'));
 
-export type CustomPersistenceConfig = z.infer<typeof CustomPersistenceConfigSchema>;
+export type CustomPersistenceConfig = z.input<typeof CustomPersistenceConfigSchema>;
 
 /**
  * Auto-detect persistence configuration.
@@ -122,7 +122,7 @@ export const AutoPersistenceConfigSchema = lazySchema(() => z.object({
   key: z.string().optional().describe('localStorage key override for browser environments'),
 }).describe('Auto-detect persistence configuration'));
 
-export type AutoPersistenceConfig = z.infer<typeof AutoPersistenceConfigSchema>;
+export type AutoPersistenceConfig = z.input<typeof AutoPersistenceConfigSchema>;
 
 /**
  * Unified persistence configuration.
@@ -331,9 +331,9 @@ export const MemoryDriverSpec = {
 // 4. Derived Types
 // ==========================================================================
 
-export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
+export type MemoryConfig = z.input<typeof MemoryConfigSchema>;
 /** Post-parse shape of {@link MemoryConfig} — defaults applied, transforms run (ADR-0122). */
 export type MemoryConfigParsed = z.infer<typeof MemoryConfigSchema>;
-export type MemoryPersistenceConfig = z.infer<typeof MemoryPersistenceConfigSchema>;
+export type MemoryPersistenceConfig = z.input<typeof MemoryPersistenceConfigSchema>;
 /** Post-parse shape of {@link MemoryPersistenceConfig} — defaults applied, transforms run (ADR-0122). */
 export type MemoryPersistenceConfigParsed = z.infer<typeof MemoryPersistenceConfigSchema>;

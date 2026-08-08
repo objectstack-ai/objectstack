@@ -5,6 +5,19 @@ description: Driver Mysql protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
+MySQL / MariaDB driver configuration — the `config` slot of a `datasource`
+whose `driver` resolves to `mysql` (`mysql2`).
+
+The driver id was offered by the connection form and buildable by the shared
+factory long before #4410, but had no config shape at all in `packages/spec`
+— postgres, mongo and memory each had one and mysql did not, so its `config`
+was the one slot with neither a gate nor a documented shape.
+
+Every key here is read by `createDefaultDatasourceDriverFactory`
+(→ `SqlDriver`, knex `mysql2`). Postgres-only knobs are deliberately absent:
+`mysql2` has no `application_name` and no `statement_timeout`, so declaring
+them would advertise settings the client drops.
+
 <Callout type="info">
 **Source:** `packages/spec/src/data/driver/mysql.zod.ts`
 </Callout>

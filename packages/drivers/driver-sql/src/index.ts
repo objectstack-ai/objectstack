@@ -10,6 +10,13 @@ export type {
   IntrospectedTable,
   IntrospectedColumn,
   IntrospectedForeignKey,
+  // The window-function door's driver-private input shape (#6212). Exported so
+  // an embedder calling `findWithWindowFunctions` — the migration prescription
+  // #4286 published for the retired `query.windowFunctions` — can name the type
+  // it must build, instead of reaching for `as any` and losing `where`/`orderBy`
+  // checking with it.
+  SqlWindowFunctionSpec,
+  SqlWindowFunctionQuery,
 } from './sql-driver.js';
 
 // Managed-schema drift / reconcile (#2186), incl. the index dimension (#3728)

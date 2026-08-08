@@ -16,7 +16,9 @@ import { describe, it, expect } from 'vitest';
 //
 // The two arrived at orphanhood by the same route, one level apart:
 //   - `NotificationAction` lost its wrappers at #4610 (`NotificationSchema` /
-//     `NotificationConfigSchema`, deleted for zero consumers);
+//     `NotificationConfigSchema`, the #4535 C3 dual-source cleanup — its "zero
+//     consumers" evidence was later falsified for objectui and is corrected on
+//     `notification.zod`'s tombstone; the removal itself stands, #5781);
 //   - `EmbedConfig` lost its key at 17.0.0 (`App.embed`, retired by the 2026-06
 //     liveness audit and still standing as a `retiredKey()` tombstone in
 //     `app.zod.ts` — the value shape simply outlived the key).

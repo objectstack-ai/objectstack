@@ -22,11 +22,17 @@
  * `/api/v1/environments/:environmentId` (rest-server.ts registerRoutes); the
  * mirror is a mechanical duplication and is deliberately not re-ledgered.
  *
- * SOURCES. `route-manager` rows are enumerable via `RestServer.getRoutes()`.
- * `direct-mount` rows come from the two registrars that bypass RouteManager
- * and register straight on `IHttpServer` (`package-routes.ts`,
- * `external-datasource-routes.ts`) — the conformance test enumerates those by
- * capturing a mock server's registration calls, so they are guarded too.
+ * SOURCES. Both are enumerable through `RestServer.getRoutes()`, and since
+ * #5822 that is the ONLY enumeration the conformance test runs. `route-manager`
+ * rows are the ones this server registered itself; `direct-mount` rows come
+ * from the two registrars that bypass RouteManager and register straight on
+ * `IHttpServer` (`package-routes.ts`, `external-datasource-routes.ts`), which
+ * now return what they mounted so the composition step can record it (see
+ * `direct-mount.ts`). Each mounted route reports its own `source`, so the two
+ * halves of this ledger stay audited separately from one table. Before that,
+ * the direct-mount half was enumerated by capturing a mock server's
+ * registration calls — a second enumeration that guarded the ledger but left
+ * the routes out of `/openapi.json` and every other runtime introspection.
  *
  * NOT COVERED HERE (the third surface): services that autonomously mount
  * routes on the host `IHttpServer` — `service-storage` (`storage-routes.ts`,
@@ -64,16 +70,56 @@ export interface RestRouteLedgerEntry {
   disposition: RestRouteDisposition;
   /** Dotted method path on `ObjectStackClient` — required when disposition is `sdk`. */
   client?: string;
+  /**
+   * Name of the `@objectstack/spec/api` export declaring this route's response
+   * PAYLOAD — the `data` of the shared `{ success, data }` envelope where the
+   * route emits one, the whole body where it does not. The envelope itself is
+   * not this field's business; `pnpm check:route-envelope` guards it
+   * structurally, and a single field cannot describe both halves honestly.
+   *
+   * ABSENT MEANS "UNDECLARED", and that is the state of most of the mounted
+   * surface: at the #3877 audit, 0 of 237 ledgered routes carried a schema
+   * reference. #3877 ruled that authoring the ~190 missing ones is NOT
+   * scheduled — a response schema is a product decision about what an endpoint
+   * promises, and mass-producing them is precisely how declarations nobody
+   * validated come to exist (the four defects #3676/#3833/#3847/#3870 fixed).
+   * So this field is filled incrementally, as a family lands conformance
+   * coverage or a route is touched for other reasons; a blank one changes no
+   * behaviour and is not a defect.
+   *
+   * ⛔ DO NOT FILL A ROW THAT HAS NO CONFORMANCE COVERAGE. The field exists to
+   * make "what does this route declare" queryable so #3877's Stage D ratchet
+   * can demand coverage for it; a name written ahead of the test it points at
+   * would BE the "declared but unverified" surface the programme exists to
+   * remove. `packages/client/src/route-ledger-response-schema.test.ts` resolves
+   * every name written here against the live `@objectstack/spec/api` exports,
+   * so a typo or a retired schema fails loudly rather than rotting.
+   *
+   * A NAME rather than a live schema object, deliberately: this module stays
+   * import-free — the client-side guards compile it as a relative SOURCE file,
+   * and `zod` is not a dependency of every package that owns a ledger. The
+   * resolution belongs in the guard that can import the spec, not in the data.
+   */
+  responseSchema?: string;
   /** One-line rationale. Required for every non-`sdk` disposition. */
   note?: string;
 }
 
 export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // ── discovery ─────────────────────────────────────────────────────────────
+  // The alias carries NO `responseSchema` on purpose (#5791). It shares the
+  // very `discoveryHandler` closure the row below names, so the body is the
+  // same object — but `discovery-schema-conformance.test.ts` resolves the
+  // handler at `/api/v1/discovery` and drives only that mount, so this row has
+  // no conformance coverage of its own. The field's rule is "no coverage, no
+  // fill", and "same handler, therefore same shape" is an argument about the
+  // code rather than a measurement of it — exactly the substitution #3877 was
+  // opened about. Fill it in the PR that drives this mount, not before.
   { route: 'GET /api/v1', family: 'discovery', source: 'route-manager', disposition: 'server-only',
     note: 'bare-base discovery alias; the SDK connects via /api/v1/discovery' },
   { route: 'GET /api/v1/discovery', family: 'discovery', source: 'route-manager', disposition: 'sdk', client: 'connect',
-    note: 'duplicate mount with the dispatcher /discovery branch — REST registers first and wins' },
+    responseSchema: 'DiscoverySchema',
+    note: 'duplicate mount with the dispatcher /discovery branch — REST registers first and wins. Answers BARE (res.json(discovery), no envelope), so `DiscoverySchema` names the whole body here while the dispatcher row names its envelope `data`; discovery-schema-conformance.test.ts drives THIS handler through the #5682 double assertion' },
 
   // ── openapi / docs ────────────────────────────────────────────────────────
   { route: 'GET /api/v1/openapi.json', family: 'openapi', source: 'route-manager', disposition: 'server-only',

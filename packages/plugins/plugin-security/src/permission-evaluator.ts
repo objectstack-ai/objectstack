@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { PermissionSet, ObjectPermission, FieldPermission } from '@objectstack/spec/security';
+import type { PermissionSet, ObjectPermission, FieldPermissionParsed } from '@objectstack/spec/security';
 
 /**
  * Operation type mapping to permission checks.
@@ -349,8 +349,8 @@ export class PermissionEvaluator {
   getFieldPermissions(
     objectName: string,
     permissionSets: PermissionSet[]
-  ): Record<string, FieldPermission> {
-    const result: Record<string, FieldPermission> = {};
+  ): Record<string, FieldPermissionParsed> {
+    const result: Record<string, FieldPermissionParsed> = {};
 
     for (const ps of permissionSets) {
       if (!ps.fields) continue;

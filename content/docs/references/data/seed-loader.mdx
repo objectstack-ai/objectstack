@@ -8,33 +8,21 @@ description: Seed Loader protocol schemas
 # Seed Loader Protocol
 
 Defines the schemas for metadata-driven seed data loading with automatic
-
 relationship resolution, dependency ordering, and multi-pass insertion.
 
 ## Architecture Alignment
-
 - **Salesforce Data Loader**: External ID-based upsert with relationship resolution
-
 - **ServiceNow**: Sys ID and display value mapping during import
-
 - **Airtable**: Linked record resolution via display names
 
 ## Loading Flow
-
 ```
-
 1. Build object dependency graph from field metadata (lookup/master_detail)
-
 2. Topological sort → determine insert order (parents before children)
-
 3. Pass 1: Insert/upsert records, resolve references via externalId
-
 4. Pass 2: Fill deferred references (circular/delayed dependencies)
-
 5. Validate & report unresolved references
-
 6. Return structured result with per-object stats
-
 ```
 
 <Callout type="info">
@@ -61,7 +49,7 @@ Complete object dependency graph for seed data loading
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **nodes** | `{ object: string; dependsOn: string[]; references: { field: string; targetObject: string; targetField: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'>; … }[] }[]` | ✅ | All objects in the dependency graph |
+| **nodes** | `{ object: string; dependsOn: string[]; references: object[] }[]` | ✅ | All objects in the dependency graph |
 | **insertOrder** | `string[]` | ✅ | Topologically sorted insert order |
 | **circularDependencies** | `string[][]` | ✅ | Circular dependency chains (e.g., [["a", "b", "a"]]) |
 
@@ -202,7 +190,7 @@ Complete seed loader result
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Overall success status |
 | **dryRun** | `boolean` | ✅ | Whether this was a dry-run |
-| **dependencyGraph** | `{ nodes: { object: string; dependsOn: string[]; references: { field: string; targetObject: string; targetField: string; fieldType: Enum<'lookup' \| 'master_detail' \| 'user'>; … }[] }[]; insertOrder: string[]; circularDependencies: string[][] }` | ✅ | Object dependency graph |
+| **dependencyGraph** | `{ nodes: object[]; insertOrder: string[]; circularDependencies: string[][] }` | ✅ | Object dependency graph |
 | **results** | `{ object: string; mode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; inserted: integer; updated: integer; … }[]` | ✅ | Per-object load results |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | ✅ | All reference resolution errors |
 | **summary** | `{ objectsProcessed: integer; totalRecords: integer; totalInserted: integer; totalUpdated: integer; … }` | ✅ | Summary statistics |

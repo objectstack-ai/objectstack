@@ -76,7 +76,7 @@ const STUDIO_PLUGIN_HISTORY =
   + 'loaded and activated, contributing less than its manifest declared.';
 
 export const ViewModeSchema = lazySchema(() => z.enum(['preview', 'design', 'code', 'data', 'history']));
-export type ViewMode = z.infer<typeof ViewModeSchema>;
+export type ViewMode = z.input<typeof ViewModeSchema>;
 
 // ─── Metadata Viewer Contribution ────────────────────────────────────
 
@@ -104,7 +104,7 @@ export const MetadataViewerContributionSchema = lazySchema(() => strictObject({
   modes: z.array(ViewModeSchema).default(['preview']).describe('Supported view modes'),
 }));
 
-export type MetadataViewerContribution = z.infer<typeof MetadataViewerContributionSchema>;
+export type MetadataViewerContribution = z.input<typeof MetadataViewerContributionSchema>;
 /** Post-parse shape of {@link MetadataViewerContribution} — defaults applied, transforms run (ADR-0122). */
 export type MetadataViewerContributionParsed = z.infer<typeof MetadataViewerContributionSchema>;
 
@@ -134,7 +134,7 @@ export const SidebarGroupContributionSchema = lazySchema(() => strictObject({
   order: z.number().default(100).describe('Sort order (lower = higher)'),
 }));
 
-export type SidebarGroupContribution = z.infer<typeof SidebarGroupContributionSchema>;
+export type SidebarGroupContribution = z.input<typeof SidebarGroupContributionSchema>;
 /** Post-parse shape of {@link SidebarGroupContribution} — defaults applied, transforms run (ADR-0122). */
 export type SidebarGroupContributionParsed = z.infer<typeof SidebarGroupContributionSchema>;
 
@@ -157,7 +157,7 @@ export type SidebarGroupContributionParsed = z.infer<typeof SidebarGroupContribu
  * studio plugin authors the app-UI vocabulary is valid in a manifest.
  */
 export const ActionContributionLocationSchema = lazySchema(() => z.enum(['toolbar', 'contextMenu', 'commandPalette']));
-export type ActionContributionLocation = z.infer<typeof ActionContributionLocationSchema>;
+export type ActionContributionLocation = z.input<typeof ActionContributionLocationSchema>;
 
 /**
  * Declares an action that can be triggered on metadata items.
@@ -183,7 +183,7 @@ export const ActionContributionSchema = lazySchema(() => strictObject({
   metadataTypes: z.array(z.string()).default([]).describe('Applicable metadata types'),
 }));
 
-export type ActionContribution = z.infer<typeof ActionContributionSchema>;
+export type ActionContribution = z.input<typeof ActionContributionSchema>;
 /** Post-parse shape of {@link ActionContribution} — defaults applied, transforms run (ADR-0122). */
 export type ActionContributionParsed = z.infer<typeof ActionContributionSchema>;
 
@@ -207,7 +207,7 @@ export const MetadataIconContributionSchema = lazySchema(() => strictObject({
   icon: z.string().describe('Lucide icon name'),
 }));
 
-export type MetadataIconContribution = z.infer<typeof MetadataIconContributionSchema>;
+export type MetadataIconContribution = z.input<typeof MetadataIconContributionSchema>;
 
 // ─── Panel Contribution ──────────────────────────────────────────────
 
@@ -234,7 +234,7 @@ export const PanelContributionSchema = lazySchema(() => strictObject({
   location: PanelLocationSchema.default('bottom').describe('Panel location'),
 }));
 
-export type PanelContribution = z.infer<typeof PanelContributionSchema>;
+export type PanelContribution = z.input<typeof PanelContributionSchema>;
 /** Post-parse shape of {@link PanelContribution} — defaults applied, transforms run (ADR-0122). */
 export type PanelContributionParsed = z.infer<typeof PanelContributionSchema>;
 
@@ -261,7 +261,7 @@ export const CommandContributionSchema = lazySchema(() => strictObject({
   icon: z.string().optional().describe('Lucide icon name'),
 }));
 
-export type CommandContribution = z.infer<typeof CommandContributionSchema>;
+export type CommandContribution = z.input<typeof CommandContributionSchema>;
 
 // ─── Studio Plugin Contributions ─────────────────────────────────────
 
@@ -292,7 +292,7 @@ export const StudioPluginContributionsSchema = lazySchema(() => strictObject({
   commands: z.array(CommandContributionSchema).default([]),
 }));
 
-export type StudioPluginContributions = z.infer<typeof StudioPluginContributionsSchema>;
+export type StudioPluginContributions = z.input<typeof StudioPluginContributionsSchema>;
 /** Post-parse shape of {@link StudioPluginContributions} — defaults applied, transforms run (ADR-0122). */
 export type StudioPluginContributionsParsed = z.infer<typeof StudioPluginContributionsSchema>;
 
@@ -403,7 +403,7 @@ export const StudioPluginManifestSchema = lazySchema(() => strictObject({
   // existed, so removing the key changes nothing at runtime.
 }));
 
-export type StudioPluginManifest = z.infer<typeof StudioPluginManifestSchema>;
+export type StudioPluginManifest = z.input<typeof StudioPluginManifestSchema>;
 /** Post-parse shape of {@link StudioPluginManifest} — defaults applied, transforms run (ADR-0122). */
 export type StudioPluginManifestParsed = z.infer<typeof StudioPluginManifestSchema>;
 
@@ -431,6 +431,6 @@ export type StudioPluginManifestParsed = z.infer<typeof StudioPluginManifestSche
  */
 export function defineStudioPlugin(
   input: z.input<typeof StudioPluginManifestSchema>
-): StudioPluginManifest {
+): StudioPluginManifestParsed {
   return StudioPluginManifestSchema.parse(input);
 }

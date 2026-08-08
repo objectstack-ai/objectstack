@@ -433,9 +433,9 @@ Already replaced by `locations` array. Remove the deprecated field.
 Following `ui/report.zod.ts` as the pattern, add `z.input<>` exports to all schemas that use `.default()` or `.transform()`:
 
 ```typescript
-// Pattern: Export both output and input types
-export type Report = z.infer<typeof ReportSchema>;       // output (after parse)
-export type ReportInput = z.input<typeof ReportSchema>;   // input (before parse)
+// Pattern (ADR-0122): the bare name is the AUTHOR state, XParsed the parse result
+export type Report = z.input<typeof ReportSchema>;        // input (before parse)
+export type ReportParsed = z.infer<typeof ReportSchema>;  // output (after parse)
 ```
 
 **Target files:** All schemas with `.default()` or `.transform()` — especially in `ui/`, `data/object.zod.ts`, `kernel/manifest.zod.ts`.

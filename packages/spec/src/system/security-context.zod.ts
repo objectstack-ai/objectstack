@@ -37,7 +37,7 @@ export const DataClassificationSchema = lazySchema(() => z.enum([
   'pii', 'phi', 'pci', 'financial', 'confidential', 'internal', 'public',
 ]).describe('Data classification level'));
 
-export type DataClassification = z.infer<typeof DataClassificationSchema>;
+export type DataClassification = z.input<typeof DataClassificationSchema>;
 
 /**
  * Shared compliance framework enum used across compliance and security schemas.
@@ -47,7 +47,7 @@ export const ComplianceFrameworkSchema = lazySchema(() => z.enum([
   'gdpr', 'hipaa', 'sox', 'pci_dss', 'ccpa', 'iso27001',
 ]).describe('Compliance framework identifier'));
 
-export type ComplianceFramework = z.infer<typeof ComplianceFrameworkSchema>;
+export type ComplianceFramework = z.input<typeof ComplianceFrameworkSchema>;
 
 /**
  * Compliance-driven audit requirement.
@@ -64,7 +64,7 @@ export const ComplianceAuditRequirementSchema = lazySchema(() => z.object({
     .describe('Raise alert if a required audit event is not being captured'),
 }).describe('Compliance framework audit event requirements'));
 
-export type ComplianceAuditRequirement = z.infer<typeof ComplianceAuditRequirementSchema>;
+export type ComplianceAuditRequirement = z.input<typeof ComplianceAuditRequirementSchema>;
 /** Post-parse shape of {@link ComplianceAuditRequirement} — defaults applied, transforms run (ADR-0122). */
 export type ComplianceAuditRequirementParsed = z.infer<typeof ComplianceAuditRequirementSchema>;
 
@@ -83,7 +83,7 @@ export const ComplianceEncryptionRequirementSchema = lazySchema(() => z.object({
     .describe('Maximum key rotation interval required (in days)'),
 }).describe('Compliance framework encryption requirements'));
 
-export type ComplianceEncryptionRequirement = z.infer<typeof ComplianceEncryptionRequirementSchema>;
+export type ComplianceEncryptionRequirement = z.input<typeof ComplianceEncryptionRequirementSchema>;
 /** Post-parse shape of {@link ComplianceEncryptionRequirement} — defaults applied, transforms run (ADR-0122). */
 export type ComplianceEncryptionRequirementParsed = z.infer<typeof ComplianceEncryptionRequirementSchema>;
 
@@ -106,7 +106,7 @@ export const MaskingVisibilityRuleSchema = lazySchema(() => z.object({
     .describe('Roles that can approve unmasking requests'),
 }).describe('Masking visibility and audit rule per data classification'));
 
-export type MaskingVisibilityRule = z.infer<typeof MaskingVisibilityRuleSchema>;
+export type MaskingVisibilityRule = z.input<typeof MaskingVisibilityRuleSchema>;
 /** Post-parse shape of {@link MaskingVisibilityRule} — defaults applied, transforms run (ADR-0122). */
 export type MaskingVisibilityRuleParsed = z.infer<typeof MaskingVisibilityRuleSchema>;
 
@@ -127,7 +127,7 @@ export const SecurityEventCorrelationSchema = lazySchema(() => z.object({
     .describe('Log masking/unmasking operations in the audit trail'),
 }).describe('Cross-subsystem security event correlation configuration'));
 
-export type SecurityEventCorrelation = z.infer<typeof SecurityEventCorrelationSchema>;
+export type SecurityEventCorrelation = z.input<typeof SecurityEventCorrelationSchema>;
 /** Post-parse shape of {@link SecurityEventCorrelation} — defaults applied, transforms run (ADR-0122). */
 export type SecurityEventCorrelationParsed = z.infer<typeof SecurityEventCorrelationSchema>;
 
@@ -148,7 +148,7 @@ export const DataClassificationPolicySchema = lazySchema(() => z.object({
     .describe('Data retention limit in days (for compliance)'),
 }).describe('Security policy for a specific data classification level'));
 
-export type DataClassificationPolicy = z.infer<typeof DataClassificationPolicySchema>;
+export type DataClassificationPolicy = z.input<typeof DataClassificationPolicySchema>;
 /** Post-parse shape of {@link DataClassificationPolicy} — defaults applied, transforms run (ADR-0122). */
 export type DataClassificationPolicyParsed = z.infer<typeof DataClassificationPolicySchema>;
 
@@ -187,7 +187,6 @@ export const SecurityContextConfigSchema = lazySchema(() => z.object({
     .describe('When false (default), deny access if security context cannot be evaluated'),
 }).describe('Unified security context governance configuration'));
 
-export type SecurityContextConfig = z.infer<typeof SecurityContextConfigSchema>;
+export type SecurityContextConfig = z.input<typeof SecurityContextConfigSchema>;
 /** Post-parse shape of {@link SecurityContextConfig} — defaults applied, transforms run (ADR-0122). */
 export type SecurityContextConfigParsed = z.infer<typeof SecurityContextConfigSchema>;
-export type SecurityContextConfigInput = z.input<typeof SecurityContextConfigSchema>;

@@ -56,6 +56,11 @@ describe('metadata create seeds validate against their spec schemas', () => {
       'report',        // canvas-create: dataset/measures picked interactively
       'app', 'field', 'seed', 'job', 'datasource', 'doc', 'book',
       'permission', 'position', 'agent', 'tool', 'skill', 'email_template',
+      // [#5961] `capability` is code-only by declaration
+      // (`allowRuntimeCreate: false` + `allowOrgOverride: false`, ADR-0066 D1):
+      // there is no runtime create surface for a create seed to seed. It is on
+      // this list for `job`/`agent`'s reason, not as deferred work.
+      'capability',
     ]);
     const seeded = new Set(listMetadataCreateSeedTypes());
     const missing = listMetadataTypeSchemaTypes().filter((t) => !seeded.has(t) && !KNOWN_UNSEEDED.has(t));

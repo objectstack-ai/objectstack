@@ -8,19 +8,6 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 // MEASURED before anything was tightened, not assumed. Read this before adding
 // a key, and before "finishing" any sibling file by analogy.
 //
-// ⚠️ Nothing above this block may be a JSDoc block: `build-docs.ts`'s
-// `getFileDescription()` publishes the module's FIRST doc block as the
-// reference page's description, so a doc-comment header here would replace the
-// public page's text with an internal note (#3746 trap 1). Hence `//`.
-//
-// And do not spell that hazard out with the literal two-star opener, either —
-// `getFileDescription()` matches it with a bare regex over the raw source, so
-// even INSIDE a `//` line it reads as the file's first doc block. The first
-// draft of this very warning quoted the token, matched as an empty description,
-// and deleted "Color Palette Schema / Defines brand colors and their variants"
-// from the published page. The caution about the trap sprang the trap; caught
-// by `check:docs`, which is exactly what it is for.
-//
 // THE DOOR (three measurements, 2026-08-03, each with controls in the run):
 //
 //   1. CARRIER KEY — `stack.zod.ts` declares `themes: z.array(ThemeSchema)`,
@@ -468,24 +455,22 @@ export const ThemeSchema = lazySchema(() => strictObject(
   },
 ));
 
-export type Theme = z.infer<typeof ThemeSchema>;
+export type Theme = z.input<typeof ThemeSchema>;
 /** Post-parse shape of {@link Theme} — defaults applied, transforms run (ADR-0122). */
 export type ThemeParsed = z.infer<typeof ThemeSchema>;
-/** Authoring input for {@link Theme} — defaulted fields are optional. */
-export type ThemeInput = z.input<typeof ThemeSchema>;
 
 /**
  * Type-safe factory for a UI theme. Validates at authoring time via
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: Theme` literal.
  */
-export function defineTheme(config: z.input<typeof ThemeSchema>): Theme {
+export function defineTheme(config: z.input<typeof ThemeSchema>): ThemeParsed {
   return ThemeSchema.parse(config);
 }
-export type ColorPalette = z.infer<typeof ColorPaletteSchema>;
-export type Typography = z.infer<typeof TypographySchema>;
-export type BorderRadius = z.infer<typeof BorderRadiusSchema>;
-export type Shadow = z.infer<typeof ShadowSchema>;
+export type ColorPalette = z.input<typeof ColorPaletteSchema>;
+export type Typography = z.input<typeof TypographySchema>;
+export type BorderRadius = z.input<typeof BorderRadiusSchema>;
+export type Shadow = z.input<typeof ShadowSchema>;
 // `Animation` and `ZIndex` were exported here until #5021, alongside the two
 // schemas they were inferred from.
-export type ThemeMode = z.infer<typeof ThemeModeSchema>;
+export type ThemeMode = z.input<typeof ThemeModeSchema>;

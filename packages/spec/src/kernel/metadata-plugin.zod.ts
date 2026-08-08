@@ -150,6 +150,18 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // Security Protocol
   'permission',  // Permission sets (PermissionSetSchema)
   'position',    // Positions — flat capability-distribution groups (ADR-0090 D3)
+  // [#5961] `capability` was ENFORCED BUT UNDECLARED — the same mirror of
+  // `declared ≠ enforced` that #5271 closed for `api`. `PLURAL_TO_SINGULAR`
+  // has mapped `capabilities` → `capability` since #5870, `AppPlugin`
+  // registers stack-declared capabilities under that exact name, and
+  // `bootstrapDeclaredCapabilities` reads them back — but the kind was absent
+  // from this enum, from `BUILTIN_METADATA_TYPE_SCHEMAS` and from
+  // `DEFAULT_METADATA_TYPE_REGISTRY`, so it resolved no schema and
+  // `PUT /api/v1/meta/capability/:name` stored ANY JSON on an authorization
+  // surface. ⚠️ `role` / `profile` / `policy` are a DIFFERENT question and are
+  // deliberately NOT admitted here: they have no `PLURAL_TO_SINGULAR` mapping,
+  // no declaration schema and no read-back seam — see #5961's ruling.
+  'capability',  // Package-declared authorization capabilities (CapabilityDeclarationSchema, ADR-0066 D1)
 
   // AI Protocol
   'agent',       // AI agent definitions (AgentSchema)
@@ -157,7 +169,7 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'skill',       // AI skill definitions (SkillSchema)
 ]));
 
-export type MetadataType = z.infer<typeof MetadataTypeSchema>;
+export type MetadataType = z.input<typeof MetadataTypeSchema>;
 
 // ==========================================
 // Type Registry Entry
@@ -301,7 +313,7 @@ export const MetadataTypeRegistryEntrySchema = lazySchema(() =>
   })
 );
 
-export type MetadataTypeRegistryEntry = z.infer<typeof MetadataTypeRegistryEntrySchema>;
+export type MetadataTypeRegistryEntry = z.input<typeof MetadataTypeRegistryEntrySchema>;
 /** Post-parse shape of {@link MetadataTypeRegistryEntry} — defaults applied, transforms run (ADR-0122). */
 export type MetadataTypeRegistryEntryParsed = z.infer<typeof MetadataTypeRegistryEntrySchema>;
 
@@ -351,6 +363,8 @@ export const MetadataQuerySchema = lazySchema(() => z.object({
 }));
 
 export type MetadataQuery = z.input<typeof MetadataQuerySchema>;
+/** Post-parse shape of {@link MetadataQuery} — defaults applied, transforms run (ADR-0122). */
+export type MetadataQueryParsed = z.infer<typeof MetadataQuerySchema>;
 
 /**
  * Metadata Query Result
@@ -378,7 +392,7 @@ export const MetadataQueryResultSchema = lazySchema(() => z.object({
   pageSize: z.number().int().min(1).describe('Page size'),
 }));
 
-export type MetadataQueryResult = z.infer<typeof MetadataQueryResultSchema>;
+export type MetadataQueryResult = z.input<typeof MetadataQueryResultSchema>;
 
 // ==========================================
 // Metadata Lifecycle Events
@@ -420,7 +434,7 @@ export const MetadataValidationResultSchema = lazySchema(() => z.object({
   })).optional().describe('Validation warnings'),
 }));
 
-export type MetadataValidationResult = z.infer<typeof MetadataValidationResultSchema>;
+export type MetadataValidationResult = z.input<typeof MetadataValidationResultSchema>;
 
 // ==========================================
 // Metadata Plugin Configuration
@@ -515,6 +529,8 @@ export const MetadataPluginConfigSchema = lazySchema(() => z.object({
 }));
 
 export type MetadataPluginConfig = z.input<typeof MetadataPluginConfigSchema>;
+/** Post-parse shape of {@link MetadataPluginConfig} — defaults applied, transforms run (ADR-0122). */
+export type MetadataPluginConfigParsed = z.infer<typeof MetadataPluginConfigSchema>;
 
 // ==========================================
 // Metadata Plugin Manifest
@@ -579,6 +595,8 @@ export const MetadataPluginManifestSchema = lazySchema(() => z.object({
 }));
 
 export type MetadataPluginManifest = z.input<typeof MetadataPluginManifestSchema>;
+/** Post-parse shape of {@link MetadataPluginManifest} — defaults applied, transforms run (ADR-0122). */
+export type MetadataPluginManifestParsed = z.infer<typeof MetadataPluginManifestSchema>;
 
 // ==========================================
 // Built-in Type Registry Defaults
@@ -590,7 +608,7 @@ export type MetadataPluginManifest = z.input<typeof MetadataPluginManifestSchema
  * The built-in metadata type registry with default configurations.
  * Plugins extend this via `contributes.kinds` in the manifest.
  */
-export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
+export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] = [
   // Data Protocol (load first)
   //
   // `object` and `field`: packaged items are LOCKED (`allowOrgOverride: false`).
@@ -646,7 +664,32 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
   // nodes inside a `flow`, so they load and version with their enclosing flow.
   // ADR-0020: there is no `workflow` metadata type — record state machines are
   // a `state_machine` validation rule on the object, not a standalone artifact.
-  { type: 'flow', label: 'Flow', filePatterns: ['**/*.flow.ts', '**/*.flow.yml', '**/*.flow.json'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: true, loadOrder: 80, domain: 'automation' },
+  //
+  // `allowOrgOverride: false` — ROLLED BACK from `true` (#6283, settling the
+  // contract half of #6155 Q1=B; the unreviewed flip itself is recorded in
+  // #6191, commit ba252da0b). ADR-0005's amendment table
+  // (`docs/adr/0005-metadata-customization-overlay.md:57`) has never said
+  // anything else about this row:
+  //
+  //   | automation | `flow`, `workflow`, `approval` | ❌ | Carry execution
+  //   | side-effects (events, jobs, audit). Per-org variants are a deployment,
+  //   | not an overlay. |
+  //
+  // That ADR is what `OVERLAY_ALLOWED_TYPES` derives from (Prime Directive #8),
+  // so `true` here was the registry contradicting the document it is supposed
+  // to be the machine-readable form of — and contradicting its OWN row, which
+  // declares `supportsOverlay: false`: the loader cannot merge a per-org flow
+  // overlay, so the write permission granted a write nothing could ever read
+  // back. #6190 measured exactly that phantom: an org-scoped flow overlay wrote
+  // successfully and lost its binding on the next cold start. Rolling the flag
+  // back turns that silent phantom into a loud `403 not_overridable` at the
+  // moment of the write.
+  //
+  // NOT closed by this flag: `allowRuntimeCreate` stays `true`, so a tenant may
+  // still author a BRAND-NEW flow through the runtime API (the two-tier model —
+  // that write overlays no code-shipped automation and is what ADR-0005 means by
+  // "a deployment"). What is closed is overlaying a PACKAGED flow per org.
+  { type: 'flow', label: 'Flow', filePatterns: ['**/*.flow.ts', '**/*.flow.yml', '**/*.flow.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: true, loadOrder: 80, domain: 'automation' },
   // `job`: A JOB IS A CODE ARTIFACT, and the flags now say so (#4509).
   //
   // `JobSchema.handler` is the name of a function in the compiled bundle's
@@ -776,6 +819,37 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
   // Security Protocol
   { type: 'permission', label: 'Permission Set', filePatterns: ['**/*.permission.ts', '**/*.permission.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 15, domain: 'security' },
   { type: 'position', label: 'Position', filePatterns: ['**/*.position.ts', '**/*.position.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 15, domain: 'security' },
+  // [#5961] Package-declared authorization capabilities (ADR-0066 D1).
+  //
+  // ⛔ CODE-ONLY, and that is the whole point of the entry. ADR-0066 D1 says
+  // packages DEFINE capabilities — `defineCapability` on a stack's
+  // `capabilities[]`, or a `*.capability.ts` file the loader globs — while
+  // permission sets GRANT them and resources REQUIRE them. An administrator
+  // minting a brand-new capability at runtime has no counterpart in that
+  // three-way separation: nothing in code would ever require the name, so the
+  // row would be an unreferenced grant target sitting in the SAME namespace
+  // `systemPermissions` / `requiredPermissions` resolve by string. Hence
+  // `allowRuntimeCreate: false` AND `allowOrgOverride: false`, which together
+  // are #5086's code-only declaration — `saveMetaItem` refuses
+  // `PUT /api/v1/meta/capability/:name` with 403 `not_creatable` on EVERY
+  // kernel, and `codeOnlySourceHint` reads `filePatterns[0]` back to tell the
+  // author where to declare it instead. `job` (#4509) and `agent` (ADR-0063 §2)
+  // carry the same pair for the same reason.
+  //
+  // The package-declaration channel is untouched: `AppPlugin` registers stack
+  // `capabilities[]` through `registerInMemory`, and the filesystem loader
+  // globs `filePatterns` — neither goes through `saveMetaItem`, so
+  // `bootstrapDeclaredCapabilities` still seeds `sys_capability` exactly as
+  // before. `OS_METADATA_WRITABLE=capability` remains the ONE documented
+  // operator escape hatch (ADR-0005), and behind it the write is now judged by
+  // `CapabilityDeclarationSchema` (422) instead of being stored unvalidated.
+  //
+  // `supportsOverlay: false` — a capability is a name, label and scope; there
+  // is no merge semantic, and letting a tenant overlay a package-shipped
+  // declaration would let it re-scope `org` → `platform`.
+  // `loadOrder: 12` — before `permission`/`position` (15), so a set's
+  // `systemPermissions` resolves against capabilities that already exist.
+  { type: 'capability', label: 'Capability', description: 'Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)', filePatterns: ['**/*.capability.ts', '**/*.capability.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 12, domain: 'security' },
 
   // AI Protocol
   // `agent`: executionPinned — long-running conversations must stick to the
@@ -791,9 +865,13 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntry[] = [
   //
   // FOR AGENTS, THE CODE IS THE RECORD — and that is the whole answer to
   // "where is this type's change log?" (#4507). Because the two flags above
-  // are false, `agent` is the one authorable type with NO governed write
-  // path: `saveMetaItem` would route it down the legacy raw-engine branch,
-  // and nothing calls it. The rows are written instead by the shipping
+  // are false, `agent` is code-only, and `saveMetaItem` REFUSES it outright
+  // on every kernel with a 403 (#5086): `NOT_OVERRIDABLE` when the name is
+  // already artifact-backed, `NOT_CREATABLE` otherwise. So the type has no
+  // governed write path at all — not a dormant one. (Until #5264 the refusal
+  // was followed by a legacy raw-engine branch that nothing reached; it has
+  // since been deleted, so there is no second door to describe.) The rows,
+  // being unwritable through the metadata API, are written by the shipping
   // plugin at boot — `AIStudioPlugin.registerMeta` → `metadataService
   // .register()` → `MetadataManager.register` → `DatabaseLoader.save` —
   // which writes `sys_metadata` directly with a fresh checksum and appends
@@ -865,7 +943,7 @@ export const MetadataBulkResultSchema = lazySchema(() => z.object({
   })).optional().describe('Per-item errors'),
 }));
 
-export type MetadataBulkResult = z.infer<typeof MetadataBulkResultSchema>;
+export type MetadataBulkResult = z.input<typeof MetadataBulkResultSchema>;
 
 // ==========================================
 // Metadata Dependency
@@ -895,4 +973,4 @@ export const MetadataDependencySchema = lazySchema(() => z.object({
     .describe('How the dependency is formed'),
 }));
 
-export type MetadataDependency = z.infer<typeof MetadataDependencySchema>;
+export type MetadataDependency = z.input<typeof MetadataDependencySchema>;

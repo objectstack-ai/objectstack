@@ -49,6 +49,7 @@
  *   dashboards.<dash>.widgets.<w>.title / .description
  *   pages.<page>.label / .description
  *   pages.<page>.title / .subtitle   (from the page's `page:header` component)
+ *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -63,7 +64,7 @@
  */
 
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
-import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
+import { METADATA_FORM_REGISTRY, PAGE_COMPONENT_COPY_KEYS } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { expandViewContainer } from '@objectstack/spec/ui';
@@ -538,6 +539,76 @@ function walkObjectSections(config: any, out: ExpectedEntry[]): void {
   }
 }
 
+// ─── Object filter-preset tabs (`objects.<o>._tabs.<tab>.label`) ───────
+//
+// The writing half of the `_tabs` slot `ObjectTranslationDataSchema` declares
+// and `resolveTabLabel` reads (#5377). Declared, written and read in one PR,
+// which is the whole point: a slot with no extractor is a key a translator has
+// to know exists, and that is most of why the tab bar stayed English.
+//
+// Scope matches the resolver exactly — a list page's
+// `interfaceConfig.userFilters.tabs`, the one `ViewTabSchema` carrier anything
+// renders. `ListViewSchema.tabs` has no reader in either repo; scaffolding keys
+// for it would fill every bundle with entries no screen can ever show, and the
+// coverage gate would then demand translations for them.
+//
+// A tab that references a saved view still gets its own entry. The resolver
+// falls back to the referenced view's label when `_tabs` is empty, so the key
+// is genuinely optional — but it is the only way to give a tab a label that
+// DIFFERS from the view it opens, and a skeleton that omitted it would hide
+// that from the translator.
+
+/** Emit `objects.<object>._tabs.<tab>.label` for every rendered preset tab. */
+function walkObjectTabs(config: any, out: ExpectedEntry[]): void {
+  const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
+  // One tab name may be authored on several pages over the same object (a
+  // shared "urgent" preset); collect first so the key is emitted once, the
+  // same way `walkObjectSections` de-duplicates a heading.
+  const index = new Map<string, Map<string, string | undefined>>();
+
+  for (const page of pages) {
+    if (!page || typeof page !== 'object') continue;
+    const cfg = page.interfaceConfig;
+    const tabs = cfg?.userFilters?.tabs;
+    if (!Array.isArray(tabs)) continue;
+    // The page's own source binding first, then its record binding — the order
+    // `translatePage` resolves the object in.
+    const objectName = inlineText(cfg?.source) ?? inlineText(page.object);
+    if (objectName === undefined) continue;
+
+    let tabsForObject = index.get(objectName);
+    if (!tabsForObject) index.set(objectName, (tabsForObject = new Map()));
+
+    for (const tab of tabs) {
+      if (!tab || typeof tab !== 'object') continue;
+      const tabName = inlineText(tab.name);
+      if (tabName === undefined) continue;
+      // A localized-map label is already multilingual — `inlineText` drops it,
+      // so the entry is emitted with no seed and coverage does not demand a
+      // translation for a string nobody authored in plain text.
+      const authored = inlineText(tab.label);
+      if (!tabsForObject.has(tabName)) tabsForObject.set(tabName, authored);
+      else if (tabsForObject.get(tabName) === undefined && authored !== undefined) {
+        tabsForObject.set(tabName, authored);
+      }
+    }
+  }
+
+  for (const [objectName, tabs] of index) {
+    for (const [tabName, label] of tabs) {
+      pushDerived(
+        out,
+        ['objects', objectName, '_tabs', tabName, 'label'],
+        // Seed mirrors the renderer's own fallback (`tab.label || tab.name`).
+        label ?? tabName,
+        label,
+        'view',
+        { objectName },
+      );
+    }
+  }
+}
+
 /** Collect every translatable entry from a normalized stack config. */
 export function collectExpectedEntries(config: any): ExpectedEntry[] {
   const out: ExpectedEntry[] = [];
@@ -752,6 +823,34 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
         }
       }
     }
+
+    // Per-component copy, addressed by the component's own id (#6080). Without
+    // this pass the face exists but nothing writes the skeleton, so a
+    // translator would have to know the keys to hand-write them — which is
+    // most of the reason the copy went untranslated in the first place.
+    //
+    // `page:header` is deliberately skipped: its copy is addressed by page
+    // name above, and emitting it here too would offer one string under two
+    // keys.
+    for (const region of regions) {
+      const components: any[] = Array.isArray(region?.components) ? region.components : [];
+      for (const component of components) {
+        if (component?.type === 'page:header') continue;
+        const id = component?.id;
+        if (typeof id !== 'string' || !id) continue;
+        const props = component.properties ?? {};
+        for (const key of PAGE_COMPONENT_COPY_KEYS) {
+          // `label` may be authored on the component itself or in its props —
+          // the same either/or `translatePage` resolves back onto.
+          const value = key === 'label' && typeof component.label === 'string' && component.label
+            ? component.label
+            : props[key];
+          if (typeof value === 'string' && value) {
+            pushEntry(out, ['pages', name, 'components', id, key], value, 'page');
+          }
+        }
+      }
+    }
   }
 
   // ── Object sections (fieldGroups + authored form/page sections) ───
@@ -760,6 +859,9 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
   // than one of them — collecting first and emitting once keeps a heading
   // from being counted twice against coverage.
   walkObjectSections(config, out);
+
+  // ── Object filter-preset tabs (`objects.<o>._tabs.<tab>.label`) ───
+  walkObjectTabs(config, out);
 
   // ── Metadata configuration forms (Studio admin UI) ────────────────
   // Registry-driven: always included, independent of stack config. These

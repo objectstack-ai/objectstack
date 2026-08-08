@@ -22,14 +22,14 @@
  * contributions in the same group (mirrors object owner priority).
  */
 
-import type { NavigationContributionInput } from '@objectstack/spec/ui';
+import type { NavigationContribution } from '@objectstack/spec/ui';
 
 const BASE_PRIORITY = 100;
 
 // Marketplace entries (browse / installed) moved to
 // @objectstack/cloud-connection's marketplace plugins (cloud ADR-0009:
 // the nav lives and dies with the capability — no plugin, no entry).
-export const SETUP_NAV_CONTRIBUTIONS: NavigationContributionInput[] = [
+export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
   {
     app: 'setup',
     group: 'group_overview',

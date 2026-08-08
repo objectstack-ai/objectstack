@@ -55,7 +55,7 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
     // reaches the driver. Feeding the array raw is what this driver no longer
     // does — pinned at the bottom of this block.
     const lowered = (where: unknown) =>
-      driver.find('tasks', { object: 'tasks', where: parseFilterAST(where) as FilterCondition });
+      driver.find('tasks', { where: parseFilterAST(where) as FilterCondition });
 
     it('equals + null → IS NULL (baseline that already worked)', async () => {
       expect(ids(await lowered([['assignee', '=', null]]))).toEqual(['2', '4']);
@@ -84,7 +84,6 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
 
     it('count with is_null is scoped, not the whole table', async () => {
       const count = await driver.count('tasks', {
-        object: 'tasks',
         where: parseFilterAST([['assignee', 'isnull', true]]) as FilterCondition,
       });
       expect(count).toBe(2);
@@ -92,35 +91,57 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
 
     it('the raw array is refused by the driver — the dialect is gone (#5158)', async () => {
       await expect(
-        driver.find('tasks', { object: 'tasks', where: [['assignee', 'isnull', true]] as any }),
+        driver.find('tasks', { where: [['assignee', 'isnull', true]] as any }),
       ).rejects.toThrow(/A filter ARRAY reached the driver/);
     });
   });
 
   describe('object-format where ($-operators)', () => {
     it('$null: true → IS NULL', async () => {
-      const rows = await driver.find('tasks', { object: 'tasks', where: { assignee: { $null: true } } });
+      const rows = await driver.find('tasks', { where: { assignee: { $null: true } } });
       expect(ids(rows)).toEqual(['2', '4']);
     });
 
     it('$null: false → IS NOT NULL', async () => {
-      const rows = await driver.find('tasks', { object: 'tasks', where: { assignee: { $null: false } } });
+      const rows = await driver.find('tasks', { where: { assignee: { $null: false } } });
       expect(ids(rows)).toEqual(['1', '3']);
     });
 
     it('$ne: null → IS NOT NULL', async () => {
-      const rows = await driver.find('tasks', { object: 'tasks', where: { assignee: { $ne: null } } });
+      const rows = await driver.find('tasks', { where: { assignee: { $ne: null } } });
       expect(ids(rows)).toEqual(['1', '3']);
     });
 
     it('$startsWith → prefix LIKE', async () => {
-      const rows = await driver.find('tasks', { object: 'tasks', where: { assignee: { $startsWith: 'a' } } });
+      const rows = await driver.find('tasks', { where: { assignee: { $startsWith: 'a' } } });
       expect(ids(rows)).toEqual(['1']);
     });
 
-    it('$regex (better-auth contains) → substring LIKE, not exact match', async () => {
-      const rows = await driver.find('tasks', { object: 'tasks', where: { assignee: { $regex: 'aro' } } });
+    // [#5702] REPLACED. This case was `$regex (better-auth contains) → substring
+    // LIKE, not exact match` and expected `['3']` — it pinned the `case '$regex':`
+    // fallthrough that existed for exactly one producer, plugin-auth's ObjectQL
+    // adapter. #5710 flipped that producer to `$contains`, #4706 retired the
+    // spelling, and the fallthrough is deleted; there is no substring-LIKE
+    // answer left to assert.
+    //
+    // Its replacement is the same query on the operator that DOES mean this,
+    // plus the refusal — asserted on `code` and `status`, not on `toThrow()`
+    // alone, which would stay green against any error including the uncoded ones
+    // the ADR-0112 envelope exists to eliminate.
+    it('$contains → substring LIKE, the operator $regex is retired in favour of', async () => {
+      const rows = await driver.find('tasks', { where: { assignee: { $contains: 'aro' } } });
       expect(ids(rows)).toEqual(['3']);
+    });
+
+    it('$regex is REFUSED, in the ADR-0112 envelope, naming $icontains', async () => {
+      const err = await driver
+        .find('tasks', { where: { assignee: { $regex: 'aro' } } })
+        .then(() => null, (e: any) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('$regex');
+      expect(err.message).toContain('$icontains');
     });
 
     it('$not (CEL `!expr` scope filter) → negated sub-condition, not a bogus "$not" column', async () => {
@@ -141,7 +162,7 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
 
     it('unknown $-operator throws instead of a silent equality compare', async () => {
       await expect(
-        driver.find('tasks', { object: 'tasks', where: { assignee: { $bogus: 1 } } }),
+        driver.find('tasks', { where: { assignee: { $bogus: 1 } } }),
       ).rejects.toThrow(/Unsupported filter operator/);
     });
   });

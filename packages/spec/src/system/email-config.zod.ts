@@ -62,13 +62,13 @@ import { lazySchema } from '../shared/lazy-schema';
  * access keys).
  */
 export const EmailProviderSchema = lazySchema(() => z.enum(['log', 'resend', 'postmark', 'smtp']));
-export type EmailProvider = z.infer<typeof EmailProviderSchema>;
+export type EmailProvider = z.input<typeof EmailProviderSchema>;
 
 export const EmailAddressConfigSchema = lazySchema(() => z.object({
   name: z.string().optional().describe('Display name (e.g. "Acme CRM")'),
   address: z.string().email().describe('RFC-5322 address'),
 }));
-export type EmailAddressConfig = z.infer<typeof EmailAddressConfigSchema>;
+export type EmailAddressConfig = z.input<typeof EmailAddressConfigSchema>;
 
 export const EmailServiceConfigSchema = lazySchema(() => z.object({
   /**
@@ -214,6 +214,6 @@ export const EmailServiceConfigSchema = lazySchema(() => z.object({
       + 'OS_APP_NAME and the appName key both override the value written here',
     ),
 }));
-export type EmailServiceConfig = z.infer<typeof EmailServiceConfigSchema>;
+export type EmailServiceConfig = z.input<typeof EmailServiceConfigSchema>;
 /** Post-parse shape of {@link EmailServiceConfig} — defaults applied, transforms run (ADR-0122). */
 export type EmailServiceConfigParsed = z.infer<typeof EmailServiceConfigSchema>;

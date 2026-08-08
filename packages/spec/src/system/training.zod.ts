@@ -210,12 +210,12 @@ export const TrainingPlanSchema = lazySchema(() => z.object({
 }).describe('Organizational training plan per ISO 27001:2022 A.6.3'));
 
 // Type exports
-export type TrainingCategory = z.infer<typeof TrainingCategorySchema>;
-export type TrainingCompletionStatus = z.infer<typeof TrainingCompletionStatusSchema>;
-export type TrainingCourse = z.infer<typeof TrainingCourseSchema>;
+export type TrainingCategory = z.input<typeof TrainingCategorySchema>;
+export type TrainingCompletionStatus = z.input<typeof TrainingCompletionStatusSchema>;
+export type TrainingCourse = z.input<typeof TrainingCourseSchema>;
 /** Post-parse shape of {@link TrainingCourse} — defaults applied, transforms run (ADR-0122). */
 export type TrainingCourseParsed = z.infer<typeof TrainingCourseSchema>;
-export type TrainingRecord = z.infer<typeof TrainingRecordSchema>;
-export type TrainingPlan = z.infer<typeof TrainingPlanSchema>;
+export type TrainingRecord = z.input<typeof TrainingRecordSchema>;
+export type TrainingPlan = z.input<typeof TrainingPlanSchema>;
 /** Post-parse shape of {@link TrainingPlan} — defaults applied, transforms run (ADR-0122). */
 export type TrainingPlanParsed = z.infer<typeof TrainingPlanSchema>;

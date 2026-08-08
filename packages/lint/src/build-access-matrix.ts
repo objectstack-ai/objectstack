@@ -15,7 +15,7 @@
  * AI may draft grants freely; it cannot silently change who can do what.
  */
 
-import type { AccessMatrix, AccessMatrixEntry } from '@objectstack/spec/security';
+import type { AccessMatrixParsed, AccessMatrixEntry } from '@objectstack/spec/security';
 
 type AnyRec = Record<string, unknown>;
 
@@ -28,7 +28,7 @@ function asArray(v: unknown): AnyRec[] {
 }
 
 /** Build the sorted access matrix for a normalized stack. */
-export function buildAccessMatrix(stack: AnyRec): AccessMatrix {
+export function buildAccessMatrix(stack: AnyRec): AccessMatrixParsed {
   const entries: AccessMatrixEntry[] = [];
   if (!stack || typeof stack !== 'object') return { version: 1, entries };
 
@@ -85,7 +85,7 @@ const BIT_LABELS: Array<[keyof AccessMatrixEntry, string]> = [
  * Semantic diff between two matrices — human-review lines, empty = identical.
  * Ordered: removals, additions, then per-entry bit/scope changes.
  */
-export function diffAccessMatrix(before: AccessMatrix, after: AccessMatrix): string[] {
+export function diffAccessMatrix(before: AccessMatrixParsed, after: AccessMatrixParsed): string[] {
   const lines: string[] = [];
   const key = (e: AccessMatrixEntry) => `${e.permissionSet}\u0000${e.object}`;
   const beforeMap = new Map((before?.entries ?? []).map((e) => [key(e), e]));

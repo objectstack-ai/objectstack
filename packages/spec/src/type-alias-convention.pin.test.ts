@@ -1,28 +1,31 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// ADR-0122 phase-1 pin — the aliases that deliberately carry NO `XParsed`.
+// ADR-0122 pin — the aliases that deliberately carry NO `XParsed`.
 //
 // ## What this file is
 //
-// ADR-0122 makes `XParsed` the name of a schema's PARSED state, and phase 1
-// declares one for every bare `X = z.infer<typeof XSchema>` alias whose schema
-// actually HAS two shapes (`z.input` differs from `z.infer`). The complement —
-// aliases where the two coincide, so the phase-2 flip of the bare name changes
-// nothing observable — deliberately gets no `XParsed`, because a permanent
-// synonym is a name an author can only pick wrongly.
+// ADR-0122 makes the bare name `X` the AUTHOR state and `XParsed` the PARSED
+// state. Phase 1 (#5551 / PR #6072) declared an `XParsed` for every alias whose
+// schema actually HAS two shapes (`z.input` differs from `z.infer`); phase 2
+// (#6083, protocol 17) flipped all 1384 bare aliases to `z.input` and retired
+// the 102 `XInput` names the flip turned into synonyms. The complement —
+// schemas whose two shapes coincide, so the flip changed nothing observable —
+// deliberately gets no `XParsed`, because a permanent synonym is a name an
+// author can only pick wrongly.
 //
 // "Deliberately" is the word that needs teeth. Isomorphism is not a property
 // anyone declared; it is a fact about the schema tree, and it ROTS: the day a
 // nested field gains a `.default()`, `.transform()`, `.catch()` or `.pipe()`,
-// its alias silently joins the shape-diff set and phase 2 would break it with
-// no migration target — the exact silent failure phase 1 exists to prevent.
+// its alias silently gains a second shape that nothing names, and a consumer
+// holding a parse result has no type to hold it in — the silent failure the
+// pins exist to prevent.
 //
 // So the complement is pinned rather than merely documented. Each line below
 // asserts `z.input === z.infer` for one schema. Add a default anywhere in its
 // tree and this file goes RED with the alias named, and the fix is the one the
 // ADR prescribes: declare `XParsed` next to the bare alias and delete the pin
-// line. The list can therefore only shrink, and it shrinks for the right
-// reason.
+// line. The list therefore moves in both directions, and it moves for the right
+// reason — phase 2 grew it by 35 for a reason it records at the block itself.
 //
 // ## It is also the gate's registry
 //
@@ -186,6 +189,8 @@ import type * as M111 from './shared/expression.zod.js';
 import type * as M112 from './shared/http.zod.js';
 import type * as M113 from './shared/identifiers.zod.js';
 import type * as M169 from './shared/mapping.zod.js';
+import type * as M172 from './automation/builtin-node-config.zod.js';
+import type * as M173 from './automation/schemaless-node-config.zod.js';
 import type * as M114 from './shared/metadata-types.zod.js';
 import type * as M115 from './shared/protection.zod.js';
 import type * as M116 from './stack.zod.js';
@@ -240,7 +245,12 @@ import type * as M164 from './ui/report.zod.js';
 import type * as M165 from './ui/responsive.zod.js';
 import type * as M166 from './ui/theme.zod.js';
 import type * as M167 from './ui/view.zod.js';
-import type * as M168 from './ui/widget.zod.js';
+// Appended out of alphabetical order deliberately: the M-indices are positional
+// identifiers the pin lines below reference by number, so a new module takes the
+// next free index rather than renumbering 169 imports and every pin that names
+// one. #5775 is the first entry from this file — `component.zod.ts` had no bare
+// `X = z.infer` alias until `PageContainerProps` arrived.
+import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
 // 717 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
@@ -452,7 +462,6 @@ export type Iso145 = Assert<Eq< z.input< typeof M28.CreateDataResponseSchema >, 
 export type Iso146 = Assert<Eq< z.input< typeof M28.UpdateDataResponseSchema >, z.infer< typeof M28.UpdateDataResponseSchema > >>;
 export type Iso147 = Assert<Eq< z.input< typeof M28.DeleteDataResponseSchema >, z.infer< typeof M28.DeleteDataResponseSchema > >>;
 export type Iso148 = Assert<Eq< z.input< typeof M28.CreateManyDataResponseSchema >, z.infer< typeof M28.CreateManyDataResponseSchema > >>;
-export type Iso149 = Assert<Eq< z.input< typeof M28.DeleteViewResponseSchema >, z.infer< typeof M28.DeleteViewResponseSchema > >>;
 export type Iso150 = Assert<Eq< z.input< typeof M28.CheckPermissionResponseSchema >, z.infer< typeof M28.CheckPermissionResponseSchema > >>;
 export type Iso151 = Assert<Eq< z.input< typeof M28.GetEffectivePermissionsResponseSchema >, z.infer< typeof M28.GetEffectivePermissionsResponseSchema > >>;
 export type Iso152 = Assert<Eq< z.input< typeof M28.RealtimeConnectResponseSchema >, z.infer< typeof M28.RealtimeConnectResponseSchema > >>;
@@ -1091,9 +1100,6 @@ export type Iso563 = Assert<Eq< z.input< typeof M131.Sha256DigestSchema >, z.inf
 
 // system/http-server.zod.ts
 export type Iso564 = Assert<Eq< z.input< typeof M132.MiddlewareType >, z.infer< typeof M132.MiddlewareType > >>;
-export type Iso565 = Assert<Eq< z.input< typeof M132.ServerEventType >, z.infer< typeof M132.ServerEventType > >>;
-export type Iso566 = Assert<Eq< z.input< typeof M132.ServerEventSchema >, z.infer< typeof M132.ServerEventSchema > >>;
-export type Iso567 = Assert<Eq< z.input< typeof M132.ServerStatusSchema >, z.infer< typeof M132.ServerStatusSchema > >>;
 
 // system/incident-response.zod.ts
 export type Iso568 = Assert<Eq< z.input< typeof M133.IncidentResponsePhaseSchema >, z.infer< typeof M133.IncidentResponsePhaseSchema > >>;
@@ -1184,6 +1190,7 @@ export type Iso624 = Assert<Eq< z.input< typeof M147.SpecifierType >, z.infer< t
 export type Iso625 = Assert<Eq< z.input< typeof M147.SpecifierOptionSchema >, z.infer< typeof M147.SpecifierOptionSchema > >>;
 export type Iso626 = Assert<Eq< z.input< typeof M147.SpecifierScopeSchema >, z.infer< typeof M147.SpecifierScopeSchema > >>;
 export type Iso627 = Assert<Eq< z.input< typeof M147.SettingsActionResultSchema >, z.infer< typeof M147.SettingsActionResultSchema > >>;
+export type Iso758 = Assert<Eq< z.input< typeof M147.SpecifierValueDomainSchema >, z.infer< typeof M147.SpecifierValueDomainSchema > >>;
 
 // system/supplier-security.zod.ts
 export type Iso628 = Assert<Eq< z.input< typeof M148.SupplierRiskLevelSchema >, z.infer< typeof M148.SupplierRiskLevelSchema > >>;
@@ -1269,11 +1276,14 @@ export type Iso683 = Assert<Eq< z.input< typeof M160.DerivedMeasureOp >, z.infer
 export type Iso684 = Assert<Eq< z.input< typeof M160.DatasetSchema >, z.infer< typeof M160.DatasetSchema > >>;
 
 // ui/i18n.zod.ts
-export type Iso685 = Assert<Eq< z.input< typeof M161.I18nObjectSchema >, z.infer< typeof M161.I18nObjectSchema > >>;
 export type Iso686 = Assert<Eq< z.input< typeof M161.I18nLabelSchema >, z.infer< typeof M161.I18nLabelSchema > >>;
 export type Iso687 = Assert<Eq< z.input< typeof M161.AriaPropsSchema >, z.infer< typeof M161.AriaPropsSchema > >>;
-export type Iso688 = Assert<Eq< z.input< typeof M161.PluralRuleSchema >, z.infer< typeof M161.PluralRuleSchema > >>;
-export type Iso689 = Assert<Eq< z.input< typeof M161.DateFormatSchema >, z.infer< typeof M161.DateFormatSchema > >>;
+// #5728 — the second arm of the widened `I18nLabelSchema`. A record of plain
+// strings under a key-format constraint: the regex narrows which keys PARSE, it
+// does not transform one, so the two shapes coincide and an `InlineLocaleMapParsed`
+// would be a permanent synonym. Give any entry a `.default()` and this line goes
+// red with the alias named — which is the point.
+export type Iso759 = Assert<Eq< z.input< typeof M161.InlineLocaleMapSchema >, z.infer< typeof M161.InlineLocaleMapSchema > >>;
 
 // ui/notification.zod.ts
 export type Iso690 = Assert<Eq< z.input< typeof M162.NotificationTypeSchema >, z.infer< typeof M162.NotificationTypeSchema > >>;
@@ -1313,37 +1323,98 @@ export type Iso713 = Assert<Eq< z.input< typeof M167.RowColorConfigSchema >, z.i
 export type Iso714 = Assert<Eq< z.input< typeof M167.VisualizationTypeSchema >, z.infer< typeof M167.VisualizationTypeSchema > >>;
 export type Iso715 = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.infer< typeof M167.UserFilterFieldSchema > >>;
 
-// ui/widget.zod.ts
-export type Iso716 = Assert<Eq< z.input< typeof M168.WidgetLifecycleSchema >, z.infer< typeof M168.WidgetLifecycleSchema > >>;
+// ui/component.zod.ts
+// #5775 — the shared `children` contract for `page:section`/`page:footer`/
+// `page:sidebar`. A lone optional array with no default, transform, catch or
+// pipe anywhere in its tree, so the two shapes coincide and the phase-2 flip of
+// the bare name changes nothing. `check:spec-parsed-alias` sent it here rather
+// than to a `PageContainerPropsParsed`, which would be a permanent synonym.
+export type Iso719 = Assert<Eq< z.input< typeof M170.PageContainerProps >, z.infer< typeof M170.PageContainerProps > >>;
 
 // ---------------------------------------------------------------------------
-// Representative spot-checks on the phase-1 ADDITIONS.
+// Phase 2 (#6083) additions. These 35 schemas were never in phase 1's
+// population: their bare alias already read `z.input` before the flip, so the
+// phase-1 gate — which only looked at bare `z.infer` aliases — never asked
+// whether their parsed state was named. The inverted gate does ask, and the
+// same probe that chose phase 1's split (with the same deliberate control
+// assertion, so a vacuous pass could not be mistaken for isomorphism) says
+// these 35 coincide. The other 22 it found got an `XParsed` instead.
+// ---------------------------------------------------------------------------
+
+// api/protocol.zod.ts
+export type Iso720 = Assert<Eq< z.input< typeof M28.GetDataRequestSchema >, z.infer< typeof M28.GetDataRequestSchema > >>;
+export type Iso721 = Assert<Eq< z.input< typeof M28.CreateDataRequestSchema >, z.infer< typeof M28.CreateDataRequestSchema > >>;
+export type Iso722 = Assert<Eq< z.input< typeof M28.UpdateDataRequestSchema >, z.infer< typeof M28.UpdateDataRequestSchema > >>;
+export type Iso723 = Assert<Eq< z.input< typeof M28.DeleteDataRequestSchema >, z.infer< typeof M28.DeleteDataRequestSchema > >>;
+export type Iso724 = Assert<Eq< z.input< typeof M28.CreateManyDataRequestSchema >, z.infer< typeof M28.CreateManyDataRequestSchema > >>;
+export type Iso728 = Assert<Eq< z.input< typeof M28.CheckPermissionRequestSchema >, z.infer< typeof M28.CheckPermissionRequestSchema > >>;
+export type Iso729 = Assert<Eq< z.input< typeof M28.GetObjectPermissionsRequestSchema >, z.infer< typeof M28.GetObjectPermissionsRequestSchema > >>;
+export type Iso730 = Assert<Eq< z.input< typeof M28.GetEffectivePermissionsRequestSchema >, z.infer< typeof M28.GetEffectivePermissionsRequestSchema > >>;
+export type Iso731 = Assert<Eq< z.input< typeof M28.RealtimeConnectRequestSchema >, z.infer< typeof M28.RealtimeConnectRequestSchema > >>;
+export type Iso732 = Assert<Eq< z.input< typeof M28.RealtimeDisconnectRequestSchema >, z.infer< typeof M28.RealtimeDisconnectRequestSchema > >>;
+export type Iso733 = Assert<Eq< z.input< typeof M28.RealtimeSubscribeRequestSchema >, z.infer< typeof M28.RealtimeSubscribeRequestSchema > >>;
+export type Iso734 = Assert<Eq< z.input< typeof M28.RealtimeUnsubscribeRequestSchema >, z.infer< typeof M28.RealtimeUnsubscribeRequestSchema > >>;
+export type Iso735 = Assert<Eq< z.input< typeof M28.SetPresenceRequestSchema >, z.infer< typeof M28.SetPresenceRequestSchema > >>;
+export type Iso736 = Assert<Eq< z.input< typeof M28.GetPresenceRequestSchema >, z.infer< typeof M28.GetPresenceRequestSchema > >>;
+export type Iso737 = Assert<Eq< z.input< typeof M28.RegisterDeviceRequestSchema >, z.infer< typeof M28.RegisterDeviceRequestSchema > >>;
+export type Iso738 = Assert<Eq< z.input< typeof M28.UnregisterDeviceRequestSchema >, z.infer< typeof M28.UnregisterDeviceRequestSchema > >>;
+export type Iso739 = Assert<Eq< z.input< typeof M28.GetNotificationPreferencesRequestSchema >, z.infer< typeof M28.GetNotificationPreferencesRequestSchema > >>;
+export type Iso740 = Assert<Eq< z.input< typeof M28.MarkNotificationsReadRequestSchema >, z.infer< typeof M28.MarkNotificationsReadRequestSchema > >>;
+export type Iso741 = Assert<Eq< z.input< typeof M28.MarkAllNotificationsReadRequestSchema >, z.infer< typeof M28.MarkAllNotificationsReadRequestSchema > >>;
+export type Iso742 = Assert<Eq< z.input< typeof M28.AiMessageSchema >, z.infer< typeof M28.AiMessageSchema > >>;
+export type Iso743 = Assert<Eq< z.input< typeof M28.AiChatRequestSchema >, z.infer< typeof M28.AiChatRequestSchema > >>;
+export type Iso744 = Assert<Eq< z.input< typeof M28.AiCompleteRequestSchema >, z.infer< typeof M28.AiCompleteRequestSchema > >>;
+export type Iso745 = Assert<Eq< z.input< typeof M28.CreateAiConversationRequestSchema >, z.infer< typeof M28.CreateAiConversationRequestSchema > >>;
+export type Iso746 = Assert<Eq< z.input< typeof M28.ListAiConversationsRequestSchema >, z.infer< typeof M28.ListAiConversationsRequestSchema > >>;
+export type Iso747 = Assert<Eq< z.input< typeof M28.UpdateAiConversationRequestSchema >, z.infer< typeof M28.UpdateAiConversationRequestSchema > >>;
+export type Iso748 = Assert<Eq< z.input< typeof M28.AiAgentChatRequestSchema >, z.infer< typeof M28.AiAgentChatRequestSchema > >>;
+export type Iso749 = Assert<Eq< z.input< typeof M28.ListAiPendingActionsRequestSchema >, z.infer< typeof M28.ListAiPendingActionsRequestSchema > >>;
+export type Iso750 = Assert<Eq< z.input< typeof M28.GetLocalesRequestSchema >, z.infer< typeof M28.GetLocalesRequestSchema > >>;
+export type Iso751 = Assert<Eq< z.input< typeof M28.GetTranslationsRequestSchema >, z.infer< typeof M28.GetTranslationsRequestSchema > >>;
+export type Iso752 = Assert<Eq< z.input< typeof M28.GetFieldLabelsRequestSchema >, z.infer< typeof M28.GetFieldLabelsRequestSchema > >>;
+export type Iso755 = Assert<Eq< z.input< typeof M28.ValidateDataIssueSchema >, z.infer< typeof M28.ValidateDataIssueSchema > >>;
+export type Iso756 = Assert<Eq< z.input< typeof M28.ValidateDataRequestSchema >, z.infer< typeof M28.ValidateDataRequestSchema > >>;
+export type Iso757 = Assert<Eq< z.input< typeof M28.ValidateDataResponseSchema >, z.infer< typeof M28.ValidateDataResponseSchema > >>;
+
+// automation/builtin-node-config.zod.ts
+export type Iso753 = Assert<Eq< z.input< typeof M172.ScreenFieldConfigSchema >, z.infer< typeof M172.ScreenFieldConfigSchema > >>;
+
+// automation/schemaless-node-config.zod.ts
+export type Iso754 = Assert<Eq< z.input< typeof M173.DecisionConditionSchema >, z.infer< typeof M173.DecisionConditionSchema > >>;
+
+// ---------------------------------------------------------------------------
+// Representative spot-checks on the phase-2 FLIP.
 //
-// Five aliases across three domains, asserting the two facts that make phase 1
-// non-breaking: each new `XParsed` denotes exactly `z.infer<typeof XSchema>`,
-// and the bare name it sits next to still denotes the same thing it did before
-// the change. The second half is the one worth pinning — phase 1's whole claim
-// is that it renames nothing, and this is that claim in a form tsc rejects.
+// Five aliases across three domains, asserting the two facts that make phase 2
+// correct: each `XParsed` still denotes exactly `z.infer<typeof XSchema>`, and
+// the bare name beside it now denotes `z.input` — the author state. The second
+// half is the one worth pinning: phase 2's whole claim is that these five names
+// CHANGED meaning, in exactly one direction, and this is that claim in a form
+// tsc rejects. In phase 1 these same five lines read `...Unmoved` and asserted
+// the opposite of what they assert now; that inversion is the change.
 // ---------------------------------------------------------------------------
 
 export type Spot1 = Assert<Eq< ConnectorParsed, z.infer< typeof ConnectorSchema > >>;
-export type Spot1Unmoved = Assert<Eq< Connector, z.infer< typeof ConnectorSchema > >>;
+export type Spot1Flipped = Assert<Eq< Connector, z.input< typeof ConnectorSchema > >>;
 export type Spot2 = Assert<Eq< DataSyncConfigParsed, z.infer< typeof DataSyncConfigSchema > >>;
-export type Spot2Unmoved = Assert<Eq< DataSyncConfig, z.infer< typeof DataSyncConfigSchema > >>;
+export type Spot2Flipped = Assert<Eq< DataSyncConfig, z.input< typeof DataSyncConfigSchema > >>;
 export type Spot3 = Assert<Eq< ViewParsed, z.infer< typeof ViewSchema > >>;
-export type Spot3Unmoved = Assert<Eq< View, z.infer< typeof ViewSchema > >>;
+export type Spot3Flipped = Assert<Eq< View, z.input< typeof ViewSchema > >>;
 export type Spot4 = Assert<Eq< ViewFilterRuleParsed, z.infer< typeof ViewFilterRuleSchema > >>;
-export type Spot4Unmoved = Assert<Eq< ViewFilterRule, z.infer< typeof ViewFilterRuleSchema > >>;
+export type Spot4Flipped = Assert<Eq< ViewFilterRule, z.input< typeof ViewFilterRuleSchema > >>;
 export type Spot5 = Assert<
   Eq< ObjectFieldGroupParsed, z.infer< typeof ObjectFieldGroupSchema > >
 >;
-export type Spot5Unmoved = Assert<
-  Eq< ObjectFieldGroup, z.infer< typeof ObjectFieldGroupSchema > >
+export type Spot5Flipped = Assert<
+  Eq< ObjectFieldGroup, z.input< typeof ObjectFieldGroupSchema > >
 >;
 
 // Each of the five is in the covered set because its two shapes DIFFER. Assert
 // that too, so a spot-check cannot quietly become vacuous by drifting into the
 // isomorphic complement — which is precisely how a pin stops testing anything.
+// Without this, `Spot1` and `Spot1Flipped` would both hold trivially on an
+// isomorphic schema and the flip would be untested at the very sites chosen to
+// test it.
 type Differs<A, B> = Eq<A, B> extends false ? true : false;
 export type Spot1Differs = Assert<
   Differs< z.input< typeof ConnectorSchema >, z.infer< typeof ConnectorSchema > >
@@ -1353,9 +1424,11 @@ export type Spot3Differs = Assert<
 >;
 
 // ---------------------------------------------------------------------------
-// The A-family, untouched. `shared/retry-policy.zod.ts` already spelled the
-// ADR-0122 target shape before phase 1, and phase 1 must not have disturbed it:
-// the bare name is the AUTHOR state, the parsed state is on `RetryPolicyParsed`.
+// The A-family, untouched — twice over. `shared/retry-policy.zod.ts` already
+// spelled the ADR-0122 target shape before phase 1, phase 1 did not disturb it,
+// and phase 2 had nothing to flip here: the bare name was already the AUTHOR
+// state, and the parsed state was already on `RetryPolicyParsed`. That is the
+// control on the whole change — a file the codemod must have left alone.
 // ---------------------------------------------------------------------------
 
 export type AFamilyBareIsAuthorState = Assert<
@@ -1371,7 +1444,10 @@ export type AFamilyParsedIsParseState = Assert<
 // ---------------------------------------------------------------------------
 
 describe('ADR-0122 type-alias convention', () => {
-  it('still declares all 719 isomorphic pins', () => {
+  // The title tracks the assertion below; it had been left at 751 when #6037
+  // moved the count to 754, so it is corrected here rather than left two
+  // numbers behind.
+  it('still declares all 755 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1388,9 +1464,81 @@ describe('ADR-0122 type-alias convention', () => {
     // sends it here rather than to an `XParsed` (718 -> 719 was
     // `ConnectorActionEffectSchema`, #4395 — a bare `z.enum`, like the
     // `ConnectorType` / `ConnectorStatus` pins beside it).
+    //
+    // And it drops by MORE than one when schemas are RETIRED, which is the third
+    // way and the one to read carefully, because from the count alone it looks
+    // exactly like the edit this case exists to stop: #5055 removed
+    // `I18nObjectSchema`, `PluralRuleSchema`, `DateFormatSchema` and
+    // `WidgetLifecycleSchema` under ADR-0049, i.e. -4. What separates it from a
+    // bare deletion is that the SCHEMAS went with the pins —
+    // `check:spec-parsed-alias` has nothing left to exempt, and
+    // `ui/widget-i18n-retirement.test.ts` asserts their absence on every public
+    // entry. A pin deleted while its schema still exports is still the failure
+    // this counts.
+    //
+    // 720 -> 716 is that retirement landing on top of #5775's addition
+    // (`PageContainerProps`, the +1 that had taken the count to 720). Both moves
+    // are in this number at once, which is exactly why it is recomputed from the
+    // source rather than reasoned about: -4 retired, +0 of my own.
+    //
+    // The fourth way is the one ADR-0122 phase 2 (#6083) added, and it is a
+    // BULK rise with no schema change behind it at all: 716 -> 751. Those
+    // 35 schemas are not new and did not move. Their bare alias already read
+    // `z.input` before the flip, so phase 1's gate — which only ever looked at
+    // bare `z.infer` aliases — had never asked them whether their parsed state
+    // was named. Inverting the gate asked, and 35 of the 57 it turned up
+    // answered "isomorphic". A jump this size is normally the shape of a
+    // mistake; this one is a gate widening, and the pins are its receipt.
+    //
+    // 751 -> 754 is #6037's `ValidateDataIssue` / `ValidateDataRequest` /
+    // `ValidateDataResponse` — three new protocol shapes with no defaults or
+    // transforms anywhere in their trees, i.e. the second (RISE) case above.
+    //
+    //
+    // 751 -> 754 is #6037's `ValidateDataIssue` / `ValidateDataRequest` /
+    // `ValidateDataResponse` — three new protocol shapes with no defaults or
+    // transforms anywhere in their trees, i.e. the second (RISE) case above.
+    //
+    // 754 -> 755 is #5933's `SpecifierValueDomain` — one new closed enum on
+    // `SettingsManifest`'s SpecifierSchema, the same (RISE) case: a `z.enum`
+    // has no default or transform, so its two shapes coincide and it gets a pin
+    // rather than a `SpecifierValueDomainParsed` synonym.
+    //
+    // 755 -> 748 is the 2026-08-08 ADR-0049 retirement sweep (#6486), the
+    // first way again — a schema left the package, so its pin left with it.
+    // Written out per member, because a MULTI-member sweep is exactly where a
+    // count gets nudged to fit instead of recomputed:
+    //
+    //   #5295  -3  ServerEventType, ServerEventSchema, ServerStatusSchema
+    //             (`ServerCapabilities` has a `Parsed` alias, so it was never
+    //             pinned here — a retired schema does not always cost a line)
+    //   #6239  -4  DeleteViewResponseSchema, ListViewsRequestSchema,
+    //             GetViewRequestSchema, DeleteViewRequestSchema (four of the
+    //             ten view schemas were isomorphic; the other six were paired)
+    //   #6414   0  every ETL alias already had a `Parsed` counterpart
+    //
+    // -7, and 755 - 7 = 748. Three things this one entry is worth stating,
+    // because they are the ways a MINUS gets miscomputed here. (1) The member
+    // count (3) and the pin count (7) have no relation to each other. (2) The
+    // -7 was computed against 751 at the branch point and had to be rebased
+    // TWICE before landing — onto #6037's 754, then onto #5933's 755 — so the
+    // subtrahend was the only stable operand. (3) A sibling retirement in the
+    // same window contributed ZERO: #6527 retired `array_agg` / `string_agg`
+    // from `AggregationFunction`, and an enum VALUE narrowing is invisible
+    // here, exactly as it is to the four surface ratchets. Recompute from the
+    // file; never from the changelog.
+    //
+    // 748 -> 749 is #5728's `InlineLocaleMapSchema`, the second arm of the
+    // widened `I18nLabelSchema`. Same RISE case: a `z.record` of plain strings
+    // whose KEY carries a format constraint. A regex narrows which keys parse;
+    // it never rewrites one, so nothing in the tree produces an output shape
+    // the input does not already have. (Its receipt was written twice before
+    // landing — as 755 -> 756 against the pre-sweep count — and recomputed
+    // here after the sweep's -7 merged in; the file, not the history, is the
+    // operand.)
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(719);
+    expect(pins).toHaveLength(749);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {
@@ -1400,19 +1548,27 @@ describe('ADR-0122 type-alias convention', () => {
     expect(parsed.jitter).toBe(false);
   });
 
-  it('keeps every pre-existing B-family export, XInput included', () => {
-    // Phase 1 is additive: nothing was renamed or removed. `ConnectorInput`
-    // is the one the qa downstream-contract FROZEN fixtures import by name.
+  it('changes no runtime behaviour — only which type name describes it', () => {
+    // Phase 2 is a TYPE-only change: 1384 aliases moved from `z.infer` to
+    // `z.input` and 102 `XInput` synonyms were deleted. Not one `.parse()` call,
+    // default, transform or schema moved, so the values below are byte-for-byte
+    // what phase 1 asserted — the difference is that `ConnectorParsed`, not
+    // `Connector`, is now the name that describes them. `ConnectorInput`, which
+    // used to be the name for what `Connector` means today, is gone.
     expect(typeof ConnectorSchema.parse).toBe('function');
-    const parsedConnector = ConnectorSchema.parse({
+    const parsedConnector: ConnectorParsed = ConnectorSchema.parse({
       name: 'acme_erp',
       label: 'Acme ERP',
       type: 'saas',
     });
-    // The parsed state is what the bare name still denotes in phase 1, and
-    // what `ConnectorParsed` will keep denoting after the phase-2 flip.
     expect(parsedConnector.enabled).toBe(true);
     expect(parsedConnector.status).toBe('inactive');
+
+    // And the flip's whole point, stated at runtime: the three keys above are
+    // everything an author has to write, and the bare name is the type that
+    // accepts exactly that.
+    const authored: Connector = { name: 'acme_erp', label: 'Acme ERP', type: 'saas' };
+    expect(ConnectorSchema.parse(authored).enabled).toBe(true);
   });
 });
 

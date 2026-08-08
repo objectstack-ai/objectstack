@@ -21,18 +21,18 @@ regenerate.
 | Measure | Value |
 |---|---|
 | Triaged directories | 5 |
-| Object sites in them | 456 |
-| Still-open (strip) sites | 197 |
-| Files carrying at least one | 30 |
+| Object sites in them | 434 |
+| Still-open (strip) sites | 182 |
+| Files carrying at least one | 28 |
 
 Remaining strip sites by class:
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 42 |
+| authorable — the ruling's forced scope | 43 |
 | unresolved — needs a per-schema verdict | 33 |
-| wire / open — out of forced scope | 107 |
-| no door — no carrier, ADR-0049 territory | 14 |
+| wire / open — out of forced scope | 104 |
+| no door — no carrier, ADR-0049 territory | 1 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |
 
@@ -44,12 +44,12 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `ui/` | 172 | 116 | 5 | 0 | 51 |
+| `ui/` | 160 | 116 | 5 | 0 | 39 |
 | `data/` | 162 | 54 | 1 | 0 | 107 |
-| `automation/` | 75 | 49 | 0 | 0 | 26 |
+| `automation/` | 65 | 42 | 0 | 0 | 23 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **456** | **253** | **6** | **0** | **197** |
+| **total** | **434** | **246** | **6** | **0** | **182** |
 
 ## File-level triage — site counts
 
@@ -66,18 +66,18 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `app.zod.ts` | 18 |
 | `bulk-action.zod.ts` | 3 |
 | `chart.zod.ts` | 8 |
-| `component.zod.ts` | 30 |
+| `component.zod.ts` | 31 |
 | `dashboard.zod.ts` | 11 |
 | `dataset.zod.ts` | 4 |
-| `i18n.zod.ts` | 6 |
+| `i18n.zod.ts` | 1 |
 | `page.zod.ts` | 7 |
 | `report.zod.ts` | 3 |
 | `responsive.zod.ts` | 4 |
 | `sharing.zod.ts` | 1 |
 | `theme.zod.ts` | 6 |
 | `view.zod.ts` | 53 |
-| `widget.zod.ts` | 9 |
-| **total** | **172** |
+| `widget.zod.ts` | 1 |
+| **total** | **160** |
 
 ### `data/` — sites
 
@@ -118,7 +118,6 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `bpmn-interop.zod.ts` | 5 |
 | `builtin-node-config.zod.ts` | 8 |
 | `control-flow.zod.ts` | 5 |
-| `etl.zod.ts` | 10 |
 | `execution.zod.ts` | 13 |
 | `flow-function.zod.ts` | 1 |
 | `flow.zod.ts` | 11 |
@@ -128,7 +127,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `state-machine.zod.ts` | 6 |
 | `time-relative-trigger.zod.ts` | 1 |
 | `webhook.zod.ts` | 1 |
-| **total** | **75** |
+| **total** | **65** |
 
 ### `security/` — sites
 
@@ -157,25 +156,24 @@ over it is here.
 
 ### `ui/` — open
 
-**51 strip of 172**, in 7 file(s).
+**39 strip of 160**, in 6 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `action-params.zod.ts` | 1 | 1 |
 | `app.zod.ts` | 1 | 18 |
 | `chart.zod.ts` | 2 | 8 |
-| `component.zod.ts` | 30 | 30 |
-| `i18n.zod.ts` | 5 | 6 |
+| `component.zod.ts` | 31 | 31 |
 | `view.zod.ts` | 3 | 53 |
-| `widget.zod.ts` | 9 | 9 |
-| **total** | **51** | **172** |
+| `widget.zod.ts` | 1 | 1 |
+| **total** | **39** | **160** |
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 33 |
+| authorable — the ruling's forced scope | 34 |
 | unresolved — needs a per-schema verdict | 0 |
 | wire / open — out of forced scope | 3 |
-| no door — no carrier, ADR-0049 territory | 14 |
+| no door — no carrier, ADR-0049 territory | 1 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |
 
@@ -214,22 +212,21 @@ over it is here.
 
 ### `automation/` — open
 
-**26 strip of 75**, in 5 file(s).
+**23 strip of 65**, in 4 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `bpmn-interop.zod.ts` | 5 | 5 |
-| `etl.zod.ts` | 3 | 10 |
 | `execution.zod.ts` | 13 | 13 |
 | `flow.zod.ts` | 1 | 11 |
 | `node-executor.zod.ts` | 4 | 4 |
-| **total** | **26** | **75** |
+| **total** | **23** | **65** |
 
 | Bucket | Sites |
 |---|---|
 | authorable — the ruling's forced scope | 0 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 26 |
+| wire / open — out of forced scope | 23 |
 | no door — no carrier, ADR-0049 territory | 0 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 0 |
@@ -267,11 +264,11 @@ directory rather than per file.
 | Dir | Sites |
 |---|---|
 | `ai/` | 77 |
-| `api/` | 396 |
+| `api/` | 391 |
 | `cloud/` | 83 |
 | `identity/` | 33 |
 | `integration/` | 10 |
 | `kernel/` | 319 |
 | `qa/` | 6 |
 | `shared/` | 20 |
-| `system/` | 366 |
+| `system/` | 362 |

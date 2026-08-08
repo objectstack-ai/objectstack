@@ -64,10 +64,9 @@ export const StartupOptionsSchema = lazySchema(() => z.object({
   context: z.unknown().optional().describe('Custom context object to pass to plugin lifecycle methods'),
 }));
 
-export type StartupOptions = z.infer<typeof StartupOptionsSchema>;
+export type StartupOptions = z.input<typeof StartupOptionsSchema>;
 /** Post-parse shape of {@link StartupOptions} — defaults applied, transforms run (ADR-0122). */
 export type StartupOptionsParsed = z.infer<typeof StartupOptionsSchema>;
-export type StartupOptionsInput = z.input<typeof StartupOptionsSchema>;
 
 // ============================================================================
 // Health Status Schemas
@@ -109,7 +108,7 @@ export const HealthStatusSchema = lazySchema(() => z.object({
   message: z.string().optional().describe('Error message if plugin is unhealthy'),
 }));
 
-export type HealthStatus = z.infer<typeof HealthStatusSchema>;
+export type HealthStatus = z.input<typeof HealthStatusSchema>;
 
 // ============================================================================
 // Startup Result Schemas
@@ -165,7 +164,7 @@ export const PluginStartupResultSchema = lazySchema(() => z.object({
   health: HealthStatusSchema.optional().describe('Health status after startup if health check was enabled'),
 }));
 
-export type PluginStartupResult = z.infer<typeof PluginStartupResultSchema>;
+export type PluginStartupResult = z.input<typeof PluginStartupResultSchema>;
 
 // ============================================================================
 // Startup Orchestration Result Schema
@@ -207,4 +206,4 @@ export const StartupOrchestrationResultSchema = lazySchema(() => z.object({
   rolledBack: z.array(z.string()).optional().describe('Names of plugins that were rolled back'),
 }));
 
-export type StartupOrchestrationResult = z.infer<typeof StartupOrchestrationResultSchema>;
+export type StartupOrchestrationResult = z.input<typeof StartupOrchestrationResultSchema>;

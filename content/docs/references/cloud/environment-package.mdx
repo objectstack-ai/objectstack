@@ -8,22 +8,15 @@ description: Environment Package protocol schemas
 # Environment Package Installation Protocol
 
 Models `sys_package_installation` — the pairing between an Environment and
-
 a specific, immutable `sys_package_version` snapshot.
 
 Key invariants (per ADR-0003):
-
 - One active version per package per environment at any time
-
-(UNIQUE `(environment_id, package_id)`).
-
+  (UNIQUE `(environment_id, package_id)`).
 - **Upgrade** = atomic `UPDATE package_version_id` to a newer version UUID.
-
 - **Rollback** = atomic `UPDATE package_version_id` to an older version UUID.
-
 - Only `status = 'published'` versions may be installed in production
-
-environments (draft/pre-release allowed in dev/sandbox with `allowDraft`).
+  environments (draft/pre-release allowed in dev/sandbox with `allowDraft`).
 
 Stored in the **Control Plane DB** (not in environment data-plane DBs).
 

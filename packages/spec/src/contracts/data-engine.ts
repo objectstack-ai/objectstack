@@ -2,7 +2,7 @@
 
 import {
   BaseEngineOptions,
-  EngineQueryOptions,
+  EngineQueryOptionsParsed,
   DataEngineInsertOptions,
   EngineUpdateOptions,
   EngineDeleteOptions,
@@ -118,7 +118,7 @@ export interface IDataEngine {
    * exactly the erasure this issue is sweeping. `query.context` remains
    * supported; when both are given, `options.context` wins.
    */
-  find(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any[]>;
+  find(objectName: string, query?: EngineQueryOptionsParsed, options?: BaseEngineOptions): Promise<any[]>;
   /**
    * Read the ONE record the query selects, or `null`.
    *
@@ -133,7 +133,7 @@ export interface IDataEngine {
    * No ordering is imposed when the caller supplies none: `findOne` promises
    * *a* matching record, never a position in a sequence (#4363).
    */
-  findOne(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any>;
+  findOne(objectName: string, query?: EngineQueryOptionsParsed, options?: BaseEngineOptions): Promise<any>;
   insert(objectName: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any>;
   update(objectName: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<any>;
   delete(objectName: string, options?: EngineDeleteOptions): Promise<any>;

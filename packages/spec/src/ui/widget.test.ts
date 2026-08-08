@@ -1,14 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { FieldWidgetPropsSchema, type FieldWidgetProps } from './widget.zod';
-import {
-  WidgetManifestSchema,
-  WidgetLifecycleSchema,
-  WidgetEventSchema,
-  WidgetPropertySchema,
-  WidgetSourceSchema,
-  type WidgetManifest,
-} from './widget.zod';
 import { Field } from '../data/field.zod';
 import { measureDoors } from './door-reachability.testkit';
 import { PageSchema } from './page.zod';
@@ -338,69 +330,42 @@ describe('FieldWidgetPropsSchema', () => {
   });
 });
 
-describe('Widget I18n Integration', () => {
-  it('should reject i18n object as widget manifest label', () => {
-    expect(() => WidgetManifestSchema.parse({
-      name: 'i18n_widget',
-      label: { key: 'widgets.date_picker', defaultValue: 'Date Picker' },
-    })).toThrow();
-  });
-  it('should reject i18n as widget description', () => {
-    expect(() => WidgetManifestSchema.parse({
-      name: 'desc_widget',
-      label: 'Test Widget',
-      description: { key: 'widgets.test.desc', defaultValue: 'A test widget' },
-    })).toThrow();
-  });
-});
-
-describe('Widget ARIA Integration', () => {
-  it('should accept widget manifest with ARIA attributes', () => {
-    expect(() => WidgetManifestSchema.parse({
-      name: 'accessible_widget',
-      label: 'Accessible Widget',
-      aria: { ariaLabel: 'Custom date picker widget', role: 'widget' },
-    })).not.toThrow();
-  });
-});
-
-describe('Widget — retired performance (#3896 close-out)', () => {
-  it('REJECTS the retired `performance` and names the live alternative', () => {
-    let message = '';
-    try {
-      WidgetManifestSchema.parse({
-        name: 'perf_widget', label: 'Performance Widget', performance: { lazyLoad: true },
-      });
-    } catch (e) { message = String((e as Error).message); }
-    expect(message).toMatch(/virtualScroll/);
-    expect(message).toMatch(/#3896/);
-  });
-});
-
 // ============================================================================
-// #4001 批 16 — the `no door` verdict for this WHOLE FILE, pinned.
+// #5055 — what is LEFT of this file, and why it is left.
 //
-// This file was scheduled as `authorable (p)` / 9 sites and resolved NEGATIVE.
-// The pin exists because the verdict regresses in one specific way: a later
-// sweep "finishing the ui/ directory" wraps these nine sites in `strictObject`,
-// spends a breaking change, and gates nothing (#4583). Same verdict is recorded
-// in this file's header comment and in the ui/ row of
-// `docs/audits/2026-07-unknown-key-strictness-ledger.md` — the three-places
-// standard, because a row in a table is not where the next person looks.
+// 批 16 measured nine sites here and #5055 disposed of them under ADR-0049:
+// eight were REMOVED (`WidgetManifest`, `WidgetLifecycle`, `WidgetEvent`,
+// `WidgetProperty`, `WidgetSource` with its three union branches) and one —
+// `FieldWidgetProps` — was KEPT.
 //
-// ADR-0049 enforce-or-remove for these shapes is #5055.
+// The keep is the part that needs a pin, because the removal took the other
+// eight with it and a later sweep "finishing widget.zod.ts" is exactly the shape
+// that would take the ninth too. It must not, and the reason is not that this
+// shape is more reachable — it is `unreachable` like the others were:
+//
+//   - It is not authorable metadata at all. It never appeared in
+//     `authorable-surface/` or `json-schema.manifest/` (its `onChange` is a
+//     `z.function()`, so no JSON Schema is emitted), so ADR-0049's question
+//     about a declared-but-unenforced AUTHORABLE key never applied to it.
+//   - It is a React props contract, and a props contract is enforced by `tsc` in
+//     the implementing repo, not by a `.parse()` here. "Zero parse" is its
+//     design.
+//   - It has a live cross-repo reader, added the day before 批 16 measured:
+//     objectui PR #3289 (2026-08-03) renamed `@object-ui/fields`' validation
+//     slot onto the spec's `error` with no alias and made the form renderer
+//     produce it, and `packages/fields/src/__tests__/spec-symbol-batch7.test.ts`
+//     pins `HasKey<SpecFieldWidgetProps, 'error'>` against
+//     `import type { FieldWidgetProps } from '@objectstack/spec/ui'` — a
+//     deliberate tripwire: "the day the spec stops exporting `FieldWidgetProps`,
+//     this file stops compiling and the rename's reason is up for re-triage".
+//
+// So the door measurement below is kept for the surviving shape (an unreachable
+// verdict is still the truth about it, and the controls keep the walker honest),
+// but `unreachable` is NOT the retirement trigger for this one. Re-measure the
+// objectui consumer before touching it.
 // ============================================================================
-describe('#4001 批 16 — widget.zod.ts has no authoring door', () => {
-  const SHAPES: Array<[string, unknown]> = [
-    ['WidgetManifestSchema', WidgetManifestSchema],
-    ['WidgetLifecycleSchema', WidgetLifecycleSchema],
-    ['WidgetEventSchema', WidgetEventSchema],
-    ['WidgetPropertySchema', WidgetPropertySchema],
-    ['WidgetSourceSchema', WidgetSourceSchema],
-    ['FieldWidgetPropsSchema', FieldWidgetPropsSchema],
-  ];
-
-  it('is unreachable from all 24 metadata-type roots and defineStack', () => {
+describe('#5055 — the one surviving shape, and the eight that left', () => {
+  it('FieldWidgetPropsSchema is still unreachable — and that is not a reason to retire it', () => {
     const { verdict, nodeCount, rootCount } = measureDoors();
 
     // Controls FIRST, in the same run. An empty result and a broken walker
@@ -411,45 +376,22 @@ describe('#4001 批 16 — widget.zod.ts has no authoring door', () => {
     expect(verdict(ObjectListViewSchema), 'positive control').toBe('direct');
     expect(verdict(z.object({ a: z.string() })), 'negative control').toBe('unreachable');
 
-    for (const [name, schema] of SHAPES) {
-      expect(verdict(schema), `${name} must have no door`).toBe('unreachable');
-    }
+    expect(verdict(FieldWidgetPropsSchema), 'a props contract has no authoring door, by design').toBe('unreachable');
   });
 
-  it('a synthetic carrier flips every one of them — the verdict is the graph, not the walker', () => {
-    // Without this the assertion above is satisfiable by a walker that reaches
-    // nothing at all. 批 15 shipped exactly that shape of vacuous pin once.
-    const carrier = z.object({
-      manifest: WidgetManifestSchema,
-      lifecycle: WidgetLifecycleSchema,
-      event: WidgetEventSchema,
-      property: WidgetPropertySchema,
-      source: WidgetSourceSchema,
-      props: FieldWidgetPropsSchema,
-    });
+  it('a synthetic carrier flips it — the verdict is the graph, not the walker', () => {
+    const carrier = z.object({ props: FieldWidgetPropsSchema });
     const { verdict } = measureDoors([carrier]);
-    for (const [name, schema] of SHAPES) {
-      expect(verdict(schema), `${name} must become reachable once something carries it`).toBe('direct');
-    }
+    expect(verdict(FieldWidgetPropsSchema)).toBe('direct');
   });
 
-  it('#5056 — the OLD any-one-shared-property bridge would have called this file reachable', () => {
-    // The regression pin for the instrument defect this batch found. zod's
-    // `.describe()` returns a clone sharing the original `_zod.def`, so
-    // `WidgetManifestSchema.name` (a described SnakeCaseIdentifierSchema) and
-    // `.label` (a described I18nLabelSchema) are def-identical to the same
-    // leaves on live schemas. Two keys out of twenty is a coincidence, not a
-    // derivation — assert the OVERLAP is low, so a future edit that reinstates
-    // the any-property bridge cannot pass this file off as live surface.
-    const { cloneOverlap } = measureDoors();
-    expect(cloneOverlap(WidgetManifestSchema)).toBeGreaterThan(0);  // it DOES share leaves…
-    expect(cloneOverlap(WidgetManifestSchema)).toBeLessThan(0.2);   // …but nothing structural
-  });
-
-  it('the shapes still accept their own vocabulary — this pins "open", not "broken"', () => {
-    expect(WidgetLifecycleSchema.safeParse({ onMount: 'x', notAHook: 1 }).success).toBe(true);
-    expect(WidgetEventSchema.safeParse({ name: 'e', notAnEventKey: 1 }).success).toBe(true);
-    expect(WidgetPropertySchema.safeParse({ name: 'p', type: 'string', notAPropKey: 1 }).success).toBe(true);
-    expect(WidgetManifestSchema.safeParse({ name: 'w_one', label: 'W', notAManifestKey: 1 }).success).toBe(true);
+  it('the shape still accepts its own vocabulary — this pins "open", not "broken"', () => {
+    const ok = FieldWidgetPropsSchema.safeParse({
+      value: 'x',
+      onChange: () => {},
+      field: { name: 'f', type: 'text' },
+      notAPropsKey: 1,
+    });
+    expect(ok.success).toBe(true);
   });
 });

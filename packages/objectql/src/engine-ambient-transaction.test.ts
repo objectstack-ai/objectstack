@@ -7,7 +7,7 @@
 // and deadlock on the single-connection SQLite pool.
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ObjectQL } from './engine.js';
+import { ObjectQL, ScopedContext } from './engine.js';
 
 function makeRecordingDriver() {
   const stores = new Map<string, Map<string, any>>();
@@ -131,5 +131,275 @@ describe('engine ambient transaction (ADR-0034)', () => {
     // rollback tracking lives on the driver; assert it was invoked.
     expect(seen.rollback.length).toBe(1);
     expect(seen.commit.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #6168 — the SECOND implementation of the same primitive joins too
+// ---------------------------------------------------------------------------
+//
+// `ScopedContext.transaction` — what a hook or action body reaches as
+// `ctx.api.transaction(fn)` — had no ADR-0067 D2 join branch. Inside an
+// `engine.transaction()` it opened a SECOND driver transaction: a second
+// connection (the deadlock D2 exists to avoid on a single-connection pool),
+// committed independently, and therefore NOT covered by the outer rollback.
+//
+// The driver below is deliberately ROLLBACK-HONEST where the one above is only
+// rollback-RECORDING: writes carrying a handle are staged per handle, `commit`
+// flushes them into the committed store and `rollback` discards them. That is
+// the difference between pinning "rollback was called" and pinning the fact
+// this issue is actually about — whether the inner row is still there
+// afterwards. With the join removed, the inner transaction commits its own
+// stage and the row SURVIVES the outer rollback; the assertion that fails is
+// the one on committed state, in the shape of leftover residue.
+
+function makeRollbackHonestDriver() {
+  const committed = new Map<string, Map<string, any>>();
+  const staged = new Map<unknown, Array<{ object: string; row: any }>>();
+  const seen = {
+    begins: [] as unknown[],
+    commits: [] as unknown[],
+    rollbacks: [] as unknown[],
+    creates: [] as Array<{ object: string; transaction: unknown }>,
+  };
+  let nextId = 0;
+  let nextTrx = 0;
+  const committedFor = (o: string) => {
+    let s = committed.get(o);
+    if (!s) { s = new Map(); committed.set(o, s); }
+    return s;
+  };
+  const driver: any = {
+    name: 'memory',
+    version: '0.0.0',
+    supports: {},
+    async connect() {},
+    async disconnect() {},
+    async checkHealth() { return true; },
+    async execute() { return null; },
+    // Reads see COMMITTED state only. Nothing in these cases reads back its own
+    // uncommitted write, and keeping it simple keeps the durability assertion
+    // unambiguous: what `find` returns at the end is what actually landed.
+    async find(object: string) { return Array.from(committedFor(object).values()); },
+    async findOne(object: string) {
+      for (const r of committedFor(object).values()) return r;
+      return null;
+    },
+    async create(object: string, data: Record<string, unknown>, options: any) {
+      const trx = options?.transaction;
+      seen.creates.push({ object, transaction: trx });
+      nextId += 1;
+      const id = (data.id as string) ?? `r_${nextId}`;
+      const row = { ...data, id };
+      if (trx === undefined) committedFor(object).set(id, row);
+      else staged.set(trx, [...(staged.get(trx) ?? []), { object, row }]);
+      return row;
+    },
+    async update(object: string, id: string, data: Record<string, unknown>) {
+      const s = committedFor(object);
+      const row = { ...s.get(id), ...data, id };
+      s.set(id, row);
+      return row;
+    },
+    async delete(object: string, id: string) { return committedFor(object).delete(id); },
+    async count() { return 0; },
+    async bulkCreate(object: string, rows: Record<string, unknown>[]) {
+      return Promise.all(rows.map((r) => this.create(object, r, undefined)));
+    },
+    async bulkUpdate() { return []; },
+    async bulkDelete() {},
+    async syncSchema() {},
+    async beginTransaction() {
+      nextTrx += 1;
+      const handle = { __trx: nextTrx };
+      seen.begins.push(handle);
+      staged.set(handle, []);
+      return handle;
+    },
+    async commit(trx: unknown) {
+      seen.commits.push(trx);
+      for (const { object, row } of staged.get(trx) ?? []) committedFor(object).set(row.id, row);
+      staged.delete(trx);
+    },
+    async rollback(trx: unknown) {
+      seen.rollbacks.push(trx);
+      staged.delete(trx);
+    },
+  };
+  const committedNames = (object: string) =>
+    Array.from(committedFor(object).values()).map((r) => r.name).sort();
+  return { driver, seen, committedNames };
+}
+
+describe('ScopedContext.transaction joins the ambient transaction (ADR-0067 D2, #6168)', () => {
+  let engine: ObjectQL;
+  let seen: ReturnType<typeof makeRollbackHonestDriver>['seen'];
+  let committedNames: ReturnType<typeof makeRollbackHonestDriver>['committedNames'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeRollbackHonestDriver();
+    seen = d.seen;
+    committedNames = d.committedNames;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+  });
+
+  /**
+   * A hook body's `ctx.api.transaction(fn)`, registered on `thing` and fired by
+   * a write made inside `engine.transaction()`. This is the real reachability
+   * path — `HookContext.api` IS a `ScopedContext` (`ObjectQL.buildHookApi`) —
+   * not a `createContext` stand-in for one.
+   */
+  function hookThatOpensATransaction(
+    body: (trxCtx: any, info: any) => Promise<void>,
+    onlyFor = 'outer',
+  ) {
+    (engine as any).registerHook(
+      'afterInsert',
+      async (ctx: any) => {
+        // The inner write fires this hook again; without the guard the join
+        // would be measured against a recursion, not against the outer call.
+        if (ctx.result?.name !== onlyFor) return;
+        await ctx.api.transaction(body);
+      },
+      { object: 'thing' },
+    );
+  }
+
+  it('joins the outer transaction — same handle, owned: false, no second begin', async () => {
+    let innerHandle: unknown;
+    let innerOwned: boolean | undefined;
+    let outerHandle: unknown;
+
+    hookThatOpensATransaction(async (trxCtx: any, info: any) => {
+      innerHandle = trxCtx.transactionHandle;
+      innerOwned = info.owned;
+    });
+
+    await engine.transaction(async (ctx: any) => {
+      outerHandle = ctx.transaction;
+      await engine.insert('thing', { name: 'outer' });
+    });
+
+    expect(innerOwned).toBe(false);
+    expect(innerHandle).toBe(outerHandle);
+    // The whole point of D2: ONE begin, so ONE connection.
+    expect(seen.begins).toHaveLength(1);
+    expect(seen.commits).toHaveLength(1);
+  });
+
+  it('the joined write is UNDONE by the outer rollback — the durability pin', async () => {
+    hookThatOpensATransaction(async (trxCtx: any) => {
+      await trxCtx.object('thing').insert({ name: 'inner' });
+    });
+
+    await expect(
+      engine.transaction(async () => {
+        await engine.insert('thing', { name: 'outer' });
+        throw new Error('outer boom');
+      }),
+    ).rejects.toThrow('outer boom');
+
+    // Before #6168 the inner transaction committed itself, so 'inner' was still
+    // here after the outer rollback: a write the caller was told had been undone
+    // and had not been. Nothing failed, nothing was logged.
+    expect(committedNames('thing')).toEqual([]);
+    expect(seen.rollbacks).toHaveLength(1);
+    expect(seen.commits).toHaveLength(0);
+    // Both writes rode the ONE handle the outer call owns.
+    expect(seen.creates).toHaveLength(2);
+    expect(seen.creates[1].transaction).toBe(seen.creates[0].transaction);
+  });
+
+  it('the joined write commits with the outer one when the outer succeeds', async () => {
+    hookThatOpensATransaction(async (trxCtx: any) => {
+      await trxCtx.object('thing').insert({ name: 'inner' });
+    });
+
+    await engine.transaction(async () => {
+      await engine.insert('thing', { name: 'outer' });
+    });
+
+    expect(committedNames('thing')).toEqual(['inner', 'outer']);
+    expect(seen.begins).toHaveLength(1);
+  });
+
+  it('with NO ambient transaction it still OPENS one — owned: true, unchanged', async () => {
+    const scoped = (engine as any).createContext({ userId: 'u1' }) as ScopedContext;
+    let owned: boolean | undefined;
+
+    await scoped.transaction(async (trxCtx: any, info: any) => {
+      owned = info.owned;
+      await trxCtx.object('thing').insert({ name: 'standalone' });
+    });
+
+    expect(owned).toBe(true);
+    expect(seen.begins).toHaveLength(1);
+    expect(seen.commits).toHaveLength(1);
+    expect(committedNames('thing')).toEqual(['standalone']);
+  });
+
+  /**
+   * The OTHER half of ADR-0067 D2's rationale: the second `beginTransaction`
+   * asks the pool for a second connection, and on a single-connection pool
+   * (the knex/SQLite one D2 names) there is no second connection to give.
+   *
+   * The real pool BLOCKS there — that is the deadlock — and a test that
+   * modelled the block faithfully would fail only by hitting vitest's timeout:
+   * slow, and flaky under parallel load. So this double models a pool of size 1
+   * WITH an acquire timeout, which refuses the second checkout instead of
+   * queueing for it. The refusal is a stand-in for the hang; what is measured
+   * honestly either way is the thing that causes both — whether a second
+   * connection is asked for at all.
+   */
+  it('never asks for a second connection — a single-connection pool survives the nested call', async () => {
+    let checkedOut = false;
+    const checkouts: number[] = [];
+    const d = makeRollbackHonestDriver();
+    d.driver.beginTransaction = async () => {
+      if (checkedOut) {
+        // Where a real single-connection pool would wait forever.
+        throw new Error('pool exhausted: no connection available (max=1)');
+      }
+      checkedOut = true;
+      checkouts.push(checkouts.length + 1);
+      return { __trx: 'only' };
+    };
+    d.driver.commit = async () => { checkedOut = false; };
+    d.driver.rollback = async () => { checkedOut = false; };
+
+    const oneConn = new ObjectQL();
+    oneConn.registerDriver(d.driver, true);
+    await oneConn.init();
+    oneConn.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+    (oneConn as any).registerHook(
+      'afterInsert',
+      async (ctx: any) => {
+        if (ctx.result?.name !== 'outer') return;
+        await ctx.api.transaction(async () => { /* joins — asks for nothing */ });
+      },
+      { object: 'thing' },
+    );
+
+    await expect(
+      oneConn.transaction(async () => { await oneConn.insert('thing', { name: 'outer' }); }),
+    ).resolves.toBeUndefined();
+
+    expect(checkouts).toHaveLength(1);
+  });
+
+  it('does not join a transaction that has already closed — the store does not leak', async () => {
+    await engine.transaction(async () => {
+      await engine.insert('thing', { name: 'covered' });
+    });
+
+    const scoped = (engine as any).createContext({ userId: 'u1' }) as ScopedContext;
+    let owned: boolean | undefined;
+    await scoped.transaction(async (_ctx: any, info: any) => { owned = info.owned; });
+
+    expect(owned).toBe(true);
+    expect(seen.begins).toHaveLength(2); // the outer one, then a fresh one
   });
 });

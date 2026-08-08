@@ -26,7 +26,7 @@ export const MetricType = z.enum([
   'summary',    // Observations with quantiles
 ]).describe('Metric type');
 
-export type MetricType = z.infer<typeof MetricType>;
+export type MetricType = z.input<typeof MetricType>;
 
 /**
  * Metric Unit Enum
@@ -66,7 +66,7 @@ export const MetricUnit = z.enum([
   'custom',
 ]).describe('Metric unit');
 
-export type MetricUnit = z.infer<typeof MetricUnit>;
+export type MetricUnit = z.input<typeof MetricUnit>;
 
 /**
  * Metric Aggregation Type
@@ -87,7 +87,7 @@ export const MetricAggregationType = z.enum([
   'stddev',    // Standard deviation
 ]).describe('Metric aggregation type');
 
-export type MetricAggregationType = z.infer<typeof MetricAggregationType>;
+export type MetricAggregationType = z.input<typeof MetricAggregationType>;
 
 /**
  * Histogram Bucket Configuration
@@ -124,7 +124,7 @@ export const HistogramBucketConfigSchema = lazySchema(() => z.object({
   }).optional(),
 }).describe('Histogram bucket configuration'));
 
-export type HistogramBucketConfig = z.infer<typeof HistogramBucketConfigSchema>;
+export type HistogramBucketConfig = z.input<typeof HistogramBucketConfigSchema>;
 
 /**
  * Metric Labels Schema
@@ -132,7 +132,7 @@ export type HistogramBucketConfig = z.infer<typeof HistogramBucketConfigSchema>;
  */
 export const MetricLabelsSchema = lazySchema(() => z.record(z.string(), z.string()).describe('Metric labels'));
 
-export type MetricLabels = z.infer<typeof MetricLabelsSchema>;
+export type MetricLabels = z.input<typeof MetricLabelsSchema>;
 
 /**
  * Metric Definition Schema
@@ -201,7 +201,7 @@ export const MetricDefinitionSchema = lazySchema(() => z.object({
   enabled: z.boolean().optional().default(true),
 }).describe('Metric definition'));
 
-export type MetricDefinition = z.infer<typeof MetricDefinitionSchema>;
+export type MetricDefinition = z.input<typeof MetricDefinitionSchema>;
 /** Post-parse shape of {@link MetricDefinition} — defaults applied, transforms run (ADR-0122). */
 export type MetricDefinitionParsed = z.infer<typeof MetricDefinitionSchema>;
 
@@ -260,7 +260,7 @@ export const MetricDataPointSchema = lazySchema(() => z.object({
   }).optional(),
 }).describe('Metric data point'));
 
-export type MetricDataPoint = z.infer<typeof MetricDataPointSchema>;
+export type MetricDataPoint = z.input<typeof MetricDataPointSchema>;
 
 /**
  * Time Series Data Point Schema
@@ -282,7 +282,7 @@ export const TimeSeriesDataPointSchema = lazySchema(() => z.object({
   labels: z.record(z.string(), z.string()).optional().describe('Labels'),
 }).describe('Time series data point'));
 
-export type TimeSeriesDataPoint = z.infer<typeof TimeSeriesDataPointSchema>;
+export type TimeSeriesDataPoint = z.input<typeof TimeSeriesDataPointSchema>;
 
 /**
  * Time Series Schema
@@ -314,7 +314,7 @@ export const TimeSeriesSchema = lazySchema(() => z.object({
   endTime: z.string().datetime().optional().describe('End time'),
 }).describe('Time series'));
 
-export type TimeSeries = z.infer<typeof TimeSeriesSchema>;
+export type TimeSeries = z.input<typeof TimeSeriesSchema>;
 
 /**
  * Metric Aggregation Configuration
@@ -356,7 +356,7 @@ export const MetricAggregationConfigSchema = lazySchema(() => z.object({
   filters: z.record(z.string(), z.unknown()).optional().describe('Filter criteria'),
 }).describe('Metric aggregation configuration'));
 
-export type MetricAggregationConfig = z.infer<typeof MetricAggregationConfigSchema>;
+export type MetricAggregationConfig = z.input<typeof MetricAggregationConfigSchema>;
 /** Post-parse shape of {@link MetricAggregationConfig} — defaults applied, transforms run (ADR-0122). */
 export type MetricAggregationConfigParsed = z.infer<typeof MetricAggregationConfigSchema>;
 
@@ -431,7 +431,7 @@ export const ServiceLevelIndicatorSchema = lazySchema(() => z.object({
   enabled: z.boolean().optional().default(true),
 }).describe('Service Level Indicator'));
 
-export type ServiceLevelIndicator = z.infer<typeof ServiceLevelIndicatorSchema>;
+export type ServiceLevelIndicator = z.input<typeof ServiceLevelIndicatorSchema>;
 /** Post-parse shape of {@link ServiceLevelIndicator} — defaults applied, transforms run (ADR-0122). */
 export type ServiceLevelIndicatorParsed = z.infer<typeof ServiceLevelIndicatorSchema>;
 
@@ -545,7 +545,7 @@ export const ServiceLevelObjectiveSchema = lazySchema(() => z.object({
   enabled: z.boolean().optional().default(true),
 }).describe('Service Level Objective'));
 
-export type ServiceLevelObjective = z.infer<typeof ServiceLevelObjectiveSchema>;
+export type ServiceLevelObjective = z.input<typeof ServiceLevelObjectiveSchema>;
 /** Post-parse shape of {@link ServiceLevelObjective} — defaults applied, transforms run (ADR-0122). */
 export type ServiceLevelObjectiveParsed = z.infer<typeof ServiceLevelObjectiveSchema>;
 
@@ -605,7 +605,7 @@ export const MetricExportConfigSchema = lazySchema(() => z.object({
   config: z.record(z.string(), z.unknown()).optional().describe('Additional configuration'),
 }).describe('Metric export configuration'));
 
-export type MetricExportConfig = z.infer<typeof MetricExportConfigSchema>;
+export type MetricExportConfig = z.input<typeof MetricExportConfigSchema>;
 /** Post-parse shape of {@link MetricExportConfig} — defaults applied, transforms run (ADR-0122). */
 export type MetricExportConfigParsed = z.infer<typeof MetricExportConfigSchema>;
 
@@ -707,6 +707,6 @@ export const MetricsConfigSchema = lazySchema(() => z.object({
   }).optional(),
 }).describe('Metrics configuration'));
 
-export type MetricsConfig = z.infer<typeof MetricsConfigSchema>;
+export type MetricsConfig = z.input<typeof MetricsConfigSchema>;
 /** Post-parse shape of {@link MetricsConfig} — defaults applied, transforms run (ADR-0122). */
 export type MetricsConfigParsed = z.infer<typeof MetricsConfigSchema>;

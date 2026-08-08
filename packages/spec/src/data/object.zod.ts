@@ -21,7 +21,7 @@ export const ApiMethod = z.enum([
   'create', 'update', 'delete', // Write
   'bulk',                       // Batch operations
 ]);
-export type ApiMethod = z.infer<typeof ApiMethod>;
+export type ApiMethod = z.input<typeof ApiMethod>;
 
 /**
  * The eight RETIRED legacy `apiMethods` values (#3543, P2 of #3391). Each is
@@ -421,6 +421,24 @@ const TENANCY_RETIRED_KEY_GUIDANCE: Record<string, string> = {
  * `strategy`/`crossTenantAccess` or a typo — is a loud, *fixable* parse error
  * instead of a silent strip (#1535), and a retired key's error carries its
  * upgrade prescription. Every other issue code defers to zod's default.
+ *
+ * ## Message order: the fix comes before the explainer (#5955 / #6416)
+ *
+ * ```text
+ * Unrecognized key(s) on `tenancy`: `k1`.       ← which key is wrong
+ *   • {per-key tombstone / "not a `tenancy` key"} ← the fix
+ * The two supported tenancy modes are: …        ← the standing explainer
+ * ```
+ *
+ * Same emission order the shared `strictUnknownKeyError` template took in
+ * #5955 — bullets first, the surface-level sentence appended to the last one.
+ * A hand-written `$ZodErrorMap` is reachable by neither that fix nor #5593's
+ * `strictObject` migration, so #6416 applies the ruling here directly. The
+ * two-modes explainer used to sit between the key statement and the bullets,
+ * which on the single-line renders several consumers use (`os validate`'s
+ * `• where: message`, CI logs) buried each key's actual prescription behind
+ * ~160 characters of standing background. Nothing is dropped: the explainer is
+ * still emitted verbatim, just last.
  */
 const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code !== 'unrecognized_keys') return undefined;
@@ -429,11 +447,11 @@ const strictTenancyError: z.core.$ZodErrorMap = (issue) => {
     TENANCY_RETIRED_KEY_GUIDANCE[key] ?? `\`${key}\` is not a \`tenancy\` key.`,
   );
   return (
-    `Unrecognized key(s) on \`tenancy\`: ${keys.map((k) => `\`${k}\``).join(', ')}. ` +
-    'The two supported tenancy modes are: database-per-tenant = environment-level ' +
+    `Unrecognized key(s) on \`tenancy\`: ${keys.map((k) => `\`${k}\``).join(', ')}.\n` +
+    lines.map((l) => `  • ${l}`).join('\n') +
+    ' The two supported tenancy modes are: database-per-tenant = environment-level ' +
     'deployment (no object config); row-level isolation = `tenancy.enabled` + ' +
-    '`tenancy.tenantField`.\n' +
-    lines.map((l) => `  • ${l}`).join('\n')
+    '`tenancy.tenantField`.'
   );
 };
 
@@ -574,8 +592,8 @@ export const ObjectRequiredPermissionsSchema = z.union([
   z.array(z.string()),
   PerOperationRequiredPermissionsSchema,
 ]);
-export type PerOperationRequiredPermissions = z.infer<typeof PerOperationRequiredPermissionsSchema>;
-export type ObjectRequiredPermissions = z.infer<typeof ObjectRequiredPermissionsSchema>;
+export type PerOperationRequiredPermissions = z.input<typeof PerOperationRequiredPermissionsSchema>;
+export type ObjectRequiredPermissions = z.input<typeof ObjectRequiredPermissionsSchema>;
 
 /**
  * Data Lifecycle (ADR-0057)
@@ -777,7 +795,6 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   }
 }));
 
-
 /**
  * Object Field Group Schema — MVP (data-layer protocol)
  * 
@@ -900,10 +917,9 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   collapsed: z.boolean().optional().describe("[DEPRECATED → collapse] Boolean pair with `collapsible`; use the `collapse` enum."),
 }));
 
-export type ObjectFieldGroup = z.infer<typeof ObjectFieldGroupSchema>;
+export type ObjectFieldGroup = z.input<typeof ObjectFieldGroupSchema>;
 /** Post-parse shape of {@link ObjectFieldGroup} — defaults applied, transforms run (ADR-0122). */
 export type ObjectFieldGroupParsed = z.infer<typeof ObjectFieldGroupSchema>;
-export type ObjectFieldGroupInput = z.input<typeof ObjectFieldGroupSchema>;
 
 /**
  * Base Object Schema Definition
@@ -988,7 +1004,7 @@ export const ObjectExternalBindingSchema = strictObject({
     .describe('Remote columns to skip during validation (dev convenience).'),
 }).describe('External datasource binding (ADR-0015)');
 
-export type ObjectExternalBinding = z.infer<typeof ObjectExternalBindingSchema>;
+export type ObjectExternalBinding = z.input<typeof ObjectExternalBindingSchema>;
 /** Post-parse shape of {@link ObjectExternalBinding} — defaults applied, transforms run (ADR-0122). */
 export type ObjectExternalBindingParsed = z.infer<typeof ObjectExternalBindingSchema>;
 
@@ -1025,10 +1041,9 @@ export const RowCrudActionOverrideSchema = z.object({
     'Per-record CEL predicate; true → render the row button disabled for that record. Fail-soft.',
   ),
 }).strict().describe('Boolean-or-predicates override for a built-in row CRUD affordance.');
-export type RowCrudActionOverride = z.infer<typeof RowCrudActionOverrideSchema>;
+export type RowCrudActionOverride = z.input<typeof RowCrudActionOverrideSchema>;
 /** Post-parse shape of {@link RowCrudActionOverride} — defaults applied, transforms run (ADR-0122). */
 export type RowCrudActionOverrideParsed = z.infer<typeof RowCrudActionOverrideSchema>;
-export type RowCrudActionOverrideInput = z.input<typeof RowCrudActionOverrideSchema>;
 
 /**
  * Unknown-key error for {@link ObjectSchemaBase}, built on FIRST USE.
@@ -1334,6 +1349,28 @@ const ObjectSchemaBase = z.object({
    *     business objects (auto-stamped to the creating user on insert;
    *     reassignable). Governed by the object-level `ownership` property
    *     (`'user' | 'org' | 'none'`), NOT by `owner` below.
+   *   - `owning_business_unit_id` — `lookup → sys_business_unit`, the
+   *     record-level ORG-UNIT ownership tier between `owner_id` (a person) and
+   *     `organization_id` (the tenant wall). [ADR-0117 D1, landed in #5677]
+   *     Governed by the same `ownership` property, on the same objects
+   *     `owner_id` is: injected under `'user'` and when `ownership` is omitted,
+   *     withheld under `'org' | 'none'`. Shaped after `organization_id`
+   *     (`readonly` + `hidden` + `system`), not after `owner_id` — it is a
+   *     server-stamped scope anchor. Provisioned but **inert**: the stamping
+   *     middleware (ADR-0117 D2/D4) has not landed, so nothing writes a value
+   *     yet.
+   *
+   *     ⚠️ D1 also defines a fourth tier, `ownership: 'business_unit'` (owning
+   *     unit, no owning person), which `applySystemFields` already implements —
+   *     but the `ownership` enum below is still `'user' | 'org' | 'none'`, so
+   *     that value is still deliberately REJECTED by this schema (the enum
+   *     member is #5678). The column being injected does NOT mean the tier is
+   *     authorable.
+   *
+   * The authority on which of these an object actually carries is
+   * `resolveInjectedSystemColumns` (`@objectstack/spec/data`): `applySystemFields`
+   * consumes it, and author-time lint reads the same derivation rather than
+   * re-deriving the conditions from this prose.
    *
    * Author-declared fields with the same name always win over injection
    * (no overwrite). Objects with `managedBy` set (and the `sys_*` namespace)
@@ -1369,12 +1406,15 @@ const ObjectSchemaBase = z.object({
           // here. `ownership` is the real, enforced lever.
           owner:
             '`owner` is not a `systemFields` key — `owner_id` injection is governed by the ' +
-            "object-level `ownership` property (`ownership: 'none'` skips it; " +
-            "`'user'`/`'org'` choose the principal). `systemFields` controls only `tenant` " +
-            '(organization_id) and `audit` (created_at/created_by/updated_at/updated_by).',
+            "object-level `ownership` property: `'user'` (or omitted) injects it, while " +
+            "`'org'` and `'none'` BOTH skip it and no `owner_id` is injected at all — " +
+            "`'org'` for an org-wide catalog (Dataverse-style), `'none'` for a junction/link " +
+            'table. `systemFields` controls only `tenant` (organization_id) and `audit` ' +
+            '(created_at/created_by/updated_at/updated_by).',
           ownership:
             '`ownership` is a TOP-LEVEL object key, not a `systemFields` key — write it ' +
-            'beside `systemFields`. It, not this block, decides whether `owner_id` is injected.',
+            'beside `systemFields`. It, not this block, decides whether the ownership ' +
+            'anchors (`owner_id` and `owning_business_unit_id`) are injected.',
         },
       }, {
         tenant: z.boolean().optional().describe('Inject the organization_id column. Default true (the column is always provisioned; the multi-tenant flag governs only its index).'),
@@ -1397,7 +1437,6 @@ const ObjectSchemaBase = z.object({
    */
   external: ObjectExternalBindingSchema.optional()
     .describe('Remote table binding for federated (external) objects.'),
-
 
   /**
    * Data Model
@@ -2175,22 +2214,21 @@ export const ObjectSchema = lazySchema(() => {
   });
 });
 
-export type ServiceObject = z.infer<typeof ObjectSchemaBase>;
+export type ServiceObject = z.input<typeof ObjectSchemaBase>;
 /** Post-parse shape of {@link ServiceObject} — defaults applied, transforms run (ADR-0122). */
 export type ServiceObjectParsed = z.infer<typeof ObjectSchemaBase>;
-export type ServiceObjectInput = z.input<typeof ObjectSchemaBase>;
-export type ObjectCapabilities = z.infer<typeof ObjectCapabilities>;
+export type ObjectCapabilities = z.input<typeof ObjectCapabilities>;
 /** Post-parse shape of {@link ObjectCapabilities} — defaults applied, transforms run (ADR-0122). */
 export type ObjectCapabilitiesParsed = z.infer<typeof ObjectCapabilities>;
-export type ObjectIndex = z.infer<typeof IndexSchema>;
+export type ObjectIndex = z.input<typeof IndexSchema>;
 /** Post-parse shape of {@link ObjectIndex} — defaults applied, transforms run (ADR-0122). */
 export type ObjectIndexParsed = z.infer<typeof IndexSchema>;
-export type TenancyConfig = z.infer<typeof TenancyConfigSchema>;
-export type ObjectAccessConfig = z.infer<typeof ObjectAccessConfigSchema>;
+export type TenancyConfig = z.input<typeof TenancyConfigSchema>;
+export type ObjectAccessConfig = z.input<typeof ObjectAccessConfigSchema>;
 /** Post-parse shape of {@link ObjectAccessConfig} — defaults applied, transforms run (ADR-0122). */
 export type ObjectAccessConfigParsed = z.infer<typeof ObjectAccessConfigSchema>;
-export type LifecycleClass = z.infer<typeof LifecycleClassSchema>;
-export type Lifecycle = z.infer<typeof LifecycleSchema>;
+export type LifecycleClass = z.input<typeof LifecycleClassSchema>;
+export type Lifecycle = z.input<typeof LifecycleSchema>;
 
 /**
  * Resolved CRUD affordance matrix for an object — what generic
@@ -2356,7 +2394,7 @@ function normalizeRowCrudOverride(
  *   object name = database table name, globally unique, no namespace prefix.
  */
 export const ObjectOwnershipEnum = z.enum(['own', 'extend']);
-export type ObjectOwnership = z.infer<typeof ObjectOwnershipEnum>;
+export type ObjectOwnership = z.input<typeof ObjectOwnershipEnum>;
 
 /**
  * Object Extension Entry — used in `objectExtensions` array.
@@ -2432,17 +2470,15 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   priority: z.number().int().min(0).max(999).default(200).describe('Merge priority (higher = applied later)'),
 }));
 
-export type ObjectExtension = z.infer<typeof ObjectExtensionSchema>;
+export type ObjectExtension = z.input<typeof ObjectExtensionSchema>;
 /** Post-parse shape of {@link ObjectExtension} — defaults applied, transforms run (ADR-0122). */
 export type ObjectExtensionParsed = z.infer<typeof ObjectExtensionSchema>;
-/** Authoring input for {@link ObjectExtension} — defaulted fields are optional. */
-export type ObjectExtensionInput = z.input<typeof ObjectExtensionSchema>;
 
 /**
  * Type-safe factory for an extension to an object owned by another package. Validates at authoring time via
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: ObjectExtension` literal.
  */
-export function defineObjectExtension(config: z.input<typeof ObjectExtensionSchema>): ObjectExtension {
+export function defineObjectExtension(config: z.input<typeof ObjectExtensionSchema>): ObjectExtensionParsed {
   return ObjectExtensionSchema.parse(config);
 }

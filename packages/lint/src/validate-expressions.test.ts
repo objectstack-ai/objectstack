@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, it, expect } from 'vitest';
 import { ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
-import { FieldSchema, ObjectSchema } from '@objectstack/spec/data';
+import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { SharingRuleSchema } from '@objectstack/spec/security';
 
 import { validateStackExpressions } from './validate-expressions.js';
@@ -539,12 +539,300 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         })).toHaveLength(0);
       });
 
-      it('is scoped to `readonlyWhen` — `requiredWhen`/`visibleWhen` verdicts are unchanged', () => {
+      // #4977 — this pin used to read "scoped to `readonlyWhen`, `requiredWhen`
+      // verdicts unchanged" over a fixture declaring BOTH. It pinned exactly the
+      // limb that issue removes, so it is replaced rather than re-spelled: the
+      // `requiredWhen` half moved to its own cases below, and what survives here
+      // is the genuinely-unchanged slot, `visibleWhen`, on a fixture that
+      // declares only that.
+      it('is still scoped OUT of `visibleWhen` — that verdict is unchanged', () => {
         expect(parentScopeIssues({
           name: 'orphan_line',
           fields: {
-            qty: { type: 'number', requiredWhen: "parent.status == 'paid'", visibleWhen: "parent.status == 'paid'" },
+            qty: { type: 'number', visibleWhen: "parent.status == 'paid'" },
           },
+        })).toHaveLength(0);
+      });
+    });
+
+    // #4977 — the same gate, extended to the slot the same issue gave a server
+    // `parent` binding. `requiredWhen` stays FAIL-OPEN at runtime, so this build
+    // gate is the only thing that stops an unbindable declaration from shipping
+    // and enforcing nothing forever — which is why the message must name that
+    // consequence and not `readonlyWhen`'s opposite one.
+    describe('parent-scoped `requiredWhen` needs a resolvable master (#4977)', () => {
+      const parentScopeIssues = (obj: Record<string, unknown>) =>
+        validateStackExpressions({ objects: [obj] }).filter((i) => /reads `parent`/.test(i.message));
+
+      it('rejects it on an object that declares NO master_detail relationship', () => {
+        const issues = parentScopeIssues({
+          name: 'orphan_line',
+          fields: {
+            inv: { type: 'lookup', reference: 'inv' }, // a lookup is not a master
+            description: { type: 'text', requiredWhen: "parent.status == 'sent'" },
+          },
+        });
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.severity).toBe('error');
+        expect(issues[0]!.where).toMatch(/field 'description' requiredWhen/);
+        expect(issues[0]!.message).toMatch(/declares no `master_detail` relationships/);
+        // The CONSEQUENCE clause is what separates this from its `readonlyWhen`
+        // twin: fail-open there, fail-closed here, opposite fixes.
+        expect(issues[0]!.message).toMatch(/the requirement would never be enforced/);
+        expect(issues[0]!.message).not.toMatch(/locked on every write/);
+      });
+
+      it('rejects it when TWO masters leave "the parent" unstated', () => {
+        const issues = parentScopeIssues({
+          name: 'junction',
+          fields: {
+            left: { type: 'master_detail', reference: 'a' },
+            right: { type: 'master_detail', reference: 'b' },
+            description: { type: 'text', requiredWhen: "parent.status == 'sent'" },
+          },
+        });
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.message).toMatch(/declares 2 `master_detail` relationships/);
+      });
+
+      it('ACCEPTS it on a real detail object — the showcase shape must stay lintable', () => {
+        expect(parentScopeIssues({
+          name: 'showcase_invoice_line',
+          fields: {
+            invoice: { type: 'master_detail', reference: 'showcase_invoice' },
+            description: { type: 'text', requiredWhen: "parent.status == 'sent'" },
+          },
+        })).toHaveLength(0);
+      });
+
+      it('does not fire on a field named `parent_id` or a `parent` string literal', () => {
+        expect(parentScopeIssues({
+          name: 'node',
+          fields: {
+            parent_id: { type: 'text' },
+            kind: { type: 'text' },
+            a: { type: 'text', requiredWhen: "record.parent_id != ''" },
+            b: { type: 'text', requiredWhen: "record.kind == 'parent'" },
+          },
+        })).toHaveLength(0);
+      });
+
+      it('reports BOTH slots when one field declares two unbindable predicates', () => {
+        const issues = parentScopeIssues({
+          name: 'orphan_line',
+          fields: {
+            qty: {
+              type: 'number',
+              readonlyWhen: "parent.status == 'paid'",
+              requiredWhen: "parent.status == 'sent'",
+            },
+          },
+        });
+        expect(issues).toHaveLength(2);
+        expect(issues.map((i) => i.where.replace(/.* field 'qty' /, '')).sort())
+          .toEqual(['readonlyWhen', 'requiredWhen']);
+      });
+    });
+
+    /**
+     * ── `current_user` is a per-SURFACE verdict, not a missing root (#6290) ───
+     *
+     * `@objectstack/formula`'s `SCOPE_ROOTS` now declares `current_user`
+     * (ADR-0068 D1's canonical spelling, which `buildScope` really mounts and
+     * which `introspectScope` already advertised). That deliberately removes
+     * the field-level rejection's OLD cause — an omission in a global baseline,
+     * doing a per-surface job by accident, and prescribing
+     * "Write `record.current_user`" while it did so: a shape that binds on no
+     * layer, so an author who obeyed the message ended up worse off.
+     *
+     * The verdict itself is not removed. It moves to the surface that owns it,
+     * with the prescriptions that exist — and the two surfaces now disagree on
+     * purpose, because their evaluators disagree (#6146):
+     *
+     *   field level  → `evalFieldPredicate`: `record` + `previous` + `parent`.
+     *                  `current_user` unbound ⇒ fault ⇒ fail-OPEN ⇒ rejected here.
+     *   option level → `resolveCascadingOptions` against the host predicate
+     *                  scope, which binds `current_user` ⇒ accepted.
+     */
+    describe('`current_user` at field level vs option level (#6290)', () => {
+      const gated = "'admin' in current_user.positions";
+
+      it('still REJECTS a field-level `visibleWhen` that reads `current_user`', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { amount: { type: 'number', visibleWhen: gated } },
+          }],
+        });
+        const hit = issues.filter((i) => i.where.includes("field 'amount' visibleWhen"));
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.severity).toBe('error');
+      });
+
+      /**
+       * The prescription is the half this issue was filed for. Asserted as a
+       * NEGATIVE plus three positives, because "the message changed" is not the
+       * property that matters — "the message names a shape that actually binds"
+       * is. `record.current_user` is the shape that binds nowhere.
+       */
+      it('prescribes surfaces that exist — and never `record.current_user`', () => {
+        const [issue] = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { amount: { type: 'number', visibleWhen: gated } },
+          }],
+        }).filter((i) => i.where.includes('visibleWhen'));
+        expect(issue!.message).not.toContain('record.current_user');
+        // 1. what actually goes wrong, in the direction it goes wrong
+        expect(issue!.message).toMatch(/falls back to VISIBLE/);
+        // 2. the one `*When` surface that binds `current_user`
+        expect(issue!.message).toMatch(/option's own `visibleWhen`/);
+        // 3. the surface that hides a whole field by role — FLS on a permission
+        //    set (`PermissionSetSchema.fields`, `permission.zod.ts:455`)
+        expect(issue!.message).toMatch(/readable: false/);
+      });
+
+      it('rejects it on `readonlyWhen` / `requiredWhen` too — same evaluator, same unbound root', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: {
+              amount: { type: 'number', readonlyWhen: gated },
+              note: { type: 'text', requiredWhen: gated },
+            },
+          }],
+        });
+        expect(issues.filter((i) => /current_user/.test(i.message)).map((i) => i.where.replace(/.*· /, '')).sort())
+          .toEqual(["field 'amount' readonlyWhen", "field 'note' requiredWhen"]);
+      });
+
+      /**
+       * The pin for the legal usage. Shape copied from
+       * `examples/app-showcase/src/data/objects/cascading-select.object.ts:85`,
+       * the role-gated option that has been shipping since ADR-0068 and had
+       * never met this rule — because until #6290 nothing walked options at all.
+       */
+      it('ACCEPTS the showcase role-gated OPTION — per-option binds `current_user`', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_cascading_select',
+            fields: {
+              tier: {
+                type: 'select',
+                options: [
+                  { label: 'Standard', value: 'standard', default: true },
+                  { label: 'Restricted (admin only)', value: 'restricted', visibleWhen: gated },
+                ],
+              },
+            },
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+
+      it('accepts the cascading (record-scoped) options from the same showcase field', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_cascading_select',
+            fields: {
+              country: { type: 'select', options: [{ label: 'China', value: 'cn' }] },
+              province: {
+                type: 'select',
+                dependsOn: ['country'],
+                options: [
+                  { label: 'Zhejiang', value: 'zj', visibleWhen: "record.country == 'cn'" },
+                  { label: 'California', value: 'ca', visibleWhen: "record.country == 'us'" },
+                ],
+              },
+            },
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+    });
+
+    /**
+     * ── The option-level traversal itself (#6290 half 3) ────────────────────
+     *
+     * Accepting `current_user` at the option level cannot be the only evidence
+     * the walk runs — an absent walk accepts everything. These are the findings
+     * the walk PRODUCES; delete the loop and every one of them disappears.
+     */
+    describe('per-option `visibleWhen` is walked at all (#6290)', () => {
+      const optionIssues = (visibleWhen: unknown) => validateStackExpressions({
+        objects: [{
+          name: 'shop_item',
+          fields: {
+            country: { type: 'text' },
+            tier: {
+              type: 'select',
+              options: [{ label: 'Restricted', value: 'restricted', visibleWhen }],
+            },
+          },
+        }],
+      });
+
+      it('flags a BARE field reference in an option predicate', () => {
+        const issues = optionIssues("country == 'cn'");
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.where).toBe("object 'shop_item' · field 'tier' option 'restricted' visibleWhen");
+        expect(issues[0]!.message).toMatch(/bare reference `country`/);
+      });
+
+      it('flags a reference to a field the object does not declare', () => {
+        const issues = optionIssues("record.no_such_field == 'cn'");
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.message).toMatch(/no_such_field/);
+      });
+
+      it('flags a syntactically broken option predicate', () => {
+        const issues = optionIssues("record.country == 'cn'  &&&");
+        expect(issues).toHaveLength(1);
+        expect(issues[0]!.severity).toBe('error');
+      });
+
+      it('flags a template-dialect option predicate (wrong dialect for a bare-CEL slot)', () => {
+        const issues = optionIssues('{{ record.country }}');
+        expect(issues).toHaveLength(1);
+      });
+
+      /**
+       * The finding is located by the option's `value`, not by its index, so an
+       * author with eight options is told WHICH one to edit. The index fallback
+       * exists for a valueless option (which the schema rejects, but the rule
+       * runs on pre-parse stacks too and must not report `option 'undefined'`).
+       */
+      it('locates each finding by the offending option, one finding per option', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'shop_item',
+            fields: {
+              tier: {
+                type: 'select',
+                options: [
+                  { label: 'Ok', value: 'ok', visibleWhen: "record.kind == 'a'" },
+                  { label: 'Bad', value: 'bad', visibleWhen: "kind == 'a'" },
+                  { label: 'Worse', value: 'worse', visibleWhen: "other == 'b'" },
+                ],
+              },
+              kind: { type: 'text' },
+            },
+          }],
+        });
+        expect(issues.map((i) => i.where.replace(/.*· field 'tier' /, ''))).toEqual([
+          "option 'bad' visibleWhen",
+          "option 'worse' visibleWhen",
+        ]);
+      });
+
+      it('is silent on options that carry no predicate at all', () => {
+        expect(validateStackExpressions({
+          objects: [{
+            name: 'shop_item',
+            fields: {
+              tier: { type: 'select', options: [{ label: 'A', value: 'a' }, { label: 'B', value: 'b', default: true }] },
+            },
+          }],
         })).toHaveLength(0);
       });
     });
@@ -1356,6 +1644,15 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'ExpressionInputSchema',
     keys: () => shapeKeysOf(ExpressionInputSchema),
   },
+  {
+    // [#6290] Per-option `visibleWhen` — the option surface had no traversal at
+    // all until then, so it enters the guard with its first two reads. `value`
+    // only locates the finding; `visibleWhen` is the predicate being checked.
+    receiver: 'opt',
+    expected: ['value', 'visibleWhen'],
+    declaredBy: 'SelectOptionSchema',
+    keys: () => Object.keys(SelectOptionSchema.shape),
+  },
 ];
 
 /**
@@ -1389,7 +1686,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
 
   it('the field receiver reads only declared keys — the tracked debt is now empty (#5026)', () => {
     const read = keysReadOff('f');
-    expect(read).toEqual(['expression', 'name', 'readonlyWhen', 'requiredWhen']);
+    // `options` joined in #6290 — the per-option `visibleWhen` traversal. It is
+    // a LITERAL `f.options` read on purpose, for the same reason the two
+    // `*When` slots below are literal: an `(f as AnyRec).options` cast would
+    // have hidden the new surface from this very scan.
+    expect(read).toEqual(['expression', 'name', 'options', 'readonlyWhen', 'requiredWhen']);
     const declared = Object.keys(FieldSchema.shape);
     const tracked = TRACKED_UNDECLARED_READS.filter((t) => t.receiver === 'f').map((t) => t.key);
     expect(tracked).toEqual([]);

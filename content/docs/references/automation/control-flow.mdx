@@ -8,107 +8,67 @@ description: Control Flow protocol schemas
 @module automation/control-flow
 
 Structured control-flow constructs (ADR-0031) — the **native + AI-authored**
-
 flow model: a `loop` **container**, a `parallel` **block**, and structured
-
 `try/catch/retry`. Unlike BPMN's gateway/boundary/token graph (kept in the
-
 protocol for *interop* only), these constructs are **well-formed by
-
 construction**, locally composable, and statically analyzable — the right
-
 substrate for LLM authoring (ADR-0010/0011).
 
 ## Representation — decision: **(B) nested sub-structure**
 
 ADR-0031 flagged two ways to carry structured containers in the flat
-
 `nodes[]`+`edges[]` model:
 
-- **(A)** marker-delimited scoped regions (a container node + a scope-end
-
-marker; the body is the edges *between* them in the main graph), or
-
-- **(B)** the container node carries a **nested mini-flow** in its `config`.
+ - **(A)** marker-delimited scoped regions (a container node + a scope-end
+   marker; the body is the edges *between* them in the main graph), or
+ - **(B)** the container node carries a **nested mini-flow** in its `config`.
 
 We adopt **(B)**. Each container holds its body as a self-contained
-
 `FlowRegionSchema` (`config.body` for `loop`, `config.branches[]` for
-
 `parallel`, `config.try`/`config.catch` for `try_catch`). The reasons:
 
-1. **Well-formed by construction** — a nested region is its *own* graph, so
-
-single-entry is intrinsic; there are no scope markers to balance and no
-
-way to "leak" an edge across a boundary. Validation is local.
-
-2. **The shared engine traversal stays untouched** — the container executor
-
-runs its own body via a scoped helper; the main DAG `traverseNext` never
-
-learns about scope markers (important under the multi-agent discipline
-
-around `engine.ts`). The container's *ordinary* out-edges remain the
-
-"after-loop / after-block" continuation.
-
-3. **Cleaner AST for AI** — ADR-0031 calls (B) "the cleaner long-term AST,"
-
-and AI authoring is the design center.
+ 1. **Well-formed by construction** — a nested region is its *own* graph, so
+    single-entry is intrinsic; there are no scope markers to balance and no
+    way to "leak" an edge across a boundary. Validation is local.
+ 2. **The shared engine traversal stays untouched** — the container executor
+    runs its own body via a scoped helper; the main DAG `traverseNext` never
+    learns about scope markers (important under the multi-agent discipline
+    around `engine.ts`). The container's *ordinary* out-edges remain the
+    "after-loop / after-block" continuation.
+ 3. **Cleaner AST for AI** — ADR-0031 calls (B) "the cleaner long-term AST,"
+    and AI authoring is the design center.
 
 Existing flat-graph loops (a `loop` node with no `config.body`) keep their
-
 legacy behavior — the constructs are **additive**, activated only when the
-
 nested structure is present.
 
 The canonical construct type ids are `LOOP_NODE_TYPE` (`loop`,
-
 pre-existing), `PARALLEL_NODE_TYPE` (`parallel`), and
-
 `TRY_CATCH_NODE_TYPE` (`try_catch`). These are distinct from the BPMN
-
 interop node types (`parallel_gateway` / `join_gateway` / `boundary_event`),
-
 which remain author-invisible interchange representations.
 
 ## Unknown keys are rejected (#4001 / ADR-0078)
 
 Every shape below is `strictObject`. Before that they were plain `z.object`,
-
 so zod's default `.strip` applied and a key this file does not declare was
-
 **discarded in silence** — the container still parsed, still registered, and
-
 still ran, with the author's configuration simply absent. On these five
-
 shapes that silence is unusually expensive, because each one carries
-
 *control* rather than data: a swallowed `maxIterations` is an uncapped loop,
-
 a swallowed branch key is a branch that runs without what it was given.
 
 ### How this relates to `validateControlFlow`
 
 `validateControlFlow` is a **sibling guard, not a key gate** — it answers
-
 "is this region single-entry / single-exit / acyclic", which no amount of
-
 key strictness can answer. The two do not overlap and cannot fight: the
-
 schema rejects undeclared KEYS, the analysis rejects malformed STRUCTURE.
-
 They do now meet at one seam, deliberately — `validateControlFlow`
-
 `safeParse`s each region slot before analyzing it, so from #4001 that parse
-
 is also where a region's undeclared key surfaces, reported as
-
 `<where>: invalid region — <the strictObject message>`. Nothing was
-
 duplicated and nothing was removed; the structural prose this guard exists
-
 for is untouched, and it simply stopped silently repairing its own input.
 
 <Callout type="info">
@@ -134,7 +94,7 @@ const result = FlowRegionSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Region body nodes (single-entry/single-exit sub-graph) |
-| **edges** | `{ id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[]` | optional | Region body edges |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | optional | Region body edges |
 
 
 ---
@@ -149,7 +109,7 @@ const result = FlowRegionSchema.parse(data);
 | **iteratorVariable** | `string` | optional | Loop variable holding the current item |
 | **indexVariable** | `string` | optional | Optional loop variable holding the current index |
 | **maxIterations** | `integer` | optional | Hard cap on iterations (clamped to the engine ceiling) |
-| **body** | `{ nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }` | optional | Loop body region (omit for legacy flat-graph loops) |
+| **body** | `{ nodes: object[]; edges?: object[] }` | optional | Loop body region (omit for legacy flat-graph loops) |
 
 
 ---
@@ -162,7 +122,7 @@ const result = FlowRegionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Branch label |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Branch body nodes |
-| **edges** | `{ id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[]` | optional | Branch body edges |
+| **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | optional | Branch body edges |
 
 
 ---
@@ -173,7 +133,7 @@ const result = FlowRegionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **branches** | `{ name?: string; nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }[]` | ✅ | Branch regions executed concurrently; implicit join at block end |
+| **branches** | `{ name?: string; nodes: object[]; edges?: object[] }[]` | ✅ | Branch regions executed concurrently; implicit join at block end |
 
 
 ---
@@ -200,8 +160,8 @@ const result = FlowRegionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **try** | `{ nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }` | ✅ | Protected region |
-| **catch** | `{ nodes: { id: string; type: string; label: string; config?: Record<string, any>; … }[]; edges?: { id: string; source: string; target: string; condition?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; … }[] }` | optional | Handler region run when the try region fails |
+| **try** | `{ nodes: object[]; edges?: object[] }` | ✅ | Protected region |
+| **catch** | `{ nodes: object[]; edges?: object[] }` | optional | Handler region run when the try region fails |
 | **errorVariable** | `string` | optional | Variable holding the caught error in the catch region |
 | **retry** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Optional retry policy for the try region |
 
