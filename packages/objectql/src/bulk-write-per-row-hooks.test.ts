@@ -31,12 +31,23 @@
  *      written, never silently downgraded to one call;
  *   5. `onError` and the write's own return contract, both unchanged;
  *   6. the same contract on a bulk DELETE.
+ *
+ * [#5574] Section 7 extends every one of those to the `before*` phase, which
+ * ADR-0058 Addendum II brought under the same contract (clauses D1–D7). The
+ * cases live here rather than in a file of their own on purpose: "the before
+ * half diverged from the after half" is exactly the failure that would go
+ * unnoticed, and side-by-side is where it gets caught.
  */
 
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { bindHooksToEngine } from './hook-binder.js';
+import { HookTargetRebindError, HOOK_TARGET_REBIND_ERROR_CODE } from './hook-target-rebind-errors.js';
 import type { Hook, HookContext } from '@objectstack/spec/data';
+import {
+  BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE,
+  MAX_BULK_PER_ROW_HOOK_ROWS,
+} from '@objectstack/spec/data';
 
 const TASK_FIELDS = {
   id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
@@ -444,6 +455,440 @@ describe('[#5038] a bulk delete fires afterDelete per row', () => {
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
+ * 7. [#5574] The BEFORE phase takes the same contract — ADR-0058 Addendum II
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+describe('[#5574 / D1] a bulk write fires before-hooks once per matched row', () => {
+  it('N matched rows ⇒ N `beforeUpdate` dispatches, each naming its row', async () => {
+    const seen: string[] = [];
+    const { engine } = await boot([hook('per_row_before', 'beforeUpdate', (ctx) => {
+      seen.push(String((ctx.input as any).id));
+    })]);
+
+    const rows = await seedTasks(engine, [
+      { title: 'a', status: 'todo' },
+      { title: 'b', status: 'todo' },
+      { title: 'c', status: 'todo' },
+    ]);
+
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+
+    expect(seen).toHaveLength(3);
+    expect(seen.sort()).toEqual(rows.map((r) => String(r.id)).sort());
+  });
+
+  it('N doomed rows ⇒ N `beforeDelete` dispatches, each naming its row', async () => {
+    const seen: string[] = [];
+    const { engine } = await boot([hook('per_row_before', 'beforeDelete', (ctx) => {
+      seen.push(String((ctx.input as any).id));
+    })]);
+
+    const rows = await seedTasks(engine, [
+      { title: 'a', status: 'stale' },
+      { title: 'b', status: 'stale' },
+      { title: 'c', status: 'live' },
+    ]);
+    const doomed = rows.filter((r) => r.status === 'stale').map((r) => String(r.id));
+
+    await engine.delete('task', { multi: true, where: { status: 'stale' } } as any);
+
+    expect(seen.sort()).toEqual(doomed.sort());
+  });
+
+  it('zero matched rows ⇒ ZERO before dispatches', async () => {
+    // `[]` is meaningful and distinct from "no row set was read": a batch that
+    // matches nothing is not a record change, so there is nothing to dispatch
+    // over — not one dispatch standing for the empty set.
+    const seen: string[] = [];
+    const { engine } = await boot([hook('per_row_before', 'beforeUpdate', () => { seen.push('x'); })]);
+    await seedTasks(engine, [{ title: 'a', status: 'done' }]);
+
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'nothing_matches' } } as any);
+
+    expect(seen).toEqual([]);
+  });
+
+  it('is UNIFORM — the count never depends on the condition text', async () => {
+    // The same ruling the after phase got: a hook's firing COUNT must not
+    // depend on what its condition happens to say, because no author can infer
+    // that from any declaration.
+    const withPrevious: string[] = [];
+    const withoutPrevious: string[] = [];
+    const { engine } = await boot([
+      hook('reads_previous', 'beforeUpdate', (ctx) => { withPrevious.push(String((ctx.input as any).id)); }, TRANSITION),
+      hook('reads_record', 'beforeUpdate', (ctx) => { withoutPrevious.push(String((ctx.input as any).id)); }, 'record.status == "done"'),
+    ]);
+
+    await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+
+    expect(withPrevious).toHaveLength(2);
+    expect(withoutPrevious).toHaveLength(2);
+  });
+
+  it('a single-record write still fires exactly once', async () => {
+    const seen: string[] = [];
+    const { engine } = await boot([hook('per_row_before', 'beforeUpdate', () => { seen.push('x'); })]);
+    const row: any = await engine.insert('task', { title: 'a', status: 'todo' });
+
+    await engine.update('task', { status: 'done' }, { where: { id: row.id } } as any);
+
+    expect(seen).toEqual(['x']);
+  });
+});
+
+describe('[#5574 / D2] the per-row before context is the SINGLE-RECORD shape', () => {
+  it('binds THAT row’s `previous` — the measured harm of #5574, fixed', async () => {
+    // The failure this whole card exists for: `ctx.previous` was permanently
+    // undefined on a predicate write, so every guard written the way guards are
+    // written (`if (ctx.previous?.locked) throw`) passed SILENTLY. Fail-open,
+    // and invisible.
+    const seen: Array<{ id: string; prev: unknown }> = [];
+    const { engine } = await boot([hook('guard', 'beforeUpdate', (ctx) => {
+      seen.push({ id: String((ctx.input as any).id), prev: ctx.previous });
+    })]);
+
+    await seedTasks(engine, [
+      { title: 'a', status: 'todo', owner: 'u1' },
+      { title: 'b', status: 'todo', owner: 'u2' },
+    ]);
+
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+
+    expect(seen).toHaveLength(2);
+    for (const { id, prev } of seen) {
+      // Each context's `previous` is ITS row's pre-image — the pre-WRITE state,
+      // so `status` is still `todo` here.
+      expect((prev as any).id).toBe(id);
+      expect((prev as any).status).toBe('todo');
+    }
+    expect(seen.map((s) => (s.prev as any).owner).sort()).toEqual(['u1', 'u2']);
+  });
+
+  it('a `previous`-reading GUARD can now refuse a bulk write per row', async () => {
+    // What per-row `previous` is FOR (D3 says so in as many words): so a guard
+    // can REFUSE, not so a rewrite can be aimed at one row.
+    const { engine } = await boot([hook('guard', 'beforeUpdate', (ctx) => {
+      if ((ctx.previous as any)?.status === 'locked') throw new Error('row is locked');
+    })]);
+
+    await seedTasks(engine, [
+      { title: 'a', status: 'todo' },
+      { title: 'b', status: 'locked' },
+    ]);
+
+    await expect(
+      engine.update('task', { status: 'done' }, { multi: true, where: {} } as any),
+    ).rejects.toThrow(/row is locked/);
+
+    // The guard fired BEFORE the write, so nothing was written at all — the
+    // refusal covers the whole batch, not just the offending row.
+    expect(await engine.count('task', { where: { status: 'done' } } as any)).toBe(0);
+  });
+
+  it('carries NO `result` — the before phase has no post-state', async () => {
+    const seen: unknown[] = [];
+    const { engine } = await boot([hook('probe', 'beforeUpdate', (ctx) => { seen.push(ctx.result); })]);
+    await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
+
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+
+    expect(seen).toEqual([undefined, undefined]);
+  });
+});
+
+describe('[#5574 / D3] the payload stays BATCH-scoped, and that IS the merge rule', () => {
+  it('every per-row context carries the SAME payload object, not a copy', async () => {
+    const payloads: unknown[] = [];
+    const { engine } = await boot([hook('probe', 'beforeUpdate', (ctx) => {
+      payloads.push((ctx.input as any).data);
+    })]);
+    await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
+
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+
+    expect(payloads).toHaveLength(2);
+    // Reference identity, deliberately. Copies are what a reconciliation step
+    // would need, and the ADR rejected reconciliation on measured evidence.
+    expect(payloads[0]).toBe(payloads[1]);
+  });
+
+  it('a rewrite made on ONE row’s dispatch applies to the WHOLE batch', async () => {
+    let firstOnly = true;
+    const { engine } = await boot([hook('stamp', 'beforeUpdate', (ctx) => {
+      if (firstOnly) { (ctx.input as any).data.owner = 'stamped'; firstOnly = false; }
+    })]);
+    await seedTasks(engine, [
+      { title: 'a', status: 'todo', owner: 'u1' },
+      { title: 'b', status: 'todo', owner: 'u2' },
+    ]);
+
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+
+    // Both rows got it, including the one whose dispatch did not make it. This
+    // is the contract, not a leak: one `updateMany` carries one SET clause.
+    const rows: any[] = await engine.find('task', {} as any);
+    expect(rows.map((r) => r.owner)).toEqual(['stamped', 'stamped']);
+  });
+
+  it('rewrites ACCUMULATE in dispatch order, including a REPLACED payload', async () => {
+    // Two spellings a handler can use, and both must accumulate: mutating the
+    // payload in place, and assigning a whole new object over `input.data`.
+    // The second is the one that would silently vanish with the row context
+    // that held it if the loop did not write it back.
+    const { engine } = await boot([hook('acc', 'beforeUpdate', (ctx) => {
+      const cur = (ctx.input as any).data as Record<string, unknown>;
+      (ctx.input as any).data = { ...cur, title: `${String(cur.title ?? '')}+` };
+    })]);
+    await seedTasks(engine, [
+      { title: 'a', status: 'todo' },
+      { title: 'b', status: 'todo' },
+      { title: 'c', status: 'todo' },
+    ]);
+
+    await engine.update('task', { title: '', status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+
+    // Three dispatches, three appends, one payload — every row gets '+++'.
+    const rows: any[] = await engine.find('task', {} as any);
+    expect(rows.map((r) => r.title)).toEqual(['+++', '+++', '+++']);
+  });
+
+  it('never splits the write: one updateMany, one affected count (#4639)', async () => {
+    const { engine, driver } = await boot([hook('probe', 'beforeUpdate', () => {})]);
+    await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
+
+    driver.updateCalls = 0;
+    const affected = await engine.update(
+      'task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any,
+    );
+
+    expect(affected).toBe(2);
+    // Not two single-row writes. A write that has learned to split itself
+    // cannot be un-split without breaking whoever came to depend on it.
+    expect(driver.updateCalls).toBe(0);
+  });
+});
+
+describe('[#5574 / D4] `input.id` is not a reroute lever, and is refused loudly', () => {
+  it('REFUSES a per-row handler that rebinds `input.id`', async () => {
+    const { engine } = await boot([hook('rebind', 'beforeUpdate', (ctx) => {
+      (ctx.input as any).id = 'somewhere_else';
+    })]);
+    await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
+
+    const err = await engine
+      .update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any)
+      .then(() => null, (e) => e);
+
+    expect(err).toBeInstanceOf(HookTargetRebindError);
+    expect(err.code).toBe(HOOK_TARGET_REBIND_ERROR_CODE);
+    expect(err.path).toBe('per-row');
+    expect(err.event).toBe('beforeUpdate');
+    expect(err.observedId).toBe('somewhere_else');
+    // Refused, not ignored — a silent no-op is the failure this family exists
+    // to abolish. And nothing was written.
+    expect(await engine.count('task', { where: { status: 'done' } } as any)).toBe(0);
+  });
+
+  it('REFUSES a by-id handler that clears `input.id` — the retired conversion', async () => {
+    const { engine } = await boot([hook('clear', 'beforeUpdate', (ctx) => {
+      (ctx.input as any).id = undefined;
+    })]);
+    const row: any = await engine.insert('task', { title: 'a', status: 'todo' });
+
+    const err = await engine
+      .update('task', { status: 'done' }, { where: { id: row.id } } as any)
+      .then(() => null, (e) => e);
+
+    expect(err).toBeInstanceOf(HookTargetRebindError);
+    expect(err.path).toBe('by-id');
+    expect(err.expectedId).toBe(row.id);
+    expect(err.message).toContain('RETIRED');
+    expect((await engine.findOne('task', { where: { id: row.id } } as any) as any).status).toBe('todo');
+  });
+
+  it('REFUSES a by-id `beforeDelete` handler that repoints the target', async () => {
+    // `delete()` used to HONOUR this, by re-reading the pre-image for the new
+    // target (#5272). ADR-0058 Amendment II.1 settles both verbs the same way:
+    // `previous` and the summary recompute were computed against the row the
+    // ladder chose, so honouring a repoint would delete a row none of that saw.
+    const { engine } = await boot([hook('repoint', 'beforeDelete', (ctx) => {
+      (ctx.input as any).id = 'other_row';
+    })]);
+    const row: any = await engine.insert('task', { title: 'a', status: 'todo' });
+
+    const err = await engine
+      .delete('task', { where: { id: row.id } } as any)
+      .then(() => null, (e) => e);
+
+    expect(err).toBeInstanceOf(HookTargetRebindError);
+    expect(err.event).toBe('beforeDelete');
+    expect(err.path).toBe('by-id');
+    expect(await engine.count('task', {} as any)).toBe(1);
+  });
+
+  it('leaves an untouched `input.id` alone — the refusal is not a trap', async () => {
+    // The negative control. A handler that reads the id, or writes back the
+    // SAME id, is doing nothing wrong and must not be refused.
+    const { engine } = await boot([hook('readonly', 'beforeUpdate', (ctx) => {
+      (ctx.input as any).id = (ctx.input as any).id;
+    })]);
+    await seedTasks(engine, [{ title: 'a', status: 'todo' }, { title: 'b', status: 'todo' }]);
+
+    const affected = await engine.update(
+      'task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any,
+    );
+    expect(affected).toBe(2);
+  });
+});
+
+describe('[#5574 / D5] equivalence with the single-id path', () => {
+  it('a read-only before-handler sees the same context on both shapes', async () => {
+    const shapeOf = (ctx: HookContext) => ({
+      keys: Object.keys(ctx.input as any).sort(),
+      idIsRow: Boolean((ctx.input as any).id),
+      previousStatus: (ctx.previous as any)?.status,
+      data: (ctx.input as any).data,
+      result: ctx.result,
+    });
+
+    const bulkSeen: unknown[] = [];
+    const bulk = await boot([hook('probe', 'beforeUpdate', (ctx) => { bulkSeen.push(shapeOf(ctx)); })]);
+    await seedTasks(bulk.engine, [{ title: 'a', status: 'todo' }]);
+    await bulk.engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+
+    const singleSeen: unknown[] = [];
+    const single = await boot([hook('probe', 'beforeUpdate', (ctx) => { singleSeen.push(shapeOf(ctx)); })]);
+    const row: any = await single.engine.insert('task', { title: 'a', status: 'todo' });
+    await single.engine.update('task', { status: 'done' }, { where: { id: row.id } } as any);
+
+    // The declared differences (D5) are `input.options` carrying `multi`/`where`,
+    // the affected COUNT, the aggregate event and D4 — none of which this
+    // projection reads. Everything else must be indistinguishable.
+    expect(bulkSeen).toEqual(singleSeen);
+  });
+});
+
+describe('[#5574 / D6] one ceiling, BOTH phases, checked before the first dispatch', () => {
+  const over = MAX_BULK_PER_ROW_HOOK_ROWS + 1;
+
+  it('refuses an over-ceiling batch on the BEFORE phase — zero handlers, zero rows written', async () => {
+    const fired: string[] = [];
+    const { engine } = await boot([hook('per_row_before', 'beforeUpdate', () => { fired.push('x'); })]);
+    await seedTasks(engine, Array.from({ length: over }, (_, i) => ({ title: `t${i}`, status: 'todo' })));
+
+    const err = await engine
+      .update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any)
+      .then(() => null, (e) => e);
+
+    expect(err.code).toBe(BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE);
+    expect(err.event).toBe('beforeUpdate');
+    expect(err.matched).toBe(over);
+    expect(err.limit).toBe(MAX_BULK_PER_ROW_HOOK_ROWS);
+    expect(err.message).toContain('Nothing was written');
+    expect(err.message).toContain('NOT silently downgraded');
+    // Refusal BEFORE the first dispatch — not after running `over` of them.
+    expect(fired).toEqual([]);
+    expect(await engine.count('task', { where: { status: 'todo' } } as any)).toBe(over);
+  });
+
+  it('refuses an over-ceiling bulk DELETE on the before phase too', async () => {
+    const fired: string[] = [];
+    const { engine } = await boot([hook('per_row_before', 'beforeDelete', () => { fired.push('x'); })]);
+    await seedTasks(engine, Array.from({ length: over }, (_, i) => ({ title: `t${i}`, status: 'stale' })));
+
+    const err = await engine
+      .delete('task', { multi: true, where: { status: 'stale' } } as any)
+      .then(() => null, (e) => e);
+
+    expect(err.code).toBe(BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE);
+    expect(err.event).toBe('beforeDelete');
+    expect(fired).toEqual([]);
+    expect(await engine.count('task', {} as any)).toBe(over);
+  });
+
+  it('ADMITS a batch exactly AT the ceiling, in both phases', async () => {
+    // The boundary, stated on the admitted side too: an off-by-one here would
+    // refuse honest batches, which is the failure nobody reports as a bug.
+    const beforeFired: string[] = [];
+    const afterFired: string[] = [];
+    const { engine } = await boot([
+      hook('pre', 'beforeUpdate', () => { beforeFired.push('x'); }),
+      hook('post', 'afterUpdate', () => { afterFired.push('x'); }),
+    ]);
+    const at = MAX_BULK_PER_ROW_HOOK_ROWS;
+    await seedTasks(engine, Array.from({ length: at }, (_, i) => ({ title: `t${i}`, status: 'todo' })));
+
+    const affected = await engine.update(
+      'task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any,
+    );
+
+    expect(affected).toBe(at);
+    expect(beforeFired).toHaveLength(at);
+    expect(afterFired).toHaveLength(at);
+  }, 60_000);
+
+  it('the engine ceiling IS the spec contract’s, not a second copy', async () => {
+    expect(ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS).toBe(MAX_BULK_PER_ROW_HOOK_ROWS);
+  });
+});
+
+describe('[#5574 / D7] the matched row set is read ONCE, and serves everything', () => {
+  it('one `find` for a write whose object has BOTH a before- and an after-hook', async () => {
+    const { engine, driver } = await boot([
+      hook('pre', 'beforeUpdate', () => {}),
+      hook('post', 'afterUpdate', () => {}),
+    ]);
+    await seedTasks(engine, [
+      { title: 'a', status: 'todo' }, { title: 'b', status: 'todo' },
+      { title: 'c', status: 'todo' }, { title: 'd', status: 'todo' },
+    ]);
+
+    driver.findCalls.length = 0;
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+
+    // Four rows, eight dispatches, ONE query. The ruling forbids a second fetch
+    // in as many words.
+    expect(driver.findCalls).toHaveLength(1);
+  });
+
+  it('one `find` for a bulk DELETE with both phases hooked', async () => {
+    const { engine, driver } = await boot([
+      hook('pre', 'beforeDelete', () => {}),
+      hook('post', 'afterDelete', () => {}),
+    ]);
+    await seedTasks(engine, [{ title: 'a', status: 'stale' }, { title: 'b', status: 'stale' }]);
+
+    driver.findCalls.length = 0;
+    await engine.delete('task', { multi: true, where: { status: 'stale' } } as any);
+
+    expect(driver.findCalls).toHaveLength(1);
+  });
+
+  it('does NOT read the row set when the object has NEITHER phase hooked', async () => {
+    // Still demand-driven: an object nobody hooks pays nothing for a contract
+    // it cannot observe.
+    const { engine, driver } = await boot([hook('elsewhere', 'beforeUpdate', () => {}, undefined, 'other')]);
+    await seedTasks(engine, [{ title: 'a', status: 'todo' }]);
+
+    driver.findCalls.length = 0;
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+
+    expect(driver.findCalls).toHaveLength(0);
+  });
+
+  it('reads it once for a BEFORE-only hook — the phase can hold the gate open alone', async () => {
+    const { engine, driver } = await boot([hook('pre', 'beforeUpdate', () => {}, undefined, 'task')]);
+    await seedTasks(engine, [{ title: 'a', status: 'todo' }]);
+
+    driver.findCalls.length = 0;
+    await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any);
+
+    expect(driver.findCalls).toHaveLength(1);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
  * Harness
  * ──────────────────────────────────────────────────────────────────────────── */
 
@@ -489,6 +934,9 @@ function makeStubDriver(): any {
     name: 'memory', version: '0.0.0', supports: {},
     /** Every `find` the engine issues, so a test can pin the read count. */
     findCalls: [] as unknown[],
+    /** Single-row writes, so a test can pin that a predicate write is never
+     *  split into N of them (#5574 D3). */
+    updateCalls: 0,
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; }, async syncSchema() {},
     async find(o: string, ast: any) {
@@ -502,6 +950,7 @@ function makeStubDriver(): any {
       const row = { ...data, id }; storeFor(o).set(id, row); return row;
     },
     async update(o: string, id: string, data: Record<string, unknown>) {
+      d.updateCalls += 1;
       const s = storeFor(o); const cur = s.get(id); if (!cur) return null;
       const u = { ...cur, ...data, id }; s.set(id, u); return u;
     },

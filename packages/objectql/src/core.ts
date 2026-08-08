@@ -57,7 +57,10 @@ export { applyInMemoryAggregation, bucketDateValue } from './in-memory-aggregati
 export { bindHooksToEngine } from './hook-binder.js';
 export type { BindHooksOptions, BindHooksResult } from './hook-binder.js';
 export { wrapDeclarativeHook, HookConditionError } from './hook-wrappers.js';
-export type { WrapDeclarativeOptions, HookConditionLimitation } from './hook-wrappers.js';
+// `HookConditionLimitation` was exported here until #5574 and is RETIRED —
+// see the note above `HookConditionError` in `hook-wrappers.ts`. Its two members
+// described a batch-scoped `before*` dispatch that no longer exists.
+export type { WrapDeclarativeOptions } from './hook-wrappers.js';
 
 // Validation
 export { ValidationError, validateRecord } from './validation/record-validator.js';
