@@ -93,8 +93,6 @@
     "api/CrudEndpointPattern",
     "api/CrudEndpointsConfig",
     "api/CrudOperation",
-    "api/CubeMeta",
-    "api/CubeMetaMember",
     "api/CursorMessage",
     "api/CursorPosition",
     "api/DataEvent",

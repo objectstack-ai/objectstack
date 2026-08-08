@@ -88,8 +88,8 @@ export const GetAnalyticsMetaRequestSchema = lazySchema(() => z.object({
 }));
 
 /**
- * A measure or dimension as `GET /analytics/meta` publishes it — the
- * discovery projection, not the authoring definition.
+ * A measure or dimension as `GET /analytics/meta` publishes it — the discovery
+ * projection, not the authoring definition.
  *
  * `name` is CUBE-QUALIFIED (`"<cube>.<key>"`), which is the form
  * `/analytics/query` expects back in `measures[]` / `dimensions[]`; the
@@ -101,12 +101,12 @@ export const GetAnalyticsMetaRequestSchema = lazySchema(() => z.object({
  * `description`, `granularities` and `format` are dropped by the projection and
  * are NOT reachable through this endpoint (#6442).
  *
- * No bare type alias by design — `CubeMeta` in `contracts/analytics-service.ts`
- * is already THE name for this shape, and a second name for one type is the
- * permanent synonym ADR-0122 D3 forbids. `analytics-meta-response.test.ts` pins
- * the two against each other at compile time.
+ * Module-local, and NOT exported as its own named schema: `CubeMeta` in
+ * `contracts/analytics-service.ts` is already THE name for this shape, so a
+ * second exported name would be the permanent synonym ADR-0122 D3 forbids AND a
+ * new dual-source export. `analytics.test.ts` binds the two at compile time.
  */
-export const CubeMetaMemberSchema = lazySchema(() => z.object({
+const cubeMetaMemberShape = () => z.object({
   name: z.string().describe('Cube-qualified member name, `"<cube>.<key>"` — the spelling `/analytics/query` accepts'),
   type: z.string().describe(
     'Aggregation type for a measure (`AggregationMetricType`) or data type for a '
@@ -115,26 +115,7 @@ export const CubeMetaMemberSchema = lazySchema(() => z.object({
     + 'shape serves both member kinds.',
   ),
   title: z.string().optional().describe('Display label, projected from the definition\'s `label`'),
-}));
-
-/**
- * One cube as `GET /analytics/meta` publishes it — the `CubeMeta` discovery
- * projection declared in `contracts/analytics-service.ts` and produced
- * identically by both implementations of `AnalyticsService.getMeta`.
- *
- * Carries only what a client needs to BUILD a query (which cubes exist, and
- * which measures/dimensions each accepts). The cube's `sql`, `joins`,
- * `refreshKey`, `public` and `description` are not projected — `CubeSchema` in
- * `data/analytics.zod.ts` remains the authoring definition.
- *
- * No bare type alias — see the note on {@link CubeMetaMemberSchema}.
- */
-export const CubeMetaSchema = lazySchema(() => z.object({
-  name: z.string().describe('Cube name'),
-  title: z.string().optional().describe('Human-readable cube title'),
-  measures: z.array(CubeMetaMemberSchema).describe('Measures this cube accepts in `/analytics/query`'),
-  dimensions: z.array(CubeMetaMemberSchema).describe('Dimensions this cube accepts in `/analytics/query`'),
-}));
+});
 
 /**
  * Meta Response
@@ -164,9 +145,15 @@ export const CubeMetaSchema = lazySchema(() => z.object({
  * consumer pulling it.
  */
 export const AnalyticsMetadataResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.array(CubeMetaSchema).describe(
-    'Available cubes, each as the `CubeMeta` discovery projection. A bare array — '
-    + 'there is no `cubes` wrapper object.',
+  data: z.array(z.object({
+    name: z.string().describe('Cube name'),
+    title: z.string().optional().describe('Human-readable cube title'),
+    measures: z.array(cubeMetaMemberShape()).describe('Measures this cube accepts in `/analytics/query`'),
+    dimensions: z.array(cubeMetaMemberShape()).describe('Dimensions this cube accepts in `/analytics/query`'),
+  })).describe(
+    'Available cubes, each as the `CubeMeta` discovery projection — the cube name, '
+    + 'its title, and the measures/dimensions a client may name in a query. A bare '
+    + 'array: there is no `cubes` wrapper object, and no cube `sql` is published.',
   ),
 }));
 

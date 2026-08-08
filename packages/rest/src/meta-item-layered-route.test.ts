@@ -33,7 +33,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
-import { GetMetaItemLayeredResponseSchema } from '@objectstack/spec/api';
+import { GetMetaItemLayeredResponseSchema, GetMetaItemResponseSchema } from '@objectstack/spec/api';
 
 const ANON_API = { api: { requireAuth: false } };
 
@@ -223,6 +223,35 @@ describe('#5882 the ordinary read is undisturbed', () => {
         expect(body.code).toBeUndefined();
         expect(body.overlay).toBeUndefined();
         expect(body.effective).toBeUndefined();
+    });
+
+    it('answers a body that parses against `GetMetaItemResponseSchema` on BOTH branches (#5950)', async () => {
+        // The end-to-end half of #5950, and what entitles this route's ledger
+        // row to name a `responseSchema`: the declaration is measured against
+        // the real mount, on both branches that reach a body, rather than
+        // against a schema-level fixture that no handler produced.
+
+        // Uncached: carries the full ADR-0010 protection envelope.
+        const uncached = await dispatch(baseProtocol(), ITEM_PATH, { type: 'object', name: 'customer' });
+        const uncachedParse = GetMetaItemResponseSchema.safeParse(uncached.body);
+        expect(uncachedParse.error?.issues ?? []).toEqual([]);
+        // The carriers survive the parse — the point of the member. Before the
+        // declaration widened, `.parse()` dropped every one of them.
+        expect((uncachedParse.data as any).lock).toBe('none');
+        expect((uncachedParse.data as any).editable).toBe(true);
+
+        // Cached (THE DEFAULT): three keys, no lock resolved — still valid,
+        // which is why the envelope is declared optional rather than required.
+        const cachedProtocol = baseProtocol({
+            getMetaItemCached: vi.fn().mockResolvedValue({
+                data: CUSTOMER, etag: { value: 'abc', weak: false }, notModified: false,
+            }),
+        });
+        const cached = await dispatch(cachedProtocol, ITEM_PATH, { type: 'object', name: 'customer' });
+        expect(cachedProtocol.getMetaItemCached).toHaveBeenCalled();
+        const cachedParse = GetMetaItemResponseSchema.safeParse(cached.body);
+        expect(cachedParse.error?.issues ?? []).toEqual([]);
+        expect((cachedParse.data as any).lock).toBeUndefined();
     });
 
     it('treats `?layers=` with an empty value as NOT a layered request', async () => {
