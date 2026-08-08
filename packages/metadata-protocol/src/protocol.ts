@@ -10382,6 +10382,18 @@ export class ObjectStackProtocolImplementation implements
      * artifact is restored to its pre-commit `prevVersion`. The revert is itself
      * recorded as a NEW commit (operation='revert'), so history stays
      * append-only and the revert is itself revertible.
+     *
+     * [#6621] BOTH limbs refresh the SchemaRegistry, so a revert that answers
+     * `success: true` is one the running process has already acted on. The
+     * restore limb writes the restored body through ({@link
+     * applyRegistryWriteThrough}, the #4521 rule the sibling
+     * {@link rollbackMetaItem} has always carried); the soft-remove limb runs
+     * the same three-tier heal the sibling {@link deleteMetaItem} runs after
+     * its own `repo.delete` ({@link restoreArtifactRegistryView}). Before
+     * this, a batch revert persisted its change and left the runtime
+     * dispatching the reverted-away body until restart —
+     * {@link rollbackToPackageCommit} inherited it, so a whole-package
+     * rollback could report success and change nothing the process could see.
      */
     async revertCommit(request: {
         commitId: string;
@@ -10451,9 +10463,8 @@ export class ObjectStackProtocolImplementation implements
                     // Sibling limb: #6563 (PR #6642) did the same for the
                     // restore branch below, where the intent was UNSTATED and
                     // fell through to `restoreVersion`'s `?? 'override-artifact'`
-                    // default. Still not addressed here, filed with its own
-                    // measurement: neither limb refreshes the SchemaRegistry the
-                    // way `rollbackMetaItem` does (#6621).
+                    // default. The registry half of both limbs is #6621, fixed
+                    // here and below.
                     const intent: 'override-artifact' | 'runtime-only' =
                         this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
                     if (current) {
@@ -10464,6 +10475,50 @@ export class ObjectStackProtocolImplementation implements
                             intent,
                             state: 'active',
                         });
+                    }
+                    // [#6621] The registry must stop serving what the revert
+                    // just removed — the #4521 rule on the DELETE side of it.
+                    //
+                    // Measured on `origin/main` before this line existed: a
+                    // first-build undo of a created `object` answered
+                    // `success: true`, left `sys_metadata` with zero rows for
+                    // the name, and `SchemaRegistry` kept serving the body —
+                    // the same split the restore limb below showed, one limb
+                    // over. Same for an overlay `view` on a control-plane
+                    // kernel, where the plain-key entry `saveMetaItem`'s
+                    // write-through had put there simply stayed.
+                    //
+                    // WHICH heal, and why not a bare unregister: this is the
+                    // #6687 three-tier walk the sibling delete caller
+                    // {@link deleteMetaItem} runs after its own `repo.delete`,
+                    // and the tiers are the point. A soft-removed overlay that
+                    // shadows a packaged artifact must fall BACK to the
+                    // artifact (tier 1, ADR-0005 reset), not vanish; only when
+                    // no layer serves the name at all is the plain-key entry
+                    // retired (tier 3, #5079). A flat `removeOverlayEntry`
+                    // here would delete names a code package still ships. Both
+                    // delete/revert callers now run the same walk, exactly as
+                    // both now derive the same per-item intent.
+                    //
+                    // Run for the no-row case too, deliberately: that is the
+                    // self-heal branch `deleteMetaItem` documents — a stale
+                    // shadow can outlive the row it came from, and this limb's
+                    // contract is "this artifact is not here after the revert",
+                    // not "a row was deleted".
+                    //
+                    // [#6602] ORG GATE, and it is asymmetric ON PURPOSE. Only
+                    // an env-wide revert may mutate the process-wide registry:
+                    // an org-scoped row never entered it (ADR-0005, the rule
+                    // {@link hydrateOverlayIntoRegistry} owns), so healing on
+                    // its behalf would un-shadow or retire an entry that
+                    // belongs to the env-wide row every other org reads. The
+                    // write-through's object branch is deliberately NOT
+                    // org-gated, and that carve-out does not transfer here: it
+                    // is argued from `assertObjectRegistered` failing CLOSED,
+                    // which licenses registering broadly and never retiring
+                    // broadly. Register wide, retire narrow.
+                    if (orgId === null) {
+                        await this.restoreArtifactRegistryView(it.type, it.name);
                     }
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
                 } else if (it.prevVersion !== null && it.prevVersion !== undefined) {
@@ -10489,17 +10544,64 @@ export class ObjectStackProtocolImplementation implements
                     //
                     // The soft-remove limb above stated the same intent as a
                     // CONSTANT and was fixed the same way (#6620), so both limbs now
-                    // derive it. One neighbour is still open, filed with its own
-                    // measurement: neither limb refreshes the SchemaRegistry the way
-                    // `rollbackMetaItem` does, so a restored body is persisted but not
-                    // yet dispatched on (#6621).
+                    // derive it. The registry half of both is #6621, below.
                     const intent: 'override-artifact' | 'runtime-only' =
                         this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
-                    await repo.restoreVersion(ref, it.prevVersion, {
+                    // [#6621 / #4636] The ownership key the write-through needs,
+                    // read from the ROW rather than from the request — the sibling
+                    // revert caller {@link rollbackMetaItem} reads it exactly this
+                    // way, and for the same reason: `revertCommit` has no
+                    // `packageId` parameter either, and inventing one would let a
+                    // caller re-key an artifact it does not own. Left unpassed, a
+                    // row bound to `app.<slug>` re-registers under the
+                    // `'sys_metadata'` sentinel and `registerObject` throws
+                    // `already owned by package "app.<slug>"` into a best-effort
+                    // `console.warn` — a revert that reports success while the
+                    // registry keeps the body it was supposed to revert.
+                    //
+                    // Read BEFORE the restore, deliberately (#4636 again): the row
+                    // exists at this point and a read failure still fails this ITEM
+                    // cleanly into `failed[]`. Read afterwards it would be a
+                    // fallible query downstream of a write that already succeeded —
+                    // the shape that ends in a `catch {}` swallowing a real outage
+                    // (#4867). Per ITEM, because a batch mixes bindings.
+                    const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, orgId);
+                    const restored = await repo.restoreVersion(ref, it.prevVersion, {
                         actor,
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
                         intent,
+                    });
+                    // [#6621] #4521 — a revert is a live write like any other: the
+                    // restored body must be the one the runtime dispatches on
+                    // immediately, not after someone lists the type.
+                    //
+                    // Measured on `origin/main` before this call existed, with the
+                    // real `SysMetadataRepository`: an `object` saved twice and then
+                    // reverted answered `{ success: true, revertedCount: 1,
+                    // failed: [] }`, the stored row came back to `["name","amount"]`
+                    // — and `SchemaRegistry.getObject(...)` still carried
+                    // `due_date`. `success: true` while CRUD dispatches on the body
+                    // the operator just reverted away, healing only at the next
+                    // restart. Type-agnostic: an overlay `view` on a control-plane
+                    // kernel showed the same split (`stored 'Cases'` vs
+                    // `registry 'Renamed'`).
+                    //
+                    // The registry key is the SINGULAR type — the spelling
+                    // `saveMetaItem`'s own write-through registered under — while
+                    // the repo-facing reads above keep `it.type`, which is the
+                    // spelling the row is stored with. Two different keys, on
+                    // purpose.
+                    this.applyRegistryWriteThrough({
+                        type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
+                        name: it.name,
+                        item: restored.item.body,
+                        packageId: restorePackageId,
+                        // [#6602] The row's OWN scope, per item. An org-scoped row
+                        // is refused by {@link hydrateOverlayIntoRegistry} and never
+                        // reaches the registry every org in this process shares —
+                        // inherited, not re-decided here.
+                        organizationId: orgId,
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
                 }
