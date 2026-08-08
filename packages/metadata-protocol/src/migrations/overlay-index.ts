@@ -90,7 +90,6 @@
  */
 
 import {
-    dropIndexQuietly,
     logProblem,
     probeThenReplaceIndex,
     type IndexExec,
