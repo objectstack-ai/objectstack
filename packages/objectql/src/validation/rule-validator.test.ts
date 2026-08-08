@@ -623,7 +623,7 @@ describe('readonlyWhen binds a TOTAL record (#4953)', () => {
     } as never)).toThrow(/could not be evaluated/);
   });
 
-  it('does not disturb the #4889 parent binding: unbound root still LOCKS, parent stays unmaterialised', () => {
+  it('does not disturb the #4889 parent binding: unbound root still LOCKS, and this function still materialises no header', () => {
     // `parent` is a row of ANOTHER object — this function has no declared-field
     // list for it — and an ABSENT parent is the signal #4889 depends on.
     const warnings: string[] = [];
@@ -631,8 +631,26 @@ describe('readonlyWhen binds a TOTAL record (#4953)', () => {
       warn: (m: string) => warnings.push(m),
     } as never)).toEqual({});
     expect(warnings.some((w) => w.includes("reads 'parent'") && w.includes('LOCKED'))).toBe(true);
-    // A parent that IS bound but does not carry the key stays a fault (no
-    // materialisation of the header): fail-open, the change goes through.
+    // [#6457 — RE-ANNOTATED, verdict deliberately NOT flipped here.]
+    //
+    // A parent that IS bound but does not carry the key is still a fault at
+    // THIS seam: fail-open, the change goes through. That was the hole #6457
+    // closed, and the sentence below is the reason this assertion nonetheless
+    // stays exactly as PR #6454 wrote it.
+    //
+    // #6457's ruling materialises the header INSIDE the engine's
+    // `resolveMasterDetailParent(s)`, using the MASTER object's declared-field
+    // table — the one thing this pure function does not and cannot have. So the
+    // strip's own contract is unchanged (its signature never grew a second field
+    // table), and a caller that hands it a genuinely sparse header still gets
+    // the fail-open answer pinned here. What changed is that the ENGINE no
+    // longer hands it one.
+    //
+    // The moved verdict therefore lives where the change lives, and is pinned
+    // end-to-end against a real driver in `engine-readonly-when-parent.test.ts`
+    // ("ROW 2 — THE FIX"), with its `requiredWhen` mirror in
+    // `engine-required-when-parent.test.ts`. Read the two together: this one
+    // says the strip did not move, that one says the write path did.
     const warnings2: string[] = [];
     expect(stripReadonlyWhenFields(invoiceLineFields, { quantity: 9999 }, { id: 'l1', invoice: 'inv1' }, {
       warn: (m: string) => warnings2.push(m),

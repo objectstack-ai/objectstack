@@ -133,15 +133,39 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
         // (`invoice.object.ts` L212).
         note: { type: 'text', requiredWhen: 'record.quantity >= 100' },
         quantity: { type: 'number' },
+        // [#6457] A requirement whose predicate is TRUE exactly when the header
+        // carries no `status`. On a header row the driver returned without that
+        // column this used to fault (`No such key: status` on a BOUND `parent`)
+        // and fail OPEN — the requirement enforced nothing. The mirror of
+        // #4889's hole: opposite direction, same `declared ≠ enforced`.
+        reason: { type: 'text', requiredWhen: 'parent.status == null' },
       },
     } as any, 'test-package');
 
     storeFor('showcase_invoice').set('INV-SENT', { id: 'INV-SENT', invoice_number: 'INV-SENT', status: 'sent' });
     storeFor('showcase_invoice').set('INV-DRAFT', { id: 'INV-DRAFT', invoice_number: 'INV-DRAFT', status: 'draft' });
+    // [#6457] The MIDDLE row of the issue's table: `status` is declared on the
+    // master; this header row simply does not carry the key.
+    storeFor('showcase_invoice').set('INV-SPARSE', { id: 'INV-SPARSE', invoice_number: 'INV-SPARSE' });
   });
 
   const line = (id: string) => storeFor('showcase_invoice_line').get(id);
   const lines = () => [...storeFor('showcase_invoice_line').values()];
+
+  /** The error a write threw, or a failure saying it was accepted. Callers
+   *  assert on `.name` / `.fields` (field + code) — never a bare `toThrow()`. */
+  async function rejectionOf(run: () => Promise<unknown>): Promise<any> {
+    let thrown: unknown;
+    let threw = false;
+    try {
+      await run();
+    } catch (err) {
+      threw = true;
+      thrown = err;
+    }
+    expect(threw).toBe(true);
+    return thrown as any;
+  }
 
   // ── parent scope HIT ──────────────────────────────────────────────────────
 
@@ -326,5 +350,134 @@ describe('parent-scoped requiredWhen is enforced server-side (#4977)', () => {
     reads.length = 0;
     await engine.insert('plain_line', { invoice: 'INV-SENT', quantity: 1 });
     expect(reads.filter((r) => r === 'showcase_invoice')).toHaveLength(0);
+  });
+
+  // ── #6457 — the header is TOTAL over the MASTER's declared fields ──────────
+  //
+  // The `requiredWhen` half of the same change. #4977 bound the scope; what it
+  // could not fix from here is what the bound header CONTAINS — a driver that
+  // returns only the columns it stored hands over a header missing the very key
+  // the predicate reads, and a `requiredWhen` that faults is fail-OPEN, so the
+  // requirement silently enforces nothing.
+  //
+  // Note which line moves and which does not. The middle row (header RESOLVED
+  // but sparse) becomes evaluable and therefore ENFORCED. The bottom row (header
+  // UNRESOLVABLE) keeps #4977's deliberate fail-OPEN asymmetry with #4889 —
+  // option B was not taken here and is not taken here now either.
+
+  /** Every warning the engine emitted during one write. */
+  async function warningsDuring(run: () => Promise<unknown>): Promise<string[]> {
+    const warns: string[] = [];
+    const base = (engine as any).logger;
+    (engine as any).logger = new Proxy(base, {
+      get: (t: any, k: string) => (k === 'warn' ? (m: string) => warns.push(String(m)) : t[k]),
+    });
+    try {
+      await run();
+    } catch {
+      /* the caller asserts the outcome; this helper only collects the channel */
+    } finally {
+      (engine as any).logger = base;
+    }
+    return warns;
+  }
+
+  it('ROW 1 (header carries the key): evaluates as it always did — no false positive', async () => {
+    // INV-SENT carries `status: 'sent'`, so `parent.status == null` is FALSE and
+    // `reason` is not required.
+    const row = await engine.insert('showcase_invoice_line', { invoice: 'INV-SENT', description: 'seat', quantity: 1 });
+    expect(row).toMatchObject({ description: 'seat' });
+  });
+
+  it('ROW 2 — THE FIX: an INSERT under a sparse header is now REJECTED (was accepted)', async () => {
+    const err = await rejectionOf(() =>
+      engine.insert('showcase_invoice_line', { invoice: 'INV-SPARSE', quantity: 1 }));
+    expect(err.name).toBe('ValidationError');
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.fields).toContainEqual(expect.objectContaining({ field: 'reason', code: 'required' }));
+    // Rejected BEFORE the driver, not rolled back after it.
+    expect(lines()).toHaveLength(0);
+  });
+
+  it('ROW 2: accepted once the required field IS supplied under the same sparse header', async () => {
+    const row = await engine.insert('showcase_invoice_line', { invoice: 'INV-SPARSE', reason: 'awaiting status', quantity: 1 });
+    expect(row).toMatchObject({ reason: 'awaiting status' });
+  });
+
+  it('ROW 2: an UPDATE that nulls the field under a sparse header is REJECTED', async () => {
+    storeFor('showcase_invoice_line').set('s1', { id: 's1', invoice: 'INV-SPARSE', reason: 'stated', quantity: 1 });
+    const err = await rejectionOf(() =>
+      engine.update('showcase_invoice_line', { id: 's1', reason: '' }));
+    expect(err.fields).toContainEqual(expect.objectContaining({ field: 'reason', code: 'required' }));
+    expect(line('s1')).toMatchObject({ reason: 'stated' });
+  });
+
+  it('ROW 2: the refusal is an EVALUATED verdict — the unbound-root diagnostic is absent', async () => {
+    // What tells ROW 2 apart from ROW 3: here `parent` IS bound, so nothing on
+    // the channel names it as unbound. The write is refused because the
+    // predicate said so, not because it could not be asked.
+    const warns = await warningsDuring(() =>
+      engine.insert('showcase_invoice_line', { invoice: 'INV-SPARSE', quantity: 1 }));
+    expect(warns.some((w) => /requiredWhen for 'reason' reads 'parent'/.test(w))).toBe(false);
+    expect(warns.some((w) => /requiredWhen for 'reason' failed to evaluate/.test(w))).toBe(false);
+  });
+
+  it('ROW 3 (unresolvable header): still FAIL-OPEN, still names the unbound root (#4977 asymmetry)', async () => {
+    // The line #4977 drew and this issue does NOT move: a header that resolves
+    // to nothing leaves `parent` unbound, the predicate is skipped, and the
+    // write lands with the field empty. Option B (422) stays not taken.
+    storeFor('showcase_invoice_line').set('orphan', { id: 'orphan', invoice: 'GONE', reason: '', quantity: 1 });
+    const warns = await warningsDuring(() =>
+      engine.update('showcase_invoice_line', { id: 'orphan', quantity: 9 }));
+    expect(line('orphan')).toMatchObject({ quantity: 9, reason: '' });
+    expect(warns.some((w) => /requiredWhen for 'reason' reads 'parent'/.test(w) && /NOT enforced/.test(w))).toBe(true);
+  });
+
+  it('ADR-0113 still holds on the newly-evaluable predicate: a legacy row may rest', async () => {
+    // The stored row ALREADY violates (sparse header, `reason` empty). Making
+    // the predicate evaluable must not brick unrelated edits to rows deployed
+    // before it started enforcing — enforcement tightens for NEW violations.
+    storeFor('showcase_invoice_line').set('legacy', { id: 'legacy', invoice: 'INV-SPARSE', reason: '', quantity: 1 });
+    await engine.update('showcase_invoice_line', { id: 'legacy', quantity: 7 });
+    expect(line('legacy')).toMatchObject({ quantity: 7, reason: '' });
+  });
+
+  it('judges a REPOINT onto a sparse header against the header it lands on', async () => {
+    // A line with no `reason` under a Sent header (where none is required).
+    // Moving it under the sparse header turns the requirement ON, and the write
+    // that does the moving is the one that must be refused — the ADR-0113
+    // pre-check must read the STORED row's own header, not the landing one.
+    storeFor('showcase_invoice_line').set('r1', { id: 'r1', invoice: 'INV-SENT', description: 'seat', reason: '', quantity: 1 });
+    const err = await rejectionOf(() =>
+      engine.update('showcase_invoice_line', { id: 'r1', invoice: 'INV-SPARSE' }));
+    expect(err.fields).toContainEqual(expect.objectContaining({ field: 'reason', code: 'required' }));
+    expect(line('r1')).toMatchObject({ invoice: 'INV-SENT' });
+  });
+
+  it('BULK: the batch path materialises its headers too, per matched row', async () => {
+    storeFor('showcase_invoice_line').set('b_sparse', { id: 'b_sparse', invoice: 'INV-SPARSE', reason: 'stated', quantity: 3 });
+    storeFor('showcase_invoice_line').set('b_sent', { id: 'b_sent', invoice: 'INV-SENT', description: 'seat', quantity: 3 });
+    const err = await rejectionOf(() =>
+      engine.update('showcase_invoice_line', { reason: '' }, { where: { quantity: 3 }, multi: true } as any));
+    expect(err.fields).toContainEqual(expect.objectContaining({ field: 'reason', code: 'required' }));
+    // Rejected before anything was written — neither matched row moved.
+    expect(line('b_sparse')).toMatchObject({ reason: 'stated' });
+  });
+
+  it('BULK INSERT: one batched header read still materialises every header', async () => {
+    // The insert path is the bulk resolver with `data: null` — each row supplies
+    // its own FK. One row lands under a header carrying `status`, one under the
+    // sparse header, and only the second is required to carry `reason`.
+    const err = await rejectionOf(() =>
+      engine.insert('showcase_invoice_line', [
+        { invoice: 'INV-SENT', description: 'seat', quantity: 1 },
+        { invoice: 'INV-SPARSE', quantity: 1 },
+      ] as any));
+    expect(err.fields).toContainEqual(expect.objectContaining({ field: 'reason', code: 'required' }));
+  });
+
+  it('does NOT mutate the stored header row — the materialised copy stays local', async () => {
+    await engine.insert('showcase_invoice_line', { invoice: 'INV-SPARSE', reason: 'stated', quantity: 1 });
+    expect('status' in storeFor('showcase_invoice').get('INV-SPARSE')).toBe(false);
   });
 });
