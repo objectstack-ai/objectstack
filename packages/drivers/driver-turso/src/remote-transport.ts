@@ -569,10 +569,16 @@ function undeclaredAggregateFunctionError(func: string): Error {
  *
  * The twin of `driver-sql`'s `uncompilableAggregateFunctionError`; its docblock
  * carries the full rationale for `NOT_IMPLEMENTED` / 501 and for why the two
- * classes must not be collapsed. In one line: `count_distinct`, `array_agg` and
- * `string_agg` are declared and other backends compile them, so a caller who
- * wrote one has made no mistake — this is the backend's gap, and an error that
- * says otherwise tells a dashboard author to fix a query that is already right.
+ * classes must not be collapsed. In one line: `count_distinct` is declared and
+ * other backends compile it, so a caller who wrote it has made no mistake —
+ * this is the backend's gap, and an error that says otherwise tells a dashboard
+ * author to fix a query that is already right.
+ *
+ * `array_agg` / `string_agg` left this class at #6188, which answered the
+ * question the message below points at: they were retired from
+ * `AggregationFunction` rather than implemented, so they are now undeclared
+ * names and answer 400. `count_distinct` took the other leg of that ruling and
+ * is, until its SQL lowering lands, the whole of this class.
  */
 function uncompilableAggregateFunctionError(func: string): Error {
   const err = new Error(

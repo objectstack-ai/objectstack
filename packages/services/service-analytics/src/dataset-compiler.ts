@@ -22,8 +22,26 @@ import { datasetInvalidError } from './dataset-refusal.js';
  * enforces at SQL-build time.
  */
 
-/** Operators v1 does NOT compile to the Cube SQL switch — surfaced as a clear error. */
-export const UNSUPPORTED_AGGREGATES = new Set(['array_agg', 'string_agg']);
+/**
+ * Aggregates v1 does NOT compile to the Cube SQL switch — surfaced as a clear error.
+ *
+ * **EMPTY since #6188, and deliberately kept.** It named `array_agg` and
+ * `string_agg`: the two aggregates the spec declared and this runtime could not
+ * lower. ADR-0049 resolved that the honest way round — both were retired from
+ * `AggregationFunction` itself, so they are now refused one layer earlier, by
+ * the parse, with a prescription that tells the author what to do instead.
+ * `count_distinct` was the third unlowered function on the SQL drivers and was
+ * NOT retired (maintainer ruling, 2026-08-07): this compiler lowers it already,
+ * and the driver-side implementation follows on its own card.
+ *
+ * The set stays because it is one half of an arithmetic the lockstep tests
+ * enforce (`SUPPORTED = spec vocabulary − this`), and that arithmetic is what
+ * stops the next aggregate added to the spec from reaching the strategy's
+ * `default` and returning a row count in place of the requested value. Empty is
+ * the correct current reading — every declared aggregate is lowered — not a
+ * leftover.
+ */
+export const UNSUPPORTED_AGGREGATES = new Set<string>();
 
 /**
  * What v1 *can* lower — derived from the spec's vocabulary rather than restated.
@@ -137,6 +155,13 @@ function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
   if (UNSUPPORTED_AGGREGATES.has(m.aggregate)) {
     // [#5367] `DATASET_INVALID` / 400 — the aggregate is the dataset author's
     // choice, and the message already names the ones that would work.
+    //
+    // Unreachable while `UNSUPPORTED_AGGREGATES` is empty (#6188 retired its two
+    // members from the spec, which now refuses them at parse). Kept as the
+    // landing site for the next aggregate the spec declares before this runtime
+    // can lower it: without it that aggregate reaches the strategy's `default`
+    // and comes back as a row count. The lockstep suite is what decides which
+    // of the two states we are in, so this branch cannot rot unnoticed.
     throw datasetInvalidError(
       `[dataset-compiler] measure "${m.name}" uses aggregate "${m.aggregate}" which is ` +
       `not supported by the v1 dataset runtime (supported: ${SUPPORTED_AGGREGATES.join(', ')}).`,

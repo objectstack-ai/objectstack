@@ -1190,6 +1190,7 @@ export type Iso624 = Assert<Eq< z.input< typeof M147.SpecifierType >, z.infer< t
 export type Iso625 = Assert<Eq< z.input< typeof M147.SpecifierOptionSchema >, z.infer< typeof M147.SpecifierOptionSchema > >>;
 export type Iso626 = Assert<Eq< z.input< typeof M147.SpecifierScopeSchema >, z.infer< typeof M147.SpecifierScopeSchema > >>;
 export type Iso627 = Assert<Eq< z.input< typeof M147.SettingsActionResultSchema >, z.infer< typeof M147.SettingsActionResultSchema > >>;
+export type Iso758 = Assert<Eq< z.input< typeof M147.SpecifierValueDomainSchema >, z.infer< typeof M147.SpecifierValueDomainSchema > >>;
 
 // system/supplier-security.zod.ts
 export type Iso628 = Assert<Eq< z.input< typeof M148.SupplierRiskLevelSchema >, z.infer< typeof M148.SupplierRiskLevelSchema > >>;
@@ -1484,7 +1485,17 @@ describe('ADR-0122 type-alias convention', () => {
     // `ValidateDataResponse` — three new protocol shapes with no defaults or
     // transforms anywhere in their trees, i.e. the second (RISE) case above.
     //
-    // 754 -> 747 is the 2026-08-08 ADR-0049 retirement sweep (#6486), the
+    //
+    // 751 -> 754 is #6037's `ValidateDataIssue` / `ValidateDataRequest` /
+    // `ValidateDataResponse` — three new protocol shapes with no defaults or
+    // transforms anywhere in their trees, i.e. the second (RISE) case above.
+    //
+    // 754 -> 755 is #5933's `SpecifierValueDomain` — one new closed enum on
+    // `SettingsManifest`'s SpecifierSchema, the same (RISE) case: a `z.enum`
+    // has no default or transform, so its two shapes coincide and it gets a pin
+    // rather than a `SpecifierValueDomainParsed` synonym.
+    //
+    // 755 -> 748 is the 2026-08-08 ADR-0049 retirement sweep (#6486), the
     // first way again — a schema left the package, so its pin left with it.
     // Written out per member, because a MULTI-member sweep is exactly where a
     // count gets nudged to fit instead of recomputed:
@@ -1497,15 +1508,19 @@ describe('ADR-0122 type-alias convention', () => {
     //             ten view schemas were isomorphic; the other six were paired)
     //   #6414   0  every ETL alias already had a `Parsed` counterpart
     //
-    // -7, and 754 - 7 = 747. Two things worth stating, because this is the
-    // first time this number moved twice between one branch point and one
-    // merge: the member count (3) and the pin count (7) have no relation to
-    // each other, and the -7 was computed against 751 on the branch and had to
-    // be REBASED onto #6037's 754 at the merge. Both operands moved; only
-    // recomputing from the file catches that.
+    // -7, and 755 - 7 = 748. Three things this one entry is worth stating,
+    // because they are the ways a MINUS gets miscomputed here. (1) The member
+    // count (3) and the pin count (7) have no relation to each other. (2) The
+    // -7 was computed against 751 at the branch point and had to be rebased
+    // TWICE before landing — onto #6037's 754, then onto #5933's 755 — so the
+    // subtrahend was the only stable operand. (3) A sibling retirement in the
+    // same window contributed ZERO: #6527 retired `array_agg` / `string_agg`
+    // from `AggregationFunction`, and an enum VALUE narrowing is invisible
+    // here, exactly as it is to the four surface ratchets. Recompute from the
+    // file; never from the changelog.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(747);
+    expect(pins).toHaveLength(748);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {

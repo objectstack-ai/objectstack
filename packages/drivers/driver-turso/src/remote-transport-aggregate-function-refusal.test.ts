@@ -190,7 +190,14 @@ async function localRefusalOf(fn: string, ast: QueryAST): Promise<WireBearingErr
 
 describe('[#5907] RemoteTransport refuses an aggregate function it cannot compile', () => {
   describe('a function name the Query Protocol never declared', () => {
-    const UNDECLARED = ['median', 'stddev', 'percentile_cont', 'group_concat'];
+    // `array_agg` / `string_agg` moved here from the class below at #6188, which
+    // retired both from `AggregationFunction` — they are now undeclared names
+    // (400), not declared-but-uncompiled ones (501). Mirrors the twin in
+    // `driver-sql`; the parity block further down compares the two faces on the
+    // reclassified pair as well.
+    const UNDECLARED = [
+      'median', 'stddev', 'percentile_cont', 'group_concat', 'array_agg', 'string_agg',
+    ];
 
     for (const fn of UNDECLARED) {
       it(`refuses "${fn}" with INVALID_QUERY / 400`, async () => {
@@ -228,10 +235,11 @@ describe('[#5907] RemoteTransport refuses an aggregate function it cannot compil
 
   describe('a DECLARED function this backend cannot compile', () => {
     // Typed against the declared enum on purpose — see the twin's note (#4918).
+    // One name since #6188 retired the other two; `count_distinct` stays
+    // declared (it takes ADR-0049's enforce leg) and is therefore the whole of
+    // this class until its SQL lowering lands on its own card.
     const UNCOMPILABLE: Array<AggregationNode['function']> = [
       'count_distinct',
-      'array_agg',
-      'string_agg',
     ];
 
     it('the fixture is exactly the declared-but-uncompiled set', () => {
@@ -261,13 +269,21 @@ describe('[#5907] RemoteTransport refuses an aggregate function it cannot compil
     // literal — a shared constant would agree with itself no matter how far the
     // two faces drifted. This is what makes "首句逐字一致" checkable.
     // One entry per class, each carrying the query value its class is entitled
-    // to: `median` cannot be a `QueryAST` (that is what class 1 means), the three
-    // declared names can and are.
+    // to: `median` cannot be a `QueryAST` (that is what class 1 means), the
+    // declared name can and is.
+    //
+    // `array_agg` / `string_agg` stay in this list across #6188 and change
+    // SIDES: they were class-2 fixtures built with `declaredAst`, and now that
+    // the enum no longer has them they are class-1 fixtures built with
+    // `undeclaredAst`. Parity is the property that must survive the
+    // reclassification — the two faces have to agree on the NEW answer as
+    // exactly as they agreed on the old one, which is what would break if only
+    // one of them read the narrowed enum.
     const PARITY: Array<[fn: string, ast: QueryAST]> = [
       ['median', undeclaredAst('median')],
       ['count_distinct', declaredAst('count_distinct')],
-      ['array_agg', declaredAst('array_agg')],
-      ['string_agg', declaredAst('string_agg')],
+      ['array_agg', undeclaredAst('array_agg')],
+      ['string_agg', undeclaredAst('string_agg')],
     ];
     for (const [fn, ast] of PARITY) {
       it(`"${fn}" is answered identically by the local driver and this transport`, async () => {

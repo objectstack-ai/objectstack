@@ -10,6 +10,7 @@
     "time-relative-trigger",
     "---Integration & Data---",
     "bpmn-interop",
+    "etl",
     "webhook",
     "---Approvals & Jobs---",
     "approval",

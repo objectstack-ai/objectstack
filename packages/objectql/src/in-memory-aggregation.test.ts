@@ -61,19 +61,37 @@ describe('applyInMemoryAggregation', () => {
     expect(eastQ1!.n).toBe(2);
   });
 
-  it('honours count_distinct + array_agg + string_agg', () => {
+  it('honours count_distinct', () => {
     const out = applyInMemoryAggregation(rows, {
       groupBy: ['region'],
       aggregations: [
         { function: 'count_distinct', field: 'owner', alias: 'owners' },
-        { function: 'array_agg', field: 'owner', alias: 'owner_list' },
-        { function: 'string_agg', field: 'owner', alias: 'owner_str' },
       ],
     });
     const east = out.find((r) => r.region === 'East');
     expect(east!.owners).toBe(2);
-    expect(east!.owner_list).toEqual(['alice', 'alice', 'bob']);
-    expect(east!.owner_str).toBe('alice,alice,bob');
+  });
+
+  // #6188 retired `array_agg` / `string_agg` from `AggregationFunction`, and
+  // this fallback's arms for them went with the vocabulary. The case is kept —
+  // re-spelled onto what the retirement actually guarantees — because the pair
+  // reached this path from a spec-valid request until v17, so "the fallback no
+  // longer computes them" is the observable half of the change. It arrives as
+  // `null` from the `default` arm, not as an array; callers cannot reach this
+  // through a parsed query at all, since the enum refuses both by name.
+  it('no longer computes the retired list aggregations', () => {
+    const out = applyInMemoryAggregation(rows, {
+      groupBy: ['region'],
+      // Cast: these are exactly the values `AggregationFunction` no longer has,
+      // which is what this test exists to pin.
+      aggregations: [
+        { function: 'array_agg', field: 'owner', alias: 'owner_list' },
+        { function: 'string_agg', field: 'owner', alias: 'owner_str' },
+      ] as never,
+    });
+    const east = out.find((r) => r.region === 'East');
+    expect(east!.owner_list).toBeNull();
+    expect(east!.owner_str).toBeNull();
   });
 
   // #3839 — this used to be the literal string `'(null)'`, which the pushed-down

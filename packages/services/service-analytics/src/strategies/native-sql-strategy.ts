@@ -20,9 +20,10 @@ import { nextUtcCalendarDay } from '@objectstack/core';
  *
  * A table rather than a `switch` so its coverage is *assertable*: the aggregate
  * vocabulary lives in `@objectstack/spec` (`AggregationFunction`), the dataset
- * compiler subtracts the two it cannot lower (`array_agg`, `string_agg`), and
- * `aggregation-lockstep.test.ts` checks that what remains is exactly the keys
- * below. A `switch` gave that no purchase — the missing case fell to
+ * compiler subtracts whatever it cannot lower (`UNSUPPORTED_AGGREGATES` — empty
+ * since #6188 retired its two members, `array_agg` and `string_agg`, from the
+ * spec itself), and `aggregation-lockstep.test.ts` checks that what remains is
+ * exactly the keys below. A `switch` gave that no purchase — the missing case fell to
  * `default: COUNT(*)`, so an aggregate the spec grew would have returned a row
  * count instead of the number the author asked for, silently. objectui#2945.
  *
