@@ -66,7 +66,6 @@ export const zhCN: TranslationData = {
         nav_api_keys: { label: 'API 密钥' },
         nav_connect_agent: { label: '连接智能体' },
 
-        nav_approval_processes: { label: '审批流程' },
         nav_approval_requests: { label: '审批申请' },
         nav_approval_actions: { label: '审批历史' },
         // `审批委派` matches sys_approval_delegation's object label; `(外出)`
@@ -104,7 +103,6 @@ export const zhCN: TranslationData = {
         nav_jwks: { label: '签名密钥 (JWKS)' },
         nav_accounts: { label: '身份链接' },
         nav_user_preferences: { label: '用户偏好' },
-        nav_metadata: { label: '全部元数据' },
       },
     },
     studio: {

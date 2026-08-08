@@ -10,8 +10,9 @@
  * #4862 / #5037 / #5038) settled the `after*` half and #5038 delivered it.
  * Addendum II (#5574's maintainer ruling B, 2026-08-06, landed by #6462)
  * extends the same per-row semantics to the `before*` half, and this module is
- * that ruling's contract face — the spec half of a deliberate contract-first
- * split, with the engine half tracked as #5574's engine card.
+ * that ruling's contract face. It landed as the spec half of a deliberate
+ * contract-first split; #5574's engine card delivered the producer, so every
+ * entry below now reads `delivered: true` and the split is closed.
  *
  * # Why a module and not one more paragraph of TSDoc
  *
@@ -27,8 +28,13 @@
  * mistaken for "delivered". So the two live apart and say different things.
  * {@link BULK_WRITE_HOOK_DISPATCH_CONTRACT} carries a `delivered` flag per
  * event, and `bulk-write-hook-conformance.test.ts` pins exactly which entries
- * are still false — so the engine half cannot land without turning this file's
- * pin red and flipping the flag in the same PR.
+ * are false — so the engine half could not land without turning this file's
+ * pin red and flipping the flag in the same PR. It did, and it did: the
+ * `before*` flags were flipped by #5574's engine half, and the pin now asserts
+ * that NOTHING is undelivered. The flag stays on the entries rather than being
+ * deleted with the gap it recorded, so the contract-first split remains
+ * readable as a decision (Prime Directive #13) and a future clause added the
+ * same way has a slot to be honest in.
  *
  * # The decision, in full
  *
@@ -208,7 +214,7 @@ export const BULK_WRITE_HOOK_DISPATCH_CONTRACT: readonly BulkWriteHookDispatchCo
         phase: 'before',
         contextKeys: ['id', 'data', 'options', 'previous'],
         payloadScope: 'batch',
-        delivered: false,
+        delivered: true,
         engineDeliveryIssue: 5574,
     },
     {
@@ -216,7 +222,7 @@ export const BULK_WRITE_HOOK_DISPATCH_CONTRACT: readonly BulkWriteHookDispatchCo
         phase: 'before',
         contextKeys: ['id', 'options', 'previous'],
         payloadScope: 'none',
-        delivered: false,
+        delivered: true,
         engineDeliveryIssue: 5574,
     },
     {
@@ -247,13 +253,13 @@ export const BULK_WRITE_HOOK_DISPATCH_CONTRACT: readonly BulkWriteHookDispatchCo
  * a whole table becomes an unbounded fan-out of handler executions inside a
  * single write.
  *
- * ⚠️ Two definitions today, one on purpose and only until the engine half
- * lands: objectql holds the same literal as `ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS`
- * (`engine.ts`, #5038) and open-codes the refusal. The engine half of #5574
- * replaces that static and that message with this module, at which point the
- * ceiling has one definition again. Until then they agree because
- * `bulk-write-hook-conformance.test.ts` pins the number, not because anything
- * structural makes them.
+ * ONE definition, since #5574's engine half. `ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS`
+ * (`engine.ts`) is now a re-export of this constant and
+ * `ObjectQL.assertBulkPerRowHookBudget` is the raising half of
+ * {@link resolveBulkPerRowHookBudget} — the engine raises, the contract
+ * decides. Between #5038 and then the same literal and the same message were
+ * written down twice, agreeing only because a pin in
+ * `bulk-write-hook-conformance.test.ts` said so.
  */
 export const MAX_BULK_PER_ROW_HOOK_ROWS = 10_000;
 

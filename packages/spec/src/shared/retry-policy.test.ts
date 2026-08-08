@@ -76,6 +76,47 @@ describe('RetryPolicy is a single declaration across entries (#4661)', () => {
       expect(parse).toThrow(/backoffMs/);
     }
   });
+
+  // The tombstone STRING is not documentation. `shared/retired-key.ts` says so
+  // in its own words — "an agent bumping `@objectstack/spec` sees THIS string,
+  // not our docs site" — which makes its enumeration of carrying surfaces
+  // contract, not prose. It went stale exactly once and in the worst direction:
+  // it kept listing "an ETL pipeline's `retry`" after #6414 deleted the whole L2
+  // layer, so the one message guaranteed to reach an upgrading author named a
+  // fourth place to write `backoffMs` on which `tsc` now reports TS2724/TS2305
+  // (#6630). Nothing could see that: every pre-existing assertion on this string
+  // matched `/backoffMs/` or `/retryDelayMs/`, i.e. the prescription, never the
+  // enumeration. Pin the enumeration in BOTH directions.
+  //
+  // Note on the assertion shape: there is no ADR-0112 `code`/`status` envelope
+  // to assert here. `retiredKey()` is a Zod `never` whose issue carries the
+  // guidance as its `message`, so for this rejection class the wording IS the
+  // whole contract (#5240) and the message is the only thing worth asserting.
+  it('the tombstone enumerates exactly the surfaces that still carry the policy (#6630)', () => {
+    const result = RetryPolicySchema.safeParse({ retryDelayMs: 500 });
+    expect(result.success).toBe(false);
+    const message = result.error!.issues.map((issue) => issue.message).join('\n');
+
+    // Every surface that builds from `retryPolicyShape()` today, spelled the way
+    // an author writes it. A prescription naming a scope NARROWER than the truth
+    // is the #4964 defect (a real surface left out reads as "not converged").
+    for (const live of ['`job.retryPolicy`', "`try_catch` node's `retry`", '`flow.errorHandling`']) {
+      expect(message, `the prescription must still name ${live}`).toContain(live);
+    }
+
+    // ...and nothing retired. Wider than the truth is the #6630 defect: the
+    // export absence is pinned in `automation/sync-retirement.test.ts`, so a
+    // surface named here that cannot be imported there is a signpost to a
+    // compile error.
+    expect(
+      message,
+      'the prescription must not point at a surface #6414 retired',
+    ).not.toMatch(/\bETL\b/i);
+
+    // None of the above may be bought by weakening the prescription itself.
+    expect(message).toContain('Rename the key to `backoffMs`');
+    expect(message).toContain('os migrate meta --from 16');
+  });
 });
 
 describe('RetryPolicySchema — converged shape', () => {

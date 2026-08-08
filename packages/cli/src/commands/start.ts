@@ -11,6 +11,7 @@ import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
 import { redactConnectionUrl } from '../utils/connection-display.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
+import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
 
 /**
  * `objectstack start` — zero-config quick boot.
@@ -187,10 +188,24 @@ export default class Start extends Command {
     }
 
     // ── Database resolution ─────────────────────────────────────────
-    // Priority: --database > $OS_DATABASE_URL > $DATABASE_URL (legacy) > file:<home>/data/objectstack.db
-    const databaseUrl = flags.database
-      ?? readEnvWithDeprecation('OS_DATABASE_URL', 'DATABASE_URL', { silent: true })
-      ?? `file:${path.join(homeDir, 'data', 'objectstack.db')}`;
+    // The ONE shared resolution (#6469) — `os dev` / `os start` / `os migrate`
+    // land on the same URL for the same project directory. Priority:
+    // --database > $OS_DATABASE_URL / $DATABASE_URL / $TURSO_DATABASE_URL >
+    // explicit memory driver > config-declared default datasource >
+    // file:<home>/data/objectstack.db (legacy dev.db / standalone.db still
+    // compat-read, with a loud notice).
+    const resolvedDb = await resolveStartDatabase({
+      databaseFlag: flags.database,
+      databaseDriverFlag: flags['database-driver'],
+      env: process.env,
+      homeDir,
+      projectRoot: cwd,
+      artifactPath: artifactSource?.path,
+    });
+    if (resolvedDb.notice) {
+      console.log(chalk.yellow(`  ⚠ ${resolvedDb.notice}`));
+    }
+    const databaseUrl = resolvedDb.url;
 
     const environmentId = flags['environment-id']
       ?? process.env.OS_ENVIRONMENT_ID
@@ -272,6 +287,41 @@ export default class Start extends Command {
     );
     child.on('exit', (code) => process.exit(code ?? 0));
   }
+}
+
+/**
+ * Resolve the database URL for `objectstack start` — start's flag surface
+ * mapped onto the ONE shared resolution (`resolveProjectDatabaseUrl`, #6469)
+ * that `os dev` and `os migrate` resolve through too.
+ *
+ * `homeDir` is start's already-resolved home (`--home` > `$OS_HOME` >
+ * `<cwd>/.objectstack` in project mode > `~/.objectstack`), so it is passed as
+ * the pre-resolved state dir — the same directory the other commands derive
+ * from `OS_HOME` / the project root, which is what makes the three answers
+ * identical (pinned by `unified-db-resolution.pin.test.ts`).
+ *
+ * This wrapper is start's ONE resolution seam: it maps inputs, it never
+ * re-implements any fallback. The runtime import is lazy so oclif's
+ * import-every-command startup (#5726) does not pay for the runtime graph.
+ */
+export async function resolveStartDatabase(opts: {
+  databaseFlag?: string;
+  databaseDriverFlag?: string;
+  env: Record<string, string | undefined>;
+  homeDir: string;
+  /** The project root (start's cwd) — anchors a config-declared relative sqlite filename. */
+  projectRoot?: string;
+  artifactPath?: string;
+}): Promise<ResolvedProjectDatabaseUrl> {
+  const { resolveProjectDatabaseUrl } = await import('@objectstack/runtime');
+  return resolveProjectDatabaseUrl({
+    explicitUrl: opts.databaseFlag,
+    explicitDriver: opts.databaseDriverFlag,
+    env: opts.env,
+    homeDir: opts.homeDir,
+    projectRoot: opts.projectRoot,
+    artifactPath: opts.artifactPath,
+  });
 }
 
 function resolveHome(

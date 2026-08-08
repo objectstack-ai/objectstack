@@ -11,6 +11,21 @@ export type { RuntimeConfig } from './runtime.js';
 export { createStandaloneStack, resolveObjectStackHome, resolveStandaloneDatabase } from './standalone-stack.js';
 export type { StandaloneStackConfig, StandaloneStackResult, ResolvedStandaloneDatabase } from './standalone-stack.js';
 
+// The ONE default-database resolution shared by `os dev` / `os start` /
+// `os migrate` (#6469) — commands map their flags onto it; no command carries
+// its own fallback filename.
+export {
+    resolveProjectDatabaseUrl,
+    normalizeDatabaseUrl,
+    UNIFIED_DEFAULT_DB_FILENAME,
+    LEGACY_DEFAULT_DB_FILENAMES,
+} from './resolve-project-database.js';
+export type {
+    ResolveProjectDatabaseUrlOptions,
+    ResolvedProjectDatabaseUrl,
+    ProjectDatabaseUrlSource,
+} from './resolve-project-database.js';
+
 // Export Default Host (artifact-first, no objectstack.config.ts required)
 export { createDefaultHostConfig, resolveDefaultArtifactPath } from './default-host.js';
 export type { DefaultHostConfigOptions, DefaultHostConfigResult } from './default-host.js';

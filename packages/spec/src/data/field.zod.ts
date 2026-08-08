@@ -713,6 +713,21 @@ export const FieldSchema = lazySchema(() => strictObject({
   // addressFormat, color colorFormat/allowAlpha/presetColors, slider showValue/marks,
   // barcode/qr barcodeFormat/qrErrorCorrection/displayValue/allowScanning.
   language: z.string().optional().describe('Programming language for syntax highlighting (e.g., javascript, python, sql)'),
+  // `step` is the slider's **UI increment** and deliberately NOT a stored-value constraint —
+  // ADR-0049's "ledger" half, ruled 2026-08-08 (#6514). Note it is renderer-LIVE, not dead,
+  // which is why it is NOT in the pruned list above and never joins it: objectui's
+  // `packages/fields/src/widgets/SliderField.tsx:14` reads it (`field.step ?? 1`) and hands it
+  // to the Slider, and `packages/spec/liveness/field.json` ledgers it `live` on that evidence.
+  // What it does not do is BIND the written value: the numeric branch of
+  // `packages/objectql/src/validation/record-validator.ts` enforces `min`/`max` for `slider`
+  // and reads `step` nowhere. The settings-side ruling (#6199 / PR #6501, which DID enforce a
+  // grid) does not transfer: its hook was that schema's own "numeric bounds and step" comment
+  // grouping `step` with `min`/`max`, which this declaration does not share — and enforcing a
+  // grid here would make already-stored off-grid values start failing on their next edit,
+  // because record-validator judges updates to existing rows. Should grid enforcement ever
+  // gain real user pull it returns as a feature request in PR #6501's shape: anchor at
+  // `min + k * step` (falling back to 0 when no `min` is declared), epsilon-tolerant
+  // comparison. See docs/audits/2026-06-dead-surface-disposition-plan.md (P2 field prune).
   step: z.number().optional().describe('Step increment for slider (default: 1)'),
 
   // Currency field config
