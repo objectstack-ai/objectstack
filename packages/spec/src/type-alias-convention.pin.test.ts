@@ -448,6 +448,7 @@ export type Iso131 = Assert<Eq< z.input< typeof M28.GetMetaItemsRequestSchema >,
 export type Iso132 = Assert<Eq< z.input< typeof M28.GetMetaItemsResponseSchema >, z.infer< typeof M28.GetMetaItemsResponseSchema > >>;
 export type Iso133 = Assert<Eq< z.input< typeof M28.GetMetaItemRequestSchema >, z.infer< typeof M28.GetMetaItemRequestSchema > >>;
 export type Iso134 = Assert<Eq< z.input< typeof M28.GetMetaItemResponseSchema >, z.infer< typeof M28.GetMetaItemResponseSchema > >>;
+export type Iso759 = Assert<Eq< z.input< typeof M28.GetMetaItemLayeredResponseSchema >, z.infer< typeof M28.GetMetaItemLayeredResponseSchema > >>;
 export type Iso135 = Assert<Eq< z.input< typeof M28.SaveMetaItemRequestSchema >, z.infer< typeof M28.SaveMetaItemRequestSchema > >>;
 export type Iso136 = Assert<Eq< z.input< typeof M28.SaveMetaItemResponseSchema >, z.infer< typeof M28.SaveMetaItemResponseSchema > >>;
 export type Iso137 = Assert<Eq< z.input< typeof M28.DeleteMetaItemRequestSchema >, z.infer< typeof M28.DeleteMetaItemRequestSchema > >>;
@@ -1518,9 +1519,31 @@ describe('ADR-0122 type-alias convention', () => {
     // from `AggregationFunction`, and an enum VALUE narrowing is invisible
     // here, exactly as it is to the four surface ratchets. Recompute from the
     // file; never from the changelog.
+    // 748 -> 749 is the 2026-08-08 undeclared-response sweep (#6487), the
+    // OTHER way a count moves: a schema ARRIVED. `GetMetaItemLayeredResponseSchema`
+    // (#5882) declares the three-layer projection that `GET /meta/:type/:name`
+    // used to serve, undeclared, behind `?layers=true`. Its tree is enums,
+    // booleans, `z.unknown()` and `MetadataValidationResultSchema` — no
+    // `.default()` anywhere — so its two shapes coincide and ADR-0122 gives it a
+    // pin rather than a `GetMetaItemLayeredResponseParsed` synonym.
+    //
+    // Written out per member, because a MULTI-member sweep is exactly where a
+    // count gets nudged to fit instead of recomputed:
+    //
+    //   #5882  +1  GetMetaItemLayeredResponseSchema (new schema, isomorphic)
+    //   #5950   0  GetMetaItemResponseSchema was ALREADY pinned (Iso134) and
+    //             stays pinned — it gained ten optional keys, and an enum /
+    //             boolean / string with no default cannot break isomorphism,
+    //             exactly as an enum VALUE narrowing could not in #6486
+    //   #6442   0  AnalyticsMetadataResponseSchema is not pinned at all; it
+    //             carries an `AnalyticsMetadataResponseParsed` alias instead,
+    //             and narrowing `data` did not change which of the two
+    //             ADR-0122 states it is in
+    //
+    // +1, and 748 + 1 = 749. Recompute from the file; never from the changelog.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(748);
+    expect(pins).toHaveLength(749);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {

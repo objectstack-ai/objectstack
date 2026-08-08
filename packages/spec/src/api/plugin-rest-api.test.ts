@@ -471,7 +471,14 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_METADATA_ROUTES.service).toBe('metadata');
       expect(DEFAULT_METADATA_ROUTES.category).toBe('metadata');
       expect(DEFAULT_METADATA_ROUTES.authRequired).toBe(true);
-      expect(DEFAULT_METADATA_ROUTES.endpoints).toHaveLength(4);
+      // 4 -> 5: `GET /:type/:name/layers` (#5882) — the three-layer diagnostic
+      // projection, previously reachable only as an undeclared `?layers=true`
+      // variant of `GET /:type/:name`, now its own path with its own
+      // `GetMetaItemLayeredResponseSchema`.
+      expect(DEFAULT_METADATA_ROUTES.endpoints).toHaveLength(5);
+      expect(DEFAULT_METADATA_ROUTES.endpoints?.map((e) => `${e.method} ${e.path}`)).toContain(
+        'GET /:type/:name/layers',
+      );
       expect(DEFAULT_METADATA_ROUTES.middleware).toBeDefined();
     });
 

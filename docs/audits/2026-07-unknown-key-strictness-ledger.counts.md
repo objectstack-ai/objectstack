@@ -264,7 +264,7 @@ directory rather than per file.
 | Dir | Sites |
 |---|---|
 | `ai/` | 77 |
-| `api/` | 391 |
+| `api/` | 393 |
 | `cloud/` | 83 |
 | `identity/` | 33 |
 | `integration/` | 10 |

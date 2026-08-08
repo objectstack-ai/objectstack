@@ -2807,6 +2807,41 @@ export class RestServer {
     }
 
     /**
+     * Serve the three-layer diagnostic projection (`code` / `overlay` /
+     * `effective`) declared by `GetMetaItemLayeredResponseSchema`.
+     *
+     * ONE implementation behind TWO entry points (#5882): the canonical
+     * `GET /meta/:type/:name/layers`, and the deprecated
+     * `GET /meta/:type/:name?layers=true` it replaces. Extracted rather than
+     * duplicated precisely because the deprecation window's promise is that the
+     * old spelling answers *the same body* — two copies would let that stop
+     * being true without anything failing.
+     *
+     * Not translated and not cached, both deliberately: this is a diagnostic
+     * view of what is STORED at each layer, so locale-collapsing it (or serving
+     * it from the published-value cache) would misreport the thing being
+     * diagnosed.
+     */
+    private async serveMetaItemLayered(
+        req: any,
+        res: any,
+        environmentId: string | undefined,
+        p: any,
+    ): Promise<void> {
+        // ADR-0048 — thread `?package=` so the layered (Studio editor) view is
+        // package-scoped; the editor passes the edited item's owning package,
+        // not the studio app's.
+        const layeredPackageId = req.query?.package || undefined;
+        const layered = await p.getMetaItemLayered({
+            type: req.params.type,
+            name: req.params.name,
+            ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
+            ...(environmentId ? { environmentId } : {}),
+        });
+        res.json(layered);
+    }
+
+    /**
      * Translate a list of metadata documents using `translateMetaItem`.
      */
     private async translateMetaItems(req: any, type: string, environmentId: string | undefined, items: any): Promise<any> {
@@ -4126,6 +4161,52 @@ export class RestServer {
                 },
             });
 
+            // [#5882] GET /meta/:type/:name/layers — the three-layer diagnostic
+            // projection as its OWN resource. Registered BEFORE
+            // /meta/:type/:name for the same first-match reason as
+            // /references above, and before /meta/:type/:section/:name, which
+            // would otherwise capture this path with section=<name>,
+            // name="layers".
+            //
+            // This path exists because the projection used to be reachable only
+            // as `GET /meta/:type/:name?layers=true` — the same route answering
+            // a SECOND, undeclared body shape depending on a query flag, while
+            // `packages/spec` declared one `responseSchema` for it. The ruled
+            // fix (maintainer, 2026-08-06) was one path per response shape,
+            // deliberately NOT teaching the route declaration to express
+            // "two shapes chosen by a flag": that would add a primitive every
+            // future tool has to understand, and conditional response selection
+            // is exactly where codegen and AI-written clients go wrong.
+            this.routeManager.register({
+                method: 'GET',
+                path: `${metaPath}/:type/:name/layers`,
+                handler: async (req: any, res: any) => {
+                    try {
+                        const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        const p = await this.resolveProtocol(environmentId, req);
+                        if (typeof (p as any).getMetaItemLayered !== 'function') {
+                            // A dedicated path cannot fall through to the plain
+                            // read the way the `?layers=` flag did — answering
+                            // the merged `{ type, name, item }` envelope here
+                            // would be answering a different resource with a
+                            // shape this path never declares.
+                            res.status(501).json({
+                                error: 'Layered metadata view not supported by protocol implementation',
+                                code: 'NOT_IMPLEMENTED',
+                            });
+                            return;
+                        }
+                        await this.serveMetaItemLayered(req, res, environmentId, p);
+                    } catch (error: any) {
+                        handleRouteError(res, error);
+                    }
+                },
+                metadata: {
+                    summary: 'Get a metadata item as its three layers (code / overlay / effective)',
+                    tags: ['metadata'],
+                },
+            });
+
             // ADR-0046 §6 — GET /meta/book/:name/tree
             // Resolve a book spine against the docs that exist *now* into a
             // rendered tree (membership is DERIVED, never stored — §6.2.1). An
@@ -4264,32 +4345,42 @@ export class RestServer {
                         // Skips the cache path entirely — layered view is a
                         // diagnostic endpoint, not on the hot read path.
                         //
-                        // [#5563] This is a DIFFERENT RESOURCE reached through a
-                        // query flag, not a variant body of the same one: it
-                        // answers `{ type, name, code, overlay, overlayScope,
-                        // effective, validation }` — three layers side by side,
-                        // where `effective` is what the plain read would return.
-                        // Collapsing it into `GetMetaItemResponseSchema`'s single
-                        // `item` would delete the diagnostic (the whole point is
-                        // seeing code vs overlay vs effective separately), so the
-                        // convergence deliberately stops at the ordinary read.
-                        // What remains is a spec gap, not a runtime split: the
-                        // route declares ONE `responseSchema` while `?layers=`
-                        // answers a second, undeclared shape — filed as #5882
-                        // for a spec seat.
+                        // [#5563 → #5882] DEPRECATED SPELLING. This flag makes one
+                        // route answer a SECOND resource representation — three
+                        // layers side by side (`code` / `overlay` / `effective`),
+                        // where `effective` is what the plain read returns — while
+                        // the route declares a single `responseSchema`. #5563
+                        // converged the ordinary read and left this half open
+                        // because collapsing the layers into
+                        // `GetMetaItemResponseSchema`'s single `item` would delete
+                        // the diagnostic outright.
+                        //
+                        // #5882 closed it the other way (maintainer ruling, 2026-08-06):
+                        // the projection is now its own path,
+                        // `GET /meta/:type/:name/layers`, declared by
+                        // `GetMetaItemLayeredResponseSchema`. One path, one shape.
+                        //
+                        // This branch stays for a deprecation window so existing
+                        // callers (Studio's metadata editor) are not broken by the
+                        // move. It answers the IDENTICAL body — same helper, not a
+                        // copy — and advertises the successor in the response
+                        // headers, so a client can discover the migration without
+                        // reading the changelog. Delete this branch (and the
+                        // headers with it) once the callers have moved.
                         const wantLayered = req.query?.layers !== undefined && req.query?.layers !== '';
                         if (wantLayered && typeof (p as any).getMetaItemLayered === 'function') {
-                            // ADR-0048 — thread `?package=` so the layered (Studio
-                            // editor) view is package-scoped; the editor passes the
-                            // edited item's owning package, not the studio app's.
-                            const layeredPackageId = req.query?.package || undefined;
-                            const layered = await (p as any).getMetaItemLayered({
-                                type: req.params.type,
-                                name: req.params.name,
-                                ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
-                                ...(environmentId ? { environmentId } : {}),
-                            });
-                            res.json(layered);
+                            // RFC 9745 `Deprecation` + RFC 8288 `Link` — the same
+                            // machine-readable pairing `versioning.zod.ts` already
+                            // describes for retiring API versions, applied to a
+                            // retiring query flag. No `Sunset` date: choosing the
+                            // hard cut-off is a maintainer call, and an invented
+                            // date is worse than none.
+                            res.header('Deprecation', 'true');
+                            res.header(
+                                'Link',
+                                `<${metaPath}/${req.params.type}/${req.params.name}/layers>; rel="successor-version"`,
+                            );
+                            await this.serveMetaItemLayered(req, res, environmentId, p);
                             return;
                         }
 
