@@ -69,7 +69,7 @@ const CRM_ACCOUNT = {
       options: [{ label: 'Standard', value: 'standard' }, { label: 'Gold', value: 'gold' }],
     },
     penalty_amount: { name: 'penalty_amount', type: 'number' as const, label: '处罚金额', min: 0, max: 9999999.99 },
-    nickname: { name: 'nickname', type: 'text' as const, label: 'Nickname', maxLength: 5 },
+    nickname: { name: 'nickname', type: 'text' as const, label: 'Nickname', minLength: 3, maxLength: 5 },
   },
 };
 
@@ -259,6 +259,33 @@ describe('import dry run == real write (#4633)', () => {
       expect(verdictOf(dry)).toEqual(verdictOf(real));
     });
 
+    it('numeric range, the other bound: above `max`, same verdict from both halves', async () => {
+      const rows = [{ id: 'r3b', name: 'Wayne', penalty_amount: 1e9 }];
+      const { dry, real } = await bothWays(rows);
+      expect(dry).toMatchObject({ ok: 0, errors: 1, created: 0 });
+      expect(real).toMatchObject({ ok: 0, errors: 1, created: 0 });
+      expect(verdictOf(dry)).toMatchObject({ field: 'penalty_amount', code: 'max_value' });
+      expect(verdictOf(dry)).toEqual(verdictOf(real));
+    });
+
+    it('string length, the other bound: below `minLength`, same verdict from both halves', async () => {
+      const rows = [{ id: 'r4b', name: 'Oscorp', nickname: 'ab' }];
+      const { dry, real } = await bothWays(rows);
+      expect(dry).toMatchObject({ ok: 0, errors: 1, created: 0 });
+      expect(real).toMatchObject({ ok: 0, errors: 1, created: 0 });
+      expect(verdictOf(dry)).toMatchObject({
+        field: 'nickname', code: 'min_length', error: 'Nickname must be ≥ 3 characters (got 2)',
+      });
+      expect(verdictOf(dry)).toEqual(verdictOf(real));
+    });
+
+    it('a bounded field the row omits is not a finding — a bound never fires on an absent value', async () => {
+      const rows = [{ id: 'r4c', name: 'Tyrell' }]; // no penalty_amount, no nickname
+      const { dry, real } = await bothWays(rows);
+      expect(dry).toMatchObject({ ok: 1, errors: 0, created: 1 });
+      expect(real).toMatchObject({ ok: 1, errors: 0, created: 1 });
+    });
+
     it('boundary values stay legal — the new route must not over-reject either', async () => {
       const rows = [{ id: 'r5', name: 'Cyberdyne', penalty_amount: 0, nickname: 'exact' }];
       const { dry, real } = await bothWays(rows);
@@ -269,8 +296,8 @@ describe('import dry run == real write (#4633)', () => {
     it('update mode judges only the supplied keys — an unmapped required field is not a finding', async () => {
       await engine.insert('crm_account', { id: 'r6', name: 'Hooli', tier: 'gold' });
       const body = { writeMode: 'update', matchFields: ['id'] };
-      const dry = (await imp({ format: 'json', dryRun: true, rows: [{ id: 'r6', nickname: 'ok' }], ...body }))._json;
-      const real = (await imp({ format: 'json', rows: [{ id: 'r6', nickname: 'ok' }], ...body }))._json;
+      const dry = (await imp({ format: 'json', dryRun: true, rows: [{ id: 'r6', nickname: 'okay' }], ...body }))._json;
+      const real = (await imp({ format: 'json', rows: [{ id: 'r6', nickname: 'okay' }], ...body }))._json;
       expect(dry).toMatchObject({ ok: 1, errors: 0, updated: 1 });
       expect(real).toMatchObject({ ok: 1, errors: 0, updated: 1 });
     });
