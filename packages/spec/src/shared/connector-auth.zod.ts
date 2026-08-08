@@ -103,6 +103,7 @@ export type ResolvedConnectorAuth = Extract<
 export const ConnectorInstanceNoAuthSchema = lazySchema(() => z.object({
   type: z.literal('none'),
 }));
+export type ConnectorInstanceNoAuth = z.input<typeof ConnectorInstanceNoAuthSchema>;
 
 /** Bearer-token auth; the token is resolved from `credentialRef` at boot. */
 export const ConnectorInstanceBearerAuthSchema = lazySchema(() => z.object({
@@ -111,6 +112,7 @@ export const ConnectorInstanceBearerAuthSchema = lazySchema(() => z.object({
     'Secrets-layer reference (e.g. an env-var name in the open tier) resolved to the bearer token at materialization. Never an inline token.',
   ),
 }));
+export type ConnectorInstanceBearerAuth = z.input<typeof ConnectorInstanceBearerAuthSchema>;
 
 /** API-key auth; the key is resolved from `credentialRef` at boot. */
 export const ConnectorInstanceAPIKeyAuthSchema = lazySchema(() => z.object({
@@ -121,6 +123,7 @@ export const ConnectorInstanceAPIKeyAuthSchema = lazySchema(() => z.object({
   headerName: z.string().optional().describe('HTTP header carrying the key (default X-API-Key).'),
   paramName: z.string().optional().describe('Query parameter carrying the key (alternative to header).'),
 }));
+export type ConnectorInstanceAPIKeyAuth = z.input<typeof ConnectorInstanceAPIKeyAuthSchema>;
 
 /** Basic auth; the password is resolved from `credentialRef` at boot. */
 export const ConnectorInstanceBasicAuthSchema = lazySchema(() => z.object({
@@ -130,6 +133,7 @@ export const ConnectorInstanceBasicAuthSchema = lazySchema(() => z.object({
     'Secrets-layer reference resolved to the password at materialization. Never an inline password.',
   ),
 }));
+export type ConnectorInstanceBasicAuth = z.input<typeof ConnectorInstanceBasicAuthSchema>;
 
 /**
  * Declarative connector-instance auth: a discriminated union whose secret-bearing

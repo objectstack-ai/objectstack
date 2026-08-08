@@ -116,3 +116,4 @@ export type AnalyticsMetadataResponseParsed = z.infer<typeof AnalyticsMetadataRe
 export type AnalyticsSqlResponse = z.input<typeof AnalyticsSqlResponseSchema>;
 /** Post-parse shape of {@link AnalyticsSqlResponse} — defaults applied, transforms run (ADR-0122). */
 export type AnalyticsSqlResponseParsed = z.infer<typeof AnalyticsSqlResponseSchema>;
+export type GetAnalyticsMetaRequest = z.input<typeof GetAnalyticsMetaRequestSchema>;

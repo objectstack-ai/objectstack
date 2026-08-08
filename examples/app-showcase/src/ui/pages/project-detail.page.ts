@@ -40,7 +40,13 @@ export const ProjectDetailPage = definePage({
           {
             // Explicit details sections — each section's `fields` is a
             // field-list bound to showcase_project in the page editor.
-            key: 'details',
+            //
+            // `value` is the tab's stable `?tab=` URL token (#5776): the key
+            // `PageTabsProps.items[]` declares and objectui's tabs renderer
+            // reads. `key` was neither — an unknown prop nothing verifies and
+            // nothing reads, which left both tabs on the index-derived
+            // `tab-<i>` fallback and their deep links non-durable.
+            value: 'details',
             label: 'Details',
             children: [
               {
@@ -56,7 +62,7 @@ export const ProjectDetailPage = definePage({
             ],
           },
           {
-            key: 'tasks',
+            value: 'tasks',
             label: 'Tasks',
             children: [
               {

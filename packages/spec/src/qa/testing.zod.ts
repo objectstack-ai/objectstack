@@ -85,3 +85,6 @@ export type TestScenario = z.input<typeof TestScenarioSchema>;
 export type TestStep = z.input<typeof TestStepSchema>;
 export type TestAction = z.input<typeof TestActionSchema>;
 export type TestAssertion = z.input<typeof TestAssertionSchema>;
+export type TestActionType = z.input<typeof TestActionTypeSchema>;
+export type TestAssertionType = z.input<typeof TestAssertionTypeSchema>;
+export type TestContext = z.input<typeof TestContextSchema>;
