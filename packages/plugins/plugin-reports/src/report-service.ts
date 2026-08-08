@@ -312,6 +312,14 @@ export class ReportService implements IReportService {
     return Array.isArray(rows) && rows[0] ? rows[0] : null;
   }
 
+  /** Raw metadata read of a report schedule by id (no authz — callers gate). */
+  private async loadScheduleRow(scheduleId: string): Promise<any | null> {
+    const rows = await this.engine.find('sys_report_schedule', {
+      where: { id: scheduleId }, limit: 1, context: SYSTEM_CTX,
+    });
+    return Array.isArray(rows) && rows[0] ? rows[0] : null;
+  }
+
   // ── Report CRUD ────────────────────────────────────────────────
 
   async saveReport(input: SaveReportInput, context: SharingExecutionContext): Promise<SavedReport> {
@@ -532,15 +540,34 @@ export class ReportService implements IReportService {
     return rowFromSchedule(row);
   }
 
-  async unscheduleReport(scheduleId: string, _context: SharingExecutionContext): Promise<void> {
+  async unscheduleReport(scheduleId: string, context: SharingExecutionContext): Promise<void> {
     if (!scheduleId) throw new Error('VALIDATION_FAILED: scheduleId is required');
+    const schedule = await this.loadScheduleRow(scheduleId);
+    if (!schedule) return; // idempotent — nothing to drop (mirrors deleteReport)
+    // A schedule is owned through its report (#2980): a caller may only delete
+    // the schedules of a report they own. Others get a not-found so the delete
+    // neither fires nor reveals the schedule's existence — deny-as-404, never a
+    // cross-owner 2xx.
+    const report = await this.loadReportRow(schedule.report_id);
+    if (!this.canAccessReport(report, context)) {
+      throw new Error(`REPORT_NOT_FOUND: ${scheduleId}`);
+    }
     await this.engine.delete('sys_report_schedule', { where: { id: scheduleId }, context: SYSTEM_CTX });
   }
 
   async listSchedules(
     filter: { reportId?: string } | undefined,
-    _context: SharingExecutionContext,
+    context: SharingExecutionContext,
   ): Promise<ReportSchedule[]> {
+    // Schedules are owned through their report (#2980): a non-system caller may
+    // only list the schedules of a report they can access. The route always
+    // supplies the parent report id; a caller who cannot see that report gets an
+    // empty list — never another owner's recipients/cron — the same non-leaking
+    // posture as listReports. System/tooling (the dispatcher) still sees all.
+    if (!context?.isSystem) {
+      if (!filter?.reportId) return [];
+      if (!(await this.getReport(filter.reportId, context))) return [];
+    }
     const f: any = {};
     if (filter?.reportId) f.report_id = filter.reportId;
     const rows = await this.engine.find('sys_report_schedule', {
