@@ -322,7 +322,11 @@ describe('[#4828] getDiscoveryInfo() conforms to DiscoverySchema', () => {
     // two different rules and #5673 deliberately moved only the first — #4828's
     // "never CLAIM production on a guess" is untouched, and this case is the
     // guard against a later simplification collapsing them back into one.
-    it.each(['qa', 'preview', 'uat', 'nonsense'])(
+    // [#6287] `preview` dropped out of this list when it gained a declared fold
+    // (`sandbox`) — it is an `EnvironmentTypeSchema` member, so it is no longer
+    // an example of a spelling this repo does not recognise. The rule and its
+    // remaining examples are untouched.
+    it.each(['qa', 'uat', 'nonsense'])(
       'NODE_ENV=%s is an unrecognised spelling — still development, never production (#4828)',
       async (raw) => {
         process.env.NODE_ENV = raw;

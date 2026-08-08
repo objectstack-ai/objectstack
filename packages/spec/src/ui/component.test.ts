@@ -20,7 +20,7 @@ import {
   ElementRecordPickerPropsSchema,
   ElementTextInputPropsSchema,
 } from './component.zod';
-import { PageComponentSchema, PageSchema } from './page.zod';
+import { PageComponentSchema, PageSchema, ElementDataSourceSchema } from './page.zod';
 
 describe('PageHeaderProps', () => {
   it('should accept minimal header', () => {
@@ -843,6 +843,77 @@ describe('Interactive Elements — element:record_picker', () => {
     expect(props).not.toHaveProperty('displayField');
     expect(props).not.toHaveProperty('searchFields');
     expect(props).not.toHaveProperty('multiple');
+  });
+
+  // ── #6276 — the flat `sort` / `limit` shorthands ─────────────────────────
+  // The renderer resolves four keys through one pattern
+  // (`ds.<k> ?? props.<k>`); after #5775 two of the four flat spellings were
+  // declared and two were not. These pin the other two, in BOTH halves of what
+  // a declaration buys: the key is retained (not stripped into silence) and the
+  // VALUE is judged (a wrong shape is rejected by name rather than dropped).
+  it('retains the flat `sort` shorthand — declared, not stripped (#6276)', () => {
+    const props = ElementRecordPickerPropsSchema.parse({
+      object: 'showcase_project',
+      sort: [{ field: 'created_at', order: 'desc' }],
+    });
+    expect(props.sort).toEqual([{ field: 'created_at', order: 'desc' }]);
+  });
+
+  it('retains the flat `limit` shorthand — declared, not stripped (#6276)', () => {
+    const props = ElementRecordPickerPropsSchema.parse({ object: 'showcase_project', limit: 20 });
+    expect(props.limit).toBe(20);
+  });
+
+  // The exact ADR-0078 trap the issue reported: an author who infers
+  // `properties.limit: 20` from the declared `object`/`filter` spelling used to
+  // get the renderer's default 50 with zero diagnostics, because the key was
+  // stripped before anything could read it.
+  it('rejects a non-integer / non-positive `limit` by name (#6276)', () => {
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 0 })).toThrow(/limit/);
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: -5 })).toThrow(/limit/);
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 2.5 })).toThrow(/limit/);
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 'ten' })).toThrow(/limit/);
+  });
+
+  it('rejects a malformed `sort` by name (#6276)', () => {
+    // A bare field name — the shape an author reaches for when the key is
+    // undeclared and nothing has ever told them otherwise.
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', sort: 'created_at' }))
+      .toThrow(/sort/);
+    // Right container, wrong direction vocabulary.
+    expect(() => ElementRecordPickerPropsSchema.parse({
+      object: 'a',
+      sort: [{ field: 'created_at', order: 'descending' }],
+    })).toThrow(/sort/);
+    // Right container, missing the required half of the pair.
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', sort: [{ field: 'created_at' }] }))
+      .toThrow(/sort/);
+  });
+
+  // The shorthand IS the `dataSource` key, so one value must parse identically
+  // through both doors. This is what stops the flat spelling drifting into a
+  // third sort dialect (the ledger's `report.zod.ts` row records three already).
+  it('parses `sort` / `limit` identically to `dataSource` (one shape, two spellings) (#6276)', () => {
+    const sort = [{ field: 'name', order: 'asc' as const }];
+    const viaProps = ElementRecordPickerPropsSchema.parse({ object: 'a', sort, limit: 25 });
+    const viaDataSource = ElementDataSourceSchema.parse({ object: 'a', sort, limit: 25 });
+    expect(viaProps.sort).toEqual(viaDataSource.sort);
+    expect(viaProps.limit).toEqual(viaDataSource.limit);
+    // …and the same rejections on the same values.
+    expect(ElementRecordPickerPropsSchema.safeParse({ object: 'a', limit: 0 }).success)
+      .toBe(ElementDataSourceSchema.safeParse({ object: 'a', limit: 0 }).success);
+    expect(ElementRecordPickerPropsSchema.safeParse({ object: 'a', sort: 'name' }).success)
+      .toBe(ElementDataSourceSchema.safeParse({ object: 'a', sort: 'name' }).success);
+  });
+
+  // The renderer's `?? 50` is a RENDERER fallback, deliberately not a schema
+  // default: `.default(50)` would materialize a limit on every parsed picker
+  // and turn an unset key into an authored one (and would then have to be kept
+  // in sync with objectui by hand).
+  it('does not default `limit` — the 50 is the renderer fallback (#6276)', () => {
+    const props = ElementRecordPickerPropsSchema.parse({ object: 'a' });
+    expect(props.limit).toBeUndefined();
+    expect(props.sort).toBeUndefined();
   });
 });
 

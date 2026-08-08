@@ -22,6 +22,19 @@ import { registerMapNode } from './builtin/map-node.js';
 import { registerHttpNodes } from './builtin/http-nodes.js';
 import { registerConnectorNodes } from './builtin/connector-nodes.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
+
+/**
+ * `resumeAuthority: 'any'` is required of a pausing fixture since #5561: these
+ * tests continue their pause through the public `resume` door, which a node type
+ * now opts into rather than inherits. Nothing here is about the resume gate
+ * (`resume-authority-gate.test.ts` owns that), so the fixture states the posture
+ * it relies on — the same declaration the pausing built-ins carry.
+ */
+const HOLD_DESCRIPTOR = defineActionDescriptor({
+    type: 'hold', version: '1.0.0', name: 'Hold',
+    supportsPause: true, resumeAuthority: 'any',
+});
 
 const AT = '2026-07-31T00:00:00.000Z';
 
@@ -590,6 +603,7 @@ describe('a child run that PAUSED still counts toward its parent', () => {
         registerSubflowNode(engine, ctx);
         engine.registerNodeExecutor({
             type: 'hold',
+            descriptor: HOLD_DESCRIPTOR,
             async execute() { return { success: true, suspend: true, correlation: 'held' }; },
         } as NodeExecutor);
         // A child that pauses, then writes a row once resumed.

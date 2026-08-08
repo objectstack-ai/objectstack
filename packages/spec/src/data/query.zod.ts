@@ -549,6 +549,7 @@ export type SortNodeParsed = z.infer<typeof SortNodeSchema>;
 export type AggregationNode = z.input<typeof AggregationNodeSchema>;
 export type GroupByNode = z.input<typeof GroupByNodeSchema>;
 export type DateGranularityValue = z.input<typeof DateGranularity>;
+export type AggregationFunction = z.input<typeof AggregationFunction>;
 // `FieldNode` is declared next to its schema rather than here: since #4196 it
 // is no longer recursive, it is just the name the docs and the engine give to
 // "one entry of a select list". (`JoinNode` and `WindowFunctionNode`/`WindowSpec`

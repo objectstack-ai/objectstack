@@ -268,3 +268,192 @@ describe('the two classifications are independent, not complementary', () => {
         expect(isMissingTableError(err)).toBe(false);
     });
 });
+
+/**
+ * #6347 — the phrase corpus.
+ *
+ * The defect this pins is a **substring** one, so it cannot be caught by
+ * checking one phrase at a time: Postgres' write-path missing-COLUMN message,
+ * `column "label" of relation "sys_team" does not exist`, contains a complete
+ * legal missing-TABLE phrase (`relation "sys_team" does not exist`) inside it.
+ * Measured on `origin/main` before the fix, straight against the signature's
+ * message regex: write-path phrase => `true`, read-path phrase
+ * (`column "bogus" does not exist`) => `false`. Only the second half was ever
+ * pinned (see "rejects other 'does not exist' objects" above), which is why the
+ * first half survived — the test suite asked about the phrasing the consumer's
+ * own read path produces, and the hole is in the other one.
+ *
+ * So the corpus is driven as a table, both directions in one place:
+ *
+ *  - `LOUD` — must NEVER be judged benign. A false benign here is not a wrong
+ *    log line: `DatabaseLoader.nextEventSeq` answers `return 1` on `true`, so a
+ *    misjudged column error restarts `event_seq` at 1 against a history table
+ *    full of rows, and the colliding insert SUCCEEDS.
+ *  - `BENIGN` — must STILL be judged benign, verbatim. An exclusion is a
+ *    subtraction, and the guarded surface may not shrink while it is applied.
+ *
+ * Reverse verification, direction predicted BEFORE running (2026-08-08):
+ * deleting `MISSING_TABLE.excludes` turns the write-path / sub-object rows of
+ * `LOUD` RED, while every `BENIGN` row and every read-path row stays green.
+ * Measured: `8 failed | 48 passed` — the direction held, and the count came in
+ * two ABOVE the six rows predicted by counting phrases, because two rows go red
+ * through the code channel rather than the phrase: `42703 whose message is a
+ * genuine missing-table phrase` and the `cause`-rescue case below. Both are
+ * part of the same repair (a code is a fact, prose is a guess) and are recorded
+ * here rather than trimmed to fit the prediction. The read-path rows are green
+ * in both directions on purpose: they were never the hole, and a corpus that
+ * could not tell the two apart would be reporting the wrong repair.
+ */
+describe('isMissingTableError — Postgres sub-object phrases are NOT missing tables (#6347)', () => {
+    /** Errors that must stay LOUD — `isMissingTableError` must answer `false`. */
+    const LOUD: ReadonlyArray<readonly [name: string, error: unknown]> = [
+        // ── the reported hole: the write-path (INSERT/UPDATE/ALTER) phrasing ──
+        [
+            'PG write-path missing column, bare message',
+            new Error('column "label" of relation "sys_team" does not exist'),
+        ],
+        [
+            'PG write-path missing column, with SQLSTATE 42703',
+            Object.assign(new Error('column "label" of relation "sys_team" does not exist'), {
+                code: '42703',
+            }),
+        ],
+        [
+            'PG write-path missing column, thrown as a bare string',
+            'column "label" of relation "sys_team" does not exist',
+        ],
+        [
+            'PG write-path missing column, wrapped as `cause`',
+            Object.assign(new Error('insert into "sys_team" failed'), {
+                cause: Object.assign(
+                    new Error('column "label" of relation "sys_team" does not exist'),
+                    { code: '42703' },
+                ),
+            }),
+        ],
+        [
+            'PG write-path missing column, single-quoted identifiers',
+            new Error("column 'label' of relation 'sys_team' does not exist"),
+        ],
+        // ── the same shape for other sub-objects of an EXISTING relation ──
+        [
+            'PG missing constraint of a relation (42704)',
+            Object.assign(
+                new Error('constraint "uq_sys_team_name" of relation "sys_team" does not exist'),
+                { code: '42704' },
+            ),
+        ],
+        // ── the read-path phrasing: already excluded before #6347, kept pinned ──
+        [
+            'PG read-path missing column, bare message',
+            new Error('column "bogus" does not exist'),
+        ],
+        [
+            'PG read-path missing column, with SQLSTATE 42703',
+            Object.assign(new Error('column "bogus" does not exist'), { code: '42703' }),
+        ],
+        // ── code-first: 42703 means not-a-table whatever the prose says ──
+        [
+            '42703 with an opaque message',
+            Object.assign(new Error('db error'), { code: '42703' }),
+        ],
+        [
+            '42703 whose message is a genuine missing-table phrase (code wins, loudly)',
+            Object.assign(new Error('relation "sys_team" does not exist'), { code: '42703' }),
+        ],
+        // ── the docblock's other named neighbours, still excluded ──
+        [
+            'PG missing role (42704)',
+            Object.assign(new Error('role "app_rw" does not exist'), { code: '42704' }),
+        ],
+        [
+            'PG missing database (3D000)',
+            Object.assign(new Error('database "objectstack" does not exist'), { code: '3D000' }),
+        ],
+        // ── other dialects' missing-column prose, for completeness ──
+        [
+            'MySQL unknown column (ER_BAD_FIELD_ERROR)',
+            Object.assign(new Error("Unknown column 'label' in 'field list'"), {
+                code: 'ER_BAD_FIELD_ERROR',
+                errno: 1054,
+            }),
+        ],
+        [
+            'SQLite unknown column on a read',
+            Object.assign(new Error('no such column: bogus'), { code: 'SQLITE_ERROR' }),
+        ],
+        [
+            'SQLite unknown column on a write',
+            Object.assign(new Error('table sys_team has no column named label'), {
+                code: 'SQLITE_ERROR',
+            }),
+        ],
+    ];
+
+    /** Errors that must STILL be benign — the guarded surface, verbatim. */
+    const BENIGN: ReadonlyArray<readonly [name: string, error: unknown]> = [
+        ['SQLite / libsql message', new Error('no such table: sys_metadata_history')],
+        ['SQLite message with a schema prefix', new Error('no such table: main.sys_metadata_history')],
+        [
+            'libsql remote, driver prefix in front of the phrase',
+            new Error('SQLITE_UNKNOWN: SQLite error: no such table: sys_metadata_history'),
+        ],
+        ['PG message', new Error('relation "sys_metadata_history" does not exist')],
+        [
+            'PG SQLSTATE 42P01 with an opaque message',
+            Object.assign(new Error('db error'), { code: '42P01' }),
+        ],
+        ['MySQL message', new Error("Table 'app.sys_metadata_history' doesn't exist")],
+        [
+            'MySQL ER_NO_SUCH_TABLE',
+            Object.assign(new Error('opaque'), { code: 'ER_NO_SUCH_TABLE' }),
+        ],
+        ['MySQL errno 1146', Object.assign(new Error('opaque'), { errno: 1146 })],
+        ['a bare thrown string', 'no such table: sys_metadata_history'],
+        [
+            'genuine missing table wrapped as `cause`',
+            Object.assign(new Error('find failed'), {
+                cause: Object.assign(new Error('relation "sys_metadata_history" does not exist'), {
+                    code: '42P01',
+                }),
+            }),
+        ],
+    ];
+
+    it.each(LOUD)('stays loud: %s', (_name, error) => {
+        expect(isMissingTableError(error)).toBe(false);
+    });
+
+    it.each(BENIGN)('still benign: %s', (_name, error) => {
+        expect(isMissingTableError(error)).toBe(true);
+    });
+
+    it('does not let a sub-object phrase be rescued by a missing-table `cause`', () => {
+        // Recognising "a column of an existing relation" ENDS the question: the
+        // exclusion returns false without descending. The alternative — keep
+        // walking and let a nested 42P01 win — would put the corrupting verdict
+        // back one level down, reachable by any driver that wraps.
+        const err = Object.assign(
+            new Error('column "label" of relation "sys_team" does not exist'),
+            {
+                code: '42703',
+                cause: Object.assign(new Error('relation "sys_team" does not exist'), {
+                    code: '42P01',
+                }),
+            },
+        );
+        expect(isMissingTableError(err)).toBe(false);
+    });
+
+    it('leaves the DDL predicate alone — `already exists` on a column still matches', () => {
+        // The exclusion is scoped to MISSING_TABLE. `ALREADY_EXISTS` documents
+        // that Postgres' own `column "x" of relation "y" already exists` matches
+        // its test, and it is genuinely benign there: the column IS provisioned.
+        const err = Object.assign(
+            new Error('column "environment_id" of relation "sys_metadata" already exists'),
+            { code: '42701' },
+        );
+        expect(isSchemaAlreadyExistsError(err)).toBe(true);
+        expect(isMissingTableError(err)).toBe(false);
+    });
+});

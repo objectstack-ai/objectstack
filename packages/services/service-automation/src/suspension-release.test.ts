@@ -5,6 +5,7 @@ import { AutomationEngine } from './engine.js';
 import type { NodeExecutor, SuspensionRelease } from './engine.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import { registerSubflowNode } from './builtin/subflow-node.js';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
 
 /**
  * `NodeExecutor.onSuspensionReleased` — the engine side of #5512.
@@ -34,10 +35,26 @@ function ctx() {
   return { logger: silentLogger(), getService() { throw new Error('none'); } } as any;
 }
 
+/**
+ * The declaration every pausing fixture in this file needs since #5561: these
+ * tests continue their pause through the public `resume` door, which a node type
+ * now has to opt into with `resumeAuthority: 'any'` — a type that declares
+ * nothing is refused there. Nothing here is about the resume gate itself (see
+ * `resume-authority-gate.test.ts`), so each fixture states the posture it relies
+ * on, exactly as the four pausing built-ins do.
+ */
+function openPauser(type: string) {
+  return defineActionDescriptor({
+    type, version: '1.0.0', name: type,
+    supportsPause: true, resumeAuthority: 'any',
+  });
+}
+
 /** A pausing executor that records every release it is told about. */
 function recordingPauser(type: string, seen: SuspensionRelease[]): NodeExecutor {
   return {
     type,
+    descriptor: openPauser(type),
     async execute(node) {
       // A correlation stands in for "the handle on whatever I armed on entry".
       return { success: true, suspend: true, correlation: `test-armature:${node.id}` };
@@ -130,6 +147,7 @@ describe('NodeExecutor.onSuspensionReleased (#5512)', () => {
   it('is silent for a pausing executor that implements no teardown', async () => {
     engine.registerNodeExecutor({
       type: 'bare_pauser',
+      descriptor: openPauser('bare_pauser'),
       async execute() { return { success: true, suspend: true }; },
     } as NodeExecutor);
     engine.registerFlow('pause_flow', pauseFlow('bare_pauser'));
@@ -175,6 +193,7 @@ describe('NodeExecutor.onSuspensionReleased (#5512)', () => {
     loud.registerNodeExecutor(markerExecutor(ranLoud));
     loud.registerNodeExecutor({
       type: 'pauser',
+      descriptor: openPauser('pauser'),
       async execute(node) { return { success: true, suspend: true, correlation: `test-armature:${node.id}` }; },
       async onSuspensionReleased() { throw new Error('job service exploded'); },
     } as NodeExecutor);
@@ -245,6 +264,7 @@ describe('onSuspensionReleased — the `failed` route (subflow ancestor)', () =>
 
     engine.registerNodeExecutor({
       type: 'pauser',
+      descriptor: openPauser('pauser'),
       async execute() { return { success: true, suspend: true }; },
     } as NodeExecutor);
     engine.registerNodeExecutor({

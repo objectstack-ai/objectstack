@@ -267,7 +267,7 @@
       "invariant": "The transaction seam is same-origin by construction (#5351/#5696, 2026-08-06 ruling). `buildDriverOptions` threads the ambient handle ONLY to the driver that owns it, compared by instance identity via `TransactionScope` — handing it to another driver does not put that driver inside the transaction, it runs the statement on the wrong connection. `enforceTransactionOrigin` then decides the write: an append-only system ledger (`lifecycle.class` in `SYSTEM_LEDGER_LIFECYCLE_CLASSES`, the same tuple ADR-0057 §3.6 routing reads — never a second copy) is CARVED OUT and executed outside the transaction, surviving rollback; any other cross-driver write is REFUSED before hooks run. Never add a companion transaction on the second driver (no two-phase commit in IDataDriver) and never restore the unconditional handle lift."
     },
     {
-"file": "packages/spec/src/type-alias-convention.pin.test.ts",
+      "file": "packages/spec/src/type-alias-convention.pin.test.ts",
       "adrs": [
         "ADR-0122"
       ],
@@ -279,6 +279,20 @@
         "ADR-0122"
       ],
       "invariant": "ADR-0122 D7: every bare `z.infer` alias in `packages/spec/src/**/*.zod.ts` must either be paired with its `XParsed` or be pinned isomorphic in the pin file. The exemption list deliberately does NOT live in this script — it lives in the pin file where tsc proves each entry, because an exemption a comment merely asserts is the declared-but-unenforced shape this repo keeps paying to fix. Moving the list in here to 'simplify' the gate would make it a phantom check. The gate also belongs HERE rather than in `packages/lint`: that package's contract is an in-memory metadata graph with 'no I/O, no runtime, no filesystem', and a rule reading our own TypeScript source cannot live there."
+    },
+    {
+      "file": "packages/metadata-core/src/object-schema-fls.ts",
+      "adrs": [
+        "ADR-0106"
+      ],
+      "invariant": "ADR-0106 is the WHOLE decision this module realizes: object schemas are projected per caller (D1, unreadable fields removed whole), the projection runs in the dispatch layer after the protocol fetch (D2), the shared cache keeps one full copy and the caller's DENIED-set fingerprint is folded into the ETag (D3), isSystem and platform admins are exempt as a CALLER property (D4), and the failure posture is three tiers — no security service or exempt caller serve unmasked, an unresolvable field universe serves unmasked with telemetry and private/no-store, and a THROW refuses the request (D6). The tiers look asymmetric on purpose: failing closed on the middle tier converts a hydration window into a rendering outage and risks a bootstrap deadlock, because permission sets are themselves metadata. Anyone tempted to \"simplify\" a tier, to widen the exemption set, or to make the fingerprint hash the READABLE set (which would move every unrestricted caller's ETag and forfeit D3's zero-regression promise) is reversing a recorded decision."
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/security-plugin.ts",
+      "adrs": [
+        "ADR-0106"
+      ],
+      "invariant": "ADR-0106 D7 — getMetadataReadableFields differs from getReadableFields in exactly one place, and the asymmetry is the decision. On the DATA plane a caller resolving to zero permission sets falls OPEN, mirroring the engine middleware, because reporting a narrowing the data path would not enforce is its own drift. On the METADATA plane the same caller resolves the configured fallback permission set (the two-step /auth/me/permissions performs), so a guest-facing deployment's schema exposure is a deliberate permission-set decision rather than an accidental everything-default. Converging the two methods in either direction reverses this."
     }
   ]
 }

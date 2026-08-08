@@ -2922,3 +2922,10 @@ export type UserFiltersParsed = z.infer<typeof UserFiltersSchema>;
 export type AddRecordConfig = z.input<typeof AddRecordConfigSchema>;
 /** Post-parse shape of {@link AddRecordConfig} — defaults applied, transforms run (ADR-0122). */
 export type AddRecordConfigParsed = z.infer<typeof AddRecordConfigSchema>;
+export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
+export type GanttConfig = z.input<typeof GanttConfigSchema>;
+export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
+export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
+export type NavigationMode = z.input<typeof NavigationModeSchema>;
+export type TreeConfig = z.input<typeof TreeConfigSchema>;
+export type ViewItemName = z.input<typeof ViewItemNameSchema>;

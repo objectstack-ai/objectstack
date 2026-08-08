@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { isUniqueViolationError } from '@objectstack/types';
 import type {
     MessagingChannel,
     MessagingChannelContext,
@@ -17,24 +18,6 @@ export const NOTIFICATION_EVENT_OBJECT = 'sys_notification';
 
 /** Receipt states that count as "read" for the inbox unread badge (ADR-0030). */
 const READ_RECEIPT_STATES = new Set(['read', 'clicked', 'dismissed']);
-
-/**
- * Whether a driver error is a unique/primary-key constraint violation. Spans the
- * SQL drivers we ship: SQLite (`UNIQUE constraint failed`), Postgres (`23505` /
- * `duplicate key`), and MySQL (`ER_DUP_ENTRY` / `Duplicate entry`). Used to turn
- * a lost check-then-act race on a unique index into a fallback update.
- */
-function isUniqueViolation(err: unknown): boolean {
-    const e = err as { code?: string | number; message?: string } | undefined;
-    if (!e) return false;
-    if (e.code === '23505' || e.code === 'ER_DUP_ENTRY' || e.code === 'SQLITE_CONSTRAINT_UNIQUE') return true;
-    const msg = String(e.message ?? '').toLowerCase();
-    return (
-        msg.includes('unique constraint failed') ||
-        msg.includes('duplicate key') ||
-        msg.includes('duplicate entry')
-    );
-}
 
 /**
  * One row of the inbox list REST response — the `Notification` shape in the API
@@ -569,7 +552,7 @@ export class MessagingService {
             });
             return 1;
         } catch (err) {
-            if (isUniqueViolation(err) && (await flipToRead())) return 1;
+            if (isUniqueViolationError(err) && (await flipToRead())) return 1;
             throw err;
         }
     }

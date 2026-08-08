@@ -1135,9 +1135,11 @@ export class ObjectQL implements IObjectQLEngine {
      * happens to it: a business write is refused, a system ledger is carved out.
      *
      * Absent on the sandbox runner's explicitly-threaded handles (the
-     * `beginTransaction`/`commit`/`rollback` trio does not use this store at
-     * all) and on any store entry an outside caller populated, so every reader
-     * must treat it as optional.
+     * `beginTransaction`/`commit`/`rollback` trio never POPULATES this store —
+     * since #6406 it reads it, to join an ambient transaction, but a
+     * transaction the trio opens still cannot be published: there is no closure
+     * spanning begin→commit to hand `run`) and on any store entry an outside
+     * caller populated, so every reader must treat it as optional.
      */
     scope?: TransactionScope;
   }>();
@@ -5732,6 +5734,35 @@ export class ObjectQL implements IObjectQLEngine {
       // untouched, hooks run after and may override.
       const nowSnap = new Date();
       const isBatch = Array.isArray(opCtx.data);
+      // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
+      // resolves any `defaultValue` / `current_user` token and before the
+      // beforeInsert hooks stamp `owner_id` / `organization_id` /
+      // `created_by`. The reference check consults it to decide WHAT THE
+      // CALLER ACTUALLY SENT, so neither a platform stamp nor a backfilled
+      // default is ever reported as the caller's bad reference.
+      //
+      // [#6339] It carries the caller's VALUES, and it is taken HERE — ahead of
+      // the hooks — as an explicit shallow COPY. Both halves are load-bearing:
+      //  - VALUES, because the runtime-owned strip below runs AFTER
+      //    `beforeInsert`, so "the caller named this key" and "this key still
+      //    holds the caller's value" are different facts, and only the second
+      //    one licenses a delete (see `stripRuntimeOwnedFields`).
+      //  - a COPY, taken ahead of the hooks, because `rows[i]` is a different
+      //    object from `opCtx.data` only by the grace of two upstream helpers:
+      //    `applyFieldDefaults` returns `{ ...record }` — except on its
+      //    `!fields` early return, which hands the SAME reference back — and
+      //    `initializeSummaryFields` copies only when it actually seeds. Hooks
+      //    mutate `ctx.input.data` IN PLACE, so an aliased snapshot would
+      //    answer "what did the caller send?" with the post-hook payload.
+      //    Measured on `origin/main`: not aliased today, because that early
+      //    return lines up with the strip's own `!fields` bail — a coincidence
+      //    of three call sites, which the copy turns into an invariant of this
+      //    one. Same spread, same reason, as the update path's `suppliedValues`
+      //    (#5591).
+      const suppliedPerRow: Array<Record<string, unknown>> =
+        (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
+          (row) => ({ ...((row ?? {}) as Record<string, unknown>) }),
+        );
       const defaultedData = isBatch
         ? (opCtx.data as any[]).map((row) =>
             this.initializeSummaryFields(
@@ -5814,16 +5845,6 @@ export class ObjectQL implements IObjectQLEngine {
         // Locale + translation hooks for the rejection messages (#3957) —
         // resolved once for the batch, identical for every row.
         const msgCtx = this.validationMessageContext(object, opCtx.context);
-        // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
-        // resolved any `defaultValue` / `current_user` token and before the
-        // beforeInsert hooks stamped `owner_id` / `organization_id` /
-        // `created_by`. The reference check consults it to decide WHAT THE
-        // CALLER ACTUALLY SENT, so neither a platform stamp nor a backfilled
-        // default is ever reported as the caller's bad reference.
-        const suppliedPerRow: Array<Record<string, unknown>> =
-          (isBatch ? (opCtx.data as any[]) : [opCtx.data]).map(
-            (row) => (row ?? {}) as Record<string, unknown>,
-          );
         // [#5503] `autonumber` is RUNTIME-owned: the engine (or the driver's
         // persistent sequence) issues the value, so a non-system caller does not
         // get to supply or rewrite it. Until now nothing enforced that — a POST
@@ -5842,14 +5863,21 @@ export class ObjectQL implements IObjectQLEngine {
         // path's, unchanged: `isSystem` (seed replay, migration) skips the whole
         // pass, and `preserveAudit` (#3493) lets a historical import reinstate
         // legacy record numbers.
+        //
+        // [#6339] `suppliedPerRow[i]` is handed over WHOLE — values included —
+        // rather than reduced to its key set. This pass runs after the
+        // beforeInsert hooks, so a key set could only say "the caller named
+        // this", and `delete` then took whatever value was standing there: a
+        // hook that RE-ISSUES the record number lost its write to any caller
+        // that had also submitted the key, while the same hook's write survived
+        // on a caller that had not. The update path's twin (#5591).
         const autonumberDropped: string[] = [];
         if (!opCtx.context?.isSystem) {
           const preserveAudit = opCtx.context?.preserveAudit === true;
           for (let i = 0; i < rows.length; i++) {
             if (rowErrors[i] !== undefined) continue;
-            const supplied = new Set(Object.keys(suppliedPerRow[i] ?? {}));
             const stripped = stripRuntimeOwnedFields(
-              schemaForValidation as any, rows[i], supplied, this.logger, { preserveAudit },
+              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger, { preserveAudit },
             ) as Record<string, unknown>;
             if (stripped === rows[i]) continue;
             for (const k of Object.keys(rows[i])) {
@@ -8156,9 +8184,12 @@ export class ScopedContext implements IScopedContext {
    * trio-held handle is invisible here and is NOT joined — which is what keeps
    * this branch from mistaking an explicitly-threaded handle for an ambient
    * one. The QuickJS sandbox drives `ctx.api.transaction(fn)` through that trio
-   * rather than through this method, so a VM-side body is outside this join;
-   * unattributable handles are the same surface #6167 tracks, and closing that
-   * needs handle ownership to become discoverable on `IDataDriver`.
+   * rather than through this method, so a VM-side body is outside THIS join —
+   * it gets its own, on the trio's `beginTransaction` since #6406, with the
+   * same semantics: same handle, `owned: false`, and commit/rollback abstaining
+   * in favour of the outer owner. Unattributable handles are the same surface
+   * #6167 tracks, and closing that needs handle ownership to become
+   * discoverable on `IDataDriver`.
    */
   async transaction(
     callback: (trxCtx: ScopedContext, info: EngineTransactionInfo) => Promise<any>,
@@ -8250,6 +8281,45 @@ export class ScopedContext implements IScopedContext {
   }
 
   /**
+   * Handles this context JOINED (ADR-0067 D2) rather than opened, recorded by
+   * {@link beginTransaction} and consumed by {@link releaseJoinedHandle}.
+   *
+   * A joined handle belongs to an OUTER owner, so this context must not commit
+   * or roll it back. Keying by the handle object is what makes the abstention
+   * exact — a context that later opens one of its own gets a different handle
+   * and closes it normally. Entries are removed by the first commit/rollback
+   * that names them, so the set holds at most the transactions currently open
+   * through this (per-dispatch, short-lived) context.
+   */
+  private readonly joinedHandles = new Set<unknown>();
+
+  /**
+   * Was `handle` JOINED by this context rather than opened by it? Consumes the
+   * record, so the trio's terminal call is also what forgets the handle.
+   *
+   * Two independent signals, because the trio's callers are exactly the ones
+   * that cannot keep a closure on the stack and may not close on the same
+   * object they opened on:
+   *
+   *   1. this context's own {@link joinedHandles} record, and
+   *   2. identity with the CURRENT ambient handle — a handle the engine is
+   *      holding open right now is, by construction, not one the trio opened
+   *      (the trio never publishes into `txStore`, so a trio-owned handle is
+   *      never the ambient one).
+   *
+   * Both point the same way and both fail SAFE: the ambiguous answer is
+   * "abstain", never "commit a transaction we do not own".
+   */
+  private releaseJoinedHandle(handle: unknown): boolean {
+    if (this.joinedHandles.delete(handle)) return true;
+    if (handle == null) return false;
+    const ambient = (this.engine as any)?.txStore?.getStore?.() as
+      | { transaction?: unknown }
+      | undefined;
+    return ambient?.transaction === handle;
+  }
+
+  /**
    * Resolve the default driver, if it exposes transaction primitives.
    * Shared by {@link transaction} and the discrete begin/commit/rollback trio.
    */
@@ -8268,19 +8338,73 @@ export class ScopedContext implements IScopedContext {
    * This trio exists for callers that cannot keep a JS closure on the stack for
    * the lifetime of the transaction — chiefly the sandbox runner, where the
    * hook/action body's `ctx.api.transaction(fn)` is driven across many host
-   * event-loop turns via deferred promises. Across those `setImmediate`
-   * boundaries the engine's ambient `txStore` (AsyncLocalStorage) does NOT
-   * survive, so the transaction handle is threaded **explicitly**: `begin`
-   * returns a child ScopedContext carrying `transaction: trx` in its execution
-   * context, and `resolveTx` honors that explicit handle ahead of the ambient
-   * store. Every `object(...)` op on the returned context therefore reuses the
-   * one connection without relying on ALS.
+   * event-loop turns via deferred promises. With no closure spanning
+   * begin→commit there is nothing to hand `txStore.run`, so a transaction this
+   * trio opens can never be PUBLISHED into the engine's ambient store; the
+   * handle is threaded **explicitly** instead: `begin` returns a child
+   * ScopedContext carrying `transaction: trx` in its execution context, and
+   * `resolveTx` honors that explicit handle ahead of the ambient store. Every
+   * `object(...)` op on the returned context therefore reuses the one
+   * connection without relying on ALS — which is also what keeps it working
+   * across `setImmediate` boundaries an outside caller may schedule the
+   * commit from.
    *
    * Returns `null` when the driver has no transaction support — the caller then
    * runs non-transactionally against `this` (same graceful degrade as
    * {@link transaction}).
+   *
+   * ## ADR-0067 D2 join (#6406) — the third face of one primitive
+   *
+   * `begin` JOINS an already-open ambient transaction instead of opening a
+   * nested driver one, exactly as `ObjectQL.transaction` always did and as
+   * {@link transaction} does since #6168. Without it, a QuickJS body's
+   * `ctx.api.transaction(fn)` — which reaches this trio, not {@link transaction}
+   * — opened a SECOND driver transaction inside a host `engine.transaction()`:
+   * a second connection (the deadlock D2 exists to avoid on a single-connection
+   * pool) whose `__txCommit` made its writes SURVIVE the outer rollback, with
+   * no error and no log.
+   *
+   * `owned` in the result is #5696's signal, in the shape this face can carry
+   * it: `false` says this call joined and the OUTER caller owns the one and
+   * only commit/rollback. Commit and rollback abstain for such a handle
+   * ({@link releaseJoinedHandle}) — the guarantee lives HERE rather than in
+   * each caller, so a caller that ignores the bit still cannot close a
+   * transaction it does not own. An explicit rollback of a joined handle
+   * therefore performs NO driver rollback here; it is the same answer the
+   * callback faces give, where the joined branch has no rollback of its own and
+   * a throw propagates to the outer owner, which rolls the whole unit back.
+   *
+   * DECLARED LIMIT, measured rather than assumed (#6406): the join reads the
+   * engine's ambient `txStore` at BEGIN time. On the sandbox path that store IS
+   * readable there — the leaf runs on a chain awaited down from the host's
+   * `txStore.run`, so the AsyncLocalStorage context is still current — which is
+   * why no separate capture mechanism is needed. What the trio still cannot do
+   * is PUBLISH: it has no closure spanning begin→commit to wrap in
+   * `txStore.run`, which is why its own handle is threaded explicitly and stays
+   * invisible to the ambient readers. A caller whose `begin` is scheduled from
+   * OUTSIDE the transaction's async context sees no ambient and opens its own,
+   * exactly as before — join is best-effort on visibility, on this face and on
+   * both callback faces alike.
    */
-  async beginTransaction(): Promise<{ ctx: ScopedContext; handle: unknown } | null> {
+  async beginTransaction(): Promise<{ ctx: ScopedContext; handle: unknown; owned: boolean } | null> {
+    // ADR-0067 D2 — JOIN before the driver lookup, the same first move and the
+    // same position as both callback faces (#6168 / #6406). An ambient
+    // transaction IS a transaction, so there is nothing to look a driver up for.
+    const ambient = (this.engine as any)?.txStore?.getStore?.() as
+      | { transaction?: unknown }
+      | undefined;
+    if (ambient?.transaction) {
+      // Threaded explicitly into the child context, identity-equal to the
+      // store's handle — so `buildDriverOptions` binds every op on it to the
+      // outer connection and `transactionCoversDriverFor` still attributes the
+      // handle to the OUTER owner (#5351 unchanged).
+      const ctx = new ScopedContext(
+        { ...this.executionContext, transaction: ambient.transaction },
+        this.engine
+      );
+      this.joinedHandles.add(ambient.transaction);
+      return { ctx, handle: ambient.transaction, owned: false };
+    }
     const driver = this.txDriver();
     if (!driver) return null;
     const trx = await driver.beginTransaction();
@@ -8288,19 +8412,35 @@ export class ScopedContext implements IScopedContext {
       { ...this.executionContext, transaction: trx },
       this.engine
     );
-    return { ctx, handle: trx };
+    return { ctx, handle: trx, owned: true };
   }
 
-  /** Commit a handle obtained from {@link beginTransaction}. */
+  /**
+   * Commit a handle obtained from {@link beginTransaction}.
+   *
+   * ABSTAINS for a JOINED handle (#6406): committing a transaction this context
+   * did not open would land the inner writes early and take the outcome away
+   * from the outer owner — the durability half of the D2 defect.
+   */
   async commitTransaction(handle: unknown): Promise<void> {
+    if (this.releaseJoinedHandle(handle)) return;
     const driver = this.txDriver();
     if (!driver) return;
     if (driver.commit) await driver.commit(handle);
     else if (driver.commitTransaction) await driver.commitTransaction(handle);
   }
 
-  /** Roll back a handle obtained from {@link beginTransaction}. */
+  /**
+   * Roll back a handle obtained from {@link beginTransaction}.
+   *
+   * ABSTAINS for a JOINED handle (#6406), mirroring the callback faces: their
+   * joined branch issues no rollback either, and a throw inside it propagates
+   * to the outer owner, which rolls back the whole unit of work. Rolling the
+   * outer transaction back from here would be the mirror-image error — an inner
+   * failure silently discarding writes the outer caller has not finished with.
+   */
   async rollbackTransaction(handle: unknown): Promise<void> {
+    if (this.releaseJoinedHandle(handle)) return;
     const driver = this.txDriver();
     if (!driver) return;
     if (driver.rollback) await driver.rollback(handle);

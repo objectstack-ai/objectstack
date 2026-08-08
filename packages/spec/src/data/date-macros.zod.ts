@@ -217,6 +217,7 @@ export const DateMacroPlaceholderSchema = z
     },
     { message: 'Not a recognised {date-macro} placeholder' },
   );
+export type DateMacroPlaceholder = z.input<typeof DateMacroPlaceholderSchema>;
 
 /**
  * Description table — handy for skill / docs generation. Pure data,

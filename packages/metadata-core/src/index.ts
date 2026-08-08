@@ -35,3 +35,12 @@ export * from './engine-update-dispatch.js';
 // surface and the write path now derive one answer from one table instead of
 // reporting two.
 export * from './audit-field-governance.js';
+
+// [ADR-0106 / #3682] The metadata-plane FLS projection — one masking function
+// and one fingerprint, shared by every object-schema exit in
+// `@objectstack/rest` and `@objectstack/runtime`. Sunk here by the same
+// criterion as the governance table above: the exits live in two dispatch
+// packages that share no other common home, and D5 ("every schema-serving
+// outlet, or the mask is decoration") is only true if they all run the same
+// projection rather than a copy each.
+export * from './object-schema-fls.js';

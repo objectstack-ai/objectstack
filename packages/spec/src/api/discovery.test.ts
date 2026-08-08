@@ -19,7 +19,9 @@ import {
   type WellKnownCapabilities,
   type RouteHealthEntry,
   type RouteHealthReport,
+  type DiscoveryEnvironment,
 } from './discovery.zod';
+import { EnvironmentTypeSchema, type EnvironmentType } from '../cloud/environment.zod';
 
 describe('ApiRoutesSchema', () => {
   it('should accept valid minimal routes', () => {
@@ -1197,14 +1199,22 @@ describe('[#4828] resolveDiscoveryEnvironment (decision 4 — enum, not passthro
     }
   });
 
+  // [#6287] `preview` was one of this fixture's three examples until the fold
+  // table grew a row for it. The RULE is unchanged and still pinned — an
+  // unrecognised spelling never claims production — but `preview` is no longer
+  // an example of one: it is a declared `EnvironmentTypeSchema` member with a
+  // stated fold, so leaving it here would have asserted the opposite of what
+  // the source now says, and would have kept passing only because the declared
+  // answer happened to equal the fallback's. Re-spelled to inputs that are
+  // genuinely outside both the taxonomy and the operator shorthands.
   it('never CLAIMS production for an unrecognized spelling (#4828)', () => {
-    for (const raw of ['qa', 'preview', 'nonsense']) {
+    for (const raw of ['qa', 'uat', 'nonsense']) {
       expect(resolveDiscoveryEnvironment(raw), raw).toBe('development');
     }
   });
 
   it('every mapped result actually satisfies the declared enum', () => {
-    for (const raw of ['production', 'prod', 'sandbox', 'staging', 'development', 'dev', 'test', 'qa', '']) {
+    for (const raw of ['production', 'prod', 'sandbox', 'staging', 'development', 'dev', 'test', 'preview', 'trial', 'qa', '']) {
       const parsed = DiscoverySchema.parse({
         name: 'ObjectStack',
         version: '1.0.0',
@@ -1216,5 +1226,102 @@ describe('[#4828] resolveDiscoveryEnvironment (decision 4 — enum, not passthro
       });
       expect(parsed.environment).toBeDefined();
     }
+  });
+});
+
+/**
+ * [#6287] Every `EnvironmentType` member folds by DECLARATION, not by fallback.
+ *
+ * Before this, five of the seven members had a row in the fold table and
+ * `preview` / `trial` fell through `?? 'development'` — a fold nobody had
+ * written down, in a table whose whole purpose is to be read by the next
+ * author. The repair is a row each, and a type that keeps the table total.
+ */
+describe('[#6287] the fold table is total over EnvironmentType', () => {
+  /**
+   * The declared fold per bucket. This mirrors the source table on purpose: it
+   * is the RUNTIME half of the pin and it proves the *values*, so a silent
+   * re-aim of any row (`staging` quietly moving to `development`, say) fails
+   * here rather than in a consumer.
+   */
+  const declaredFold: Record<EnvironmentType, DiscoveryEnvironment> = {
+    production: 'production',
+    sandbox: 'sandbox',
+    development: 'development',
+    test: 'development',
+    staging: 'sandbox',
+    preview: 'sandbox',
+    trial: 'sandbox',
+  };
+
+  it('resolves every EnvironmentTypeSchema member to its declared fold', () => {
+    const members = EnvironmentTypeSchema.options as readonly EnvironmentType[];
+    // Anti-vacuity: `.options` comes through the lazySchema Proxy, and a broken
+    // read would make the loop below assert nothing at all.
+    expect(Array.isArray(members)).toBe(true);
+    expect(members.length).toBeGreaterThan(0);
+    for (const member of members) {
+      expect(resolveDiscoveryEnvironment(member), member).toBe(declaredFold[member]);
+    }
+  });
+
+  it('folds preview and trial to sandbox — the two rows this issue added', () => {
+    // Both are provisioned environments (isolated database, hostname, plan
+    // tier, per-environment RBAC), not the developer-class runs `development`
+    // and `test` describe — and `trial` in particular holds an evaluating
+    // customer's real data, so `development` would understate the posture a
+    // client reads this flag to judge.
+    expect(resolveDiscoveryEnvironment('preview')).toBe('sandbox');
+    expect(resolveDiscoveryEnvironment('trial')).toBe('sandbox');
+    // Declared rows go through the same operator-input normalization as the
+    // rest of the table, not a second path.
+    expect(resolveDiscoveryEnvironment('  PREVIEW ')).toBe('sandbox');
+    expect(resolveDiscoveryEnvironment('Trial')).toBe('sandbox');
+  });
+
+  it('leaves the #5936 two-rule split standing (absence ≠ unrecognised)', () => {
+    // Neither new row may be read as loosening those. Absence is still the host
+    // declining to answer; an unrecognised spelling is still a guess.
+    expect(resolveDiscoveryEnvironment(undefined)).toBe('production');
+    expect(resolveDiscoveryEnvironment('preview-2')).toBe('development');
+  });
+
+  it('rejects a fold table that misses a member — the exhaustiveness gate itself', () => {
+    // ⚠️ This assertion is made by `tsc`, not by vitest, and that is the point.
+    // A RUNTIME exhaustiveness test cannot see the defect #6287 reported: the
+    // fallback and three declared rows all produce `'development'`, so calling
+    // `resolveDiscoveryEnvironment('preview')` returned an identical answer
+    // whether a row existed or the `??` invented one. Such a test would have
+    // passed on the broken state. `Record<EnvironmentType, …>` compares the KEY
+    // SET, which is the actual claim, so the gate lives on the source table's
+    // type annotation and this is its negative control.
+    //
+    // What it does and does not cover, stated exactly:
+    //   - It DOES fail both ways on the enum's membership. Add a bucket to
+    //     `EnvironmentTypeSchema` and the six-key literal below is missing two,
+    //     so the source table must grow a row before anything compiles. REMOVE
+    //     `trial` from the enum and this literal becomes complete, the directive
+    //     goes UNUSED, and tsc reports TS2578 — a vacuously-passing negative
+    //     control cannot hide here.
+    //   - It does NOT catch someone widening the source annotation itself (to
+    //     `Record<string, …>`, say). No type-level pin can: the table is not
+    //     exported, and exporting it to satisfy a test would put a private
+    //     lookup on this package's public surface. That edit is a deliberate,
+    //     visible change to a line whose own comment forbids it, not the silent
+    //     drift #6287 was about — the drift was a member that nobody had to
+    //     touch anything to omit.
+    // `packages/spec`'s test layer IS type-checked (`tsconfig.test.json`, named
+    // in the `typecheck` script since #5286) and this file carries no entry in
+    // `test-typecheck-debt.json`, so the directive is live, not phantom.
+    // @ts-expect-error [#6287] `trial` has no fold — a partial table must not type-check.
+    const missingTrial: Record<EnvironmentType, DiscoveryEnvironment> = {
+      production: 'production',
+      sandbox: 'sandbox',
+      development: 'development',
+      test: 'development',
+      staging: 'sandbox',
+      preview: 'sandbox',
+    };
+    expect(Object.keys(missingTrial)).toHaveLength(6);
   });
 });

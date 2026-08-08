@@ -54,7 +54,11 @@ export const companySettingsManifest: SettingsManifest = {
     {
       type: 'text', key: 'country', label: 'Country', required: false,
       description: 'ISO 3166-1 alpha-2 code (e.g. US, GB, CN).',
+      // Fourth case of the hole #5712 closed on timezone/currency (#6579): the
+      // pattern constrains SHAPE only, and `ZZ` is a shape-valid code assigned
+      // to nobody. The domain constrains membership; both still apply.
       pattern: '^[A-Za-z]{2}$', minLength: 2, maxLength: 2,
+      valueDomain: 'iso_3166_alpha2',
     },
 
     // ── Contact ───────────────────────────────────────────────────────────

@@ -124,6 +124,7 @@ export const ContextTokenPlaceholderSchema = z
     },
     { message: 'Not a recognised {context-token} placeholder' },
   );
+export type ContextTokenPlaceholder = z.input<typeof ContextTokenPlaceholderSchema>;
 
 /**
  * Description table — feeds skill / docs generation. Pure data,

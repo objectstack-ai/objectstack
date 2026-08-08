@@ -2046,16 +2046,24 @@ rc.1, and administrators should know what changed:
   the generated upgrade guide and the `spec_changes` MCP tool actually
   report the 16 → 17 chain (they still said 16.0.0).
 
-### New in Console — bundled objectui advanced `4a4829d0ef39 → f995a452d2ca`
+### New in Console — bundled objectui advanced `4a4829d0ef39 → 7d9734d5e321`
 
 143 objectui commits across five pin moves, released as **objectui 17.1.0**.
 (The pin changesets enumerate 79 of them; one range under-enumerated its own
 window and is recorded by `console-bebaebd39ace-backfill` — the fixes it
 covers are folded into the list below rather than left to the changelog.)
-Two later pin moves carried the bundle on to `f995a452d2ca` — 129 further
-commits, enumerated in `console-f5bc4c78be76` and `console-f995a452d2ca`. The
-two author-facing breaking migrations in that range are documented under
-*Breaking changes & migration* above.
+
+**How the Console pin is recorded on this page.** `scripts/bump-objectui.sh`
+advances `.objectui-sha` whenever the bundled Console moves, and every move
+writes a `.changeset/console-<sha>.md` that enumerates its own range. Each
+move is reported under the *Landed since* window that shipped it — never
+folded into an earlier window's range — so the chain reads end to end:
+`4a4829d0ef39 → 7d9734d5e321` here (released as `rc.1`), `→ f5bc4c78be76`
+under *rc.1* (`rc.2`), `→ f995a452d2ca` under *rc.2* (`rc.4`),
+`→ 7dfbeb704e1e` under *rc.4* (`rc.5`), and `→ 0cf8f0f70d10` under *rc.5*,
+which is still open. The two author-facing breaking migrations the bundle
+carries (objectui#3233, objectui#3172) arrived with `f995a452d2ca` and are
+documented under *Breaking changes & migration* above.
 
 - **The lockstep half of ADR-0110 — release-critical.** The rc.0 pin predates
   the client fix, so the Console it built still posted `action.target` to
@@ -2140,13 +2148,16 @@ two author-facing breaking migrations in that range are documented under
 ## Landed since 17.0.0-rc.1
 
 These changes are on `main` after the `rc.1` cut and **roll into 17.0.0-rc.2**.
-At the time of writing the window has left 209 changesets pending — 46
+At the time of writing the window had left 209 changesets pending — 46
 `major`-class, 74 `minor`, 55 `patch`, and 34 that release nothing (CI, tooling
-and docs). The Console pin was `785b8a5d432c` when this window was written and
-has since advanced to `f995a452d2ca` in two moves; that delta is carried by the
-range on *New in Console* above and enumerated in the two pin changesets. Its
-two author-facing breaking migrations are documented with the other breaking
-changes above.
+and docs); the cut itself released **166 changesets — 45 `major`-class, 69
+`minor`, 52 `patch`**, counted across the `17.0.0-rc.2` sections of the package
+changelogs. The Console pin stood at `7d9734d5e321` when the window opened and
+advanced twice inside it — to `785b8a5d432c`, already the value when the
+paragraphs below were written, and then to `f5bc4c78be76`. The two moves are
+enumerated in `console-785b8a5d432c` and `console-f5bc4c78be76`; neither
+carries an author-facing breaking migration, and the two that exist arrive in
+the next window.
 
 Two campaigns dominate the window, and both are *finishing* rather than
 starting: the #4535 dual-source convergence and #4001's close of the authorable
@@ -2611,6 +2622,192 @@ it compared a declaration to an implementation (#4472).
   from the **host app** rather than the framework (#4699, #4700).
 - **A `RETURNING` write persists on `driver-sqlite-wasm` (#4518)**, unblocking
   cold-boot e2e.
+
+## Landed since 17.0.0-rc.2
+
+These changes are on `main` after the `rc.2` cut and **roll into 17.0.0-rc.4**.
+Counted across the `17.0.0-rc.4` sections of the package changelogs, the cut
+released **360 changesets — 44 `major`-class, 94 `minor`, 222 `patch`**, which
+makes it the largest of the train's RC cuts (`rc.0` released 258, `rc.1` 262,
+`rc.2` 166, `rc.5` 10).
+
+**Why there is no `rc.3` window section.** `17.0.0-rc.3` was tagged for every
+package on 2026-08-03 by a `chore: version packages (rc)` run, but the round
+consumed exactly one changeset — `BulkActionParamSchema`'s `options[]` entry
+gaining passthrough (#4001) — and left every other package with nothing but an
+*Updated dependencies* bump. Those `## 17.0.0-rc.3` changelog sections no
+longer survive on `main`, and the Console pin did not move in that round. So
+this one window section spans the `rc.2` cut through the `rc.4` cut rather than
+splitting at a tag that records nothing.
+
+As in the windows above, landings that belong to a section higher up the page
+are documented **there** rather than repeated here.
+
+- **Declarative `apis:` goes from silent no-op to live, in two steps.** The
+  surface was zero-execution end to end and said nothing about it: metadata
+  loading accepted `apis:` and `GET /api/v1/meta/api` returned every endpoint
+  with every key intact, while no route was ever mounted — so a declared path
+  died at Hono's `notFound` rather than at the dispatcher. It first learned to
+  **refuse loudly**, retiring the `ApiRegistry` family (#4936, #4939); the
+  blanket refusal then narrowed to per-endpoint publish gates and declared
+  endpoints **went live** (#5111, #5040 E7).
+- **#4001 closes the authorable surface, batches 9–20.** Unknown keys are now
+  rejected on the flow-node config contracts (batch 9), `control-flow` and
+  `state-machine` (batch 10), nine automation shapes (batch 11), the ETL
+  authoring contracts (batch 12), the responsive/SDUI styling shapes (batch
+  13), action-param options, public sharing, report sorting, the dataset
+  semantic layer and dashboard widgets (batch 14), all 14 `ui/theme` sites and
+  5 of 7 `ui/chart` sites (batch 15), and `AriaProps` (batch 16). View
+  sub-blocks (batch 18) and object inner blocks (batch 20) stop dropping
+  unknown keys instead of reporting them. `ui/component.zod.ts`'s 29 sites were
+  judged **no gate** and deliberately left open (batch 17) — a recorded
+  verdict, not an omission. `ViewItemSchema` splits into an authoring schema
+  and a wire variant.
+- **ADR-0049 enforce-or-remove reaches its widest sweep.** Retired in this
+  window: the dashboard widget action trio plus `aria`, and the build gate that
+  enforced a button nobody renders (#5010); `indexes[].type` and
+  `indexes[].partial`, two authorable index keys no driver ever read (#5248,
+  #4943); `connector.rateLimitConfig` and the whole outbound rate-limit shape,
+  whose engine never existed (#4911); `dashboard.widgets[].responsive` (#4876);
+  `HookContext.session`'s deprecated position key, declared and read by two
+  dead branches but never produced (#5050); `HttpServerConfigSchema` (#4938);
+  `NotificationActionSchema` and `EmbedConfigSchema` (#5015); nine theme token
+  groups emitted and read by nobody (#5021); the five `ui/` interaction config
+  modules (#4988); `IStorageService.list(prefix)` (#5540); the field-mapping
+  `transform` key and `FieldMappingTransform` (#5552); and the exported
+  `HttpServer` delegating wrapper.
+- **The caller's positions converge on one spelling.** Action-body
+  `ctx.session` starts emitting the canonical `positions` alongside the
+  deprecated predecessor key it replaces (#5613); that predecessor is then
+  removed outright, leaving `ctx.user.positions` as the only spelling on
+  action bodies and AI route handlers (#6011).
+- **A misconfigured provider fails the boot instead of degrading silently.**
+  `OS_EMAIL_PROVIDER=resend/postmark` without an API key no longer becomes the
+  log transport (#5132), and a misspelled `OS_SMS_PROVIDER` no longer does
+  either (#5713).
+- **Wire shapes stop having two answers.** `GET /meta/:type/:name` answers
+  exactly one body shape; a sort node spelling its direction `direction` is a
+  400 rather than a silently reversed page (#4721); `DeleteDataResult` declares
+  the schema it names — `success`, not `deleted` (#5638); and
+  `@objectstack/spec/openapi.json` stops describing routes it does not own,
+  shrinking to the contract half it does (#5744, #5588).
+- **The driver contract stops writing the object name twice.** `IDataDriver`'s
+  query parameter becomes `DriverQuery` (#5181) — the first step of the
+  narrowing that finishes in the open window below.
+- **Tenancy and durability corrections.** `organization/create` is judged
+  against the **effective** tenancy posture, so a deployment with no
+  organization wall can no longer create organizations (#5261);
+  `HierarchyScopeContext.organizationId` becomes the authoritative tenancy
+  field and is required (#5858); and a `sys_file` / `sys_upload_session` write
+  that never landed stops reporting success (#5216).
+- **Two dialect convergences.** The retry policy's last two spellings meet
+  (#4964 `flow.errorHandling`, #4962), and `dashboard.widgets[].compareTo`
+  converges on the analytics executor's contract (#5011).
+
+### New in Console — bundled objectui advanced `f5bc4c78be76 → f995a452d2ca`
+
+One pin move, released as **@objectstack/console 17.0.0-rc.4**: 98 non-merge
+objectui commits, of which 64 of 65 changesets release; the enumeration is
+`console-f995a452d2ca`. This is the move that carries the bundle's two
+author-facing breaking migrations — **field widgets receive their metadata on
+one key, `field`** (objectui#3233) and **flow node geometry is the spec's
+`FlowNode.position`** (objectui#3172) — both documented under *Breaking changes
+& migration* above.
+
+## Landed since 17.0.0-rc.4
+
+These changes are on `main` after the `rc.4` cut and **roll into 17.0.0-rc.5**.
+A short window: **10 changesets — 2 `major`-class, 4 `minor`, 4 `patch`**,
+counted across the `17.0.0-rc.5` sections of the package changelogs. Nine are
+listed below; the tenth is the Console pin move.
+
+- **`system-data` no longer grants CSV import by default** (#4671).
+  `managedBy: 'system-data'` narrows from `create/import/edit/delete/exportCsv`
+  to the same set with `import: false`, leaving `platform` as the only bucket
+  that grants `import` by default. Eight in-repo objects lose the import
+  wizard, three of them the RBAC join tables that decide who can do what.
+  Restore any one of them with `userActions: { import: true }` on the object —
+  only that verb, the rest still follow the bucket default. The authorization
+  boundary is unchanged: `import` is an affordance that decides whether a UI
+  entry renders, and every imported row still passes `DelegatedAdminGate`, RLS
+  and permission-set adjudication. What changes is leverage — one bad CSV is a
+  bulk grant. Recorded as the #4671 addendum to ADR-0103.
+- **`subscribeMetadata`'s `type` narrows to `MetadataEventSubject`** (#4627) —
+  subscribing to an event the contract can never deliver is now a compile
+  error.
+- **`engine.transaction` tightens, batch 1** (#5696) — `opts.require` is
+  fail-closed, and the handle carries an `owned` signal.
+- **Transaction handles stop leaking across datasources** (#5351, #5696) — a
+  business write refuses loudly, and the system ledger moves out of the
+  transaction so it lands on its own.
+- **A connector action can declare what it did upstream** (#4395), which is
+  what makes `connector_action` countable.
+- **`XParsed` naming reaches every schema that has a parsed state** (ADR-0122,
+  #5551).
+- **`os migrate summary-nulls`** (#6063) backfills roll-up count and sum
+  columns left `NULL` by pre-seed inserts.
+- **`runAs: 'system'` `create_record` stamps all three ADR-0118 columns**
+  (#5494) — organization, owner and creator are non-`NULL`.
+- **The strictness ledger gains a ninth verdict, `covered`** (#5249) — an
+  honest cell for a shape fragment with no gate and no parse whose every
+  consumer already guards.
+
+### New in Console — bundled objectui advanced `f995a452d2ca → 7dfbeb704e1e`
+
+One pin move, released as **@objectstack/console 17.0.0-rc.5**: 28 non-merge
+objectui commits, 9 of 9 changesets releasing, all `patch`; the enumeration is
+`console-7dfbeb704e1e`. No author-facing breaking migration.
+
+## Landed since 17.0.0-rc.5
+
+This window is **open** — these changes are on `main` after the `rc.5` cut and
+roll into the next cut. Measured from the changesets added since the `rc.5`
+version commit: **135 pending — 17 `major`-class, 26 `minor`, 92 `patch`**, and
+none that release nothing. These numbers move until the cut; once it lands the
+package changelogs are authoritative.
+
+- **ADR-0122 phase 2 — the bare type name becomes the AUTHOR state.** 1384
+  aliases flip and 102 `XInput` synonyms retire, completing the convention
+  whose `XParsed` half landed in the previous window (#5551).
+- **The driver query contract finishes narrowing.** `DriverQuery` reaches
+  `aggregate` and `distinct` on memory and mongodb (#6212 batch C) and five
+  further drivers (#6075); `SqlDriver.distinct`'s third parameter becomes a
+  bare `FilterCondition`, so a spelling that silently returned the whole set no
+  longer compiles (#6320); `analyzeQuery` and `findWithWindowFunctions` stop
+  taking `any`, and the window door carries its own flat-shape types (#6212
+  batches A and E); and the two undeclared `aggregate` / `func` aliases retire
+  (#6212 batch B, #6321).
+- **ADR-0049 enforce-or-remove continues.** The L2 ETL layer retires —
+  `automation/etl.zod.ts` had no executor while the sync architecture document
+  was still recommending it. So do `system/http-server.zod.ts`'s runtime
+  vocabulary; the widget-registration vocabulary and five doorless i18n shapes,
+  with `FieldWidgetProps` deliberately **kept**; `ViewProtocol`'s five
+  viewId-addressed methods and their ten schemas (#6239); and `array_agg` /
+  `string_agg` from `AggregationFunction`, with `count_distinct` deliberately
+  kept (#6188). The SDUI component props are reconciled against the renderers
+  that serve them — 4 keys retired, 9 declared (#5775).
+- **`composeStacks` stops last-wins on `i18n`** (#5051) — the same value
+  passes, a genuine conflict errors with a prescription.
+- **`HierarchyScopeContext` carries the tenancy posture** (#6139), so a
+  single-posture `DEPTH` scope is legal rather than rejected.
+- **`HookContext.api` narrows from `z.unknown()` to `IScopedContext`** (#5945)
+  — the first hook the documentation teaches finally compiles.
+- **A `view` body must be a view before the union judges it** (#5599), and an
+  action param's `options[]` can speak a per-option `visibleWhen` (#5016).
+
+### New in Console — bundled objectui advanced `7dfbeb704e1e → 0cf8f0f70d10`
+
+One pin move, not yet released: 66 non-merge objectui commits, 24 of 24
+changesets releasing; the enumeration is `console-0cf8f0f70d10`. Two entries
+carry the author's own breaking annotation, but both are TypeScript
+export-surface changes inside objectui's own npm packages — the `GestureType` /
+`GestureConfig` rename (objectui#3363), and objectui tracking the
+`@objectstack` family at `17.0.0-rc.5` (objectui#3560). `@objectstack/console`
+ships a frozen SPA build at the pin SHA and does not forward those type
+entrypoints, so **no new metadata migration is registered for this move** — the
+changeset records that verdict against ADR-0087. The same changeset also lists,
+by subject rather than by count, the 42 commits in the range that carried no
+changeset of their own.
 
 ## Upgrade checklist
 

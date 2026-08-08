@@ -28,6 +28,7 @@ import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
+    RUNTIME_OWNED_FIELD_TYPES,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
@@ -1026,6 +1027,20 @@ const CLONE_STRIP_FIELDS: readonly string[] = [
  * reject. The #3043 threat is app approval/status/verdict fields (the issue's
  * `sporadic_application` / `assessment`), never `sys_`; this is the same
  * platform-vs-authored boundary `applySystemFields` uses for ownership.
+ *
+ * SCOPE, second boundary — RUNTIME-OWNED field types
+ * ({@link RUNTIME_OWNED_FIELD_TYPES}: today `autonumber`) are left to the
+ * ENGINE's own insert strip (`stripRuntimeOwnedFields`, #5503), which runs on
+ * every insert path including the direct `engine.insert` callers this ingress
+ * never sees. Skipping them here removes no protection and prevents this seam
+ * from PRE-EMPTING an exemption it does not implement: the engine strip honours
+ * `preserveAudit` (#3493 — a historical import reinstating legacy record
+ * numbers) while this one knows only `isSystem`. Before #5628 the distinction
+ * was academic, because an `autonumber` field carried no `readonly` flag for the
+ * loop below to notice; now that `Field.autonumber` injects one, stripping here
+ * would silently delete the value a historical import is entitled to keep,
+ * BEFORE the engine could apply the whitelist. Author-declared `readonly` on
+ * every other type is untouched — the #3043 strip is exactly as wide as it was.
  */
 function stripReadonlyForInsert(schema: any, data: any, context: any): any {
     if (context?.isSystem) return data;
@@ -1037,6 +1052,9 @@ function stripReadonlyForInsert(schema: any, data: any, context: any): any {
         let out = row;
         for (const name of Object.keys(fields)) {
             if (!fields[name]?.readonly) continue;
+            // [#5628] The engine's runtime-owned strip owns these, with the
+            // wider exemption set. See the note above.
+            if (RUNTIME_OWNED_FIELD_TYPES.has(String(fields[name]?.type ?? ''))) continue;
             if (!(name in out)) continue;
             if (out === row) out = { ...row };
             delete out[name];
@@ -10163,10 +10181,38 @@ export class ObjectStackProtocolImplementation implements
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
                 } else if (it.prevVersion !== null && it.prevVersion !== undefined) {
                     // Edited an existing artifact → restore the pre-commit body.
+                    //
+                    // [#6563] The write INTENT is derived per item, exactly as the
+                    // sibling caller {@link rollbackMetaItem} derives it. Left
+                    // unstated, `SysMetadataRepository.restoreVersion` defaults to
+                    // `'override-artifact'` and `put`'s `assertAllowed` refuses every
+                    // type that is not `allowOrgOverride` — `object` among them — so
+                    // each `object` item of a reverted commit came back in `failed[]`
+                    // as `NOT_OVERRIDABLE` while the same edit reverted fine one
+                    // artifact at a time through the version-history revert. The
+                    // repository's default is right for callers that genuinely mean
+                    // "override a packaged artifact"; the defect was this caller never
+                    // saying which of the two cases it is.
+                    //
+                    // Per ITEM, not per call: `revertCommit` reverts a batch, and a
+                    // commit routinely mixes a runtime-created object with an overlay
+                    // on a packaged view. A genuinely artifact-backed item still
+                    // resolves to `'override-artifact'` and is still refused — the
+                    // derivation states the case, it does not widen the gate.
+                    //
+                    // Two neighbours are deliberately NOT changed here, each filed
+                    // with its own measurement: the soft-remove limb above states the
+                    // same intent as a CONSTANT, so a commit that CREATED an object
+                    // still cannot be reverted (#6620); and neither limb refreshes the
+                    // SchemaRegistry the way `rollbackMetaItem` does, so a restored
+                    // body is persisted but not yet dispatched on (#6621).
+                    const intent: 'override-artifact' | 'runtime-only' =
+                        this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
                     await repo.restoreVersion(ref, it.prevVersion, {
                         actor,
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
+                        intent,
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
                 }

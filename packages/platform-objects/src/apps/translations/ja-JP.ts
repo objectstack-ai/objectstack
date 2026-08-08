@@ -32,6 +32,9 @@ export const jaJP: TranslationData = {
       navigation: {
         group_overview: { label: '概要' },
         group_apps: { label: 'アプリ' },
+        // Setup's own `nav_packages` — distinct from the same id under
+        // `apps.studio.navigation`, which does not answer for this app (#5750).
+        nav_packages: { label: 'パッケージ' },
         nav_marketplace_browse: { label: 'マーケットプレイスを閲覧' },
         nav_marketplace_installed: { label: 'インストール済みアプリ' },
         nav_cloud_connection: { label: 'クラウド接続' },
@@ -53,6 +56,7 @@ export const jaJP: TranslationData = {
         nav_invitations: { label: '招待' },
 
         nav_positions: { label: 'ポジション' },
+        nav_capabilities: { label: 'ケイパビリティ' },
         nav_permission_sets: { label: '権限セット' },
         nav_sharing_rules: { label: '共有ルール' },
         nav_record_shares: { label: 'レコード共有' },
@@ -62,8 +66,11 @@ export const jaJP: TranslationData = {
         nav_approval_processes: { label: 'プロセス' },
         nav_approval_requests: { label: 'リクエスト' },
         nav_approval_actions: { label: 'アクション履歴' },
+        nav_approval_delegations: { label: '委任 (不在時)' },
 
         nav_settings_hub: { label: 'すべての設定' },
+        nav_settings_localization: { label: 'ローカリゼーション' },
+        nav_settings_company: { label: '会社情報' },
         nav_settings_mail: { label: 'メール' },
         nav_settings_branding: { label: 'ブランディング' },
         nav_settings_auth: { label: '認証' },
@@ -78,6 +85,12 @@ export const jaJP: TranslationData = {
         nav_sessions: { label: 'セッション' },
         nav_audit_logs: { label: '監査ログ' },
         nav_notifications: { label: '通知' },
+
+        // Integrations — contributed at RUNTIME by the owning capability
+        // plugins (ADR-0029 K2); gated by `pnpm check:app-nav-i18n` (#5750).
+        nav_webhooks: { label: 'Webhooks' },
+        nav_http_deliveries: { label: 'HTTP 配信' },
+        nav_datasources: { label: 'データソース' },
 
         nav_oauth_apps: { label: 'OAuth アプリケーション' },
         nav_jwks: { label: '署名キー (JWKS)' },
