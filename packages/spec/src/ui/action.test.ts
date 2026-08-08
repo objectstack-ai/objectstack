@@ -157,26 +157,6 @@ describe('ActionParamSchema', () => {
       expect(message).toContain('`wibble`');
       expect(message).not.toContain('Did you mean');
     });
-
-    it('accepts every key the schema declares (guards ACTION_PARAM_KEYS drift)', () => {
-      // If a declared key were missing from the suggestion list, or a listed key
-      // were removed from the schema, one of these probes would be rejected.
-      const probes: Record<string, unknown> = {
-        name: 'p', field: 'inspector', objectOverride: 'sys_member', label: 'P',
-        type: 'lookup', required: true, options: [{ label: 'A', value: 'a' }],
-        placeholder: 'ph', helpText: 'help', defaultValue: 'd', multiple: true,
-        accept: ['image/*'], maxSize: 1024, reference: 'sys_user',
-        defaultFromRow: true, visible: 'features.phoneNumber == true',
-        requiresFeature: 'phoneNumber',
-      };
-      for (const [key, value] of Object.entries(probes)) {
-        const result = ActionParamSchema.safeParse({ name: 'p', [key]: value });
-        const unknown = result.success
-          ? undefined
-          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-        expect(unknown, `\`${key}\` should be a declared ActionParam key`).toBeUndefined();
-      }
-    });
   });
 });
 

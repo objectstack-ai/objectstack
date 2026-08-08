@@ -6,6 +6,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictObject } from '../shared/strict-object';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { DateGranularity } from '../data/query.zod';
+import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from '../data/date-macros.zod';
 import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
 import { ActionType } from './action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
@@ -635,6 +636,69 @@ export const DashboardWidgetSchema = lazySchema(() => z.object({
   .strict());
 
 /**
+ * Dashboard date-range presets — the named windows a dashboard date filter may
+ * select, in the display order the filter bar offers them.
+ *
+ * **This is the vocabulary's single source of truth (#4614).** It used to exist
+ * three times: inline in `dateRange.defaultRange` below, as `PRESET_RANGES` in
+ * objectui's `dashboard-filters` (the module that maps each name to its
+ * date-macro bounds), and as a hand-written table in
+ * `content/docs/ui/dashboards.mdx`. Three copies of one enum drift in the
+ * direction nobody notices: a name the renderer knows but the schema does not is
+ * rejected from metadata that would have rendered, and a name the schema knows
+ * but the renderer does not validates clean and then resolves to nothing.
+ *
+ * Each preset resolves to a pair of date-macro token bounds at query time (see
+ * `DATE_MACRO_TOKENS` in `../data/date-macros.zod`). That is why the two
+ * vocabularies live one import apart and neither restates the other's grammar.
+ */
+export const DATE_RANGE_PRESETS = [
+  'today',        'yesterday',
+  'this_week',    'last_week',
+  'this_month',   'last_month',
+  'this_quarter', 'last_quarter',
+  'this_year',    'last_year',
+  'last_7_days',  'last_30_days', 'last_90_days',
+] as const;
+
+export type DateRangePreset = (typeof DATE_RANGE_PRESETS)[number];
+
+/**
+ * What `dashboard.dateRange.defaultRange` accepts: every preset, plus the
+ * `custom` sentinel.
+ *
+ * `custom` is deliberately NOT a member of {@link DATE_RANGE_PRESETS} — it names
+ * no window. It means "open the from/to picker with no preset applied", so it
+ * carries no bounds and resolves to no range. That distinction is load-bearing
+ * in both directions: `defaultRange: 'custom'` is a legitimate dashboard
+ * declaration, while a `globalFilters` date filter defaulting to `'custom'` is
+ * not — a bare filter value gives the sentinel no from/to to hand over. The
+ * `superRefine` on {@link GlobalFilterSchema} therefore checks the presets
+ * alone, and this list exists so `defaultRange`'s accepted set is left exactly
+ * as it was by the extraction.
+ */
+export const DATE_RANGE_DEFAULT_RANGES = [...DATE_RANGE_PRESETS, 'custom'] as const;
+
+export type DateRangeDefaultRange = (typeof DATE_RANGE_DEFAULT_RANGES)[number];
+
+/**
+ * ISO calendar date, optionally carrying a time part — `2026-01-15`,
+ * `2026-01-15T08:30:00Z`. Deliberately narrower than `Date.parse`, which also
+ * accepts locale prose (`March 5, 2026`) and bare years (`2026`); neither is a
+ * value a backend compares a date column against usefully.
+ *
+ * Mirrors the accepted set of objectui's `isUsableDateString`, so this schema
+ * never rejects a spelling the renderer resolves correctly.
+ */
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+
+/** True for `'{today}'` / `'${30_days_ago}'` — a wrapped, KNOWN macro token. */
+function isDateMacroPlaceholder(value: string): boolean {
+  const m = value.match(DATE_MACRO_WRAPPED_RE);
+  return !!m && isDateMacroToken(m[1]);
+}
+
+/**
  * Dynamic options binding for global filters.
  * Allows dropdown options to be fetched from an object at runtime.
  */
@@ -709,6 +773,46 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
 
   /** Widget IDs to apply this filter to (when scope is widget) */
   targetWidgets: z.array(z.string()).optional().describe('Widget IDs to apply this filter to'),
+}).superRefine((filter, ctx) => {
+  // #4614 — a date filter's `defaultValue` is checked against the vocabulary
+  // that can actually resolve it.
+  //
+  // Why this filter type and not the built-in `dateRange`: `dateRange`'s
+  // `defaultRange` has always been an enum, so a typo there was already an
+  // author-time error. A `globalFilters` entry of `type: 'date'` was the
+  // asymmetric half — `defaultValue` is `string | number | boolean`, so a bare
+  // preset name is the ONLY spelling available, and nothing checked it. An
+  // unknown name then failed SILENTLY and late: the renderer cannot lift it to a
+  // range, falls through to "a bare string date means equality on that day", and
+  // emits `created_at = 'last_7_dayz'` — a condition no row matches, which the
+  // backend answers `200 OK` with a zero. Every tile reads 0 and the filter bar
+  // shows "All time", so the dashboard looks deliberately empty rather than
+  // misconfigured. That is the failure this moves to parse time.
+  if (filter.type !== 'date' || filter.defaultValue === undefined) return;
+
+  const value = filter.defaultValue;
+  if (
+    typeof value === 'string' &&
+    ((DATE_RANGE_PRESETS as readonly string[]).includes(value) ||
+      isDateMacroPlaceholder(value) ||
+      ISO_DATE_RE.test(value))
+  ) {
+    return;
+  }
+
+  ctx.addIssue({
+    code: 'custom',
+    path: ['defaultValue'],
+    message:
+      `${JSON.stringify(value)} is not a value a \`type: 'date'\` filter can resolve. ` +
+      'Use one of three spellings: a preset name (' +
+      DATE_RANGE_PRESETS.join(', ') +
+      '); an ISO date such as `2026-01-15` or `2026-01-15T08:30:00Z`, meaning that ' +
+      'day exactly; or a date-macro token such as `{today}` or `{30_days_ago}` ' +
+      '(the full vocabulary is `DATE_MACRO_TOKENS` in `@objectstack/spec/data`). ' +
+      "`custom` is not among them — it is a `dateRange.defaultRange` sentinel that " +
+      'carries no bounds of its own.',
+  });
 }));
 
 /**
@@ -790,7 +894,7 @@ export const DashboardSchema = lazySchema(() => strictObject({
     aliases: { dateField: 'field', fieldName: 'field', preset: 'defaultRange', range: 'defaultRange', default: 'defaultRange', allowCustom: 'allowCustomRange', custom: 'allowCustomRange' },
   }, {
     field: z.string().optional().describe('Default date field name for time-based filtering'),
-    defaultRange: z.enum(['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'this_quarter', 'last_quarter', 'this_year', 'last_year', 'last_7_days', 'last_30_days', 'last_90_days', 'custom']).default('this_month').describe('Default date range preset'),
+    defaultRange: z.enum(DATE_RANGE_DEFAULT_RANGES).default('this_month').describe('Default date range preset'),
     allowCustomRange: z.boolean().default(true).describe('Allow users to pick a custom date range'),
   }).optional().describe('Global dashboard date range filter configuration'),
 

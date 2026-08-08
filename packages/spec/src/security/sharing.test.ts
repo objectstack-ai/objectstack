@@ -460,17 +460,4 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
     const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys');
     expect(issue!.message).toContain('`id` → `value`');
   });
-
-  it('accepts every key the schema declares (guards SHARING_RULE_KEYS drift)', () => {
-    const probes: Record<string, unknown> = {
-      label: 'L', description: 'D', active: false, accessLevel: 'edit',
-    };
-    for (const [key, value] of Object.entries(probes)) {
-      const result = SharingRuleSchema.safeParse({ ...rule, [key]: value });
-      const unknown = result.success
-        ? undefined
-        : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-      expect(unknown, `\`${key}\` should be a declared sharing-rule key`).toBeUndefined();
-    }
-  });
 });

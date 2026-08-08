@@ -353,7 +353,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // `ApprovalService`, which records the decision and enforces the slate —
         // on a SYMBOL-keyed marker. Assembling the signal field-wise (never
         // spreading the body) keeps that unforgeable even if a caller invents
-        // extra keys.
+        // extra keys. Since #5561 a node type that declares NO `resumeAuthority`
+        // is gated the same way, so this door is one a descriptor opts into with
+        // `'any'` rather than one every pausing node inherits.
         //
         // REFUSAL codes come back from the engine and are answered as such
         // rather than a 200 carrying `success: false` (which reads as "your

@@ -11,6 +11,8 @@ import {
   WidgetActionTypeSchema,
   GlobalFilterSchema,
   GlobalFilterOptionsFromSchema,
+  DATE_RANGE_PRESETS,
+  DATE_RANGE_DEFAULT_RANGES,
 } from './dashboard.zod';
 
 /**
@@ -290,6 +292,124 @@ describe('Dashboard presentation sub-schemas', () => {
       id: 'w_bad', type: 'metric', dataset: 'sales', values: ['revenue'],
       filterBindings: { region: true },
     })).toThrow();
+  });
+});
+
+/**
+ * #4614 — the date-range preset vocabulary, and the `defaultValue` check it
+ * makes possible.
+ *
+ * Before this, `dateRange.defaultRange` was an enum (a typo there was already an
+ * author-time error) while a `globalFilters` entry of `type: 'date'` accepted
+ * any `string | number | boolean` unchecked. A misspelled preset therefore
+ * failed silently and late — the renderer cannot lift it to a range, falls
+ * through to "a bare string means equality on that day", and emits a condition
+ * no row matches. The dashboard reads 0 everywhere and looks deliberately empty.
+ */
+describe('date-range preset vocabulary (#4614)', () => {
+  const dateFilter = (defaultValue: unknown) =>
+    GlobalFilterSchema.parse({ field: 'created_at', type: 'date', defaultValue });
+
+  it('is a closed vocabulary — counts pinned so a silent add/drop is loud', () => {
+    // ADR-0122 receipt convention: assert the count, not just membership, so a
+    // name appearing or vanishing cannot ride in under a passing test.
+    expect(DATE_RANGE_PRESETS).toHaveLength(13);
+    expect(DATE_RANGE_DEFAULT_RANGES).toHaveLength(14);
+
+    // `custom` names no window — it is a `defaultRange` sentinel only.
+    expect(DATE_RANGE_PRESETS).not.toContain('custom');
+    expect(DATE_RANGE_DEFAULT_RANGES).toContain('custom');
+    expect(new Set(DATE_RANGE_PRESETS).size).toBe(DATE_RANGE_PRESETS.length);
+  });
+
+  it('`dateRange.defaultRange` accepts exactly what it accepted before the extraction', () => {
+    // The vocabulary moved out of this enum into a shared constant; this is the
+    // assertion that the move was value-preserving.
+    for (const range of DATE_RANGE_DEFAULT_RANGES) {
+      const d = DashboardSchema.parse({
+        name: 'dash_x', label: 'D', dateRange: { field: 'created_at', defaultRange: range },
+        widgets: [{ id: 'wid_x', type: 'metric', dataset: 'sales', values: ['revenue'] }],
+      });
+      expect(d.dateRange?.defaultRange).toBe(range);
+    }
+    expect(() => DashboardSchema.parse({
+      name: 'dash_x', label: 'D', dateRange: { defaultRange: 'last_7_dayz' },
+      widgets: [{ id: 'wid_x', type: 'metric', dataset: 'sales', values: ['revenue'] }],
+    })).toThrow();
+  });
+
+  it('accepts every preset name as a date filter default', () => {
+    for (const preset of DATE_RANGE_PRESETS) {
+      expect(dateFilter(preset).defaultValue).toBe(preset);
+    }
+  });
+
+  it('accepts an ISO date — day, or day with an instant', () => {
+    expect(dateFilter('2026-01-15').defaultValue).toBe('2026-01-15');
+    expect(dateFilter('2026-01-15T08:30:00Z').defaultValue).toBe('2026-01-15T08:30:00Z');
+  });
+
+  it('accepts a KNOWN date-macro token, wrapped either way', () => {
+    expect(dateFilter('{today}').defaultValue).toBe('{today}');
+    expect(dateFilter('${30_days_ago}').defaultValue).toBe('${30_days_ago}');
+    // The macro vocabulary is asked, not restated — an unknown token is exactly
+    // the typo this guard exists to catch.
+    expect(() => dateFilter('{yesteryear}')).toThrow();
+  });
+
+  it('REJECTS a misspelled preset name', () => {
+    // The regression this issue is about. `last_7_dayz` reaches a query as
+    // `created_at = 'last_7_dayz'` and the backend answers 200 OK with a zero.
+    expect(() => dateFilter('last_7_dayz')).toThrow();
+    expect(() => dateFilter('last-7-days')).toThrow();
+    expect(() => dateFilter('Last 7 Days')).toThrow();
+    expect(() => dateFilter('lastweek')).toThrow();
+  });
+
+  it('REJECTS `custom` — a sentinel with no bounds of its own', () => {
+    // Legal as `dateRange.defaultRange`, meaningless as a bare filter value:
+    // there is no from/to for it to hand over.
+    expect(() => dateFilter('custom')).toThrow();
+  });
+
+  it('REJECTS a non-string default on a date filter', () => {
+    expect(() => dateFilter(0)).toThrow();
+    expect(() => dateFilter(true)).toThrow();
+  });
+
+  it('names the offending value and all three legal spellings', () => {
+    // House rule: a strict gate ships with text an author can act on. Without
+    // the value quoted back, a dashboard with several date filters gives no clue
+    // WHICH one is wrong.
+    let message = '';
+    try { dateFilter('last_7_dayz'); } catch (e) { message = String(e); }
+
+    expect(message).toContain('last_7_dayz');
+    expect(message).toContain('last_7_days');       // the preset list, i.e. the fix
+    expect(message).toContain('2026-01-15');        // the ISO form
+    expect(message).toContain('{30_days_ago}');     // the macro form
+  });
+
+  it('leaves every OTHER filter type untouched', () => {
+    // A `select` filter's options are the author's own vocabulary — a value that
+    // happens to look like a preset name is none of this check's business.
+    expect(GlobalFilterSchema.parse({
+      field: 'time_period', type: 'select', defaultValue: 'this_quarter',
+    }).defaultValue).toBe('this_quarter');
+    expect(GlobalFilterSchema.parse({
+      field: 'period', type: 'select', defaultValue: 'last_7_dayz',
+    }).defaultValue).toBe('last_7_dayz');
+    expect(GlobalFilterSchema.parse({ field: 'q', type: 'text', defaultValue: 'today' }).defaultValue).toBe('today');
+    expect(GlobalFilterSchema.parse({ field: 'n', type: 'number', defaultValue: 7 }).defaultValue).toBe(7);
+    // A date filter with no default is still perfectly legal.
+    expect(GlobalFilterSchema.parse({ field: 'created_at', type: 'date' }).defaultValue).toBeUndefined();
+  });
+
+  it('does not break the shipped System Overview dashboard', () => {
+    // packages/platform-objects/.../system_overview.dashboard.ts — the only
+    // date-filter default in the tree, and a legal one. Pinned here so the
+    // strictness cannot regress a real, shipped declaration.
+    expect(dateFilter('last_7_days').defaultValue).toBe('last_7_days');
   });
 });
 

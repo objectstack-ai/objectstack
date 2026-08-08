@@ -441,12 +441,36 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
    * (what it declared rides along in the artifact and is re-attached on load).
    * The `AppPlugin` registers them on the engine before binding hooks so
    * `string` handlers resolve at startup.
+   *
+   * BOTH shapes therefore reach this schema twice: once as authored, once
+   * lowered. All four combinations (map/array × bare/declared) are accepted —
+   * the map's two lowered forms since #4343 and #4976, the array's since #6238.
+   * `packages/cli`'s `lower-callables.test.ts` pins every cell against what the
+   * lowering actually emits, rather than against a belief about it.
    */
   functions: z.union([
     z.record(z.string(), FlowFunctionEntrySchema),
+    // The array member is NOT `FlowFunctionEntrySchema` in a list: an array
+    // entry carries its own `name` (and an optional `packageId`) because it has
+    // no map key to be named by, so the two shapes are genuinely different
+    // records rather than one reused schema.
+    //
+    // `handler` accepts the lowered string ref for the same reason the map form
+    // does (#4343, #4976), and this member was the last place it did not:
+    // `lowerCallables` lowers the array branch too (`next.handler = ref`,
+    // `next.name = ref`), so `objectstack build` emitted
+    // `[{ name: 'syncBilling', handler: 'syncBilling', effect: 'writes' }]` into
+    // a schema that still demanded a callable — `invalid_union: Invalid input`,
+    // path stopping at `functions`, naming neither the entry nor the key. One
+    // widening covers BOTH array spellings at once, unlike the map form's two
+    // separate members: `effect` is already optional here, so the bare and the
+    // declared entry differ only in whether that key is present.
     z.array(z.object({
       name: z.string(),
-      handler: z.function(),
+      handler: z.union([
+        z.function(),
+        z.string().min(1).describe('The lowered handler ref (built artifacts) — the callable rides in the sibling ESM module'),
+      ]).describe('The function invoked by name — the authored callable, or the ref `objectstack build` lowered it to'),
       packageId: z.string().optional(),
       effect: FlowFunctionEffectSchema.optional(),
     })),

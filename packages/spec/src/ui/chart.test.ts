@@ -279,8 +279,16 @@ describe('Chart ARIA Integration', () => {
 // UPDATE (#5020): the open half's verdict moved from `no gate` to `authorable`
 // — the react-page publish lint now PARSES `ChartAggregateSchema` instead of
 // re-deriving it, so a `strictObject` here would no longer gate nothing. The
-// posture itself is unchanged, so every assertion below stands as written; the
-// conversion is #5583, and that is the change that inverts the two STRIP pins.
+// posture itself was unchanged by that step, which is the whole reason it was
+// its own step.
+//
+// UPDATE (#5583): the posture moved too, and the file is now 0 strip. The split
+// is history rather than a live classification — the `chart.zod.ts` row left the
+// ledger's remaining-strip map on the reverse pin (a row that outlives its work
+// fails), and the two "still STRIPS" pins below were INVERTED in place. What the
+// pair still guards is the ORDER: parse first, posture second. A sweep that
+// meets a `no gate` verdict elsewhere and closes it in passing is the failure
+// this file was written to make visible (#4583).
 // ============================================================================
 describe('#4001 批 15 — the five closed chart sites', () => {
   const reject = (schema: { safeParse: (v: unknown) => { success: boolean; error?: { issues: unknown } } }, value: unknown): string => {
@@ -422,33 +430,72 @@ describe('#4001 批 15 — the five closed chart sites', () => {
   });
 });
 
-describe('#4001 批 15 — the two chart sites deliberately LEFT OPEN (measured, not skipped)', () => {
+describe('#4001 批 15 — the two chart sites left open on a measurement, CLOSED at #5583', () => {
   // `ChartAggregateSchema` and `ChartGroupBySchema`'s object arm have a LIVE
   // carrier — the react tier's `<ObjectChart aggregate={…}>` prop, which
   // objectui's ObjectChart reads to run the query — and, as of **#5020**, a
   // PARSE: the react-page publish lint calls `ChartAggregateSchema.safeParse()`
   // instead of re-deriving the vocabulary and the count/field refinement by
-  // hand. That retires the 批 15 `no gate` verdict; both sites are now ordinary
-  // `authorable` ones.
+  // hand. That retired the 批 15 `no gate` verdict and made both sites ordinary
+  // `authorable` ones; **#5583** then moved the posture, which is what the two
+  // pins below now record.
   //
-  // The two pins below are therefore UNCHANGED and must stay GREEN: the posture
-  // did not move, only the parse did. `.strict()` is a property of a parse, and
-  // now that one exists, converting these two is a behaviour change with a gate
-  // to observe it — **#5583**, where these two assertions INVERT (the stripped
-  // key becomes a named rejection). Until then they record what the wired gate
-  // still cannot see, which is the difference between a gate and a closed door
-  // (#4583). The companion pins live in `packages/lint`'s
-  // `validate-react-page-props.test.ts`.
-  it('ChartAggregateSchema still STRIPS an undeclared key — deliberate', () => {
-    const parsed = ChartAggregateSchema.parse({ function: 'count', groupBy: 'status', groupby: 'status' }) as Record<string, unknown>;
-    expect(parsed.groupby, 'if this is no longer stripped, re-read the header in chart.zod.ts').toBeUndefined();
-    expect(parsed.groupBy).toBe('status');
+  // ⚠️ They are the SAME two assertions 批 15 wrote, INVERTED — deliberately
+  // rewritten rather than deleted, because the pair is what makes the two-step
+  // order legible: the key that used to come back stripped now comes back as a
+  // named rejection, from the same input, at the same site. A reader who lands
+  // here from a future sweep should be able to see both states. The companion
+  // pins live in `packages/lint`'s `validate-react-page-props.test.ts`, which
+  // inverted in the same PR.
+  it('ChartAggregateSchema REJECTS an undeclared key, by name (#5583 — was a silent strip)', () => {
+    const r = ChartAggregateSchema.safeParse({ function: 'count', groupBy: 'status', groupby: 'status' });
+    expect(r.success, 'if this parses again the strictness was reverted — re-read the header in chart.zod.ts').toBe(false);
+    const issue = r.error!.issues[0];
+    expect(issue.code).toBe('unrecognized_keys');
+    // The three things a named rejection owes an author: the surface, the
+    // offending key echoed back, and the rename. `groupby` → `groupBy` comes
+    // from the FOLDED edit distance, not from an alias entry — asserted here so
+    // a later "curation" that adds the redundant alias has a reason not to.
+    expect(issue.message).toContain('this chart aggregate');
+    expect(issue.message).toContain('`groupby`');
+    expect(issue.message).toContain('`groupby` → `groupBy`');
+
+    // The curated half, on the key this file's own header named as the
+    // expensive one: written BESIDE `groupBy`, `dateGranularity` did nothing.
+    const wrongLayer = ChartAggregateSchema.safeParse({ function: 'count', groupBy: 'created_at', dateGranularity: 'month' });
+    expect(wrongLayer.success).toBe(false);
+    expect(wrongLayer.error!.issues[0].message).toContain('goes INSIDE `groupBy`');
+
+    // Control, in the SAME run: a declaration that was legal before is legal
+    // now. A strictness pin that only shows rejections is satisfiable by a
+    // schema that rejects everything.
+    expect(ChartAggregateSchema.safeParse({ function: 'count', groupBy: 'status' }).success).toBe(true);
   });
 
-  it('ChartGroupBySchema\'s object arm still STRIPS an undeclared key — deliberate', () => {
-    const parsed = ChartGroupBySchema.parse({ field: 'created_at', dateGranularty: 'month' }) as Record<string, unknown>;
-    expect(parsed.dateGranularty).toBeUndefined();
-    expect(parsed.field).toBe('created_at');
+  it("ChartGroupBySchema's object arm REJECTS an undeclared key — and the UNION collapses its message (#5583)", () => {
+    const r = ChartGroupBySchema.safeParse({ field: 'created_at', dateGranularty: 'month' });
+    expect(r.success).toBe(false);
+
+    // ⚠️ The zod-4 union collapse, pinned as a RAW SHAPE rather than described.
+    // `groupBy` is a union, so the arm's `unrecognized_keys` never reaches
+    // `error.issues`: what surfaces is ONE `invalid_union` whose own message is
+    // the bare string "Invalid input". A consumer that renders `issue.message`
+    // verbatim shows the author nothing at all (#5014), which is why
+    // `packages/lint/src/zod-issue-format.ts` unpacks `issue.errors` — and why
+    // that unpacking had to exist BEFORE this schema was closed.
+    const top = r.error!.issues[0] as { code: string; message: string; errors?: unknown[][] };
+    expect(top.code, 'the strict arm does NOT surface as unrecognized_keys').toBe('invalid_union');
+    expect(top.message, 'the collapsed message carries nothing an author can act on').toBe('Invalid input');
+
+    // The named rejection is reachable, one level in — this is exactly what the
+    // lint side reads, so if this shape ever changes the unpacking breaks with it.
+    const armMessages = (top.errors ?? []).flat().map((i) => (i as { message: string }).message);
+    expect(armMessages.some((m) => m.includes('this chart groupBy'))).toBe(true);
+    expect(armMessages.some((m) => m.includes('`dateGranularty` → `dateGranularity`'))).toBe(true);
+
+    // Controls in the same run: both accepted forms still parse.
+    expect(ChartGroupBySchema.safeParse({ field: 'created_at', dateGranularity: 'month', alias: 'month' }).success).toBe(true);
+    expect(ChartGroupBySchema.safeParse('status').success).toBe(true);
   });
 
   it('neither is REACHABLE from the metadata-type roots — the measurement, re-run every CI', () => {

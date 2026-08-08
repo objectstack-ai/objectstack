@@ -47,6 +47,7 @@
   "devDependencies": {
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
+    "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/service-analytics": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-job": "workspace:*",
