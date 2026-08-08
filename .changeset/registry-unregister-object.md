@@ -54,14 +54,22 @@ So `SchemaRegistry` gains the verb that was missing:
   from package to name. Both facts it needs (owner, extenders) were already in
   the contributor list, so no new bookkeeping was added.
 
-`restoreArtifactRegistryView` calls it from **tier 3 only** — the tier that has
-already established no lower layer serves the name. Tiers 1 and 2 concluded a
+`restoreArtifactRegistryView` calls it from **tier 3 only**, and only for a name
+that is not artifact-backed — the tier that has already established no lower
+layer serves the name. Tiers 1 and 2 concluded a
 packaged artifact or a MetadataService baseline still does, and an object that is
 still served must stay registered: `assertObjectRegistered` fails CLOSED, so
 retiring it there would turn "reset to artifact default" into a data-plane
-outage. Because the heal runs after the repository delete has committed, an
-extender refusal is caught and logged by name rather than propagated (the row is
-gone either way) — and deliberately not left to the heal's silent outer `catch`,
-so a runtime that disagrees with `sys_metadata` is visible rather than inferred.
+outage. It also carries the same artifact refusal `removeOverlayEntry` applies
+one line up, asked through the protocol's own `isArtifactBacked`: a code-shipped
+object is never retired by this walk. That is not already covered by the gates in
+front of it — the two-tier delete authorization runs only when `environmentId !==
+undefined`, and the no-row leg of a control-plane delete reaches the heal without
+touching the repository's `assertAllowed` at all.
+
+Because the heal runs after the repository delete has committed, an extender
+refusal is caught and logged by name rather than propagated (the row is gone
+either way) — and deliberately not left to the heal's silent outer `catch`, so a
+runtime that disagrees with `sys_metadata` is visible rather than inferred.
 
 `unregisterObjectsByPackage` keeps its signature and semantics unchanged.

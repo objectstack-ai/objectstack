@@ -7989,7 +7989,38 @@ export class ObjectStackProtocolImplementation implements
             // delete is a real divergence between the store and the runtime,
             // and it must be visible in the log rather than inferred later
             // from a registry that disagrees with `sys_metadata`.
-            if (singular === 'object' && typeof registry.unregisterObject === 'function') {
+            //
+            // ── AND IT NEVER RETIRES A CODE-SHIPPED OBJECT ──
+            //
+            // The same refusal `removeOverlayEntry` carries one line up, for
+            // the same reason: unregistering shipped code that the overlay
+            // delete never touched would be a worse bug than the one this
+            // closes. It is asked through the protocol's OWN existing predicate
+            // ({@link isArtifactBacked} → `SchemaRegistry.getArtifactItem`,
+            // which for `object` reads the contributor definition and applies
+            // exactly the artifact test the sibling verb applies to the plain
+            // key), so this limb inherits that judgement instead of open-coding
+            // a second one.
+            //
+            // Not theoretical, and NOT already covered by the gate at the top of
+            // `deleteMetaItem`: that two-tier authorization — which refuses an
+            // artifact-backed `object` outright with `not_overridable` — runs
+            // only when `environmentId !== undefined`. On a CONTROL-PLANE
+            // kernel it is skipped, and `revertCommit`'s soft-remove limb
+            // reaches this walk without it either, so the delete can arrive
+            // here for a name a code package still ships. Retiring it would
+            // take that object off the whole data plane until restart, because
+            // `assertObjectRegistered` fails closed.
+            //
+            // The check lives HERE rather than in the verb because it is a
+            // statement about LAYERS, which is what this walk reasons about;
+            // `unregisterObject` stays a general removal whose only refusal is
+            // ADR-0029's extender rule.
+            if (
+                singular === 'object'
+                && !this.isArtifactBacked(singular, name)
+                && typeof registry.unregisterObject === 'function'
+            ) {
                 try {
                     registry.unregisterObject(name);
                 } catch (err: any) {

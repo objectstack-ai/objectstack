@@ -235,6 +235,76 @@ describe('#6808 — deleteMetaItem stops BOTH registry exits serving a deleted o
   });
 
   /**
+   * The provenance refusal, measured against a REAL registry — and the reason
+   * it is not theoretical for objects. `engine.registerApp` registers a code
+   * package's objects straight into `objectContributors` and never writes the
+   * generic `metadata` map, so `isArtifactBacked` cannot see them (tier 1 has
+   * no composite entry to find either) and an overlay row for such a name can
+   * still be authored. Without this refusal the heal would reach tier 3 and
+   * take a shipped object off the data plane until restart — a strictly worse
+   * bug than the one being fixed, which is the same argument
+   * `removeOverlayEntry` records for its own artifact refusal.
+   *
+   * ADR-0010 `_provenance` is the axis: both paths that register a TENANT's
+   * object (`applyObjectRegistryMutation` and the boot rehydration) stamp
+   * `'org'` server-side; a loader-introduced artifact carries `'package'`.
+   */
+  it('a CODE-SHIPPED object survives the delete of a same-named row', async () => {
+    // The reachable shape, and the reason this is not covered by the gates in
+    // front of the heal. `deleteMetaItem`'s two-tier authorization refuses an
+    // artifact-backed `object` with `NOT_OVERRIDABLE` (pinned below) but runs
+    // only when `environmentId !== undefined`; on a CONTROL-PLANE kernel the
+    // repository's own `assertAllowed` refuses it instead — except on the
+    // NO-ROW leg, which never reaches the repository's write verb at all. That
+    // leg still runs the heal (deliberately: "a stale shadow can outlive the
+    // row it came from"), so the walk arrives for a name a code package ships.
+    const { protocol, registry, rows } = makeHarness({ controlPlane: true });
+    // The package's object, as `registerApp` registers it: contributors only,
+    // no composite `metadata` entry — so tier 1 finds no shadow to lift, and
+    // with no MetadataService here tier 2 finds no baseline either. The walk
+    // reaches tier 3 with the object still shipped.
+    registry.registerObject(
+      { ...invoiceBody('myapp_invoice'), _packageId: APP_PKG, _provenance: 'package' } as any,
+      APP_PKG,
+    );
+    expect((registry.getObject('myapp_invoice') as any)._provenance).toBe('package');
+
+    const res = await protocol.deleteMetaItem({ type: 'object', name: 'myapp_invoice' });
+
+    expect(res.success).toBe(true);
+    expect(res.reset).toBe(false); // nothing to delete — no overlay row exists
+    expect(storedRows(rows, 'myapp_invoice')).toHaveLength(0);
+    // THE OBJECT SURVIVES — the package still ships it, and unregistering code
+    // the overlay delete never touched would be a worse bug than the one fixed.
+    expect(registry.getObject('myapp_invoice')).toBeDefined();
+    expect((registry.getObject('myapp_invoice') as any)._provenance).toBe('package');
+  });
+
+  /**
+   * …and on a TENANT kernel the same delete never reaches the heal at all: the
+   * two-tier authorization refuses it first. Pinned as the pair of the case
+   * above so the tier-3 refusal is not mistaken for the only thing standing
+   * between a code package's object and this walk — and so a future change to
+   * either gate cannot quietly leave the pair with no protection.
+   */
+  it('the same delete on a tenant kernel is refused before the heal (NOT_OVERRIDABLE)', async () => {
+    const { protocol, registry } = makeHarness();
+    await seedCreatedObject(protocol, 'myapp_invoice', APP_PKG);
+    registry.registerObject(
+      { ...invoiceBody('myapp_invoice'), _packageId: APP_PKG, _provenance: 'package' } as any,
+      APP_PKG,
+    );
+
+    const err = await protocol
+      .deleteMetaItem({ type: 'object', name: 'myapp_invoice' })
+      .then(() => null, (e: any) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.code).toBe('NOT_OVERRIDABLE');
+    expect(registry.getObject('myapp_invoice')).toBeDefined();
+  });
+
+  /**
    * ADR-0029 — the extender guard, at the delete seam. An extension is merged
    * into the owner's definition (`resolveObject`), so tearing the owner out from
    * under a live extender leaves contributions that resolve to nothing: the

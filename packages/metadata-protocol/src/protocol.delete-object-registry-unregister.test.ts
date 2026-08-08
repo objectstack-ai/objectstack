@@ -69,6 +69,18 @@ function makeHarness(opts: {
     omitUnregisterObject?: boolean;
     /** The ADR-0029 refusal, raised by the registry the way the real verb does. */
     unregisterThrows?: Error;
+    /**
+     * ADR-0010 `_provenance` of what the registry currently serves for the
+     * name. `'org'` is what BOTH paths that register a tenant's object stamp
+     * (the write-through and the boot rehydration); `'package'` is a
+     * loader-introduced artifact.
+     */
+    servedProvenance?: 'org' | 'package' | null;
+    /** `environmentId === undefined` — the kernel on which the two-tier delete
+     * authorization does not run. A FLAG, never an `environmentId` parameter
+     * with a default: passing `undefined` explicitly to a defaulted parameter
+     * re-applies the default (#6621). */
+    controlPlane?: boolean;
 } = {}) {
     const rows = [...(opts.rows ?? [])];
     const shadowKeys = new Set((opts.shadowed ?? []).map((s) => `${s.type}|${s.name}`));
@@ -77,8 +89,10 @@ function makeHarness(opts: {
     const matches = (row: Row, where: Record<string, unknown> = {}) =>
         Object.entries(where).every(([k, v]) => (row as any)[k] === v);
 
+    const provenance = opts.servedProvenance === undefined ? 'org' : opts.servedProvenance;
     const registry: any = {
-        getObject: () => undefined,
+        getObject: (name: string) =>
+            provenance === null ? undefined : { name, _packageId: 'app.myapp', _provenance: provenance },
         getItem: () => undefined,
         listItems: () => [],
         registerItem: () => {},
@@ -86,7 +100,19 @@ function makeHarness(opts: {
         applyNavContributions: (x: unknown) => x,
         isPackageDisabled: () => false,
         getObjectOwner: () => undefined,
-        getArtifactItem: () => undefined,
+        // Mirrors the REAL `SchemaRegistry.getArtifactItem` for `object`: it
+        // reads `getObject` and returns it only when it looks like packaged
+        // code (`_packageId` real, and NOT `_provenance: 'org'`). A double that
+        // always answered `undefined` here would report every object as
+        // runtime-authored and hide the artifact refusal entirely — looser than
+        // the implementation it stands in for, which is no test at all (#4550).
+        getArtifactItem: (type: string, name: string) => {
+            if (type !== 'object' && type !== 'objects') return undefined;
+            const obj: any = registry.getObject(name);
+            return obj && obj._packageId && obj._packageId !== 'sys_metadata' && obj._provenance !== 'org'
+                ? obj
+                : undefined;
+        },
         removeRuntimeShadow: (type: string, name: string) => shadowKeys.has(`${type}|${name}`),
         removeOverlayEntry: (type: string, name: string) => {
             removeOverlayEntryCalls.push(`${type}|${name}`);
@@ -129,7 +155,9 @@ function makeHarness(opts: {
 
     // An EMPTY services registry: with no `metadata` service, tier 2 answers
     // "no baseline, not degraded", which is the verdict that licenses tier 3.
-    const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_1') as any;
+    const protocol = new ObjectStackProtocolImplementation(
+        engine, () => new Map(), opts.controlPlane === true ? undefined : 'env_1',
+    ) as any;
     return { protocol, rows, unregisterObjectCalls, removeOverlayEntryCalls };
 }
 
@@ -185,6 +213,36 @@ describe('#6808 — the heal retires the object contributor, not just the metada
         expect(result.success).toBe(true);
         expect(h.rows).toHaveLength(0);
         expect(h.removeOverlayEntryCalls).toEqual([]);
+        expect(h.unregisterObjectCalls).toEqual([]);
+    });
+
+    /**
+     * The second refusal, and the one that is NOT theoretical for objects:
+     * `engine.registerApp` registers a package's objects straight into
+     * `objectContributors` without writing the generic `metadata` map, so
+     * `isArtifactBacked` does not see them and an overlay row for such a name
+     * CAN be authored. Retiring the contributor on that row's delete would take
+     * a code package's object off the data plane until restart.
+     *
+     * The axis is ADR-0010 `_provenance`, the same one `removeOverlayEntry`
+     * uses one line up — both paths that register a TENANT's object stamp
+     * `'org'` server-side, an artifact carries `'package'`.
+     */
+    it('a CODE-SHIPPED object is never unregistered by this walk', async () => {
+        // The reachable shape: a CONTROL-PLANE kernel (the two-tier delete
+        // authorization that refuses an artifact-backed `object` with
+        // `NOT_OVERRIDABLE` is wrapped in `environmentId !== undefined`), on the
+        // NO-ROW leg — which runs the heal without ever reaching the
+        // repository's own `assertAllowed`. `revertCommit`'s soft-remove limb
+        // reaches the walk without that gate either.
+        const h = makeHarness({ controlPlane: true, servedProvenance: 'package' });
+
+        const result = await h.protocol.deleteMetaItem({ type: 'object', name: 'rc9_widget' });
+
+        expect(result.success).toBe(true);
+        // The generic-map half still runs — that entry IS the overlay's slot,
+        // and `removeOverlayEntry` applies its own artifact refusal inside.
+        expect(h.removeOverlayEntryCalls).toContain('object|rc9_widget');
         expect(h.unregisterObjectCalls).toEqual([]);
     });
 
