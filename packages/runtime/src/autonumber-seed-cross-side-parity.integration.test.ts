@@ -30,6 +30,51 @@
  * the same fixture rows.
  */
 
+/**
+ * ⚠️ `@objectstack/driver-memory` is imported here ON PURPOSE — ruled permanent
+ * by #6664 (maintainer 2026-08-08), inheriting #5704's Q2 = B ruling. It is NOT
+ * a migration leftover: do not "finish the driver-memory retirement" by deleting
+ * or replacing this arm.
+ *
+ * Why the arm is STRUCTURAL rather than a convenience. The cases below are a
+ * convergence assertion — one format, one set of stored rows, both real seeding
+ * implementations, `toBe(sqlValue)` on the engine's answer — so the two arms have
+ * to BE the two implementations, and which one answers is decided by the driver's
+ * declared capability, not by the test:
+ *
+ *   - `InMemoryDriver` declares `supports = {}`, so the driver has no autonumber
+ *     of its own and the ENGINE's fallback seeding owns the counter.
+ *   - `SqlDriver` advertises the capability, so its own sequence bootstrap
+ *     answers instead. That is the other arm, in `sqlDriverIssues()` below.
+ *
+ * Point the schemaless arm at sqlite `:memory:` (the #5704 migration target) and
+ * both arms become the same implementation: `toBe()` then passes because nothing
+ * distinguishes them, not because the two seeders agree. This family has paid for
+ * exactly that shape once — #5830 held `auth-contains-filter.test.ts` back from
+ * migration on the measurement that its SQL arm would have answered identically
+ * either way, and released it (#5893) only once #5702 gave that arm a real
+ * verdict again.
+ *
+ * Why the freeze does not forbid it: #5499 froze *investment* in driver-memory
+ * (defect fixes, feature work). Using it as a reference implementation is not
+ * investment, and nothing here fixes or extends it — #6468's fix landed in the
+ * engine and in `driver-sql`. The ruling says so in as many words (#5704,
+ * maintainer 2026-08-06): 「#5499 冻结令冻的是缺陷修复投入,不禁止作参照物使用」.
+ *
+ * Option B on #6664 — migrate this file — was ruled out rather than left open:
+ * it would spend measurement effort inside the freeze area for no user-visible
+ * payoff, against an arm that has no SQL equivalent to migrate TO.
+ *
+ * #6664 census: 2 ruled consumers — this file, and
+ * `sandbox/undeclared-field-write-driver-split.integration.test.ts`, which pins
+ * the other cross-family property (a DIVERGENCE, where this file pins a
+ * convergence). That count is no longer prose: `pnpm check:driver-memory-census`
+ * reads `scripts/driver-memory-census.ledger.json` and fails on any declaration
+ * of the driver the ledger does not cover, so a third arrival is refused at the
+ * gate instead of silently expiring this sentence — which is precisely what
+ * #6664 was filed about.
+ */
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { InMemoryDriver } from '@objectstack/driver-memory';

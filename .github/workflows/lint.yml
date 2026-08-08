@@ -492,6 +492,36 @@ jobs:
       - name: Resume-authority declaration gate
         run: pnpm check:resume-authority-declared
 
+      # driver-memory census gate (#6664, from #5704 / #5499). #5499 froze
+      # investment in `@objectstack/driver-memory`; #5704 migrated the project's
+      # test backends to sqlite `:memory:` and ruled that one test file keeps the
+      # driver on purpose. The programme's enforcement was a PROSE CENSUS — a
+      # sentence in that file claiming it was the only permanent test consumer in
+      # the repository, backed by #5704/#5784 renaming every look-alike local stub
+      # to `makeStubDriver` so a grep would land on real consumers only. The grep
+      # is a good handle; the sentence describing what it should find is not. It
+      # expired silently the first time the hand-edit step was skipped: #6468
+      # (PR #6553) added a second importer with no ruling block, named nowhere in
+      # the census it invalidated, and the two ways that misleads are opposite —
+      # delete the other file's schemaless arm as a "leftover", or take it as
+      # implicitly covered so a THIRD arrival is never disposed of either. The
+      # census is now a ledger (scripts/driver-memory-census.ledger.json) with a
+      # gate reading it: every module binding and every package.json declaration
+      # must be ledgered, every ledger entry must still be live, each ruled file
+      # must still carry its ruling markers, and — the half a sentence can never
+      # do for itself — each must state the ruled COUNT verbatim, so changing the
+      # set makes both sentences fail until they are rewritten. Static AST over
+      # tracked sources (positions, not text: a comment naming the package and the
+      # bundler externals entry in packages/runtime/tsup.config.ts are mentions,
+      # not arrivals), no build needed, so it belongs in this job. Runs its own
+      # --self-test first: the detector can be broken while the census is fine,
+      # and a scan that stops matching would report OK while reading nothing
+      # (#4868's family — DISCOVERED refuses an empty scan for that reason).
+      # It polices the retirement programme's bookkeeping; it is not investment in
+      # the driver, which stays frozen under #5499.
+      - name: driver-memory census gate
+        run: pnpm check:driver-memory-census
+
       # Merge-driver wiring gate (#6008, from #4675 / #4868). `merge=os-regen`
       # is what stops generator-owned artifacts (spec-changes.json, the ADR-0087
       # registries, the api-surface baselines) from text-merging into a
