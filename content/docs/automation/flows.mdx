@@ -493,16 +493,26 @@ The resume route is generic, so **the node the run is parked on** decides
 whether a raw resume is a legitimate continuation. Every action descriptor
 carries a `resumeAuthority`:
 
-- **`'any'`** (the default — `screen`, `wait`, your own pausing nodes): the
-  caller supplies the continuation and the route is the intended door.
-- **`'service'`** (`approval`): continuing is a *side effect* of a decision
-  that some service must authorize and record first, so only that service may
-  drive it. `ApprovalService.decide` enforces the approver slate, writes the
-  `sys_approval_action` row, mirrors the status field — **then** resumes.
+- **`'any'`** (`screen`, `wait`): the caller supplies the continuation and the
+  route is the intended door.
+- **`'service'`** (`approval`, `approval_revise`): continuing is a *side effect*
+  of a decision that some service must authorize and record first, so only that
+  service may drive it. `ApprovalService.decide` enforces the approver slate,
+  writes the `sys_approval_action` row, mirrors the status field — **then**
+  resumes.
 
-A resume of a `'service'` pause through the route answers **403** and changes
-nothing: the request stays pending and the run stays parked, so the real
-decision can still land. (Before this gate a raw resume walked the `approve`
+<Callout type="warn">
+  **There is no default — an omission means `'service'`.** A pausing node type
+  whose descriptor never declares `resumeAuthority` is closed to the generic
+  route: its pauses answer **403** with a message naming the missing field. If
+  the route *is* the intended door for your node, declare
+  `resumeAuthority: 'any'` explicitly. This is an opt-in, not an inheritance —
+  a pause nobody claimed is one nobody authorized.
+</Callout>
+
+A resume of a `'service'` (or undeclared) pause through the route answers **403**
+and changes nothing: the request stays pending and the run stays parked, so the
+real decision can still land. (Before this gate a raw resume walked the `approve`
 edge with no decision recorded, leaving the `sys_approval_request` row and the
 run permanently disagreeing.)
 
@@ -570,9 +580,12 @@ action with no `params` is untouched:
 - `signal.output`, which is the node-*output* namespace of the approval-style
   resume envelope rather than the screen's collected-values channel.
 
-Registering a pausing node of your own? Declare `resumeAuthority: 'service'` on
-its descriptor when the decision to continue belongs to your service rather
-than to whoever holds the run id.
+Registering a pausing node of your own? **Declare `resumeAuthority` — the field
+is not optional in practice.** Use `'any'` when whoever holds the run id is
+meant to supply the continuation (a screen's inputs, a signal wait's external
+producer), and `'service'` when the decision to continue belongs to your service
+rather than to whoever holds the run id. Declaring neither leaves your pauses
+refused on the generic route, and the engine warns about it at registration.
 
 ### Parallel approvals — one aggregating node, not two pauses
 

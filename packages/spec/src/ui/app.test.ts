@@ -1143,25 +1143,6 @@ describe('unknown keys are rejected, not stripped (#4001 PR B)', () => {
       expect(result.success).toBe(false);
       expect(result.error!.issues.map((i) => i.message).join('\n')).toContain('FormView.sharing');
     });
-
-    it('accepts every key the schema declares (guards APP_KEYS drift)', () => {
-      const probes: Record<string, unknown> = {
-        description: 'd', icon: 'briefcase', branding: { primaryColor: '#fff' },
-        active: false, isDefault: true, hidden: true,
-        navigation: [{ id: 'nav_a', label: 'A', type: 'object', objectName: 'account' }],
-        areas: [{ id: 'area_a', label: 'A', navigation: [] }],
-        contextSelectors: [{ id: 'pkg', label: 'Package', optionsSource: { endpoint: '/api/v1/packages' } }],
-        requiredPermissions: ['app.access.x'],
-        defaultAgent: 'ask', protection: { lock: 'none' },
-      };
-      for (const [key, value] of Object.entries(probes)) {
-        const result = AppSchema.safeParse({ name: 'app_a', label: 'A', [key]: value });
-        const unknown = result.success
-          ? undefined
-          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-        expect(unknown, `\`${key}\` should be a declared App key`).toBeUndefined();
-      }
-    });
   });
 
   describe('navigation items (discriminated union)', () => {

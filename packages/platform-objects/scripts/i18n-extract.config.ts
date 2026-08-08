@@ -36,9 +36,22 @@
  *     by `SETUP_NAV_CONTRIBUTIONS` and by capability plugins, so a bundle
  *     generated from a static walk of `SETUP_APP` would be structurally
  *     incomplete — regenerating over it would DELETE 40 live nav
- *     translations per locale. Their gate is the coverage ratchet
- *     (`scripts/check-i18n-coverage.mjs`), baselined at 0 for this package,
- *     not the bundle-drift gate.
+ *     translations per locale. Their gate is `pnpm check:app-nav-i18n`
+ *     (`packages/cli/scripts/check-app-nav-i18n.mjs`), which boots the real
+ *     composition and judges the MERGED app — not the bundle-drift gate, and
+ *     not the coverage ratchet.
+ *
+ *     This paragraph used to end "Their gate is the coverage ratchet
+ *     (`scripts/check-i18n-coverage.mjs`), baselined at 0 for this package",
+ *     and that sentence was half of the #5750 defect. The ratchet runs
+ *     `os lint` over STATIC configs — the same static walk two lines up says
+ *     is structurally incomplete for Setup — so it could never see a
+ *     runtime-contributed label. Its 0 for this package meant "not looked at
+ *     here", not "checked, clean", while `app-nav-translation-parity.test.ts`
+ *     excluded Setup and pointed at the ratchet from the other side. Four
+ *     `zh-CN` nav labels were missing under a fully green build. The ratchet
+ *     still gates this package's STATIC declared surface and its 0 is real for
+ *     that; it simply is not the owner of the runtime half.
  *
  * Omitting the hand-authored half was a measurable bug, not a style choice:
  * this config declares SETUP_APP / STUDIO_APP / ACCOUNT_APP and

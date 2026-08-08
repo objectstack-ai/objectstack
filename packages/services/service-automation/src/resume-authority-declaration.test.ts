@@ -13,9 +13,10 @@
  * decision nothing had recorded).
  *
  * The default is gone, so absent means absent, and `registerNodeExecutor` says
- * so once per node type. Runtime authority resolution is unchanged — absent
- * still resolves to `'any'` — which is why this file asserts about the LOG and
- * `resume-authority-gate.test.ts` still asserts about behaviour.
+ * so once per node type. Since step two absent also RESOLVES fail-closed
+ * (`'service'`), so the warning now precedes a refusal rather than describing a
+ * silence — this file still asserts about the LOG, and
+ * `resume-authority-gate.test.ts` asserts the refusal it warns about.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -68,19 +69,23 @@ describe('resumeAuthority omission warning (#5561)', () => {
     expect(found[0]).toContain("'plugin_pause'");
   });
 
-  it('tells the author how to silence it, and that silencing changes no behaviour', () => {
+  it('names the consequence (refusal) and the declaration that lifts it', () => {
     const warnings: string[] = [];
     engineWith(warnings).registerNodeExecutor(executor('plugin_pause', { supportsPause: true }));
 
     const [line] = omissions(warnings);
-    // Single self-sufficient line: the two legal values, the incident, and the
-    // fact that declaring 'any' is a no-op at run time (so an author whose node
-    // really is open does not feel pushed into 'service' to quieten a log).
+    // Single self-sufficient line: the two legal values, the incident, and what
+    // now actually happens to this type's pauses. Step one's wording — that
+    // declaring 'any' "changes no behaviour" — is exactly what step two made
+    // false, and a warning that still said it would send an author away from the
+    // one field that restores their resume route.
     expect(line).toContain("'any'");
     expect(line).toContain("'service'");
     expect(line).toContain('#3801');
     expect(line).toContain('#3823');
-    expect(line).toContain("Declaring 'any' explicitly silences this and changes no behaviour");
+    expect(line).toContain('REFUSES');
+    expect(line).toContain("Declaring 'any' is what RESTORES the generic route");
+    expect(line).not.toContain('changes no behaviour');
     expect(line.split('\n')).toHaveLength(1);
   });
 
@@ -180,26 +185,63 @@ describe('resumeAuthority omission warning (#5561)', () => {
   });
 });
 
-describe('resumeAuthority resolution is unchanged by the missing default (#5561)', () => {
+describe('resumeAuthority resolution is fail-closed by omission (#5561 step two)', () => {
   /**
-   * The half that must NOT move in step one: an undeclared pausing type is still
-   * resolved fail-open, because `resolveResumeAuthority`'s `?? 'any'` is what the
-   * removed schema default used to do. Flipping that expression to `'service'` is
-   * the breaking half still tracked on #5561; this pins today's answer so that
-   * flip cannot happen silently.
+   * The breaking half. `resolveResumeAuthority`'s fallback used to be `'any'` —
+   * inherited from the schema default step one removed — and is now `'service'`,
+   * so an undeclared pausing type is closed to the generic resume route instead
+   * of open to it. This is the ONE expression the whole flip lives in, which is
+   * why it is pinned directly here as well as end-to-end in
+   * `resume-authority-gate.test.ts`.
    */
-  it("resolves an undeclared pausing type to 'any', exactly as the removed default did", () => {
-    const warnings: string[] = [];
-    const engine = engineWith(warnings);
-    engine.registerNodeExecutor(executor('plugin_pause', { supportsPause: true }));
-
-    const resolve = (engine as unknown as {
+  const resolverOf = (engine: AutomationEngine) =>
+    (engine as unknown as {
       resolveResumeAuthority(t: string): 'any' | 'service';
     }).resolveResumeAuthority.bind(engine);
 
-    expect(resolve('plugin_pause')).toBe('any');
-    // Unregistered types keep answering 'any' too — the gate speaks only to
-    // authorization and leaves machine-state errors to `resumeInternal`.
-    expect(resolve('never_registered')).toBe('any');
+  it("resolves an undeclared pausing type to 'service' — the opposite of the removed default", () => {
+    const engine = engineWith([]);
+    engine.registerNodeExecutor(executor('plugin_pause', { supportsPause: true }));
+
+    const resolve = resolverOf(engine);
+
+    expect(resolve('plugin_pause')).toBe('service');
+    // A type nothing ever registered declared nothing either, so it answers the
+    // same way. The gate still speaks only to authorization: a run whose node
+    // type cannot be resolved at all never reaches this, and machine-state
+    // errors stay `resumeInternal`'s to report.
+    expect(resolve('never_registered')).toBe('service');
+  });
+
+  it('leaves an explicit declaration untouched in both directions', () => {
+    const engine = engineWith([]);
+    engine.registerNodeExecutor(executor('open_pause', { supportsPause: true, resumeAuthority: 'any' }));
+    engine.registerNodeExecutor(executor('gated_pause', { supportsPause: true, resumeAuthority: 'service' }));
+
+    const resolve = resolverOf(engine);
+
+    // The flip moves the fallback only — a declared value is a decision, and
+    // `'any'` must keep meaning `'any'` or the migration prescription is a lie.
+    expect(resolve('open_pause')).toBe('any');
+    expect(resolve('gated_pause')).toBe('service');
+  });
+
+  it('reads the four pausing built-ins as open, because each declares so', () => {
+    // The repo-is-unchanged proof, at the resolver rather than through the
+    // engine: every shipped pausing type declared `'any'` in step one, so the
+    // flip moves nothing in this tree. A green suite alone could not tell that
+    // apart from "no pausing type was reachable" (the empty-green trap), so the
+    // inventory is asserted with it.
+    const engine = engineWith([]);
+    const ctx: any = { logger: loggerInto([]), getService() { return undefined; } };
+    installBuiltinNodes(engine, ctx);
+
+    const resolve = resolverOf(engine);
+    const pausing = engine.getActionDescriptors().filter((d) => d.supportsPause === true);
+
+    expect(pausing.map((d) => d.type).sort()).toEqual(['map', 'screen', 'subflow', 'wait']);
+    for (const d of pausing) {
+      expect(resolve(d.type), `${d.type} must resolve open, from its own declaration`).toBe('any');
+    }
   });
 });

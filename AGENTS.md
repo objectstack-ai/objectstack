@@ -802,6 +802,52 @@ the gate merely cannot classify. If a red seam turns out to hand its failure to
 the caller, declare the propagation vocabulary above; do not baseline correct
 code.
 
+**The same command has a SECOND set of teeth** — the read-seam invention rule
+(#5186; family #4728 → #4825 → #5108 → #6116). Everything above grades *how loud
+the catch is*, which is the right axis for a write or a DDL seam and structurally
+blind to a read: `catch { return []; }` has no log to grade at all, and a read's
+callees are `find` / `findOne` / `count`, names far too generic to declare
+repo-wide. So the second rule asks a different question — **the read did not
+happen; did you make an answer up anyway, and tell nobody?** — and goes red only
+when every part holds: the `try` performs a storage read (the `IDataDriver` read
+methods, or a same-file wrapper over one), the `catch` logs *nothing* at any
+level (same-file helpers followed), some path out of it returns an **invented
+answer** — an empty/zero value for that method (`[]`, `null`, `false`, `0`, `1`,
+…), or one of the enclosing function's own parameters handed straight back
+(#6451, from #6116: for an enrichment function the un-enriched input is the very
+same bytes a successful read with nothing to hydrate returns) — and that path was
+never reached by discriminating the error's **type**. What it protects is
+DISTINGUISHABILITY, not the spelling of the returned value: the fix is to ask the
+error's type, or to report the failure once — never to invent a different empty.
+
+Its scan surface is deliberately narrower than the log-level rule's:
+`packages/metadata/src`, `packages/metadata-protocol/src` and
+`packages/objectql/src` only. That is the maintainer's 2026-08-06 ruling —
+「裁 3 —— 收窄先行」: prove the false-positive surface on the metadata/persistence
+layer first, and evaluate widening as its own issue. It is also the only honest
+way to afford `find`/`findOne`/`count` as a vocabulary at all — the names are
+generic, so the SCOPE is what makes them mean "a storage seam" rather than "any
+data read anywhere". Like its sibling it is a ratchet, not a proof: it cannot see
+a read outside the `try`, nor an empty answer wrapped in a result envelope.
+
+**Found a new read seam?** The symmetric answer to `DURABILITY_CRITICAL_CALLEES`
+above is `READ_FAILURE_DISCRIMINATORS`, in the same script: the declared
+predicates that prove a read failure is benign (today `isMissingTableError`,
+`packages/metadata/src/errors.ts`), which is why a hand-rolled `if (e.code ===
+'42P01')` is flagged on purpose — ask the shared predicate instead of growing a
+second vocabulary of "which driver errors are benign" (#5841). A reviewed,
+genuinely legitimate seam goes in this rule's OWN ledger,
+`scripts/durability-read-invention.baseline.json` — **not** the empty
+`durability-degradation.baseline.json` named above. The two rules share this
+file, one CI step and one AST pass, and share no vocabulary, no baseline and no
+verdict: a seam red under one is untouched by the other. That ledger is
+shrink-only, hand-edited and fails on a stale entry exactly like its sibling, but
+its steady state is *not* "empty": an entry is either a real unfixed instance
+(`unfixed-degradation`, carrying the issue that tracks it) or a
+`reviewed-legitimate` seam whose empty value is a declared "could not determine"
+that a syntactic rule cannot see. Read the entries and the reasons they give —
+never the count.
+
 ---
 
 ## Startup registry reads — never record a verdict the boot can still contradict

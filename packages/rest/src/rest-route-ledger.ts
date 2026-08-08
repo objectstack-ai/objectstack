@@ -136,7 +136,27 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/meta/:type', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItems' },
   { route: 'GET /api/v1/meta/:type/:name/references', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getReferences' },
   { route: 'GET /api/v1/meta/book/:name/tree', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getBookTree' },
-  { route: 'GET /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItem' },
+  // [#5882] The three-layer diagnostic projection, promoted from the
+  // `?layers=true` flag on the row below to a path of its own so that one path
+  // answers one response shape. `responseSchema` is filled because this mount
+  // HAS conformance coverage of its own: `meta-item-layered-route.test.ts`
+  // drives this handler and parses the body it answers against the named
+  // schema — not "same handler, therefore same shape".
+  //
+  // `server-only`, and NOT `gap`: the gap ratchet is pinned at zero and a new
+  // `gap` row is defined to need its own reviewed decision, which this PR does
+  // not carry. The disposition is accurate on its own terms — the SDK has never
+  // expressed a layered read, the `?layers=` spelling this path replaces was
+  // equally unreachable through `@objectstack/client`, and Studio consumes it
+  // straight over HTTP. So this row opens no gap and closes none; it records the
+  // status quo under a new path. Whether the SDK SHOULD express it is a separate
+  // product call.
+  { route: 'GET /api/v1/meta/:type/:name/layers', family: 'metadata', source: 'route-manager', disposition: 'server-only',
+    responseSchema: 'GetMetaItemLayeredResponseSchema',
+    note: 'three-layer diagnostic read (code / overlay / effective) powering the Studio editor comparison tabs; consumed by objectui over plain HTTP, and the SDK expressed no layered read under the `?layers=` spelling either. Answers BARE, so the named schema is the whole body' },
+  { route: 'GET /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItem',
+    responseSchema: 'GetMetaItemResponseSchema',
+    note: '[#5950] answers BARE, so the named schema is the whole body. Filled now that meta-item-layered-route.test.ts parses BOTH branches of this mount (cached and uncached) against it — the uncached branch carries the ADR-0010 protection envelope this schema newly declares' },
   { route: 'PUT /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.saveItem' },
   { route: 'DELETE /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.deleteItem',
     note: 'REST-only: the dispatcher /meta branch has no DELETE handling — it falls into the read path' },

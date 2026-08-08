@@ -1003,6 +1003,24 @@ jobs:
       - name: Check no new untranslated declared labels
         run: pnpm check:i18n-coverage
 
+      # The THIRD i18n question, and the one neither step above can answer
+      # (#5750). Both of them read STATIC declarations; the Setup app declares a
+      # shell of empty group anchors and gets its ~50 menu entries at RUNTIME
+      # from SETUP_NAV_CONTRIBUTIONS and from the capability plugins that own the
+      # underlying objects (ADR-0029 D7). So those labels were covered by
+      # nothing: the extract config deferred them to the ratchet, the parity test
+      # deferred them to the ratchet, and the ratchet walks static configs. Four
+      # of them were untranslated in `zh-CN` while every gate reported green.
+      #
+      # This one boots the real composition, merges the contributions the same
+      # way the `/api/v1/meta/app` read path does, and asserts every merged nav
+      # id carries a label in every locale the platform bundle declares.
+      #
+      # Imports the BUILT output of ten workspace packages, so it belongs here
+      # with the other post-build consumer gates.
+      - name: Check runtime-merged app navigation is translated in every locale
+        run: pnpm check:app-nav-i18n
+
       # Seed the shared Turbo cache from main only (see the restore step above).
       - name: Save Turbo cache (main only)
         if: always() && github.event_name == 'push'

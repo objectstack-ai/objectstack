@@ -32,6 +32,12 @@ export const zhCN: TranslationData = {
       navigation: {
         group_overview: { label: '总览' },
         group_apps: { label: '应用' },
+        // The Setup app's own `nav_packages`. A translation for this id already
+        // existed under `apps.studio.navigation` and did NOT answer here — the
+        // lookup is per app — so Setup fell back to the author's 'Packages'
+        // literal in an otherwise Chinese menu (#5750). Both entries are
+        // legitimate; keep them both.
+        nav_packages: { label: '软件包' },
         nav_marketplace_browse: { label: '浏览应用市场' },
         nav_marketplace_installed: { label: '已安装应用' },
         nav_cloud_connection: { label: '云连接' },
@@ -63,6 +69,9 @@ export const zhCN: TranslationData = {
         nav_approval_processes: { label: '审批流程' },
         nav_approval_requests: { label: '审批申请' },
         nav_approval_actions: { label: '审批历史' },
+        // `审批委派` matches sys_approval_delegation's object label; `(外出)`
+        // renders the entry's own "(OOO)" qualifier.
+        nav_approval_delegations: { label: '审批委派（外出）' },
 
         nav_settings_hub: { label: '全部设置' },
         nav_settings_localization: { label: '本地化' },
@@ -82,6 +91,13 @@ export const zhCN: TranslationData = {
         nav_audit_logs: { label: '审计日志' },
         nav_notifications: { label: '通知' },
 
+        // Integrations — contributed at RUNTIME by the owning capability
+        // plugins (ADR-0029 K2), so no static walk of SETUP_APP can see them.
+        // `Webhooks` stays the loanword deliberately: sys_webhook's own zh-CN
+        // object label is `Webhook` too, and this bundle is where that choice
+        // is now RECORDED rather than reached by falling back (#5750).
+        nav_webhooks: { label: 'Webhooks' },
+        nav_http_deliveries: { label: 'HTTP 投递' },
         nav_datasources: { label: '数据源' },
 
         nav_oauth_apps: { label: 'OAuth 应用' },
