@@ -13,6 +13,7 @@ import {
     assertInitServiceRequirements,
     describeInitOrderFault,
 } from './plugin-order.js';
+import { dispatchHookIsolating, dispatchHookPropagating } from './hook-dispatch.js';
 
 /**
  * Enhanced Kernel Configuration
@@ -150,11 +151,12 @@ export class ObjectKernel {
                 }
                 this.hooks.get(name)!.push(handler);
             },
+            // PROPAGATING dispatch — the same shared loop `LiteKernel`'s
+            // context.trigger runs, and deliberately WITHOUT a trace line:
+            // `context.trigger` has never emitted one on either kernel, so no
+            // logger is handed over (#5282).
             trigger: async (name, ...args) => {
-                const handlers = this.hooks.get(name) || [];
-                for (const handler of handlers) {
-                    await handler(...args);
-                }
+                await dispatchHookPropagating(name, this.hooks.get(name) || [], undefined, args);
             },
             getServices: () => {
                 return new Map(this.services);
@@ -723,29 +725,21 @@ export class ObjectKernel {
      * one bad handler must not amplify into leaked resources and unflushed
      * writes. Same reasoning, same wording, same `Hook handler failed:
      * kernel:shutdown` log line as `LiteKernel`'s dispatch site, which reaches
-     * the shared isolating dispatcher `ObjectKernelBase.triggerHook` (#5257).
+     * the isolating dispatcher through `ObjectKernelBase.triggerHook` (#5257).
      *
-     * `ObjectKernel` cannot call that dispatcher: it does not extend
+     * Until #5282 "same wording" was literally that — the loop was typed out a
+     * second time here, because `ObjectKernel` does not extend
      * `ObjectKernelBase` (only `LiteKernel` does) and owns its own `hooks` map,
-     * so the semantics are mirrored here rather than shared. One hook name
-     * meaning two opposite things across the two kernels is exactly the bug
-     * #5170/#5257 closed, so the pin for this one lives on both sides too.
+     * so the base's `protected triggerHook` is out of reach. The loop now lives
+     * in {@link dispatchHookIsolating}, which BOTH sides call: the storage is
+     * still two maps (deliberately — unifying it was out of #5282's scope), but
+     * "isolating" is one implementation, so it can no longer drift on one
+     * kernel while the other keeps the old shape. That drift is exactly the bug
+     * #5170 / #5257 / #5274 each closed one hook at a time, and the paired-pin
+     * gate (`scripts/check-kernel-hook-pairs.mjs`) covers the residue.
      */
     private async triggerShutdownHookIsolating(): Promise<void> {
-        const handlers = this.hooks.get('kernel:shutdown') || [];
-        this.logger.debug('Triggering hook: kernel:shutdown', {
-            hook: 'kernel:shutdown',
-            handlerCount: handlers.length,
-        });
-
-        for (const handler of handlers) {
-            try {
-                await handler();
-            } catch (error) {
-                this.logger.error('Hook handler failed: kernel:shutdown', error as Error);
-                // Continue with other handlers even if one fails
-            }
-        }
+        await dispatchHookIsolating('kernel:shutdown', this.hooks.get('kernel:shutdown') || [], this.logger);
     }
 
     private async performShutdown(): Promise<void> {
