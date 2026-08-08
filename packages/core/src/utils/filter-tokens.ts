@@ -48,6 +48,18 @@
  * through is precisely the silent-zero bug this module exists to end, so it is
  * a hard error carrying the near-miss suggestion (`{current_user}` →
  * `{current_user_id}`). Values that merely CONTAIN braces are left untouched.
+ *
+ * "Entirely `{something}`" means ANY character between the braces (#5586).
+ * Until then the recognition grammar was the token-NAME grammar
+ * (`[a-zA-Z0-9_]+`), so a placeholder carrying a non-word character —
+ * `{TODAY()}`, `{current-user-id}`, `{30 days ago}`, `{user.id}` — was not
+ * recognised as a token at all and fell straight through to the literal
+ * comparison this module exists to abolish. The failure was inverted against
+ * the author: `{TODAY}` threw (diagnostic working), `{TODAY()}` returned rows
+ * (diagnostic bypassed) — and the parenthesised, kebab-case and
+ * natural-language spellings are exactly what an author migrating from another
+ * system's macro syntax reaches for first. See `FILTER_TOKEN_WRAPPED_RE` in
+ * `@objectstack/spec`.
  */
 
 import {

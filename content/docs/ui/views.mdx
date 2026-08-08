@@ -103,7 +103,7 @@ A List View controls how a collection of records is presented. It supports multi
 | `data` | `ViewData` | optional | Data source configuration (defaults to the `object` provider) |
 | `filter` | `array` | optional | Base filter criteria |
 | `sort` | `array` | optional | Sort configuration |
-| `searchableFields` | `string[]` | optional | Fields included in search |
+| `searchableFields` | `string[]` | optional | Fields the toolbar search scans — **narrows** the object's set, never widens it (ADR-0061). Entries must be the object's **own** columns: a lookup (`project_id`) or a dotted path (`project_id.name`) is refused, and every toolbar search on the list then returns `400 INVALID_FIELD` (#4254). To search by a related record's title, [mirror it into a stored field](/docs/data-modeling/schema-design#searching-by-a-related-records-title--mirror-the-value) on the object and list that |
 | `grouping` | `object` | optional | Row grouping configuration |
 | `pagination` | `object` | optional | Pagination settings |
 | `selection` | `object` | optional | Row selection mode |

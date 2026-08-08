@@ -100,6 +100,96 @@ Toggle system behaviours per object:
 
 ---
 
+## Search Fields (`searchableFields`)
+
+`searchableFields` on the object is the canonical set `$search` scans (ADR-0061).
+Leave it unset and search auto-defaults to the `nameField` plus the object's
+short-text and enum columns (`text` / `email` / `phone` / `url` / `autonumber` /
+`textarea` / `markdown` / `select` / `status`); declare it to pin the set
+explicitly. Views may narrow it, never widen it.
+
+### ⛔ Searching by a related record's title — mirror the value, always
+
+`$search` scans **the queried object's own columns**. A dotted path is never a
+search target: unlike `fields` / `sort` / `filters`, the search axis does not
+resolve traversal, and `project_id.name` in `searchableFields` (or in a
+`$searchFields` override) is **refused**, not silently dropped.
+
+**This is the one prescription — emit it every time.** To search by a related
+record's title, copy that title into a **stored field on this object** and
+declare *that* field searchable. A task list searched by project name:
+
+```typescript
+// `project_name` is a stored, denormalized mirror of the parent's title.
+{
+  name: 'task',
+  enable: { searchable: true },
+  fields: {
+    name:         { type: 'text', required: true },
+    project_id:   { type: 'lookup', reference: 'project' },
+    project_name: { type: 'text', label: 'Project Name' },   // ← the mirror
+  },
+  searchableFields: ['name', 'project_name'],
+}
+```
+
+`?search=apollo` expands to `name $contains 'apollo' OR project_name $contains
+'apollo'` — one single-table scan, every driver, no traversal. (A `text` mirror
+also lands in the auto-default set when the object declares no
+`searchableFields`.)
+
+❌ **Never mirror onto a `formula` field.** A formula field is *virtual* — no
+driver materializes a column for it, so a `$contains` predicate against one has
+nothing to scan (the SQL driver would emit a `WHERE` over a column that does not
+exist). CEL also only reads this record's own fields (`record.<field>`), so a
+formula cannot fetch the related title in the first place. Nothing rejects the
+mistake: `searchableFields` admits any field the object declares, so a formula
+entry clears both lint and the ingress gate and then never matches.
+
+**Mirror maintenance is the trade-off** — a mirror is denormalized data, only as
+fresh as whatever writes it. Cover both write paths:
+
+| When | What maintains the mirror |
+|:-----|:--------------------------|
+| A task is created, or re-pointed at another project | `beforeInsert` / `beforeUpdate` hook on `task` — read the parent's `name` for the incoming `project_id`, stamp `project_name` |
+| A project is renamed | `afterUpdate` hook on `project` — re-stamp `project_name` on that project's tasks |
+
+Rows written by a path that bypasses hooks (bulk import, direct SQL) need a
+one-off backfill. See [Lifecycle Hooks](./rules/hooks.md).
+
+**The errors an author sees for the dotted path** (grep either back to here).
+`os validate` → `searchable-field-unknown`:
+
+```text
+searchableFields entry "project_id.name" is not a field on object "task". The
+declaration is stale: searching it can never match, and the engine silently
+drops it — leaving a narrower search than declared, or the auto-default set once
+every entry is dropped.
+
+hint: 'search' scans this object's own columns, so a related record's column
+cannot be a search target — expand the relation and search the related object,
+or copy the value onto a formula field here. Clients echo this declaration
+verbatim as the '$searchFields' override, so a stale entry becomes a 400
+INVALID_FIELD on list search (#4254), not just a quietly narrowed one.
+```
+
+(The hint's "formula field" wording is loose — only a **stored** mirror works.)
+
+A request carrying the dotted path is `400 INVALID_FIELD`:
+
+```text
+Unknown field 'project_id.name' on object 'task'. '$searchFields' narrows which
+columns 'search' scans, so a name the object does not declare cannot narrow
+anything — and the engine used to drop it and scan the default columns instead,
+answering a NARROWER search with a WIDER one. 'search' scans this object's own
+columns; a related record's column cannot be a search target.
+```
+
+Cross-object search paths are rejected by design, not pending. Do not invent a
+per-project convention for this — the mirror field is the answer.
+
+---
+
 ## Field Groups (MVP)
 
 Organize fields into logical groups (e.g., "Contact Information", "Billing",
