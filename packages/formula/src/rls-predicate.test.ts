@@ -22,6 +22,20 @@ import { compileCelToFilter, isPushdownableCel } from './cel-to-filter';
 import { matchesFilterCondition } from './matches-filter';
 import type { FilterCondition } from '@objectstack/spec/data';
 
+/**
+ * This file's own directory, resolved ONCE.
+ *
+ * Deliberately a single module-level constant rather than a `const here = …` in
+ * each test that needs it. This package's `tsconfig.json` excludes `*.test.ts`,
+ * so `pnpm typecheck` never reads this file — but `check-type-check-coverage`
+ * re-measures it with the exclusion lifted and holds the count to a shrink-only
+ * TEST_DEBT ledger (#5278). `import.meta` costs two raw errors there (TS1470 +
+ * TS2339) under the package's CommonJS-targeted config, so a SECOND occurrence
+ * would raise the ledger by two for no behavioural reason. One occurrence, two
+ * readers.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url));
+
 // ---------------------------------------------------------------------------
 // ADR-0056 D4 — RLS predicates that won't compile must not vanish in silence
 // (moved verbatim from plugin-security/src/security-plugin.test.ts, #4983)
@@ -132,12 +146,11 @@ describe('isSupportedRlsExpression — composition and dependency direction', ()
    * a dependency that is only wrong at build time produces no failing assertion.
    */
   it('never imports a runtime — the hoist direction is pinned, not just intended', () => {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const source = readFileSync(join(here, 'rls-predicate.ts'), 'utf8');
+    const source = readFileSync(join(HERE, 'rls-predicate.ts'), 'utf8');
     const specifiers = [...source.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1]);
     expect(specifiers).toEqual(['./cel-to-filter']);
 
-    const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')) as {
+    const pkg = JSON.parse(readFileSync(join(HERE, '..', 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>;
     };
     expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(['@marcbachmann/cel-js', '@objectstack/spec']);
@@ -172,15 +185,7 @@ describe('isSupportedRlsExpression — composition and dependency direction', ()
 // This is the guard that whole defect class was missing.
 
 /** `packages/spec/src/security/rls.zod.ts`, from this file's own location. */
-const RLS_ZOD_SOURCE = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  'spec',
-  'src',
-  'security',
-  'rls.zod.ts',
-);
+const RLS_ZOD_SOURCE = join(HERE, '..', '..', 'spec', 'src', 'security', 'rls.zod.ts');
 
 /** The `@example "…"` predicates declared on ONE property's own TSDoc block. */
 function predicateExamples(property: 'using' | 'check'): string[] {
