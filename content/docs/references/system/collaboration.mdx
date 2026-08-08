@@ -102,7 +102,7 @@ const result = AwarenessEventSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **state** | `{ type: 'lww-register'; value: any; timestamp: string; replicaId: string; … } \| { type: 'g-counter'; counts: Record<string, integer> } \| { type: 'pn-counter'; positive: Record<string, integer>; negative: Record<string, integer> } \| { type: 'or-set'; elements: { value: any; timestamp: string; replicaId: string; uid: string; … }[] } \| … +1 more` | ✅ | Merged CRDT state |
+| **state** | `{ type: 'lww-register'; value: any; timestamp: string; replicaId: string; … } \| { type: 'g-counter'; counts: Record<string, integer> } \| { type: 'pn-counter'; positive: Record<string, integer>; negative: Record<string, integer> } \| { type: 'or-set'; elements: object[] } \| … +1 more` | ✅ | Merged CRDT state |
 | **conflicts** | `{ type: string; description: string; resolved: boolean }[]` | optional | Conflicts encountered during merge |
 
 

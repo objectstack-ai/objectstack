@@ -86,7 +86,7 @@ const result = ActionSchema.parse(data);
 | **requiredPermissions** | `string[]` | optional | [ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on the platform action route (script/flow/modal + MCP) and mirrored as a UI hide; a `type: api` action pointed at a custom endpoint must re-check it there. |
 | **shortcut** | `never` | optional | [REMOVED] `action.shortcut` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults action metadata. Delete the key. For a real shortcut, register the key in the Console keyboard stack and have its handler invoke the action by name. |
 | **bulkEnabled** | `never` | optional | [REMOVED] `action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — the multi-select toolbar is driven by the LIST VIEW's `bulkActions` / `bulkActionDefs`, never by this flag, so setting it changed nothing. Delete the key and declare the action in the view's `bulkActions` instead. |
-| **ai** | `{ exposed?: boolean; description?: string; category?: Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>; paramHints?: Record<string, { description?: string; enum?: (string \| number)[]; examples?: any[] }>; … }` | optional | AI exposure (opt-in). Set ai.exposed=true + ai.description to make this callable by agents. |
+| **ai** | `{ exposed?: boolean; description?: string; category?: Enum<'data' \| 'action' \| 'flow' \| 'integration' \| 'vector_search' \| 'analytics' \| 'utility'>; paramHints?: Record<string, object>; … }` | optional | AI exposure (opt-in). Set ai.exposed=true + ai.description to make this callable by agents. |
 | **recordIdParam** | `string` | optional | Body key to inject the row id into when running from a list_item context. |
 | **recordIdField** | `string` | optional | Row field whose value seeds recordIdParam. Defaults to "id". |
 | **bodyShape** | `'flat' \| { wrap: string }` | optional | Body wrapping: flat (default) or `{ wrap: key }` to nest user-collected params under a key. |
@@ -166,7 +166,7 @@ const result = ActionSchema.parse(data);
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional |  |
 | **required** | `boolean` | optional |  |
-| **options** | `{ label: string \| Record<string, string>; value: string; visibleWhen?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object } }[]` | optional |  |
+| **options** | `{ label: string \| Record<string, string>; value: string; visibleWhen?: string \| object }[]` | optional |  |
 | **placeholder** | `string` | optional |  |
 | **helpText** | `string` | optional |  |
 | **defaultValue** | `any` | optional |  |

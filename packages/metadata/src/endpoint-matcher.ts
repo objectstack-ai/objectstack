@@ -38,6 +38,24 @@
  *   §7-5 keeps RFC 3986 canonicalization as an explicit open question — it is
  *   a vocabulary-level decision, not an implementation detail to smuggle in.)
  *
+ * ## Envelope off, body parsed (#5309)
+ *
+ * What arrives here is a STORED ROW, not an authored declaration: the metadata
+ * layer wraps every row in its own bookkeeping — `packageId`, `state`,
+ * `version`, `publishedDefinition`, … — either flat beside the body or under a
+ * `metadata` key (the publish envelope). None of that is endpoint vocabulary,
+ * so `peelStoredEnvelope` takes it off and `ApiEndpointSchema` sees the
+ * authored body alone. Before the split, the schema's unknown-key STRIPPING
+ * was load-bearing here: it silently ate the bookkeeping, which is exactly why
+ * `api` could not be closed (#5271's measurement, #5384's job). Stripping is no
+ * longer what makes a stored row parse.
+ *
+ * The body-selection half (`metadata ?? row`) is the metadata layer's existing
+ * rule — `publishPackage`'s snapshot, `getPublished`, `gateApiItemsForPublish`
+ * all use it — and this module now follows it too, so a publish envelope that
+ * passes the publish gate is the same document this index serves. It used to
+ * be the one reader that disagreed.
+ *
  * ## Loud, never half-valid
  *
  * Every stored item is `ApiEndpointSchema.safeParse`-d. The answer handed back
@@ -108,6 +126,7 @@ import {
 } from '@objectstack/spec/api';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 import type { Logger } from '@objectstack/spec/contracts';
+import { peelStoredEnvelope, storedItemName } from './stored-envelope.js';
 
 /**
  * Upper-case a request verb so `method` compares case-insensitively.
@@ -158,15 +177,18 @@ export function buildEndpointIndex(items: readonly unknown[], logger: Logger): E
   const index = new Map<string, ApiEndpoint>();
 
   for (const item of items) {
-    const parsed = ApiEndpointSchema.safeParse(item);
+    // [#5309] Envelope OFF before the body parse. A stored row carries the
+    // metadata layer's bookkeeping (`packageId`, `state`, …) which is not
+    // endpoint vocabulary; `ApiEndpointSchema` judges the authored body and
+    // nothing else. See `stored-envelope.ts` for why this is the fix rather
+    // than teaching the vocabulary two storage keys.
+    const peeled = peelStoredEnvelope(item);
+    const parsed = ApiEndpointSchema.safeParse(peeled.body);
     if (!parsed.success) {
       // LOUD skip (contract: "MUST skip (loudly) any stored item that fails to
       // parse rather than returning a half-valid shape"). Name the item so the
       // author can find it; say what the consequence is.
-      const declaredName =
-        item && typeof item === 'object' && typeof (item as { name?: unknown }).name === 'string'
-          ? (item as { name: string }).name
-          : '<unnamed>';
+      const declaredName = storedItemName(peeled) ?? '<unnamed>';
       logger.error(
         `[EndpointMatcher] stored api item '${declaredName}' does not satisfy ApiEndpointSchema — ` +
           `it is EXCLUDED from endpoint matching and its declared route will answer 404. ` +

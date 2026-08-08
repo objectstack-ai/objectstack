@@ -124,7 +124,7 @@ Compatibility level between versions
 | **enabled** | `boolean` | optional |  |
 | **maxConcurrentVersions** | `integer` | optional | How many versions can run at the same time |
 | **selectionStrategy** | `Enum<'latest' \| 'stable' \| 'compatible' \| 'pinned' \| 'canary' \| 'custom'>` | optional |  |
-| **routing** | `{ condition: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; version: string; priority?: integer }[]` | optional |  |
+| **routing** | `{ condition: string \| object; version: string; priority?: integer }[]` | optional |  |
 | **rollout** | `{ enabled?: boolean; strategy: Enum<'percentage' \| 'blue-green' \| 'canary'>; percentage?: number; duration?: integer }` | optional |  |
 
 
@@ -138,7 +138,7 @@ Compatibility level between versions
 | :--- | :--- | :--- | :--- |
 | **pluginId** | `string` | ✅ |  |
 | **currentVersion** | `string` | ✅ |  |
-| **compatibilityMatrix** | `{ from: string; to: string; compatibility: Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| … +2 more>; breakingChanges?: { introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| … +3 more>; description: string; migrationGuide?: string; … }[]; … }[]` | ✅ |  |
+| **compatibilityMatrix** | `{ from: string; to: string; compatibility: Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| … +2 more>; breakingChanges?: object[]; … }[]` | ✅ |  |
 | **supportedVersions** | `{ version: string; supported: boolean; endOfLife?: string; securitySupport: boolean }[]` | ✅ |  |
 | **minimumCompatibleVersion** | `string` | optional | Oldest version that can be directly upgraded |
 
@@ -153,7 +153,7 @@ Compatibility level between versions
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ |  |
 | **resolved** | `{ pluginId: string; version: string; resolvedVersion: string }[]` | optional |  |
-| **conflicts** | `{ type: Enum<'version-mismatch' \| 'missing-dependency' \| 'circular-dependency' \| … +2 more>; plugins: { pluginId: string; version: string; requirement?: string }[]; description: string; resolutions?: { strategy: Enum<'upgrade' \| 'downgrade' \| 'replace' \| 'disable' \| 'manual'>; description: string; automaticResolution: boolean; riskLevel: Enum<'low' \| 'medium' \| 'high'> }[]; … }[]` | optional |  |
+| **conflicts** | `{ type: Enum<'version-mismatch' \| 'missing-dependency' \| 'circular-dependency' \| … +2 more>; plugins: object[]; description: string; resolutions?: object[]; … }[]` | optional |  |
 | **warnings** | `string[]` | optional |  |
 | **installationOrder** | `string[]` | optional | Plugin IDs in order they should be installed |
 | **dependencyGraph** | `Record<string, string[]>` | optional | Map of plugin ID to its dependencies |
@@ -174,7 +174,7 @@ Compatibility level between versions
 | **releaseNotes** | `string` | optional |  |
 | **breakingChanges** | `{ introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| … +3 more>; description: string; migrationGuide?: string; … }[]` | optional |  |
 | **deprecations** | `{ feature: string; deprecatedIn: string; removeIn?: string; reason: string; … }[]` | optional |  |
-| **compatibilityMatrix** | `{ from: string; to: string; compatibility: Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| … +2 more>; breakingChanges?: { introducedIn: string; type: Enum<'api-removed' \| 'api-renamed' \| 'api-signature-changed' \| 'behavior-changed' \| … +3 more>; description: string; migrationGuide?: string; … }[]; … }[]` | optional |  |
+| **compatibilityMatrix** | `{ from: string; to: string; compatibility: Enum<'fully-compatible' \| 'backward-compatible' \| 'deprecated-compatible' \| … +2 more>; breakingChanges?: object[]; … }[]` | optional |  |
 | **securityFixes** | `{ cve?: string; severity: Enum<'critical' \| 'high' \| 'medium' \| 'low'>; description: string; fixedIn: string }[]` | optional |  |
 | **statistics** | `{ downloads?: integer; installations?: integer; ratings?: number }` | optional |  |
 | **support** | `{ status: Enum<'active' \| 'maintenance' \| 'deprecated' \| 'eol'>; endOfLife?: string; securitySupport: boolean }` | ✅ |  |

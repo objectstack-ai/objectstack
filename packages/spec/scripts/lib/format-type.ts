@@ -75,6 +75,62 @@ export const anchorFor = (schemaName: string) => `#${schemaName.toLowerCase()}`;
 const INLINE_KEY_LIMIT = 4;
 
 /**
+ * How many `{ … }` shape levels one cell expands before printing `object`
+ * (#6374).
+ *
+ * `INLINE_KEY_LIMIT` caps a summary's KEYS at its own level; the two enum
+ * budgets cap one key's VOCABULARY; `VARIANT_LIMIT` caps a union's ARITY.
+ * Nothing capped how many times a cell could re-enter the object branch, and
+ * cell width is the product of all four axes. `ui/page.mdx`'s `Page.slots` was
+ * the corpus maximum at 1538 characters with the enum elision already firing
+ * eight times inside it: 4 keys × a 2-variant union × a 176-character shape.
+ *
+ * WHY 1 — the number is RECOVERED, not chosen. This renderer has always had a
+ * depth budget of exactly one shape level, written as the ternary in the key
+ * loop below: a child that is itself an object printed `object` rather than its
+ * shape. That budget was applied on ONE of the four ways down. An array element
+ * (`{ … }[]`), a `Record` value (`Record<string, { … }>`) and a union variant
+ * (`{ … } | { … }[]`) each re-entered the object branch through `renderType`
+ * with the budget nowhere in scope, so the same shape at the same reader-facing
+ * depth printed opaquely or in full depending on whether its author had wrapped
+ * it in an array. That is a fact about the Zod spelling, not about how a reader
+ * needs to read it — the same asymmetry #6225 removed for vocabularies. This
+ * constant makes the existing rule apply to all four descents; the ternary it
+ * replaces is its depth-1 case.
+ *
+ * The corpus confirms 1 is the only admissible value. Regenerating all 215
+ * pages (8499 type cells) at each candidate, counting emitted cell widths:
+ *
+ *   depth limit | (none, before) |    1 |    2 |    3 |    4
+ *   cells >200  |            121 |   42 |  173 |  191 |  191
+ *   cells >400  |              9 |    1 |   19 |   35 |   35
+ *   cells >600  |              3 |    1 |    2 |   14 |   22
+ *   cells >900  |              1 |    0 |    1 |    1 |    1
+ *   p95 / p99   |      145 / 229 | 124/180 | 154/260 | 154/280 | 154/287
+ *   max         |           1538 |  656 | 1538 | 1538 | 1538
+ *
+ * Every limit above 1 is worse than shipping nothing: raising it necessarily
+ * LOOSENS the direct-object-child path, which was already at 1, so cells over
+ * 200 rise from 121 to 173+ and the flagship never moves. There is no sweep to
+ * balance here and no threshold to tune — 1 is the status quo made uniform,
+ * and 2 and up are a regression dressed as a budget.
+ *
+ * At 1, every cell still over 400 characters is `ui/page.mdx`'s
+ * `PageComponent.type` (656), a top-level vocabulary in a union variant that
+ * #6225 deliberately leaves alone and that carries no nested shape at all.
+ * Shape-driven width is gone from the corpus.
+ *
+ * WHAT A READER LOSES, and why `object` is the honest rendering. Nothing is
+ * silently truncated: `object` claims nothing about keys, so unlike a prefix it
+ * cannot be mistaken for a complete list — which is the #5340 principle applied
+ * to shapes rather than to enum members. It is also not a new elision style in
+ * these tables: `object` is what a nested shape has always printed, and the
+ * complete shape stays where it always was — its own `## Schema` section when
+ * the generator emits one, and `json-schema/` in every case.
+ */
+const SHAPE_DEPTH_LIMIT = 1;
+
+/**
  * Character budget for one `Enum<…>` BODY rendered INSIDE an inline shape
  * summary. Over it, members are dropped until the body fits and the count of
  * what was dropped is printed in their place (#5340).
@@ -426,7 +482,18 @@ export function formatPropertyType(prop: any, ctx?: TypeContext): RenderedProper
   return { cell: formatType(prop, ctx), allowedValues: null };
 }
 
+/**
+ * `depth` is the count of `{ … }` shape levels already OPEN above this node,
+ * and it is a parameter rather than a `TypeContext` field on purpose: a caller
+ * that passes no `ctx` (every unit test that only wants a type string) must
+ * still get the width budget, the way it always got the ternary this replaces.
+ * `ctx` carries facts about the PAGE; depth is a fact about the RECURSION.
+ */
 export function formatType(prop: any, ctx?: TypeContext): string {
+  return renderType(prop, ctx, 0);
+}
+
+function renderType(prop: any, ctx: TypeContext | undefined, depth: number): string {
   if (!prop) return 'any';
 
   // A `retiredKey()` tombstone. `never` is both the accurate TypeScript (the
@@ -452,7 +519,7 @@ export function formatType(prop: any, ctx?: TypeContext): string {
       if (ctx!.expanding?.has(name)) return 'object';
       const expanding = new Set(ctx!.expanding ?? []);
       expanding.add(name);
-      return formatType({ ...target, $ref: undefined }, { ...ctx!, expanding });
+      return renderType({ ...target, $ref: undefined }, { ...ctx!, expanding }, depth);
     }
 
     const href = ctx?.schemaHref?.(name) ?? null;
@@ -460,7 +527,7 @@ export function formatType(prop: any, ctx?: TypeContext): string {
   }
 
   if (prop.type === 'array') {
-    const element = formatType(prop.items, ctx);
+    const element = renderType(prop.items, ctx, depth);
     // An open object element renders as an intersection and a multi-variant
     // element as a union — `[]` would re-associate either — so parenthesize
     // and the cell keeps meaning "array of that".
@@ -477,7 +544,7 @@ export function formatType(prop: any, ctx?: TypeContext): string {
 
   if (prop.anyOf || prop.oneOf) {
     const variants = prop.anyOf || prop.oneOf;
-    const rendered = variants.map((v: any) => formatType(v, ctx));
+    const rendered = variants.map((v: any) => renderType(v, ctx, depth));
     const full = rendered.join(' | ');
     if (rendered.length <= VARIANT_LIMIT) return full;
     // The variants a reader does not see are counted, never silently dropped —
@@ -496,7 +563,7 @@ export function formatType(prop: any, ctx?: TypeContext): string {
     // open object with a declared shape printed as a bare `Record<string, any>`
     // and the author-facing page lost keys the schema *requires*.
     const open = prop.additionalProperties
-      ? `Record<string, ${formatType(prop.additionalProperties, ctx)}>`
+      ? `Record<string, ${renderType(prop.additionalProperties, ctx, depth)}>`
       : null;
 
     // Inline object: show its shape one level deep instead of an opaque `Object`.
@@ -517,18 +584,22 @@ export function formatType(prop: any, ctx?: TypeContext): string {
       : [];
 
     if (keys.length > 0) {
+      // The shape budget, spent HERE rather than at each of the four descents
+      // that reach this branch (#6374). A cell opens `SHAPE_DEPTH_LIMIT` shape
+      // levels; below that a shape prints `object`, whichever way down it was
+      // reached — a direct object child, an array element, a `Record` value or
+      // a union variant. Wrappers do not spend the budget, only shapes do, so
+      // `{ … }[]` and `Record<string, { … }>` are one level, not two.
+      if (depth >= SHAPE_DEPTH_LIMIT) return 'object';
       const shown = keys.slice(0, INLINE_KEY_LIMIT).map(k => {
         const child = prop.properties[k];
         const optional = (prop.required || []).includes(k) ? '' : '?';
-        // Depth-limited: nested objects stay opaque so a table cell can't explode.
         // Everything below this point is a SUMMARY of the child, not the
         // child's own row, so a long enum reached from here is elided (#5340).
         // The flag is set once, here, and inherited by every branch underneath
-        // — arrays of objects recurse (only a direct object child is forced
-        // opaque above), so `errors?: { code: Enum<…> }[]` is reached this way.
-        const childType = child?.type === 'object' && child.properties
-          ? 'object'
-          : formatType(child, ctx && { ...ctx, inShapeSummary: true });
+        // — arrays of objects recurse, so `errors?: { code: Enum<…> }[]` is
+        // reached this way.
+        const childType = renderType(child, ctx && { ...ctx, inShapeSummary: true }, depth + 1);
         return `${k}${optional}: ${childType}`;
       });
       // `…` elides further LIVE declared keys; `& Record<…>` states that

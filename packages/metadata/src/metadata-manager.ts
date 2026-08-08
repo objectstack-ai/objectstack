@@ -71,6 +71,9 @@ import type {
   MetaRef,
 } from '@objectstack/metadata-core';
 import { EndpointMatcher } from './endpoint-matcher.js';
+// [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
+// schema parses a stored row. See `stored-envelope.ts`.
+import { peelStoredEnvelope } from './stored-envelope.js';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 
 /**
@@ -1659,10 +1662,16 @@ export class MetadataManager implements IMetadataService {
    * ## What it judges, and on what
    *
    * The registry stores either a raw spec document or a publish envelope
-   * (`{ name, packageId, state, metadata: {…spec} }`); the endpoint is read
-   * out with the SAME rule this method's caller uses for
-   * `publishedDefinition` (`data.metadata ?? data`), so publish gates exactly
-   * the document publish is about to snapshot. An item that does not satisfy
+   * (`{ name, packageId, state, metadata: {…spec} }`), and in BOTH shapes the
+   * row carries the metadata layer's bookkeeping. [#5309] The envelope is
+   * peeled off first (`peelStoredEnvelope`) and the gate judges the authored
+   * BODY: the wrapped half of that peel is the `data.metadata ?? data` rule
+   * this method used to spell inline — the same document `publishedDefinition`
+   * snapshots — and the flat half additionally removes `packageId` / `state` /
+   * `version` / `published*`, which are storage identity, never endpoint
+   * vocabulary. (What publish SNAPSHOTS is unchanged: `publishedDefinition`
+   * still stores `data.metadata ?? data` verbatim, envelope included, because
+   * `revertPackage` restores from it.) An item whose body does not satisfy
    * `ApiEndpointSchema` fails here too — not extra strictness but a
    * precondition: an unparsed shape cannot be gated, and it could never be
    * served either (the matcher's own loud skip refuses it at load).
@@ -1686,8 +1695,13 @@ export class MetadataManager implements IMetadataService {
     const gatedItems: Array<{ name: string }> = [];
 
     for (const item of apiItems) {
-      const document = item.data?.metadata ?? item.data;
-      const parsed = ApiEndpointSchema.safeParse(document);
+      // [#5309] Envelope OFF before the body parse — the same peel the load-time
+      // backstop applies (`buildEndpointIndex`), so the two doors judge the same
+      // document. The wrapped half of the rule is the `data.metadata ?? data`
+      // this line used to spell inline; the flat half additionally takes off the
+      // bookkeeping (`packageId`, `state`, …) that shares a level with the body.
+      const { body } = peelStoredEnvelope(item.data);
+      const parsed = ApiEndpointSchema.safeParse(body);
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
           errors.push({
