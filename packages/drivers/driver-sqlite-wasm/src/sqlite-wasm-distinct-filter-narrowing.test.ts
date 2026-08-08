@@ -28,6 +28,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import type { Knex } from 'knex';
 import { SqliteWasmDriver } from './index.js';
 
 /** `true` for `any` and for nothing else. */
@@ -35,13 +36,15 @@ type IsAny<T> = 0 extends 1 & T ? true : false;
 
 describe("SqliteWasmDriver inherits distinct's bare-FilterCondition parameter (#6320)", () => {
   let driver: SqliteWasmDriver;
-  let knexInstance: any;
+  let knexInstance: Knex;
 
   beforeEach(async () => {
     driver = new SqliteWasmDriver({ filename: ':memory:' });
-    knexInstance = (driver as any).knex;
+    // Inherited `protected knex`, reached by naming the one member rather than
+    // erasing the driver with `as any` — see the note in driver-sql's twin.
+    knexInstance = (driver as unknown as { knex: Knex }).knex;
 
-    await knexInstance.schema.createTable('orders', (t: any) => {
+    await knexInstance.schema.createTable('orders', (t: Knex.CreateTableBuilder) => {
       t.string('id').primary();
       t.string('product');
       t.string('status');

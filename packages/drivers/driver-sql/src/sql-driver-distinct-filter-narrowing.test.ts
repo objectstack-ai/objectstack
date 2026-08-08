@@ -44,6 +44,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import type { Knex } from 'knex';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver } from './index.js';
 
@@ -52,7 +53,7 @@ type IsAny<T> = 0 extends 1 & T ? true : false;
 
 describe('SqlDriver.distinct takes a bare FilterCondition (#6320)', () => {
   let driver: SqlDriver;
-  let knexInstance: any;
+  let knexInstance: Knex;
 
   beforeEach(async () => {
     driver = new SqlDriver({
@@ -60,9 +61,15 @@ describe('SqlDriver.distinct takes a bare FilterCondition (#6320)', () => {
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
     });
-    knexInstance = (driver as any).knex;
+    // `knex` is `protected` on SqlDriver, so a fixture outside the class cannot
+    // read it without a cast. Sibling suites in this package spell that
+    // `(driver as any).knex`, which erases EVERY member of the driver to reach
+    // one; this names the single member being reached instead (#6204 spelling).
+    // A file whose whole subject is "this parameter stopped being `any`" should
+    // not introduce `any` in its own harness.
+    knexInstance = (driver as unknown as { knex: Knex }).knex;
 
-    await knexInstance.schema.createTable('orders', (t: any) => {
+    await knexInstance.schema.createTable('orders', (t: Knex.CreateTableBuilder) => {
       t.string('id').primary();
       t.string('product');
       t.string('status');
