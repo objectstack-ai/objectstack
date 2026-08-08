@@ -341,7 +341,7 @@ export function applyObjectSchemaMask<T>(document: T, posture: ObjectSchemaMaskP
  */
 export function objectFieldVisibilityFingerprint(denied: readonly string[]): string {
     if (denied.length === 0) return '';
-    const joined = [...denied].sort().join(' ');
+    const joined = [...denied].sort().join('\u0000');
     let hash = 0x811c9dc5;
     for (let i = 0; i < joined.length; i++) {
         hash ^= joined.charCodeAt(i);
