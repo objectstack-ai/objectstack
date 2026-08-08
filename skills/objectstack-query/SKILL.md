@@ -330,15 +330,19 @@ unique or near-unique column such as `created_at` or `id`) so
 | `min` | Minimum | `MIN(field)` |
 | `max` | Maximum | `MAX(field)` |
 | `count_distinct` | Unique count | `COUNT(DISTINCT field)` |
-| `array_agg` | Collect into array | `ARRAY_AGG(field)` |
-| `string_agg` | Concatenate strings | `STRING_AGG(field, ',')` |
 
 > ⚠️ **Driver support varies.** On SQL datasources the driver executes only
-> `count` / `sum` / `avg` / `min` / `max` and **throws** on `count_distinct`,
-> `array_agg`, and `string_agg`; the per-aggregation `distinct: true` flag is
-> also ignored there. The in-memory fallback path (driver-rest, driver-memory,
-> timezone/date-bucket fallbacks) supports all 8 functions plus `distinct`.
-> For portable queries, stick to the first five.
+> `count` / `sum` / `avg` / `min` / `max` and **throws** on `count_distinct`;
+> the per-aggregation `distinct: true` flag is also ignored there. The
+> in-memory fallback path (driver-rest, driver-memory, timezone/date-bucket
+> fallbacks) supports all six functions plus `distinct`. For portable queries,
+> stick to the first five.
+
+> **Removed in 17 (#6188).** `array_agg` and `string_agg` left this vocabulary:
+> declared but lowered by no SQL backend, so whether they worked depended on
+> which driver sat behind the object. Either one is now refused at parse. There
+> is no replacement — read the rows with an ordinary `fields` query and shape
+> them in the caller, or materialise the roll-up as a stored field.
 
 ### GroupBy + Aggregation
 

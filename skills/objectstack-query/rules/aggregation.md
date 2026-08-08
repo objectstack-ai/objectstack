@@ -12,16 +12,20 @@ Guide for building ObjectStack aggregation queries.
 | `min` | `MIN(field)` | Minimum value | Yes |
 | `max` | `MAX(field)` | Maximum value | Yes |
 | `count_distinct` | `COUNT(DISTINCT field)` | Count unique values | Yes |
-| `array_agg` | `ARRAY_AGG(field)` | Collect values into array | Yes |
-| `string_agg` | `STRING_AGG(field, ',')` | Concatenate string values | Yes |
 
 > ⚠️ **Driver support varies.** On SQL datasources the driver executes only
 > `count` / `sum` / `avg` / `min` / `max` and **throws** (`Unsupported
-> aggregate function`) on `count_distinct`, `array_agg`, and `string_agg`;
-> the per-aggregation `distinct: true` flag is also ignored there. The
-> in-memory aggregation path (driver-rest, driver-memory, timezone/
-> date-bucket fallbacks) supports all 8 functions plus `distinct`. For
-> portable queries, stick to the first five.
+> aggregate function`) on `count_distinct`; the per-aggregation
+> `distinct: true` flag is also ignored there. The in-memory aggregation path
+> (driver-rest, driver-memory, timezone/date-bucket fallbacks) supports all six
+> functions plus `distinct`. For portable queries, stick to the first five.
+
+> **Removed in 17 (#6188).** `array_agg` and `string_agg` are no longer part of
+> the vocabulary — they were declared and lowered by no SQL backend, so a query
+> using them succeeded or failed depending on which driver happened to be
+> behind the object. A query carrying either is refused at parse. There is no
+> replacement: read the rows with an ordinary `fields` query and shape them in
+> the caller, or materialise the roll-up as a stored field.
 
 ## Basic Aggregation
 

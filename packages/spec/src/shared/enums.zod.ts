@@ -13,9 +13,10 @@ import { lazySchema } from './lazy-schema';
 // no importer in this repo, objectui, or cloud — while `AggregationFunction`
 // (`data/query.zod.ts`) is the vocabulary the query engine, dataset compiler and
 // native-SQL strategy all gate on. The two even disagreed: this one had
-// percentile/median/stddev/variance, that one has array_agg/string_agg. Removed
-// rather than reconciled, because a second name for one concept is how the
-// vocabularies drifted apart in the first place. objectui#2945.
+// percentile/median/stddev/variance, that one carried array_agg/string_agg
+// (themselves retired at #6188, ADR-0049 — no SQL backend compiled them).
+// Removed rather than reconciled, because a second name for one concept is how
+// the vocabularies drifted apart in the first place. objectui#2945.
 
 /** Sort direction used across query, data-engine, analytics */
 export const SortDirectionEnum = z.enum(['asc', 'desc'])

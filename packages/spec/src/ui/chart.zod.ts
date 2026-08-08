@@ -716,9 +716,11 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
  *
  * A deliberate subset of the engine's `AggregationFunction`: these are the five
  * the chart renderers implement in every path, including the client-side
- * fallback. `count_distinct` / `array_agg` / `string_agg` are engine-level
- * capabilities with no chart renderer behind them — advertising them here would
- * be a declared-but-not-delivered claim (Prime Directive #10).
+ * fallback. `count_distinct` is the one engine-level function left outside the
+ * subset — no chart renderer computes it, and advertising it here would be a
+ * declared-but-not-delivered claim (Prime Directive #10). `array_agg` and
+ * `string_agg` were named here for the same reason until #6188 retired them
+ * from the engine vocabulary outright; the subset is unchanged by that.
  */
 export const ChartAggregateFunctionSchema = lazySchema(() =>
   z.enum(['count', 'sum', 'avg', 'min', 'max']),

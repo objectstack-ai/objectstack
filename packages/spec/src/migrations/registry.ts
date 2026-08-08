@@ -1099,7 +1099,36 @@ const step17: MigrationStep = {
     + 'selected nothing extra while reporting success. Either returns the day the capability '
     + 'is implemented (#5021 / #4988). Not in scope, and deliberately: `page:card.visible` is a '
     + 'component-level visibility predicate written into `properties` and hoisted by the '
-    + 'renderer — a page to rewrite onto the ADR-0089 `visibleWhen`, not a key to declare.',
+    + 'renderer — a page to rewrite onto the ADR-0089 `visibleWhen`, not a key to declare.\n\n'
+    + 'Finally it narrows the aggregation vocabulary: `array_agg` and `string_agg` leave '
+    + '`AggregationFunction` (#6188, ADR-0049). The enum declared eight functions and the SQL '
+    + 'family compiles five — `SqlDriver.mapAggregateFunc` and the Turso '
+    + '`RemoteTransport.aggregate` each lower `count`/`sum`/`avg`/`min`/`max` and route the rest '
+    + 'to one refusal — so three were declared-but-unenforced against the backends this platform '
+    + 'targets. What makes these two worse than an ordinary inert declaration is that another '
+    + 'package had to carry a denylist for them: `service-analytics` subtracted `array_agg` and '
+    + '`string_agg` by name in `UNSUPPORTED_AGGREGATES`, because without that subtraction they '
+    + "reached the Cube strategy's `default` and returned `COUNT(*)` — a row count in place of "
+    + 'the requested value, with no error and no log. The maintainer SPLIT the three rather than '
+    + 'retiring them as a block (2026-08-07), and the split is the point: `count_distinct` STAYS '
+    + 'and takes the enforce leg — one portable lowering (`COUNT(DISTINCT x)`), a dashboard '
+    + 'staple, already lowered by `service-analytics` — with its SQL implementation following on '
+    + 'its own card, so that declaration leads its implementation by decision rather than by '
+    + 'drift. These two take the remove leg: display conveniences with no measured pull, and '
+    + '`string_agg` never had one shape to lower to (the delimiter is a second argument in '
+    + 'PostgreSQL, a `SEPARATOR` clause in MySQL, a differently named function in SQL Server). '
+    + 'This is an enum VALUE, not a key, so — as with `crypto.hash` above — there is no '
+    + '`retiredKey()` tombstone: the enum error map carries the prescription, keyed on the '
+    + 'received value so only the two spellings that used to be legal are told they "were '
+    + 'removed". Of the two authoring surfaces only one is stored metadata: the conversion '
+    + 'rewrites `dataset.measures[].aggregate`, dropping the measure outright (a measure with '
+    + 'neither `aggregate` nor `derived` fails the dataset\'s own refinement, so stripping just '
+    + 'the key would emit an item that cannot parse) plus any derived measure the drop strands, '
+    + 'with a notice each. Nothing is lost: `compileDataset` refused both by name already, so '
+    + 'such a measure never produced a number. `QueryAST.aggregations[].function` is a request '
+    + 'surface with no stored source — one semantic TODO below. The mongodb and in-memory '
+    + 'backends that implemented these two are inside the #5499 freeze and are untouched; their '
+    + 'code is simply no longer reachable through a spec-valid request.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1149,6 +1178,7 @@ const step17: MigrationStep = {
     'record-picker-display-field-to-label-field',
     'record-picker-inert-keys-removed',
     'page-card-body-to-children',
+    'dataset-measure-array-string-agg-removed',
   ],
   semantic: [
     {
@@ -1439,6 +1469,35 @@ const step17: MigrationStep = {
         + 'deduplication goes through `groupBy` / `count_distinct` / the drivers\' `distinct()` '
         + 'door. A query still carrying the key fails to parse with the removal prescription, '
         + 'and the REST list response reports a real `total` for queries that used to send it.',
+    },
+    {
+      id: 'query-array-string-agg-retired',
+      surface: "data.query.aggregations[].function ('array_agg' / 'string_agg')",
+      replacement:
+        'an ordinary `fields` query, shaped in the caller — or a stored field that materialises '
+        + 'the roll-up. For a deduplicated COUNT the live spelling is unchanged: '
+        + '`count_distinct` stays declared',
+      reason:
+        'The stored half of this retirement is a conversion '
+        + '(`dataset-measure-array-string-agg-removed`); this entry is the REQUEST half. '
+        + '`QueryAST` is never stored in stack metadata — it is the client SDK builder\'s output '
+        + 'and the `POST /data/:object/query` body — so there is no source for the chain to '
+        + 'rewrite and callers move their own queries. Both values were declared-but-unlowered '
+        + 'on the SQL family: `SqlDriver.mapAggregateFunc` and the Turso '
+        + '`RemoteTransport.aggregate` compile five functions and refuse the rest, so a caller '
+        + 'following the schema against a SQL datasource got a refusal, not an array. They did '
+        + 'run on `driver-mongodb` and on the engine\'s in-memory fallback, which is what makes '
+        + 'this the one narrowing in the batch that removes reachable behaviour: an aggregation '
+        + 'that worked on one backend and failed on another is exactly the unpredictability the '
+        + 'ruling ended, and #5499 has both of those backends frozen. `count_distinct` was '
+        + 'deliberately NOT retired with them (maintainer, 2026-08-07) — it takes ADR-0049\'s '
+        + 'enforce leg, and its SQL lowering is a separate drivers-side card. ADR-0049, #6188.',
+      acceptanceCriteria:
+        'No caller sends `array_agg` or `string_agg` in `aggregations[].function`; list-style '
+        + 'roll-ups are assembled by the caller from an ordinary `fields` query, or materialised '
+        + 'as a stored field. A query still carrying either value fails to parse with the '
+        + 'removal prescription naming it, and authoring it is a `tsc` error at the call site; '
+        + '`count_distinct` continues to parse and is unaffected.',
     },
     {
       id: 'workflow-service-slot-retired',
@@ -2361,6 +2420,58 @@ const step17: MigrationStep = {
         + 'that the annotation should be `XParsed`. `pnpm check:spec-parsed-alias` reports every '
         + 'bare alias as `z.input` and refuses both a bare `z.infer` alias and a reintroduced '
         + '`XInput` synonym.',
+    },
+    {
+      id: 'driver-sql-distinct-bare-filter-typed',
+      // No backticks in `surface` — see the note on the entry above.
+      surface: 'SqlDriver.distinct() third argument — any value',
+      replacement:
+        'a bare FilterCondition (@objectstack/spec/data) — the same value find() carries '
+        + 'under query.where, never a query envelope',
+      reason:
+        'This entry records a TYPE being added, not a surface being withdrawn, and it says '
+        + 'so up front because the distinction decides who has to do anything. `distinct` is '
+        + 'not declared on `IDataDriver`, so #5181 / #6075 never reached it and it kept '
+        + '`filters?: any` while its body said something far more specific — '
+        + '`applyFilters(builder, filters)` is handed the ARGUMENT ITSELF, never a `.where` '
+        + 'off it. ⚠️ RUNTIME BEHAVIOUR IS UNCHANGED by this entry\'s change: not one '
+        + 'statement moved, so no upgrade breaks at run time and nothing that answered '
+        + 'correctly stops. What the annotation removes is a compile-time hole, measured '
+        + 'rather than assumed: a truthy NON-OBJECT third argument — '
+        + '`distinct(\'orders\', \'product\', \'completed\')` — used to type-check and resolve '
+        + 'the UNFILTERED set, because `applyFilters` emits no predicate at all for a truthy '
+        + 'non-object, non-array filter. A call meaning "which products among completed '
+        + 'orders" answered with EVERY product, silently. That spelling is now TS2345 at the '
+        + 'call site. This is a driver CALL ARGUMENT — code, never stack metadata — so there '
+        + 'is no source for the D2 chain to rewrite and deliberately no schema tombstone, the '
+        + 'disposition `data-driver-find-stream-retired` (#4484), `storage-service-list-retired` '
+        + '(#5540), `actor-user-roles-to-positions` (#6011) and '
+        + '`driver-aggregate-undeclared-key-aliases-removed` (#6321) already carry. ⚠️ It '
+        + 'differs from those four in ONE measured way a reader should not have to infer: '
+        + 'because nothing changed at run time, an untyped JS caller is not affected BY THE '
+        + 'UPGRADE at all. The entry is here for a different reason — such a caller is exactly '
+        + 'the one tsc can never reach, and the silent widening above is a defect they may '
+        + 'ALREADY be sitting on, before and after this major. The generated upgrade guide is '
+        + 'the only channel that reaches them, which is why the fix is written down rather '
+        + 'than left to the compiler. ⛔ The reverse mismatch is NOT closed and no type can '
+        + 'close it: `FilterCondition` is an open map (`[key: string]: any`) because a filter '
+        + 'key IS a field name, so a query envelope `{ object, where }` is structurally a '
+        + 'valid filter — one constraining columns named `object` and `where` — and so is a '
+        + 'FilterArray. Both reach `distinct` type-checked and are refused at run time, '
+        + 'loudly, with INVALID_FILTER / 400. `driver-memory`\'s opposite half — where the '
+        + 'BARE spelling returns the unfiltered set in silence — stays open under the #5499 '
+        + 'freeze (#6320). ADR-0087, #6320.',
+      acceptanceCriteria:
+        'No caller passes a non-object to `distinct()`\'s third argument. A scalar there is '
+        + 'now a compile error (`TS2345: Argument of type \'string\' is not assignable to '
+        + 'parameter of type \'FilterCondition\'`); rewrite it as the bare filter it was '
+        + 'always meant to be — `\'completed\'` becomes `{ status: \'completed\' }`. ⚠️ That '
+        + 'is NOT an equivalent rewrite: the old spelling returned the UNFILTERED set, so the '
+        + 'answer changes once fixed, and the changed answer is the one the call always meant. '
+        + 'An untyped JS caller gets no compile error and no behaviour change — for them this '
+        + 'entry is the only notice that the spelling never filtered anything. A query '
+        + 'envelope or a FilterArray in that slot still compiles and is rejected at run time '
+        + 'with INVALID_FILTER / 400.',
     },
   ],
 };

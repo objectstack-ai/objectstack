@@ -154,7 +154,16 @@ describe('[#5907] SqlDriver refuses an aggregate function it cannot compile', ()
   describe('a function name the Query Protocol never declared', () => {
     // `median` is the issue's own repro. The rest are the names a SQL-fluent
     // author reaches for that `AggregationFunction` does not declare.
-    const UNDECLARED = ['median', 'stddev', 'percentile_cont', 'group_concat'];
+    //
+    // `array_agg` / `string_agg` MOVED HERE from class 2 at #6188: the ruling
+    // retired both from `AggregationFunction`, so they are no longer "declared
+    // but not compiled by this backend" (501) — they are names the protocol
+    // does not declare (400), exactly like `group_concat` beside them. Keeping
+    // them covered on this side of the split is the point: the answer to the
+    // same input changed, and this is where that change is legible.
+    const UNDECLARED = [
+      'median', 'stddev', 'percentile_cont', 'group_concat', 'array_agg', 'string_agg',
+    ];
 
     for (const fn of UNDECLARED) {
       it(`refuses "${fn}" with INVALID_QUERY / 400`, async () => {
@@ -195,19 +204,25 @@ describe('[#5907] SqlDriver refuses an aggregate function it cannot compile', ()
   // ── Class 2: declared by the protocol, not compiled by this backend ────────
 
   describe('a DECLARED function this backend cannot compile', () => {
-    // Exactly the three `AggregationFunction` declares with no SQL lowering.
-    // The TYPE is load-bearing (#4918): `AggregationNode['function']` is the
-    // declared enum, so a typo in this fixture — or a name that leaves the enum
-    // when #6188 is decided — fails `tsc` instead of quietly becoming a class-1
-    // input that still passes a class-2 assertion for the wrong reason.
+    // Exactly what `AggregationFunction` declares with no SQL lowering — one
+    // name since #6188. The TYPE is load-bearing (#4918):
+    // `AggregationNode['function']` is the declared enum, so a typo in this
+    // fixture — or a name that LEAVES the enum — fails `tsc` instead of quietly
+    // becoming a class-1 input that still passes a class-2 assertion for the
+    // wrong reason. That is exactly how #6188 announced itself here: retiring
+    // `array_agg` / `string_agg` turned those two entries into TS2322 rather
+    // than leaving them asserting 501 for names the protocol no longer has.
+    //
+    // `count_distinct` was deliberately NOT retired with them (maintainer
+    // ruling, 2026-08-07): it takes ADR-0049's enforce leg, and lowering it to
+    // `COUNT(DISTINCT x)` in this driver is its own card. Until that lands it is
+    // the whole of class 2, and this suite is what keeps its refusal honest.
     const UNCOMPILABLE: Array<AggregationNode['function']> = [
       'count_distinct',
-      'array_agg',
-      'string_agg',
     ];
 
     // Guard: the fixture is the real declared-minus-compiled set, derived rather
-    // than trusted. If the spec drops one (that decision is #6188) or this driver
+    // than trusted. If the spec drops one (as #6188 dropped two) or this driver
     // implements one, this fails HERE rather than leaving a case that passes
     // because nothing is produced.
     it('the fixture is exactly the declared-but-uncompiled set', () => {

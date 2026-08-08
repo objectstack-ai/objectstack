@@ -12,8 +12,14 @@
 //   * Flat groupBy strings: `['region']`
 //   * Structured groupBy with date bucketing: `[{ field: 'closed_at',
 //     dateGranularity: 'quarter' }]`
-//   * Aggregation functions: count, count_distinct, sum, avg, min, max,
-//     array_agg, string_agg
+//   * Aggregation functions: count, count_distinct, sum, avg, min, max —
+//     the whole of `AggregationFunction`. This fallback used to implement two
+//     more, `array_agg` and `string_agg`, which #6188 retired from the spec
+//     vocabulary (ADR-0049: no SQL backend ever compiled them, so which
+//     backend could compute what was unpredictable to the author). Their arms
+//     are deleted rather than left unreachable — a `switch` case on a value
+//     the enum no longer has does not type-check, and dead arms are how a
+//     retired vocabulary comes back by accident.
 //   * `distinct: true` on aggregations (collapse duplicates before applying
 //     the function)
 //   * `filter: FilterCondition` on aggregations is **not** evaluated here —
@@ -188,12 +194,6 @@ function aggregateBucket(rows: any[], aggregations: AggregationNode[]): Record<s
         out[alias] = defined.length === 0 ? null : defined.reduce((a, b) => (a > b ? a : b));
         break;
       }
-      case 'array_agg':
-        out[alias] = values.slice();
-        break;
-      case 'string_agg':
-        out[alias] = values.filter((v) => v != null).map(String).join(',');
-        break;
       default:
         out[alias] = null;
     }
