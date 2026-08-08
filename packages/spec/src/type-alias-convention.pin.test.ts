@@ -448,7 +448,7 @@ export type Iso131 = Assert<Eq< z.input< typeof M28.GetMetaItemsRequestSchema >,
 export type Iso132 = Assert<Eq< z.input< typeof M28.GetMetaItemsResponseSchema >, z.infer< typeof M28.GetMetaItemsResponseSchema > >>;
 export type Iso133 = Assert<Eq< z.input< typeof M28.GetMetaItemRequestSchema >, z.infer< typeof M28.GetMetaItemRequestSchema > >>;
 export type Iso134 = Assert<Eq< z.input< typeof M28.GetMetaItemResponseSchema >, z.infer< typeof M28.GetMetaItemResponseSchema > >>;
-export type Iso759 = Assert<Eq< z.input< typeof M28.GetMetaItemLayeredResponseSchema >, z.infer< typeof M28.GetMetaItemLayeredResponseSchema > >>;
+export type Iso760 = Assert<Eq< z.input< typeof M28.GetMetaItemLayeredResponseSchema >, z.infer< typeof M28.GetMetaItemLayeredResponseSchema > >>;
 export type Iso135 = Assert<Eq< z.input< typeof M28.SaveMetaItemRequestSchema >, z.infer< typeof M28.SaveMetaItemRequestSchema > >>;
 export type Iso136 = Assert<Eq< z.input< typeof M28.SaveMetaItemResponseSchema >, z.infer< typeof M28.SaveMetaItemResponseSchema > >>;
 export type Iso137 = Assert<Eq< z.input< typeof M28.DeleteMetaItemRequestSchema >, z.infer< typeof M28.DeleteMetaItemRequestSchema > >>;
@@ -1566,6 +1566,12 @@ describe('ADR-0122 type-alias convention', () => {
     // either side's 749 verbatim would have been green in review and wrong in
     // fact, which is the exact failure this receipt block exists to prevent.
     // Recomputed from the merged file: 748 + 1 + 1 = 750.
+    //
+    // The collision was not only in the COUNT: both branches also minted the
+    // same next-free alias name, `Iso759`, so the merged file declared it
+    // twice. tsc caught that as TS2300 where the count assertion could not —
+    // `toHaveLength` counts matching LINES, and two lines that share a name
+    // still count as two. This sweep's pin took `Iso760`; #5728's kept 759.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
     expect(pins).toHaveLength(750);
