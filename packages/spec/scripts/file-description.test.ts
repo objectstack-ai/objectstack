@@ -554,6 +554,112 @@ describe('renderFileDescription — #6229: a bare path keeps its `../` prefix in
 });
 
 /**
+ * #6420 — a path an author wrote in PARENTHESES is prose, not a link.
+ *
+ * The rewriter carried a lookaround pair, `(?<!\()` … `(?!\))`, from before the
+ * tokenizer existed. Its job was "do not touch a path that is already a link's
+ * destination", because `](route)` puts that path between exactly those two
+ * characters. It never could state that (lookaround cannot say "not nested
+ * inside a link" — the module comment is explicit), and since #6136 it has had
+ * nothing left to state: a formed link is a `link` run and this step is only
+ * ever shown `text` runs. What the pair still did was refuse every path an
+ * author had put in ordinary parentheses, which is neither a link nor code —
+ * so those paths rendered as bare text on three published pages:
+ *
+ *   automation/etl.mdx:16        `- **Enterprise Connector** (integration/connector.zod.ts) - …`
+ *   integration/connector.mdx:17 `- **ETL Pipeline** (automation/etl.zod.ts) - …`
+ *   shared/mapping.mdx:16-17     `- Integration connectors (integration/connector.zod.ts)` (+ external-lookup)
+ *
+ * MEASURED (reverse verification), the ordinary direction: putting either
+ * guard back turns the four parenthesised cases below red — the two-sided pair
+ * and each half on its own, since a path in `(…)` trips both — while the
+ * unparenthesised cases and the whole #6229 block above stay green. Restoring
+ * them also leaves `keeps a formed link's destination out of reach` green,
+ * which is the point of that case: it is the tokenizer that holds the
+ * invariant now, so removing the guards cannot re-open #6136.
+ *
+ * Corpus-wide the widening is exactly those four positions and nothing else
+ * (`gen:docs` on the fixed generator: 231 files, 3 changed, 4 lines), and all
+ * three routes it newly emits resolve to a real page.
+ */
+describe('renderFileDescription — #6420: a bare path in parentheses still links', () => {
+  const ctx = {
+    // Mirrors `build-docs.ts`'s `sourcePathToDocsRoute`, restricted to the two
+    // categories these cases name, so an unroutable path is genuinely
+    // unroutable rather than a stand-in that resolves everything.
+    sourcePathToDocsRoute: (t: string) => {
+      const m = /(?:^|\/)(integration|automation)\/([\w-]+)\.zod\.ts$/.exec(t);
+      return m ? `/docs/references/${m[1]}/${m[2]}` : null;
+    },
+  };
+
+  const describedBy = (line: string) =>
+    renderFileDescription(['/**', ` * ${line}`, ' */', '', "import { z } from 'zod';", ''].join('\n'), ctx);
+
+  it('links a parenthesised path — the published `automation/etl` line', () => {
+    // `packages/spec/src/automation/etl.zod.ts` verbatim — the exact input
+    // behind `content/docs/references/automation/etl.mdx:16`.
+    expect(
+      describedBy('- **Enterprise Connector** (integration/connector.zod.ts) - System integrators'),
+    ).toBe(
+      '- **Enterprise Connector** ([integration/connector.zod.ts](/docs/references/integration/connector)) - System integrators',
+    );
+  });
+
+  it('links a parenthesised path that closes the line — the `shared/mapping` shape', () => {
+    // `content/docs/references/shared/mapping.mdx:16`. Distinct from the case
+    // above on purpose: there the `)` is followed by more prose, here it ends
+    // the line, and the trailing guard `(?!\))` refused both.
+    expect(describedBy('- Integration connectors (integration/connector.zod.ts)')).toBe(
+      '- Integration connectors ([integration/connector.zod.ts](/docs/references/integration/connector))',
+    );
+  });
+
+  it('keeps a `../` prefix inside the link when the path is parenthesised', () => {
+    // #6229 and this fix compose: the prefix belongs inside the link, and the
+    // parentheses stay outside it. Neither fix implies the other.
+    expect(describedBy('The layer (../integration/connector.zod.ts) is the widest.')).toBe(
+      'The layer ([../integration/connector.zod.ts](/docs/references/integration/connector)) is the widest.',
+    );
+  });
+
+  it('prints an unroutable parenthesised path as code, never as a dead link', () => {
+    // Widening the rewriter must not widen what it is willing to LINK. A path
+    // with no page still falls back to a code span, so the parentheses can
+    // never produce a 404 on the site.
+    expect(describedBy('Nothing here (nowhere/absent.zod.ts) resolves.')).toBe(
+      'Nothing here (`nowhere/absent.zod.ts`) resolves.',
+    );
+  });
+
+  it('still links the same path outside parentheses — the fix widens, it does not move', () => {
+    // The vacuity guard for the four cases above. Each of them asserts an
+    // OUTPUT for a path in parentheses; if this `ctx` had stopped resolving
+    // that path, the parenthesised cases could have been written around a
+    // code-span fallback and passed while proving nothing. Pinning the same
+    // path unparenthesised fixes the only variable to the parentheses.
+    expect(describedBy('The layer integration/connector.zod.ts is the widest.')).toBe(
+      'The layer [integration/connector.zod.ts](/docs/references/integration/connector) is the widest.',
+    );
+  });
+
+  it('keeps a formed link destination out of reach — the tokenizer, not the guards', () => {
+    // The case the deleted lookaround was actually written for, and the reason
+    // deleting it is safe. A titled `{@link}` whose target has no page emits
+    // `[label](../nowhere/absent.zod.ts)`: the raw path is now a link
+    // DESTINATION, sitting between the very `(` and `)` the guards tested for.
+    // With them gone the only thing standing between that path and a second
+    // rewrite is #6136's tokenizer, which classifies the whole construct as a
+    // `link` run this step is never shown. Were that protection to regress,
+    // this case reports `[the fallback](\`../nowhere/absent.zod.ts\`)` — the
+    // #6136 shape — while every other case here stays green.
+    expect(describedBy('See {@link ../nowhere/absent.zod.ts|the fallback} for now.')).toBe(
+      'See [the fallback](../nowhere/absent.zod.ts) for now.',
+    );
+  });
+});
+
+/**
  * The corpus half: re-derive the verdict from the real sources, so the six
  * pages the issue measured cannot silently re-acquire a wrong opening, and so a
  * NEW file that puts a helper above its schemas is caught here rather than on
@@ -786,6 +892,32 @@ describe('corpus — every rendered description is well-formed markdown', () => 
     for (const { rel, out } of described) {
       const stranded = out.match(/(?:\.\.\/)+[[`]/);
       if (stranded) offenders.push(`${rel}: ${stranded[0]}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('never leaves a bare source path sitting in parentheses (#6420)', () => {
+    // The corpus half of the unit block above. A path this step CAN match —
+    // one with a category segment, `(?:\.\./)*<dir>/<file>.zod.ts` — must never
+    // reach a page still bare: it is a link when a page renders it and a code
+    // span when none does, and "plain text between parentheses" is the one
+    // outcome the lookaround pair used to force. Scanned on the rendered
+    // fragment rather than on the emitted `.mdx` for the same reason the rest
+    // of this file is: `check:docs` reproduces the artifact faithfully and so
+    // stayed green through all three published symptoms.
+    //
+    // Only the head character is examined, not a full `(…)` pair: `- Integration
+    // connectors (integration/connector.zod.ts)` and `(…) - System integrators`
+    // are different closers and both were victims, so what identifies the class
+    // is a `(` immediately before the path. A path that follows `](` is a link
+    // destination and belongs there — the tokenizer put it there.
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      for (const line of withoutFences(out).split('\n')) {
+        const bare = line.replace(/`[^`]*`/g, ''); // a code span is the null-route fallback
+        const hit = /(^|[^\]])\((?:\.\.\/)*[\w-]+\/[\w.-]+\.zod\.ts/.exec(bare);
+        if (hit) offenders.push(`${rel}: ${hit[0].trim()}`);
+      }
     }
     expect(offenders).toEqual([]);
   });
