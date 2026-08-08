@@ -93,6 +93,29 @@
  * whatever the runner leaks next — is decided purely by the count, which is
  * what makes this robust to the next undocumented lifecycle value instead of
  * needing another word added to a list.
+ *
+ * ## How the static guard decides what a job IS (#6589)
+ *
+ * `scanWorkflow` has to tell an aggregate GATE (`… --verify …`) from an
+ * attesting SHARD (`… --emit …`), and both answers are read out of the same
+ * place: the jobs' `run:` text. That classification is by INVOCATION —
+ * `invokesScript()` requires the flag to be an argument of a command that runs
+ * this script — and never by two substrings co-occurring somewhere in a job.
+ *
+ * The co-occurrence spelling was live and measured wrong (#6589). Every
+ * attesting shard job already contains the string `check-shard-attestation.mjs`
+ * (its own `--emit` step at the bottom), so under `text.includes(BASENAME) &&
+ * text.includes('--verify')` the sole discriminator was the bare flag substring
+ * appearing ANYWHERE in ANY step of that job. Adding a `git rev-parse --verify`
+ * to the shard's package-set step reclassified job `test` as a gate and the
+ * guard failed with two complaints about properties of a gate that job is not
+ * required to have — pointing the reader at #3622/#4928 contracts to break.
+ * Whole `--verify`-shaped family: `git show-ref --verify`, `gpg --verify`, …
+ *
+ * The classifier therefore also drops shell comments, because DOCUMENTING this
+ * trap inside a `run:` re-armed it — a comment is part of `run:` (the #4890
+ * shape). Making that safe by construction is the point: the self-test's
+ * `--verify`-in-a-comment fixture is the pin.
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -286,6 +309,115 @@ export function readAttestations(dir) {
 const LEG_TOKEN = /--leg\s+['"]?([A-Za-z0-9_-]+)\/(\d+):/g;
 
 /**
+ * One `run:` block, split into the individual commands a shell would execute.
+ *
+ * Three properties, each of which the classification below rests on:
+ *
+ *   - a backslash-newline continuation JOINS its lines into one command, so a
+ *     flag written on a continuation line is still an argument of the command
+ *     that started two lines up (which is how both invocations in ci.yml are
+ *     actually spelled);
+ *   - a `#` comment is DROPPED, so writing about this classifier inside a
+ *     `run:` cannot re-trigger it (#6589's second-order trap);
+ *   - quoting is honoured, so a `#` or a `|` inside an argument stays an
+ *     argument rather than silently truncating the command — a false negative
+ *     here would disable the gate quietly, which is the one outcome worse than
+ *     the false positive #6589 is about.
+ *
+ * Deliberately a small lexer and not a shell: it recognises comments, quotes,
+ * continuations and the separators `; & && | ||` plus newline. Anything more
+ * exotic in a `run:` block (heredocs, process substitution) can only make a
+ * command look like fewer commands, never like more, so it cannot manufacture
+ * a classification.
+ *
+ * @param {unknown} runText a step's `run:` string
+ * @returns {string[]} the commands, in order, comments and separators removed
+ */
+export function shellCommands(runText) {
+  if (typeof runText !== 'string') return [];
+  const commands = [];
+  let current = '';
+  let quote = '';
+  let atWordStart = true;
+  const flush = () => {
+    const command = current.trim();
+    if (command) commands.push(command);
+    current = '';
+    atWordStart = true;
+  };
+  for (let i = 0; i < runText.length; i += 1) {
+    const ch = runText[i];
+    if (quote) {
+      // Inside single quotes a backslash is literal; inside double quotes it
+      // escapes the next character. Either way the pair stays in the argument.
+      if (ch === '\\' && quote === '"' && i + 1 < runText.length) {
+        current += ch + runText[i + 1];
+        i += 1;
+        continue;
+      }
+      current += ch;
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '\\') {
+      if (runText[i + 1] === '\n') {
+        current += ' ';
+        i += 1;
+        atWordStart = true;
+        continue;
+      }
+      if (i + 1 < runText.length) {
+        current += ch + runText[i + 1];
+        i += 1;
+        atWordStart = false;
+        continue;
+      }
+      current += ch;
+      continue;
+    }
+    if (ch === '#' && atWordStart) {
+      while (i < runText.length && runText[i] !== '\n') i += 1;
+      flush();
+      continue;
+    }
+    if (ch === '\n' || ch === ';' || ch === '&' || ch === '|') {
+      flush();
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      atWordStart = false;
+      continue;
+    }
+    current += ch;
+    atWordStart = ch === ' ' || ch === '\t';
+  }
+  flush();
+  return commands;
+}
+
+/**
+ * Does this `run:` text INVOKE this script with `flag`?
+ *
+ * Adjacency, not co-occurrence (#6589): the flag must be an argument of a
+ * command that runs `SCRIPT_BASENAME`. The script named in one step and the
+ * flag spelled in another — or in a comment, or as an argument of some other
+ * program entirely — no longer add up to an invocation.
+ *
+ * @param {unknown} runText a step's `run:` string
+ * @param {string} flag e.g. `--verify` or `--emit`
+ */
+export function invokesScript(runText, flag) {
+  return shellCommands(runText).some((command) => {
+    const tokens = command.split(/\s+/).map((token) => token.replace(/^['"]|['"]$/g, ''));
+    const at = tokens.findIndex((token) => token === SCRIPT_BASENAME || token.endsWith(`/${SCRIPT_BASENAME}`));
+    if (at === -1) return false;
+    return tokens.slice(at + 1).some((token) => token === flag || token.startsWith(`${flag}=`));
+  });
+}
+
+/**
  * Scan `.github/workflows/ci.yml` and hold the gates to their own declaration.
  *
  * The whole point of "declared = enforced" is that the roster the gate counts
@@ -306,18 +438,18 @@ export async function scanWorkflow(root) {
   const problems = [];
   const file = join(root, '.github', 'workflows', 'ci.yml');
   if (!existsSync(file)) {
-    return { problems: [`${file} does not exist — nothing was verified (see #4690).`], gates: 0, legs: 0, attesters: 0 };
+    return { problems: [`${file} does not exist — nothing was verified (see #4690).`], gates: 0, legs: 0, attesters: 0, gateIds: [], attesterIds: [] };
   }
 
   let doc;
   try {
     doc = parse(readFileSync(file, 'utf8'));
   } catch (error) {
-    return { problems: [`${file} does not parse as YAML: ${error.message}`], gates: 0, legs: 0, attesters: 0 };
+    return { problems: [`${file} does not parse as YAML: ${error.message}`], gates: 0, legs: 0, attesters: 0, gateIds: [], attesterIds: [] };
   }
   const jobs = doc && typeof doc === 'object' ? doc.jobs : undefined;
   if (!jobs || typeof jobs !== 'object') {
-    return { problems: [`${file} has no jobs: map — nothing was verified (see #4690).`], gates: 0, legs: 0, attesters: 0 };
+    return { problems: [`${file} has no jobs: map — nothing was verified (see #4690).`], gates: 0, legs: 0, attesters: 0, gateIds: [], attesterIds: [] };
   }
 
   const stepsOf = (job) => (Array.isArray(job?.steps) ? job.steps : []);
@@ -325,6 +457,13 @@ export async function scanWorkflow(root) {
     stepsOf(job)
       .map((step) => (typeof step?.run === 'string' ? step.run : ''))
       .join('\n');
+  /**
+   * Does any single step of this job invoke this script with `flag`?
+   *
+   * Per STEP, never over the job's joined text: two steps' texts concatenated
+   * are not a command, and treating them as one is exactly #6589.
+   */
+  const jobInvokes = (job, flag) => stepsOf(job).some((step) => invokesScript(step?.run, flag));
 
   /** The shard count a job DECLARES: a matrix's length, or 1 for a single job. */
   const declaredTotal = (job) => {
@@ -336,8 +475,8 @@ export async function scanWorkflow(root) {
   const gates = new Map();
   const claimed = new Map();
   for (const [id, job] of Object.entries(jobs)) {
+    if (!jobInvokes(job, '--verify')) continue;
     const text = runTextOf(job);
-    if (!text.includes(SCRIPT_BASENAME) || !text.includes('--verify')) continue;
     const legs = [...text.matchAll(LEG_TOKEN)].map((m) => ({ job: m[1], total: Number(m[2]) }));
     gates.set(id, legs);
     if (job.if !== 'always()') {
@@ -382,7 +521,7 @@ export async function scanWorkflow(root) {
       // are the LAST two steps and neither may carry an `if:`.
       const steps = stepsOf(target);
       const [emit, upload] = steps.slice(-2);
-      const emitsHere = typeof emit?.run === 'string' && emit.run.includes(SCRIPT_BASENAME) && emit.run.includes('--emit');
+      const emitsHere = invokesScript(emit?.run, '--emit');
       const uploadsHere = typeof upload?.uses === 'string' && upload.uses.startsWith('actions/upload-artifact@');
       if (!emitsHere || !uploadsHere) {
         problems.push(
@@ -413,15 +552,22 @@ export async function scanWorkflow(root) {
     }
   }
   // Any job that publishes a credential must be counted by exactly one gate,
-  // or the credential is decoration.
+  // or the credential is decoration. Same invocation test as the gate side and
+  // as `emitsHere` above (#6589): the question is "does this job publish a
+  // credential the way the pair check requires", and a bare `--emit` substring
+  // — `esbuild --emit`, a comment — does not answer it.
   for (const [id, job] of Object.entries(jobs)) {
-    if (runTextOf(job).includes('--emit') && !claimed.has(id)) {
+    if (jobInvokes(job, '--emit') && !claimed.has(id)) {
       problems.push(`job '${id}' publishes an attestation that no gate counts — declared but not enforced.`);
     }
   }
 
   const legs = [...gates.values()].reduce((n, l) => n + l.length, 0);
-  return { problems, gates: gates.size, legs, attesters: claimed.size };
+  // `gateIds` / `attesterIds` are the CLASSIFICATION itself, reported so a test
+  // can assert what a job was taken for instead of inferring it from the
+  // absence of a problem — #6589's misclassification produced problems that
+  // named neither the classifier nor the flag.
+  return { problems, gates: gates.size, legs, attesters: claimed.size, gateIds: [...gates.keys()], attesterIds: [...claimed.keys()] };
 }
 
 // ── Modes ───────────────────────────────────────────────────────────────────
@@ -619,6 +765,39 @@ async function selfTest() {
   assert(!judge({ gate: 'Test Core', legs: [], filterResult: 'success', present: new Map(), runId: '99' }).ok, 'a gate with no legs verifies nothing ⇒ red');
   assert(!testGate('', []).ok, 'an aggregate result that did not interpolate ⇒ red');
 
+  // ── the classifier: adjacency, not co-occurrence (#6589) ──────────────────
+  // Every one of these strings is in the classifier's own input domain — that
+  // is the point. The old test asked whether the basename and the flag both
+  // occurred; these ask whether the flag is an ARGUMENT of a command that runs
+  // the script.
+  const REAL_GATE_COMMAND = "node scripts/check-shard-attestation.mjs --verify \\\n  --gate 'Test Core' \\\n  --dir \"$OS_ATTEST_DIR\"";
+  assert(invokesScript('node scripts/check-shard-attestation.mjs --verify --gate x', '--verify'), 'the flag as an argument on the same line ⇒ an invocation');
+  assert(invokesScript(REAL_GATE_COMMAND, '--verify'), "ci.yml's real gate command, continuations and all ⇒ an invocation");
+  assert(
+    invokesScript('node scripts/check-shard-attestation.mjs \\\n  --verify \\\n  --gate x', '--verify'),
+    'the flag on a CONTINUATION line of the invocation ⇒ still the same command',
+  );
+  assert(!invokesScript('node scripts/check-shard-attestation.mjs --emit --job test\ngit rev-parse --verify HEAD', '--verify'), '#6589: the script in one command + the flag in another ⇒ NOT an invocation');
+  assert(!invokesScript('git rev-parse --verify HEAD', '--verify'), '#6589: another program\'s identically-spelled flag ⇒ not an invocation');
+  assert(!invokesScript('git show-ref \\\n  --verify refs/heads/main', '--verify'), '#6589: the flag on another program\'s continuation line ⇒ not an invocation');
+  assert(
+    !invokesScript('# node scripts/check-shard-attestation.mjs --verify would reclassify this job\necho documented', '--verify'),
+    '#6589 second-order trap: DOCUMENTING the invocation in a comment is not making one (the #4890 shape)',
+  );
+  assert(!invokesScript('echo hi  # node scripts/check-shard-attestation.mjs --verify', '--verify'), '#6589: a trailing comment on a real command is still a comment');
+  assert(!invokesScript('node scripts/check-shard-attestation.mjs --emit --job test && git rev-parse --verify HEAD', '--verify'), '#6589: `&&` starts a new command — the flag belongs to git, not to the script');
+  assert(invokesScript('node scripts/check-shard-attestation.mjs --emit --job test && git rev-parse --verify HEAD', '--emit'), 'the same line still reads as an --emit invocation');
+  assert(!invokesScript('node scripts/check-shard-attestation.mjs --verify-nothing', '--verify'), 'a longer flag that merely STARTS with the flag is a different flag');
+  assert(invokesScript('node scripts/check-shard-attestation.mjs --gate "a # b" --verify', '--verify'), 'a quoted `#` is an argument, not a comment — the command must not be truncated');
+  assert(invokesScript("node scripts/check-shard-attestation.mjs --gate 'a || b' --verify", '--verify'), 'a quoted separator is an argument, not a command boundary');
+  assert(!invokesScript(undefined, '--verify') && !invokesScript(null, '--verify'), 'a step with no run: is not an invocation');
+  assert(
+    shellCommands('a \\\n  b\n# c\nd; e | f')
+      .map((command) => command.split(/\s+/).join(' '))
+      .join(' / ') === 'a b / d / e / f',
+    'shellCommands: continuations join, comments drop, `;` and `|` split',
+  );
+
   // ── readAttestations over a real directory ───────────────────────────────
   const dir = mkdtempSync(join(tmpdir(), 'shard-attest-'));
   try {
@@ -638,36 +817,107 @@ async function selfTest() {
 
     // ── the static drift guard, over fixture workflows ──────────────────────
     const good = readFileSync(join(scriptRepoRoot(), '.github', 'workflows', 'ci.yml'), 'utf8');
-    const fixture = async (mutate) => {
+    const withWorkflow = async (source) => {
       const root = mkdtempSync(join(tmpdir(), 'shard-attest-wf-'));
       mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
-      writeFileSync(join(root, '.github', 'workflows', 'ci.yml'), mutate(good));
+      writeFileSync(join(root, '.github', 'workflows', 'ci.yml'), source);
       try {
         return await scanWorkflow(root);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
     };
-    assert((await fixture((s) => s)).problems.length === 0, 'the checked-in ci.yml passes the static drift guard');
-    assert((await fixture((s) => s.replace('shard: [1, 2, 3]', 'shard: [1, 2, 3, 4]'))).problems.some((p) => p.includes('declares 4 shard')), 'growing the matrix without the gate ⇒ red');
-    assert((await fixture((s) => s.replace('--leg "test/3', '--leg "test/2'))).problems.some((p) => p.includes('expects 2 attestation')), 'shrinking the gate roster without the matrix ⇒ red');
-    assert((await fixture((s) => s.replace(/^jobs:$/m, 'jobs:\n  intruder:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/check-shard-attestation.mjs --emit'))).problems.some((p) => p.includes('no gate counts')), 'an attestation no gate counts ⇒ red');
-    assert((await fixture((s) => s.replace('  test-gate:', '  test-gate-renamed:'))).problems.some((p) => p.includes("'test-gate'")), 'losing a required-context gate ⇒ red');
-    assert((await fixture((s) => s.replace('name: shard-attest-test-', 'name: shard-attest-typo-'))).problems.some((p) => p.includes('cannot count')), 'an artifact name the gate cannot match ⇒ red');
+    /**
+     * A mutated ci.yml, with the mutation itself asserted.
+     *
+     * Every anchor below is a literal lifted out of ci.yml, so any of them can
+     * go stale under an unrelated edit. A `String.replace` that matches nothing
+     * returns the input unchanged — which would leave each assertion below
+     * judging the PRISTINE workflow. The green-expecting ones would then pass
+     * for the wrong reason, permanently, and silently. So the no-op is a named
+     * failure of its own, and the label says which anchor died.
+     */
+    const fixture = async (label, mutate) => {
+      const source = mutate(good);
+      assert(source !== good, `fixture '${label}': its ci.yml anchor no longer matches — the assertion below would judge the pristine workflow`);
+      return withWorkflow(source);
+    };
+    const baseline = await withWorkflow(good);
+    assert(baseline.problems.length === 0, 'the checked-in ci.yml passes the static drift guard');
+    assert((await fixture('grow the matrix', (s) => s.replace('shard: [1, 2, 3]', 'shard: [1, 2, 3, 4]'))).problems.some((p) => p.includes('declares 4 shard')), 'growing the matrix without the gate ⇒ red');
+    assert((await fixture('shrink the roster', (s) => s.replace('--leg "test/3', '--leg "test/2'))).problems.some((p) => p.includes('expects 2 attestation')), 'shrinking the gate roster without the matrix ⇒ red');
+    assert((await fixture('uncounted intruder', (s) => s.replace(/^jobs:$/m, 'jobs:\n  intruder:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/check-shard-attestation.mjs --emit'))).problems.some((p) => p.includes('no gate counts')), 'an attestation no gate counts ⇒ red');
+    assert((await fixture('rename test-gate', (s) => s.replace('  test-gate:', '  test-gate-renamed:'))).problems.some((p) => p.includes("'test-gate'")), 'losing a required-context gate ⇒ red');
+    assert((await fixture('typo the artifact name', (s) => s.replace('name: shard-attest-test-', 'name: shard-attest-typo-'))).problems.some((p) => p.includes('cannot count')), 'an artifact name the gate cannot match ⇒ red');
     assert(
-      (await fixture((s) => s.replace('          overwrite: true\n\n  test-gate:', '          overwrite: true\n\n      - name: after the credential\n        run: echo late\n\n  test-gate:'))).problems.some((p) =>
+      (await fixture('step after the credential', (s) => s.replace('          overwrite: true\n\n  test-gate:', '          overwrite: true\n\n      - name: after the credential\n        run: echo late\n\n  test-gate:'))).problems.some((p) =>
         p.includes('must END with the attestation pair'),
       ),
       'a step appended after the credential ⇒ red',
     );
     assert(
-      (await fixture((s) => s.replace('          pattern: shard-attest-test-*', '          pattern: shard-attest-nothing-*'))).problems.some((p) => p.includes('none of which matches')),
+      (await fixture('unmatchable download pattern', (s) => s.replace('          pattern: shard-attest-test-*', '          pattern: shard-attest-nothing-*'))).problems.some((p) => p.includes('none of which matches')),
       'a gate whose download pattern cannot match its legs ⇒ red',
     );
     assert(
-      (await fixture((s) => s.replace('      - name: Attest this shard ran and passed\n        run: |\n          node scripts/check-shard-attestation.mjs --emit \\\n            --job test', '      - name: Attest this shard ran and passed\n        if: always()\n        run: |\n          node scripts/check-shard-attestation.mjs --emit \\\n            --job test'))).problems.some((p) => p.includes('guards its attestation steps with an if:')),
+      (await fixture('if: on the credential step', (s) => s.replace('      - name: Attest this shard ran and passed\n        run: |\n          node scripts/check-shard-attestation.mjs --emit \\\n            --job test', '      - name: Attest this shard ran and passed\n        if: always()\n        run: |\n          node scripts/check-shard-attestation.mjs --emit \\\n            --job test'))).problems.some((p) => p.includes('guards its attestation steps with an if:')),
       'an `if:` on the credential step ⇒ red (the credential would stop meaning "every earlier step passed")',
     );
+
+    // ── #6589: a shard job is not a gate because a step says `--verify` ──────
+    // The classification, asserted as a classification. The measured false red
+    // reported neither the classifier nor the flag — it reported that job
+    // `test` lacked two properties only an aggregate gate owes, and following
+    // that reading means editing the shard job's `if:`, i.e. breaking #3622.
+    assert(
+      REQUIRED_GATE_JOBS.every((id) => baseline.gateIds.includes(id)) && baseline.gateIds.length === REQUIRED_GATE_JOBS.length,
+      `the real gate invocations, and only those, are classified as gates (${REQUIRED_GATE_JOBS.join(', ')})`,
+    );
+    assert(baseline.attesterIds.includes('test'), 'the sharded test job is classified as an attester');
+    const SHARD_STEP_ANCHOR = "      - name: Compute this shard's package set\n";
+    const shardStepProbe = (body) => (s) => s.replace(SHARD_STEP_ANCHOR, `      - name: Probe step (#6589)\n${body}\n${SHARD_STEP_ANCHOR}`);
+    const staysAnAttester = async (label, body) => {
+      const result = await fixture(label, shardStepProbe(body));
+      assert(!result.gateIds.includes('test'), `#6589 '${label}': job 'test' is NOT reclassified as an aggregate gate`);
+      assert(result.attesterIds.includes('test'), `#6589 '${label}': job 'test' is still counted as an attester`);
+      assert(result.problems.length === 0, `#6589 '${label}': the guard stays green — got ${JSON.stringify(result.problems)}`);
+    };
+    // The exact edit that was measured red on origin/main: the idiomatic strict
+    // ref-existence check, in the step ci.yml routes around with `git cat-file
+    // -e` to this day. Whole family: `git show-ref --verify`, `gpg --verify`.
+    await staysAnAttester('git rev-parse --verify in a shard step', '        run: git rev-parse --verify "$GITHUB_SHA^{commit}"');
+    await staysAnAttester('the flag on another program\'s continuation line', '        run: |\n          git show-ref \\\n            --verify refs/heads/main');
+    // The second-order trap, in a fixture: writing DOWN the collision used to
+    // re-arm it, because a comment is part of `run:` (#4890's shape). This one
+    // spells the whole invocation and must still classify as a shard.
+    await staysAnAttester(
+      'a comment documenting the invocation',
+      '        run: |\n          # node scripts/check-shard-attestation.mjs --verify would have\n          # reclassified this shard job as an aggregate gate (#6589).\n          echo documented',
+    );
+    // The twin, on the `--emit` side: "publishes an attestation that no gate
+    // counts" asked the same co-occurrence question one flag over — a bare
+    // `--emit` anywhere in an unclaimed job's `run:` text, script or no script.
+    const unclaimedEmitFlag = await fixture('another program\'s --emit flag in an unclaimed job', (s) =>
+      s.replace(/^jobs:$/m, 'jobs:\n  bystander:\n    runs-on: ubuntu-latest\n    steps:\n      - run: esbuild src/index.ts --emit\n      - run: echo "see check-shard-attestation.mjs for why this is not an attester"'),
+    );
+    assert(
+      !unclaimedEmitFlag.problems.some((p) => p.includes("'bystander'")),
+      '#6589 twin: another program\'s --emit flag is not an unenforced credential — the job is never named',
+    );
+    assert(unclaimedEmitFlag.problems.length === 0, `#6589 twin: the guard stays green — got ${JSON.stringify(unclaimedEmitFlag.problems)}`);
+
+    // The other direction: a REAL gate invocation must still read as a gate, or
+    // the fix has simply turned the guard off. `--verify-nothing` is not the
+    // flag, so test-gate stops being one and the required-context check fires.
+    const ablated = await fixture('ablate the gate invocation', (s) =>
+      s.replace('check-shard-attestation.mjs --verify', 'check-shard-attestation.mjs --verify-nothing'),
+    );
+    assert(!ablated.gateIds.includes('test-gate'), '#6589 positive limb: a job that no longer INVOKES the script with the flag stops being a gate');
+    assert(
+      ablated.problems.some((p) => p.includes("job 'test-gate'") && p.includes('#3622')),
+      '#6589 positive limb: losing the real gate invocation ⇒ red, naming the branch-protection contract',
+    );
+
     const noFile = mkdtempSync(join(tmpdir(), 'shard-attest-empty-'));
     try {
       assert((await scanWorkflow(noFile)).problems.some((p) => p.includes('does not exist')), '#4690: a missing ci.yml is a failure, never a pass');
@@ -688,7 +938,9 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-shard-attestation --self-test: ${checked} assertions (dominance experiment + both #6082 counter-examples + the #4928 guard).`);
+  console.log(
+    `✓ check-shard-attestation --self-test: ${checked} assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins).`,
+  );
 }
 
 if (process.argv.includes('--self-test')) {

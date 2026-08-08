@@ -527,4 +527,84 @@ describe('[#5567] analytics LIKE compilers escape their comparand', () => {
       expect(sql).toMatch(/name LIKE \$\d+ ESCAPE \$\d+/);
     });
   });
+
+  /**
+   * [#6518] The dialect assumption `like-pattern.ts` now writes down, made
+   * FALSIFIABLE.
+   *
+   * #6518 moved the driver family off a plain `LIKE` — SQLite's folds ASCII
+   * case, MySQL's follows its collation, and #4706 Q2 = A rules the family
+   * case-SENSITIVE — while these three compilers kept `LIKE`. That is correct
+   * only because what they emit is Postgres-shaped, and on Postgres `LIKE` IS
+   * case-exact. A comment saying so rots silently; this block goes red.
+   *
+   * Two claims, and both have to hold for the file's reasoning to survive:
+   *
+   *   1. the emitted statement really is Postgres-shaped (`$N` placeholders,
+   *      `"double quoted"` identifiers) — so a change that started emitting for
+   *      SQLite or MySQL trips here first;
+   *   2. the `$contains` family compiles CASE-EXACTLY — no `ILIKE`, no
+   *      `LOWER()`, no fold of any kind wrapped around either operand.
+   *
+   * On `read-scope-sql.ts`'s output the second claim is a permission boundary,
+   * not a filter preference: a wider predicate there is ADR-0021 read-scope
+   * over-reach (#3948).
+   */
+  describe('[#6518] the case-sensitivity assumption these compilers rest on', () => {
+    const TEXT_FAMILY = ['$contains', '$notContains', '$startsWith', '$endsWith'] as const;
+
+    it('read-scope-sql compiles the family case-EXACTLY — no ILIKE, no fold', () => {
+      for (const op of TEXT_FAMILY) {
+        const { sql } = compileScopedFilterToSql(
+          { name: { [op]: 'Admin' } } as FilterCondition,
+          'person',
+        );
+        expect(sql, op).toMatch(/LIKE/);
+        expect(sql, op).not.toMatch(/ILIKE|LOWER\s*\(|lower\s*\(|translate\s*\(|GLOB/);
+      }
+    });
+
+    it('read-scope-sql emits `?` for its consumers to renumber, and quotes identifiers', () => {
+      const { sql, params } = compileScopedFilterToSql(
+        { name: { $contains: 'Admin' } } as FilterCondition,
+        'person',
+      );
+      // `?` here, `$N` after the consumers rewrite it — the shape both
+      // `applyReadScope` and `generateSql` depend on, and the reason the escape
+      // character can be a bound value rather than a per-dialect literal.
+      expect(sql).toContain('?');
+      expect(sql).toContain('"person"."name"');
+      expect(params).toEqual(['%Admin%', LIKE_ESCAPE_CHAR]);
+    });
+
+    it('both executing compilers number their placeholders Postgres-style', async () => {
+      const native = await new NativeSQLStrategy().generateSql(query({ name: { $contains: 'x' } }), nativeCtx);
+      const echo = await new ObjectQLStrategy().generateSql(query({ name: { $contains: 'x' } }), echoCtx);
+      for (const [label, sql] of [['native', native.sql], ['echo', echo.sql]] as const) {
+        expect(sql, label).toMatch(/\$\d+/);
+        // `?` is SQLite's and MySQL's placeholder. Its appearance would mean the
+        // statement stopped being Postgres-shaped, which is exactly the premise
+        // `like-pattern.ts`'s #6518 section says to re-open.
+        expect(sql, label).not.toMatch(/[^$\w]\?/);
+        expect(sql, label).not.toMatch(/ILIKE|LOWER\s*\(/);
+      }
+    });
+
+    /**
+     * `$icontains` is UNIMPLEMENTED here, and fail-closed at both doors — the
+     * state #6518 leaves it in deliberately, because adding it belongs with
+     * #6520 (the vocabulary, driver-memory and analytics together) rather than
+     * to a driver-lane case-folding fix. Pinned so "unimplemented" cannot
+     * quietly become "dropped": a dropped predicate WIDENS.
+     */
+    it('$icontains is REFUSED, not silently dropped, at both doors', async () => {
+      expect(() =>
+        compileScopedFilterToSql({ name: { $icontains: 'admin' } } as FilterCondition, 'person'),
+      ).toThrow(/\$icontains/);
+
+      await expect(
+        new NativeSQLStrategy().generateSql(query({ name: { $icontains: 'admin' } }), nativeCtx),
+      ).rejects.toThrow(/\$icontains/);
+    });
+  });
 });
