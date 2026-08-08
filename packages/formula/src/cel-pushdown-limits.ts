@@ -42,12 +42,15 @@
  * export const CEL_PUSHDOWN_LIMITS_MODE: CelPushdownLimitsMode = 'fail-closed';
  * ```
  *
- * Two tests are written to go red on that line so the flip cannot be a silent
- * one: `cel-pushdown-limits.test.ts` pins the shipped default, and
- * `cel-to-filter-limits.rc-grace.test.ts` pins the grace-window behaviour. Both
- * name this file in their failure text; flipping the const means updating them
- * to the GA expectation, which is already written out in
- * `cel-to-filter-limits.ga.test.ts` and exercised there today.
+ * `cel-to-filter-limits.test.ts` is written to go red on that line so the flip
+ * cannot be a silent one, and its blast radius is known: flipping the const
+ * fails exactly that file's "the shipped default is the rc grace window"
+ * assertion and its `switch = rc-grace` block — 10 tests, measured — and
+ * nothing else in the repo. The GA expectation they become is already written
+ * out and passing in the same file's `switch = fail-closed` block, and on the
+ * RLS path in `plugin-security`'s `rls-pushdown-limits.test.ts`. So the flip is:
+ * this one const, that one default assertion, and deleting the grace block
+ * whose behaviour has ended.
  *
  * Nothing else needs to move at GA. In particular `@objectstack/lint`'s two
  * enforceability gates need no edit: `validateRlsPredicateEnforceability` reads

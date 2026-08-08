@@ -59,11 +59,22 @@ const AT_LIMIT = [
   },
 ];
 
+/**
+ * The WARN's sink, reached the same way the compiler reaches it: through
+ * `globalThis`. `@objectstack/formula` compiles with neither the DOM lib nor
+ * `@types/node`, so the bare `console` global has no type in this package — and
+ * spying on a differently-obtained object than the one under test would be a
+ * green test over a silent sink.
+ */
+const maybeConsole = (globalThis as { console?: { warn: (message: string) => void } }).console;
+if (!maybeConsole) throw new Error('this suite spies on the WARN sink and needs a host console');
+const hostConsole = maybeConsole;
+
 let warn: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   __resetPushdownLimitWarnings();
-  warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  warn = vi.spyOn(hostConsole, 'warn').mockImplementation(() => {});
 });
 
 afterEach(() => {
