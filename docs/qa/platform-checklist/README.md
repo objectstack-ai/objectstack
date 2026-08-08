@@ -8,9 +8,12 @@ checkbox issue per release (#3358) — with one ledger that **accumulates across
 releases**, supports append/change without losing history, and pins every tick to an
 acceptance oracle and captured evidence.
 
-Validated in CI: `pnpm check:platform-checklist`
-(`scripts/check-platform-checklist.mjs`). Execution protocol for agents:
-[RUNNER.md](./RUNNER.md). Run records: [runs/](./runs/README.md).
+Validated by `pnpm check:platform-checklist` (`scripts/check-platform-checklist.mjs`) —
+a zero-dependency structural + coverage check. **By maintainer decision it runs on a
+periodic MANUAL cadence, not in CI**: run it before a release, after a large platform
+surface lands, or alongside a `coverage-sweep` / `checklist-run`. It is a QA ledger, not
+a per-PR code gate, so an unrelated PR is never blocked by checklist drift. Execution
+protocol for agents: [RUNNER.md](./RUNNER.md). Run records: [runs/](./runs/README.md).
 
 **Two internal skills drive this ledger** (`.claude/skills/`, never published):
 `coverage-sweep` **authors** items (find gaps → write them, per
