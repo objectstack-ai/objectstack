@@ -2022,26 +2022,49 @@ export class RemoteTransport {
   }
 
   /**
-   * Append one parameterized `LIKE` / `NOT LIKE` predicate.
+   * Append one parameterized text-match predicate for the `$contains` family
+   * and `$icontains`.
    *
-   * The LIKE metacharacters `%` / `_` (and the escape character `\` itself) are
-   * escaped in the COMPARAND so they match literally: unescaped, a value of `%`
-   * expands to `%%%` and matches every row — a filter bypass, and a P0 the
-   * framework already paid for (`sql-driver-like-escape.test.ts`). The escape
-   * clause is written explicitly because SQLite honours no default escape
-   * character; it is a literal here rather than a bind (as `SqlDriver` does)
-   * only because this transport is SQLite-by-construction and keeping the bind
-   * list to comparands keeps the arg arithmetic in every caller unchanged.
+   * The comparand's metacharacters are escaped so it matches literally:
+   * unescaped, a value of `%` expands to `%%%` and matches every row — a filter
+   * bypass, and a P0 the framework already paid for
+   * (`sql-driver-like-escape.test.ts`).
    *
-   * This is the ONE place the LIKE family is built. That is the point: five
-   * operators sharing one escape rule is the opposite of the second
-   * implementation ADR-0053 D-A1 warns about — the rule cannot drift between
-   * `$contains` and `$startsWith` because there is only one of it. It does
-   * restate the framework's rule (which lives in `SqlDriver.applyLike`, a
-   * private Knex-builder method with no reusable export), so the two must be
-   * read together; the row-level suite in
-   * `remote-transport-text-predicates.test.ts` is what pins them to the same
-   * answers.
+   * # [#6518] Why this emits `GLOB`, not `LIKE`
+   *
+   * `$contains` / `$notContains` / `$startsWith` / `$endsWith` are
+   * case-SENSITIVE by contract (#4706 Q2 = A). SQLite's `LIKE` folds ASCII case
+   * unconditionally, and libSQL is SQLite — so this transport used to answer
+   * `{name: {$contains: 'acme'}}` with the `ACME Corp` row too, which is
+   * over-matching rather than a near miss. The fold cannot be switched off per
+   * statement (`PRAGMA case_sensitive_like` is connection-global, so one query
+   * would silently redefine every other query on the same connection), and
+   * `CAST(col AS BLOB) LIKE ?` was measured to match NOTHING at all. `GLOB` is
+   * SQLite's case-exact pattern operator and is what both SQLite faces now
+   * emit — `SqlDriver.applyLike`'s `textMatchPredicate` reaches the identical
+   * decision for the local transport, and `turso-local-remote-*` parity suites
+   * are what hold the two to the same rows.
+   *
+   * The escaped character class moves WITH the operator, which is the part a
+   * second implementation gets wrong: GLOB's metacharacters are `*`, `?` and
+   * `[` (escaped as self-closing classes `[*]`, `[?]`, `[[]`, because GLOB has
+   * no `ESCAPE` clause in SQLite's grammar), while `%` and `_` are ordinary
+   * characters to it. So this method no longer emits an `ESCAPE` clause at all.
+   *
+   * `fold` still wraps BOTH operands, now in `lower()` around `GLOB` — folding
+   * only the comparand would compare a folded needle against a raw column and
+   * silently match just the rows that were already lower-case. `lower()` on
+   * SQLite folds ASCII ONLY, which is the contract (#4706 Q1 = A) rather than a
+   * limitation to work around: measured, `lower('CAFÉ')` is `'cafÉ'`, so
+   * `$icontains: 'café'` answers the `café` row and not the `CAFÉ` one.
+   *
+   * This is still the ONE place the family is built, which is the point: five
+   * operators sharing one escape rule cannot drift between `$contains` and
+   * `$startsWith` because there is only one of it. It restates the framework's
+   * rule (which lives in `SqlDriver`, whose emitter is a private module
+   * function with no reusable export), so the two must be read together; the
+   * row-level suite in `remote-transport-text-predicates.test.ts` is what pins
+   * them to the same answers.
    */
   private pushLike(
     clauses: string[],
@@ -2053,21 +2076,11 @@ export class RemoteTransport {
     nullSafe = false,
     fold = false,
   ): void {
-    const escaped = String(value).replace(/[\\%_]/g, '\\$&');
-    const pattern = shape === 'starts' ? `${escaped}%` : shape === 'ends' ? `%${escaped}` : `%${escaped}%`;
-    // [#5702] `fold` wraps BOTH operands in `LOWER()` — the `$icontains`
-    // lowering, and a parameter of THIS method rather than a sixth text arm for
-    // the reason the paragraph above gives: one escape rule, one place. Folding
-    // only the comparand would compare a folded needle against a raw column and
-    // silently match only the rows that were already lower-case.
-    //
-    // libSQL is SQLite, whose `lower()` folds ASCII ONLY — which is the
-    // contract (#4706 Q1 = A), not a limitation to work around: `É` does not
-    // fold, so `$icontains: 'café'` must not match `CAFÉ`. The local transport
-    // reaches the same answer through `SqlDriver.applyLike`'s `LOWER()`.
-    const lhs = fold ? `LOWER(${column})` : column;
-    const rhs = fold ? 'LOWER(?)' : '?';
-    const predicate = `${lhs} ${negate ? 'NOT LIKE' : 'LIKE'} ${rhs} ESCAPE '\\'`;
+    const escaped = String(value).replace(/[*?[]/g, '[$&]');
+    const pattern = shape === 'starts' ? `${escaped}*` : shape === 'ends' ? `*${escaped}` : `*${escaped}*`;
+    const lhs = fold ? `lower(${column})` : column;
+    const rhs = fold ? 'lower(?)' : '?';
+    const predicate = `${lhs} ${negate ? 'NOT GLOB' : 'GLOB'} ${rhs}`;
     clauses.push(nullSafe ? this.nullSafeNegative(column, predicate) : predicate);
     args.push(pattern);
   }
