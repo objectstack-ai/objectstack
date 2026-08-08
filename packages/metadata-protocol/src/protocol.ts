@@ -4,7 +4,12 @@ import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack } from '@objectstack/core';
-import { readEnvWithDeprecation } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/types';
+// [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
+// `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
+// this question with it is a bug (cloud#1020, #5233) — so the posture, and only
+// the posture, is what the runtime authoring gate is told.
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { MetadataHostEngine } from './host-engine.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
@@ -2419,10 +2424,42 @@ export class ObjectStackProtocolImplementation implements
      * strictly better information than the CLI's single-package view — the
      * inversion #4463 D2 points out: the same rule can be more decisive here
      * than it can be at build time.
+     *
+     * [#6285 / #6155 Q3=A] It also supplies the two DEPLOYMENT facts the CLI
+     * cannot know and the shared registry therefore must not read: the
+     * organization partition this write lands in, and whether this deployment
+     * enforces an organization wall. Both are gathered here — the impure side —
+     * and passed as arguments, so `evaluateRuntimeAuthoringGate` stays a pure
+     * function of its inputs and a test can drive both postures without
+     * mutating the process.
      */
     private assertRuntimeAuthoringRules(evt: {
         type: string; name: string; state: 'draft' | 'active'; body: unknown; source?: string;
+        /**
+         * The organization partition of this write (`saveMetaItem`'s
+         * `organizationId`). Absent = a platform-level / environment write,
+         * which is one limb of the #6285 refusal combination.
+         */
+        organizationId?: string | null;
     }): void {
+        // Environment writes only. `environmentId === undefined` is the
+        // package author's own control-plane channel — the same carve-out the
+        // ADR-0005 authorization gate and the #3050 authoring gate below both
+        // make, and pinned as deliberate by `protocol.runtime-authoring-gate.
+        // test.ts` ("does not gate control-plane (package-author) writes").
+        //
+        // [#6285] Measured before adding a guardrail behind it, because the
+        // dispatch asked whether the short-circuit makes the new refusal
+        // unreachable in the deployment shape it protects: it does not. Every
+        // serving path binds an environment id — `os dev` / `os start` default
+        // to `env_local` (`cli/src/commands/dev.ts:225`, `start.ts:197`), the
+        // standalone artifact stack to `proj_local`
+        // (`runtime/src/standalone-stack.ts:378`), and a cloud per-project
+        // kernel to its own — so a multi-organization deployment reaches this
+        // gate. What sits behind the short-circuit is the control-plane
+        // bootstrap kernel, which authors no tenant metadata. Widening it is
+        // therefore not this issue's business (and would change the blast
+        // radius of all 26 shared rules, not just this one).
         if (this.environmentId === undefined) return;
         if (evt.state !== 'active') return;
         // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
@@ -2461,8 +2498,42 @@ export class ObjectStackProtocolImplementation implements
             state: evt.state,
             body: evt.body,
             objects,
+            ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
+            orgWallEnforced: this.orgWallEnforced(),
         });
         if (err) throw err;
+    }
+
+    /**
+     * [#6285] Does this deployment enforce an organization wall (ADR-0105 D1)?
+     *
+     * The authoritative reading, and the only one:
+     * `postureEnforcesWall(resolveTenancyPosture())`. `resolveMultiOrgEnabled()`
+     * is the demoted legacy input — a deployment that sets only the canonical
+     * `OS_TENANCY_POSTURE` reads `false` there while genuinely running a walled
+     * posture, which is the bug shape cloud#1020 and #5233 already paid for.
+     *
+     * Read per call rather than memoised: `resolveTenancyPosture()` reads
+     * `process.env` live by contract, and a gate that cached the answer at
+     * construction would disagree with every other consumer for the life of the
+     * process.
+     *
+     * `resolveTenancyPosture()` THROWS on an unrecognized `OS_TENANCY_POSTURE`
+     * — deliberately, so a typo cannot silently remove the wall. That refusal
+     * belongs at boot, not on a metadata write, so it is caught here and read
+     * as WALLED. Fail-closed is the direction ADR-0105 argues for on exactly
+     * this input ("refusing to boot rather than silently falling back to a
+     * posture with no organization wall"), and it costs nothing in practice: a
+     * deployment in that state does not boot, and even when reached it only
+     * arms a guardrail — a publish still has to match every other limb of the
+     * refusal combination to be turned away.
+     */
+    private orgWallEnforced(): boolean {
+        try {
+            return postureEnforcesWall(resolveTenancyPosture());
+        } catch {
+            return true;
+        }
     }
 
     /**
@@ -8089,6 +8160,10 @@ export class ObjectStackProtocolImplementation implements
             state: mode === 'draft' ? 'draft' : 'active',
             body: request.item,
             source: writeSource,
+            // [#6285] The write's organization partition. It was always here;
+            // it simply never travelled to the gate, which is the whole reason
+            // the "platform-level flow" limb could not be judged before.
+            organizationId: request.organizationId ?? null,
         });
 
         // Pre-persistence authoring gate (#3050): a domain plugin may veto the
@@ -8802,6 +8877,10 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 state: 'active',
                 body: draftForGate.body,
+                // [#6285] Same partition the draft is being promoted in. Without
+                // it the draft door would be a bypass for this refusal alone,
+                // which is the exact hole #4463 D1 closed for the other 26.
+                organizationId: orgId,
             });
         }
 
