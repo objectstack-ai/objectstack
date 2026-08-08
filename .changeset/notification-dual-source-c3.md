@@ -10,36 +10,63 @@ each resolved to **two different declarations** depending on the import
 path — the #4411 dual-source trap. Resolution (three-repo,
 import-statement-level consumer scan: framework, cloud, objectui):
 
+> **Correction (#5781): the `./ui` declarations were NOT consumer-free — the
+> removal stands, the evidence sentence does not.** The scan above matched
+> `import … from` statement text, and objectui reached these two names by two
+> hops it could not see: `packages/types/src/index.ts` re-exported both with
+> `export … from '@objectstack/spec/ui'`, and
+> `packages/core/src/protocols/NotificationProtocol.ts` consumed them via the
+> `@object-ui/types` barrel in the public signatures of
+> `resolveNotificationConfig` / `specNotificationToToast` (objectui#3310, at
+> 17.0.0-rc.1). objectui does not ask for the retirement back: that bridge had
+> zero in-repo callers, `@object-ui/react`'s locally-declared
+> `NotificationSystemConfig` is what runs, and objectui deleted the bridge to
+> follow this retirement. A cross-repo liveness verdict must be read off the
+> resolved SYMBOL GRAPH — covering `export … from` re-exports and
+> barrel-indirect consumption — never off import-statement text; this was the
+> third miss of that class, after #4667 / #4709 (`app.homePageId`).
+
 - **Removed** `NotificationSchema` / `Notification` from
   `@objectstack/spec/ui`. This was a toast/banner "notification instance"
   shape (`type`/`severity`/`message`/`duration`/`actions`/`position` + ARIA
-  props) with **zero importers** in all three repos — objectui's toaster
-  never adopted it. The live contract is `./api`'s `Notification(Schema)`:
+  props) that objectui's toaster never adopted — its only holders were the
+  re-export bridge named in the correction above, which objectui has since
+  deleted. The live contract is `./api`'s `Notification(Schema)`:
   the REST inbox row (`id`/`type`/`title`/`body`/`read`/`data`/`actionUrl`/
   `createdAt`) embedded in `ListNotificationsResponseSchema`, served by
   `/api/v1/notifications`, implemented by `@objectstack/client`, and
   mirrored by `InboxNotification` in `@objectstack/spec/contracts`
   (ADR-0030: the bell reads this shape).
   - FROM `import { NotificationSchema, type Notification } from '@objectstack/spec/ui'` →
-    TO `import { NotificationSchema, type Notification } from '@objectstack/spec/api'`.
-    **Shape change**: the api row is an inbox record, not a presentation
-    config — the ui shape's `severity` / `duration` / `dismissible` /
-    `actions` / `position` / ARIA fields do not exist there. For the
+    TO: **no replacement.** Do NOT re-point this import at
+    `@objectstack/spec/api` — that is the same name under a different
+    contract, and following it does not compile. The api `Notification` is the
+    REST inbox row (`id` / `type` / `title` / `body` / `read` / `data` /
+    `actionUrl` / `createdAt`); the removed ui shape was a toast instance
+    (`message` / `severity` / `position` / `duration` / `dismissible` /
+    `actions` + ARIA). The two share zero fields, and aliasing one to the
+    other would re-create the dual-source trap this change closed. For the
     presentation vocabulary keep using the ui enums, which are unchanged:
-    `NotificationTypeSchema`, `NotificationSeveritySchema`,
-    `NotificationPositionSchema`, `NotificationActionSchema` (+ their
-    types) still live in `@objectstack/spec/ui`.
+    `NotificationTypeSchema`, `NotificationSeveritySchema` and
+    `NotificationPositionSchema` (+ their types) still live in
+    `@objectstack/spec/ui`. Declare the instance shape locally, as objectui
+    does. (`NotificationActionSchema` was listed here too at the time of this
+    change; #5015 retired it in 17.0.0-rc.3, so three enums survive, not
+    four.)
 - **Removed** `NotificationConfigSchema` / `NotificationConfig` from **both**
   `@objectstack/spec/system` and `@objectstack/spec/ui` — the bare name left
-  the spec export surface entirely. Both declarations had zero importers in
-  all three repos and were wired into no parent schema. The system side (a
+  the spec export surface entirely. Neither declaration was wired into any
+  parent schema; the `./system` one had no importers in any of the three
+  repos, and the `./ui` one was held only by the objectui re-export bridge
+  named in the correction above. The system side (a
   channel + template + recipients + schedule + retryPolicy + tracking
   "unified notification management protocol") predates ADR-0030's accepted
   delivery architecture and advertised capability the runtime does not
   deliver (its channel enum's `push`/`slack`/`teams`/`webhook` dead-letter,
   #3197; nothing reads `schedule`/`retryPolicy`/`tracking`). The ui side (a
   toaster global config: `defaultPosition`/`defaultDuration`/`maxVisible`/
-  `stackDirection`/`pauseOnHover`) was never adopted by objectui.
+  `stackDirection`/`pauseOnHover`) was never adopted by objectui's toaster,
+  which reads its own `NotificationSystemConfig` instead.
   - FROM `import { NotificationConfigSchema } from '@objectstack/spec/system'` (or `.../ui`) →
     TO: no direct replacement. The live delivery vocabulary is
     `NotificationService.emit` (`INotificationService`,
