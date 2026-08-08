@@ -61,8 +61,10 @@ import {
   PAGINATION_CASES,
   PAGINATION_ROWS,
   PAGINATION_UNORDERED_CASES,
+  PAGINATION_ZERO_LIMIT_CASES,
 } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
+import { RemoteTransport } from './remote-transport.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 
 const TICKET_OBJECT = {
@@ -195,5 +197,56 @@ describe('TursoDriver remote — paged reads are a partition of the result set',
     const seen = await walk(5);
     expect(seen).toEqual([...PAGINATION_ALL_IDS].sort());
     expect(seen).not.toEqual(PAGINATION_ROWS.map((r) => r.id));
+  });
+
+  /**
+   * `limit: 0` means "return no records" (#6485/#6577). This transport does not
+   * go through knex at all — `remote-transport.ts` assembles its own
+   * `LIMIT`/`OFFSET` — so its agreement with the local half is a separate fact
+   * needing its own measurement, not an inheritance. It reads `!== undefined`
+   * today; this is what stops that from silently becoming `if (query.limit)`.
+   */
+  describe('`limit: 0` returns no records', () => {
+    for (const testCase of PAGINATION_ZERO_LIMIT_CASES) {
+      it(testCase.name, async () => {
+        const rows: Array<Record<string, unknown>> = await driver.find('ticket', { ...testCase.query });
+        expect(rows).toHaveLength(testCase.expectedRowCount);
+      });
+    }
+  });
+
+  /**
+   * An OFFSET with no LIMIT — the defect the case-set's bare-offset control
+   * surfaced here, and a separate bug from the `limit: 0` one it was added for.
+   *
+   * SQLite's grammar is `LIMIT expr [OFFSET expr]`, so an OFFSET cannot stand
+   * alone. This compiler emitted the two clauses independently and the server
+   * answered `near "OFFSET": syntax error` — for every offset value, not a
+   * boundary case, and only on THIS transport: the local half goes through knex,
+   * which synthesises the `LIMIT -1` no-limit sentinel.
+   *
+   * Kept as its own block rather than left to the shared control because the
+   * control asserts a row COUNT, and a count assertion reports this as "expected
+   * 12, got a thrown error" — which reads as a pagination fault rather than as
+   * a statement that never parsed.
+   */
+  describe('an offset with no limit still assembles a legal statement', () => {
+    for (const offset of [0, 1, 5]) {
+      it(`offset ${offset} alone does not throw a syntax error`, async () => {
+        const rows: Array<Record<string, unknown>> = await driver.find('ticket', { offset });
+        expect(rows).toHaveLength(PAGINATION_ROWS.length - offset);
+      });
+    }
+
+    it('agrees with what knex builds for the local transport — `LIMIT -1 OFFSET ?`', () => {
+      const built = new RemoteTransport().buildSelectSQL('ticket', { offset: 3 } as never);
+      expect(built.sql.toUpperCase()).toContain('LIMIT ? OFFSET ?');
+      expect(built.args).toEqual([-1, 3]);
+    });
+
+    it('still emits the caller\'s own limit when one was given — the sentinel is not a default', () => {
+      const built = new RemoteTransport().buildSelectSQL('ticket', { limit: 0, offset: 3 } as never);
+      expect(built.args).toEqual([0, 3]);
+    });
   });
 });
