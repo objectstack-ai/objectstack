@@ -235,7 +235,7 @@ describe('[#5929] the delete-side prior-row demand is asked per object', () => {
 
     expect((reads.findOneOn['del_scope_a'] ?? 0) - before).toBe(0);
     // The row really went — a skipped read must not have skipped the write.
-    expect(await engine.count('del_scope_a', {} as any)).toBe(0);
+    expect(await engine.count('del_scope_a', {})).toBe(0);
   });
 
   it('the object that DOES have the afterDelete hook pays it, and `previous` is the stored row', async () => {
@@ -315,7 +315,7 @@ describe('[#5929] the delete-side prior-row demand is asked per object', () => {
     await engine.delete('del_scope_locked', { where: { id: row.id } } as any);
 
     expect((reads.findOneOn['del_scope_locked'] ?? 0) - before).toBe(0);
-    expect(await engine.count('del_scope_locked', {} as any)).toBe(0);
+    expect(await engine.count('del_scope_locked', {})).toBe(0);
   });
 });
 
@@ -399,7 +399,7 @@ describe('[#5929] the predicate delete path asks the same per-object question', 
     await engine.delete('del_scope_a', { multi: true, where: { status: 'stale' } } as any);
 
     expect((reads.findOn['del_scope_a'] ?? 0) - before).toBe(0);
-    expect(await engine.count('del_scope_a', {} as any)).toBe(0);
+    expect(await engine.count('del_scope_a', {})).toBe(0);
   });
 
   it('…and reads it exactly once when the object IS hooked', async () => {
@@ -436,7 +436,11 @@ describe('[#5929] on a KERNEL-hosted engine the per-object skip finally happens'
     } as any);
     await kernel.use(new ObjectQLPlugin());
     await kernel.bootstrap();
-    const engine = kernel.getService('objectql') as any;
+    // `getService<ObjectQL>` — the slot's real contract, not `as any`. The
+    // erasure would switch off checking for every `engine.*` call below while
+    // looking identical to code that keeps it (#4168/#4176/#4251), and the
+    // calls below are the measurement.
+    const engine = kernel.getService<ObjectQL>('objectql');
     for (const o of objects) engine.registry.registerObject(o, 'test', 'test');
     return { kernel, engine, reads: stub.reads };
   }
