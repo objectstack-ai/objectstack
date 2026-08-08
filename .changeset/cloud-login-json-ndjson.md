@@ -65,3 +65,6 @@ that previously worked stops working", which was true there — the output was
 unreadable before. It is false here: a single-document reader of
 `os cloud login --json` works today and stops working on the device-flow path.
 The bump follows the wire shape, not the size of the diff.
+
+<!-- adr-0087: not-required (no-migration-prescription) what changes is one CLI command's stdout STREAM shape. No authorable key, no exported symbol and no stored value moves: `packages/spec` is untouched, no metadata schema gains or loses a key, and nothing an app authored or persisted becomes invalid or unparseable — so `objectstack migrate meta` has nothing to convert and neither `spec-changes.json` nor the generated upgrade guide has anything to carry. The consumer action prescribed above is rewriting a SCRIPT that reads this command's stdout (parse line by line instead of one `JSON.parse`), which is a channel the ADR-0087 ledger does not serve at all; the channels that do reach those readers are this changeset's own CHANGELOG text, the `--json` `--help` line, and the CLI reference page — all three shipped with this change. -->
+
