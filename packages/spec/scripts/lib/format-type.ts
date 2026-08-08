@@ -566,11 +566,22 @@ function renderType(prop: any, ctx: TypeContext | undefined, depth: number): str
     // Identical spellings are not new here, but #6374 made them common: with
     // `SHAPE_DEPTH_LIMIT` in force every all-object union below a summary
     // prints `object` per variant, so `object | object | object | object`
-    // appeared on 11 cells across 6 shipped reference pages, and
+    // appeared on 9 cells across 5 shipped reference pages, and
     // `kernel/manifest.mdx`'s `Manifest.navigationContributions` spelled four
     // of them and then counted `… +5 more` identical ones behind them. Those
     // pages are the authoritative input for AI authors (ADR-0033), where a
     // cell that reads as a rendering bug costs more than a wide one.
+    //
+    // 9 and not the 11 #6569 was filed with, because a SUBSTRING count of
+    // `object | object` also matches the two cells that spell
+    // `object | object[]` (`ui/page.mdx`'s `slots`,
+    // `automation/state-machine.mdx`'s `states`) — two spellings, which the
+    // rule below deliberately never collapses. Worth knowing before grepping:
+    // re-deriving 11 that way and concluding the dedupe missed two cells is
+    // the wrong conclusion from a correct observation. Counting all duplicate
+    // spellings rather than only `object` ones, the rule moves 14 cells on 7
+    // pages; the extra 5 repeat a SHAPE spelling (`ui/app.mdx`,
+    // `data/validation.mdx`).
     //
     // WHY THE COUNT STAYS. Collapsing to a bare `object` would drop the union's
     // ARITY, which after the depth budget is the only fact that cell still
