@@ -73,8 +73,7 @@ export const SortNodeSchema = lazySchema(() => strictObject(
 const AGG_RETIRED_MIDDLE =
   ' was removed from `AggregationFunction` in @objectstack/spec 17 (#6188, ADR-0049 '
   + 'enforce-or-remove) — no SQL backend ever compiled it. `SqlDriver.mapAggregateFunc` and '
-  + '`RemoteTransport.aggregate` lower the same set of functions and refuse everything outside '
-  + 'it (`count_distinct` joined that set at #6409; these two never did), and '
+  + '`RemoteTransport.aggregate` each lower the same set of functions and refuse the rest, and '
   + "the v1 dataset runtime had to subtract this one by name to stop it reaching a `COUNT(*)` "
   + 'fallback that returns a row count in place of the value asked for. On the backend family '
   + 'this platform targets it was a declaration that could only fail. ';
