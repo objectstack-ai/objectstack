@@ -111,6 +111,7 @@ describe('InMemoryDriver — paged reads are a partition of the result set (obje
       expect(paged.map((r) => r.id)).toEqual(PAGINATION_ROWS.map((r) => r.id));
     });
   }
+
   /**
    * `limit: 0` returns no records (#6485/#6577).
    *

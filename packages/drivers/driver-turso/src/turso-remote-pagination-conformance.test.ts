@@ -215,21 +215,6 @@ describe('TursoDriver remote — paged reads are a partition of the result set',
   });
 
   /**
-   * An OFFSET with no LIMIT — the defect the case-set's bare-offset control
-   * surfaced here, and a separate bug from the `limit: 0` one it was added for.
-   *
-   * SQLite's grammar is `LIMIT expr [OFFSET expr]`, so an OFFSET cannot stand
-   * alone. This compiler emitted the two clauses independently and the server
-   * answered `near "OFFSET": syntax error` — for every offset value, not a
-   * boundary case, and only on THIS transport: the local half goes through knex,
-   * which synthesises the `LIMIT -1` no-limit sentinel.
-   *
-   * Kept as its own block rather than left to the shared control because the
-   * control asserts a row COUNT, and a count assertion reports this as "expected
-   * 12, got a thrown error" — which reads as a pagination fault rather than as
-   * a statement that never parsed.
-   */
-  /**
    * The SELECT this transport puts on the wire for `query`, read off a
    * recording client rather than recompiled here — the same instrument
    * `remote-pagination-tiebreaker.test.ts` uses, and for the same reason: a
@@ -262,6 +247,21 @@ describe('TursoDriver remote — paged reads are a partition of the result set',
     return reads[0]!;
   }
 
+  /**
+   * An OFFSET with no LIMIT — the defect the case-set's bare-offset control
+   * surfaced here, and a separate bug from the `limit: 0` one it was added for.
+   *
+   * SQLite's grammar is `LIMIT expr [OFFSET expr]`, so an OFFSET cannot stand
+   * alone. This compiler emitted the two clauses independently and the server
+   * answered `near "OFFSET": syntax error` — for every offset value, not a
+   * boundary case, and only on THIS transport: the local half goes through knex,
+   * which synthesises the `LIMIT -1` no-limit sentinel.
+   *
+   * Kept as its own block rather than left to the shared control because the
+   * control asserts a row COUNT, and a count assertion reports this as "expected
+   * 12, got a thrown error" — which reads as a pagination fault rather than as
+   * a statement that never parsed.
+   */
   describe('an offset with no limit still assembles a legal statement', () => {
     for (const offset of [0, 1, 5]) {
       it(`offset ${offset} alone does not throw a syntax error`, async () => {
