@@ -67,6 +67,7 @@ const OPPORTUNITY_SCHEMA = {
     id: { name: 'id' },
     name: { name: 'name' },
     next_step: { name: 'next_step' },
+    stage: { name: 'stage' },
     owner_id: { name: 'owner_id' },
     created_by: { name: 'created_by' },
     organization_id: { name: 'organization_id' },
@@ -128,7 +129,33 @@ const CRM_REP: PermissionSet = PermissionSetSchema.parse({
   },
 });
 
-const PERMISSION_SETS: PermissionSet[] = [MEMBER_DEFAULT, CRM_MANAGER, CRM_REP];
+/**
+ * [#5493 control] The SAME profile plus an APP-AUTHORED RLS update-widener:
+ * "anyone may update an opportunity still in `prospecting`". Applicable policies
+ * OR-combine, so at the RLS layer this widens PAST the platform ownership floor
+ * — which is the shape #5493 reports from the other side: the security gate
+ * admits the row and the SHARING middleware refuses it first.
+ *
+ * Present as a CONTROL, not a fix. This PR does not touch the sharing
+ * middleware; the case at the bottom of this file measures that #5493's symptom
+ * is unchanged by the composition landed here.
+ */
+const CRM_REP_WIDENED: PermissionSet = PermissionSetSchema.parse({
+  name: 'crm_rep_widened',
+  objects: {
+    crm_opportunity: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+  },
+  rowLevelSecurity: [
+    {
+      name: 'app_open_stage_updates',
+      object: 'crm_opportunity',
+      operation: 'update',
+      using: "stage == 'prospecting'",
+    },
+  ],
+});
+
+const PERMISSION_SETS: PermissionSet[] = [MEMBER_DEFAULT, CRM_MANAGER, CRM_REP, CRM_REP_WIDENED];
 
 // ── rows ───────────────────────────────────────────────────────────────────
 
@@ -140,12 +167,12 @@ const U_READ_SHARE = 'u_read_share';
 
 /** Owned AND created by somebody else — the cross-owner row the sweep probed. */
 const OPP_THEIRS = {
-  id: 'opp_theirs', name: 'Theirs', next_step: 'call',
+  id: 'opp_theirs', name: 'Theirs', next_step: 'call', stage: 'prospecting',
   owner_id: U_OTHER, created_by: U_OTHER, organization_id: 'org1',
 };
 /** The rep's own row — the positive control the floor must keep admitting. */
 const OPP_MINE = {
-  id: 'opp_mine', name: 'Mine', next_step: 'call',
+  id: 'opp_mine', name: 'Mine', next_step: 'call', stage: 'prospecting',
   owner_id: U_REP, created_by: U_REP, organization_id: 'org1',
 };
 /** Owner-less object, created by somebody else (the E2 shape). */
@@ -335,6 +362,7 @@ const MANAGER_CTX = ctxFor(U_MANAGER, 'crm_manager');
 const REP_CTX = ctxFor(U_REP, 'crm_rep');
 const EDIT_SHARE_CTX = ctxFor(U_EDIT_SHARE, 'crm_rep');
 const READ_SHARE_CTX = ctxFor(U_READ_SHARE, 'crm_rep');
+const WIDENED_CTX = ctxFor('u_widened', 'crm_rep_widened');
 
 /**
  * The refusal this issue is about, asserted as an ENVELOPE and not as "it
@@ -454,5 +482,36 @@ describe('[#5492] the platform ownership floor still stands where nothing replac
     ).resolves.toBe('abstain');
     const out = await stack.write('update', 'crm_note', NOTE_THEIRS.id, MANAGER_CTX);
     expectRowLevelDenial(out, 'update', 'crm_note');
+  });
+});
+
+describe('[#5493 control] the sharing middleware still refuses on its own — unchanged by this PR', () => {
+  let stack: Stack;
+  beforeEach(async () => { stack = await makeStack(); });
+
+  it('an APP-AUTHORED RLS update-widener passes the security gate and is still refused by sharing', async () => {
+    // #5493 is this composition's mirror image: there the RLS layer admits and
+    // the SHARING middleware answers FORBIDDEN first. This case reproduces that
+    // shape so the answer to "did #5492's fix change #5493?" is measured rather
+    // than reasoned: the app policy `stage == 'prospecting'` OR-combines past the
+    // platform ownership floor, so the security pre-image gate admits the row —
+    // and the write is still refused, by the other authority, exactly as before.
+    await expect(
+      stack.sharing.checkEdit('crm_opportunity', OPP_THEIRS.id, WIDENED_CTX as any),
+    ).resolves.toBe('deny');
+
+    const out = await stack.write('update', 'crm_opportunity', OPP_THEIRS.id, WIDENED_CTX);
+    expect(out.ok, 'still refused').toBe(false);
+    // The refusal is NOT the row-level pre-image gate's — that one admitted.
+    // Naming which authority refused is the whole point of the control.
+    expect(out.message, 'refused by the sharing middleware, not the RLS pre-image gate').not.toContain(
+      '(row-level security)',
+    );
+    // …and POSITIVELY the other authority's envelope, so this case cannot pass
+    // by refusing for some third reason (a missing CRUD bit, a thrown probe):
+    //   FORBIDDEN: insufficient privileges to update crm_opportunity opp_theirs
+    expect(out.code, "the sharing middleware's own code").toBe('FORBIDDEN');
+    expect(out.message).toContain('insufficient privileges to update crm_opportunity');
+    expect(rowById(stack, 'crm_opportunity', OPP_THEIRS.id)?.next_step).toBe('call');
   });
 });
