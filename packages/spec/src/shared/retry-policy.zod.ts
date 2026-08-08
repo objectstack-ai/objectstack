@@ -27,7 +27,9 @@
  *
  * - `automation/flow.zod.ts` → `Flow.errorHandling` (#4964) — spelled the base
  *   delay `retryDelayMs`, every other key already identical.
- * - `automation/etl.zod.ts` → `ETLPipeline.retry` (#4962) — spelled the count
+ * - `automation/etl.zod.ts` → `ETLPipeline.retry` (#4962; the whole L2 layer
+ *   was retired at #6414, so this surface no longer exists — the convergence
+ *   is recorded because it is how the divergence was FOUND) — spelled the count
  *   `maxAttempts`, defaulted it to **3** (the opposite of the opt-in reading
  *   below), and declared no `backoffMultiplier` / `maxRetryDelayMs` / `jitter`
  *   at all, so its backoff was flat, uncapped and unjittered.

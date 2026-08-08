@@ -5,6 +5,23 @@ description: I18n protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
+Display-label and ARIA-label primitives shared by every `ui/` shape.
+
+A MODULE doc, deliberately, rather than the first declaration's doc doing the
+job by accident: `scripts/build-skill-references.ts` headlines this file in
+four skill indexes from the first JSDoc it finds, so without one the headline
+silently becomes whatever declaration happens to sort first. It did exactly
+that when #5728 added `InlineLocaleMapSchema` above `I18nLabelSchema` — the
+indexes started describing the file as a BCP-47 key format. Stating the
+headline once, on the module, makes it a decision instead of a side effect of
+declaration order.
+
+Declaration order here is load-bearing and cannot simply be flipped back:
+`I18nLabelSchema` names `InlineLocaleMapSchema` in its union, and under
+`OS_EAGER_SCHEMAS=1` (which `gen:schema` sets) `lazySchema` evaluates its
+factory at module load — so a forward reference would be a TDZ crash in the
+schema build rather than a lazy lookup.
+
 <Callout type="info">
 **Source:** `packages/spec/src/ui/i18n.zod.ts`
 </Callout>
@@ -12,8 +29,8 @@ description: I18n protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { AriaPropsSchema, I18nLabelSchema } from '@objectstack/spec/ui';
-import type { AriaProps, I18nLabel } from '@objectstack/spec/ui';
+import { AriaPropsSchema, I18nLabelSchema, InlineLocaleMapSchema } from '@objectstack/spec/ui';
+import type { AriaProps, I18nLabel, InlineLocaleMap } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AriaPropsSchema.parse(data);
@@ -29,9 +46,34 @@ ARIA accessibility attributes
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **ariaLabel** | `string` | optional | Accessible label for screen readers (WAI-ARIA aria-label) |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
 | **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
 | **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
+
+---
+
+## I18nLabel
+
+Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Type: `string`
+
+---
+
+#### Option 2
+
+Inline locale map: BCP-47 tag → translated string
+
+Type: `Record<string, string>`
+
+---
 
 
 ---

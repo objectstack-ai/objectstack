@@ -139,15 +139,24 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 //     `saveMetaItem` / REST `/meta` write still stores an unvalidated props bag
 //     (#4463's fourth wall). That is recorded, not fixed, by #5068.
 //
-// The gate is WARNING-level in this first step. The live corpus violates these
-// declarations in places that are open contract questions rather than authoring
-// mistakes — inline `{ en, 'zh-CN' }` label maps on three published platform
-// pages against an `I18nLabelSchema` that is a plain `z.string()` (#5728), and
-// keys objectui's renderers honour that this file does not declare. The
-// warning-period inventory is the acceptance baseline for the error upgrade.
-// #5775 cleared this file's half of that inventory; #5728 (the label maps) and
-// the page rewrites (`page:card.visible`, #5776's tab `key`) are what remain
-// before the upgrade to error.
+// The gate is WARNING-level in this first step. The live corpus violated these
+// declarations in places that were open contract questions rather than
+// authoring mistakes, and the inventory is the acceptance baseline for the
+// error upgrade. Two of the three entries are now cleared:
+//
+//  - #5775 declared the keys objectui's renderers honour and tombstoned the
+//    four nothing read.
+//  - #5728 settled the inline `{ en, 'zh-CN' }` label maps the three published
+//    platform pages author: the maintainer ruled (2026-08-06) that the map is a
+//    delivered capability, so `I18nLabelSchema` is a union of the plain string
+//    and an inline locale map, and `element:text.content` — declared a bare
+//    `z.string()` and therefore out of that union's reach — was named in the
+//    same ruling and moved onto it. That retired all 42 `component-props-invalid`
+//    findings this gate reported on the platform pages (34 label + 8 content).
+//
+// What remains before the upgrade to error is the page rewrites
+// (`page:card.visible` → the component-level `visibleWhen`, #5776's tab `key`
+// → `value`), not a declaration in this file.
 //
 // The verdict is pinned in `component.test.ts` and in the `ui/` tables of
 // `docs/audits/2026-07-unknown-key-strictness-ledger.md` — change all three
@@ -509,7 +518,19 @@ export const AIChatWindowProps = z.object({
  */
 
 export const ElementTextPropsSchema = lazySchema(() => z.object({
-  content: z.string().describe('Text or Markdown content'),
+  /**
+   * Text or Markdown body copy.
+   *
+   * `I18nLabelSchema` rather than a bare `z.string()` (#5728, named explicitly
+   * in the maintainer's ruling because the label-wide widening could not reach
+   * it): `sys-user.page.ts` authors eight `element:text` nodes whose `content`
+   * is an inline `{ en, 'zh-CN', 'ja-JP', 'es-ES' }` map, and objectui resolves
+   * them through the same `pickLocalized` every label goes through. The bare
+   * string was the declaration disagreeing with the delivered shape, and it was
+   * eight of the 42 findings the #5068 gate reported on the platform's own
+   * pages.
+   */
+  content: I18nLabelSchema.describe('Text or Markdown content — a plain string, or an inline locale map'),
   variant: z.enum(['heading', 'subheading', 'body', 'caption'])
     .optional().default('body').describe('Text style variant'),
   align: z.enum(['left', 'center', 'right'])

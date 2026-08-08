@@ -19,8 +19,20 @@
  *      for `delete` and is deliberately NARROWER (ADR-0111 D3) — a
  *      share widens which ROWS a principal reaches, never which VERBS
  *      they may use, so an `edit` share does NOT confer delete:
- *      ownership or the bypass only. Each returns `true` when the
- *      caller may perform that operation, `false` otherwise.
+ *      ownership or the bypass only.
+ *
+ *      [#6428] Each gate has TWO forms, and the difference matters to
+ *      anyone COMPOSING this answer with another authority's.
+ *      `checkEdit()` / `checkDelete()` are the primary form and answer a
+ *      tri-state {@link SharingWriteVerdict} — `allow` (a positive basis
+ *      to permit), `abstain` (this service does not enforce on this row
+ *      at all), `deny` (refused). `canEdit()` / `canDelete()` are the
+ *      two-state PROJECTION every pre-existing caller already reads:
+ *      `true` for anything that is not a `deny`, so their truth table is
+ *      byte-for-byte what it has always been. Read the tri-state whenever
+ *      an `abstain` must NOT be mistaken for permission — see
+ *      {@link SharingWriteVerdict} for the measured fail-open that
+ *      collapsing the two into one `true` produced (#5492 E2).
  *
  * Manual share CRUD is exposed via `grant()`, `revoke()`, and
  * `listShares()`. The REST layer wires these to
@@ -118,11 +130,48 @@ export interface SharingExecutionContext {
 }
 
 /**
+ * [#6428] The verdict a per-record WRITE gate returns. THREE states, because
+ * two cannot say what this service actually knows:
+ *
+ * - **`allow`** — a POSITIVE basis to permit the write exists: ownership
+ *   (widened by write DEPTH), an `edit`-level `sys_record_share` row (update
+ *   only — ADR-0111 D3), the `modifyAllRecords` super-user bypass, or a system
+ *   context.
+ * - **`abstain`** — this service has NO OPINION about this row, because record
+ *   sharing does not enforce on it at all: a `public` sharing model, an object
+ *   with no owner field, a bypass-listed platform internal, an object this
+ *   engine has no schema for. **Not a permission.** Whatever other authority
+ *   guards the row still decides, and a caller that has no other authority to
+ *   consult may treat it as "nothing here stops you" — which is exactly what
+ *   {@link ISharingService.canEdit}'s `true` has always meant.
+ * - **`deny`** — this service REFUSES: the object IS sharing-enforced and the
+ *   principal has no ownership, no write-level share and no bypass — or the
+ *   answer could not be resolved at all.
+ *
+ * **Why the third state exists (measured, not theoretical).** Collapsing
+ * `allow` and `abstain` into one `true` is safe for a caller that only ADDS a
+ * gate (the sharing middleware reads `true` as "I do not stop you") and unsafe
+ * for a caller that lets this verdict OVERRIDE another authority's floor.
+ * #5492's experiment E2 delegated a pre-image write gate to `canEdit()` and an
+ * ordinary member's cross-creator UPDATE became `ok: true` on objects with **no
+ * `owner_id` column** — where `main` answers 403 — because the platform's
+ * `created_by` ownership floor is the only row-level write gate such objects
+ * have, and an abstaining `true` overrode it.
+ *
+ * **A resolution failure is `deny`, never `abstain`.** The two are opposite
+ * instructions to a composing caller: `abstain` hands the decision on, `deny`
+ * ends it. Reading a failed lookup as "no opinion" is precisely the confusion
+ * that produced that fail-open, so an implementation that cannot answer must
+ * refuse rather than step aside.
+ */
+export type SharingWriteVerdict = 'allow' | 'abstain' | 'deny';
+
+/**
  * Public contract.
  *
  * Implementations should treat `context.isSystem === true` as a
- * complete bypass (no filter, every `canEdit` returns `true`) so that
- * platform-internal writers (audit, migrations, the sharing plugin
+ * complete bypass (no filter, every write gate answers `allow` / `true`) so
+ * that platform-internal writers (audit, migrations, the sharing plugin
  * itself) cannot deadlock on their own enforcement.
  */
 export interface ISharingService {
@@ -137,11 +186,19 @@ export interface ISharingService {
   ): Promise<unknown | null>;
 
   /**
-   * Return `true` when the principal in `context` may UPDATE the record
-   * `(object, recordId)`. Ownership (widened by write DEPTH), a write-level
-   * ({@link ShareAccessLevel} `edit`) share, OR — [#4647] — the
-   * `modifyAllRecords` super-user bypass. Always true for system context,
-   * `public` objects, and objects with no owner field.
+   * [#6428] The UPDATE gate, in its primary tri-state form: may the principal
+   * in `context` UPDATE the record `(object, recordId)`, and does this service
+   * have an opinion at all?
+   *
+   * - `allow` — ownership (widened by write DEPTH), a write-level
+   *   ({@link ShareAccessLevel} `edit`) share, [#4647] the `modifyAllRecords`
+   *   super-user bypass, or a system context.
+   * - `abstain` — record sharing does not enforce on this row: a `public`
+   *   object, an object with **no owner field**, a bypass-listed platform
+   *   internal, or an object with no resolvable schema. The answer belongs to
+   *   whatever else guards the row (see {@link SharingWriteVerdict}).
+   * - `deny` — a sharing-enforced object where the principal has none of the
+   *   above, a principal-less context, or an unresolvable answer.
    *
    * The bypass is the same `ISecurityService.hasWriteBypass` predicate
    * {@link canDelete} and {@link canManageShares} consult, so the three write
@@ -150,12 +207,56 @@ export interface ISharingService {
    * write costs no extra resolution, and it **fails CLOSED** (ADR-0111 D2):
    * no security service, a throwing probe, or a principal-less /
    * on-behalf-of context leaves the answer at owner-plus-share only.
+   *
+   * **Fail-closed, restated because the tri-state is where it gets confused:**
+   * a lookup that throws is a `deny`, never an `abstain`.
+   */
+  checkEdit(
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+  ): Promise<SharingWriteVerdict>;
+
+  /**
+   * Return `true` when the principal in `context` may UPDATE the record
+   * `(object, recordId)`. Ownership (widened by write DEPTH), a write-level
+   * ({@link ShareAccessLevel} `edit`) share, OR — [#4647] — the
+   * `modifyAllRecords` super-user bypass. Always true for system context,
+   * `public` objects, and objects with no owner field.
+   *
+   * [#6428] The two-state PROJECTION of {@link checkEdit}: `true` for every
+   * verdict that is not `deny`, i.e. `allow` and `abstain` alike. That
+   * collapse is the historical semantics, kept byte-for-byte so existing
+   * callers do not drift — it is correct for a caller that only ADDS this gate
+   * to whatever else already guards the row (the sharing middleware, the
+   * `sys_attachment` parent gate, the ADR-0055 master check), and WRONG for a
+   * caller that would let this answer override another authority's floor. The
+   * latter must read {@link checkEdit}.
    */
   canEdit(
     object: string,
     recordId: string,
     context: SharingExecutionContext,
   ): Promise<boolean>;
+
+  /**
+   * [#6428 / ADR-0111 D3] The DELETE gate, in its primary tri-state form.
+   *
+   * The verb boundary is inherited, not restated: a share widens *which rows*
+   * a principal reaches, never *which verbs* they may use, so an `edit` share
+   * that makes {@link checkEdit} answer `allow` leaves this one at `deny`
+   * (Salesforce Read/Write cannot delete; Dataverse `Delete` is a distinct
+   * privilege; Odoo splits `write`/`unlink`). `allow` is ownership (widened by
+   * write DEPTH), the `modifyAllRecords` super-user bypass, or system context
+   * ONLY; `abstain` covers exactly the rows {@link checkEdit} abstains on, so
+   * the two gates agree about which objects sharing enforces on and disagree
+   * only about the verb.
+   */
+  checkDelete(
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+  ): Promise<SharingWriteVerdict>;
 
   /**
    * [ADR-0111 D3] Return `true` when the principal in `context` may DELETE the
@@ -169,6 +270,9 @@ export interface ISharingService {
    * true for system context, `public` objects, and objects with no owner
    * field, matching {@link canEdit}. A per-record delete grant, if ever added,
    * is a capability mask AND-ed with object CRUD — not a share level.
+   *
+   * [#6428] The two-state PROJECTION of {@link checkDelete}, on the same rule
+   * as {@link canEdit}: `true` for everything that is not a `deny`.
    */
   canDelete(
     object: string,
