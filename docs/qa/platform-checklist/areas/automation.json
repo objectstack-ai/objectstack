@@ -465,7 +465,7 @@
       "title": "Screen flow round-trip: action trigger → paused run → rendered dialog → resume with inputs → persisted write",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": ["admin"],
@@ -482,7 +482,9 @@
         "the console renders the screen as a dialog: screenshot it (heading 'New Assignee')",
         "fill #ff-new_assignee with a unique value and Submit; record the resume POST body",
         "re-read the task over /api/v1/data/showcase_task/:id — the assignee must equal the submitted value",
-        "negative probe: trigger the action again on another row, then POST /runs/:runId/resume directly with an EMPTY inputs bag"
+        "negative probe: trigger the action again on another row, then POST /runs/:runId/resume directly with an EMPTY inputs bag",
+        "cancel-mid-flow probe: trigger the action on a fresh row to open the FlowRunner dialog, note its runId (GET /runs — the newest paused run), then DISMISS the dialog via its Cancel button (or the dialog close) WITHOUT submitting; do NOT POST resume",
+        "after the cancel: GET /api/v1/automation/showcase_reassign_wizard/runs/:runId for that run, then GET /runs/:runId/screen and POST /runs/:runId/resume with valid inputs to prove it is still resumable, and re-read the target task"
       ],
       "acceptance": [
         {
@@ -520,21 +522,30 @@
           "oracle": "api",
           "verify": "the empty-inputs resume answers 400 (screen-resume validation); the run re-reads as paused, and a later valid resume still works",
           "evidence": "rejected resume response + run reads"
+        },
+        {
+          "clause": "cancelling the screen dialog mid-flow closes the dialog but does NOT consume the durable suspension: the run is parked (still paused at 'collect'), not orphaned or cancelled, and remains resumable",
+          "oracle": "api",
+          "verify": "FlowRunner's Cancel/close only calls onClose (setScreenFlow(null)) — it POSTs nothing, so GET /runs/:runId re-reads status=paused at node 'collect'; a follow-up GET /runs/:runId/screen still serves the contract and a POST /runs/:runId/resume with valid inputs completes it (status=completed) and the downstream update_record lands — proving the parked run was resumable, never an orphan",
+          "evidence": "post-cancel run read (paused) + the later successful screen read/resume + task read"
         }
       ],
       "negative": [
-        "a resume with the required new_assignee absent that answers 2xx or completes the run is a FAIL — the screen contract's required flag must be enforced server-side, not only by the dialog"
+        "a resume with the required new_assignee absent that answers 2xx or completes the run is a FAIL — the screen contract's required flag must be enforced server-side, not only by the dialog",
+        "a cancel that leaves the run status=cancelled/completed, deletes the paused row, or silently fires the downstream update_record is a FAIL — dismissing the dialog must not consume the durable suspension (the run must stay resumable); equally, a cancel that makes the run unresumable (a later valid resume 404s 'no suspended run') is a FAIL"
       ],
       "traps": ["automation-input", "hydration-race"],
       "automated": { "kind": "e2e", "ref": "objectui e2e/live/screen-flow.spec.ts" },
       "source": [
         "objectui e2e/live/screen-flow.spec.ts (framework#3528 — the trigger → dialog → resume → refresh seam)",
+        "objectui packages/app-shell/src/views/FlowRunner.tsx (onClose = dismiss without POSTing resume; the durable suspension is untouched, so the paused run stays resumable)",
         "examples/app-showcase/src/automation/flows/index.ts (ReassignWizardFlow)",
         "packages/services/service-automation/src/builtin/screen-resume-validation.test.ts + src/screen-input-contract.ts (400 on missing required inputs)",
         "packages/runtime/src/route-ledger.ts (resume + getScreen routes)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — promotes the objectui live e2e's seam to a ledger item and adds the server-side required-input negative", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "initial — promotes the objectui live e2e's seam to a ledger item and adds the server-side required-input negative", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-08", "change": "added the FlowRunner cancel-mid-flow clause — dismissing the screen dialog parks the run (still paused, resumable) rather than orphaning/cancelling it; API run state is the oracle", "ref": "claude/platform-test-checklist-ocwugl" }
       ]
     },
     {
@@ -676,6 +687,149 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — connector dispatch matrix over the plugin / declarative-rest / declarative-MCP kinds the showcase seeds, with the unregistered-id negative", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "automation.flow-runs-page-test-trigger",
+      "title": "The developer Flow Runs page triggers a run with typed inputs and drives a screen flow's pause to completion (no orphaned paused rows)",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_batch_reminders (examples/app-showcase/src/automation/flows/index.ts BatchRemindersFlow) — an autolaunched loop flow declaring one INPUT variable `tasks` (type list, isInput:true), so the Test Run panel renders a JSON textarea for it",
+          "showcase_reassign_wizard (ReassignWizardFlow, type screen) declaring input variables recordId + new_assignee (text) — executing it from this page returns {status:'paused', runId, screen} and the page hands the pause to FlowRunner"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "open the developer Flow Runs PAGE (apps/console FlowRunsPage) at /apps/showcase_app/component/developer/flow-runs (console route developer/flow-runs) — NOT the Studio flow-designer Runs preview",
+        "typed-input run: select 'Batch Task Reminders (Loop)' (showcase_batch_reminders); the Test Run panel shows the `tasks` input as a JSON `list` textarea; paste three task-shaped objects [{id,title,owner}×3] and click 'Run Flow'",
+        "record the trigger POST (client.automation.execute → POST /api/v1/automation/showcase_batch_reminders/trigger) and screenshot the Result envelope; confirm a fresh row appeared in the Recent Runs panel (client.automation.listRuns → GET /automation/showcase_batch_reminders/runs)",
+        "GET /api/v1/automation/showcase_batch_reminders/runs and match the newest run id/status against the panel row",
+        "screen-flow run: select 'showcase_reassign_wizard'; fill recordId (a real showcase_task id) + new_assignee, click 'Run Flow' — the Result reads 'Waiting for input' (status=paused) and the FlowRunner dialog opens on THIS page",
+        "screenshot the FlowRunner dialog; fill #ff-new_assignee and Submit; record the resume POST (POST /runs/:runId/resume)",
+        "GET /api/v1/automation/showcase_reassign_wizard/runs — the driven run reads status=completed; count the paused rows for this flow before vs after and assert the count did not grow (the framework#3528 orphaned-paused regression)",
+        "re-read the target task over /api/v1/data/showcase_task/:id — its assignee equals the submitted value",
+        "negative probe: run the screen flow again but DISMISS the FlowRunner without submitting; confirm the page offers a 'Continue run' affordance (the durable pause is reopenable) rather than losing the run"
+      ],
+      "acceptance": [
+        {
+          "clause": "a typed-input flow triggers from the page: the `tasks` list input is rendered and editable, Run POSTs the trigger route, and the Result envelope reports a completed run",
+          "oracle": "network",
+          "verify": "capture POST /api/v1/automation/showcase_batch_reminders/trigger carrying {params:{tasks:[…3…]}}; the Result JsonBlock shows the run completed (or the loop body executed 3×) — not an error envelope",
+          "evidence": "trigger request/response + Result screenshot"
+        },
+        {
+          "clause": "the triggered run appears as a history row in the Recent Runs panel and that row matches the API",
+          "oracle": "api",
+          "verify": "GET /automation/showcase_batch_reminders/runs returns a newest run whose id + status equal the panel's freshest row (a row the panel invented that the API does not list is a rendering fault; a run the API lists that the panel omits is a refresh fault)",
+          "evidence": "runs API read + Recent Runs screenshot side by side"
+        },
+        {
+          "clause": "a SCREEN flow executed from this page pauses and the pause is handed to FlowRunner — the page opens the interactive dialog instead of dumping the {status:'paused'} envelope and stopping",
+          "oracle": "screenshot",
+          "verify": "after Run, the Result reads 'Waiting for input' and the FlowRunner dialog renders on the page (the framework#3528 fix: FlowTestRunner sets screenFlow when res.status==='paused' && res.screen && res.runId)",
+          "evidence": "dialog screenshot with the page behind it"
+        },
+        {
+          "clause": "driving the FlowRunner dialog to Submit resumes and completes the run",
+          "oracle": "network",
+          "verify": "Submit POSTs /api/v1/automation/showcase_reassign_wizard/runs/:runId/resume with the collected inputs; the run re-reads status=completed and the downstream update_record landed on the task",
+          "evidence": "resume request body + run read + task read"
+        },
+        {
+          "clause": "no orphaned paused row: after the screen flow is driven to completion, the run reads completed and the flow's paused-row count did not grow — the exact framework#3528 regression the page fix closes",
+          "oracle": "api",
+          "verify": "GET /automation/showcase_reassign_wizard/runs before and after: the run that was paused is now completed and the number of runs left in status=paused is unchanged (each test run of a screen flow used to strand a paused row)",
+          "evidence": "before/after runs reads with the paused-row tally"
+        }
+      ],
+      "negative": [
+        "a screen-flow test run that dumps the {status:'paused'} JSON envelope and stops — no dialog, no way to finish it — leaving a paused run stranded is a FAIL: that is the framework#3528 regression this page's FlowRunner hand-off exists to prevent",
+        "citing the Studio flow-designer Runs preview (metadata-admin FlowRunsPanel) as this item's surface is a wrong-panel FAIL — this item is the developer:flow-runs PAGE (trigger + inline history), which renders steps FLAT; the nested step-tree lives in automation.flow-run-step-nesting"
+      ],
+      "traps": ["wrong-panel", "hydration-race", "automation-input"],
+      "source": [
+        "objectui apps/console/src/pages/developer/FlowRunsPage.tsx (FlowTestRunner + inline FlowRunsPanel; framework#3528 — hands a paused screen run to FlowRunner so it no longer orphans a paused row)",
+        "objectui packages/app-shell/src/views/FlowRunner.tsx (the shared screen runner reused here)",
+        "objectui apps/console/src/AppContent.tsx (Route path 'developer/flow-runs') + registerDeveloperComponents.tsx (ref 'developer:flow-runs')",
+        "packages/runtime/src/route-ledger.ts (POST /automation/:name/trigger, GET /automation/:name/runs, POST /automation/:name/runs/:runId/resume)",
+        "examples/app-showcase/src/automation/flows/index.ts (BatchRemindersFlow tasks input, ReassignWizardFlow screen)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "initial — pins the developer Flow Runs page's typed-input trigger + the framework#3528 screen-flow hand-off (paused run driven to completion, no orphaned row); distinct from flow-run-step-nesting which reads the designer's Runs preview", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "automation.flow-toggle-kill-switch",
+      "title": "Toggling a record-change flow OFF is a runtime kill switch — the mutation that fired it produces no new run; ON restores firing",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": ["admin"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_urgent_task_alert (examples/app-showcase/src/automation/flows/index.ts UrgentTaskAlertFlow) — the only type:'record_change' flow, bound via record-after-write and firing on a showcase_task created with priority='urgent' (previous==null, #3427)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated (dogfood §0); sign in as the dev admin",
+        "baseline: POST /api/v1/data/showcase_task with priority='urgent'; GET /api/v1/automation/showcase_urgent_task_alert/runs and record the run count (one new run for this create)",
+        "read the pre-toggle runtime state: GET /api/v1/automation/_status (getFlowRuntimeStates) — showcase_urgent_task_alert enabled=true, bound=true",
+        "toggle OFF: POST /api/v1/automation/showcase_urgent_task_alert/toggle with {enabled:false} (client.automation.toggle → engine.toggleFlow → deactivateFlowTrigger)",
+        "re-read /_status: enabled=false and the record_change trigger unbound (bound=false)",
+        "POST another priority='urgent' showcase_task; GET the runs list again — assert NO new run row was added (the kill switch)",
+        "toggle ON: POST /api/v1/automation/showcase_urgent_task_alert/toggle {enabled:true}; re-read /_status (enabled=true, bound=true again)",
+        "POST a third priority='urgent' showcase_task; GET the runs list — a new run row appears again",
+        "negative probe (unknown flow): POST /api/v1/automation/does_not_exist/toggle {enabled:false} — expect a not-found error, no state change"
+      ],
+      "acceptance": [
+        {
+          "clause": "baseline: an urgent task created BEFORE any toggle fires the flow exactly once",
+          "oracle": "api",
+          "verify": "GET /automation/showcase_urgent_task_alert/runs after the first urgent create shows one new run whose trigger records the record_change mutation on that task",
+          "evidence": "runs list + the created task id"
+        },
+        {
+          "clause": "toggle OFF is a kill switch: after {enabled:false}, a mutation that used to fire the flow produces NO new run row",
+          "oracle": "api",
+          "verify": "the runs list count is IDENTICAL before and after the second urgent create — assert the ABSENCE of a new run, not merely that a run 'looks skipped'",
+          "evidence": "before/after runs reads bracketing the second create"
+        },
+        {
+          "clause": "the runtime state mirrors the toggle: /_status reports enabled=false and the record_change trigger unbound while off, enabled=true + bound while on",
+          "oracle": "api",
+          "verify": "GET /api/v1/automation/_status (getFlowRuntimeStates) for showcase_urgent_task_alert flips enabled/bound across the OFF and ON toggles — the toggle unbinds the trigger, it does not merely guard execute()",
+          "evidence": "the three /_status reads"
+        },
+        {
+          "clause": "toggle ON restores firing: after {enabled:true}, the next urgent task fires the flow again",
+          "oracle": "api",
+          "verify": "the runs list gains exactly one new run after the third urgent create (and none was added while off) — firing resumed only after the ON toggle",
+          "evidence": "runs list after the re-enable"
+        }
+      ],
+      "negative": [
+        "a new run row appearing while the flow is toggled OFF is a FAIL — the kill switch must unbind the trigger (deactivateFlowTrigger), not just guard the run; a run that fired anyway means the event source was never detached",
+        "a toggle that answers 2xx while /_status still reports enabled/bound unchanged is a FAIL — the reported state must match the enforced state",
+        "toggling an unknown flow that answers 2xx (rather than not-found) is a FAIL"
+      ],
+      "traps": ["seed-data-thin", "dispatcher-vs-hono-route"],
+      "source": [
+        "packages/runtime/src/route-ledger.ts (POST /automation/:name/toggle → automation.toggle; GET /automation/_status → automation.getRuntimeStatus)",
+        "packages/services/service-automation/src/engine.ts (toggleFlow → flowEnabled + activateFlowTrigger/deactivateFlowTrigger; getFlowRuntimeStates enabled/bound)",
+        "examples/app-showcase/src/automation/flows/index.ts (UrgentTaskAlertFlow — the record_change flow, #3427)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "initial — pins the /toggle runtime kill switch on a record_change flow: OFF unbinds the trigger so the firing mutation produces no run, ON restores it; runs list + runtime state as oracles", "ref": "claude/platform-test-checklist-ocwugl" }
       ]
     }
   ]

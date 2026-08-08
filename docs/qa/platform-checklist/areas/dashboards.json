@@ -11,7 +11,9 @@
       "revision": 2,
       "priority": "P1",
       "surface": "mixed",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -83,15 +85,27 @@
         "measures",
         "chartFlavour (hallucinated control)"
       ],
-      "traps": ["stale-console-bundle"],
+      "traps": [
+        "stale-console-bundle"
+      ],
       "source": [
         "#3358 §3 (four stray-key variants all rejected with the named error)",
         "packages/spec/src/ui/dashboard.zod.ts (LEGACY key list + strict error map, ADR-0021 single-form cutover)",
         "packages/spec/src/ui/chart.zod.ts (ChartConfigSchema wrong-layer guidance: dataset/aggregate/objectName/drillDown)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -102,7 +116,9 @@
       "revision": 2,
       "priority": "P2",
       "surface": "browser",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -146,15 +162,28 @@
       "negative": [
         "a chart area that stays blank until the window is resized is the FAIL this item exists for, even if it draws afterwards"
       ],
-      "traps": ["single-datapoint", "hydration-race"],
+      "traps": [
+        "single-datapoint",
+        "hydration-race"
+      ],
       "source": [
         "#3358 §3 — note its caveat: with thin seeds every widget draws one data point, so the tick 'says less than it looks'; prefer multi-bucket fixtures",
         "examples/app-showcase/src/ui/dashboards/chart-gallery.dashboard.ts",
         "examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 with the thin-seed caveat attached", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358 with the thin-seed caveat attached",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -165,7 +194,9 @@
       "revision": 2,
       "priority": "P2",
       "surface": "browser",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -217,7 +248,10 @@
       "negative": [
         "a drill that opens the object's FULL unfiltered list while looking scoped (heading says the bucket, rows say everything) is a FAIL — the network trace is the authority, not the heading"
       ],
-      "traps": ["seed-data-thin", "single-datapoint"],
+      "traps": [
+        "seed-data-thin",
+        "single-datapoint"
+      ],
       "source": [
         "#3358 §3",
         "#3415",
@@ -226,8 +260,18 @@
         "examples/app-showcase/src/ui/reports/index.ts (drilldown: true on all four reports)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; runnable once multi-bucket seeds exist", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358; runnable once multi-bucket seeds exist",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -235,15 +279,18 @@
       "title": "Every ChartTypeSchema member renders a real chart with the correct marks and series count",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "the Chart Gallery dashboard (showcase_chart_gallery) — one widget per DISTINCTLY-rendered family, bound to showcase_task_metrics / showcase_project_metrics (ADR-0021)",
-          "a scratch draft dashboard (via PUT /api/v1/meta/dashboard/qa_single_value_gallery?mode=draft) for the four single-value synonym types the gallery deliberately does not duplicate"
+          "a scratch draft dashboard (via PUT /api/v1/meta/dashboard/qa_single_value_gallery?mode=draft) for the four single-value synonym types the gallery deliberately does not duplicate",
+          "a scratch draft dashboard for the period-over-period compareTo probe (via PUT /api/v1/meta/dashboard/qa_compareto_probe?mode=draft) — NO showcase widget authors compareTo, so this is authored fresh exactly like the strict-widget probes; bind a metric/line widget to showcase_task_metrics with a time dimension (a month-bucketed created_at) and carry compareTo: { kind: 'previousPeriod' }"
         ],
         "knownGaps": [
           "kpi / gauge / solid-gauge / bullet have NO distinct renderer today — they render the same single value as `metric` (chart.zod.ts NOTE: 'honest single-value synonyms … gain a dial when a gauge renderer lands'; coverage.test.ts SAME_AS_METRIC). For these four the demonstrable claim is 'renders the value, not blank', NOT 'renders a dial' — a run must not tick a dial that does not exist"
@@ -259,6 +306,7 @@
         "for table and pivot, verify real grouped tables: Projects by Account rows == distinct accounts with 3 measure columns; Tasks by Status × Priority cross-tab dimensions match distinct status × priority",
         "author the scratch draft dashboard with four widgets of types kpi, gauge, solid-gauge, bullet, each bound to dataset showcase_task_metrics, values ['task_count'], publish it, and load it",
         "verify each of the four renders the same numeric value the metric tile shows — a number, never a blank tile",
+        "author qa_compareto_probe with a time-dimensioned widget carrying compareTo: { kind: 'previousPeriod' }, publish it, and load it — verify a comparison series/delta actually RENDERS (not the base numbers alone with the comparison silently dropped, the pre-#5011 ADR-0021 dataset-path bug)",
         "capture the per-variant verdict table"
       ],
       "acceptance": [
@@ -303,11 +351,24 @@
           "oracle": "test",
           "verify": "run examples/app-showcase/test/coverage.test.ts ('covers every distinctly-renderable ChartType'); it enumerates ChartTypeSchema minus SAME_AS_METRIC against the gallery's widgets. Note: this pins declaration coverage only — it does NOT replace the browser render checks above",
           "evidence": "the test output"
+        },
+        {
+          "clause": "period-over-period compareTo renders the comparison: a widget authoring compareTo: { kind: 'previousPeriod' } on the scratch draft draws a comparison series/delta beside its base measure — the ADR-0021 dataset path that used to silently DROP the string arm now carries the converged { kind, dimension? } shape (#5011)",
+          "oracle": "screenshot",
+          "verify": "the qa_compareto_probe widget shows a base value AND a previous-period comparison (series/delta), not the base alone; DOM read only after the screenshot confirms render",
+          "evidence": "the compareTo widget screenshot"
+        },
+        {
+          "clause": "the converged compareTo contract is pinned at the parse: { kind: 'previousPeriod' | 'previousYear', dimension? } is accepted THROUGH the dashboard metadata root, while the retired spellings (the bare 'previousPeriod' string, { offset: '7d' }) are rejected with the #5011 upgrade in hand — a strict schema nobody parses would gate nothing",
+          "oracle": "test",
+          "verify": "run packages/spec/src/ui/dashboard-compareto.test.ts (#5011) — it asserts the converged shape parses via getMetadataTypeSchema('dashboard') and every retired spelling is rejected with its prescription at the top level; evidence is the test output",
+          "evidence": "the dashboard-compareto.test.ts run output"
         }
       ],
       "negative": [
         "any variant rendering as a DIFFERENT family than named (e.g. sankey falling back to a bar) is a FAIL — advertising a type that renders as something else is the exact failure the trimmed enum exists to prevent",
-        "a blank widget with no error for any variant is a FAIL"
+        "a blank widget with no error for any variant is a FAIL",
+        "a compareTo widget rendering its base numbers with the comparison silently absent (the pre-#5011 dropped-string-arm bug) is a FAIL, not a thin-data caveat"
       ],
       "variants": [
         "bar",
@@ -331,15 +392,32 @@
         "table",
         "pivot"
       ],
-      "traps": ["single-datapoint", "hydration-race", "stale-console-bundle"],
+      "traps": [
+        "single-datapoint",
+        "hydration-race",
+        "stale-console-bundle"
+      ],
       "source": [
         "packages/spec/src/ui/chart.zod.ts (ChartTypeSchema — 20 members; NOTE on trimmed variants and single-value synonyms)",
         "examples/app-showcase/src/ui/dashboards/chart-gallery.dashboard.ts",
         "examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts",
-        "examples/app-showcase/src/coverage.ts + examples/app-showcase/test/coverage.test.ts (SAME_AS_METRIC waiver)"
+        "examples/app-showcase/src/coverage.ts + examples/app-showcase/test/coverage.test.ts (SAME_AS_METRIC waiver)",
+        "packages/spec/src/ui/dashboard-compareto.test.ts (#5011 — compareTo converged on the executor's { kind, dimension? } contract; parses through the dashboard root; retired spellings rejected with the upgrade)",
+        "packages/spec/src/ui/dashboard.zod.ts (DashboardWidgetSchema compareTo slot — union-free strict object so its prescription reaches the wire)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-variant render proof for the full ChartTypeSchema enum, grounded in the Chart Gallery + coverage ratchet", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new matrix item: per-variant render proof for the full ChartTypeSchema enum, grounded in the Chart Gallery + coverage ratchet",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-08",
+          "change": "added the period-over-period compareTo: { kind: 'previousPeriod' } clause + scratch-draft probe + parse pin (dashboard-compareto.test.ts #5011)",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -350,7 +428,9 @@
       "revision": 1,
       "priority": "P1",
       "surface": "mixed",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -426,9 +506,20 @@
         "a joined block nested inside blocks[] must be rejected at parse (block type enum is tabular|summary|matrix — no recursion); a silent save is a FAIL",
         "a report or widget silently rendering while its dataset binding names nothing (blank-without-error) is a FAIL"
       ],
-      "variants": ["tabular (via ListView lens)", "summary", "matrix", "joined"],
-      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/dashboard-designer-roundtrip.dogfood.test.ts" },
-      "traps": ["hydration-race", "seed-data-thin"],
+      "variants": [
+        "tabular (via ListView lens)",
+        "summary",
+        "matrix",
+        "joined"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "packages/qa/dogfood/test/dashboard-designer-roundtrip.dogfood.test.ts"
+      },
+      "traps": [
+        "hydration-race",
+        "seed-data-thin"
+      ],
       "source": [
         "packages/spec/src/ui/report.zod.ts (ReportType enum; block type enum excludes joined)",
         "packages/spec/src/ui/dashboard.zod.ts (ADR-0021 dataset+dimensions+values single form)",
@@ -438,7 +529,12 @@
         "packages/qa/dogfood/test/dashboard-designer-roundtrip.dogfood.test.ts"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: dataset-only authoring contract (ADR-0021) + ReportType variant matrix, pinned to the designer-roundtrip golden test", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new item: dataset-only authoring contract (ADR-0021) + ReportType variant matrix, pinned to the designer-roundtrip golden test",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -449,7 +545,9 @@
       "revision": 1,
       "priority": "P2",
       "surface": "mixed",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -508,8 +606,14 @@
         "a trend chart collapsing every row into one bucket while the seed spans multiple months is the #3773 regression returned — FAIL, not 'thin data'",
         "an empty window that leaves widgets showing previous (stale) values with no re-query in the trace is a FAIL"
       ],
-      "automated": { "kind": "conformance", "ref": "packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts" },
-      "traps": ["single-datapoint", "seed-data-thin"],
+      "automated": {
+        "kind": "conformance",
+        "ref": "packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts"
+      },
+      "traps": [
+        "single-datapoint",
+        "seed-data-thin"
+      ],
       "source": [
         "packages/qa/dogfood/test/date-bucket-parity-conformance.test.ts (#3773)",
         "packages/qa/dogfood/test/empty-group-bucket-parity.test.ts (#3839)",
@@ -517,18 +621,25 @@
         "examples/app-showcase/src/data/seed/index.ts (prospects carry no signed_on — the deliberate NULL population)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: boundary behavior (empty window, NULL bucket, single datapoint) pinned to the two bucket-parity conformance suites", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new item: boundary behavior (empty window, NULL bucket, single datapoint) pinned to the two bucket-parity conformance suites",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
       "id": "dashboards.global-filters-rescope",
-      "title": "Dashboard-level dateRange + global filters re-scope every bound widget through its OWN field mapping; opted-out widgets stay fixed",
+      "title": "Dashboard-level dateRange + global filters re-scope every bound widget through its OWN field mapping; opted-out widgets stay fixed; and the Studio widget inspector AUTHORS those filterBindings",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -545,7 +656,11 @@
         "confirm the opted-out KPI issued NO re-query and shows the unchanged all-time value",
         "cross-check one re-scoped widget's displayed aggregate against a direct API aggregate with the same filter",
         "repeat the global-filter check on Delivery Operations: the Task Status select must re-scope the KPI hero tiles, composing with each tile's own per-widget filter",
-        "screenshot before/after each filter change"
+        "screenshot before/after each filter change",
+        "D1 (dirty→Reset): on Revenue Pulse, confirm the filter bar shows NO Reset affordance in its pristine state; change a filter away from its defaultValue and confirm a Reset button (RotateCcw) appears; click it and confirm every filter returns to its default and the widgets re-query back",
+        "D3 ({value,label} options): open the region select and confirm its options render as {value,label} pairs (the trigger shows the LABEL, the committed value is the option value); capture the option-source request — a select whose options come from a dataset issues a server GROUP BY (queryDataset) for the distinct value list, not a truncated client dedupe",
+        "D2 (Studio authoring round-trip): in the Studio metadata-admin dashboard designer, select a widget and open the Filter Bindings section of the widget inspector; author a binding — re-target the dateRange (or region) filter to a specific field via the field-override combo, and toggle Apply OFF on another widget to opt it out; publish the draft",
+        "re-read the persisted metadata (GET /api/v1/meta/dashboard/<name>) and confirm the authored widget.filterBindings shape landed; reload the dashboard and confirm the authored binding DRIVES the widget at runtime (re-targeted field in the re-query; opted-out widget no longer re-queries)"
       ],
       "acceptance": [
         {
@@ -583,21 +698,332 @@
           "oracle": "api",
           "verify": "tile value equals the aggregate with BOTH filters applied",
           "evidence": "tile screenshot + query result"
+        },
+        {
+          "clause": "D2 — the Studio widget inspector AUTHORS filterBindings that round-trip and drive the widget: a binding authored in the inspector's Filter Bindings section persists into widget.filterBindings and, on reload, re-scopes the widget through the authored field (or opts it out when Apply is unchecked) (objectui#2586)",
+          "oracle": "api",
+          "verify": "GET /api/v1/meta/dashboard/<name> after publish carries the authored filterBindings map (field override string, or false for opt-out); the reloaded widget's re-query targets the authored field / issues no query when opted out",
+          "evidence": "the persisted metadata + the reloaded widget's re-query trace"
+        },
+        {
+          "clause": "D1 — the filter bar's Reset affordance is dirty-gated: a pristine bar (every value == its defaultValue) shows NO Reset; changing any filter surfaces a Reset (RotateCcw) that restores all filters to defaults and re-queries the widgets back",
+          "oracle": "dom",
+          "verify": "the DashboardFilterBar (data-testid dashboard-filter-bar) has no Reset in the pristine state and one once a value diverges from its default (isDirty); after Reset, values match defaults and widgets re-query — DOM read only after a screenshot confirms the bar rendered",
+          "evidence": "before/after screenshots + the dirty-vs-pristine DOM"
+        },
+        {
+          "clause": "D3 — select/lookup filter options render as {value,label}: the trigger shows the selected option's LABEL while the committed value is the option value, and a dataset-sourced option list comes from a SERVER group-by (queryDataset), not a truncated top-N client dedupe (#2578 item 5)",
+          "oracle": "network",
+          "verify": "the option-list request is a queryDataset GROUP BY over the source object (complete regardless of row count); the rendered SelectItems carry value/label from resolveDashboardFilterDefs' normalized pairs",
+          "evidence": "the option-source query trace + the rendered option value/label pairs"
         }
       ],
       "negative": [
         "a filter change that repaints without a server re-query (client-side cosmetic filtering) is a FAIL — the network trace is the oracle, not the repaint",
-        "the opted-out KPI drifting after a filter change is a FAIL (the fixed reference is the point of the opt-out)"
+        "the opted-out KPI drifting after a filter change is a FAIL (the fixed reference is the point of the opt-out)",
+        "a filterBinding authored in the inspector that does NOT persist (absent from the re-read metadata) or does NOT drive the widget on reload is a FAIL — a designer that writes into the void is worse than no designer",
+        "a Reset button visible on a pristine (undirtied) bar, or a select option list silently truncated to the first N rows (missing values that exist), is a FAIL"
       ],
-      "traps": ["hydration-race", "seed-data-thin"],
+      "traps": [
+        "hydration-race",
+        "seed-data-thin"
+      ],
       "source": [
         "examples/app-showcase/src/ui/dashboards/revenue-pulse.dashboard.ts (framework#2501 / objectui#2578 acceptance fixture)",
         "examples/app-showcase/src/ui/dashboards/ops-dashboard.dashboard.ts",
         "examples/app-showcase/src/data/seed/index.ts (sales_region + signed_on seeding, prospects unset by design)",
-        "examples/app-showcase/src/coverage.ts (dashboard kind notes: revenue-pulse demonstrates dashboard-level filters)"
+        "examples/app-showcase/src/coverage.ts (dashboard kind notes: revenue-pulse demonstrates dashboard-level filters)",
+        "objectui packages/app-shell/src/views/metadata-admin/inspectors/DashboardWidgetInspector.tsx (Filter Bindings section — Apply toggle writes false for opt-out, field-override combo, data-testid widget-filter-binding-<name>, patches draft.widgets[i].filterBindings; objectui#2586)",
+        "objectui packages/plugin-dashboard/src/DashboardFilterBar.tsx (isDirty→Reset affordance RotateCcw, data-testid dashboard-filter-bar; SelectFilter {value,label} options + server GROUP BY via queryDataset, #2578 item 5)",
+        "objectui packages/core/src/utils/dashboard-filters.ts (resolveDashboardFilterDefs normalizes options to {value,label} pairs)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: dashboard-level filter re-scoping with per-widget filterBindings, both-sides (bound vs opted-out) verification", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new item: dashboard-level filter re-scoping with per-widget filterBindings, both-sides (bound vs opted-out) verification",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-08",
+          "change": "added the Studio widget-inspector filterBindings AUTHORING round-trip (D2, objectui#2586) plus the D1 dirty→Reset affordance and D3 {value,label} filter-option render clauses",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "dashboards.saved-report-ownership",
+      "title": "Saved reports are owner-isolated: cross-owner read/run/delete deny as 404, schedules included",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "user A (report owner)",
+        "user B (fresh sign-up, no relation)",
+        "anonymous"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "two runtime-signed-up users (showcase seeds no sys_saved_report rows and only the admin — create both users and the report in-run)"
+        ]
+      },
+      "steps": [
+        "as A: POST /api/v1/reports (201) and POST /api/v1/reports/:id/schedule; record both ids",
+        "as B: GET /api/v1/reports/:idA, DELETE /api/v1/reports/:idA, POST /api/v1/reports/:idA/run — capture each",
+        "as B: GET /api/v1/reports (list) with and without ?ownerId=A — capture row sets",
+        "as B: GET /api/v1/reports/:idA/schedules and DELETE /api/v1/reports/schedules/:scheduleIdA — capture each (see the known-gap clause)",
+        "anonymous: GET /api/v1/reports",
+        "as A afterwards: re-read the report and schedule to prove nothing was destroyed"
+      ],
+      "acceptance": [
+        {
+          "clause": "cross-owner GET/DELETE/run all answer 404 REPORT_NOT_FOUND (deny-as-404, anti-enumeration — never 403, never 2xx)",
+          "oracle": "api",
+          "verify": "the three responses' status+code per #2980's canAccessReport posture",
+          "evidence": "the responses"
+        },
+        {
+          "clause": "the list never leaks: B's listing excludes A's report even with a forged ownerId param; ownerId cannot be spoofed on create either",
+          "oracle": "api",
+          "verify": "list bodies + a create-as-B carrying ownerId=A lands owned by B",
+          "evidence": "listings + the created row's owner"
+        },
+        {
+          "clause": "anonymous access answers 401 UNAUTHENTICATED",
+          "oracle": "api",
+          "verify": "the anonymous GET",
+          "evidence": "the response"
+        },
+        {
+          "clause": "KNOWN-GAP PROBE — schedule routes: unscheduleReport and listSchedules currently ignore the caller context (report-service.ts), so B deleting A's schedule succeeds today; the contract this item asserts is deny-as-404, so record the actual outcome and treat a 2xx as a FAIL with a privately-raised finding (do NOT file publicly without maintainer decision — cross-owner destructive access)",
+          "oracle": "api",
+          "verify": "the two schedule-route responses + A's schedule surviving (re-read as A)",
+          "evidence": "responses + the survival read"
+        },
+        {
+          "clause": "A's artifacts survive every denied attempt byte-identical",
+          "oracle": "api",
+          "verify": "final re-reads as A",
+          "evidence": "the reads"
+        }
+      ],
+      "negative": [
+        "any cross-owner 2xx anywhere on /api/v1/reports* is a FAIL; the schedule-route clause documents the one place a FAIL is expected TODAY — a run must not tick it green until the owner check lands"
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "source": [
+        "packages/rest/src/rest-route-ledger.ts (reports family)",
+        "packages/plugins/plugin-reports/src/report-service.ts (canAccessReport #2980; the unchecked unscheduleReport/listSchedules)",
+        "packages/platform-objects/src/audit/sys-saved-report.object.ts",
+        "docs/plans/release-15.1-test-plan.md §A10 (#2980/#2981/#2975)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — 15.1 §A10 was never imported; the sweep also surfaced the unchecked schedule routes, recorded here as an expected-FAIL probe",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "dashboards.system-overview-live-counts",
+      "title": "The built-in System Overview dashboard renders as admin with LIVE sys_* counts, two widget values reconcile against direct API counts, single-environment-only widgets hide gracefully, and no widget renders blank",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin / sysadmin (admin@objectos.ai)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the built-in Setup app + the platform `system_overview` dashboard (packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts) reached at Setup → System Overview (nav_system_overview, setup-nav.contributions.ts) — present in any booted app, not a showcase fixture",
+          "the five backing datasets over `sys_*` objects (packages/platform-objects/src/apps/dashboards/system.datasets.ts: sys_user_metrics, sys_session_metrics, sys_organization_metrics, sys_package_installation_metrics, sys_audit_log_metrics)",
+          "at least one signed-in session (the admin's own) so sys_session count is non-zero, and the seeded sys_user population"
+        ],
+        "knownGaps": [
+          "in a SINGLE-TENANT / single-environment runtime (the stock standalone serve) two widgets are runtime-gated OFF by design: widget_organizations carries `requiresService: 'org-scoping'` and widget_packages_installed carries `requiresObject: 'sys_package_installation'` (a cloud-only object). Their ABSENCE is the graceful-hide behavior this item checks — NOT a blank tile and NOT a FAIL; a run must not demand those two render"
+        ]
+      },
+      "steps": [
+        "sign in as admin, open the Setup app, and navigate to System Overview (nav_system_overview → dashboard system_overview); let the board settle and screenshot the whole dashboard BEFORE reading any DOM",
+        "capture the dataset queries the widgets issue on load (the network trace) — each metric tile queries its sys_*_metrics dataset (count aggregate)",
+        "establish ground truth via the data API: GET/POST a count aggregate on sys_user, and a count aggregate on sys_session, recording both numbers",
+        "read the rendered value of widget_total_users (Total Users) and widget_active_sessions (Active Sessions) from the DOM (only after the screenshot confirmed render) and compare each to its API count",
+        "confirm widget_organizations and widget_packages_installed are ABSENT from the rendered board (runtime-gated in single-tenant), not showing a broken/empty tile",
+        "walk every remaining widget: the three security KPI tiles (login/permission/config event counts over sys_audit_log_metrics), the Audit Events by Action pie, the Events by User bar, and the Audit Events by Action table — confirm each draws a real mark or a named error state, none blank",
+        "capture the browser console for the whole load"
+      ],
+      "acceptance": [
+        {
+          "clause": "widget_total_users shows the live user population — its value equals a direct count aggregate on sys_user, not a hardcoded or stale number",
+          "oracle": "api",
+          "verify": "the rendered Total Users tile == COUNT(sys_user) from a direct /api/v1/data aggregate, taken in the same run",
+          "evidence": "the tile value next to the API count"
+        },
+        {
+          "clause": "widget_active_sessions shows the live session count — its value equals a direct count aggregate on sys_session (the sys_session_metrics dataset carries NO active-only filter, so the honest oracle is the full sys_session count; record the label-says-'Active' vs dataset-counts-all caveat rather than glossing it)",
+          "oracle": "api",
+          "verify": "the rendered Active Sessions tile == COUNT(sys_session) from a direct /api/v1/data aggregate",
+          "evidence": "the tile value + the API count + the caveat note"
+        },
+        {
+          "clause": "the reconciliation is authoritative, not cosmetic: the widget's OWN dataset query (on the wire) returns the same count the direct /data aggregate returns — the tile reflects a real query, not a placeholder",
+          "oracle": "network",
+          "verify": "the captured sys_user_metrics / sys_session_metrics dataset query results match both the tile and the direct aggregate",
+          "evidence": "the two dataset-query traces"
+        },
+        {
+          "clause": "single-environment-only widgets hide gracefully: in a single-tenant runtime widget_organizations (requiresService: org-scoping) and widget_packages_installed (requiresObject: sys_package_installation) are ABSENT, not rendered as blank/error tiles",
+          "oracle": "screenshot",
+          "verify": "the board screenshot shows neither gated widget occupying a slot; the runtime-gate source (requiresService/requiresObject on the two widgets) explains the absence",
+          "evidence": "the board screenshot annotated with the two gated widget ids"
+        },
+        {
+          "clause": "no widget renders blank: every PRESENT widget draws its mark — metric tiles show numbers, the Audit Events by Action pie shows segments, the Events by User bar shows bars, the table shows rows — or shows a named error state",
+          "oracle": "screenshot",
+          "verify": "per-widget screenshot check; DOM mark-count only after the screenshot confirms render (hydration-race guard)",
+          "evidence": "the per-widget render verdicts"
+        },
+        {
+          "clause": "the distribution charts reflect the real audit population, not one lonely datapoint: the Audit Events by Action pie/table segment count equals the distinct sys_audit_log.action values present",
+          "oracle": "api",
+          "verify": "segment/row count == distinct action count from a direct sys_audit_log group-by aggregate; if only one action is seeded, annotate the single-datapoint weakness rather than counting it as full proof",
+          "evidence": "the distinct-action aggregate vs the rendered segments"
+        }
+      ],
+      "negative": [
+        "a blank widget with no error for any PRESENT widget is a FAIL — the exact blank-tile failure this item exists to catch",
+        "a runtime-gated widget (organizations / packages) rendering a broken or empty tile INSTEAD of hiding is a FAIL — the gate must remove it, not render it empty",
+        "a KPI tile whose value does not match the direct API count (a stale cache or a hardcoded number) is a FAIL — the tick 'says what it looks like it says' only if the numbers reconcile",
+        "running this as a non-admin persona proves nothing about the sysadmin surface (wrong-persona) — and Setup itself must refuse the member"
+      ],
+      "traps": [
+        "hydration-race",
+        "single-datapoint",
+        "seed-data-thin",
+        "wrong-persona"
+      ],
+      "source": [
+        "packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts (widget ids, requiresService/requiresObject gates, globalFilters date range)",
+        "packages/platform-objects/src/apps/dashboards/system.datasets.ts (the five sys_*_metrics datasets and their count measures)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_system_overview → dashboard system_overview in the Setup app)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new item: built-in System Overview live-count reconciliation + graceful single-environment widget hiding, grounded in the platform dashboard + sys_*_metrics datasets",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "dashboards.cube-query",
+      "title": "The showcase_delivery analytics cube serves /api/v1/analytics/*: meta discovers its measures/dimensions, a query answers a known aggregate that reconciles against a direct /data aggregate, and an unwired analytics slot degrades honestly to 404",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the showcase_delivery cube (examples/app-showcase/src/data/analytics/showcase.cube.ts — verified present: base table showcase_task; measures count / total_estimate_hours / avg_estimate_hours / done_rate; dimensions status / priority / due_date / assignee), registered as `analyticsCubes` (examples/app-showcase/src/coverage.ts) and served by the `analytics` capability the CLI serve path auto-loads (packages/cli/src/commands/serve.ts CAPABILITY_PROVIDERS.analytics → @objectstack/service-analytics, configKey analyticsCubes)",
+          "seeded showcase_task rows spanning multiple statuses (the same multi-bucket seed dashboards.chart-first-paint relies on) so the reconciled aggregate has more than one bucket"
+        ]
+      },
+      "steps": [
+        "probe the slot first: GET /api/v1/analytics/meta and record the status — a 404 (handled:false) means the analytics service slot is empty or filled by a self-declared stub; go straight to the degradation clause and record the honest absence",
+        "GET /api/v1/analytics/meta?cube=showcase_delivery and record the returned cube descriptor",
+        "establish ground truth: POST /api/v1/data/showcase_task/query with a status group-by count (and a SUM of estimate_hours per status), recording each bucket's count and hour total",
+        "POST /api/v1/analytics/query { cube: 'showcase_delivery', measures: ['showcase_delivery.count'], dimensions: ['showcase_delivery.status'] } and record rows",
+        "POST /api/v1/analytics/query { cube: 'showcase_delivery', measures: ['showcase_delivery.total_estimate_hours'], dimensions: ['showcase_delivery.status'] } and record rows",
+        "reconcile the cube rows against the direct /data aggregate bucket-for-bucket (count and hours)",
+        "negative: POST /api/v1/analytics/query { cube: 'showcase_delivery', filters: { status: 'done' } } (the off-contract `filters` key instead of `where`) and capture the refusal; also POST the retired { cube, query: {...} } envelope and capture its rejection"
+      ],
+      "acceptance": [
+        {
+          "clause": "meta discovers the cube: GET /analytics/meta lists showcase_delivery with exactly its four measures (namespaced showcase_delivery.count / .total_estimate_hours / .avg_estimate_hours / .done_rate) and four dimensions (showcase_delivery.status / .priority / .due_date / .assignee)",
+          "oracle": "api",
+          "verify": "the meta response's cubes[] entry for showcase_delivery names all four measures and four dimensions (getMeta keys them `${cube}.${key}` and does NOT filter on the cube's public:false flag)",
+          "evidence": "the /analytics/meta?cube=showcase_delivery body"
+        },
+        {
+          "clause": "a known aggregate reconciles: count grouped by status from the cube equals the direct /data showcase_task count-by-status aggregate, bucket-for-bucket",
+          "oracle": "api",
+          "verify": "row-by-row equality of showcase_delivery.count-by-status against the /api/v1/data/showcase_task group-by count",
+          "evidence": "the two aggregates side by side"
+        },
+        {
+          "clause": "a numeric measure reconciles too, proving the semantic layer is not just counting rows: total_estimate_hours by status equals SUM(estimate_hours) grouped by status from /data",
+          "oracle": "api",
+          "verify": "row-by-row equality of showcase_delivery.total_estimate_hours-by-status against the direct SUM aggregate — a divergence would expose a fan-out double-count through the showcase_project join",
+          "evidence": "the two hour aggregates"
+        },
+        {
+          "clause": "the query rides the caller's read scope: the /analytics domain forwards the request ExecutionContext (analytics.ts #2852), so results are RLS/tenant-scoped — not run UNSCOPED — verified structurally here (admin reconciles against the same-scoped /data aggregate; the cross-persona proof lives in search.rls-both-personas / access-security)",
+          "oracle": "api",
+          "verify": "the admin cube aggregate == the admin /data aggregate; cite handleAnalyticsRequest passing context.executionContext as the mechanism",
+          "evidence": "the matched aggregates + the mechanism citation"
+        },
+        {
+          "clause": "DEGRADATION: an empty analytics slot (or a self-declared stub) answers 404 handled:false on BOTH /analytics/query and /analytics/meta — the honest 'install service-analytics' signal (#3891/#4000) — never a 500 and never a silent 200-empty masquerading as an answer",
+          "oracle": "api",
+          "verify": "on stock showcase the slot is filled (verify by the served meta above and record this clause as served-not-absent); to exercise the 404 arm, drive an environment without the analytics capability and confirm the 404 rather than a 500/empty-200",
+          "evidence": "the served-meta status, plus the 404 body if the absent-slot arm is exercised"
+        },
+        {
+          "clause": "a malformed AnalyticsQuery is rejected AT THE ENTRY with a 400 that names what is wrong — `filters` is told to use `where`, and the retired { query } / { format } envelope carries its migration hint — never forwarded to the engine to die as a `SELECT  FROM` SQL error",
+          "oracle": "api",
+          "verify": "the `filters` body answers 400 VALIDATION_FAILED naming `where` (analytics.ts assertAnalyticsQueryBody); the { query } envelope is rejected via the retiredKey tombstone (analytics.zod.ts AnalyticsQueryRequestSchema.strict())",
+          "evidence": "the two refusal bodies"
+        }
+      ],
+      "negative": [
+        "cube rows that do NOT reconcile with the direct /data aggregate (a join fan-out double-count, or a wrong grouping) are a FAIL — the semantic layer must agree with the base-table truth",
+        "a 200 empty-success where the analytics slot is actually absent (instead of the honest 404) is a FAIL — silent degradation is exactly what #3891/#4000 replaced",
+        "a malformed body reaching the engine and dying as a 500 SQL error instead of a 400 at the entry is a FAIL",
+        "the route existing only in unit tests but 404-ing on the live server is the dispatcher-vs-hono-route class — the oracle is a live HTTP trace, never a simulated dispatch"
+      ],
+      "variants": [
+        "measure count (type: count)",
+        "measure total_estimate_hours (type: sum)",
+        "measure avg_estimate_hours (type: avg)",
+        "measure done_rate (type: number, computed CASE expression)"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "seed-data-thin",
+        "single-datapoint"
+      ],
+      "source": [
+        "examples/app-showcase/src/data/analytics/showcase.cube.ts (the showcase_delivery cube — measures, dimensions, base table, showcase_project join, public:false)",
+        "examples/app-showcase/src/coverage.ts (analyticsCubes registration → src/data/analytics/showcase.cube.ts, served by /api/v1/analytics/*)",
+        "packages/runtime/src/domains/analytics.ts (route contract: POST /analytics/query, GET /analytics/meta[?cube], entry validation, ExecutionContext scoping #2852, handled:false 404 for an absent/stub slot #3891/#4000)",
+        "packages/spec/src/api/analytics.zod.ts (AnalyticsQueryRequestSchema bare shape + retiredKey query/format; meta response cubes[])",
+        "packages/services/service-analytics/src/analytics-service.ts (getMeta keys measures/dimensions as `${cube}.${key}`, returns all registry cubes)",
+        "packages/cli/src/commands/serve.ts (CAPABILITY_PROVIDERS.analytics → @objectstack/service-analytics, configKey analyticsCubes)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new item: showcase_delivery cube /analytics/* meta+query reconciliation against the direct /data aggregate, with the honest empty-slot 404 degradation clause and the entry-validation negatives",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     }
   ]

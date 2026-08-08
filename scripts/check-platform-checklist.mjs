@@ -153,6 +153,71 @@ for (const { file, item } of allItems) {
   }
 }
 
+// ── Capability-coverage ratchet ─────────────────────────────────────────────
+// "凡是有的能力, 都要测试" made mechanical: the universe of governed metadata
+// kinds is derived from packages/spec/liveness/*.json (the ADR-0049 ledger
+// set), and coverage.json must map every kind to ≥1 checklist item or waive it
+// with a reason. Bidirectional, mirroring the liveness ledger's own
+// UNCLASSIFIED/ORPHAN discipline: an unmapped kind fails (the platform grew a
+// capability the checklist doesn't test), and a mapped kind with no liveness
+// ledger fails (the entry outlived the capability).
+const COVERAGE_FILE = join(ROOT, 'docs/qa/platform-checklist/coverage.json');
+const LIVENESS_DIR = join(ROOT, 'packages/spec/liveness');
+let waivedCount = 0;
+let mappedCount = 0;
+if (!existsSync(COVERAGE_FILE)) {
+  err('coverage.json', null, 'missing — every liveness-governed metadata kind must be mapped or waived');
+} else if (!existsSync(LIVENESS_DIR)) {
+  err('coverage.json', null, `cannot derive the kind universe: ${LIVENESS_DIR} not found`);
+} else {
+  let cov;
+  try {
+    cov = JSON.parse(readFileSync(COVERAGE_FILE, 'utf8'));
+  } catch (e) {
+    cov = null;
+    err('coverage.json', null, `does not parse as JSON: ${e.message}`);
+  }
+  if (cov) {
+    const universe = readdirSync(LIVENESS_DIR)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => basename(f, '.json'))
+      .sort();
+    const map = cov.metadataKinds ?? {};
+    for (const kind of universe) {
+      const entry = map[kind];
+      if (entry === undefined) {
+        err('coverage.json', kind, 'UNCLASSIFIED — the platform has this capability (liveness ledger exists) but the checklist neither tests nor waives it. Add items or a waiver with a reason.');
+        continue;
+      }
+      const hasItems = Array.isArray(entry.items) && entry.items.length > 0;
+      const hasWaiver = typeof entry.waived === 'string' && entry.waived.trim().length > 0;
+      if (hasItems === hasWaiver) {
+        err('coverage.json', kind, 'must have EITHER non-empty "items" OR a non-empty "waived" reason — not both, not neither');
+        continue;
+      }
+      if (hasItems) {
+        mappedCount++;
+        for (const id of entry.items) {
+          if (!allIds.has(id)) err('coverage.json', kind, `maps to unknown item id "${id}"`);
+          else {
+            const mapped = allItems.find((r) => r.item.id === id);
+            if (mapped?.item.status === 'retired') {
+              err('coverage.json', kind, `maps to retired item "${id}" — point at its successor or re-waive the kind`);
+            }
+          }
+        }
+      } else {
+        waivedCount++;
+      }
+    }
+    for (const kind of Object.keys(map)) {
+      if (!universe.includes(kind)) {
+        err('coverage.json', kind, `ORPHAN — mapped kind has no packages/spec/liveness/${kind}.json ledger; remove the entry or restore the ledger`);
+      }
+    }
+  }
+}
+
 if (errors.length) {
   console.error(`check-platform-checklist: ${errors.length} problem(s)\n`);
   for (const e of errors) console.error(`  ✗ ${e}`);
@@ -162,4 +227,4 @@ if (errors.length) {
 
 const total = allItems.length;
 const active = allItems.filter(({ item }) => item.status === 'active').length;
-console.log(`check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active).`);
+console.log(`check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived.`);

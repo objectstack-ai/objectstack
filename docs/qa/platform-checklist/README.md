@@ -19,6 +19,7 @@ docs/qa/platform-checklist/
   README.md        ← this file: what an item is, how to append / change / retire
   RUNNER.md        ← how an AI runs the checklist accurately (verdicts, oracles, evidence)
   areas/*.json     ← the ledger, sharded by feature area (append here)
+  coverage.json    ← capability-coverage ratchet: every governed metadata kind → items or waiver
   runs/            ← durable run records (one JSON per executed sweep)
 ```
 
@@ -51,6 +52,9 @@ next-sequential numbers do.
       "evidence": "what artifact the run must capture" }
   ],
   "negative": ["…"],                     // the other side of every gate (deny/absence cases)
+  "variants": ["…"],                     // enumerable-surface matrix (field types, chart types, flow
+                                         // nodes, operators…) — derived from the spec's own Zod enums,
+                                         // source cited; one clause requires per-variant verification
   "traps": ["hydration-race"],           // known false-positive risks (vocabulary in RUNNER.md)
   "automated": { "kind": "e2e", "ref": "path/to/pinning.test.ts" },  // set when a permanent test pins it
   "blocked": { "by": "fixture", "ref": "#NNNN" },  // standing blocker, waive-with-a-reference
@@ -90,6 +94,28 @@ Design notes:
   ref}`) meaning "not runnable on stock fixtures today, tracked at <ref>". The
   showcase-side fixture gaps #3358 uncovered (#3408, #3409, #3415) each cost a sweep to
   rediscover; recording the gap on the item is what stops that.
+
+## Capability coverage — every capability the platform has gets tested
+
+`coverage.json` makes "凡是有的能力, 都要测试" mechanical instead of aspirational. The
+universe of capabilities is **derived, not hand-kept**: every metadata kind with a
+`packages/spec/liveness/<kind>.json` ledger (the ADR-0049 governed set) must be mapped
+to at least one checklist item, or waived with a written reason. The validator enforces
+both directions — an unmapped kind fails CI (the platform grew a capability the
+checklist doesn't test), and a mapped kind whose liveness ledger disappeared fails too
+(the entry outlived the capability). This is the `examples/app-showcase/src/coverage.ts`
+demonstrated-or-waived ratchet, applied to testing instead of demonstration.
+
+Enumerable surfaces *inside* a capability (49 field types, 20 chart types, flow node
+types, query operators, decision actions, …) are covered by `variants` matrices on the
+items themselves, each derived from the spec's own Zod enums with the source cited —
+when the spec grows a variant, the matrix item's next revision must grow with it (and
+the showcase `coverage.test.ts` ratchet will already be failing if the variant isn't
+demonstrable at all).
+
+A waiver is a debt marker, not an exemption: it names what fixture or surface is
+missing, so paying it down is a matter of adding the fixture and flipping the entry to
+`items`.
 
 ## How a release sweep works
 

@@ -141,10 +141,10 @@
     },
     {
       "id": "i18n.surface-matrix",
-      "title": "Every translatable surface localizes on a zh-CN session — one pass over the full translation-group vocabulary",
+      "title": "Every translatable surface localizes on a zh-CN session — one pass over the full translation-group vocabulary, plus the runtime i18n routes it resolves through",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": ["admin on a zh-CN session"],
@@ -172,6 +172,11 @@
         "a Settings namespace — title, group titles, key labels, and the source badges (settings.<namespace> + settingsCommon.sourceLabels)",
         "Studio metadata forms (metadataForms group — overlaps i18n.studio-follows-app-locale; a pinned pass there may be cited)",
         "a sys_ object surface — e.g. the All Users list showing sys_user's translated label (platform-objects-owned bundle)",
+        "runtime i18n routes (server truth, consulted independently of the browser — these are what the client resolves labels through): GET /api/v1/i18n/locales and record data.locales",
+        "GET /api/v1/i18n/translations/zh-CN — record whether it is non-empty and whether every key path sits under a declared translation group",
+        "GET /api/v1/i18n/labels/showcase_task/zh-CN — record its { object, locale, labels } and hold it next to the zh-CN list-header the browser rendered for showcase_task",
+        "unknown-locale probe: GET /api/v1/i18n/translations/zz-ZZ and GET /api/v1/i18n/labels/showcase_task/zz-ZZ — capture WHICH degradation the running server does (the FileI18nAdapter returns an empty {} map for an unloaded locale; getTranslations does NOT synthesize the default bundle — record the observed shape, do not assume a fallback)",
+        "feed/audit verb variant (E11): trigger an activity-feed / audit entry (e.g. an assignment or a record edit) and, on the zh-CN session, screenshot its rendered verb/template — the feed/audit verb copy is a translatable surface",
         "record a per-variant verdict table with the screenshot evidence"
       ],
       "acceptance": [
@@ -210,11 +215,43 @@
           "oracle": "network",
           "verify": "the action's request fired and returned 2xx while the zh-CN confirm/success strings were shown — the toast is attached to a real server round-trip",
           "evidence": "network trace + dialog/toast screenshots"
+        },
+        {
+          "clause": "GET /i18n/locales lists exactly the configured locale set — data.locales carries the descriptors for the supportedLocales (showcase: en + zh-CN), inside the declared { success, data } envelope (#3636), never a bare array and never a superset",
+          "oracle": "api",
+          "verify": "the response body's data.locales equals toLocaleDescriptors(getLocales(), defaultLocale) for the configured locales; unwrapResponse keys on the success flag, so a flag-less body is itself the failure #3636 closed",
+          "evidence": "the /i18n/locales response"
+        },
+        {
+          "clause": "GET /i18n/translations/:locale returns a non-empty bundle whose key paths all sit within the declared translation-group vocabulary (translationDataShape) — a key outside the declared groups, or a raw dotted key handed to a consumer, is the silent-strip class",
+          "oracle": "api",
+          "verify": "translations for zh-CN is non-empty; spot-check that sampled keys resolve under objects/_views/_actions/_sections/apps.navigation/dashboards/pages/settings groups, not a fourth dialect",
+          "evidence": "the /translations/zh-CN response + the key check"
+        },
+        {
+          "clause": "the /labels/:object/:locale route is the resolver the UI reads through, and it agrees with the UI: the labels it returns for showcase_task in zh-CN match the zh-CN list-header labels the browser renders (resolveObjectFieldLabels over the nested objects.<obj>.fields.<field>.label shape — the flat o.<obj> dialect that always returned {} was #3778/#3833)",
+          "oracle": "api",
+          "verify": "the labels response's field→label map equals the rendered zh-CN list-header row for showcase_task",
+          "evidence": "the /labels response next to the list-header screenshot"
+        },
+        {
+          "clause": "an unknown locale degrades honestly and the run records WHICH: /translations/zz-ZZ and /labels/showcase_task/zz-ZZ answer 200 with an empty {} map (the adapter does not synthesize the default bundle at the route), never a 500 and never a dotted-key dump — the observed shape is captured, not assumed",
+          "oracle": "api",
+          "verify": "both unknown-locale reads return 200 with an empty translations/labels object (FileI18nAdapter's unloaded-locale path — getTranslations returns {}; fallbackLocale only applies per-KEY inside t(), not to the bulk route); record the exact bodies",
+          "evidence": "the two unknown-locale responses"
+        },
+        {
+          "clause": "the activity-feed / audit verb template localizes on the zh-CN session (E11) — the feed/audit entry's verb renders its zh-CN copy, not an English verb and not a raw key",
+          "oracle": "screenshot",
+          "verify": "a feed/audit entry's verb/template renders zh-CN on the switched session; a raw key or English verb here is the E11 gap (record which group backs it — the messages/globalActions area is the likely home)",
+          "evidence": "the feed/audit screenshot"
         }
       ],
       "negative": [
         "a raw translation key (dotted path) rendered anywhere is a FAIL — that is the silent-strip failure surfacing to the user",
-        "a surface whose group the spec declares (e.g. _sections) showing NO translation while the bundle carries one for it is a FAIL against the resolver, not a coverage gap"
+        "a surface whose group the spec declares (e.g. _sections) showing NO translation while the bundle carries one for it is a FAIL against the resolver, not a coverage gap",
+        "a /i18n/locales that answers a bare array (the pre-#3636 shape) instead of { success, data: { locales } } is a FAIL — the SDK's unwrapResponse then hands callers the wrong shape depending on which surface mounted the route",
+        "the /labels route and the rendered UI labels disagreeing for the same object+locale is a FAIL against the resolver — they must be one derivation (#3833), not two copies that drift"
       ],
       "variants": [
         "nav labels (apps.navigation)",
@@ -229,17 +266,22 @@
         "settings (settings.<namespace> + settingsCommon.sourceLabels)",
         "Studio metadata forms (metadataForms)",
         "sys_ object labels (platform-objects bundles)",
-        "relative dates (locale formatting, not a translation group)"
+        "relative dates (locale formatting, not a translation group)",
+        "activity-feed / audit verb templates (E11 — a translatable surface not previously in the variant list)"
       ],
-      "traps": ["stale-console-bundle", "hydration-race", "wrong-panel"],
+      "traps": ["stale-console-bundle", "hydration-race", "wrong-panel", "dispatcher-vs-hono-route"],
       "source": [
         "packages/spec/src/system/translation.zod.ts (translationDataShape — the authoritative group vocabulary: objects/_views/_actions/_sections, apps.navigation, messages, globalActions, dashboards, pages, settings, metadataForms, settingsCommon)",
         "examples/app-showcase/src/system/translations/index.ts (full-column coverage rationale)",
+        "packages/services/service-i18n/src/i18n-service-plugin.ts (GET /i18n/locales | /translations/:locale | /labels/:object/:locale; { success, data } envelope #3636/#3675; resolveObjectFieldLabels nested shape #3778/#3833; the plugin mount and the dispatcher /i18n domain serve the same routes interchangeably)",
+        "packages/services/service-i18n/src/file-i18n-adapter.ts (getLocales / getTranslations — unloaded locale → {}; fallbackLocale applies per-KEY in t(), not to the bulk route)",
+        "packages/services/service-i18n/src/i18n-route-ledger.ts (the three routes, conformance-guarded #3636)",
         "content/docs/ui/translations.mdx",
         "scripts/check-i18n-coverage.mjs + scripts/i18n-coverage-baseline.json (frozen-debt ratchet)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-surface localization pass over the spec's full translation-group vocabulary, grounded in the showcase bundle and the coverage ratchet", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-surface localization pass over the spec's full translation-group vocabulary, grounded in the showcase bundle and the coverage ratchet", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-08", "change": "clause-extension: runtime i18n routes (/i18n/locales configured set, /translations/:locale ⊂ declared vocabulary, /labels/:object/:locale matches the UI, unknown-locale honest degradation), plus the E11 activity-feed/audit verb-localization variant; traps gain dispatcher-vs-hono-route (the plugin mount and dispatcher /i18n domain must answer one shape, #3636/#3833)", "ref": "claude/platform-test-checklist-ocwugl" }
       ]
     },
     {
