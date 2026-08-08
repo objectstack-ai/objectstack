@@ -58,6 +58,12 @@ export const en: TranslationData = {
         nav_system_overview: { label: 'System Overview' },
 
         // Apps / Marketplace
+        // `nav_packages` is a SETUP entry (package administration is an
+        // operator concern — ADR-0084), distinct from the same-id entry under
+        // `apps.studio.navigation`. Two apps carrying one nav id is normal;
+        // each app resolves its own subtree, so the studio copy never answers
+        // for this one. Its absence here was #5750's first cause.
+        nav_packages: { label: 'Packages' },
         nav_marketplace_browse: { label: 'Browse Marketplace' },
         nav_marketplace_installed: { label: 'Installed Apps' },
         nav_cloud_connection: { label: 'Cloud Connection' },
@@ -72,6 +78,7 @@ export const en: TranslationData = {
 
         // Access Control
         nav_positions: { label: 'Positions' },
+        nav_capabilities: { label: 'Capabilities' },
         nav_permission_sets: { label: 'Permission Sets' },
         nav_sharing_rules: { label: 'Sharing Rules' },
         nav_record_shares: { label: 'Record Shares' },
@@ -82,9 +89,12 @@ export const en: TranslationData = {
         nav_approval_processes: { label: 'Processes' },
         nav_approval_requests: { label: 'Requests' },
         nav_approval_actions: { label: 'Action History' },
+        nav_approval_delegations: { label: 'Delegations (OOO)' },
 
         // Configuration
         nav_settings_hub: { label: 'All Settings' },
+        nav_settings_localization: { label: 'Localization' },
+        nav_settings_company: { label: 'Company' },
         nav_settings_mail: { label: 'Email' },
         nav_settings_branding: { label: 'Branding' },
         nav_settings_auth: { label: 'Authentication' },
@@ -101,6 +111,14 @@ export const en: TranslationData = {
         nav_sessions: { label: 'Sessions' },
         nav_audit_logs: { label: 'Audit Logs' },
         nav_notifications: { label: 'Notifications' },
+
+        // Integrations — every entry here is contributed at RUNTIME by the
+        // capability plugin that owns the object (ADR-0029 K2), so it exists on
+        // no static walk of SETUP_APP. `pnpm check:app-nav-i18n` is what keeps
+        // this block honest; see that gate's header for why (#5750).
+        nav_webhooks: { label: 'Webhooks' },
+        nav_http_deliveries: { label: 'HTTP Deliveries' },
+        nav_datasources: { label: 'Datasources' },
 
         // Advanced
         nav_oauth_apps: { label: 'OAuth Applications' },

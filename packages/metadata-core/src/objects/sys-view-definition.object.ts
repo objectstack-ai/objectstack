@@ -120,7 +120,8 @@ export const SysViewDefinitionObject = ObjectSchema.create({
 
   indexes: [
     // A given view name is unique per (organization, owner) — a shared view
-    // (owner NULL) and each user's personal views don't collide.
+    // (owner NULL) and each user's personal views don't collide, AND two
+    // shared views may not share a name either (#6417).
     //
     // ⚠️ This entry is the FALLBACK shape, not the delivered one. It carried
     // `partial: "state = 'active'"` until #5248 / #4943 retired the key,
@@ -139,10 +140,27 @@ export const SysViewDefinitionObject = ObjectSchema.create({
     // `syncDeclaredIndexes` (which skips by name) never re-imposes the
     // unrestricted form on a later boot.
     //
+    // ⚠️ The KEY below is NULL-DISTINCT, which is a second gap the declaration
+    // cannot close on its own (#6417). `owner` is NULL for SHARED views and
+    // `organization_id` is NULL for environment-level ones, and SQL UNIQUE
+    // treats NULLs as mutually distinct — so what this entry constrains is
+    // PERSONAL views only, measured: two active shared views could carry one
+    // name. Per the maintainer ruling of 2026-08-08 that is forbidden, and the
+    // same runtime migration delivers it, again without touching this
+    // declaration: it materializes the key NULL-safe, as
+    // `(name, COALESCE(organization_id, '__global__'), COALESCE(owner, ''))`
+    // — ADR-0120 D3's sentinel for the tenant column, `ensureOverlayIndex`'s
+    // `COALESCE(package_id, '')` form for the non-tenant one. Storage keeps
+    // its NULLs; only the index folds them into a bucket.
+    //
     // Keep this declaration exactly as it is. It is what dialects without
     // partial indexes (MySQL) and hosts that never run the migration fall back
     // to, and the migration deliberately leaves it untouched when it cannot
-    // build the partial form — degraded to this behaviour, never below it.
+    // build the partial NULL-safe form — degraded to this behaviour, never
+    // below it. Rewriting it to `unique: 'organization'` would NOT be the same
+    // thing: that is ADR-0120 D1's declared-scope vocabulary, staged for the
+    // protocol-18 train (D7), and it scopes the tenant column only — `owner`
+    // would stay NULL-distinct.
     {
       name: 'idx_sys_view_def_active',
       fields: ['name', 'organization_id', 'owner'],

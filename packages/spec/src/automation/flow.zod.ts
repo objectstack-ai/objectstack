@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
 
 /**
  * Flow Node Types — **built-in seed set** (ADR-0018).
@@ -110,28 +109,24 @@ export const FLOW_STRUCTURAL_NODE_TYPES: readonly string[] = ['start', 'end'];
  * note).
  */
 
-/** Keys {@link FlowVariableSchema} declares (drift-guarded by flow.test.ts). */
-const FLOW_VARIABLE_KEYS = ['name', 'type', 'isInput', 'isOutput'] as const;
-
-const flowVariableUnknownKeyError = strictUnknownKeyError({
-  surface: 'this flow variable',
-  knownKeys: FLOW_VARIABLE_KEYS,
-  aliases: { input: 'isInput', output: 'isOutput' },
-  history:
-    'Until #4001 these were dropped silently — the variable still parsed, so a ' +
-    'mis-declared input/output contract shipped without a diagnostic.',
-});
-
 /**
  * Flow Variable Schema
  * Variables available within the flow execution context.
  */
-export const FlowVariableSchema = lazySchema(() => z.object({
+export const FlowVariableSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this flow variable',
+    aliases: { input: 'isInput', output: 'isOutput' },
+    history:
+      'Until #4001 these were dropped silently — the variable still parsed, so a ' +
+      'mis-declared input/output contract shipped without a diagnostic.',
+  },
+  {
   name: z.string().describe('Variable name'),
   type: z.string().describe('Data type (text, number, boolean, object, list)'),
   isInput: z.boolean().default(false).describe('Is input parameter'),
   isOutput: z.boolean().default(false).describe('Is output parameter'),
-}, { error: flowVariableUnknownKeyError }).strict());
+}));
 
 /**
  * Flow Node Schema
@@ -154,33 +149,6 @@ export const FlowVariableSchema = lazySchema(() => z.object({
  *   position: { x: 300, y: 200 }
  * }
  */
-/** Keys {@link FlowNodeSchema} declares (drift-guarded by flow.test.ts). */
-const FLOW_NODE_KEYS = [
-  'id', 'type', 'label', 'config', 'connectorConfig', 'position', 'timeoutMs',
-  'inputSchema', 'outputSchema', 'waitEventConfig', 'boundaryConfig',
-] as const;
-
-const flowNodeUnknownKeyError = strictUnknownKeyError({
-  surface: 'this flow node',
-  knownKeys: FLOW_NODE_KEYS,
-  aliases: {
-    configuration: 'config',
-    settings: 'config',
-    properties: 'config',
-    options: 'config',
-    params: 'config',
-    parameters: 'config',
-  },
-  guidance: {
-    inputs:
-      '`inputs` is not a FlowNode key — a node\'s runtime inputs live under `config` ' +
-      '(e.g. `config.inputs` for script/function nodes); `inputSchema` declares their types.',
-  },
-  history:
-    'Until #4001 these were dropped silently — the node still parsed, so a mis-placed ' +
-    'config shipped as a step that quietly ignored it.',
-});
-
 /**
  * A flow node — **including** whatever ADR-0031 region its `config` holds (#4415).
  *
@@ -234,7 +202,27 @@ export const FlowNodeSchema = lazySchema(() => flowNodeObject().transform(parseF
  * the `lazySchema` factory runs at module-evaluation time, and a `const` arrow
  * declared after it would still be in its temporal dead zone.
  */
-function flowNodeObject() { return z.object({
+function flowNodeObject() { return strictObject(
+  {
+    surface: 'this flow node',
+    aliases: {
+      configuration: 'config',
+      settings: 'config',
+      properties: 'config',
+      options: 'config',
+      params: 'config',
+      parameters: 'config',
+    },
+    guidance: {
+      inputs:
+        '`inputs` is not a FlowNode key — a node\'s runtime inputs live under `config` ' +
+        '(e.g. `config.inputs` for script/function nodes); `inputSchema` declares their types.',
+    },
+    history:
+      'Until #4001 these were dropped silently — the node still parsed, so a mis-placed ' +
+      'config shipped as a step that quietly ignored it.',
+  },
+  {
   id: z.string().describe('Node unique ID'),
   type: z.string().min(1).describe(
     'Action type — a built-in FlowNodeAction id or a plugin-registered node type. ' +
@@ -457,34 +445,30 @@ function flowNodeObject() { return z.object({
     /** Signal name — only for signal boundary events */
     signalName: z.string().optional().describe('Named signal to catch'),
   }).optional().describe('Configuration for boundary events attached to host nodes'),
-}, { error: flowNodeUnknownKeyError }).strict(); }
-
-/** Keys {@link FlowEdgeSchema} declares (drift-guarded by flow.test.ts). */
-const FLOW_EDGE_KEYS = ['id', 'source', 'target', 'condition', 'type', 'label', 'isDefault'] as const;
-
-const flowEdgeUnknownKeyError = strictUnknownKeyError({
-  surface: 'this flow edge',
-  knownKeys: FLOW_EDGE_KEYS,
-  aliases: {
-    // n8n / mermaid / BPMN-tool vocabulary an author (or AI) imports wholesale.
-    from: 'source',
-    to: 'target',
-    sourceid: 'source',
-    targetid: 'target',
-    expression: 'condition',
-    when: 'condition',
-    guard: 'condition',
-  },
-  history:
-    'Until #4001 these were dropped silently — the edge still parsed, so a branch ' +
-    'predicate or endpoint the author wrote was quietly ignored.',
-});
+}); }
 
 /**
  * Flow Edge Schema
  * Connections between nodes.
  */
-export const FlowEdgeSchema = lazySchema(() => z.object({
+export const FlowEdgeSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this flow edge',
+    aliases: {
+      // n8n / mermaid / BPMN-tool vocabulary an author (or AI) imports wholesale.
+      from: 'source',
+      to: 'target',
+      sourceid: 'source',
+      targetid: 'target',
+      expression: 'condition',
+      when: 'condition',
+      guard: 'condition',
+    },
+    history:
+      'Until #4001 these were dropped silently — the edge still parsed, so a branch ' +
+      'predicate or endpoint the author wrote was quietly ignored.',
+  },
+  {
   id: z.string().describe('Edge unique ID'),
   source: z.string().describe('Source Node ID'),
   target: z.string().describe('Target Node ID'),
@@ -522,7 +506,7 @@ export const FlowEdgeSchema = lazySchema(() => z.object({
       'BPMN default flow: traverse this edge only when no sibling conditional edge of the same '
       + 'source node matched. Mutually exclusive with `condition`; at most one per source node.',
     ),
-}, { error: flowEdgeUnknownKeyError }).strict());
+}));
 
 /**
  * Flow Schema
@@ -550,46 +534,35 @@ export const FlowEdgeSchema = lazySchema(() => z.object({
  *   ]
  * }
  */
-/** Keys {@link FlowSchema} declares (drift-guarded by flow.test.ts). */
-const FLOW_KEYS = [
-  'name', 'label', 'description', 'successMessage', 'errorMessage', 'version',
-  'status', 'template', 'type', 'variables', 'nodes', 'edges', 'active', 'runAs',
-  'errorHandling', 'protection',
-  // ADR-0010 runtime protection envelope (MetadataProtectionFields spread).
-  '_lock', '_lockReason', '_lockSource', '_provenance', '_packageId',
-  '_packageVersion', '_lockDocsUrl',
-] as const;
-
-const flowUnknownKeyError = strictUnknownKeyError({
-  surface: 'this flow',
-  knownKeys: FLOW_KEYS,
-  aliases: {
-    steps: 'nodes',
-    connections: 'edges',
-    transitions: 'edges',
-    links: 'edges',
-    trigger: 'type',
-    triggertype: 'type',
-    title: 'label',
+export const FlowSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this flow',
+    aliases: {
+      steps: 'nodes',
+      connections: 'edges',
+      transitions: 'edges',
+      links: 'edges',
+      trigger: 'type',
+      triggertype: 'type',
+      title: 'label',
+    },
+    guidance: {
+      object:
+        '`object` is not a Flow field — a record-change flow binds its object on the ' +
+        'START node\'s `config` (`{ objectName, triggerType, condition }`), not at the ' +
+        'flow top level.',
+      objectName:
+        '`objectName` is not a Flow field — it belongs on the START node\'s `config` ' +
+        '(`{ objectName, triggerType, condition }`), not at the flow top level.',
+      schedule:
+        '`schedule` is not a Flow field — a schedule flow declares its cron/interval as ' +
+        '`config.schedule` on the START node, not at the flow top level.',
+    },
+    history:
+      'Until #4001 these were dropped silently — the flow still parsed, so a trigger ' +
+      'binding or config the author wrote was quietly ignored.',
   },
-  guidance: {
-    object:
-      '`object` is not a Flow field — a record-change flow binds its object on the ' +
-      'START node\'s `config` (`{ objectName, triggerType, condition }`), not at the ' +
-      'flow top level.',
-    objectName:
-      '`objectName` is not a Flow field — it belongs on the START node\'s `config` ' +
-      '(`{ objectName, triggerType, condition }`), not at the flow top level.',
-    schedule:
-      '`schedule` is not a Flow field — a schedule flow declares its cron/interval as ' +
-      '`config.schedule` on the START node, not at the flow top level.',
-  },
-  history:
-    'Until #4001 these were dropped silently — the flow still parsed, so a trigger ' +
-    'binding or config the author wrote was quietly ignored.',
-});
-
-export const FlowSchema = lazySchema(() => z.object({
+  {
   /** Identity */
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Machine name'),
   label: z.string().describe('Flow label'),
@@ -805,7 +778,7 @@ export const FlowSchema = lazySchema(() => z.object({
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 
-}, { error: flowUnknownKeyError }).strict());
+}));
 
 /**
  * Type-safe factory for creating flow definitions.

@@ -791,9 +791,9 @@ describe('validateReactPageProps — <ObjectForm subforms> resolve per child obj
 // schema is `.strict()`, but `.strict()` is a property of a PARSE — before
 // this gate nothing on the react surface called one, which was exactly the
 // `no gate` verdict the strictness ledger recorded for `aggregate` two props
-// over until #5020 wired that parse too (its own block below; the difference
-// that remains is posture — `aggregate`'s schema still STRIPS, so its
-// unknown-key half waits on #5583). The rule parses instead of re-deriving, so the surface name, the
+// over until #5020 wired that parse too (its own block below), with the
+// posture following at #5583 — so both props are now parsed AND closed, and the
+// asymmetry this paragraph used to record is history. The rule parses instead of re-deriving, so the surface name, the
 // near-key guidance and the `target` union all arrive without being restated
 // here — which is why #5435's widening needed no edit to the rule itself.
 // ─────────────────────────────────────────────────────────────────────────
@@ -911,12 +911,16 @@ describe('validateReactPageProps — <ObjectChart drillDown> (#5022)', () => {
 //      asserted.
 //   2. SEVERITY GRADING (#5020 R2) — every violation the schema, the published
 //      react-blocks type and objectui's renderer agree on gates at `error`;
-//      an absent `groupBy` is a `warning`, because the renderer honours the
-//      absence and the ledger's rule is "declare before you gate".
-//   3. THE GAP, pinned open. Both schemas are STRIP-posture, so wiring the
-//      parse did NOT close the unknown-key hole `groupby` walks through —
-//      #5583 is the spec-side half. Asserting the tolerance out loud is the
-//      only thing that stops this gate reading as a closed door (#4583).
+//      an absent `groupBy` is a `warning`. #5583 ruled that the ungrouped
+//      single-value chart is NOT a supported shape, so that warning is an
+//      un-promoted gate rather than a blessed form; promoting it is its own
+//      acceptance surface and its own step.
+//   3. THE GAP #5020 PINNED OPEN, CLOSED AT #5583. Both schemas were
+//      STRIP-posture, so wiring the parse did not close the unknown-key hole
+//      `groupby` walked through. They are `strictObject` now and the two
+//      tolerance pins INVERTED — including the harder half, where the
+//      rejection reaches the author only because `describeIssue` unpacks the
+//      collapsed `invalid_union` (#5014).
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('validateReactPageProps — <ObjectChart aggregate> PARSED (#5020)', () => {
@@ -1006,18 +1010,21 @@ describe('validateReactPageProps — <ObjectChart aggregate> PARSED (#5020)', ()
 
   // ── R2: the one violation that only WARNS ──────────────────────────────
 
-  it('WARNS on an absent groupBy and does not block — the renderer honours it', () => {
-    // `ChartAggregateSchema` and `react-blocks.ts` both declare `groupBy`
-    // required, but ObjectChart falls back to `xAxisKey`
-    // (`schema.aggregate?.groupBy || schema.xAxisKey`) and this protocol's own
-    // `chartAggregateCategoryKey` documents the ungrouped single-row result.
-    // Gating it would break a working authoring shape to enforce a declaration
-    // the platform does not keep; #5583 decides which of the two moves.
+  it('WARNS on an absent groupBy and does not block — a tolerance, not a supported shape (#5583 ruled)', () => {
+    // The severity is unchanged; what changed at #5583 is what it MEANS. The
+    // ruling was that an ungrouped single-value chart is NOT a supported
+    // `<ObjectChart>` shape (`groupBy` stays required; the single-value need is
+    // served by the separate `object-metric` block), so this warning is an
+    // un-promoted gate rather than a blessed authoring form. Promoting it is a
+    // separate acceptance surface — every consumer's pages, not just the example
+    // corpus, which carries zero instances — so it is deliberately still a
+    // warning and the hint now says which way the question was decided.
     const hit = aggFindings(`{ function: 'count' }`);
     expect(hit.length).toBe(1);
     expect(hit[0].severity).toBe('warning');
     expect(hit[0].message).toContain('aggregate.groupBy is not set');
     expect(hit[0].hint).toContain('5583');
+    expect(hit[0].hint, 'the hint must carry the RULING, not an open question').toContain('NOT a supported');
     expect(
       validateReactPageProps(agg(`{ function: 'count' }`)).filter((x) => x.severity === 'error'),
       'nothing about this aggregate may gate the build',
@@ -1064,64 +1071,61 @@ describe('validateReactPageProps — <ObjectChart aggregate> PARSED (#5020)', ()
     expect(hit[0].message).toContain('"quarter"');
   });
 
-  // ── The gap this PR does NOT close, pinned open (#5583) ─────────────────
+  // ── The gap #5020 pinned OPEN, and #5583 closed ─────────────────────────
+  //
+  // ⚠️ These two are the same assertions #5020 wrote, INVERTED. They were
+  // written as `.toEqual([])` / `.not.toContain('Unrecognized key')` so that a
+  // gate wired over a STRIP-posture schema could not be mistaken for a closed
+  // door (#4583); the spec-side tightening landed at #5583 and they now assert
+  // the rejection instead. Kept as a pair rather than replaced, because the
+  // before/after is what makes the deliberate two-step order legible.
 
-  it('⚠️ STILL ACCEPTS an unknown key inside aggregate — the parse STRIPS it (#5583)', () => {
-    // NOT the desired end state. `ChartAggregateSchema` is a STRIP-posture
-    // `z.object()`, so `groupby` is silently dropped BY THE PARSE and this gate
-    // has nothing to report — the #4001 failure mode this issue set out to
-    // close survives one layer down. Wiring the parse was the precondition
-    // (`.strict()` is a property of a parse, and there was none); #5583 is the
-    // spec-side tightening, after which this assertion INVERTS and the finding
-    // arrives carrying the schema's named surface and rename suggestion.
-    //
-    // Asserted rather than left implicit so nobody reads this gate as a closed
-    // door: a rule that looks like it rejects `groupby` and does not is worse
-    // than one that visibly does not (#4583).
-    expect(aggFindings(`{ function: 'count', groupBy: 'status', groupby: 'status' }`)).toEqual([]);
+  it('REJECTS an unknown key inside aggregate — the schema names it (#5583, was a silent strip)', () => {
+    const hit = aggFindings(`{ function: 'count', groupBy: 'status', groupby: 'status' }`);
+    expect(hit.length, 'the stripped key is now a finding').toBe(1);
+    expect(hit[0].severity).toBe('error');
+    // The three things the author gets, all of them from `packages/spec` — this
+    // rule restates none of them.
+    expect(hit[0].message).toContain('Unrecognized key');
+    expect(hit[0].message, "the schema's own surface name").toContain('this chart aggregate');
+    expect(hit[0].message, 'the rename').toContain('`groupby` → `groupBy`');
 
-    // …and the tolerance is pinned on a PARSED aggregate, not on a rule that
-    // happens to look at nothing. Without this half the assertion above would
-    // stay green for the wrong reason — an empty finding list proves nothing on
-    // its own (the #5046 trap). Same unknown key, plus one violation only the
-    // parse can report: exactly one finding comes back, and it is not about
-    // `groupby`.
+    // The parse still runs on everything else, and the two findings coexist —
+    // the #5046 trap in reverse: a green "it rejects" proves nothing unless the
+    // rule is still reading the rest of the aggregate in the same pass.
     const alsoBad = aggFindings(`{ function: 'kount', groupBy: 'status', groupby: 'status' }`);
-    expect(alsoBad.length, 'the parse ran').toBe(1);
-    expect(alsoBad[0].message).toContain('aggregate.function');
-    // Only the schema's own rejection is worded this way — the deleted
-    // hand-rolled check said "is not an aggregation this chart can run" — so
-    // this is what makes the tolerance above a statement about a PARSED
-    // aggregate rather than one the rule never looked at.
-    expect(alsoBad[0].message, 'and the finding came from the schema').toContain('expected one of');
-    // What #5583 adds, and what today's STRIP posture cannot produce.
-    expect(alsoBad[0].message, 'the stripped key is invisible to the gate — today').not.toContain(
-      'Unrecognized key',
-    );
+    expect(alsoBad.length, 'both the unknown key and the bad function are reported').toBe(2);
+    expect(
+      alsoBad.some((f) => f.message.includes('aggregate.function') && f.message.includes('expected one of')),
+      'the function rejection still comes from the schema',
+    ).toBe(true);
+    expect(alsoBad.some((f) => f.message.includes('Unrecognized key')), 'and the unknown key too').toBe(true);
   });
 
-  it("⚠️ STILL ACCEPTS an unknown key inside a structured groupBy (#5583)", () => {
-    // The same hole one level deeper: `dateGranularty` is dropped by
-    // `ChartGroupBySchema`'s object arm, so the dates are never bucketed and
-    // the trend line is one flat segment — silently.
-    expect(
-      aggFindings(`{ function: 'count', groupBy: { field: 'closed_at', dateGranularty: 'month' } }`),
-    ).toEqual([]);
-
-    // The same parse-proof as above, so this tolerance is not green merely
-    // because nothing reads the structured arm: plant the typo NEXT TO a value
-    // the arm does judge, and the arm's own rejection comes back while the
-    // unknown key stays invisible.
-    const alsoBad = aggFindings(
-      `{ function: 'count', groupBy: { field: 'closed_at', dateGranularty: 'month', dateGranularity: 'fortnight' } }`,
+  it('REJECTS an unknown key inside a structured groupBy — through the UNION collapse (#5583)', () => {
+    // The same hole one level deeper, and the harder half: `groupBy` is a
+    // UNION, so the arm's `unrecognized_keys` never reaches `error.issues` —
+    // zod 4 reports one `invalid_union` whose own message is the bare string
+    // "Invalid input" (#5014). What carries the named rejection to the author is
+    // `describeIssue`'s arm unpacking in `zod-issue-format.ts`. This assertion
+    // is therefore an END-TO-END pin on that path, not a restatement of the
+    // schema's: delete the unpacking and it goes red while the spec's own tests
+    // stay green.
+    const hit = aggFindings(`{ function: 'count', groupBy: { field: 'closed_at', dateGranularty: 'month' } }`);
+    expect(hit.length).toBe(1);
+    expect(hit[0].severity).toBe('error');
+    expect(hit[0].message, 'the collapsed union was unpacked').toContain('no accepted form matched');
+    expect(hit[0].message, "the strict arm's surface").toContain('this chart groupBy');
+    expect(hit[0].message, 'and its rename').toContain('`dateGranularty` → `dateGranularity`');
+    expect(hit[0].message, 'the bare collapsed message must not be the whole report').not.toBe(
+      'aggregate.groupBy: Invalid input',
     );
-    expect(alsoBad.length, 'the structured arm was parsed').toBe(1);
-    expect(alsoBad[0].message).toContain('dateGranularity');
-    // The typo DOES appear in this message — inside the echo of the author's own
-    // object — but only as data, never as a rejection. `Unrecognized key` is the
-    // sentence #5583 makes possible and today's STRIP posture cannot produce, so
-    // that is what this pin watches for.
-    expect(alsoBad[0].message, 'the stripped near-key is not REJECTED — today').not.toContain('Unrecognized key');
+
+    // Control in the same run: a structured groupBy with no unknown key still
+    // parses clean, so this is a statement about the key and not about the arm.
+    expect(
+      aggFindings(`{ function: 'count', groupBy: { field: 'closed_at', dateGranularity: 'month' } }`),
+    ).toEqual([]);
   });
 
   // ── Unresolvable is not wrong (ADR-0072 D1) ────────────────────────────
