@@ -176,7 +176,7 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
     },
 };
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
-import { isGuardRefusal } from './guard-refusal.js';
+import { isGuardRefusal, refuseNode } from './guard-refusal.js';
 import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
 // #5660 — the degrade registration reports a FOREIGN failure (a third-party
 // provider factory's text), so it renders it as structured `meta` rather than
@@ -1461,14 +1461,16 @@ export class AutomationEngine implements IAutomationService {
      * needs no seal flag (contrast {@link warnIfNodeTypeVocabularyNeverSealed},
      * which reports a missing CALL for the same reason).
      *
-     * **Blind spot, stated up front:** the trigger is `supportsPause`, itself a
-     * declaration no execution path enforces (#5703) — a run pauses because
-     * `execute()` returned `suspend: true`. An executor that suspends while
-     * leaving `supportsPause` false is therefore silent here, and since step two
-     * its pauses are refused with no prior warning. The refusal message carries
-     * the same prescription for exactly that reader (see
-     * {@link refuseGatedResume}), `check:resume-authority-declared` catches this
-     * repo's own executors at authoring time, and #5703 tracks the runtime half.
+     * **Scope, stated up front:** the trigger is `supportsPause`, so a descriptor
+     * that leaves it false is not asked this question at all. That used to be a
+     * blind spot — the executor could suspend anyway and nothing said a word
+     * (#5703) — and it is now closed at the other end instead of here:
+     * {@link refuseUndeclaredSuspension} refuses the suspension itself at the
+     * engine boundary (#6667), so the mismatch fails the run that produced it
+     * rather than parking a continuation this gate never got to warn about.
+     * A type that suspends therefore reaches this warning by the only route
+     * left — declaring `supportsPause: true`, which is when the question about
+     * `resumeAuthority` is worth asking.
      */
     private warnIfResumeAuthorityUndeclared(descriptor: ActionDescriptor): void {
         if (descriptor.supportsPause !== true) return;
@@ -3094,13 +3096,109 @@ export class AutomationEngine implements IAutomationService {
      * implemented twice and drift.
      */
     private resolveDeclaredResumeAuthority(nodeType: string): ActionDescriptor['resumeAuthority'] {
+        return this.resolveCanonicalDescriptor(nodeType)?.resumeAuthority;
+    }
+
+    /**
+     * The descriptor whose CAPABILITY declarations govern a node type: the one
+     * registered under that type, or — when that one is a deprecated ADR-0018
+     * alias — the canonical descriptor it forwards to.
+     *
+     * The alias hop is the whole reason this is a function rather than a map
+     * lookup, and the reasoning is {@link registerNodeAlias}'s: an alias's
+     * descriptor is SYNTHESIZED, so it carries the schema defaults for every
+     * capability (`supportsPause: false`, `resumeAuthority` absent) rather than
+     * the canonical's real values. Reading it directly would make each capability
+     * gate answer "no" for the old type name — one rename away from either a hole
+     * (#5561's, if the gate fails open) or a false refusal (#6667's, if it fails
+     * closed). Resolving live rather than snapshotting at alias-registration time
+     * also keeps the answer right whichever order the two register in. No alias
+     * of a pausing type exists today; this keeps it from becoming a defect the
+     * day one does.
+     *
+     * Extracted at #6667 so the two capability gates that need the hop —
+     * {@link resolveDeclaredResumeAuthority} (who may resume) and
+     * {@link refuseUndeclaredSuspension} (may this type pause at all) — share
+     * ONE walk. Two copies of a four-line loop is exactly how one of them
+     * acquires a bound the other lacks.
+     */
+    private resolveCanonicalDescriptor(nodeType: string): ActionDescriptor | undefined {
         let descriptor = this.actionDescriptors.get(nodeType);
         for (let hop = 0; descriptor?.aliasOf && hop < AutomationEngine.MAX_ALIAS_HOPS; hop++) {
             const canonical = this.actionDescriptors.get(descriptor.aliasOf);
             if (!canonical || canonical === descriptor) break;
             descriptor = canonical;
         }
-        return descriptor?.resumeAuthority;
+        return descriptor;
+    }
+
+    /**
+     * Refuse a suspension the node type never declared it could produce — the
+     * runtime half of `supportsPause` (#6667, from #5703).
+     *
+     * Returns a guard refusal when the node type publishes a descriptor whose
+     * (alias-resolved) `supportsPause` is not `true` and its executor just
+     * returned `suspend: true`; `null` when there is nothing to refuse.
+     *
+     * ## Why refuse rather than pause-and-log
+     *
+     * Honouring the pause and logging `error` was the alternative, and it loses
+     * on consequence. A type that leaves `supportsPause` false is, in the same
+     * breath, a type `check:resume-authority-declared` does not gate and
+     * {@link warnIfResumeAuthorityUndeclared} does not warn about — both key on
+     * `supportsPause: true` — so it almost certainly declares no
+     * `resumeAuthority` either, and since #5561 step two an undeclared authority
+     * resolves to `'service'`: the generic resume route REFUSES every pause it
+     * creates. Honouring the suspension therefore writes a durable continuation
+     * for a run that nothing can continue, and the `error` line is printed in the
+     * process that paused — hours or a restart before anyone tries to resume and
+     * gets a `PERMISSION_DENIED` that names `resumeAuthority`, not the
+     * `supportsPause` that actually caused it. That is Prime Directive #10
+     * exactly: advertising a capability (a resumable pause) the runtime does not
+     * deliver, discovered by someone who cannot connect it back.
+     *
+     * Refusing fails the run at the moment of the mistake, in the process that
+     * made it, with the failure handed to the run's own caller and NOTHING
+     * durable written — and the message names the one-line fix. It is the same
+     * direction #5561 chose for the neighbouring guess: the loud mistake is
+     * discoverable by the person who made it; the silent one is not.
+     *
+     * No log line is emitted here, deliberately. This is AGENTS.md's third legal
+     * answer under "Degradation log levels" — a failure handed to the CALLER is
+     * not a degradation, and the run's own `failed` history row already carries
+     * the message. A `logger.error` on top would fire once per execution of a
+     * mis-declared node, which is what makes `error` unreadable.
+     *
+     * ## What it does NOT judge
+     *
+     *  - **The inverse.** `supportsPause: true` on a type that never suspends is
+     *    not a mismatch: the declaration is a capability, not an obligation, and
+     *    `wait` legitimately returns without suspending when its condition is
+     *    already met.
+     *  - **Silence.** A node type that publishes NO descriptor declares nothing —
+     *    not even `false` — so there is no declaration for this gate to enforce,
+     *    and `NodeExecutor.descriptor` is optional by contract. Its pauses are
+     *    already fail-closed at the other end (#5561: an absent descriptor means
+     *    an absent `resumeAuthority`, so the generic route refuses them and says
+     *    so). Refusing here as well would delete that behaviour, which
+     *    `resume-authority-gate.test.ts`'s `bare_pause` case pins on purpose.
+     */
+    private refuseUndeclaredSuspension(nodeType: string): NodeExecutionResult | null {
+        const descriptor = this.resolveCanonicalDescriptor(nodeType);
+        // No descriptor ⇒ no declaration ⇒ nothing to enforce (see above).
+        if (!descriptor) return null;
+        if (descriptor.supportsPause === true) return null;
+        return refuseNode(
+            `node type '${nodeType}' suspended the run but its action descriptor declares ` +
+            `supportsPause: false, so the pause is refused — a run that paused here could not be ` +
+            `continued on the generic resume route anyway: a type that declares no pause declares no ` +
+            `resumeAuthority either, and an unclaimed pause is fail-closed since #5561. Declare ` +
+            `supportsPause: true on the descriptor together with the resumeAuthority the pauses need ` +
+            `('any' if POST /automation/:name/runs/:runId/resume is the intended door, 'service' if ` +
+            `resuming is the tail of a decision some service must authorize and record first) — or stop ` +
+            `returning suspend: true from execute(). This is a metadata defect, not a runtime one, so a ` +
+            `fault edge does not route it.`,
+        );
     }
 
     /**
@@ -4860,6 +4958,27 @@ export class AutomationEngine implements IAutomationService {
                     }
                 }
                 throw execErr;
+            }
+
+            // #6667 — declared = enforced for `supportsPause`, at the ONE seam
+            // every suspension passes through.
+            //
+            // Placed here rather than beside the `throw new FlowSuspendSignal`
+            // below on purpose: converting the mismatch into an ordinary guard
+            // refusal *before* the success bookkeeping means the run records a
+            // `failure` step for the offending node (not a `success` step
+            // followed by an unexplained failed run), sets `$error` like any
+            // other refusal, and inherits #3863's un-routability — a `fault`
+            // edge must not be able to swallow a declaration defect, since
+            // re-running the flow unchanged can never fix one.
+            //
+            // Exactly once, and nothing bypasses it: this is the only call site
+            // of any `executor.execute()` that the engine acts on — the ADR-0018
+            // alias path delegates and RETURNS its target's result here rather
+            // than suspending on its own, `resume()` re-enters through
+            // {@link executeNode}, and region bodies ({@link runRegion}) do too.
+            if (result.success && result.suspend === true) {
+                result = this.refuseUndeclaredSuspension(node.type) ?? result;
             }
 
             if (!result.success) {

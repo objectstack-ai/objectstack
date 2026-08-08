@@ -768,7 +768,7 @@
       "title": "Saved reports are owner-isolated: cross-owner read/run/delete deny as 404, schedules included",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -786,7 +786,7 @@
         "as A: POST /api/v1/reports (201) and POST /api/v1/reports/:id/schedule; record both ids",
         "as B: GET /api/v1/reports/:idA, DELETE /api/v1/reports/:idA, POST /api/v1/reports/:idA/run — capture each",
         "as B: GET /api/v1/reports (list) with and without ?ownerId=A — capture row sets",
-        "as B: GET /api/v1/reports/:idA/schedules and DELETE /api/v1/reports/schedules/:scheduleIdA — capture each (see the known-gap clause)",
+        "as B: GET /api/v1/reports/:idA/schedules and DELETE /api/v1/reports/schedules/:scheduleIdA — capture each (both owner-gated since #6683)",
         "anonymous: GET /api/v1/reports",
         "as A afterwards: re-read the report and schedule to prove nothing was destroyed"
       ],
@@ -810,9 +810,9 @@
           "evidence": "the response"
         },
         {
-          "clause": "KNOWN-GAP PROBE — schedule routes: unscheduleReport and listSchedules currently ignore the caller context (report-service.ts), so B deleting A's schedule succeeds today; the contract this item asserts is deny-as-404, so record the actual outcome and treat a 2xx as a FAIL with a privately-raised finding (do NOT file publicly without maintainer decision — cross-owner destructive access)",
+          "clause": "schedule routes are owner-gated too (#6683): B's GET /reports/:idA/schedules returns an empty list (never A's recipients/cron), and B's DELETE /reports/schedules/:scheduleIdA answers 404 REPORT_NOT_FOUND — never a cross-owner 2xx",
           "oracle": "api",
-          "verify": "the two schedule-route responses + A's schedule surviving (re-read as A)",
+          "verify": "the two schedule-route responses' status+body + A's schedule surviving (re-read as A)",
           "evidence": "responses + the survival read"
         },
         {
@@ -823,14 +823,14 @@
         }
       ],
       "negative": [
-        "any cross-owner 2xx anywhere on /api/v1/reports* is a FAIL; the schedule-route clause documents the one place a FAIL is expected TODAY — a run must not tick it green until the owner check lands"
+        "any cross-owner 2xx anywhere on /api/v1/reports* is a FAIL — including the schedule routes, which #6683 brought under the same canAccessReport gate (they leaked before)"
       ],
       "traps": [
         "wrong-persona"
       ],
       "source": [
         "packages/rest/src/rest-route-ledger.ts (reports family)",
-        "packages/plugins/plugin-reports/src/report-service.ts (canAccessReport #2980; the unchecked unscheduleReport/listSchedules)",
+        "packages/plugins/plugin-reports/src/report-service.ts (canAccessReport #2980; unscheduleReport/listSchedules owner-gated in #6683)",
         "packages/platform-objects/src/audit/sys-saved-report.object.ts",
         "docs/plans/release-15.1-test-plan.md §A10 (#2980/#2981/#2975)"
       ],
@@ -840,6 +840,12 @@
           "date": "2026-08-07",
           "change": "initial — 15.1 §A10 was never imported; the sweep also surfaced the unchecked schedule routes, recorded here as an expected-FAIL probe",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-08",
+          "change": "D1 fixed in #6683 — unscheduleReport/listSchedules now owner-gated; flipped the known-gap probe clause to a positive deny-as-404 assertion and dropped the expected-FAIL language in negative/source",
+          "ref": "#6683"
         }
       ]
     },
