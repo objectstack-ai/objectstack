@@ -8,9 +8,22 @@ land in the repo (`.gitignore` here tracks only this README). The durable source
 the checklist itself under `../areas/`; a run is a snapshot that goes stale the moment
 the build moves.
 
-**Where results go instead:** the executing environment — a CI artifact, the runner's
-own workspace, the sweep's tracking issue, or an external QA store. Keep them there;
-do not commit them.
+**Where results go instead — the canonical home is one tracking issue per release
+sweep** (a `[sweep] vN release test sweep` issue, successor to the #3358 model):
+
+- the issue **body** hosts the human-readable summary — the per-item verdict table
+  (pass / partial / fail / blocked) and the filter that selected them (`since:vN` ∪ all
+  `P0` ∪ items whose `source` cites a release PR);
+- the machine **run-record JSON(s)** (shape below) attach to that issue — pasted in a
+  comment or linked as a CI artifact from the sweep job;
+- every `fail` becomes its **own linked issue** (RUNNER.md makes a filed issue part of a
+  completed `fail` verdict), cross-referenced from the sweep issue.
+
+A raw CI artifact or an external QA store is a fine substitute where one exists, but the
+per-release tracking issue is the default so a sweep is never lost. What NEVER lands in
+the repo is the record itself — only the durable ledger under `../areas/` accumulates
+here, through each item's `revision`/`history`. A verdict is interpretable only next to
+the `revision` it names, so the run record stays with its build's artifacts, not in git.
 
 ## Record shape (write to `YYYY-MM-DD-<slug>.json`, kept out of git)
 

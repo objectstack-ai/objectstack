@@ -11,11 +11,11 @@ decide on, and docs that promise retired capabilities.
 These are real runtime/UI defects the gap hunters hit while grounding items. Each is
 captured inside the relevant checklist item as an **expected-fail probe** (so a run
 records the actual behavior instead of ticking green), but they are defects, not test
-gaps. Security-sensitive ones were deliberately NOT filed publicly — your call.
+gaps. The one security-sensitive finding (D1) has since been fixed in #6683.
 
 | # | defect | evidence | captured in | sensitivity |
 |---|---|---|---|---|
-| D1 | **Saved-report schedule routes lack an owner check** — `report-service.ts` `unscheduleReport`/`listSchedules` ignore `_context`, so user B can delete user A's report schedule (cross-owner destructive access). The read/run/delete routes ARE owner-gated (deny-as-404); only the schedule routes leak. | packages/plugins/plugin-reports/src/report-service.ts (unscheduleReport/listSchedules) | dashboards.saved-report-ownership (known-gap probe clause) | **SECURITY — not filed publicly; awaiting your decision** |
+| D1 | **Saved-report schedule routes now owner-gated** — the schedule delete/list routes were brought under the same parent-report owner check as the other report routes (deny-as-404). | packages/plugins/plugin-reports/src/report-service.ts | dashboards.saved-report-ownership (positive assertion since rev 2) | **FIXED in #6683** |
 | D2 | **AppManagementPage enable/disable/set-default/delete are client-only stubs** — the handlers call `toast.success()` with a `TODO: Replace with real API call` and issue no request; an admin sees "success" while nothing changes. | objectui apps/console/src/pages/system/AppManagementPage.tsx | platform-core.app-management-toggle (expected-fail probe) | UX-integrity — safe to file |
 | D3 | **`useGlobalUndo.executeOp` issues a bare `ds.update` with no `ifMatch`** — record undo can silently clobber a concurrent edit (no OCC guard on the undo path). | objectui react/src/hooks/useGlobalUndo.ts | records-forms.record-edit-undo (observe-and-flag clause) | correctness — safe to file |
 | D4 | **`SharedViewLink` builds dead `/share/<object>/<view>?token=` URLs** — client-generated token, no matching console route (only `/s/:token`), no server persistence. Registered but unused. | objectui plugin-view/src/SharedViewLink.tsx | — (not an item; demo-grade) | low — file a cleanup issue |
