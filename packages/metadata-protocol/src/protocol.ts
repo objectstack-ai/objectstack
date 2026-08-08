@@ -7925,10 +7925,60 @@ export class ObjectStackProtocolImplementation implements
      * Only the READ is now unconditional, because a project kernel needs the
      * same evidence before retiring an entry.
      *
+     * ## Why `organizationId` is a REQUIRED parameter (#6780)
+     *
+     * Every tier above is `(type, name)`-addressed: `removeRuntimeShadow`
+     * drops the PLAIN key, the layer-2 re-register writes the PLAIN key, and
+     * `removeOverlayEntry` retires the PLAIN key. There is exactly one
+     * plain-key entry per (type, name) in a process, and per ADR-0005 it
+     * belongs to the ENV-WIDE row — an org-scoped overlay never enters the
+     * registry at all (the rule {@link hydrateOverlayIntoRegistry} owns since
+     * #6602). So a heal run on behalf of an ORG-scoped delete cannot address
+     * anything of its own: it can only un-shadow or retire the entry every
+     * other org and the control plane read.
+     *
+     * Measured on `origin/main` before this gate existed: env-wide
+     * `view/shared_grid` in the registry → org A saves its own overlay (the
+     * entry correctly stays `Env grid`, #6602 holding) → org A DELETEs ITS
+     * OWN overlay → `registry.getItem('view','shared_grid')` is `undefined`
+     * while the env-wide row still sits in `sys_metadata`. While the entry is
+     * gone, direct registry readers answer as if the item does not exist
+     * (ADR-0110 D3's declaration gate, `resolveRouteActionDeclaration`,
+     * fail-closed `assertObjectRegistered` → 404) — one tenant's "reset my
+     * customization" degrading every other tenant's runtime on the unscoped
+     * kernels #5086 measured the flagship showcase booting with.
+     *
+     * The verdict lives HERE rather than at the call sites for the reason
+     * {@link hydrateOverlayIntoRegistry} states on the register side (#6602 /
+     * PR #6779): this is the ONE choke point all four heal callers already
+     * route through, and a REQUIRED (never optional) `organizationId` makes a
+     * fifth caller answer the question at compile time. An optional parameter
+     * would default an omission to "env-wide" and reinstate the exact hole.
+     *
+     * REGISTER WIDE, RETIRE NARROW — the asymmetry is deliberate. The
+     * write-through's `object` branch is NOT org-gated ({@link
+     * applyRegistryWriteThrough}), and that carve-out does not transfer to
+     * removal: it is argued from `assertObjectRegistered` failing CLOSED, so
+     * a surplus entry degrades to "listable but rowless" and the next reload
+     * heals it, while a wrongly retired entry 404s data CRUD for every tenant.
+     * The two costs are not symmetric, so the two gates are not either.
+     *
+     * The KERNEL-scope gate stays where it was: `environmentId === undefined`
+     * still guards re-registration only, because that is a fact about the
+     * kernel this protocol instance serves, not about the row in hand.
+     *
      * Best-effort: a failure must never block the delete that already
      * succeeded; the next full reload fixes the registry anyway.
      */
-    private async restoreArtifactRegistryView(type: string, name: string): Promise<void> {
+    private async restoreArtifactRegistryView(
+        type: string,
+        name: string,
+        /** The DELETE's own scope — `null` for an env-wide row. [#6780] */
+        organizationId: string | null,
+    ): Promise<void> {
+        // [#6780] ADR-0005 — the plain-key entry belongs to the env-wide row,
+        // so only an env-wide removal may heal (or retire) it.
+        if (organizationId !== null && organizationId !== undefined) return;
         try {
             const registry: any = this.engine.registry;
             const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -10584,9 +10634,17 @@ export class ObjectStackProtocolImplementation implements
                     // is argued from `assertObjectRegistered` failing CLOSED,
                     // which licenses registering broadly and never retiring
                     // broadly. Register wide, retire narrow.
-                    if (orgId === null) {
-                        await this.restoreArtifactRegistryView(it.type, it.name);
-                    }
+                    //
+                    // [#6780] The verdict this comment argues now lives INSIDE
+                    // {@link restoreArtifactRegistryView} as a REQUIRED
+                    // parameter, so `orgId` is handed over rather than tested
+                    // here: PR #6807's call-site `if (orgId === null)` guarded
+                    // this ONE caller while the sibling `deleteMetaItem` — the
+                    // caller this limb was modelled on — had the same hole on
+                    // all three of its own call sites. The gate moved to the
+                    // choke point every caller shares; the pin below this
+                    // comment is unchanged and still covers the batch path.
+                    await this.restoreArtifactRegistryView(it.type, it.name, orgId);
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
                 } else if (it.prevVersion !== null && it.prevVersion !== undefined) {
                     // Edited an existing artifact → restore the pre-commit body.
@@ -11100,8 +11158,18 @@ export class ObjectStackProtocolImplementation implements
                     // shadow may linger in the registry (e.g. pollution from
                     // before this fix shipped) — drop it so the artifact
                     // view really IS the default we claim below.
+                    //
+                    // [#6780] `orgId` is passed, and this branch is where it
+                    // matters MOST: with no row to delete, an org that never
+                    // customized anything at all could evict the env-wide
+                    // plain-key entry with a single no-op DELETE. Measured on
+                    // `origin/main`: receipt `{reset: false, "nothing to
+                    // delete"}` and `registry.getItem('view','shared_grid')`
+                    // → `undefined`, the env-wide row untouched in
+                    // `sys_metadata`. A gate applied only to the delete-ful
+                    // branch below would have left this door standing open.
                     if (targetState === 'active') {
-                        await this.restoreArtifactRegistryView(request.type, request.name);
+                        await this.restoreArtifactRegistryView(request.type, request.name, orgId);
                     }
                     return {
                         success: true,
@@ -11148,8 +11216,16 @@ export class ObjectStackProtocolImplementation implements
                 // see {@link restoreArtifactRegistryView}. Draft discards
                 // skip this: drafts never hydrate into the registry, and the
                 // still-active overlay (if any) must keep its shadow.
+                //
+                // [#6780] SCOPED by the same `orgId` the row was deleted with,
+                // so the registry's view cannot disagree with the row's scope
+                // — the sibling rule the write side states in
+                // {@link applyRegistryWriteThrough}. Org A resetting ITS OWN
+                // overlay used to retire the plain-key entry belonging to the
+                // ENV-WIDE row, i.e. one tenant's "reset to default" blanked
+                // the item for every other tenant and the control plane.
                 if (targetState === 'active') {
-                    await this.restoreArtifactRegistryView(request.type, request.name);
+                    await this.restoreArtifactRegistryView(request.type, request.name, orgId);
                 }
 
                 // Storage teardown (opt-in): drop the now-orphaned physical table
@@ -11287,8 +11363,17 @@ export class ObjectStackProtocolImplementation implements
                 }
             }
 
+            // [#6780] The legacy path deletes under the SAME org predicate it
+            // built into `scopedWhere` above, so the heal reads its scope from
+            // the same place. Reachable only on a control-plane kernel for a
+            // code-only type, which is exactly the kernel whose registry every
+            // org shares — the narrowest path and the widest blast radius.
             if (request.state !== 'draft') {
-                await this.restoreArtifactRegistryView(request.type, request.name);
+                await this.restoreArtifactRegistryView(
+                    request.type,
+                    request.name,
+                    request.organizationId ?? null,
+                );
             }
 
             return {
