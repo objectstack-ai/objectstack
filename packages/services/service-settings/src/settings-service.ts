@@ -112,27 +112,101 @@ function firstRejectedOption(allowed: string[], value: unknown): { value: unknow
 }
 
 /**
- * The value bounds a specifier declares — `min`/`max` (numeric window) and
- * `minLength`/`maxLength` (string length window), as `SpecifierSchema` spells
- * them (#5932).
+ * The value bounds a specifier declares — `min`/`max` (numeric window),
+ * `step` (numeric grid) and `minLength`/`maxLength` (string length window), as
+ * `SpecifierSchema` spells them (#5932, #6199).
  */
 interface DeclaredBounds {
   min?: number;
   max?: number;
+  /**
+   * The grid spacing, from the `step` declared under `SpecifierSchema`'s
+   * "numeric bounds and step" comment (#6199). Only ever set to a FINITE
+   * POSITIVE number — see {@link declaredBounds} for why a `0`, a negative or a
+   * non-finite `step` declares no grid at all rather than an impossible one.
+   */
+  step?: number;
   minLength?: number;
   maxLength?: number;
 }
 
 /** A breached bound, in the form both call sites need to report it. */
 interface RangeViolation {
-  /** `FieldErrorCode`, ADR-0114 — the member that mirrors the breached property. */
-  code: 'min_value' | 'max_value' | 'min_length' | 'max_length';
-  /** `range` (numeric window) or `length` (character window) — picks the prose. */
-  kind: 'range' | 'length';
+  /**
+   * `FieldErrorCode`, ADR-0114 — the member that mirrors the breached property.
+   *
+   * The window codes are the property's own name (`min` → `min_value`). A grid
+   * breach has no such member, so it takes `invalid_value`, the catalog's
+   * declared slot for "rejected for a reason no other member names" — the same
+   * verdict `rest-server.ts` already reaches for Zod's `not_multiple_of`, which
+   * is this exact condition arriving from the other direction. Inventing a
+   * `not_multiple_of` member would be a `packages/spec` change, and the catalog
+   * is closed on purpose.
+   */
+  code: 'min_value' | 'max_value' | 'min_length' | 'max_length' | 'invalid_value';
+  /**
+   * `range` (numeric window), `step` (numeric grid) or `length` (character
+   * window) — picks the prose at both call sites.
+   */
+  kind: 'range' | 'step' | 'length';
   /** The declared window in machine form, for `FieldError.constraint`. */
   constraint: Record<string, unknown>;
   /** The declared window in prose (`min 6, max 64`), for the env log line. */
   declared: string;
+}
+
+/**
+ * Relative slack allowed when deciding whether a value sits ON the declared
+ * grid, as a fraction of the magnitudes involved (#6199).
+ *
+ * A grid check is `value === anchor + k * step` for some integer `k`, and in
+ * binary floating point that equation is almost never exactly true for the
+ * decimal grids people actually declare. `ai.temperature` declares `step: 0.1`;
+ * `0.7 / 0.1` is `6.999999999999999`, not `7`, so an exact modulo would reject
+ * a value the manifest's own default neighbourhood is made of. The tolerance is
+ * RELATIVE rather than absolute because the absolute error scales with the
+ * operands: at `step: 1e-6` an absolute `1e-9` would be a third of a step wide,
+ * and at `max: 1048576` (`ai.max_tokens`) it would be tighter than one ULP.
+ *
+ * `1e-9` sits deliberately between the two errors it must separate. A double
+ * carries ~2.2e-16 of relative precision, so a handful of arithmetic steps
+ * accumulate ~1e-15 at worst — six orders of magnitude of headroom below this
+ * bound. A genuine off-grid value is off by a fraction of a step: `0.15` on a
+ * `0.1` grid misses by `0.05`, which is `3e-1` relative — eight orders of
+ * magnitude above it. Nothing real lands in the gap.
+ *
+ * The direction of the remaining doubt is deliberate too. This gate is a
+ * TIGHTENING of a path that accepted everything yesterday, so where the
+ * arithmetic genuinely cannot tell (a value so large the grid is finer than the
+ * double's own spacing there), it accepts. Rejecting a legitimate write is the
+ * expensive mistake; letting one absurd-magnitude value through is not.
+ */
+const STEP_GRID_TOLERANCE = 1e-9;
+
+/**
+ * True when `value` sits on the grid `anchor + k * step` for some integer `k`,
+ * within {@link STEP_GRID_TOLERANCE} (#6199).
+ *
+ * The ANCHOR is the declared `min` when there is one, else `0` — the HTML
+ * step-base convention, and the one the vocabulary itself points at: `step`
+ * lives under `SpecifierSchema`'s `min`/`max` comment, and a `slider` declaring
+ * `min: 1, step: 2` means the odd numbers, not the even ones. Nothing in this
+ * repo declares a different base; the only other `multipleOf`-shaped rule
+ * anywhere (Zod's, mapped in `rest-server.ts`) is anchored at 0, which is the
+ * same convention with no `min` declared.
+ *
+ * The comparison happens in the VALUE domain, not the multiplier domain:
+ * `Math.abs(k - Math.round(k))` would measure the error as a fraction of a
+ * step, so its meaning would change with the grid's fineness. Measuring
+ * `value` against the nearest grid point keeps the tolerance a property of the
+ * numbers, which is what the floating-point error is a property of.
+ */
+function isOnStepGrid(value: number, anchor: number, step: number): boolean {
+  const k = Math.round((value - anchor) / step);
+  if (!Number.isFinite(k)) return true; // cannot judge — accept, per the posture above
+  const nearest = anchor + k * step;
+  const scale = Math.max(Math.abs(value), Math.abs(anchor), Math.abs(step));
+  return Math.abs(value - nearest) <= scale * STEP_GRID_TOLERANCE;
 }
 
 /**
@@ -144,8 +218,8 @@ interface RangeViolation {
  * superRefine *ties* an option table to exactly `select`/`radio`/`multiselect`
  * (it rejects those three without one), so "types that must declare a table"
  * and "types whose value is checked against it" are the same set and no third
- * list can drift. It ties `min`/`max`/`minLength`/`maxLength` to nothing —
- * doc comments say `number`/`slider` and `text`/`textarea`, but the schema
+ * list can drift. It ties `min`/`max`/`step`/`minLength`/`maxLength` to nothing
+ * — doc comments say `number`/`slider` and `text`/`textarea`, but the schema
  * accepts them on any specifier and only checks their ordering. Inventing a
  * type list here would therefore BE the third list, and it would recreate this
  * issue one level down: a `min` authored on a type not on my list would parse,
@@ -153,9 +227,23 @@ interface RangeViolation {
  * declared. The value's SHAPE decides applicability instead (see
  * {@link firstRangeViolation}), which is exactly how the `pattern` branch in
  * `validatePatch` has always worked.
+ *
+ * `step` (#6199) is admitted on a STRICTER test than the window bounds: finite
+ * AND positive. A window bound of `0` or `-3` is a perfectly meaningful window;
+ * a `step` of `0` or `-0.1` is not a grid at all — `anchor + k * 0` is a single
+ * point and a negative spacing names the same grid as its absolute value while
+ * reading as an author error. Such a declaration therefore records NO grid,
+ * which is the same disposition this function already gives a non-finite bound
+ * and the same one `registerManifest` gives an option-bearing specifier with no
+ * table: nothing to enforce, unchanged behaviour, never a refused write. It is
+ * also the posture #5204 settled for the declaration audit one level up —
+ * registration REPORTS, it never refuses — and there is nothing to report here,
+ * because a manifest that declares an impossible grid rejects no writes and
+ * misconfigures no deployment; it merely fails to constrain, which is exactly
+ * where every other specifier without a `step` already sits.
  */
 function declaredBounds(spec: {
-  min?: unknown; max?: unknown; minLength?: unknown; maxLength?: unknown;
+  min?: unknown; max?: unknown; step?: unknown; minLength?: unknown; maxLength?: unknown;
 }): DeclaredBounds | null {
   const out: DeclaredBounds = {};
   let any = false;
@@ -165,6 +253,10 @@ function declaredBounds(spec: {
       out[k] = v;
       any = true;
     }
+  }
+  if (typeof spec.step === 'number' && Number.isFinite(spec.step) && spec.step > 0) {
+    out.step = spec.step;
+    any = true;
   }
   return any ? out : null;
 }
@@ -204,14 +296,21 @@ function numericValue(value: unknown): number | null {
  * open a second implementation of the same comparison.
  *
  * A value that is not comparable against a declared window is left alone (a
- * non-numeric value under `min`/`max`, a non-string under
+ * non-numeric value under `min`/`max`/`step`, a non-string under
  * `minLength`/`maxLength`). Check ordering mirrors `record-validator.ts`'s
  * equivalent branches so the two report the same bound for the same value; a
  * value can breach only one side of a well-ordered window anyway, and
  * `SpecifierSchema` rejects `min > max` at parse time.
+ *
+ * The grid (`step`, #6199) is judged AFTER the window it lives inside, so a
+ * value that is both out of range and off grid is reported as out of range.
+ * That ordering is not cosmetic: the window is the coarser, more actionable
+ * fact, and `validatePatch` emits at most one `FieldError` per key — telling an
+ * author that `temperature: 40` misses the 0.1 grid, while true, buries that it
+ * is twenty times the declared maximum.
  */
 function firstRangeViolation(bounds: DeclaredBounds, value: unknown): RangeViolation | null {
-  const { min, max, minLength, maxLength } = bounds;
+  const { min, max, step, minLength, maxLength } = bounds;
 
   if (typeof min === 'number' || typeof max === 'number') {
     const n = numericValue(value);
@@ -229,6 +328,23 @@ function firstRangeViolation(bounds: DeclaredBounds, value: unknown): RangeViola
       if (typeof max === 'number' && n > max) {
         return { code: 'max_value', kind: 'range', constraint, declared };
       }
+    }
+  }
+
+  if (typeof step === 'number') {
+    const n = numericValue(value);
+    // The anchor is the declared `min` when there is one, else 0 — see
+    // {@link isOnStepGrid}. It travels in `constraint` alongside `step` because
+    // a client cannot reconstruct the grid from the spacing alone, and the
+    // specifier it came from may declare no `min` at all.
+    const anchor = typeof min === 'number' ? min : 0;
+    if (n !== null && !isOnStepGrid(n, anchor, step)) {
+      return {
+        code: 'invalid_value',
+        kind: 'step',
+        constraint: { step, ...(typeof min === 'number' ? { min } : {}) },
+        declared: anchor === 0 ? `step ${step}` : `step ${step} from ${anchor}`,
+      };
     }
   }
 
@@ -280,7 +396,8 @@ interface RegisteredManifest {
   optionTables: Map<string, string[]>;
   /**
    * Declared value bounds for every specifier that declares at least one of
-   * `min` / `max` / `minLength` / `maxLength`, keyed by specifier key (#5932).
+   * `min` / `max` / `step` / `minLength` / `maxLength`, keyed by specifier key
+   * (#5932, #6199).
    *
    * Precomputed for the same reason and read the same way as `optionTables`:
    * `get()` is the hottest path, and an ABSENT key means "this specifier
@@ -449,7 +566,8 @@ export class SettingsService {
       if (typeof spec.default !== 'undefined') defaults.set(spec.key, spec.default);
       // Declared bounds are recorded wherever they are declared — see
       // `declaredBounds` for why this is keyed on the declaration and the
-      // option table is keyed on the type (#5932).
+      // option table is keyed on the type (#5932), and why a `step` that is not
+      // a finite positive spacing records no grid at all (#6199).
       const declared = declaredBounds(spec);
       if (declared) bounds.set(spec.key, declared);
       if (OPTION_BEARING_TYPES.has(spec.type)) {
@@ -534,7 +652,10 @@ export class SettingsService {
    * env half came to disagree with the save half in the first place. Both
    * families are judged at this one point, by the same helpers the save path
    * calls, and both produce the same verdict — an override that is not in force
-   * contributes no value and pins nothing.
+   * contributes no value and pins nothing. #6199 folded `step` into that same
+   * family rather than opening a third branch: it rides `DeclaredBounds` and
+   * `firstRangeViolation`, so it arrives on both paths at once by construction
+   * and cannot be the next constraint that is enforced on one door only.
    */
   private effectiveEnvOverride(
     reg: RegisteredManifest,
@@ -566,11 +687,22 @@ export class SettingsService {
     if (bounds) {
       const breach = firstRangeViolation(bounds, value);
       if (breach) {
-        this.reportRejectedEnvOverride(reg, namespace, key, envName, value, {
-          what: `is outside the declared ${breach.kind} for`,
-          detail: `Allowed ${breach.kind}: ${breach.declared}.`,
-          fix: `a value within the allowed ${breach.kind}`,
-        });
+        // A grid breach gets its own three fragments rather than being forced
+        // through the window template (#6199): "is outside the declared step"
+        // and "a value within the allowed step" are both false descriptions of
+        // what happened — the value can sit squarely inside every declared
+        // bound and still miss the grid, which is the whole point of the check.
+        this.reportRejectedEnvOverride(reg, namespace, key, envName, value, breach.kind === 'step'
+          ? {
+            what: 'does not sit on the declared step grid for',
+            detail: `Allowed values: ${breach.declared}.`,
+            fix: 'a value on the declared step grid',
+          }
+          : {
+            what: `is outside the declared ${breach.kind} for`,
+            detail: `Allowed ${breach.kind}: ${breach.declared}.`,
+            fix: `a value within the allowed ${breach.kind}`,
+          });
         return null;
       }
     }
@@ -1085,6 +1217,9 @@ export class SettingsService {
    * - `min` / `max` / `minLength` / `maxLength` + non-empty value outside the
    *   declared window → rejected (`min_value` / `max_value` / `min_length` /
    *   `max_length`, #5932).
+   * - `step` + non-empty numeric value that misses the declared grid
+   *   (`min + k * step`, or `k * step` where no `min` is declared) → rejected
+   *   (`invalid_value`, #6199).
    * - All-null patches (namespace reset) and unparseable visibility
    *   expressions skip validation rather than block the write.
    *
@@ -1245,6 +1380,17 @@ export class SettingsService {
       // (and negatives): the value reaches better-auth's password policy and
       // is honoured there, so the declaration was the only thing claiming a
       // floor existed and nothing was holding it.
+      //
+      // `step` (#6199) is the fifth and last of the value constraints
+      // `SpecifierSchema` declares, and it joins the family here rather than
+      // getting a branch of its own. The reading that settles it is the
+      // schema's own: `step` sits under the SAME "numeric bounds and step"
+      // comment as `min`/`max`, so it is authored as a bound and a declared
+      // bound binds. Read the other way — a pure `input[type=number]` arrow
+      // increment — it would have to have a UI consumer to be doing anything,
+      // and it has none: `step` had zero read points anywhere in this repo or
+      // in `objectui` when this branch was written, which is a declaration
+      // enforcing nothing rather than a declaration enforcing presentation.
       if (!empty) {
         const bounds = declaredBounds(spec);
         const breach = bounds ? firstRangeViolation(bounds, value) : null;
@@ -1259,7 +1405,9 @@ export class SettingsService {
             code: breach.code,
             message: breach.kind === 'length'
               ? `${label} must be within the declared length (${breach.declared}).${got}`
-              : `${label} must be within the declared range (${breach.declared}).${got}`,
+              : breach.kind === 'step'
+                ? `${label} must line up with the declared step (${breach.declared}).${got}`
+                : `${label} must be within the declared range (${breach.declared}).${got}`,
             label,
             // The declared window as discrete values, so a client composes its
             // own sentence instead of parsing ours (`FieldError.constraint`,

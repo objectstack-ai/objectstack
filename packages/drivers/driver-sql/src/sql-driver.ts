@@ -14,6 +14,17 @@ import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyD
 // `AggregationNodeSchema.function` actually admits.
 import { AggregationFunction } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+// [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
+// `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
+// implementation for all four consumers, proven against the same
+// `FILTER_LOGIC_CASES` table this driver's conformance suite runs; this file
+// supplies only its own refusals. See `reduceFilterNode` below.
+import {
+  reduceFilterVerdict,
+  reduceFilterKeyVerdict,
+  type FilterVerdict as SharedFilterVerdict,
+  type FilterVerdictHooks,
+} from '@objectstack/spec/data';
 // `defaultValue` runtime tokens (#4560). The DDL below asks the SPEC — not a
 // list of its own — which `defaultValue`s are instructions rather than literals,
 // so the engine and this driver can never disagree about what may become a
@@ -1000,8 +1011,12 @@ function safeShapePreview(value: unknown): string {
  * - `'true'`  — matches every row; the compiler emits NO clause for it.
  * - `'false'` — matches no row; the compiler emits the dialect FALSE constant.
  * - `'clause'` — carries at least one real predicate; compile it normally.
+ *
+ * [#5659] The vocabulary is `@objectstack/spec`'s now, because the REDUCTION
+ * that produces it is — see {@link reduceFilterNode}. Kept as a local alias so
+ * every use site below still reads `FilterVerdict`.
  */
-type FilterVerdict = 'true' | 'false' | 'clause';
+type FilterVerdict = SharedFilterVerdict;
 
 /**
  * [#5134] Is `value` a Filter Protocol NODE — the shape `FilterConditionSchema`
@@ -1359,52 +1374,59 @@ function assertFilterNodeList(value: unknown, key: string, path: string): assert
  * "empty because the author wrote nothing" from "empty because something failed
  * to compile". A structural verdict has no such blind spot, and it lets the
  * emitter guarantee that every group it opens receives at least one clause.
+ *
+ * ## [#5659] The algebra is `@objectstack/spec`'s; the REFUSALS are this driver's
+ *
+ * Everything above describes a ruling (#5322/#5134) that four consumers had to
+ * agree on and implemented four times — here, in `driver-mongodb`, in
+ * `driver-memory`'s matcher, and nearly a fifth time inside `@objectstack/lint`,
+ * which declined to hand-write it and filed #5659 instead. The reduction now
+ * lives once, in {@link reduceFilterVerdict}, proven against the same
+ * `FILTER_LOGIC_CASES` table this driver's conformance suite runs.
+ *
+ * What stays here is what is genuinely this driver's: WHICH shapes it refuses
+ * and with which message. They are handed to the shared walk as
+ * {@link SQL_FILTER_VERDICT_HOOKS} and are invoked from exactly the positions
+ * they were invoked from before, so no wording, code or status moved — the
+ * conformance case-set is green on both sides of the change.
  */
 function reduceFilterNode(node: Record<string, unknown>, path: string): FilterVerdict {
-  let sawFalse = false;
-  let sawClause = false;
-  for (const [key, value] of Object.entries(node)) {
-    const verdict = reduceFilterKey(key, value, path);
-    if (verdict === 'false') sawFalse = true;
-    else if (verdict === 'clause') sawClause = true;
-  }
-  // AND over the node's keys: FALSE dominates, then a real predicate, else TRUE.
-  return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
+  return reduceFilterVerdict(node, { ...SQL_FILTER_VERDICT_HOOKS, path });
 }
 
 /** [#5134] The verdict of ONE key of a filter node. */
 function reduceFilterKey(key: string, value: unknown, path: string): FilterVerdict {
-  const here = path ? `${path}.${key}` : key;
+  return reduceFilterKeyVerdict(key, value, { ...SQL_FILTER_VERDICT_HOOKS, path });
+}
 
-  if (key === '$and' || key === '$or') {
-    assertFilterNodeList(value, key, here);
-    let sawTrue = false;
-    let sawFalse = false;
-    let sawClause = false;
-    value.forEach((element, index) => {
-      const elementPath = `${here}[${index}]`;
-      assertFilterNode(element, elementPath);
-      const verdict = reduceFilterNode(element, elementPath);
-      if (verdict === 'true') sawTrue = true;
-      else if (verdict === 'false') sawFalse = true;
-      else sawClause = true;
-    });
-    // `$and: []` → no FALSE, no clause → TRUE (the AND identity).
-    if (key === '$and') return sawFalse ? 'false' : sawClause ? 'clause' : 'true';
-    // `$or: []` → no TRUE, no clause → FALSE (the OR identity). This is the
-    // half the old compile got backwards: it answered the whole table.
-    return sawTrue ? 'true' : sawClause ? 'clause' : 'false';
-  }
+/**
+ * [#5659] This driver's half of the reduction: the shape refusals, at the
+ * positions the shared walk visits them.
+ *
+ * `assertFilterNodeList` / `assertFilterNode` are wrapped in arrows rather than
+ * passed by reference because they are TypeScript assertion functions, whose
+ * narrowing is meaningless — and whose declaration requirements are a nuisance
+ * — through a property reference. Nothing else about the call changes.
+ */
+const SQL_FILTER_VERDICT_HOOKS: FilterVerdictHooks = {
+  assertNodeList: (value, key, path) => assertFilterNodeList(value, key, path),
+  assertNode: (value, path) => assertFilterNode(value, path),
+  classifyKey: (key, value, here) => classifyFilterKey(key, value, here),
+};
 
-  if (key === '$not') {
-    assertFilterNode(value, here);
-    const inner = reduceFilterNode(value, here);
-    // NOT TRUE ≡ FALSE — so `{ $not: {} }` matches nothing.
-    return inner === 'true' ? 'false' : inner === 'false' ? 'true' : 'clause';
-  }
-
+/**
+ * [#5134] The verdict of ONE **non-combinator** key — and this driver's gate on
+ * everything a field constraint may not be.
+ *
+ * `here` is the already-joined path of the key, exactly as the reduction hands
+ * it over; the three combinator arms this used to open with are the shared
+ * walk's now, and the refusals below are unchanged from when they sat under
+ * them.
+ */
+function classifyFilterKey(key: string, value: unknown, here: string): FilterVerdict {
   // [#5348] Everything still `$`-prefixed at this point is an UNDECLARED
-  // combinator — the three declared ones each returned above. Refused here and
+  // combinator — the shared walk resolved the three declared ones before this
+  // key ever reached the hook (#5659). Refused here and
   // not in the emitter for exactly the reason the two lines below are here, and
   // the reason #5327 gave for `{ field: {} }`: this walk is exhaustive and does
   // not short-circuit, while the emitter is skipped wholesale by a boolean

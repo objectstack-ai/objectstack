@@ -16,6 +16,11 @@
  * comparand is not `[min, max]` (#5328).
  */
 
+// [#5659] The Filter Protocol's boolean identity reduction, shared with
+// driver-sql, driver-mongodb and the flow linter. See `evaluate` for why a
+// record-at-a-time matcher consults a record-INDEPENDENT verdict first.
+import { reduceFilterVerdict } from '@objectstack/spec/data';
+
 import { assertFilterConditionShape } from './filter-refusal.js';
 
 type RecordType = Record<string, any>;
@@ -41,9 +46,34 @@ export function match(record: RecordType, filter: any): boolean {
     return evaluate(record, filter);
 }
 
+/**
+ * [#5659] The boolean identities come from the SHARED reduction; everything
+ * record-dependent is still decided here.
+ *
+ * This matcher used to answer `{ $and: [] }`, `{ $or: [] }`, `{}` and
+ * `{ $not: {} }` as a by-product of the JS it happens to be written in —
+ * `every` over an empty array is `true`, `some` is `false`, an empty node falls
+ * through to the trailing `return true`. Those four answers are not an accident
+ * of `Array.prototype`, they are a ruling (#5322/#5134) that `driver-sql` and
+ * `driver-mongodb` each spell out in a `reduceFilterNode` of their own, and
+ * "emergent from the evaluator" is not a place a ruling can be read from or
+ * held to. Asking the shared predicate makes this backend's identity answers
+ * the same OBJECT as theirs rather than a third agreeing coincidence.
+ *
+ * It is a pre-pass and not a rewrite of the loops below, because the verdict is
+ * record-independent by construction and the evaluation is not: `'clause'` —
+ * the answer for every filter that carries a real predicate — falls straight
+ * through to the untouched code. And a `'true'` verdict can only be reached by
+ * a filter whose keys are ALL combinators that resolved (a field key always
+ * contributes `'clause'`), so returning early on it skips no field constraint.
+ */
 function evaluate(record: RecordType, filter: any): boolean {
     if (!filter || Object.keys(filter).length === 0) return true;
-    
+
+    const verdict = reduceFilterVerdict(filter);
+    if (verdict === 'true') return true;
+    if (verdict === 'false') return false;
+
     // 1. Handle Top-Level Logical Operators ($and, $or, $not)
     // These usually appear at the root or nested.
     
