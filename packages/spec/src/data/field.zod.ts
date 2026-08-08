@@ -262,7 +262,7 @@ export const AddressSchema = lazySchema(() => z.object({
  */
 /**
  * Prescriptive rejection for a mis-spelled `unique` scope (ADR-0120
- * §Terminology; pattern of `strictTenancyError`): the error must carry the
+ * §Terminology; pattern of `strictCapabilitiesError`): the error must carry the
  * vocabulary and, for the two predictable near-misses (`'tenant'`, `'org'`),
  * name `'organization'` explicitly — a typo must be a loud, fixable parse
  * error, never a silent scope change. Declared before `UniqueScopeSchema`

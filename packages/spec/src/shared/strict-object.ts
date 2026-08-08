@@ -60,7 +60,7 @@
 
 import { z } from 'zod';
 
-import { strictUnknownKeyError } from './suggestions.zod';
+import { strictUnknownKeyError, type KeySetGuidance } from './suggestions.zod';
 
 /**
  * True when `schema` accepts no value at all — a `z.never()`, however wrapped.
@@ -123,6 +123,18 @@ export interface StrictObjectOptions {
    * keys, wrong-layer pointers. An entry here suppresses the rename suggestion.
    */
   guidance?: Readonly<Record<string, string>>;
+  /**
+   * The same channel, keyed by a **named key set** instead of an exact key: one
+   * prescription for a whole family, emitted once per message. Added at #6619
+   * for the three prescriptions that were hand-written `$ZodErrorMap`s precisely
+   * because this form did not exist — a set of eleven retired analytics keys
+   * with one migration answer, and the ADR-0089 visibility family, which is a
+   * pattern rather than a list.
+   *
+   * An exact {@link guidance} entry always wins over a set; among sets,
+   * declaration order decides. See {@link KeySetGuidance}.
+   */
+  guidanceSets?: readonly KeySetGuidance[];
   /**
    * Extra candidates for the "did you mean" fallback beyond the shape's own
    * keys. For a base that gets `.extend()`ed elsewhere, naming the extension's
@@ -225,12 +237,28 @@ export function strictObjectDeclarations(): readonly StrictObjectDeclaration[] {
 }
 
 /**
- * A `.strict()` object whose unknown-key error names the surface, echoes the
- * offending key, and suggests the closest declared key — with the candidate
- * list read from `shape` rather than transcribed alongside it.
+ * Register an authoring surface and build its unknown-key error map, **without
+ * closing the shape** — the half of {@link strictObject} that a schema whose
+ * door is one level up needs on its own (#6619).
+ *
+ * The case it exists for is `view.zod.ts`'s `FormFieldBaseSchema`: a
+ * module-private base with exactly ONE consumer, `FormFieldSchema =
+ * base.extend({ fields }).strict()`. Both the error map and the strictness ride
+ * the `.extend()`, so the base is not a door and #4001 批 18 deliberately left
+ * it open — the ledger's `strip` row for that site is a measurement artifact,
+ * not authorable surface. Folding its bespoke map in with `strictObject` would
+ * have flipped that posture as a side effect of a TEXT change, which is exactly
+ * the acceptance-surface edit this migration is not allowed to make.
+ *
+ * Everything else is identical to `strictObject`, because `strictObject` is
+ * this function plus `z.object(shape, { error }).strict()`: same lazy build,
+ * same tombstone-aware candidate list, same one registration the audit reads.
  */
-export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptions, shape: T) {
-  const { surface, history, aliases, guidance, extraKeys = [], retiredForms } = options;
+export function strictObjectError<T extends z.ZodRawShape>(
+  options: StrictObjectOptions,
+  shape: T,
+): z.core.$ZodErrorMap {
+  const { surface, history, aliases, guidance, guidanceSets, extraKeys = [], retiredForms } = options;
 
   // The error map is built on FIRST USE, not at construction.
   //
@@ -282,10 +310,20 @@ export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptio
       history,
       aliases,
       guidance,
+      guidanceSets,
     }))(issue);
   };
 
   declarationStore().push({ options, shape });
 
-  return z.object(shape, { error }).strict();
+  return error;
+}
+
+/**
+ * A `.strict()` object whose unknown-key error names the surface, echoes the
+ * offending key, and suggests the closest declared key — with the candidate
+ * list read from `shape` rather than transcribed alongside it.
+ */
+export function strictObject<T extends z.ZodRawShape>(options: StrictObjectOptions, shape: T) {
+  return z.object(shape, { error: strictObjectError(options, shape) }).strict();
 }
