@@ -746,62 +746,53 @@ export {
 };
 
 // ==========================================
-// View Management Operations
+// View Management Operations — RETIRED
 // ==========================================
 
-export const ListViewsRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  type: z.enum(['list', 'form']).optional().describe('Filter by view type'),
-}));
-
-export const ListViewsResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  views: z.array(ViewSchema).describe('Array of view definitions'),
-}));
-
-export const GetViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  viewId: z.string().describe('View identifier'),
-}));
-
-export const GetViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  view: ViewSchema.describe('View definition'),
-}));
-
-export const CreateViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  data: ViewSchema.describe('View definition to create'),
-}));
-
-export const CreateViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  viewId: z.string().describe('Created view identifier'),
-  view: ViewSchema.describe('Created view definition'),
-}));
-
-export const UpdateViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  viewId: z.string().describe('View identifier'),
-  data: ViewSchema.partial().describe('Partial view data to update'),
-}));
-
-export const UpdateViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  viewId: z.string().describe('Updated view identifier'),
-  view: ViewSchema.describe('Updated view definition'),
-}));
-
-export const DeleteViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  viewId: z.string().describe('View identifier to delete'),
-}));
-
-export const DeleteViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  viewId: z.string().describe('Deleted view identifier'),
-  success: z.boolean().describe('Whether deletion succeeded'),
-}));
+// `ListViews` / `GetView` / `CreateView` / `UpdateView` / `DeleteView` —
+// five methods and their ten Request/Response schemas — were REMOVED per
+// ADR-0049 enforce-or-remove (#6239, protocol 17, maintainer ruling
+// 2026-08-07). Route 3 of the retirement playbook: not one of the ten was a
+// KEY on an authorable shape, nothing parsed them, and no route could reach the
+// methods, so there is no tombstone to write and no source or `sys_metadata`
+// row for a D2 conversion to rewrite. `RETIRED_DEFS_BY_MAJOR[17]` plus the D3
+// `SemanticMigration` `view-management-protocol-retired` ARE the declaration.
+//
+// ## What it declared, and what serves it
+//
+// A viewId-addressed CRUD surface over views: list by object (+ optional
+// list/form filter), read one, create, patch, delete. Measured on `origin/main`
+// immediately before the removal, it had ZERO of the three things a protocol
+// method needs:
+//
+//   - no implementation — `packages/metadata-protocol/src/protocol.ts` declares
+//     no `listViews`/`getView`/`createView`/`updateView`/`deleteView`; its only
+//     view resolver is `getUiView`;
+//   - no route — `packages/rest/src/rest-server.ts` never mentions `viewId`, so
+//     nothing viewId-addressed is reachable over HTTP at all;
+//   - no caller — the only `ViewProtocol` mention outside this file was
+//     `content/docs/kernel/services-checklist.mdx`, which already recorded the
+//     five as declared-and-unrouted.
+//
+// Views are read and written today through surfaces that DO exist: the
+// metadata routes (`/api/v1/meta/view/:name`, i.e. `getMetaItem` /
+// `saveMetaItem` / `deleteMetaItem` with `type: 'view'`) for the stored
+// definition, and `getUiView` (`GET /api/v1/ui/view/:object/:type`) for the
+// resolved render-time view.
+//
+// ## Why this one was worth the removal rather than a note
+//
+// A declared surface that is name-identical and semantics-adjacent to a real
+// one is not merely dead weight; it is an attractive nuisance in every grep.
+// It had already cost once: #5948's issue body AND its 2026-08-07 maintainer
+// ruling both read `GetViewResponseSchema` (this block, zero implementations)
+// as the contract of `GET /ui/view/:object/:type`, whose declared response is
+// `GetUiViewResponseSchema` — 250 lines up, one word different. The ruling's
+// reasoning happened to survive the mix-up, which is the luck that makes this
+// class of defect worth removing rather than annotating.
+//
+// If "read/write ONE view by id" becomes a real requirement, it returns through
+// the ENFORCE route — implementation first, vocabulary second (ADR-0049).
 
 // ==========================================
 // Permission Operations
@@ -1423,30 +1414,6 @@ export type DeleteManyDataResponse = z.input<typeof DeleteManyDataResponseSchema
 /** Post-parse shape of {@link DeleteManyDataResponse} — defaults applied, transforms run (ADR-0122). */
 export type DeleteManyDataResponseParsed = z.infer<typeof DeleteManyDataResponseSchema>;
 
-// View Management Types
-export type ListViewsRequest = z.input<typeof ListViewsRequestSchema>;
-export type ListViewsResponse = z.input<typeof ListViewsResponseSchema>;
-/** Post-parse shape of {@link ListViewsResponse} — defaults applied, transforms run (ADR-0122). */
-export type ListViewsResponseParsed = z.infer<typeof ListViewsResponseSchema>;
-export type GetViewRequest = z.input<typeof GetViewRequestSchema>;
-export type GetViewResponse = z.input<typeof GetViewResponseSchema>;
-/** Post-parse shape of {@link GetViewResponse} — defaults applied, transforms run (ADR-0122). */
-export type GetViewResponseParsed = z.infer<typeof GetViewResponseSchema>;
-export type CreateViewRequest = z.input<typeof CreateViewRequestSchema>;
-/** Post-parse shape of {@link CreateViewRequest} — defaults applied, transforms run (ADR-0122). */
-export type CreateViewRequestParsed = z.infer<typeof CreateViewRequestSchema>;
-export type CreateViewResponse = z.input<typeof CreateViewResponseSchema>;
-/** Post-parse shape of {@link CreateViewResponse} — defaults applied, transforms run (ADR-0122). */
-export type CreateViewResponseParsed = z.infer<typeof CreateViewResponseSchema>;
-export type UpdateViewRequest = z.input<typeof UpdateViewRequestSchema>;
-/** Post-parse shape of {@link UpdateViewRequest} — defaults applied, transforms run (ADR-0122). */
-export type UpdateViewRequestParsed = z.infer<typeof UpdateViewRequestSchema>;
-export type UpdateViewResponse = z.input<typeof UpdateViewResponseSchema>;
-/** Post-parse shape of {@link UpdateViewResponse} — defaults applied, transforms run (ADR-0122). */
-export type UpdateViewResponseParsed = z.infer<typeof UpdateViewResponseSchema>;
-export type DeleteViewRequest = z.input<typeof DeleteViewRequestSchema>;
-export type DeleteViewResponse = z.input<typeof DeleteViewResponseSchema>;
-
 // Permission Types
 export type CheckPermissionRequest = z.input<typeof CheckPermissionRequestSchema>;
 export type CheckPermissionResponse = z.input<typeof CheckPermissionResponseSchema>;
@@ -1652,14 +1619,11 @@ export interface PackageProtocol {
   disablePackage?(request: DisablePackageRequest): Promise<DisablePackageResponse>;
 }
 
-/** View management (optional). */
-export interface ViewProtocol {
-  listViews?(request: ListViewsRequest): Promise<ListViewsResponse>;
-  getView?(request: GetViewRequest): Promise<GetViewResponse>;
-  createView?(request: CreateViewRequest): Promise<CreateViewResponse>;
-  updateView?(request: UpdateViewRequest): Promise<UpdateViewResponse>;
-  deleteView?(request: DeleteViewRequest): Promise<DeleteViewResponse>;
-}
+// `ViewProtocol` (`listViews` / `getView` / `createView` / `updateView` /
+// `deleteView`) was REMOVED at protocol 17 — see the "View Management
+// Operations — RETIRED" note above (#6239). No host implemented it and no route
+// reached it; view read/write is `MetadataProtocol` (`getMetaItem` /
+// `saveMetaItem` / `deleteMetaItem` with `type: 'view'`) plus `getUiView`.
 
 /** Permissions (optional). */
 export interface PermissionProtocol {

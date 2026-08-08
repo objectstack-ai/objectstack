@@ -31,9 +31,12 @@
  *    no source-literal reader can see, so the target check has to be suppressed
  *    for most of the interesting schemas. `.shape` sees them.
  * 2. **Assembled tables.** Ten call sites build `aliases` (or `surface`) from
- *    something other than a literal — `data/field.zod.ts`, `ui/theme.zod.ts`,
- *    `automation/etl.zod.ts` and others. The AST reads those as empty and
- *    reports them clean.
+ *    something other than a literal — `data/field.zod.ts`, `ui/theme.zod.ts`
+ *    and others. The AST reads those as empty and reports them clean.
+ *    (`automation/etl.zod.ts` was one of the ten when this was measured; the
+ *    whole L2 layer was retired at #6414, which is why the count above is kept
+ *    as the measurement it was rather than silently decremented — the argument
+ *    is about the AST's blind spot, and it does not get weaker by one file.)
  * 3. **Colliding surfaces.** `'this field group'` names two different schemas
  *    (`data/object.zod.ts`, `studio/object-designer.zod.ts`), so the surface
  *    string is not a key and the hand-map silently judges one against the

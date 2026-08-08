@@ -14,14 +14,7 @@ import {
   CreateManyDataResponseSchema,
   UpdateManyDataRequestSchema,
   DeleteManyDataRequestSchema,
-  // Views
-  ListViewsRequestSchema,
-  ListViewsResponseSchema,
-  GetViewRequestSchema,
-  CreateViewRequestSchema,
-  UpdateViewRequestSchema,
-  DeleteViewRequestSchema,
-  DeleteViewResponseSchema,
+  // View-management schemas removed with the retired ViewProtocol (#6239, v17)
   // Permissions
   CheckPermissionRequestSchema,
   CheckPermissionResponseSchema,
@@ -166,24 +159,41 @@ describe('ObjectStack Protocol', () => {
     expect(DeleteManyDataRequestSchema.safeParse(deleteManyReq).success).toBe(true);
   });
 
-  it('validates Views operations', () => {
-    expect(ListViewsRequestSchema.safeParse({ object: 'project', type: 'list' }).success).toBe(true);
-    expect(ListViewsResponseSchema.safeParse({
-      object: 'project',
-      views: [{ list: { columns: [] } }],
-    }).success).toBe(true);
-    expect(GetViewRequestSchema.safeParse({ object: 'project', viewId: 'v1' }).success).toBe(true);
-    expect(CreateViewRequestSchema.safeParse({
-      object: 'project',
-      data: { list: { columns: [] } },
-    }).success).toBe(true);
-    expect(UpdateViewRequestSchema.safeParse({
-      object: 'project',
-      viewId: 'v1',
-      data: { list: { columns: [] } },
-    }).success).toBe(true);
-    expect(DeleteViewRequestSchema.safeParse({ object: 'project', viewId: 'v1' }).success).toBe(true);
-    expect(DeleteViewResponseSchema.safeParse({ object: 'project', viewId: 'v1', success: true }).success).toBe(true);
+  it('no longer publishes a viewId-addressed view CRUD surface (#6239)', async () => {
+    // Retired at protocol 17: five methods, ten schemas, zero implementations
+    // and zero routes — and already mis-read once as the contract of
+    // `GET /ui/view/:object/:type` (#5948). The unit test that stood here
+    // asserted the ten shapes parse; the shapes are what was removed, so it is
+    // replaced wholesale rather than re-spelled (the retirement playbook's
+    // third fixture disposition — an assertion that keeps passing because
+    // nothing is produced is not coverage).
+    //
+    // Reverse verification, direction predicted first: these are
+    // `false`-expecting existence checks over a runtime namespace, so restoring
+    // any removed limb turns exactly this test red. Plain red, not one of the
+    // inverted directions — nothing downstream counts these names.
+    const protocol = await import('./protocol.zod');
+    for (const name of [
+      'ListViewsRequestSchema', 'ListViewsResponseSchema',
+      'GetViewRequestSchema', 'GetViewResponseSchema',
+      'CreateViewRequestSchema', 'CreateViewResponseSchema',
+      'UpdateViewRequestSchema', 'UpdateViewResponseSchema',
+      'DeleteViewRequestSchema', 'DeleteViewResponseSchema',
+    ]) {
+      expect(name in protocol, `${name} must not be exported`).toBe(false);
+    }
+  });
+
+  it('keeps the two view surfaces that ARE routed', async () => {
+    // The point of the removal, asserted positively so a later reader cannot
+    // mistake it for "views left the protocol". `getUiView` serves the resolved
+    // render-time view; the stored definition travels on the generic metadata
+    // methods with `type: 'view'`.
+    const protocol = await import('./protocol.zod');
+    expect('GetUiViewRequestSchema' in protocol).toBe(true);
+    expect('GetUiViewResponseSchema' in protocol).toBe(true);
+    expect('GetMetaItemRequestSchema' in protocol).toBe(true);
+    expect('SaveMetaItemRequestSchema' in protocol).toBe(true);
   });
 
   it('validates Permissions operations', () => {

@@ -263,6 +263,7 @@
     "SharingRuleEvaluationResult (interface)",
     "SharingRuleRecipientType (type)",
     "SharingRuleRow (interface)",
+    "SharingWriteVerdict (type)",
     "SmsDeliveryStatus (type)",
     "SmsTransportSendResult (interface)",
     "StartupOptions (type)",

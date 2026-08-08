@@ -1181,9 +1181,25 @@ describe('[#4828] resolveDiscoveryEnvironment (decision 4 — enum, not passthro
     expect(resolveDiscoveryEnvironment('STAGING')).toBe('sandbox');
   });
 
-  it('never CLAIMS production for an unset or unrecognized value', () => {
-    for (const raw of [undefined, null, '', 'qa', 'preview', 'nonsense']) {
-      expect(resolveDiscoveryEnvironment(raw as any), String(raw)).toBe('development');
+  // [#5936] These were ONE case until the 2026-08-07 ruling folded the unset
+  // default into this mapper (direction 1). They are two different rules and
+  // they now point opposite ways, so they are two cases: absence is the host
+  // declining to answer and resolves conservatively to `production`; a spelling
+  // this repo does not recognise is a GUESS and never claims production.
+  // Collapsing them back into one is the regression these two guard.
+  it('an UNSET value advertises production — the host declined to say (#5673, #5936)', () => {
+    // Blank counts as unset: `NODE_ENV=` exports an empty string, and the
+    // runtime's `getEnv` has always folded that into its default. Were it
+    // treated as "anything else" the two producers would drift again on exactly
+    // that input — the drift this consolidation ends.
+    for (const raw of [undefined, null, '', '   ']) {
+      expect(resolveDiscoveryEnvironment(raw as any), JSON.stringify(raw)).toBe('production');
+    }
+  });
+
+  it('never CLAIMS production for an unrecognized spelling (#4828)', () => {
+    for (const raw of ['qa', 'preview', 'nonsense']) {
+      expect(resolveDiscoveryEnvironment(raw), raw).toBe('development');
     }
   });
 
