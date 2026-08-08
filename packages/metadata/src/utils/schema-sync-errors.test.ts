@@ -293,12 +293,16 @@ describe('the two classifications are independent, not complementary', () => {
  *    subtraction, and the guarded surface may not shrink while it is applied.
  *
  * Reverse verification, direction predicted BEFORE running (2026-08-08):
- * deleting `MISSING_TABLE.excludes` turns the write-path rows of `LOUD` — and
- * only those — RED, while every `BENIGN` row and every read-path row stays
- * green. Measured after writing them: 6 failed, exactly the 6 write-path/
- * sub-object-phrase rows, no others. The read-path rows are green in both
- * directions on purpose: they were never the hole, and a corpus that could not
- * tell the two apart would be reporting the wrong repair.
+ * deleting `MISSING_TABLE.excludes` turns the write-path / sub-object rows of
+ * `LOUD` RED, while every `BENIGN` row and every read-path row stays green.
+ * Measured: `8 failed | 48 passed` — the direction held, and the count came in
+ * two ABOVE the six rows predicted by counting phrases, because two rows go red
+ * through the code channel rather than the phrase: `42703 whose message is a
+ * genuine missing-table phrase` and the `cause`-rescue case below. Both are
+ * part of the same repair (a code is a fact, prose is a guess) and are recorded
+ * here rather than trimmed to fit the prediction. The read-path rows are green
+ * in both directions on purpose: they were never the hole, and a corpus that
+ * could not tell the two apart would be reporting the wrong repair.
  */
 describe('isMissingTableError — Postgres sub-object phrases are NOT missing tables (#6347)', () => {
     /** Errors that must stay LOUD — `isMissingTableError` must answer `false`. */
