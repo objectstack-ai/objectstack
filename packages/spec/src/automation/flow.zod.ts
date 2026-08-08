@@ -353,8 +353,9 @@ function flowNodeObject() { return strictObject(
       // helper once told an author to write something that gets rejected next.
       timeout:
         '`wait` has no timeout — nothing has ever failed or resumed a wait on a deadline ' +
-        '(#4158 retired the two keys that claimed one). Use `timerDuration`: it accepts a ' +
-        'bare number as milliseconds, so `timerDuration: 60000` is a 60s wait.',
+        '(#4158 retired the two keys that claimed one). Use `timerDuration`, and QUOTE the ' +
+        'number: the key is a string, and a bare numeric string is read as milliseconds, so ' +
+        "`timerDuration: '60000'` is a 60s wait (`timerDuration: 'PT1M'` says the same in ISO 8601).",
     },
     history:
       'Until #4001 these were dropped silently — the block still parsed, so a wait node ' +
@@ -370,14 +371,18 @@ function flowNodeObject() { return strictObject(
 
     /**
      * `wait` never had a timeout. Both keys below described one and neither
-     * delivered it (#4158) — the pair is retired in 18 rather than left standing
-     * as a promise the runtime does not keep (PD #10).
+     * delivered it (#4158) — the pair is retired in 17 rather than left standing
+     * as a promise the runtime does not keep (PD #10). (Both tombstones below say
+     * 17 and the ADR-0087 conversion is `toMajor: 17`; this line said 18, the
+     * #4350 class — a tombstone naming a major that never shipped it.)
      *
      * `timeoutMs` said "maximum wait time" and its ONLY reader used it as the
      * timer *duration* when `timerDuration` was absent — so it did something, just
      * not what it said. `timerDuration` already expresses that (`parseIsoDuration`
-     * accepts a bare number as milliseconds), which is why the conversion can move
-     * it losslessly instead of dropping it.
+     * reads a bare numeric *string* as milliseconds — the number must be quoted,
+     * because `timerDuration` is `z.string()` and the schema is what the author
+     * meets), which is why the conversion can move it losslessly, stringifying on
+     * the way, instead of dropping it.
      *
      * `onTimeout` had ZERO readers anywhere. Setting it changed nothing, and the
      * showcase set it — a declared default (`'fail'`) stamped on every wait node
@@ -392,8 +397,10 @@ function flowNodeObject() { return strictObject(
       '`waitEventConfig.timeoutMs` was removed in @objectstack/spec 17 (#4158). It documented a '
       + 'timeout guard that never existed: nothing ever failed or resumed a wait on a deadline. Its '
       + 'only reader treated it as the timer DURATION when `timerDuration` was absent, so use '
-      + '`timerDuration` — it accepts a bare number as milliseconds, making `timeoutMs: 60000` and '
-      + "`timerDuration: 60000` the same wait. Stored flows are converted automatically.",
+      + '`timerDuration` — but QUOTE the number: the key is a string, and a bare numeric string is '
+      + "read as milliseconds, making `timeoutMs: 60000` and `timerDuration: '60000'` the same wait "
+      + "(`timerDuration: 'PT1M'` is the ISO 8601 spelling of that same 60s). Stored flows are "
+      + 'converted automatically — the conversion does the quoting for you.',
     ),
     onTimeout: retiredKey(
       '`waitEventConfig.onTimeout` was removed in @objectstack/spec 17 (#4158). It had no readers at '

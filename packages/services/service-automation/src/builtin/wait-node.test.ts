@@ -6,6 +6,9 @@ import type { NodeExecutor } from '../engine.js';
 import { InMemorySuspendedRunStore } from '../suspended-run-store.js';
 import { registerWaitNode, parseIsoDuration, rearmSuspendedWaitTimers } from './wait-node.js';
 import type { IJobService, JobHandler, JobSchedule } from '@objectstack/spec/contracts';
+// #6758 — the wait tombstone's prescription is checked against BOTH gates an
+// author's value must clear: the spec schema and `parseIsoDuration` above.
+import { FlowNodeSchema } from '@objectstack/spec/automation';
 
 function silentLogger() {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } } as any;
@@ -71,6 +74,90 @@ describe('parseIsoDuration', () => {
     expect(parseIsoDuration(0)).toBeUndefined();
     expect(parseIsoDuration(-5)).toBeUndefined();
     expect(parseIsoDuration(undefined)).toBeUndefined();
+  });
+});
+
+/**
+ * #6758 — the spec's own upgrade prescription, EXECUTED rather than read.
+ *
+ * `waitEventConfig.timeoutMs` is a #4158 tombstone whose message tells an
+ * upgrading author which `timerDuration` value to write instead. That value has
+ * to survive TWO gates, and each gate is blind to the other's failure:
+ *
+ *   1. **The schema.** `timerDuration` is `z.string()`, so an unquoted number is
+ *      TS2322 at the authoring site and `expected string, received number` at
+ *      the parse. This is what the message printed until #6758 — `parseIsoDuration`
+ *      below does accept a bare JS number, which is where the wrong wording came
+ *      from, but no number can REACH it through `timerDuration`.
+ *   2. **This reader.** `z.string()` takes any string at all, so schema-green
+ *      cannot tell `'60000'` from `'about a minute'` (the latter parses to
+ *      `undefined` here and silently waits on nothing).
+ *
+ * The spec package can only check gate 1 — it does not depend on this one — so
+ * the round trip is pinned here, where both halves are importable. Every value
+ * is EXTRACTED from the live message, never compared to a copy: a hard-coded
+ * `'60000'` would go green the moment someone reworded the prose, which is
+ * exactly when this needs to be checked.
+ */
+describe("the spec's `timeoutMs` → `timerDuration` prescription round-trips (#6758)", () => {
+  const waitNode = (waitEventConfig: Record<string, unknown>) => ({
+    id: 'w', type: 'wait', label: 'Wait', waitEventConfig,
+  });
+  const issueMessage = (waitEventConfig: Record<string, unknown>, code: string) => {
+    const result = FlowNodeSchema.safeParse(waitNode(waitEventConfig));
+    expect(result.success).toBe(false);
+    return result.error!.issues.find((i) => i.code === code)?.message;
+  };
+
+  it('every `timerDuration` it prints parses AND yields the wait it promises', () => {
+    // Channel 1 — the tombstone itself. Channel 2 — the `timeout` misspelling's
+    // `guidance` entry, which repeats the same advice to an author who has had
+    // no first failure to learn from.
+    const tombstone = issueMessage({ eventType: 'timer', timeoutMs: 60_000 }, 'invalid_type');
+    const guidance = issueMessage({ eventType: 'timer', timeout: 60_000 }, 'unrecognized_keys');
+
+    for (const [channel, message] of Object.entries({ tombstone, guidance })) {
+      // Anti-vacuity: gut either channel and this fails, rather than the loop
+      // below passing because it found nothing to check.
+      expect(message, `${channel}: raised no message at all`).toBeDefined();
+      const printed = [...message!.matchAll(/`timerDuration:\s*([^`]+)`/g)].map((m) => m[1]);
+      expect(printed.length, `${channel} must PRINT a \`timerDuration\` value to copy`)
+        .toBeGreaterThan(0);
+
+      for (const literal of printed) {
+        // Read the literal exactly as an author retypes it: `'60000'` is a
+        // string, a bare `60000` is a number — and that gap IS the defect.
+        const authored: unknown = JSON.parse(literal.replace(/^'(.*)'$/, '"$1"'));
+
+        // Gate 1 — the schema.
+        const parsed = FlowNodeSchema.safeParse(waitNode({ eventType: 'timer', timerDuration: authored }));
+        expect(
+          parsed.success,
+          `${channel} prints \`timerDuration: ${literal}\`, but the spec REJECTS it: `
+          + JSON.stringify(parsed.error?.issues),
+        ).toBe(true);
+
+        // Gate 2 — this reader. A wait it cannot parse is a wait on nothing.
+        const ms = parseIsoDuration(parsed.data!.waitEventConfig?.timerDuration);
+        expect(ms, `${channel} prints \`timerDuration: ${literal}\`, which this reader cannot parse`)
+          .toBeGreaterThan(0);
+      }
+    }
+
+    // The tombstone does not merely prescribe a value, it claims an EQUALITY:
+    // "`timeoutMs: N` and `timerDuration: X` the same wait". Read both sides out
+    // of the message and hold it to that claim.
+    const claimedMs = Number(/`timeoutMs:\s*(\d+)`/.exec(tombstone!)?.[1]);
+    expect(claimedMs, 'the tombstone must still name the `timeoutMs` wait it is equating')
+      .toBeGreaterThan(0);
+    for (const literal of [...tombstone!.matchAll(/`timerDuration:\s*([^`]+)`/g)].map((m) => m[1])) {
+      const authored = JSON.parse(literal.replace(/^'(.*)'$/, '"$1"')) as string;
+      expect(
+        parseIsoDuration(authored),
+        `the tombstone equates \`timeoutMs: ${claimedMs}\` with \`timerDuration: ${literal}\`, `
+        + 'but they are not the same wait',
+      ).toBe(claimedMs);
+    }
   });
 });
 
