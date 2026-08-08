@@ -748,9 +748,9 @@ End-user quick-filter configuration (Airtable "User filters" parity)
 | **name** | `string` | optional | Item name — supplied by the metadata door; for an object-scoped container it is the object name. |
 | **label** | `string \| Record<string, string>` | optional | Human-readable label shown in metadata lists. |
 | **object** | `string` | optional | Object this container binds to — how a stack-level `views: [...]` entry says which object its views belong to; read by `getViewsByObject()` / `GET /meta/view?object=`. |
-| **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object \| object; … }` | optional |  |
+| **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }` | optional |  |
 | **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }` | optional |  |
-| **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object \| object; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
+| **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
 | **formViews** | `Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>; columns?: integer; title?: string; … }>` | optional | Additional named form views |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -869,7 +869,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **viewKind** | `'list'` | ✅ |  |
-| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object \| object; … }` | ✅ | List-family view configuration. |
+| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }` | ✅ | List-family view configuration. |
 | **name** | `string` | ✅ | Globally-unique view id, `<object>.<viewKey>`. |
 | **object** | `string` | ✅ | Bound object name — the foreign key used to aggregate views. |
 | **label** | `string \| Record<string, string>` | optional | Display label (supports i18n). |
@@ -935,7 +935,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **viewKind** | `'list'` | ✅ |  |
-| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object \| object; … }` | ✅ | List-family view configuration. |
+| **config** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }` | ✅ | List-family view configuration. |
 | **name** | `string` | ✅ | Globally-unique view id, `<object>.<viewKey>`. |
 | **object** | `string` | ✅ | Bound object name — the foreign key used to aggregate views. |
 | **label** | `string \| Record<string, string>` | optional | Display label (supports i18n). |

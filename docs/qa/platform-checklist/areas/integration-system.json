@@ -1,0 +1,1199 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md. FIXTURE MAP for this area (all in-repo, CI-deterministic): the showcase ships four declarative connectors (examples/app-showcase/src/system/connectors/index.ts — rest/openapi/mcp provider-bound instances + one enabled:false catalog descriptor), an outbound webhook (src/automation/webhooks — shipped inactive), a cron job (src/automation/jobs — showcase_health_sweep), an email template (src/system/emails — showcase_task_done_email) and two notify flows (src/automation/flows).",
+  "area": "integration-system",
+  "title": "Integration & system services — connectors, webhooks, jobs, email templates, notifications",
+  "items": [
+    {
+      "id": "integration-system.connector-declarative-boot",
+      "title": "Provider-bound declarative connectors materialize at boot for every installed provider kind (rest/openapi/mcp), list with origin:'declarative' state:'ready', and dispatch end-to-end from connector_action",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "api",
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the three provider-bound showcase instances (examples/app-showcase/src/system/connectors/index.ts): showcase_status_api (provider:'rest', providerConfig.baseUrl self-pointing), showcase_status_openapi (provider:'openapi', file-path spec), showcase_mcp_tools (provider:'mcp', stdio fixture scripts/mcp-fixture.mjs) — #2994/#3062/#3056",
+          "the provider factories installed in objectstack.config.ts: ConnectorRestPlugin, ConnectorOpenApiPlugin, ConnectorMcpPlugin({ declarativeStdio: ['node'] })",
+          "the two dispatch flows: ShowcaseDeclarativeConnectorPingFlow (rest getHealth) and ShowcaseMcpConnectorEchoFlow (mcp echo_upper) — examples/app-showcase/src/automation/flows/index.ts"
+        ]
+      },
+      "variants": [
+        "provider: rest — providerConfig { baseUrl }, actions hand-derived by the factory",
+        "provider: openapi — providerConfig { spec, baseUrl? }; actions derived from the OpenAPI document's operations (getHealth)",
+        "provider: mcp — providerConfig { transport }; actions derived from the upstream's tools/list (echo_upper)",
+        "no provider — catalog descriptor (showcase_erp_catalog): registered as metadata only, NEVER in the runtime registry (#2612)"
+      ],
+      "steps": [
+        "boot the showcase; capture the boot log lines 'Connector registered: <name> (… origin: declarative)'",
+        "GET /api/v1/automation/connectors (route ledger: automation.listConnectors); the body is { connectors, total }",
+        "for each of the three instances, record its descriptor: origin, state, and the actions[] array (key/label/inputSchema/outputSchema/effect)",
+        "confirm showcase_erp_catalog is ABSENT from the runtime listing (it has no provider — descriptor only)",
+        "POST /api/v1/automation/showcase_declarative_connector_ping/trigger and .../showcase_mcp_connector_echo/trigger (automation.execute); read each run via GET /automation/:name/runs",
+        "author the DeclarativeConnectorEntrySchema negatives in a scratch package and build each: (a) providerConfig with NO provider, (b) provider-bound entry that also authors actions[], (c) provider-bound entry with inline authentication { type: 'api-key', … }, (d) provider: 'no_such_provider'; capture all four rejections",
+        "disable one declaration (enabled:false) and reboot; re-list"
+      ],
+      "acceptance": [
+        {
+          "clause": "all three provider variants appear in GET /automation/connectors with origin:'declarative' and state:'ready' — one clause verdict PER variant, none inferred from a sibling",
+          "oracle": "api",
+          "verify": "the listing contains showcase_status_api, showcase_status_openapi, showcase_mcp_tools each with origin 'declarative' + state 'ready' (engine.getConnectorDescriptors shape)",
+          "evidence": "the three descriptors, keyed by provider variant"
+        },
+        {
+          "clause": "actions are DERIVED from each provider's upstream, not authored: the mcp instance's action set equals the fixture server's tools/list (echo_upper), the openapi instance's equals the document's operations (getHealth)",
+          "oracle": "api",
+          "verify": "descriptor actions[] against scripts/mcp-fixture.mjs and src/system/connectors/status-openapi.json",
+          "evidence": "the action arrays next to their upstream sources"
+        },
+        {
+          "clause": "a materialized instance is DISPATCHABLE, indistinguishable from a hand-registered connector: both flows complete and their connector_action outputs land in flow variables (rest ping returns the health payload; mcp echo returns the uppercased string)",
+          "oracle": "api",
+          "verify": "the two triggered runs succeed; run output/variables carry the upstream results",
+          "evidence": "the two run records"
+        },
+        {
+          "clause": "the authoring gate rejects each malformed entry with its located ADR-0097 message: providerConfig-without-provider ('`providerConfig` requires a `provider` …'), instance-authored actions ('must not author `actions` — the … provider derives them from the upstream at boot'), inline secrets ('must not inline secrets via `authentication`; reference credentials with `auth: { type, credentialRef }`')",
+          "oracle": "build",
+          "verify": "the three superRefine rejections match packages/spec/src/integration/connector.zod.ts DeclarativeConnectorEntrySchema verbatim on the quoted fragments",
+          "evidence": "the three error texts"
+        },
+        {
+          "clause": "an unknown provider key is a HARD BOOT ERROR (fail loudly, ADR-0097 §Decision) — never a silently-dead connector",
+          "oracle": "log",
+          "verify": "boot with provider:'no_such_provider' aborts with an error naming the provider",
+          "evidence": "the fatal boot output"
+        },
+        {
+          "clause": "materialization tracks the metadata: a disabled/removed declaration is gone from the listing after reboot (and torn down on reload) — it does not fossilize",
+          "oracle": "api",
+          "verify": "post-disable listing omits the instance",
+          "evidence": "the before/after listings"
+        }
+      ],
+      "negative": [
+        "the catalog descriptor (showcase_erp_catalog) appearing in the RUNTIME listing is a FAIL — descriptor vs instance is the #2612 boundary this whole surface is built on",
+        "any of the four malformed-entry builds passing clean is a FAIL (silent acceptance of an unmaterializable declaration)"
+      ],
+      "traps": [
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "packages/qa/dogfood/test/showcase-declarative-mcp.dogfood.test.ts"
+      },
+      "source": [
+        "docs/plans/release-15.1-test-plan.md §B1 (#2994/#3062)",
+        "packages/spec/src/integration/connector.zod.ts (provider/providerConfig/auth keys + DeclarativeConnectorEntrySchema cross-field rejections, exact messages)",
+        "packages/spec/src/integration/connector-provider.ts (factory contract; adopt-declared-name; throw ⇒ hard boot error)",
+        "packages/services/service-automation/src/engine.ts (registerConnector origin 'declarative'; getConnectorDescriptors shape)",
+        "packages/runtime/src/route-ledger.ts (GET /automation/connectors, POST /automation/:name/trigger, GET /automation/:name/runs)",
+        "examples/app-showcase/src/system/connectors/index.ts + src/automation/flows/index.ts (the fixtures)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from the 15.1 plan §B — connectors had no checklist coverage",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.connector-degraded-recovery",
+      "title": "An unreachable connector upstream degrades that ONE instance (CONNECTOR_UPSTREAM_UNAVAILABLE) instead of failing boot, retries on 5s→300s backoff, and recovers atomically — while config faults stay boot-fatal",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "api",
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the showcase_mcp_tools stdio instance — break its upstream deterministically by pointing providerConfig.transport.args at a nonexistent script (the exact experiment its own fixture comment prescribes, examples/app-showcase/src/system/connectors/index.ts)",
+          "a config-fault twin for the both-sides check: the same entry with an invalid providerConfig shape (e.g. transport.kind: 'carrier_pigeon')"
+        ]
+      },
+      "steps": [
+        "boot with the broken upstream; time the boot and capture the '[Automation] connector … registered DEGRADED' warn with its degradedReason",
+        "GET /api/v1/automation/connectors; record the husk descriptor (state, degradedReason, actions)",
+        "POST the flow that dispatches it (showcase_mcp_connector_echo trigger); capture the dispatch failure",
+        "watch the log through at least three retry cycles; record the intervals",
+        "restore the upstream (fix the script path is a config CHANGE — instead restore by making the original path valid again, e.g. re-adding the file) WITHOUT restarting; wait one backoff cycle; re-read the descriptor",
+        "separately, boot the config-fault twin and capture that boot's outcome",
+        "trigger a metadata:reloaded reconcile (touch/save the entry) and confirm it retries immediately and resets the backoff"
+      ],
+      "acceptance": [
+        {
+          "clause": "boot COMPLETES on the dead upstream — the instance lands as a degraded husk: descriptor state:'degraded' with a degradedReason quoting the operational failure; no actions, and it still appears in GET /automation/connectors (visible, not vanished)",
+          "oracle": "api",
+          "verify": "boot exit + the husk descriptor (engine.registerDegradedConnector: state 'degraded', empty handlers, stored degradedReason)",
+          "evidence": "boot log + descriptor"
+        },
+        {
+          "clause": "the degrade path is taken ONLY for errors carrying code CONNECTOR_UPSTREAM_UNAVAILABLE (structural check, not instanceof); a configuration fault (invalid providerConfig) remains FATAL at boot — both sides of the #3017 classification",
+          "oracle": "log",
+          "verify": "the broken-upstream boot degrades; the config-fault twin's boot aborts with the factory's validation error (connector-provider-errors.ts contract)",
+          "evidence": "the two boot outcomes side by side"
+        },
+        {
+          "clause": "dispatching a degraded instance fails FAST with a pointed connector-unavailable error that quotes the stored degradedReason — not a timeout hang, and distinguishable from 'no such connector/action'",
+          "oracle": "api",
+          "verify": "the connector_action step errors promptly; its message carries the degradedReason (engine.getConnectorDegradedReason feeds the refusal)",
+          "evidence": "the failed run record"
+        },
+        {
+          "clause": "retries back off from DECLARATIVE_RETRY_BASE_MS (5s) doubling to the 300s ceiling — no hot loop against the dead upstream",
+          "oracle": "log",
+          "verify": "observed retry intervals ≈ 5s/10s/20s… (service-automation/src/plugin.ts constants); a config edit or reload reconcile resets the backoff and retries immediately",
+          "evidence": "timestamped log excerpt"
+        },
+        {
+          "clause": "recovery is ATOMIC and restart-free: once the upstream is reachable a retry swaps the live instance in — descriptor flips to state:'ready' with the derived actions, and the previously-failing flow dispatch now succeeds",
+          "oracle": "api",
+          "verify": "post-recovery descriptor + a successful echo run, all without a server restart",
+          "evidence": "the recovered descriptor + run record"
+        }
+      ],
+      "negative": [
+        "a dead upstream taking the WHOLE boot down is the outage-amplification #3017 exists to prevent — FAIL",
+        "a degraded instance silently disappearing from GET /automation/connectors is a FAIL (operators must be able to SEE the husk and its reason)"
+      ],
+      "traps": [
+        "stale-dist"
+      ],
+      "source": [
+        "docs/plans/release-15.1-test-plan.md §B3 (#3049)",
+        "packages/spec/src/integration/connector-provider-errors.ts (CONNECTOR_UPSTREAM_UNAVAILABLE marker; structural isConnectorUpstreamUnavailable)",
+        "packages/services/service-automation/src/plugin.ts (DECLARATIVE_RETRY_BASE_MS=5000 / DECLARATIVE_RETRY_MAX_MS=300000; degradedInstances backoff + reload reconcile; boot fatal vs reload skip)",
+        "packages/services/service-automation/src/engine.ts (registerDegradedConnector; getConnectorDegradedReason feeding the dispatch refusal)",
+        "packages/services/service-automation/src/connector-degrade-cause.test.ts + degraded-register-cause.test.ts (unit pins)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from the 15.1 plan §B3",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.connector-stdio-default-deny",
+      "title": "Declarative stdio connector transports are denied by default; the host allowlists exact commands (declarativeStdio) — and the deny is a config fault (boot fatal), not a degrade",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "cli",
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the showcase_mcp_tools stdio instance (command 'node') + the host opt-in `new ConnectorMcpPlugin({ declarativeStdio: ['node'] })` in examples/app-showcase/objectstack.config.ts — removing that option IS the deny fixture (the connector file's own comment says 'try it')"
+        ]
+      },
+      "variants": [
+        "policy absent/false → deny every declarative stdio transport (default)",
+        "policy ['node'] with command 'node' → allowed (strict string equality)",
+        "policy ['node'] with a non-matching command (e.g. 'python3') → denied, allowlist quoted",
+        "http transport → never subject to the stdio policy (control)"
+      ],
+      "steps": [
+        "boot the stock showcase (allowlisted): confirm showcase_mcp_tools materializes state:'ready'",
+        "remove the declarativeStdio option from ConnectorMcpPlugin in objectstack.config.ts; boot; capture the failure verbatim",
+        "restore the option but change the connector's command to one NOT in the allowlist (e.g. 'python3' with the same script); boot; capture that failure",
+        "restore fully; author a scratch mcp instance with an HTTP transport pointing at any URL and confirm the stdio policy does not touch it (it may degrade on unreachability — that is the OTHER item)",
+        "GET /api/v1/automation/connectors after the allowlisted boot"
+      ],
+      "acceptance": [
+        {
+          "clause": "the non-opted-in stdio instance refuses with the message naming the mechanism: 'declares a stdio transport (command \\'node\\'), but declarative stdio transports are disabled by default — a stdio transport launches a local process …' (connector-mcp provider, #3055)",
+          "oracle": "log",
+          "verify": "boot output contains the deny message from packages/connectors/connector-mcp/src/mcp-provider.ts; the fixture process is never spawned",
+          "evidence": "the refusal line"
+        },
+        {
+          "clause": "an allowlist MISMATCH is refused quoting both the offending command and the configured allowlist: \"stdio transport with command 'python3', which is not in the host's declarativeStdio allowlist [node]\" — equality is strict, no prefix/glob creep",
+          "oracle": "log",
+          "verify": "the mismatch boot's error text carries command + allowlist",
+          "evidence": "the refusal line"
+        },
+        {
+          "clause": "the deny is classified as a CONFIGURATION fault: boot-fatal at start (and a skipped entry on reload) — NOT a degraded husk retrying forever toward a process the host never authorized",
+          "oracle": "log",
+          "verify": "the denied boots abort; no 'registered DEGRADED' line and no retry loop for the denied instance",
+          "evidence": "boot output"
+        },
+        {
+          "clause": "the allowlisted boot materializes the instance normally (state:'ready', echo_upper action derived) — the opt-in works and stays scoped to the exact command",
+          "oracle": "api",
+          "verify": "GET /automation/connectors shows showcase_mcp_tools ready on the stock config",
+          "evidence": "the descriptor"
+        }
+      ],
+      "negative": [
+        "absence of ANY allowlist config silently spawning a subprocess from metadata is the security failure #3055 closed — a spawned fixture process on the deny boot is a P0-severity FAIL regardless of this item's priority",
+        "the deny surfacing as state:'degraded' with backoff retries is a FAIL — an unauthorized command must not be retried into existence"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/connectors/connector-mcp/src/mcp-provider.test.ts"
+      },
+      "source": [
+        "docs/plans/release-15.1-test-plan.md §B4 (#3059)",
+        "packages/connectors/connector-mcp/src/mcp-provider.ts (#3055 policy: default deny, strict-equality allowlist, both messages)",
+        "examples/app-showcase/objectstack.config.ts (declarativeStdio: ['node'] opt-in) + src/system/connectors/index.ts (the 'remove that option and boot fails loudly — try it' fixture note)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from the 15.1 plan §B4",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.connector-spec-path-no-escape",
+      "title": "Connector openapi spec file refs resolve package-relative only: './…' works, absolute and '../' escapes reject with the confinement error, missing files fail loudly",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "build",
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the shipped file-path fixture: showcase_status_openapi with providerConfig.spec './src/system/connectors/status-openapi.json' (#3016) — the happy path is stock",
+          "scratch copies of that entry for the three rejection probes (absolute path, '../' escape, missing file)"
+        ]
+      },
+      "variants": [
+        "spec: inline OpenAPI document object (no file read)",
+        "spec: package-relative file path './…' (resolved against packageRoot, confined)",
+        "spec: http(s) URL (fetched; unreachability is the degrade item's territory)",
+        "rejection: absolute path (/etc/… or C:\\…)",
+        "rejection: '../'-escaping relative path",
+        "rejection: missing/unreadable file"
+      ],
+      "steps": [
+        "boot the stock showcase; confirm showcase_status_openapi materialized with the spec-derived getHealth action",
+        "author scratch entries and boot each: spec '/etc/hostname' (absolute), spec '../../outside.json' (escape), spec './does-not-exist.json' (missing); capture each error verbatim",
+        "author one with a nested traversal that RESOLVES inside the root after normalization (e.g. './src/../src/system/connectors/status-openapi.json') and record whether it is accepted — the guard rejects on the RESOLVED path, not on the substring",
+        "verify boot-vs-reload policy: repeat the missing-file probe via a metadata reload and confirm it is skipped-with-log instead of fatal"
+      ],
+      "acceptance": [
+        {
+          "clause": "the package-relative path resolves and the connector's actions derive from the document (getHealth on the descriptor; dispatch covered by connector-declarative-boot)",
+          "oracle": "api",
+          "verify": "descriptor carries the spec-derived action set on the stock boot",
+          "evidence": "descriptor read"
+        },
+        {
+          "clause": "an absolute path is rejected with the exact guard: \"package file ref '<p>' is absolute — file refs must be relative to the declaring stack/package root.\" — including Windows drive-letter forms",
+          "oracle": "build",
+          "verify": "boot error text matches createPackageFileLoader (packages/services/service-automation/src/plugin.ts)",
+          "evidence": "the error"
+        },
+        {
+          "clause": "a path escaping the root after RESOLUTION is rejected: \"package file ref '<p>' escapes the stack/package root — reads are confined to '<root>'.\" — while an inside-resolving './a/../b' form passes (the check is on the resolved path)",
+          "oracle": "build",
+          "verify": "the '../' probe errors with the confinement text; the normalized-inside probe boots",
+          "evidence": "the two outcomes"
+        },
+        {
+          "clause": "a missing/unreadable file fails LOUDLY with the resolved path in the message ('could not be read (resolved to …)') — boot-fatal at start, skipped-with-log on reload, per the ADR-0097 reconcile policy",
+          "oracle": "build",
+          "verify": "the missing-file boot aborts; the reload path logs + skips",
+          "evidence": "both captures"
+        }
+      ],
+      "negative": [
+        "any read landing OUTSIDE the declaring package root is a security FAIL whatever the error text — the confinement, not the message, is the contract",
+        "a missing spec producing a silently-actionless connector (instead of the loud failure) is a FAIL"
+      ],
+      "source": [
+        "docs/plans/release-15.1-test-plan.md §B5 (#3024)",
+        "packages/services/service-automation/src/plugin.ts (createPackageFileLoader — all three exact error strings, #3016)",
+        "packages/spec/src/integration/connector.zod.ts (providerConfig.spec three-form doc) + connector-provider.ts (loadPackageFile contract incl. host-without-fs behavior)",
+        "examples/app-showcase/src/system/connectors/index.ts (showcase_status_openapi — the shipped happy-path fixture)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from the 15.1 plan §B5",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.connector-descriptor-audit",
+      "title": "Descriptor-only connector contracts are audited at boot: declared-with-actions-but-unregistered warns with names + remedy; enabled:false is the deliberate, quiet catalog opt-out",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "cli",
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_erp_catalog — the shipped enabled:false catalog descriptor WITH actions (get_invoice, post_journal_entry): the stock boot is the quiet side of this gate",
+          "a scratch copy of it with enabled:true (and no provider) for the loud side"
+        ]
+      },
+      "steps": [
+        "boot the stock showcase and grep the full boot log for the inert-connector audit warning — there must be NONE (the only actions-bearing descriptor is enabled:false)",
+        "add the scratch enabled:true descriptor (actions, no provider, no plugin registration); boot; capture the warning verbatim",
+        "add a same-named RUNTIME registration for it (any connector plugin) and boot again — the audit must go quiet because the name is now live",
+        "flip the scratch entry back to enabled:false; boot; confirm quiet"
+      ],
+      "acceptance": [
+        {
+          "clause": "the loud side names names and prescribes the fix: '[Automation] N declarative connector(s) declare actions but are not registered in the connector registry — the connector_action node cannot dispatch them: <names>. … Install/instantiate the matching connector plugin, or mark a deliberate catalog-only entry with `enabled: false` to silence this warning.' (PD#10: declared ≠ delivered surfaces loudly)",
+          "oracle": "log",
+          "verify": "the warning matches auditDeclaredConnectors (packages/services/service-automation/src/plugin.ts) and lists the scratch connector's name",
+          "evidence": "log excerpt"
+        },
+        {
+          "clause": "all three quiet conditions are individually verified: (a) enabled:false descriptor — quiet; (b) descriptor with a same-name runtime registration — quiet; (c) provider-bound instances — never audited by this gate (they materialize instead)",
+          "oracle": "log",
+          "verify": "no audit warning on the stock boot, on the registered boot, or for the three provider-bound showcase instances",
+          "evidence": "the grepped boot logs per condition"
+        },
+        {
+          "clause": "the audit re-runs on metadata reload, not only at boot — enabling the scratch descriptor at runtime surfaces the warning without a restart",
+          "oracle": "log",
+          "verify": "the warn appears after the reload reconcile (plugin.ts wires auditDeclaredConnectors on both paths)",
+          "evidence": "timestamped log"
+        }
+      ],
+      "negative": [
+        "a stock showcase boot emitting the inert-connector warning is a FAIL — either the shipped catalog descriptor lost its enabled:false or the audit's silencing contract broke",
+        "the warning firing for a provider-bound instance is a FAIL (it is an instance declaration, not a descriptor — #2977/ADR-0097 carve-out in findInertDeclaredConnectors)"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-automation/src/connector-descriptor-audit.test.ts"
+      },
+      "source": [
+        "docs/plans/release-15.1-test-plan.md §B6 (#2985)",
+        "packages/services/service-automation/src/plugin.ts (auditDeclaredConnectors — exact warning text; boot + reload wiring)",
+        "packages/spec/src/integration/connector.zod.ts (enabled:false = deliberate catalog descriptor, #2612)",
+        "examples/app-showcase/src/system/connectors/index.ts (showcase_erp_catalog — the shipped quiet fixture)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from the 15.1 plan §B6",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.flow-connector-picker",
+      "title": "The flow designer's connector picker mirrors GET /automation/connectors: same instances, declarative ones annotated, actions and their input schemas offered per pick",
+      "since": "v15.1",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the stock showcase connector registry: three declarative instances + the plugin-registered rest/slack connectors from objectstack.config.ts (so the picker has BOTH origins to distinguish)"
+        ]
+      },
+      "steps": [
+        "before the browser: GET /api/v1/automation/connectors and record { connectors, total } — this is the ground truth the picker must mirror",
+        "in Studio, open a flow (e.g. showcase_declarative_connector_ping) and add/select a connector_action node",
+        "open the connector picker; screenshot; only AFTER the screenshot, read the DOM list",
+        "pick showcase_mcp_tools; record which actions are offered and screenshot the action + input form for echo_upper",
+        "pick a plugin-registered connector and compare its presentation with the declarative one's annotation"
+      ],
+      "acceptance": [
+        {
+          "clause": "the picker lists exactly the instances the API reports — no extras (a picker inventing catalog descriptors would let authors wire undispatchable nodes), none missing",
+          "oracle": "screenshot",
+          "verify": "picker screenshot cross-checked name-by-name against the pre-captured listing",
+          "evidence": "screenshot + API read, diffed"
+        },
+        {
+          "clause": "declarative instances carry their annotation (origin distinguishable from plugin-registered), per the descriptor's origin field the API serves",
+          "oracle": "screenshot",
+          "verify": "the three declarative entries are visually marked; the plugin rest/slack ones are not",
+          "evidence": "annotated screenshot"
+        },
+        {
+          "clause": "picking an instance offers its DERIVED actions with their input schemas (echo_upper for the mcp instance) — the ADR-0022 descriptor pipeline reaches the designer end-to-end",
+          "oracle": "dom",
+          "verify": "action list + input fields match the descriptor's actions[].inputSchema, read only after the screenshot confirmed render",
+          "evidence": "screenshot + DOM excerpt"
+        }
+      ],
+      "negative": [
+        "a picker entry for a connector the API does not list (or vice versa) is a FAIL — the network response is the authority, not the panel"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race",
+        "wrong-panel"
+      ],
+      "source": [
+        "docs/plans/release-15.1-test-plan.md §B2 (objectui#2563)",
+        "packages/services/service-automation/src/engine.ts (getConnectorDescriptors — the designer-facing shape incl. origin + actions[].inputSchema, ADR-0022)",
+        "packages/runtime/src/route-ledger.ts (GET /automation/connectors)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from the 15.1 plan §B2",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.webhook-lifecycle",
+      "title": "Outbound webhooks materialize (spec object→object_name, isActive→active), fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, reject retired trigger kinds, and never clobber admin edits",
+      "since": "v15",
+      "status": "active",
+      "revision": 3,
+      "priority": "P1",
+      "surface": "mixed",
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a reachable webhook receiver (local echo server on the run's own port range) — point the shipped showcase_task_changed row at it, or author a scratch webhook",
+          "the shipped fixture: showcase_task_changed (object showcase_task, triggers create/update/delete, isActive:false ON PURPOSE — flipping it active in Setup is part of the test, examples/app-showcase/src/automation/webhooks/index.ts)",
+          "a predicate multi-write path for the bulk variants (update/delete with multi:true on showcase_task)"
+        ]
+      },
+      "variants": [
+        "trigger: create (data.record.created → per-record payload with recordId)",
+        "trigger: update (data.record.updated)",
+        "trigger: delete (data.record.deleted)",
+        "trigger: bulk_update (aggregate data.records.updated → { object, matched }, NO recordId/body — #4639)",
+        "trigger: bulk_delete (aggregate data.records.deleted, same shape)",
+        "retired: undelete — no event source exists (#3196); parse-rejected",
+        "retired: api (manual fire) — no fire path exists (#3196); parse-rejected"
+      ],
+      "steps": [
+        "boot the showcase; verify the materializer bridge: read sys_webhook over /api/v1/data and locate showcase_task_changed with object_name:'showcase_task', active:false, managed_by:'package', and the envelope in definition_json",
+        "in Setup → Integrations → Webhooks flip the row active and point url at the local receiver (an admin edit — it must stamp customized)",
+        "create, update, then delete a showcase_task; capture the three deliveries at the receiver (headers incl. the HMAC signature when a secret is set, body incl. recordId)",
+        "run a predicate multi-update and multi-delete (multi:true) matching several rows; capture the bulk deliveries and their { object, matched } shape",
+        "read sys_http_delivery over /api/v1/data: one row per delivery with status/attempts/lastStatusCode",
+        "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
+        "author a scratch webhook with triggers:['undelete'] and one with ['api']; build both and capture the parse errors",
+        "redeploy/reboot and confirm the admin-edited row survived re-seed (customized rows are never clobbered)"
+      ],
+      "acceptance": [
+        {
+          "clause": "authoring is LIVE, not a no-op: the declared webhook materializes into the sys_webhook row the dispatcher reads, with the two documented remaps (object→object_name, isActive→active) and the envelope in definition_json (#3461/#3489)",
+          "oracle": "api",
+          "verify": "the sys_webhook row fields against bootstrap-declared-webhooks mapWebhookToRow",
+          "evidence": "the row read"
+        },
+        {
+          "clause": "each per-record trigger variant delivers exactly its event: create/update/delete each produce one receiver hit whose payload names the event and carries the recordId — verified per-variant, none inferred",
+          "oracle": "network",
+          "verify": "the three captured requests, keyed by variant",
+          "evidence": "receiver logs"
+        },
+        {
+          "clause": "the bulk pair delivers the AGGREGATE shape — { object, matched } with no recordId and no record body — and only to webhooks that opted into bulk_update/bulk_delete; per-record subscribers do NOT receive a fabricated per-record event for a predicate write (#4639/#4626)",
+          "oracle": "network",
+          "verify": "bulk delivery bodies + absence of per-record deliveries for the same predicate write on a create/update/delete-only subscription",
+          "evidence": "receiver logs for both subscriptions"
+        },
+        {
+          "clause": "delivery mechanics honor the authored envelope: custom headers attached, HMAC signature present when secret is set, timeoutMs applied — and every attempt is durably observable as a sys_http_delivery row (status pending/in_flight/success/failed/dead, attempts, lastStatusCode)",
+          "oracle": "api",
+          "verify": "receiver-side headers + the outbox rows over the data API",
+          "evidence": "headers + delivery rows"
+        },
+        {
+          "clause": "a retired trigger kind fails at parse with the enum rejection — WebhookTriggerType is exactly [create, update, delete, bulk_update, bulk_delete]; undelete/api never register silently dead (the #3196 enforce-or-remove gate the #3358 sweep verified)",
+          "oracle": "build",
+          "verify": "both scratch builds error on the trigger value",
+          "evidence": "the two build errors"
+        },
+        {
+          "clause": "seed-not-clobber: the admin-edited row (customized:true) survives redeploys — the deactivation/receiver-URL edit is still there after reboot",
+          "oracle": "api",
+          "verify": "post-reboot sys_webhook row keeps the admin's values (bootstrap-declared-webhooks.ts:132-145)",
+          "evidence": "before/after row reads"
+        }
+      ],
+      "negative": [
+        "an unreachable receiver must surface as failed/dead sys_http_delivery rows (and retry per the outbox schedule) — a dropped delivery with no durable trace is a FAIL",
+        "a stored row whose triggers contain an unknown value must be dropped LOUDLY by the dispatcher (the #3196 drift-guard warn: 'dead while looking armed in Setup') — silent armed-looking deadness is a FAIL",
+        "connector-attached `webhooks`/`triggers` (integration/connector.zod.ts) are NOT dispatched by anything (#3197, said in-schema) — a run must not tick them as live, and a delivery appearing from one would be a spec-contract FAIL"
+      ],
+      "traps": [
+        "seed-data-thin",
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "packages/qa/dogfood/test/webhook-materialization.dogfood.test.ts"
+      },
+      "source": [
+        "packages/spec/src/automation/webhook.zod.ts (WebhookTriggerType enum + why undelete/api are absent; materialization contract; strict shape #4001)",
+        "packages/spec/liveness/webhook.json (all 11 props live via the #3489 bridge; per-prop line refs)",
+        "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts + auto-enqueuer.ts (remaps; trigger→event mapping incl. the #4639 bulk pair; #3196 unknown-trigger warn; seed-not-clobber)",
+        "packages/services/service-messaging/src/http-outbox.ts (delivery statuses, attempts, redeliver contract) + plugin-webhooks/webhook-outbox-plugin.ts (sys_http_delivery nav)",
+        "examples/app-showcase/src/automation/webhooks/index.ts (the shipped inactive fixture and its activation story)",
+        "#3358 §9 (webhook undelete/api trigger removal gate)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — webhook kind had no checklist coverage",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-08",
+          "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift is caught by the manual check on this item directly",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/automation/webhook.zod.ts",
+        "export": "WebhookTriggerType",
+        "expect": 5
+      }
+    },
+    {
+      "id": "integration-system.job-scheduled-run",
+      "title": "Job metadata schedules through every ScheduleSchema variant, executes with retry/timeout enforced, records sys_job/sys_job_run truth, and refuses the closed doors (id key, runtime create, missing handler)",
+      "since": "v15",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "mixed",
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the shipped cron fixture: showcase_health_sweep (schedule cron '0 1 * * *' UTC, handler 'sweepProjectHealth' registered in defineStack({ functions }), retryPolicy { maxRetries: 2, backoffMs: 5000, backoffMultiplier: 2 }, timeout 300000 — examples/app-showcase/src/automation/jobs/index.ts; the handler-missing regression here was #4774/#4888)",
+          "scratch jobs in a writable package for the interval / once / failing / timing-out probes (near-term schedules so the run observes real executions)"
+        ]
+      },
+      "variants": [
+        "schedule { type: 'cron', expression, timezone (default UTC) } — cron-job-adapter.ts:76-77",
+        "schedule { type: 'interval', intervalMs } — cron-job-adapter.ts:82",
+        "schedule { type: 'once', at: ISO datetime } — cron-job-adapter.ts:87",
+        "execution status: success | failed | timeout (JobExecutionStatus; 'running' is the in-flight state)",
+        "rejection: job.id (retired 17.0.0, #4667 — guidance-carrying parse error)",
+        "rejection: unknown key (strictObject #4001; aliases cron/interval→schedule, fn→handler)"
+      ],
+      "steps": [
+        "boot the showcase; capture the AppPlugin job registration path for showcase_health_sweep (bundle jobs → IJobService.schedule on kernel:ready)",
+        "read sys_job over /api/v1/data: the row is keyed by NAME (the adapter mints its own row id) with the schedule persisted",
+        "author three scratch jobs (interval ~5s, once at now+1min, and a cron) with observable side effects; boot; let each fire; read sys_job_run rows and sys_job.last_run_at/last_status/run_count",
+        "author a deliberately-throwing job with retryPolicy { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 }; let it exhaust; capture run rows + failure_count",
+        "author a job whose handler sleeps past a small `timeout`; capture the run's status",
+        "author a job with enabled:false and one whose handler string names NO registered function; boot; capture how each is skipped",
+        "author a job carrying `id: 'x'` and one with a stray key; build both; capture the errors",
+        "attempt to create a job at runtime through the meta door and capture the refusal (allowRuntimeCreate:false, #4509)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every ScheduleSchema variant actually schedules and fires — cron (with timezone), interval (intervalMs), once (at) — each verified by its OWN sys_job_run row and side effect, not by registration lines alone",
+          "oracle": "api",
+          "verify": "per-variant run rows + the side effect over the data API (adapters honor all three shapes: cron-job-adapter.ts:71-88; db adapter persists them: db-job-adapter.ts:233-245)",
+          "evidence": "run rows + side-effect reads, keyed by variant"
+        },
+        {
+          "clause": "execution truth is durable and name-keyed: sys_job upserts by name; every execution writes a sys_job_run row and bumps last_run_at/last_status/run_count/failure_count",
+          "oracle": "api",
+          "verify": "the counters move with each observed run",
+          "evidence": "before/after row reads"
+        },
+        {
+          "clause": "a failing job retries per the CONVERGED policy — delay = backoffMs × multiplier^(retry-1) up to maxRetries — then records status 'failed' with the error message; a policy-less job gets ONE attempt (maxRetries defaults to 0 since 17.0.0, #4661 — a run asserting 3 default retries is testing the old world)",
+          "oracle": "log",
+          "verify": "attempt count + spacing in the run rows/log for the throwing probe; the no-policy probe shows exactly one attempt",
+          "evidence": "run rows + timestamped log"
+        },
+        {
+          "clause": "an over-`timeout` run is recorded with execution status 'timeout' (the in-flight handler is abandoned, not force-cancelled — as documented), and timeouts COUNT as failures for the retry loop (#3494)",
+          "oracle": "api",
+          "verify": "the timeout probe's run row status",
+          "evidence": "the run row"
+        },
+        {
+          "clause": "the two skip doors are LOUD and distinct: enabled:false skips scheduling at registration; a handler naming no registered function skips with '[AppPlugin] job handler not found in bundle.functions — skipping' — the exact silent-no-op that let the showcase sweep never run for months (#4774/#4888)",
+          "oracle": "log",
+          "verify": "both skip lines present; neither job has sys_job_run rows",
+          "evidence": "log excerpts + absence of runs"
+        },
+        {
+          "clause": "the closed doors refuse loudly: authoring `id` errors with the #4667 prescription ('`job.id` was removed … `name` IS the job's identity everywhere … os migrate meta --from 16'); a stray key errors naming the key (aliases steer cron/interval→schedule, fn→handler); runtime create is refused (allowRuntimeCreate:false — handler strings cannot resolve outside the compiled bundle, #4509)",
+          "oracle": "build",
+          "verify": "the parse errors + the runtime-create refusal",
+          "evidence": "the error texts"
+        }
+      ],
+      "negative": [
+        "a declared job that never runs WITHOUT one of the two loud skip lines is a FAIL against the scheduler, not thin data — 'nothing reports this' was the actual #4774 bug",
+        "a runtime-created job row saving cleanly is a FAIL (the #4509 door is closed precisely because such a job could never run)"
+      ],
+      "traps": [
+        "stale-dist",
+        "seed-data-thin"
+      ],
+      "source": [
+        "packages/spec/src/system/job.zod.ts (ScheduleSchema discriminated union; JOB_ID_RETIRED; retryPolicy/timeout docs incl. the 17.0.0 maxRetries default flip #4661; JobExecutionStatus)",
+        "packages/spec/liveness/job.json (per-prop verdicts + the #4509 closed-door rationale)",
+        "packages/runtime/src/app-plugin.ts:790-855 (registration, enabled/handler skip lines)",
+        "packages/services/service-job/src/cron-job-adapter.ts + db-job-adapter.ts (all three schedule shapes; sys_job/sys_job_run persistence) + run-with-policy.ts (retry/timeout enforcement, #3494)",
+        "examples/app-showcase/src/automation/jobs/index.ts (showcase_health_sweep fixture + its #4774/#4888 history)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — job kind had no checklist coverage",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.email-template-render",
+      "title": "Email templates materialize to sys_email_template, resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, refuses anonymous, and 400s malformed input",
+      "since": "v15",
+      "status": "active",
+      "revision": 3,
+      "priority": "P2",
+      "surface": "mixed",
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the shipped fixture: showcase_task_done_email (category workflow, subject '✅ Task done: {{title}}', variables title required / project optional — examples/app-showcase/src/system/emails/index.ts)",
+          "a capturable email channel (dev transport / log capture — no real SMTP needed)",
+          "a second-locale scratch copy (same name, locale zh-CN) for the i18n-bundle clause"
+        ],
+        "knownGaps": [
+          "no stock example exercises an email template end-to-end; needs a small fixture flow with a notify/email step",
+          "refinement of the gap above (2026-08-07 survey): the TEMPLATE fixture now exists (showcase_task_done_email) and the send path is pinned by packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts, but no shipped FLOW invokes sendTemplate — the flow-driven half still needs the fixture flow, or the send must be driven directly via IEmailService.sendTemplate in the run"
+        ]
+      },
+      "variants": [
+        "locale resolution: exact (name, locale) match / en-US fallback / two-locale bundle picking by recipient locale",
+        "body: bodyHtml + bodyText authored / bodyText omitted (service derives text from HTML — omitted from the ROW, not nulled)",
+        "gate: active:false → TEMPLATE_INACTIVE",
+        "gate: missing required variable → fail-fast (requireVars)",
+        "rejection: unknown key (strictObject; aliases title→subject, content/html→bodyHtml, text→bodyText, from/sender→fromOverride — #5013)",
+        "rejection: name not dotted snake_case"
+      ],
+      "steps": [
+        "boot the showcase; read sys_email_template over /api/v1/data and locate showcase_task_done_email: bodyHtml→body_html remap, variables in variables_json, managed_by:'package'",
+        "drive a send with full data ({ title, project }) through IEmailService.sendTemplate (or the fixture flow once it exists); capture the rendered subject/body at the dev transport",
+        "drive a send MISSING the required `title`; capture the fast failure",
+        "set the row inactive (or author active:false) and send; capture the TEMPLATE_INACTIVE error",
+        "author the zh-CN twin; send to a zh-CN-locale recipient and to an unmatched-locale recipient; capture which row rendered each",
+        "author a template with fromOverride + replyTo and verify both on the outbound message",
+        "edit the template wording as an admin in Studio (stamps customized), redeploy/reboot, and re-read the row",
+        "edit the DECLARED source template and metadata-reload WITHOUT a reboot — the single item re-materializes (email_template is allowRuntimeCreate:true; the plugin subscribes to metadata changes)",
+        "build the two rejection probes (stray key `body`; name 'BadName') and capture the errors",
+        "drive the raw send door POST /api/v1/email/send three ways: (a) authed with a well-formed message { to, subject, bodyHtml } → capture status + the dev-transport landing; (b) anonymous (no session) → capture status; (c) a non-object / malformed body → capture the envelope"
+      ],
+      "acceptance": [
+        {
+          "clause": "the authored template is what actually renders: subject/body substitute every {{path}} hole with the run's values, and the AUTHORED wording (not a built-in or stale copy) reaches the transport — the exact three-break disconnect #4509 closed (engine registration + managed_by stamping + bridge write)",
+          "oracle": "log",
+          "verify": "captured render contains the authored strings with substituted values and zero unresolved {{placeholder}} residue",
+          "evidence": "the captured render"
+        },
+        {
+          "clause": "a send missing a REQUIRED variable fails fast with a located error naming the variable (requireVars, email-service.ts) — never a silently-empty substitution; the optional variable's absence does not fail the send",
+          "oracle": "log",
+          "verify": "the missing-title send errors; a missing-project send renders",
+          "evidence": "the two outcomes"
+        },
+        {
+          "clause": "active:false is a real gate: sendTemplate returns TEMPLATE_INACTIVE (also the withdrawal mechanism — deleting a declared template deactivates rows rather than destroying them)",
+          "oracle": "log",
+          "verify": "the inactive send's error code",
+          "evidence": "the error"
+        },
+        {
+          "clause": "(name, locale) resolution picks the best locale row and falls back to en-US — two rows with one name are an i18n bundle, both reachable by recipient locale",
+          "oracle": "log",
+          "verify": "the zh-CN recipient gets the zh-CN render; the unmatched recipient gets the fallback",
+          "evidence": "the two renders"
+        },
+        {
+          "clause": "fromOverride and replyTo are honored on the outbound message; an omitted bodyText is derived from HTML at send time (and stays absent on the row so re-seeds never blank it)",
+          "oracle": "log",
+          "verify": "outbound headers + the derived text alternative",
+          "evidence": "the captured message"
+        },
+        {
+          "clause": "both provenance protections hold: an admin-edited (customized) row survives redeploys, AND a declared-source edit re-materializes the single item on metadata reload without a restart",
+          "oracle": "api",
+          "verify": "post-reboot row keeps the admin wording; the reload path updates the untouched declared row",
+          "evidence": "before/after row reads for both paths"
+        },
+        {
+          "clause": "authoring rejections are loud and prescriptive: a stray key errors naming it with the alias prescription (content→bodyHtml per #5013 — landing on the REQUIRED body so the rename renders); a non-dotted-snake-case name errors at parse",
+          "oracle": "build",
+          "verify": "the two probe errors against EmailTemplateDefinitionSchema",
+          "evidence": "the error texts"
+        },
+        {
+          "clause": "the raw transactional send door (POST /api/v1/email/send → IEmailService.send, complementary to the sendTemplate path above) authenticates and validates: an AUTHED well-formed message lands at the dev transport (200 with result.status 'sent'); an ANONYMOUS send is refused 401 UNAUTHENTICATED (the #3963 unconditional gate — the api.requireAuth opt-out is retired); a MALFORMED body is refused 400 with a ledgered envelope code (INVALID_REQUEST for a non-object body, VALIDATION_FAILED for a bad message shape) — never a 500 for caller-fixable input, and a runtime with no email provider answers 501 NOT_IMPLEMENTED rather than a fake success",
+          "oracle": "api",
+          "verify": "the three POST /api/v1/email/send responses: authed 200 + dev-transport capture, anonymous 401 UNAUTHENTICATED, malformed 400 with the named code (rest-server.ts registerEmailEndpoints: enforceAuth, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider)",
+          "evidence": "the three responses + the dev-transport landing"
+        }
+      ],
+      "negative": [
+        "the false-compliance case #4509 named is the standing FAIL: an admin 'fixes' a template and recipients keep receiving the old copy — any render not matching the authoritative row is a FAIL against the bridge",
+        "a send with an unresolved {{placeholder}} residue delivered to the transport is a FAIL (render must substitute or refuse, never ship holes)"
+      ],
+      "traps": [
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts"
+      },
+      "source": [
+        "packages/spec/src/system/email-template.zod.ts (requireds, dotted-name regex, aliases #5013, variables/required, fromOverride/replyTo/active)",
+        "packages/spec/liveness/email_template.json (the whole surface live via #4509; per-prop evidence incl. requireVars, TEMPLATE_INACTIVE, seed-not-clobber, runtime re-materialization)",
+        "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts + email-service.ts (row mapping; (name,locale)+fallback; the gates)",
+        "examples/app-showcase/src/system/emails/index.ts (showcase_task_done_email fixture)",
+        "packages/rest/src/rest-server.ts (registerEmailEndpoints — POST /api/v1/email/send: enforceAuth 401 UNAUTHENTICATED #3963, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider, 500 EMAIL_SEND_FAILED)",
+        "packages/rest/src/rest-route-ledger.ts (email family — POST /api/v1/email/send → client email.send)",
+        "packages/spec/src/api/error-code-ledger.zod.ts (EMAIL_SEND_FAILED under @objectstack/rest)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — email_template kind had no checklist coverage",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-08",
+          "change": "added the raw POST /api/v1/email/send route clause (authed → dev transport, anonymous → 401 UNAUTHENTICATED, malformed → 400 envelope, no-provider → 501) per PENDING-GAPS §D",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.notify-inbox-delivery",
+      "title": "The flow notify node delivers to the recipient's inbox (sys_inbox_message + receipt), readable and markable over /notifications, recipient-scoped — with unimplemented channels dead-lettering, never faking delivery",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (to reassign the task)",
+        "the assignee member (to read the inbox)",
+        "a third member (for the scoping negative)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the shipped fixture flow showcase_task_assigned_notify (notify node: topic 'task.assigned', recipients ['{record.assignee}'], channels ['inbox'], title/message/actionUrl — examples/app-showcase/src/automation/flows/index.ts)",
+          "MessagingServicePlugin installed (the showcase config requires the 'messaging' capability)",
+          "three personas with sessions: admin, the assignee, an unrelated member"
+        ],
+        "knownGaps": [
+          "channels push/slack/teams/webhook have NO delivery implementation (#3197 — notification.zod.ts says the dispatcher dead-letters them, and the enum's 'in-app' spelling vs the implemented 'inbox' channel is a known naming drift); this item tests inbox only and records the dead-letter behavior as a negative, not as deliverable channels"
+        ]
+      },
+      "variants": [
+        "channel: inbox — implemented, always-on (this item's happy path)",
+        "channel: email — implemented via plugin-email (covered by email-template-render; not re-proven here)",
+        "channel: sms — implemented via service-sms (needs provider credentials; blocked on stock fixtures)",
+        "channels push/slack/teams/webhook — unimplemented, dead-letter (#3197): negative-only"
+      ],
+      "steps": [
+        "as admin, reassign a showcase_task to the assignee persona (assignee != previous.assignee fires the flow trigger)",
+        "as the ASSIGNEE, GET /api/v1/notifications (route ledger: notifications.list); locate the new row (title 'New task assigned: <title>', the actionUrl deep link)",
+        "as the THIRD member, GET /api/v1/notifications and confirm the notification is absent",
+        "unauthenticated GET /api/v1/notifications; capture the 401",
+        "as the assignee, POST /api/v1/notifications/read with { ids: [<id>] }; re-list with ?read=false and confirm it dropped out; then POST /notifications/read/all",
+        "read the backing rows over the data API (sys_inbox_message + sys_notification_receipt keyed (notification_id, user_id, channel:'inbox')) to confirm the surface reflects storage",
+        "author a scratch flow copy whose notify node names channels ['push']; run it; capture where the message lands (dead-letter), and that NO inbox row was fabricated"
+      ],
+      "acceptance": [
+        {
+          "clause": "the notify node delivers: one inbox row for the assignee carrying the flow's title/message/actionUrl, listed over GET /notifications for that user",
+          "oracle": "api",
+          "verify": "the listing contains the notification with the authored strings after the reassignment",
+          "evidence": "the listing response"
+        },
+        {
+          "clause": "delivery is recipient-scoped — the third member's listing does NOT contain it (server-side scoping, not client filtering)",
+          "oracle": "api",
+          "verify": "the third member's authenticated listing omits the row",
+          "evidence": "both listings side by side"
+        },
+        {
+          "clause": "mark-read is persisted per (notification, user, channel): POST /notifications/read flips the receipt; an unread-filtered re-list omits it; read/all clears the rest — and the receipts are real rows, not client state",
+          "oracle": "api",
+          "verify": "the receipt row exists after markRead; the ?read=false listing shrinks accordingly",
+          "evidence": "the mutation responses + receipt row read"
+        },
+        {
+          "clause": "the surface gates correctly on BOTH sides: unauthenticated → 401; with the messaging service absent/unserveable the route answers the 501 capability-unavailable envelope (never a fabricated empty inbox from a stub)",
+          "oracle": "api",
+          "verify": "the anonymous 401; the 501 side may be cited from a minimal boot without the messaging plugin",
+          "evidence": "the two responses"
+        },
+        {
+          "clause": "an unimplemented channel dead-letters instead of faking success: the ['push'] probe produces NO inbox row and the dispatcher records the dead-letter — declared-but-unimplemented channels must stay visible failures (#3197)",
+          "oracle": "log",
+          "verify": "no sys_inbox_message row for the probe run; the dead-letter/log evidence captured",
+          "evidence": "absence check + log excerpt"
+        }
+      ],
+      "negative": [
+        "a notify step reporting success while the recipient's listing stays empty is a FAIL against the delivery chain (flow → messaging → inbox row → route), wherever it broke",
+        "the third member seeing another user's notification is a security FAIL (receipts and rows are per-user; the route must scope server-side)"
+      ],
+      "traps": [
+        "wrong-persona",
+        "seed-data-thin"
+      ],
+      "source": [
+        "packages/runtime/src/domains/notifications.ts (routes, auth:true, sys_inbox_message + sys_notification_receipt join, receipt key)",
+        "packages/runtime/src/route-ledger.ts (GET /notifications, POST /notifications/read, POST /notifications/read/all)",
+        "packages/spec/src/system/notification.zod.ts (channel enum + the #3197 implemented-vs-dead-letter note and 'in-app' vs 'inbox' drift)",
+        "packages/services/service-messaging/src/inbox-channel.ts + channel.ts (inbox delivery writes; channels default ['inbox'])",
+        "examples/app-showcase/src/automation/flows/index.ts (showcase_task_assigned_notify — the worked ADR-0012 notify fixture)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "new item: the notify→inbox→/notifications chain had no checklist coverage; unimplemented channels pinned as dead-letter negatives per #3197 instead of asserted as capabilities",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.external-datasource-federated-read",
+      "title": "A declared external datasource federates: its objects query in place over REST, read-only",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the shipped read-only SQLite external datasource (examples/app-showcase/src/system/datasources/ — showcase-external.datasource.ts + external-fixture.ts, External Customer / External Order)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; sign in as admin",
+        "GET /api/v1/meta and confirm the federated objects are registered",
+        "GET /api/v1/data/<external object> and read fixture rows",
+        "attempt a write (POST/PATCH) against the read-only external object; capture the refusal",
+        "open Setup → Datasources and confirm the connection is listed with its health"
+      ],
+      "acceptance": [
+        {
+          "clause": "the external datasource's objects appear in /meta and return the fixture rows over the normal /data query path — federation is transparent to the query layer",
+          "oracle": "api",
+          "verify": "/data/<external object> returns the seeded external rows; filters/$top work as on a native object",
+          "evidence": "the reads"
+        },
+        {
+          "clause": "writes to a read-only external object are refused with a located error, not silently dropped or half-applied",
+          "oracle": "api",
+          "verify": "POST/PATCH → 4xx naming the read-only datasource",
+          "evidence": "the refusal"
+        },
+        {
+          "clause": "the connection is visible and health-badged in Setup → Datasources",
+          "oracle": "screenshot",
+          "verify": "the datasources admin page shows the external connection",
+          "evidence": "screenshot"
+        }
+      ],
+      "negative": [
+        "a write that appears to succeed against a read-only external source is a FAIL"
+      ],
+      "traps": [
+        "stale-dist"
+      ],
+      "source": [
+        "examples/app-showcase/src/system/datasources/ (showcase-external.datasource.ts, external-fixture.ts)",
+        "content/docs/capabilities/integrations.mdx (federated datasource claim)",
+        "packages/runtime route-ledger external-datasource family"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "initial — the coverage.json `datasource` waiver was STALE (showcase ships a read-only SQLite external fixture); un-waived. NOTE: the external-datasource ADMIN CRUD lifecycle is a separate item (datasource-admin-lifecycle)",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.datasource-admin-lifecycle",
+      "title": "The /api/v1/datasources admin lifecycle: static driver catalog, runtime create with provenance+health, secret never echoes (hasSecret only), bad drafts 400 DATASOURCE_ADMIN_ERROR, unwired federation degrades 503 naming external-datasource",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "os dev mounts the datasource admin routes at /api/v1/datasources by default (packages/cli/src/commands/serve.ts wires DatasourceAdminServicePlugin + registerDatasourceAdminRoutes when the engine is not 'memory')",
+          "the sqlite driver from the static catalog (packages/services/service-datasource/src/driver-catalog.ts) + a writable location for the sqlite file — the runtime-create probe target",
+          "a crypto provider / secret binder (createDatasourceSecretBinder) so the inline secret is bound, not stored cleartext"
+        ],
+        "knownGaps": [
+          "the external-datasource FEDERATION service is intentionally NOT wired in the admin-lifecycle boot — its absence is what the 503-naming clause verifies; a boot that DOES wire it should record that and skip the 503 clause as not-applicable-this-run"
+        ]
+      },
+      "steps": [
+        "boot showcase via os dev (serve.ts mounts /api/v1/datasources by default on a non-memory engine); sign in as admin",
+        "GET /api/v1/datasources/drivers; confirm the static catalog (memory/sqlite/postgres/mysql/mongo, each with a configSchema) — this route has NO service dependency and answers even before any datasource-admin service is wired",
+        "POST /api/v1/datasources with a sqlite-file draft { name: 'qa_ds_probe', driver: 'sqlite', config: { file: '<writable path>' }, secret?: '...' }; capture status + the returned datasource",
+        "GET /api/v1/datasources; confirm qa_ds_probe appears with origin:'runtime' and a health field",
+        "GET /api/v1/datasources/qa_ds_probe; inspect the body for config + a hasSecret flag and confirm the cleartext secret value is ABSENT",
+        "POST /api/v1/datasources with a bad draft (invalid config shape / missing required); capture status + code",
+        "GET /api/v1/datasources/qa_ds_probe/remote-tables (an external-datasource-served route) on the boot with federation UNWIRED; capture the 503 + which service its message names",
+        "GET /api/v1/datasources/does-not-exist; capture the 404"
+      ],
+      "acceptance": [
+        {
+          "clause": "the driver catalog is static and always-available: GET /api/v1/datasources/drivers returns the curated driver set (memory/sqlite/postgres/mysql/mongo) each with a projected configSchema, with NO datasource-admin service dependency",
+          "oracle": "api",
+          "verify": "the drivers body against DRIVER_CATALOG (driver-catalog.ts); route answers even when the admin service is unwired",
+          "evidence": "the drivers response"
+        },
+        {
+          "clause": "a runtime create lands with provenance + health: POST /api/v1/datasources creates a sqlite-file datasource (201) and the subsequent list shows it with origin:'runtime' and a health status",
+          "oracle": "api",
+          "verify": "POST status 201; GET /api/v1/datasources contains qa_ds_probe with origin 'runtime' + a health field",
+          "evidence": "the create + list responses"
+        },
+        {
+          "clause": "the secret NEVER echoes back: the create body's inline secret is split out server-side (splitSecret) so it never reaches the persisted draft, and every read (getDatasource is credential-stripped) exposes only a hasSecret boolean plus non-sensitive config — the cleartext secret is returned by no GET",
+          "oracle": "api",
+          "verify": "GET /api/v1/datasources/qa_ds_probe carries hasSecret + config but no secret value; a grep of the list + detail bodies finds the secret nowhere",
+          "evidence": "the detail + list bodies (secret-absent)"
+        },
+        {
+          "clause": "a malformed draft is refused 400 DATASOURCE_ADMIN_ERROR — the datasource-admin service's registered refusal code (attributed to the service that refused, #4249), never a 500",
+          "oracle": "api",
+          "verify": "the bad-draft POST: status 400, error.code DATASOURCE_ADMIN_ERROR (registered under @objectstack/service-datasource)",
+          "evidence": "the 400 response"
+        },
+        {
+          "clause": "an unwired federation service degrades 503 naming external-datasource: the introspection routes (/:name/remote-tables, /:name/test, /:name/object-draft) answer 503 SERVICE_UNAVAILABLE whose message names the external-datasource service — NOT datasource-admin (the #4225 mis-attribution the resolve() helper exists to prevent, since datasource-admin itself is running fine)",
+          "oracle": "api",
+          "verify": "the remote-tables 503 message names 'external-datasource', not 'datasource-admin'",
+          "evidence": "the 503 response"
+        },
+        {
+          "clause": "unknown name → 404 RESOURCE_NOT_FOUND; and (FINDING) the /api/v1/datasources admin CRUD is UNLEDGERED — absent from packages/rest/src/rest-route-ledger.ts (only the /datasources/:name/external/* federation routes are ledgered there), a tranche-3 route-ledger discipline gap the run must record (PENDING-GAPS §E)",
+          "oracle": "api",
+          "verify": "GET /api/v1/datasources/does-not-exist → 404 RESOURCE_NOT_FOUND; run record notes the admin routes carry no route-ledger entry",
+          "evidence": "the 404 + the unledgered-mount finding"
+        }
+      ],
+      "negative": [
+        "the cleartext secret appearing in ANY list/detail response is a security FAIL — hasSecret is the only permitted signal",
+        "a federation-route 503 that names datasource-admin (the service that IS running) instead of external-datasource is the #4225 mis-attribution regressed — FAIL",
+        "a datasource-admin refusal carrying EXTERNAL_DATASOURCE_ERROR (or an external-datasource refusal carrying DATASOURCE_ADMIN_ERROR) is the #4249 code mis-attribution — FAIL"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-datasource/src/__tests__/admin-routes.test.ts (+ __tests__/envelope.conformance.test.ts) — pins route behavior + envelope; the LIVE-mount half is not pinned, drive os dev for it"
+      },
+      "source": [
+        "packages/services/service-datasource/src/admin-routes.ts (the nine routes; splitSecret keeps the secret out of the persisted draft; resolve()/badRequest() per-service attribution #4225/#4249; getDatasource credential-stripped + hasSecret)",
+        "packages/services/service-datasource/src/driver-catalog.ts (static DRIVER_CATALOG, configSchema projected from spec #4410)",
+        "packages/spec/src/api/error-code-ledger.zod.ts (DATASOURCE_ADMIN_ERROR, EXTERNAL_DATASOURCE_ERROR under @objectstack/service-datasource)",
+        "packages/spec/src/api/errors.zod.ts (HttpStatusErrorCodeMap: 503 SERVICE_UNAVAILABLE, 404 RESOURCE_NOT_FOUND)",
+        "packages/cli/src/commands/serve.ts (mounts registerDatasourceAdminRoutes at /api/v1/datasources by default — NOT in the REST route ledger, tranche-3 gap)",
+        "PENDING-GAPS §B/§E (#4225/#4249; service-datasource has no route ledger)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — the external-datasource ADMIN lifecycle (driver catalog, runtime create + provenance/health, secret-never-echoes, 400/503 per-service attribution, unledgered-mount finding); distinct from external-datasource-federated-read (which tests the seeded read-only fixture's query path) — cross-referenced, not duplicated. Per PENDING-GAPS §B/§E (#4225/#4249)",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.notification-preference-suppression",
+      "title": "A recipient preference muting the inbox channel for a topic suppresses delivery (no inbox row, no dead-letter fake); flipping it back resumes; a sys_notification_template renders through a delivery",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "admin (to fire the notify flow by reassigning the task)",
+        "the assignee member (whose inbox is checked)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "MessagingServicePlugin installed (the showcase config requires the 'messaging' capability) — its emit() consults the PreferenceResolver before fan-out",
+          "the shipped notify flow showcase_task_assigned_notify (notify node: topic 'task.assigned', channels ['inbox'] — examples/app-showcase/src/automation/flows/index.ts)",
+          "two personas with sessions: admin and the assignee"
+        ],
+        "knownGaps": [
+          "no shipped sys_notification_preference rows nor a sys_notification_template fixture — both authored in-run (both are writable system-data objects); the notify flow fixture itself is shipped. The spec's channel enum spells this 'in-app'; the implemented channel id is 'inbox' (the #3197 naming drift) — the preference row must name the IMPLEMENTED id 'inbox'"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; personas admin + assignee; establish the happy path first (or lean on notify-inbox-delivery): reassign a showcase_task to the assignee → showcase_task_assigned_notify fires topic 'task.assigned' on channel 'inbox' → one sys_inbox_message for the assignee, visible in GET /api/v1/notifications",
+        "author a suppression row via POST /api/v1/data/sys_notification_preference: { user_id: <assigneeId>, topic: 'task.assigned', channel: 'inbox', enabled: false } — this is the 'category' the task names; the model's field is `topic` (most-specific-wins over the built-in default-ON)",
+        "re-fire the notify flow (reassign the task to the same assignee again); GET /api/v1/notifications as the assignee and confirm NO new inbox row landed",
+        "read the messaging outbox / dead-letter surface and confirm there is no dead-letter row for the muted (recipient, 'inbox') — a deliberate mute is a DROP by the preference filter, not a dead-letter (dead-letter is reserved for unimplemented channels, #3197)",
+        "flip the row enabled:true (or delete it); re-fire; confirm the inbox row is delivered again",
+        "probe the resolution order: a user_id='*' admin-global default OFF with a user-specific row ON delivers (user row overrides global); a mandatoryTopics-configured topic bypasses the matrix entirely (cannot be muted)",
+        "render a sys_notification_template through a delivery: author a scratch sys_notification_template keyed (topic, channel, locale) and drive a template-backed channel (email/sms — messaging-service-plugin registers them as 'renders sys_notification_template'); capture the rendered subject/body"
+      ],
+      "acceptance": [
+        {
+          "clause": "a suppression row mutes the channel: with (assignee, 'task.assigned', 'inbox', enabled:false) present, firing the notify flow delivers NO inbox row to the assignee — the PreferenceResolver drops the recipient once no channel survives the filter (most-specific-wins; built-in default ON)",
+          "oracle": "api",
+          "verify": "post-fire GET /api/v1/notifications for the assignee lacks the new row; the preference row is present with enabled:false",
+          "evidence": "the empty-of-new listing + the preference row"
+        },
+        {
+          "clause": "no dead-letter fake: the muted delivery is DROPPED by preference, not recorded as a dead-letter/failed row — dead-letter is reserved for unimplemented channels (#3197); a deliberate mute must leave no fake failure trace",
+          "oracle": "api",
+          "verify": "no sys_inbox_message for the muted fire AND no dead-letter row for the (recipient, 'inbox') pair",
+          "evidence": "the absence checks (inbox + dead-letter)"
+        },
+        {
+          "clause": "flipping back resumes delivery: setting enabled:true (or removing the row) restores default-ON and the next fire delivers the inbox row again — the mute is reversible and reflects the CURRENT matrix, not a cached decision",
+          "oracle": "api",
+          "verify": "post-flip GET /api/v1/notifications shows the new inbox row",
+          "evidence": "the before/after listings around the flip"
+        },
+        {
+          "clause": "resolution is most-specific-wins: a user-specific row overrides the user_id='*' admin-global default, and a mandatoryTopics-configured topic bypasses the matrix (cannot be muted) — the ADR-0030 Layer-3 precedence holds on the live pipeline",
+          "oracle": "api",
+          "verify": "the global-OFF + user-ON probe delivers; a mandatory-topic fire delivers despite an enabled:false row",
+          "evidence": "the two probe outcomes"
+        },
+        {
+          "clause": "a sys_notification_template renders through a delivery: driving a template-backed channel resolves (topic, channel, locale) from sys_notification_template with locale fallback and renders the subject/body holes — proving the template surface is live and DISTINCT from the inline title/message the inbox flow uses",
+          "oracle": "log",
+          "verify": "the captured render carries the template's substituted subject/body (email/sms channel path; messaging-service-plugin 'renders sys_notification_template')",
+          "evidence": "the captured render"
+        }
+      ],
+      "negative": [
+        "a suppression row present and enabled:false but an inbox row STILL landing is a FAIL — the preference filter was bypassed (distinct from the by-design fail-OPEN, which applies only to a preference OUTAGE: no data engine / lookup error keeps all channels; a HEALTHY lookup ignoring an enabled:false row is the FAIL)",
+        "distinct from notify-inbox-delivery (the inbox happy path) — a run must not double-count the happy path here; this item's proof is the SUPPRESSION and its reversal"
+      ],
+      "traps": [
+        "wrong-persona",
+        "seed-data-thin",
+        "stale-dist"
+      ],
+      "source": [
+        "packages/services/service-messaging/src/objects/notification-preference.object.ts (sys_notification_preference: user_id × topic × channel × enabled; '*' wildcards + admin-global default; unique (user_id,topic,channel) index)",
+        "packages/services/service-messaging/src/preference-resolver.ts (PreferenceResolver.filter — most-specific-wins, mandatory-topic bypass, fail-open; drops recipients left with no accepted channel)",
+        "packages/services/service-messaging/src/messaging-service.ts (emit() consults the PreferenceResolver before fan-out)",
+        "packages/services/service-messaging/src/messaging-service-plugin.ts (email/sms channels render sys_notification_template; shared retry/dead-letter substrate)",
+        "packages/spec/src/system/notification.zod.ts (#3197 dead-letter for unimplemented channels; 'in-app' vs 'inbox' naming drift)",
+        "examples/app-showcase/src/automation/flows/index.ts (showcase_task_assigned_notify — topic 'task.assigned', channels ['inbox'])"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "new — preference-driven inbox suppression (no row, no dead-letter fake), reversal, ADR-0030 Layer-3 precedence, and a sys_notification_template render; distinct from notify-inbox-delivery (happy path). Per PENDING-GAPS §C",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    }
+  ]
+}

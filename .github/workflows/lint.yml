@@ -193,6 +193,14 @@ jobs:
       - name: ADR anchors + number uniqueness (governed code names its decision)
         run: pnpm check:adr-anchors
 
+      # NOTE: the standing platform test checklist (docs/qa/platform-checklist/)
+      # is validated by `pnpm check:platform-checklist`, but by MAINTAINER
+      # DECISION it is NOT wired into CI — it runs on a periodic manual cadence
+      # (before a release / after a large platform surface lands), not on every
+      # PR. The checklist is a QA ledger, not a code gate; keeping it out of the
+      # per-PR path means an unrelated PR is never blocked by checklist drift.
+      # Run it by hand: `pnpm check:platform-checklist`. See that dir's README.
+
       # #3280/#3290 org-identifier guard: `organizationId` is the blessed
       # developer-facing name for the caller's active org in hook/action bodies;
       # the `session.tenantId` alias was REMOVED in v11 (#3290). Keeps our own

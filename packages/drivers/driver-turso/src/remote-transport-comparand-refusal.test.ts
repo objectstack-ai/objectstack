@@ -80,11 +80,16 @@ describe('RemoteTransport comparand refusal — the value half of #1004', () => 
       expect(calls[0].args).toEqual(['a', 'b', 'lost']);
     });
 
-    it('keeps the LIKE family compiling a string comparand', async () => {
+    it('keeps the text family compiling a string comparand', async () => {
+      // [#6518] `GLOB`, not `LIKE`: the family is case-SENSITIVE by contract
+      // (#4706 Q2 = A) and SQLite's `LIKE` folds ASCII, so both the operator
+      // and its wildcard character changed. What this case controls for is
+      // unchanged — a legitimate string comparand still compiles rather than
+      // being caught by the refusal this file is about.
       const { t, calls } = transportWithCapturingClient();
       await t.find('deal', { where: { name: { $startsWith: 'Alp' } } });
-      expect(calls[0].sql).toMatch(/"name"\s+LIKE\s+\?/i);
-      expect(calls[0].args).toEqual(['Alp%']);
+      expect(calls[0].sql).toMatch(/"name"\s+GLOB\s+\?/i);
+      expect(calls[0].args).toEqual(['Alp*']);
     });
   });
 
