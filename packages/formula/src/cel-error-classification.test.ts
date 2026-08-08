@@ -269,11 +269,12 @@ describe('celEngine error classification (#6133)', () => {
       // read straight off the record. Before #6223 these four one-and-the-same
       // regex failures were graded `type` / `bounds` / `parse` / `type`.
       for (const [source, ctx] of [
-        ['matches(record.name, "(?<type>")', { record: { name: 'x' } }],
+        ['matches(record.name, "type(")', { record: { name: 'x' } }],
         ['matches(record.name, "Exceeded maxAstNodes(")', { record: { name: 'x' } }],
         ['matches(record.name, "unexpected(")', { record: { name: 'x' } }],
+        ['matches(record.name, "syntax[")', { record: { name: 'x' } }],
         // Not even authored: the pattern is a VALUE on the row.
-        ['matches(record.name, record.re)', { record: { name: 'x', re: '(?<type>' } }],
+        ['matches(record.name, record.re)', { record: { name: 'x', re: 'type(' } }],
       ] as Array<[string, EvalContext]>) {
         const { kind, message } = evalKind(source, ctx);
         expect(message).toContain('Invalid regular expression');

@@ -40,7 +40,7 @@ Two findings from the audit worth recording. First, the residual keyword arm was
 **not** dormant: `matches()` is an ObjectStack stdlib binding over `new
 RegExp(...)`, so an uncompilable pattern escapes as a native `SyntaxError` whose
 message echoes the pattern — and the pattern can come off the row, not just out
-of the source. `matches(record.name, record.re)` with `re = "(?<type>"` was
+of the source. `matches(record.name, record.re)` with `re = "type("` was
 graded `type`; with `"Exceeded maxAstNodes("` it was graded `bounds`. A data
 value was picking the error kind. Second, there is deliberately no `TypeError`
 arm: cel-js raises that class only from its non-evaluating `TypeChecker`, which

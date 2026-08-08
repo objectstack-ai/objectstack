@@ -942,7 +942,7 @@ function classifyCelFault(err: unknown): 'parse' | 'bounds' | 'type' | 'runtime'
  * `SyntaxError` whose message echoes the pattern (measured, #6223):
  *
  * ```text
- * matches(record.name, "(?<type>")               ->  type    (was)
+ * matches(record.name, "type(")                  ->  type    (was)
  * matches(record.name, "Exceeded maxAstNodes(")  ->  bounds  (was)
  * matches(record.name, "unexpected(")            ->  parse   (was)
  * matches(record.name, record.re)                ->  type    (was) — from a ROW
