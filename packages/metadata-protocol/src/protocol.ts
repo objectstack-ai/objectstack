@@ -16,7 +16,16 @@ import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
-import { ConflictError, assertProtocolCompat, applyAuditFieldGovernance, type MetadataItem } from '@objectstack/metadata-core';
+import {
+    ConflictError,
+    assertProtocolCompat,
+    applyAuditFieldGovernance,
+    // [#6562] The injection/strip pair over the shared injected-column
+    // definition table — see {@link governServedItem} / {@link stripServedSystemColumns}.
+    applyInjectedSystemColumns,
+    stripInjectedSystemColumns,
+    type MetadataItem,
+} from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
 // `@objectstack/metadata` (#5108). See `rethrowUnlessMetadataStoreUnprovisioned`.
@@ -140,30 +149,76 @@ function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T 
 }
 
 /**
- * [#4513] The last thing every `/meta` read does to an OBJECT document before
- * it leaves this service: make the field metadata it reports agree with what
- * the engine enforces on the write path.
+ * The last thing every `/meta` read does to an OBJECT document before it leaves
+ * this service: make the field metadata it reports agree with what the engine
+ * enforces on the write path — in BOTH of the ways it used to disagree.
  *
  * The mismatch this closes is structural, not incidental. A `/meta` object read
  * resolves through `sys_metadata` overlay → MetadataService → SchemaRegistry,
- * and only the last of those three has been through `applySystemFields` — so
- * the two stored layers answered with whatever the artifact/overlay body
- * happened to declare, while `ObjectQL.update` was stripping caller writes to
- * the audit family off the registry's post-injection schema. `created_at` read
- * `readonly: false` and wrote as read-only, on the same field, at the same
- * moment, from the one face a client can actually see (#4447 fixed the write
- * half; this is the read half).
+ * and only the last of those three has been through `applySystemFields`, so the
+ * answer a caller got depended on which link produced it — with nothing in the
+ * response saying which one had. Two halves, filed and ruled separately:
+ *
+ *  - **[#4513] the VALUE half.** The two stored layers answered with whatever
+ *    the artifact/overlay body happened to declare, while `ObjectQL.update` was
+ *    stripping caller writes to the audit family off the registry's
+ *    post-injection schema. `created_at` read `readonly: false` and wrote as
+ *    read-only, on the same field, at the same moment, from the one face a
+ *    client can actually see (#4447 fixed the write half; this is the read
+ *    half). {@link applyAuditFieldGovernance} normalizes a DECLARED audit field.
+ *  - **[#6562] the PRESENCE half.** The stored layers reported the platform's
+ *    own injected columns — `created_at`, `owner_id`, `organization_id`,
+ *    `owning_business_unit_id`, … — as simply ABSENT, so an author reading an
+ *    overlay-backed object reasonably concluded the columns do not exist, while
+ *    every one of them is real in the database, filterable, orderable and
+ *    enforced read-only on write. Maintainer ruling (2026-08-08), Option B: the
+ *    read serves the EFFECTIVE runtime schema and the overlay-backed minority
+ *    converges on the registry-backed majority.
+ *    {@link applyInjectedSystemColumns} adds an UNDECLARED injected column.
+ *
+ * The two are composed rather than folded, because they do different things to
+ * different fields: governance rewrites what the author declared, injection only
+ * ever adds what nobody declared. Both return their input by reference when
+ * nothing was needed, so the registry-sourced path (injected AND governed at
+ * registration) and every non-object type pay a comparison and no copy.
  *
  * Applied per EXIT rather than inside `decorateMetadataItem`: decoration is a
  * diagnostics concern whose output `stripReadDecorations` deliberately removes
- * again on write, and governance is neither — it is what the document means.
+ * again on write, and neither of these is that — they are what the document
+ * means. The read exits are also the ONLY place injection may happen (ruling
+ * constraint 1): `getMetaItemLayered` calls this on `effective` and never on
+ * `overlay`, so Studio's "what you customised" diff keeps showing the row the
+ * author actually stored.
  *
- * `applyAuditFieldGovernance` returns its input by reference when nothing needed
- * forcing, so the registry-sourced path (already governed at registration) and
- * every non-object type pay a comparison and no copy.
+ * ⛔ The write path owes this function a counterpart. See
+ * {@link stripServedSystemColumns} — without it the standard Studio GET → edit →
+ * PUT round-trip would persist the injected columns into `sys_metadata`, and the
+ * #4326 byte-identical invariant would break the day this shipped.
  */
 function governServedItem<T>(type: string, item: T): T {
-    return canonicalMetaType(type) === 'object' ? applyAuditFieldGovernance(item) : item;
+    if (canonicalMetaType(type) !== 'object') return item;
+    return applyInjectedSystemColumns(applyAuditFieldGovernance(item));
+}
+
+/**
+ * [#6562] The write-path counterpart of {@link governServedItem}'s injection
+ * half: take the injected-but-undeclared system columns back off a body on its
+ * way IN, so a served document handed straight back still persists byte-identical.
+ *
+ * Exactly the shape, and exactly the reason, of the `stripReadDecorations` call
+ * beside it in `saveMetaItem` (#4326) — the write path persists the request body
+ * verbatim by design (ADR-0005 §Validation), so anything the READ adds must come
+ * off again on the way in or it is baked into `sys_metadata.metadata`, into its
+ * checksum, and into every history diff. Kept a SEPARATE strip from that one
+ * rather than folded into `METADATA_READ_DECORATIONS`, because the two lists are
+ * different in kind: a read decoration is derived diagnostics no schema accepts,
+ * whereas an injected column is a real, spec-valid field declaration an author
+ * may legitimately write — so this strip removes only a field byte-identical to
+ * the platform's own definition, and a declared `owner_id` carrying the author's
+ * own label survives untouched.
+ */
+function stripServedSystemColumns<T>(type: string, item: T): T {
+    return canonicalMetaType(type) === 'object' ? stripInjectedSystemColumns(item) : item;
 }
 
 /**
@@ -8021,6 +8076,18 @@ export class ObjectStackProtocolImplementation implements
         // Placed first so the destructive-change diff, the schema gate, the
         // authoring gate and the persisted body all see the same document.
         request.item = stripReadDecorations(request.item);
+        // [#6562] …and OUR OWN injected system columns, for the same reason and
+        // at the same moment. `governServedItem` now serves the EFFECTIVE object
+        // schema, so the very same Studio round-trip would otherwise persist
+        // `created_at` / `owner_id` / `organization_id` / … into a body whose
+        // author declared none of them — turning the platform's own columns into
+        // a phantom customization in `sys_metadata`, in the checksum, in every
+        // history diff, and in the layered read's `overlay` layer. Placed
+        // alongside the decoration strip so the destructive-change diff, the
+        // schema gate, the authoring gate and the persisted body all still see
+        // one document. See {@link stripServedSystemColumns} for why this is a
+        // separate strip from the decoration list and not another entry in it.
+        request.item = stripServedSystemColumns(request.type, request.item);
         // Per-item lifecycle (ADR-0005 §"Drafts"). Default is `'publish'`
         // (legacy semantics — save goes straight live) to keep callers
         // that predate the draft/publish split working. Studio's

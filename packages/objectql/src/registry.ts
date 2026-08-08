@@ -1,9 +1,16 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, resolveInjectedSystemColumns, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, type AuditProvenanceField } from '@objectstack/spec/data';
-// [#4513] The audit-family governance table — see the re-export below for why
-// it lives in a package both `objectql` and `metadata-protocol` depend on.
-import { AUDIT_FIELD_GOVERNANCE } from '@objectstack/metadata-core';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, resolveInjectedSystemColumns, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+// [#4513] The audit-family governance table, and [#6562] the injected-column
+// DEFINITION tables it governs — see the re-exports below for why both live in a
+// package `objectql` and `metadata-protocol` both depend on.
+import {
+  AUDIT_FIELD_GOVERNANCE,
+  AUDIT_FIELD_DEFS,
+  TENANT_SCOPE_FIELD_DEF,
+  OWNER_FIELD_DEF,
+  OWNING_BUSINESS_UNIT_FIELD_DEF,
+} from '@objectstack/metadata-core';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
@@ -250,51 +257,21 @@ export interface SchemaRegistryOptions {
  *     site for why that shape presumes nothing about the undecided D2 policy.
  */
 /**
- * Column definitions for the audit-provenance family, keyed by the spec's
- * {@link AUDIT_PROVENANCE_FIELDS} tuple — the canonical declaration of WHICH
- * columns exist (#3786). This table owns only WHAT each column looks like.
+ * [#6562] The column-definition tables — `AUDIT_FIELD_DEFS` and the three
+ * ownership/tenancy anchors below — now live in `@objectstack/metadata-core`,
+ * re-exported here so the symbols still resolve from `@objectstack/objectql`.
  *
- * The `satisfies` clause is the sync mechanism: a name added to the spec tuple
- * without a definition here — or a definition for a name the spec dropped — is
- * a compile error, not a silently diverging copy. Same discipline as the
- * spec's `APPROVER_VALUE_BINDINGS`.
+ * Same criterion, same package and the same cycle as {@link AUDIT_FIELD_GOVERNANCE}
+ * one comment down: the `/meta` READ path lives in
+ * `@objectstack/metadata-protocol`, which `@objectstack/objectql` depends on, so
+ * it could not import WHAT each injected column looks like from the registry
+ * that provisions it. Until it could, an overlay-backed read served the stored
+ * document verbatim and reported the platform's own columns as *absent* while a
+ * registry-backed read of the same object reported them present — one endpoint,
+ * two field sets, and nothing telling the caller which it had received. The read
+ * exits and this injection now derive one answer from one table.
  */
-const AUDIT_FIELD_DEFS = {
-  created_at: {
-    type: 'datetime',
-    label: 'Created At',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'Timestamp when the record was created (auto-populated by the driver).',
-  },
-  created_by: {
-    type: 'lookup',
-    reference: 'sys_user',
-    label: 'Created By',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'User who created the record (populated when an authenticated session is present).',
-  },
-  updated_at: {
-    type: 'datetime',
-    label: 'Last Modified At',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'Timestamp of the most recent modification (auto-populated by the driver).',
-  },
-  updated_by: {
-    type: 'lookup',
-    reference: 'sys_user',
-    label: 'Last Modified By',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'User who last modified the record (populated when an authenticated session is present).',
-  },
-} satisfies Record<AuditProvenanceField, Record<string, unknown>>;
+export { AUDIT_FIELD_DEFS, TENANT_SCOPE_FIELD_DEF, OWNER_FIELD_DEF, OWNING_BUSINESS_UNIT_FIELD_DEF };
 
 /**
  * [#4447] The subset of {@link AUDIT_FIELD_DEFS} that is NOT authorable — the
@@ -429,18 +406,15 @@ export function applySystemFields(
   const overrides: Record<string, any> = {};
 
   if (wantTenant && !schema.fields?.organization_id) {
-    additions.organization_id = {
-      type: 'lookup',
-      reference: 'sys_organization',
-      label: 'Organization',
-      required: false,
-      indexed: opts.multiTenant,
-      hidden: true,
-      readonly: true,
-      system: true,
-      description:
-        'Tenant scope (auto-populated by org-scoping on insert; NULL on single-tenant stacks).',
-    };
+    // [#6562] The authorable shape is the shared table's; `indexed` is spread on
+    // top HERE and only here. It is the one key of this definition that is not a
+    // `FieldSchema` key at all — removed in the 16.x line (#2377, ADR-0049), and
+    // `FieldSchema` is `strictObject`, so a document carrying it is rejected by
+    // name ("never a FieldSchema key; a field-level index flag built no index").
+    // Its only consumer is `driver-mongodb`'s schema builder, which reads the
+    // REGISTERED schema and never a served `/meta` document — so it stays at the
+    // injection site and the served answer converges on everything else.
+    additions.organization_id = { ...TENANT_SCOPE_FIELD_DEF, indexed: opts.multiTenant };
   }
 
   if (wantAudit) {
@@ -484,17 +458,7 @@ export function applySystemFields(
   // editable in forms and assignable via the API. SecurityPlugin auto-stamps
   // it to the acting user on insert when left NULL.
   if (wantOwner && !schema.fields?.owner_id) {
-    additions.owner_id = {
-      type: 'lookup',
-      reference: 'sys_user',
-      label: 'Owner',
-      required: false,
-      readonly: false,
-      system: true,
-      description:
-        'Record owner (auto-stamped to the creating user on insert; reassignable). ' +
-        'Drives owner-scoped views, reports and notifications.',
-    };
+    additions.owner_id = { ...OWNER_FIELD_DEF };
   }
 
   // [ADR-0117 D1] Record-level business-unit ownership. Shaped after
@@ -529,18 +493,7 @@ export function applySystemFields(
   // writes and nothing filters is dead weight — the same reasoning that gates
   // `organization_id`'s index on `multiTenant`.
   if (wantOwningBusinessUnit && !schema.fields?.[OWNING_BUSINESS_UNIT_FIELD]) {
-    additions[OWNING_BUSINESS_UNIT_FIELD] = {
-      type: 'lookup',
-      reference: 'sys_business_unit',
-      label: 'Owning Business Unit',
-      required: false,
-      hidden: true,
-      readonly: true,
-      system: true,
-      description:
-        'Record-level business-unit ownership (ADR-0117 D1). Server-stamped scope anchor; ' +
-        'NULL until the stamping middleware lands.',
-    };
+    additions[OWNING_BUSINESS_UNIT_FIELD] = { ...OWNING_BUSINESS_UNIT_FIELD_DEF };
   }
 
   if (Object.keys(additions).length === 0 && Object.keys(overrides).length === 0) return schema;
