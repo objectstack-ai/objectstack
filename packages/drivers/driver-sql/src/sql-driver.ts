@@ -40,7 +40,7 @@ import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
-import { resolveTenancyPosture } from '@objectstack/types';
+import { isUniqueViolationError, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
@@ -6348,7 +6348,17 @@ export class SqlDriver implements IDataDriver {
         // different name can race us here — both are benign for our intent
         // (the index exists). Anything else is a real failure.
         if (/already exists|duplicate key name|exists/i.test(msg)) continue;
-        if (nullSafe.size > 0 && /unique constraint failed|duplicate entry|duplicate key value/i.test(msg)) {
+        // The ERROR OBJECT, not `msg` (#6543). This used to be a private
+        // inline regex over the message alone, which is the only channel the
+        // SQLite family reliably fills — but Postgres answers this exact
+        // failure with `could not create unique index "…"` and puts the
+        // verdict on `code` (SQLSTATE 23505) instead, so a message-only read
+        // missed the dialect entirely and took the boot down on the very case
+        // the branch below exists to absorb. The shared predicate reads
+        // `code` / `errno` / `message` / `cause`; see
+        // `@objectstack/types`' `unique-violation.ts` for why it is the one
+        // name for this question.
+        if (nullSafe.size > 0 && isUniqueViolationError(e)) {
           // Existing rows violate the NULL-safe unique — the #5030 defect made
           // visible. Do not take the boot down: the declared constraint is not
           // enforced yet, say so at `error` (from the outside everything looks
@@ -6398,8 +6408,16 @@ export class SqlDriver implements IDataDriver {
       await this.knex.raw(sql);
     } catch (e: any) {
       const msg = String(e?.message ?? e);
+      // The positive limb is this site's own question — "does this server
+      // reject functional key parts?" — and stays a message test, because
+      // that is the only channel the answer is on. The NEGATIVE limb was a
+      // seventh spelling of the unique-violation vocabulary (`/duplicate/i`)
+      // and is now the shared predicate (#6543): a conflict must never be
+      // read as a syntax rejection and silently degraded to the bare
+      // composite, and on the `errno`-only shape mysql2 can hand back, a
+      // message-only exclusion did not fire.
       const functionalUnsupported =
-        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !/duplicate/i.test(msg);
+        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !isUniqueViolationError(e);
       if (!functionalUnsupported) throw e;
       (this.logger.error ?? this.logger.warn)(
         `[sql-driver] this MySQL/MariaDB server rejects functional key parts — created '${name}' on ` +
