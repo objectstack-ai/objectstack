@@ -85,6 +85,23 @@ const PROBES: Record<string, { name: string; item: Record<string, unknown> }> = 
             instructions: 'be helpful',
         },
     },
+    // [#5961] The third flagged type. ADR-0066 D1: packages DEFINE
+    // capabilities — an administrator minting one at runtime has no place in
+    // the capability / assignment / requirement separation, so the kind is
+    // code-only for the same reason `job` and `agent` are. This probe is
+    // schema-valid on purpose (see the note above): only a body the schema
+    // ACCEPTS proves the refusal came from the registry consult rather than
+    // from the 422 that #5961 also gave this type.
+    capability: {
+        name: 'rc3_capability_probe',
+        item: {
+            name: 'rc3_capability_probe',
+            label: 'C',
+            description: 'Probe capability.',
+            scope: 'org',
+            packageId: 'com.example.probe',
+        },
+    },
 };
 
 function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
@@ -186,11 +203,14 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
     // ── the flags are data: keep the suite honest about new ones ──────────
 
     it('covers every code-only type the registry declares', () => {
-        // Today: job (#4509) and agent (ADR-0063 §2). When a third type is
-        // flagged, this fails until it has a schema-valid probe above —
-        // which is the whole cost of covering it.
+        // Today: job (#4509), agent (ADR-0063 §2) and capability (#5961,
+        // ADR-0066 D1). When a fourth type is flagged, this fails until it has
+        // a schema-valid probe above — which is the whole cost of covering it,
+        // and is exactly what happened when `capability` joined: this
+        // assertion and eleven generated cases went red on the spec-side
+        // registry edit alone, before a line of this file was touched.
         expect(CODE_ONLY_TYPES.length).toBeGreaterThan(0);
-        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'job']);
+        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'capability', 'job']);
         for (const type of CODE_ONLY_TYPES) {
             expect(PROBES[type], `no probe payload for code-only type '${type}'`).toBeDefined();
         }

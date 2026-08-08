@@ -43,7 +43,7 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -65,17 +65,17 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | App unique machine name (lowercase snake_case) |
-| **label** | `string` | ✅ | App display label |
+| **label** | `string \| Record<string, string>` | ✅ | App display label |
 | **version** | `never` | optional | [REMOVED] `App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no consumer in framework or objectui). An app is versioned by its owning package: use `manifest.version`. Delete the key. |
-| **description** | `string` | optional | App description |
+| **description** | `string \| Record<string, string>` | optional | App description |
 | **icon** | `string` | optional | App icon used in the App Launcher |
 | **branding** | `{ primaryColor?: string; accentColor?: string; logo?: string; favicon?: string }` | optional | App-specific branding |
 | **active** | `boolean` | optional | Whether the app is enabled |
 | **isDefault** | `boolean` | optional | Is default app |
 | **hidden** | `boolean` | optional | Hide from the App Switcher; the shell surfaces hidden apps via the avatar menu instead |
-| **navigation** | `({ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| … +5 more)[]` | optional | Full navigation tree for the app sidebar |
-| **areas** | `{ id: string; label: string; icon?: string; description?: string; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
-| **contextSelectors** | `{ id: string; label: string; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
+| **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| … +5 more)[]` | optional | Full navigation tree for the app sidebar |
+| **areas** | `{ id: string; label: string \| Record<string, string>; icon?: string; description?: string \| Record<string, string>; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
+| **contextSelectors** | `{ id: string; label: string \| Record<string, string>; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
 | **homePageId** | `never` | optional | [REMOVED] `app.homePageId` was removed in @objectstack/spec 17.0.0 (#4667, #4709, ADR-0049). objectui's console did read it before v17 (`resolveLandingRoute`), so this key had a consumer — it was retired because the capability is better expressed on the navigation item itself than as an ID cross-reference that silently falls back when it dangles. An app's landing page IS its first navigation item (by `order`), and the root landing follows `isDefault` routing. Delete the key; to change where an app opens, reorder `navigation` so the intended entry is first, and set `isDefault` on the app that should own the root landing. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this app |
 | **objects** | `never` | optional | [REMOVED] `App.objects` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — never read; the spec itself labelled it "config file convenience"). Objects belong to the stack (`defineStack({ objects })`); an app reaches them through its navigation items. Delete the key. |
@@ -118,7 +118,7 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Selector id; selected value is exposed as the nav template var `{<id>}` |
-| **label** | `string` | ✅ | Dropdown label |
+| **label** | `string \| Record<string, string>` | ✅ | Dropdown label |
 | **icon** | `string` | optional | Icon name |
 | **optionsSource** | `{ endpoint: string; valueKey: string; labelKey: string; filter?: { key: string; op: Enum<'eq' \| 'ne' \| 'in' \| 'nin'>; value: string \| string[] }[] }` | ✅ | Option data source |
 | **allValue** | `string` | ✅ | Sentinel value meaning "no concrete selection yet" (empty string is almost always right) |
@@ -134,7 +134,7 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -157,7 +157,7 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -179,7 +179,7 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -201,10 +201,10 @@ const result = ActionNavItemSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique area identifier (lowercase snake_case) |
-| **label** | `string` | ✅ | Area display label |
+| **label** | `string \| Record<string, string>` | ✅ | Area display label |
 | **icon** | `string` | optional | Area icon name |
-| **description** | `string` | optional | Area description |
-| **navigation** | `({ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| … +5 more)[]` | ✅ | Navigation items within this area |
+| **description** | `string \| Record<string, string>` | optional | Area description |
+| **navigation** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| … +5 more)[]` | ✅ | Navigation items within this area |
 
 
 ---
@@ -220,7 +220,7 @@ A navigation contribution: a package injecting nav items into an app it does not
 | **app** | `string` | ✅ | Target app name to contribute navigation into (e.g. "setup") |
 | **group** | `string` | optional | Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level |
 | **priority** | `integer` | optional | Merge priority within the target group — lower applied first (matches object extender priority) |
-| **items** | `({ id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| { id: string; label: string; icon?: string; order?: number; … } \| … +5 more)[]` | ✅ | Navigation items contributed into the target app/group |
+| **items** | `({ id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| { id: string; label: string \| Record<string, string>; icon?: string; order?: number; … } \| … +5 more)[]` | ✅ | Navigation items contributed into the target app/group |
 
 
 ---
@@ -240,7 +240,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -268,7 +268,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -291,7 +291,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -315,7 +315,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -339,7 +339,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -362,7 +362,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -385,7 +385,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -423,7 +423,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -448,7 +448,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -474,7 +474,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -497,7 +497,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |
@@ -519,7 +519,7 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Unique identifier for this navigation item (lowercase snake_case) |
-| **label** | `string` | ✅ | Display proper label |
+| **label** | `string \| Record<string, string>` | ✅ | Display proper label |
 | **icon** | `string` | optional | Icon name |
 | **order** | `number` | optional | Sort order within the same level (lower = first) |
 | **badge** | `string \| number` | optional | Badge text or count displayed on the item |

@@ -5207,11 +5207,12 @@ export type {
   GetPresenceResponse,
   // Workflow re-exports removed (#4451, v17): the types were deleted from
   // @objectstack/spec/api with the retired workflow slot.
-  ListViewsResponse,
-  GetViewResponse,
-  CreateViewResponse,
-  UpdateViewResponse,
-  DeleteViewResponse,
+  // View-management re-exports removed (#6239, v17): the five viewId-addressed
+  // methods and their ten schemas were deleted from @objectstack/spec/api with
+  // the retired `ViewProtocol` — no host implemented them and no route reached
+  // them. A view's stored definition travels on the metadata types
+  // (`GetMetaItemResponse` / `SaveMetaItemResponse` with `type: 'view'`), and
+  // the resolved render-time view on `getUiView`.
   RegisterDeviceRequest,
   RegisterDeviceResponse,
   ListNotificationsResponse,

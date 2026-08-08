@@ -60,6 +60,7 @@ import { DocSchema } from '../system/doc.zod';
 import { BookSchema } from '../system/book.zod';
 
 import { PermissionSetSchema } from '../security/permission.zod';
+import { CapabilityDeclarationSchema } from '../security/capabilities';
 import { PositionSchema } from '../identity/position.zod';
 
 import { AgentSchema } from '../ai/agent.zod';
@@ -140,6 +141,25 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   // Security Protocol
   permission: PermissionSetSchema,
   position: PositionSchema, // flat capability-distribution group (ADR-0090 D3)
+  // [#5961, the same shape #5271 closed for `api`] Package-declared
+  // authorization capabilities (ADR-0066 D1). The kind was produced and read
+  // back long before it resolved a schema: `PLURAL_TO_SINGULAR` maps
+  // `capabilities` → `capability` (#5870), `AppPlugin` registers stack-declared
+  // ones under that name, and `bootstrapDeclaredCapabilities` reads them back to
+  // seed `sys_capability`. Yet `getMetadataTypeSchema('capability')` answered
+  // `undefined`, so `saveMetaItem` took its documented "unregistered type →
+  // store without validation" branch and `PUT /meta/capability/:name` accepted
+  // ANY JSON — on an AUTHORIZATION surface, where `systemPermissions` /
+  // `requiredPermissions` resolve capabilities by NAME STRING, so an
+  // arbitrary-JSON row lands in the same namespace a permission set grants
+  // from. `/meta/types` compounded it by synthesising a fake descriptor
+  // (`allowRuntimeCreate: true`, no schema ⇒ a raw-JSON textarea form) for a
+  // kind the registry never declared.
+  //
+  // With this entry the existing 422 `invalid_metadata` path applies to
+  // `capability` like every other kind, and the registry entry next to it
+  // (`allowRuntimeCreate: false`) closes the runtime write door outright.
+  capability: CapabilityDeclarationSchema,
 
   // AI Protocol
   agent: AgentSchema,

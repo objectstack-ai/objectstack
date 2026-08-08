@@ -150,6 +150,18 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   // Security Protocol
   'permission',  // Permission sets (PermissionSetSchema)
   'position',    // Positions — flat capability-distribution groups (ADR-0090 D3)
+  // [#5961] `capability` was ENFORCED BUT UNDECLARED — the same mirror of
+  // `declared ≠ enforced` that #5271 closed for `api`. `PLURAL_TO_SINGULAR`
+  // has mapped `capabilities` → `capability` since #5870, `AppPlugin`
+  // registers stack-declared capabilities under that exact name, and
+  // `bootstrapDeclaredCapabilities` reads them back — but the kind was absent
+  // from this enum, from `BUILTIN_METADATA_TYPE_SCHEMAS` and from
+  // `DEFAULT_METADATA_TYPE_REGISTRY`, so it resolved no schema and
+  // `PUT /api/v1/meta/capability/:name` stored ANY JSON on an authorization
+  // surface. ⚠️ `role` / `profile` / `policy` are a DIFFERENT question and are
+  // deliberately NOT admitted here: they have no `PLURAL_TO_SINGULAR` mapping,
+  // no declaration schema and no read-back seam — see #5961's ruling.
+  'capability',  // Package-declared authorization capabilities (CapabilityDeclarationSchema, ADR-0066 D1)
 
   // AI Protocol
   'agent',       // AI agent definitions (AgentSchema)
@@ -807,6 +819,37 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // Security Protocol
   { type: 'permission', label: 'Permission Set', filePatterns: ['**/*.permission.ts', '**/*.permission.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 15, domain: 'security' },
   { type: 'position', label: 'Position', filePatterns: ['**/*.position.ts', '**/*.position.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 15, domain: 'security' },
+  // [#5961] Package-declared authorization capabilities (ADR-0066 D1).
+  //
+  // ⛔ CODE-ONLY, and that is the whole point of the entry. ADR-0066 D1 says
+  // packages DEFINE capabilities — `defineCapability` on a stack's
+  // `capabilities[]`, or a `*.capability.ts` file the loader globs — while
+  // permission sets GRANT them and resources REQUIRE them. An administrator
+  // minting a brand-new capability at runtime has no counterpart in that
+  // three-way separation: nothing in code would ever require the name, so the
+  // row would be an unreferenced grant target sitting in the SAME namespace
+  // `systemPermissions` / `requiredPermissions` resolve by string. Hence
+  // `allowRuntimeCreate: false` AND `allowOrgOverride: false`, which together
+  // are #5086's code-only declaration — `saveMetaItem` refuses
+  // `PUT /api/v1/meta/capability/:name` with 403 `not_creatable` on EVERY
+  // kernel, and `codeOnlySourceHint` reads `filePatterns[0]` back to tell the
+  // author where to declare it instead. `job` (#4509) and `agent` (ADR-0063 §2)
+  // carry the same pair for the same reason.
+  //
+  // The package-declaration channel is untouched: `AppPlugin` registers stack
+  // `capabilities[]` through `registerInMemory`, and the filesystem loader
+  // globs `filePatterns` — neither goes through `saveMetaItem`, so
+  // `bootstrapDeclaredCapabilities` still seeds `sys_capability` exactly as
+  // before. `OS_METADATA_WRITABLE=capability` remains the ONE documented
+  // operator escape hatch (ADR-0005), and behind it the write is now judged by
+  // `CapabilityDeclarationSchema` (422) instead of being stored unvalidated.
+  //
+  // `supportsOverlay: false` — a capability is a name, label and scope; there
+  // is no merge semantic, and letting a tenant overlay a package-shipped
+  // declaration would let it re-scope `org` → `platform`.
+  // `loadOrder: 12` — before `permission`/`position` (15), so a set's
+  // `systemPermissions` resolves against capabilities that already exist.
+  { type: 'capability', label: 'Capability', description: 'Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)', filePatterns: ['**/*.capability.ts', '**/*.capability.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 12, domain: 'security' },
 
   // AI Protocol
   // `agent`: executionPinned — long-running conversations must stick to the
