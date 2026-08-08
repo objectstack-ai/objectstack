@@ -733,6 +733,20 @@ function selfTest() {
         settle,
         'consumer: the settling label read must be conditioned on `steps.changeset_count.outputs.added == \'0\'` -- the wait #6378 introduces is charged ONLY to a PR headed for red, and un-conditioning it taxes every run instead',
       );
+      // The condition above is a substring test, so it would go on passing if a
+      // later edit bolted an unrelated `|| <anything>` onto it and quietly taxed
+      // every run again. #6434 legitimately adds ONE disjunct -- the unusable diff
+      // base, which is the other way a PR arrives at red and which the count
+      // cannot speak for, because the counting step is skipped on that path. So
+      // the whole condition is pinned, not just its first term: exactly these two
+      // ways in, and no third without an argument.
+      const settleIf = yaml.match(
+        /steps\.labels\.outputs\.skip != 'true'\s*\n\s*&& \(steps\.changeset_count\.outputs\.added == '0'\s*\n\s*\|\| steps\.diffbase\.outputs\.base_error != ''\)/,
+      );
+      assert(
+        settleIf !== null,
+        "consumer: the settling read's condition must be exactly `no fast-path label AND (added == '0' OR base_error != '')` -- both disjuncts are ways of being headed for RED, which is the only thing that may buy the #6378 wait",
+      );
 
       // Both reads, one matcher. A divergence (say a substring `grep -q` on one
       // path) would be a gate that exempts on one read and enforces on the
@@ -744,20 +758,56 @@ function selfTest() {
         `consumer: exactly two live \`grep -qxF 'skip-changeset'\` reads are expected (the fast path and the settling read); found ${matchers.length}`,
       );
 
-      // Every step that can FAIL a PR over the changeset rule must honour both
-      // reads. Scoped to those steps by what they run, not by name: a step that
-      // shells out to a `check-*.mjs` gate, or that emits the "no changeset"
-      // error. `Resolve the diff base` is deliberately outside this set -- it
-      // exits 1 over an unusable git base, which is not a changeset verdict and
-      // was never label-exempt (recorded, not implied).
+      // Every step of this job that can FAIL a PR must honour both reads. Scoped
+      // by what a step RUNS, never by its name: it shells out to a `check-*.mjs`
+      // gate, or it contains a literal `exit 1` outside a comment.
+      //
+      // #6434 widened this boundary, and the widening is the point rather than an
+      // accident of it. The predicate used to be "runs a `check-*.mjs` OR emits
+      // the no-changeset error", which described the four steps that existed and
+      // nothing else. `Resolve the diff base` sat outside it carrying two `exit
+      // 1`s of its own -- deliberately, on the argument that "the git base is
+      // unavailable" is not a changeset verdict and so was never label-exempt.
+      // That argument is sound about the VERDICT and wrong about its ADDRESS: the
+      // step ran before the settling read, so on a PR whose `skip-changeset` label
+      // landed in the ordinary +10..45s window it could red a run the job was
+      // about to exempt. #6434 moved that verdict to `Require a usable diff base`,
+      // which honours both reads, and the boundary here moved with it.
+      //
+      // Naming `exit 1` instead of one specific error string is what makes the
+      // rule outlive the steps it was written for: the gap #6434 closed existed
+      // precisely because the old predicate could not see a failing step it had
+      // not been told about, and the next one added here would have been invisible
+      // the same way. Residual, stated rather than implied: a step that fails by
+      // running a command that returns non-zero, with no literal `exit 1` and no
+      // `check-*.mjs`, is still outside this set. That is a smaller hole than the
+      // one it replaces, not no hole.
       const jobText = yaml.slice(yaml.indexOf('\n  changeset-check:'));
       const chunks = jobText
         .split(/\n(?=      - name: )/)
         .map((c) => c.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'))
-        .filter((c) => /node scripts\/check-\S+\.mjs/.test(c) || /::error::This PR adds no changeset/.test(c));
+        .filter((c) => /node scripts\/check-\S+\.mjs/.test(c) || /\bexit 1\b/.test(c));
       assert(
-        chunks.length === 4,
-        `consumer: expected 4 changeset-verdict steps in the Check Changeset job, found ${chunks.length} -- a new one that this rule cannot see is a new way to red an exempt PR`,
+        chunks.length === 5,
+        `consumer: expected 5 failable steps in the Check Changeset job, found ${chunks.length} -- a new one that this rule cannot see is a new way to red an exempt PR`,
+      );
+      // The step whose relocation #6434 IS. Pinned in the negative as well as the
+      // positive: base resolution reports into an output and the verdict is taken
+      // downstream, so re-introducing an `exit 1` here would restore the fast-path
+      // -only failure this card exists to remove. The count above would catch that
+      // as a 6th failable step; this says which one and why, so the next reader
+      // gets the reason and not just an arithmetic mismatch.
+      const diffbaseStep = jobText
+        .split(/\n(?=      - name: )/)
+        .map((c) => c.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'))
+        .find((c) => /- name: Resolve the diff base/.test(c));
+      assert(
+        diffbaseStep !== undefined && !/\bexit 1\b/.test(diffbaseStep),
+        'consumer: `Resolve the diff base` must not fail on the spot -- it runs BEFORE the settling read, so its verdict would be taken on the fast path alone and would red a PR whose skip-changeset label was still in flight (#6434). It reports `base_error` and the adjudication step below decides.',
+      );
+      assert(
+        diffbaseStep !== undefined && /base_error=/.test(diffbaseStep),
+        'consumer: `Resolve the diff base` must report an unusable base as a `base_error` output -- dropping it silently would leave the downstream adjudication permanently un-triggerable, i.e. a gate that passes because it never runs (#4690)',
       );
       const unguarded = chunks.filter((c) => !/steps\.labels_settled\.outputs\.skip != 'true'/.test(c));
       assert(
@@ -777,6 +827,21 @@ function selfTest() {
       assert(
         /::error::This PR adds no changeset[\s\S]{0,900}?\n\s+exit 1\n/.test(yaml),
         'consumer: the "no changeset" verdict must still exit 1 -- #6378 removes a structural FALSE red, it does not relax the gate',
+      );
+      // The same constraint for #6434, and the reason it is written as a POSITIVE
+      // is the asymmetry that makes the negative one above worthless on its own:
+      // "the diff base no longer reds an exempt PR" is satisfied just as well by a
+      // step that stopped running, or by an adjudication whose `if:` can never be
+      // true. So the exempt direction is not asserted at all -- what is asserted
+      // is that the enforcing direction survived, in the one place it now lives.
+      const adjudication = jobText
+        .split(/\n(?=      - name: )/)
+        .map((c) => c.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'))
+        .find((c) => /- name: Require a usable diff base/.test(c));
+      assert(adjudication !== undefined, 'consumer: the unusable-diff-base verdict step must exist (#6434) -- without it `base_error` is written and never read, which is a gate deleted rather than relocated');
+      assert(
+        /steps\.diffbase\.outputs\.base_error != ''/.test(adjudication ?? '') && /\n\s+exit 1\n/.test(adjudication ?? ''),
+        "consumer: the unusable-diff-base verdict must fire on `base_error != ''` and exit 1 -- #6434 relocates a failure past the settling read, it does not forgive one. A PR the label reads did not exempt is still failed over a base that could not be resolved (#4690).",
       );
       assert(
         !/continue-on-error/.test(yaml),
