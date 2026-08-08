@@ -248,6 +248,22 @@ export type {
 export { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens.js';
 export type { FilterTokenFinding, FilterTokenSeverity } from './validate-filter-tokens.js';
 
+// #5330 — the same subtree, judged for SHAPE rather than for its strings. The
+// runtime meaning of an empty combinator is settled (#5322: boolean identity,
+// one implementation in `@objectstack/spec`'s `reduceFilterVerdict`); this
+// refuses the literal spellings at authoring time, with a prescription that is
+// per shape because the identities disagree — `{$and: []}` / `{}` are match-ALL
+// and `{$or: []}` / `{$not: {}}` are match-NONE.
+export {
+  validateEmptyCombinators,
+  FILTER_EMPTY_COMBINATOR,
+  FILTER_EMPTY_NODE,
+} from './validate-empty-combinators.js';
+export type {
+  EmptyCombinatorFinding,
+  EmptyCombinatorSeverity,
+} from './validate-empty-combinators.js';
+
 export {
   validateObjectReferences,
   OBJECT_REFERENCE_UNKNOWN,

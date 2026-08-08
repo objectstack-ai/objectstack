@@ -19,7 +19,7 @@
  *   - `mysql[2]://`             → SqlDriver (mysql2)
  *   - `mongodb[+srv]://`        → MongoDBDriver (optional `@objectstack/driver-mongodb`)
  *   - `libsql://`, `http(s)://*.turso.*` → TursoDriver (optional `@objectstack/driver-turso`)
- *   - `file:` / no scheme       → SqlDriver (better-sqlite3)
+ *   - `file:` / `sqlite://` (alias, #6469) / no scheme → SqlDriver (better-sqlite3)
  *
  * Unknown URL schemes throw — we never silently fall back to sqlite, since
  * that historically created bogus directories on disk (e.g. `mongodb:/`)
@@ -56,10 +56,14 @@ import { resolve as resolvePath } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
-import { readEnvWithDeprecation, stampSearchPinyinEnabled } from '@objectstack/types';
+import { stampSearchPinyinEnabled } from '@objectstack/types';
 import type { IDatasourceDriverFactory } from '@objectstack/service-datasource';
 import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
 import { loadTursoDriverFactory } from './turso-driver-factory.js';
+import {
+    resolveProjectDatabaseUrl,
+    type ProjectDatabaseUrlSource,
+} from './resolve-project-database.js';
 
 /**
  * Resolve the ObjectStack home directory used to store cwd-independent
@@ -116,11 +120,13 @@ export const StandaloneStackConfigSchema = z.object({
     /**
      * Project root directory. When set (typically by the CLI after locating
      * `objectstack.config.ts`), the default sqlite database is placed under
-     * `<projectRoot>/.objectstack/data/standalone.db` instead of the global
-     * `~/.objectstack/data/standalone.db`, and the metadata FileSystemRepository
-     * roots at `<projectRoot>/.objectstack/metadata`. This keeps per-project
-     * data scoped to the project folder so different examples / apps don't
-     * share a single database by accident.
+     * `<projectRoot>/.objectstack/data/objectstack.db` — the UNIFIED default
+     * every command resolves since #6469 (legacy `dev.db` / `standalone.db`
+     * are still compat-read, see `resolve-project-database.ts`) — instead of
+     * the global `~/.objectstack/data/objectstack.db`, and the metadata
+     * FileSystemRepository roots at `<projectRoot>/.objectstack/metadata`.
+     * This keeps per-project data scoped to the project folder so different
+     * examples / apps don't share a single database by accident.
      *
      * Both halves matter: until #4065 only the database honoured it while the
      * metadata repository still used `process.cwd()`, so a boot whose
@@ -224,7 +230,8 @@ function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
         `[StandaloneStack] Unsupported database URL scheme: ${dbUrl}. ` +
         `Supported schemes: memory://, postgres://, pg://, mysql://, mysql2://, ` +
         `mongodb://, mongodb+srv://, ` +
-        `libsql:// (optional @objectstack/driver-turso), file:`
+        `libsql:// (optional @objectstack/driver-turso), file: ` +
+        `(sqlite:// is accepted as an alias of file:)`
     );
 }
 
@@ -296,15 +303,49 @@ export interface ResolvedStandaloneDatabase {
      * the side effects of building the stack.
      */
     sqliteFile: string | null;
+    /** Which priority tier resolved the URL (#6469 — shared resolution). */
+    source: ProjectDatabaseUrlSource;
+    /** Declared datasource name, when `source` is `config-datasource`. */
+    datasourceName?: string;
+    /**
+     * One loud line about a legacy-file compat-read (#6469) — surfaced by
+     * `createStandaloneStack` at boot; a caller resolving without booting
+     * (the occupancy probe) deliberately does not print it, so one command
+     * run prints it once.
+     */
+    notice?: string;
+}
+
+/**
+ * The artifact path this boot would read — `cfg.artifactPath` →
+ * `OS_ARTIFACT_PATH` → `<cwd>/dist/objectstack.json`, relative paths anchored
+ * on the cwd. ONE computation for `createStandaloneStack` (which loads the
+ * bundle from it) and `resolveStandaloneDatabase` (which consults it for the
+ * config-declared datasource tier, #6469) — two copies here would let the URL
+ * resolver read a different config than the boot loads.
+ */
+function resolveArtifactPathInput(cfg: z.output<typeof StandaloneStackConfigSchema>): string {
+    const cwd = process.cwd();
+    const input = cfg.artifactPath
+        ?? process.env.OS_ARTIFACT_PATH
+        ?? resolvePath(cwd, 'dist/objectstack.json');
+    return isHttpUrl(input)
+        ? input
+        : (input.startsWith('/') ? input : resolvePath(cwd, input));
 }
 
 /**
  * Resolve the database target WITHOUT building anything.
  *
- * Same precedence `createStandaloneStack` applies (explicit config →
- * `OS_DATABASE_URL`/`DATABASE_URL` → `TURSO_DATABASE_URL` → `OS_HOME` →
- * project root → user home), factored out so a caller can answer "which file
- * am I about to open?" first. Pure: reads env, touches no filesystem.
+ * Since #6469 the URL comes from the ONE shared resolution
+ * ({@link resolveProjectDatabaseUrl}) that `os dev` / `os start` also use:
+ * explicit config → `OS_DATABASE_URL`/`DATABASE_URL` → `TURSO_DATABASE_URL` →
+ * explicit `memory` driver → the config-declared default datasource (read from
+ * the compiled artifact) → the unified default file
+ * (`<state dir>/data/objectstack.db`, with a compat-read of the legacy
+ * `dev.db`/`standalone.db`). State-dir precedence is unchanged: `OS_HOME` →
+ * project root → user home. No longer purely env-derived: the legacy probe and
+ * the artifact consult read the filesystem (they create nothing).
  *
  * The `TURSO_DATABASE_URL` source only started meaning something in #5820: the
  * URL was read here and then rejected by `detectDriverFromUrl` as an unsupported
@@ -318,7 +359,13 @@ export interface ResolvedStandaloneDatabase {
  */
 export function resolveStandaloneDatabase(config?: StandaloneStackConfig): ResolvedStandaloneDatabase {
     const cfg = StandaloneStackConfigSchema.parse(config ?? {});
-    const url = resolveDatabaseUrl(cfg);
+    const resolution = resolveProjectDatabaseUrl({
+        explicitUrl: cfg.databaseUrl,
+        explicitDriver: cfg.databaseDriver,
+        projectRoot: cfg.projectRoot,
+        artifactPath: resolveArtifactPathInput(cfg),
+    });
+    const url = resolution.url;
     const explicitDriver = resolveExplicitDriver(cfg);
     const driver: ResolvedDriverKind = explicitDriver || detectDriverFromUrl(url);
     const isSqlite = driver === 'sqlite' || driver === 'sqlite-wasm';
@@ -327,18 +374,10 @@ export function resolveStandaloneDatabase(config?: StandaloneStackConfig): Resol
         url,
         driver,
         sqliteFile: filename && filename !== ':memory:' && !filename.startsWith(':') ? filename : null,
+        source: resolution.source,
+        ...(resolution.datasourceName ? { datasourceName: resolution.datasourceName } : {}),
+        ...(resolution.notice ? { notice: resolution.notice } : {}),
     };
-}
-
-function resolveDatabaseUrl(cfg: z.output<typeof StandaloneStackConfigSchema>): string {
-    return cfg.databaseUrl
-        ?? readEnvWithDeprecation('OS_DATABASE_URL', 'DATABASE_URL', { silent: true })?.trim()
-        ?? process.env.TURSO_DATABASE_URL?.trim()
-        ?? (process.env.OS_HOME?.trim()
-            ? `file:${resolvePath(resolveObjectStackHome(), 'data/standalone.db')}`
-            : (cfg.projectRoot
-                ? `file:${resolvePath(cfg.projectRoot, '.objectstack/data/standalone.db')}`
-                : `file:${resolvePath(resolveObjectStackHome(), 'data/standalone.db')}`));
 }
 
 /**
@@ -374,22 +413,20 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     const { DefaultDatasourcePlugin } = await import('./default-datasource-plugin.js');
     const { AppPlugin } = await import('./app-plugin.js');
 
-    const cwd = process.cwd();
     const environmentId = cfg.environmentId ?? process.env.OS_ENVIRONMENT_ID ?? 'proj_local';
-    const artifactPathInput = cfg.artifactPath
-        ?? process.env.OS_ARTIFACT_PATH
-        ?? resolvePath(cwd, 'dist/objectstack.json');
-    const artifactPath = isHttpUrl(artifactPathInput)
-        ? artifactPathInput
-        : (artifactPathInput.startsWith('/')
-            ? artifactPathInput
-            : resolvePath(cwd, artifactPathInput));
+    const artifactPath = resolveArtifactPathInput(cfg);
 
     // `databaseAuthToken` / `OS_DATABASE_AUTH_TOKEN` / `TURSO_AUTH_TOKEN` are
     // consumed by the `turso` kind below (#5820). They used to be declared here
     // and read by nobody — the same "reads it in, cannot dispatch it out" split
     // `TURSO_DATABASE_URL` had.
-    const { url: dbUrl, driver: dbDriver } = resolveStandaloneDatabase(cfg);
+    const { url: dbUrl, driver: dbDriver, notice: dbNotice } = resolveStandaloneDatabase(cfg);
+    if (dbNotice) {
+        // Legacy-file compat-read (#6469): loud, once per boot, on stderr so a
+        // `--json` command's reserved stdout stays a single parseable document.
+        // eslint-disable-next-line no-console
+        console.warn(`[StandaloneStack] ⚠ ${dbNotice}`);
+    }
 
     // Translate the database URL into the `default` datasource DEFINITION
     // (ADR-0062 D1, #3826). The stack no longer builds a driver: the definition

@@ -327,9 +327,50 @@ export interface IMetadataService {
     listNames(type: string): Promise<string[]>;
 
     /**
-     * Convenience: get an object definition by name
+     * Convenience: get an object definition by name.
+     * Equivalent to `get('object', name)` — the same relationship the optional
+     * members of this family declare ({@link getView}, {@link getDashboard}).
+     * Every implementation this repo ships resolves the pair through one
+     * lookup: `MetadataManager.getObject` delegates to its own `get`;
+     * `createMemoryMetadata` reads the same `object` map from both; and
+     * `MetadataFacade.getObject` calls `SchemaRegistry.getObject`, which is
+     * also what `SchemaRegistry.getItem('object', …)` — and therefore the
+     * facade's own `get` — special-cases to, so both members hand back the
+     * identical object.
+     *
+     * What that lookup ANSWERS is the **runtime-effective** object: the object
+     * as the engine runs it, not the document its author wrote. On a
+     * `SchemaRegistry`-backed host the difference is material. The answer is
+     * the owning package's definition after the registry's materialization
+     * seam has run — system-column injection, primary-title designation,
+     * protection/provenance stamping — with every `extend` contribution from
+     * other packages merged in (`registerObject` → `resolveObject`). An object
+     * authored with one field comes back carrying the audit and ownership
+     * columns, `organization_id` on a multi-tenant host, a resolved
+     * `nameField`, and the extenders' fields. On a plain-store host
+     * (`MetadataManager`, `createMemoryMetadata`) there is no contribution
+     * layer to fold, so the effective object and the stored item coincide.
+     *
+     * Read the answer as the effective object in **both** cases. A consumer
+     * that needs the raw stored document — provenance, diffing an authored file
+     * against what is installed, round-tripping an edit — must not take this
+     * for one, and `get('object', name)` is not the escape hatch either: on a
+     * registry-backed host the per-package contributions are reachable only
+     * through `SchemaRegistry` itself, never through this contract.
+     *
+     * `undefined` carries the same ambiguity {@link get} documents — prefer
+     * {@link getDiagnosed} wherever "absent" and "could not be read" would lead
+     * to different decisions (#5840).
+     *
+     * [#6505] Written down because the silence was being paid for: #6055
+     * declined to swap this resolver for `getDiagnosed('object', name)` and
+     * bought a second read on the miss path instead, rather than presume an
+     * equivalence the contract never made (Prime Directive #12). The
+     * effective-over-stored half is the contract-layer statement of the fork
+     * #6562 rules on for the HTTP meta read surface.
+     *
      * @param name - Object name (snake_case)
-     * @returns The object definition, or undefined if not found
+     * @returns The runtime-effective object definition, or undefined if not found
      */
     getObject(name: string): Promise<unknown | undefined>;
 

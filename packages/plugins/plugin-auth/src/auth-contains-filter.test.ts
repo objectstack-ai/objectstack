@@ -70,13 +70,19 @@
  * face 2 quietly reverting to the always-green pin #5830 refused to create.
  *
  * Case semantics are deliberately untested here, exactly as in the sibling
- * file: sqlite's `LIKE` is ASCII case-INsensitive by default (so `$contains`
- * folds on this backend while the contract layer calls it case-SENSITIVE per
- * #5701 Q2=A — driver-sql pins that gap itself, in
- * `sql-driver-icontains-and-retired-operators.test.ts`, which asserts
- * `$contains` compiles WITHOUT `LOWER()` while `$icontains` compiles with it).
- * Every fixture below is lower-case and no assertion depends on which way that
- * per-driver alignment lands.
+ * file — but the REASON changed under this file, so it is restated rather than
+ * left stale. It used to be that sqlite's `LIKE` folds ASCII case, so
+ * `$contains` folded on this backend while the contract layer called it
+ * case-SENSITIVE (#5701 Q2 = A), and driver-sql could pin that gap only through
+ * the compiled SQL. **#6518 closed it**: the SQL family emits `GLOB` on the
+ * SQLite dialects now, so `$contains` is case-exact here too and
+ * `sql-driver-icontains-and-retired-operators.test.ts` pins it in ROWS.
+ *
+ * Nothing below moves either way. Every fixture is lower-case and every
+ * comparand matches its row's case exactly, so the four behavioural pins hold
+ * identically before and after that change — case belongs to the driver's own
+ * conformance suites, while what this file is about is which OPERATOR the
+ * adapter emits.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';

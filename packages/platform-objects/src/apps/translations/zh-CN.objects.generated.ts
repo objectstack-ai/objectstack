@@ -2931,8 +2931,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         options: {
           global: "全局",
           tenant: "租户",
-          user: "用户",
-          runtime: "运行时"
+          user: "用户"
         }
       },
       user_id: {

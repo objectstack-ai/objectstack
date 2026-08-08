@@ -3712,7 +3712,7 @@ const objectIndexTypePartialRemoved: MetadataConversion = {
  *     see the `datasource-inert-blocks-removed` note above, which leans on
  *     exactly that distinction), so the platform drops from three spellings to
  *     two rather than four. `retryDelayMs` is tombstoned (`retiredKey`) — NOT
- *     deleted — because two of the four owning shapes are not `.strict()`: a
+ *     deleted — because two of the three owning shapes are not `.strict()`: a
  *     plain deletion would have Zod silently swallow the authored number and
  *     fall back to the 1000ms default, which is the quiet-failure class
  *     ADR-0049 removes.
@@ -3733,32 +3733,37 @@ const objectIndexTypePartialRemoved: MetadataConversion = {
  * Jobs with no `retryPolicy` block at all are left alone — absence already
  * meant a single attempt on both sides of the change.
  *
- * ## The two surfaces this entry grew to cover (#4964 / #4962)
+ * ## The ONE further surface this entry grew to cover (#4964 / #4962)
  *
  * The convergence above was driven by the dual-source instrument, whose
  * question is "how many declarations share one exported NAME?". Two further
- * encodings of the identical policy were invisible to it because they are
+ * encodings of the identical policy were invisible to it because they were
  * anonymous inline `z.object`s with no exported name at all — and after a
  * convergence lands, a surviving dialect reads as reviewed-and-kept rather
- * than missed:
+ * than missed. One of the two is still a surface; the other went with its
+ * layer:
  *
  *  - **`flow.errorHandling`** (#4964) spelled the base delay `retryDelayMs`;
  *    every other key, bound and default already matched. Step 0 below renames
  *    it, so the ONE authorable casualty of the whole convergence is still just
- *    that word — now retired everywhere it was ever legal rather than on two
- *    surfaces out of four.
+ *    that word — now retired everywhere it was ever legal rather than only on
+ *    the two shapes #4661's instrument could see.
  *  - **`ETLPipeline.retry`** (#4962) spelled the count `maxAttempts` and
- *    defaulted it to 3. It gets **no step here, deliberately.** An ETL pipeline
- *    is not a `defineStack` collection and `etl.zod.ts` has no parse site in
- *    objectstack / objectui / cloud (批 12's measurement), so there is no
- *    stored or authored document a walker could reach: a branch for it would be
- *    dead code claiming migration coverage that does not exist, which is the
- *    ADR-0049 failure this registry is supposed to prevent, not commit. Its
- *    `maxAttempts` tombstone carries the rename AND the default change, and the
- *    tombstone reaches the only doors that exist (`tsc` at the authoring site,
- *    and the parse). That is also why the ETL default flip 3 → 0 needs no
- *    materialization step while the job one did: nothing is deployed under the
- *    old reading.
+ *    defaulted it to 3. It got **no step here, deliberately** — and never will.
+ *    An ETL pipeline was not a `defineStack` collection and `etl.zod.ts` had no
+ *    parse site in objectstack / objectui / cloud (批 12's measurement), so
+ *    there was no stored or authored document a walker could reach: a branch
+ *    for it would have been dead code claiming migration coverage that does not
+ *    exist, which is the ADR-0049 failure this registry is supposed to prevent,
+ *    not commit. #6414 then retired the whole L2 layer, and #4962's own entry
+ *    (`etl-retry-converged-onto-retry-policy`) was ABSORBED into
+ *    `etl-pipeline-layer-retired` inside the same unreleased major. There is no
+ *    `maxAttempts` tombstone left to carry the rename or the default change: it
+ *    went with the shape that carried it, which is strictly stronger, because
+ *    no `retry` block survives to author the key into. `tsc` (TS2724/TS2305 on
+ *    the removed ETL names) is the whole channel. That is also why the ETL
+ *    default flip 3 → 0 never needed a materialization step while the job one
+ *    did: nothing was ever deployed under the old reading.
  *
  * `retiredFromLoadPath` is NOT set: `FlowNodeSchema.config` is an unconstrained
  * record, so no schema rejection can reach `config.retry.retryDelayMs` and the

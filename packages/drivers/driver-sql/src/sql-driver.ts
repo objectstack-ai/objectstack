@@ -1073,6 +1073,200 @@ function safeShapePreview(value: unknown): string {
 }
 
 /**
+ * Where the wildcard sits relative to the comparand. Named exactly as
+ * `service-analytics`'s `LikeShape` names its own, so the twin implementations
+ * read alike: `contains` → `%v%`, `starts` → `v%`, `ends` → `%v`.
+ */
+type TextMatchShape = 'contains' | 'starts' | 'ends';
+
+/**
+ * The ASCII case map, written out as data.
+ *
+ * [#6518] Spelled as two 26-character constants rather than reached through a
+ * locale-aware `LOWER()` because "ASCII only" is the CONTRACT (#4706 Q1 = A),
+ * and a locale can be configured to fold more. Measured on a live Postgres 16
+ * (both a `C.utf8` database and an ICU one): `lower('CAFÉ')` is `café` — the
+ * over-fold — while `translate('CAFÉ', <upper>, <lower>)` is `cafÉ`. The
+ * mapping being visible in the emitted SQL is the point: a reviewer can see
+ * that exactly 26 characters fold, without knowing the server's locale.
+ */
+const ASCII_UPPER_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+
+/** The character bound into every `ESCAPE` clause this driver emits. */
+const LIKE_ESCAPE_CHARACTER = '\\';
+
+/**
+ * Escape the LIKE metacharacters (`%`, `_`) and the escape character itself
+ * (`\`) so a comparand matches literally.
+ *
+ * This is the expression `service-analytics`'s `escapeLikePattern` is held to
+ * character for character by its `like-metacharacter-escape.test.ts`. Changing
+ * it here without changing it there forks one `$contains` into two.
+ */
+function escapeLikeComparand(value: unknown): string {
+  return String(value).replace(/[\\%_]/g, '\\$&');
+}
+
+/**
+ * [#6518] Escape the GLOB metacharacters (`*`, `?`, `[`) so a comparand matches
+ * literally, using GLOB's ONLY escape mechanism: a single-character class.
+ *
+ * GLOB has no `ESCAPE` clause — SQLite's grammar simply does not have one for
+ * it — so `[*]`, `[?]` and `[[]` are how a literal metacharacter is spelled.
+ * `]` needs no escape and deliberately gets none: every `[` this function sees
+ * is turned into a class that closes itself, so no unclosed class can survive
+ * for a later `]` to terminate. `%` and `_` are ordinary characters to GLOB and
+ * are likewise left alone — the escaped class here is NOT the LIKE one, and
+ * writing the two as one shared regex is the mistake to refuse.
+ *
+ * Measured before it was written (better-sqlite3 3.53.4, the nine-row
+ * `FILTER_TEXT_ROWS` fixture plus `a*b` / `a?b` / `a[b`): the unescaped pattern
+ * `*a*b*` returned six rows where `*a[*]b*` returns the one. An unescaped `*`
+ * is the same filter bypass an unescaped `%` is under LIKE, which is why this
+ * function exists at the same level as its LIKE sibling rather than inline.
+ */
+function escapeGlobComparand(value: unknown): string {
+  return String(value).replace(/[*?[]/g, '[$&]');
+}
+
+/** Wrap an already-escaped comparand in the wildcards `shape` calls for. */
+function wrapTextMatchShape(escaped: string, shape: TextMatchShape, wildcard: string): string {
+  if (shape === 'starts') return `${escaped}${wildcard}`;
+  if (shape === 'ends') return `${wildcard}${escaped}`;
+  return `${wildcard}${escaped}${wildcard}`;
+}
+
+/**
+ * [#6518] MySQL's ASCII-only case fold: 26 `REPLACE`s over the BINARY rendering
+ * of an expression.
+ *
+ * Ugly, and the alternatives are all wrong rather than merely uglier — that is
+ * the whole justification, so it is written down:
+ *
+ *   - `LOWER(x)` folds the full Unicode range (the defect this closes).
+ *   - `LOWER(x)` on a binary string is documented as INEFFECTIVE, so casting
+ *     first and folding after simply does not fold.
+ *   - `CONVERT(x USING ascii)` maps every non-ASCII character to `?`, which
+ *     COLLIDES `café` with `cafÉ` — strictly worse than over-folding.
+ *   - No MySQL collation is case-insensitive for ASCII and exact elsewhere.
+ *
+ * Operating on `CAST(x AS BINARY)` rather than on the text is what makes it
+ * provable without a live server: in binary space `REPLACE` matches bytes, so
+ * no collation participates, and UTF-8 is self-synchronising — a byte in
+ * `0x41..0x5A` can only ever be a real ASCII `A`..`Z`, never part of a
+ * multi-byte character. Byte-wise ASCII lowering therefore IS the ruled fold.
+ */
+function mysqlAsciiLowerBinary(expr: string): string {
+  let out = `CAST(${expr} AS BINARY)`;
+  for (let i = 0; i < ASCII_UPPER_LETTERS.length; i++) {
+    out = `REPLACE(${out}, '${ASCII_UPPER_LETTERS[i]}', '${ASCII_LOWER_LETTERS[i]}')`;
+  }
+  return out;
+}
+
+/**
+ * [#6518] The one place a text predicate becomes SQL — `{sql, bindings}` for
+ * knex's `whereRaw`, with `??` the column and `?` the pattern.
+ *
+ * # The defect this closes
+ *
+ * Before this, every dialect got `col LIKE ? ESCAPE ?` (and `LOWER()` on both
+ * sides for `$icontains`), which made case sensitivity the DIALECT's answer
+ * where #4706 rules it the CONTRACT's. Both halves over-matched — they returned
+ * rows the filter excludes, which on an RLS read scope is over-reach (#3948),
+ * not a loose filter:
+ *
+ * | | `$contains` family (must be case-SENSITIVE, Q2=A) | `$icontains` (folds ASCII ONLY, Q1=A) |
+ * |---|---|---|
+ * | SQLite | ✗ `LIKE` folds ASCII | ✓ `lower()` is ASCII-only |
+ * | Postgres | ✓ `LIKE` is case-exact | ✗ `LOWER()` folds all of Unicode |
+ * | MySQL | ✗ follows the collation | ✗ `LOWER()` folds all of Unicode |
+ *
+ * # What is emitted now, and why each cell
+ *
+ * - **SQLite → `GLOB`.** `LIKE`'s ASCII fold cannot be turned off per-statement;
+ *   `PRAGMA case_sensitive_like` is a CONNECTION-global switch, so one query
+ *   would change every other query's meaning. Of the operand-level tricks,
+ *   `CAST(col AS BLOB) LIKE ?` was measured to return NOTHING at all (SQLite's
+ *   LIKE is false for a BLOB operand), so the operator has to change. `GLOB` is
+ *   case-exact by definition and carries its own escape mechanism
+ *   ({@link escapeGlobComparand}). `lower()` in front of it is still the
+ *   `$icontains` fold, and still ASCII-only: measured, `lower('CAFÉ')` is
+ *   `'cafÉ'`, so `lower(name) GLOB '*café*'` answers row 4 and `'*cafÉ*'`
+ *   answers row 3 — the Q1 = A boundary, executed rather than argued.
+ * - **Postgres → `LIKE`, unchanged**, because `LIKE` there is already exact.
+ *   Only the fold moves, from `LOWER()` to {@link ASCII_UPPER_LETTERS}-driven
+ *   `translate()`. Measured live (PG 16, ICU database): `LOWER(name) LIKE
+ *   LOWER('%café%')` returned rows 3 AND 4; the `translate()` form returns row
+ *   4, and its `'%CAFÉ%'` mirror returns row 3.
+ * - **MySQL → `LIKE` over `CAST(… AS BINARY)`**, which is byte-wise and
+ *   therefore case-exact whatever the column's collation says. The fold adds
+ *   {@link mysqlAsciiLowerBinary} on top. NOT executed here: no MySQL server was
+ *   provisionable in the container that wrote this, so the mysql cell is a
+ *   declared skip in the live matrix rather than a claimed pass, and the
+ *   reasoning is written out on that helper instead.
+ * - **`'unknown'` → the pre-#6518 `LIKE`/`LOWER()` shape.** `dialectName` is
+ *   `'unknown'` for a knex client this driver does not model (mssql, oracle),
+ *   where `GLOB` is a syntax error and `CAST(… AS BINARY)` means something
+ *   else. Emitting the old shape is not an endorsement of it — it is the only
+ *   answer that still RUNS, and it is the residue the conformance ledger names.
+ *
+ * # Why one function and not four emitters
+ *
+ * The escaping is the P0 (#5567: an unescaped `%` matches every row), the fold
+ * is the contract, and the two interact — the SQLite arm needs a DIFFERENT
+ * escaped character class from the other three, which is exactly the kind of
+ * divergence a second emitter drops on the floor. Every arm below therefore
+ * builds its pattern from one of two named escape functions and one shared
+ * {@link wrapTextMatchShape}, so "which characters are literal" is answered per
+ * dialect in one readable place and can never be answered by accident.
+ */
+function textMatchPredicate(
+  dialect: SqlDialectName,
+  field: string,
+  value: unknown,
+  shape: TextMatchShape,
+  negate: boolean,
+  fold: boolean,
+): { sql: string; bindings: unknown[] } {
+  if (dialect === 'sqlite') {
+    // GLOB takes no ESCAPE clause, so this arm binds two values, not three.
+    const pattern = wrapTextMatchShape(escapeGlobComparand(value), shape, '*');
+    const column = fold ? 'lower(??)' : '??';
+    const comparand = fold ? 'lower(?)' : '?';
+    return {
+      sql: `${column} ${negate ? 'NOT GLOB' : 'GLOB'} ${comparand}`,
+      bindings: [field, pattern],
+    };
+  }
+
+  const pattern = wrapTextMatchShape(escapeLikeComparand(value), shape, '%');
+  const keyword = negate ? 'NOT LIKE' : 'LIKE';
+  // The `ESCAPE` character is BOUND, never written as a literal: MySQL applies C
+  // escape syntax inside string literals, so `'\'` and `'\\'` are the same
+  // backslash spelled two ways per dialect, while a bound value has one
+  // spelling everywhere (#5567).
+  const bindings = [field, pattern, LIKE_ESCAPE_CHARACTER];
+
+  if (dialect === 'postgres') {
+    const asciiLower = (expr: string) =>
+      fold ? `translate(${expr}, '${ASCII_UPPER_LETTERS}', '${ASCII_LOWER_LETTERS}')` : expr;
+    return { sql: `${asciiLower('??')} ${keyword} ${asciiLower('?')} ESCAPE ?`, bindings };
+  }
+
+  if (dialect === 'mysql') {
+    const caseExact = (expr: string) =>
+      fold ? mysqlAsciiLowerBinary(expr) : `CAST(${expr} AS BINARY)`;
+    return { sql: `${caseExact('??')} ${keyword} ${caseExact('?')} ESCAPE ?`, bindings };
+  }
+
+  const column = fold ? 'LOWER(??)' : '??';
+  const comparand = fold ? 'LOWER(?)' : '?';
+  return { sql: `${column} ${keyword} ${comparand} ESCAPE ?`, bindings };
+}
+
+/**
  * [#5134] What a filter node is worth as a boolean, before any SQL is emitted.
  *
  * - `'true'`  — matches every row; the compiler emits NO clause for it.
@@ -7174,23 +7368,31 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Parameterized `LIKE`/`NOT LIKE` match with the LIKE metacharacters `%` / `_`
-   * (and the escape char `\`) escaped in the user value so they match literally
-   * — otherwise a value of `%` matches every row (a filter-bypass, P0). Binds an
-   * explicit `ESCAPE '\'` because SQLite does not honour a default escape
-   * character (MySQL/Postgres do, but the explicit clause is correct for all
-   * three). `shape` positions the wildcard: `contains` → `%v%`, `starts` → `v%`,
-   * `ends` → `%v`.
+   * Parameterized text match for the `$contains` family and `$icontains`, with
+   * the comparand's metacharacters escaped so it matches LITERALLY — otherwise
+   * a value of `%` matches every row (a filter-bypass, P0). `shape` positions
+   * the wildcard: `contains` → `%v%`, `starts` → `v%`, `ends` → `%v`.
+   *
+   * **[#6518] The construct is chosen by DIALECT, and that is the whole point
+   * of this method's existence.** Everything about which SQL is emitted lives in
+   * {@link textMatchPredicate}; this method only picks `whereRaw` vs
+   * `orWhereRaw`. See that function for the per-dialect table and the measured
+   * evidence behind each cell — in one sentence: case sensitivity used to be
+   * the DIALECT's answer (SQLite's `LIKE` folds ASCII, Postgres's does not,
+   * MySQL's follows its collation) where #4706 Q2 = A says it is the
+   * CONTRACT's, and `LOWER()` folds the whole Unicode range on Postgres/MySQL
+   * where #4706 Q1 = A says `$icontains` folds ASCII only.
    *
    * **Second implementation, deliberately** (#5567):
    * `packages/services/service-analytics/src/like-pattern.ts` carries the same
-   * transform — same escaped character class, same three shapes, same bound
+   * LIKE transform — same escaped character class, same three shapes, same bound
    * `ESCAPE` — because `service-analytics` depends on no driver and this is a
    * private method taking a knex builder, so there is nothing for it to import.
-   * That file's header explains the choice; it is held to THIS expression, character
-   * for character, by `service-analytics`'s `like-metacharacter-escape.test.ts`.
-   * A third hand-copy is the thing to refuse: import from one of the two, or add
-   * a consumer to that test.
+   * That file's header explains the choice; it is held to the LIKE arm of
+   * {@link textMatchPredicate}, character for character, by
+   * `service-analytics`'s `like-metacharacter-escape.test.ts`. A third hand-copy
+   * is the thing to refuse: import from one of the two, or add a consumer to
+   * that test.
    *
    * **[#5234] `String(value)` is safe here because nothing unrenderable reaches
    * it.** {@link assertCompilableComparand} refuses an object comparand on this
@@ -7207,31 +7409,13 @@ export class SqlDriver implements IDataDriver {
     method: string,
     field: string,
     value: unknown,
-    shape: 'contains' | 'starts' | 'ends',
+    shape: TextMatchShape,
     negate = false,
     fold = false,
   ): void {
-    const escaped = String(value).replace(/[\\%_]/g, '\\$&');
-    const pattern = shape === 'starts' ? `${escaped}%` : shape === 'ends' ? `%${escaped}` : `%${escaped}%`;
-    const keyword = negate ? 'NOT LIKE' : 'LIKE';
     const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
-    // [#5702] `fold` wraps BOTH operands in SQL `LOWER()` — the `$icontains`
-    // lowering. It is a parameter of this method rather than a second emitter
-    // so that the escaping above (the `%`/`_`/`\` class and the bound `ESCAPE`)
-    // is literally the same code, not a copy held in sync by a comment: an
-    // unescaped `%` is a filter bypass (P0), and the second `$icontains` face
-    // is exactly where a copy would have skipped it.
-    //
-    // `LOWER()` and not a JS-side fold: the column side has to fold too, and it
-    // can only fold in SQL. SQLite's `lower()` folds ASCII ONLY, which IS the
-    // contract (#4706 Q1 = A) — `É` stays `É`, so `$icontains: 'café'` does not
-    // match `CAFÉ`. Postgres and MySQL fold the wider Unicode range in
-    // `LOWER()`, so on those dialects this over-matches on non-ASCII letters;
-    // that divergence is measured and recorded rather than papered over, and it
-    // is the same dialect axis `$contains`'s case sensitivity sits on.
-    const col = fold ? 'LOWER(??)' : '??';
-    const bound = fold ? 'LOWER(?)' : '?';
-    builder[rawMethod](`${col} ${keyword} ${bound} ESCAPE ?`, [field, pattern, '\\']);
+    const { sql, bindings } = textMatchPredicate(this.dialectName, field, value, shape, negate, fold);
+    builder[rawMethod](sql, bindings);
   }
 
   /**

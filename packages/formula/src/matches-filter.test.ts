@@ -57,6 +57,31 @@ describe('matchesFilterCondition — operators', () => {
     expect(m(rec, { name: { $notContains: 'Zeta' } })).toBe(true);
     expect(m(rec, { name: { $startsWith: 'Zzz' } })).toBe(false);
   });
+  /**
+   * [#6518] The `$contains` family is case-SENSITIVE by contract (#4706 Q2 = A).
+   *
+   * This face already was — `String.prototype.includes` / `startsWith` /
+   * `endsWith` compare exactly — so #6518 is what moved the SQL family onto this
+   * answer, not what changed this one. It is pinned now precisely BECAUSE
+   * nothing here changed: this evaluator is the JS baseline the drivers were
+   * brought to, and the next mistake in this file takes the shape of a
+   * "helpful" `toLowerCase()` added to make some backend agree. That would
+   * silently widen every RLS rule this function evaluates, and no assertion in
+   * the repo would have gone red for it.
+   *
+   * `$notContains` carries the mirror: a case-only difference does NOT contain,
+   * so it must SATISFY the negation. A folding implementation excludes the row.
+   */
+  it('[#6518] the $contains family is case-SENSITIVE', () => {
+    expect(m(rec, { name: { $contains: 'beta' } })).toBe(false);
+    expect(m(rec, { name: { $contains: 'Beta' } })).toBe(true);
+    expect(m(rec, { name: { $startsWith: 'acme' } })).toBe(false);
+    expect(m(rec, { name: { $startsWith: 'Acme' } })).toBe(true);
+    expect(m(rec, { name: { $endsWith: 'BETA' } })).toBe(false);
+    expect(m(rec, { name: { $endsWith: 'Beta' } })).toBe(true);
+    expect(m(rec, { name: { $notContains: 'beta' } })).toBe(true);
+    expect(m(rec, { name: { $notContains: 'Beta' } })).toBe(false);
+  });
   it('$null / $exists', () => {
     expect(m(rec, { region: { $null: true } })).toBe(true);
     expect(m(rec, { stage: { $null: false } })).toBe(true);

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
 import { AutomationEngine } from './engine.js';
 import { registerCrudNodes } from './builtin/crud-nodes.js';
 import { registerHttpNodes } from './builtin/http-nodes.js';
@@ -156,6 +157,12 @@ const GUARDS: Array<{ name: string; why: string; node: Record<string, unknown>; 
         node: { type: 'connector_action', config: {} },
         expect: 'are required',
     },
+    {
+        name: 'a node that suspends while its descriptor declares supportsPause: false (#6667)',
+        why: 'a wrong capability declaration — re-running cannot fix it, and the pause asked for would be unresumable',
+        node: { type: 'mis_declared_pause' },
+        expect: 'declares supportsPause: false',
+    },
 ];
 
 describe('#3863 — the guard inventory stays un-routable', () => {
@@ -169,6 +176,20 @@ describe('#3863 — the guard inventory stays un-routable', () => {
         registerSubflowNode(engine, ctx);
         registerMapNode(engine, ctx);
         registerConnectorNodes(engine, ctx);
+        // #6667 — the newest member of the inventory, and the only one that
+        // needs a fixture: it refuses a DECLARATION mismatch (an executor that
+        // suspends while its descriptor says it cannot pause), and no shipped
+        // executor is in that state — all six pausing built-ins declare
+        // `supportsPause: true`, measured on the #6667 branch. `supports-pause-
+        // runtime-enforcement.test.ts` owns the behaviour; this row owns its
+        // classification, which is the one fact this file is about.
+        engine.registerNodeExecutor({
+            type: 'mis_declared_pause',
+            descriptor: defineActionDescriptor({
+                type: 'mis_declared_pause', version: '1.0.0', name: 'Mis-declared Pause',
+            }),
+            async execute() { return { success: true, suspend: true }; },
+        });
     });
 
     it.each(GUARDS.map((g, i) => ({ ...g, i })))(

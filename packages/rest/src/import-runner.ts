@@ -6,6 +6,7 @@ import type { ExportFieldMeta } from './export-format.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
 import type { ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
+import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 
 /**
  * import-runner — the shared row-processing core for bulk import.
@@ -206,6 +207,14 @@ function bareColumn(raw: string): string {
 }
 
 /**
+ * The sentence used when the row conflicts but no column is determinable
+ * (#6544). Deliberately the same wording `mapDataError` puts in the 409
+ * `UNIQUE_VIOLATION` body, so the importer and the API say one thing about one
+ * condition rather than two.
+ */
+const UNNAMED_CONFLICT = 'A record with this value already exists.';
+
+/**
  * Turn a raw write error into a message safe to hand back to the importer.
  *
  * Driver / query-builder errors (knex et al.) embed the *entire* failing SQL
@@ -214,18 +223,32 @@ function bareColumn(raw: string): string {
  * verbatim is both unreadable and an information disclosure of the schema
  * (framework#3566). This maps the common constraint failures to human wording
  * and, as a backstop, never lets a raw SQL statement escape to the client.
+ *
+ * The unique-violation verdict and the conflicting column both come from
+ * `@objectstack/types` (#6544). This site used to carry its own three-dialect
+ * regex chain — one of the four private vocabularies #6250 inventoried, which
+ * between them disagreed about MySQL. Two consequences of adopting the shared
+ * pair, both intended:
+ *
+ *  - the verdict widens: a conflict recognised only by a channel the old chain
+ *    did not read (Postgres' bare constraint name, for one) now gets conflict
+ *    wording instead of falling through to the SQL backstop; and
+ *  - the *naming* narrows: `uniqueViolationColumn` refuses to answer with an
+ *    index name, so **MySQL rows no longer name a column** — they used to name
+ *    the index (`for key 'idx_email_unique'`) as if it were one, pointing the
+ *    user at a field that does not exist. See that function's doc comment.
  */
 export function sanitizeRowError(raw: unknown): string {
   const msg = typeof raw === 'string' ? raw.trim() : '';
   if (!msg) return 'Row failed';
 
-  // UNIQUE — surface the offending column (it maps to a user-facing import
-  // column, so naming it is helpful, not a schema leak).
-  const unique =
-    /unique constraint failed:\s*([^\s,)]+)/i.exec(msg) ??          // sqlite
-    /duplicate entry .* for key '([^']+)'/i.exec(msg) ??            // mysql
-    /duplicate key value violates unique constraint.*?[Kk]ey \(([^)]+)\)/is.exec(msg); // postgres
-  if (unique) return `A record with this ${bareColumn(unique[1])} already exists.`;
+  // UNIQUE — surface the offending column when the dialect determinably named
+  // one (it maps to a user-facing import column, so naming it is helpful, not a
+  // schema leak); otherwise say so generically rather than guess.
+  if (isUniqueViolationError(msg)) {
+    const column = uniqueViolationColumn(msg);
+    return column ? `A record with this ${column} already exists.` : UNNAMED_CONFLICT;
+  }
 
   // NOT NULL — a required value is missing.
   const notNull = /not null constraint failed:\s*([^\s,)]+)/i.exec(msg);

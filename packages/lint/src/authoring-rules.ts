@@ -104,6 +104,7 @@ import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
+import { validateEmptyCombinators } from './validate-empty-combinators.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 import { validateComponentProps } from './validate-component-props.js';
 import { validateResponsiveStyles } from './validate-responsive-styles.js';
@@ -485,6 +486,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateFilterTokens(stack),
+  },
+  // #5330 — the LITERAL empty combinators (`$and: []`, `$or: []`, `$not: {}`,
+  // `{}`). #5322 ruled their RUNTIME meaning to be the boolean identity, and
+  // this rule does not touch it: it refuses the literal SPELLINGS at authoring
+  // time with a per-shape prescription, which is Prime Directive #12's standard
+  // shape (reject at the producer, never tolerate at the consumer) and #5240's
+  // same-direction precedent one shape over.
+  {
+    name: 'validateEmptyCombinators',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-empty-combinators.ts',
+    // The one type #4463's P1 slice opened, and the one this rule most needs:
+    // a flow CRUD node's `config.filter` is where an empty combinator has the
+    // largest blast radius, and the write path is the only door an AI author
+    // uses. This rule needs NO resolution context at all — it judges the filter
+    // literal in isolation — so RUNTIME_NEEDS_FULL_SNAPSHOT does not apply to
+    // it, and widening to the other filter-carrying types (`object`, `view`,
+    // `page`, `dashboard`) is a one-line `runtimeTypes` edit once #4463 P2
+    // opens them at the gate. Making that call here would widen the gate's
+    // dispatch surface on this rule's authority, which is P2's decision.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack) => validateEmptyCombinators(stack),
   },
   // The reference-integrity suite (#3583 §5 D5) — itself a registry, of the
   // rules that answer "does this name resolve to anything?". It reached all

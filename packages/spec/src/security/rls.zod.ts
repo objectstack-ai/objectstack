@@ -374,7 +374,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    * - Restrict certain operations (e.g., only allow creating "draft" status)
    * 
    * @example "organization_id = current_user.organization_id"
-   * @example "status IN ('draft', 'pending')" - Only allow certain statuses
+   * @example "status in ['draft', 'pending']" - Only allow certain statuses
    * @example "created_by = current_user.id" - Must be the creator
    */
   check: z.string()
