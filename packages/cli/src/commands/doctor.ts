@@ -1408,17 +1408,25 @@ const LEDGER_ROW_NAME = 'Installed packages';
  *   • **The cause is quoted, not paraphrased** (#5390 / #5403). `ENOTDIR: not
  *     a directory, scandir '…'` names the file that is in the way; no sentence
  *     doctor could invent would beat it.
+ *   • **`dir` is the directory doctor actually read** (#6643) — resolved from
+ *     `DEFAULT_INSTALLED_PACKAGES_DIR` and carried on the reading, exactly as
+ *     its `skipped` sibling takes it since #5996. It used to open with a
+ *     re-hardcoded ``.objectstack/installed-packages/`` literal "under the
+ *     project root": the consumer restating a value only the producer decides,
+ *     and — since the resolved directory is `cwd`-joined — a vaguer answer than
+ *     the one doctor was holding. A row reporting an unreadable directory owes
+ *     the reader the directory it actually tried.
  */
-export function installedPackageLedgerFailureCheck(err: unknown): HealthCheckResult {
+export function installedPackageLedgerFailureCheck(err: unknown, dir: string): HealthCheckResult {
   const cause = describeThrown(err);
   return {
     name: LEDGER_ROW_NAME,
     status: 'warning',
     message: `Could not read the installed-package ledger (installed packages NOT checked) — ${reportRowHeadline(cause)}`,
     fix:
-      'The ledger is the `.objectstack/installed-packages/` directory under the\n'
-      + '      project root; it exists here, which is why this is reported rather than\n'
-      + '      treated as "nothing was ever installed". Every package it lists is one\n'
+      `The ledger is \`${dir}\`; it exists here, which is why\n`
+      + '      this is reported rather than treated as "nothing was ever\n'
+      + '      installed". Every package it lists is one\n'
       + '      this runtime ALSO cannot rehydrate at boot — not registered with the\n'
       + '      kernel, absent from the console’s installed-apps list — so an app missing\n'
       + '      from this environment is very likely in there.\n'
@@ -1675,7 +1683,14 @@ export function installedPackageLedgerChecks(
     return [installedPackageLedgerDirAuthorityMissingCheck(reading.dirAuthorityMissing.received)];
   }
   const out: HealthCheckResult[] = [];
-  if (reading.failure) out.push(installedPackageLedgerFailureCheck(reading.failure.cause));
+  // Same invariant as the `skipped` row below, one boundary out (#6643): a
+  // `failure` reading always carries the directory the failure was ABOUT.
+  // `failure` is set only in the `catch` of `readInstalledPackageEntries()`,
+  // and that `try` opens after `dir` is already resolved — the two are set on
+  // the same return. The `!` states that where the flat reading shape cannot,
+  // and the parameter stays required so this row can never quietly fall back
+  // to a guessed literal.
+  if (reading.failure) out.push(installedPackageLedgerFailureCheck(reading.failure.cause, reading.dir!));
   // Independent of the row above, not an `else`: `failure` means the directory
   // could not be enumerated at all, `skipped` means it enumerated fine and
   // named files inside it would not parse. Each names packages the other does

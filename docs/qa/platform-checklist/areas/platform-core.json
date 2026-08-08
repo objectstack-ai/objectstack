@@ -1,0 +1,1020 @@
+{
+  "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
+  "area": "platform-core",
+  "title": "Platform core — boot, health, console shell, metadata pipeline",
+  "items": [
+    {
+      "id": "platform-core.boot-health",
+      "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
+      "since": "v15",
+      "status": "active",
+      "revision": 2,
+      "priority": "P0",
+      "surface": "mixed",
+      "preconditions": [
+        "isolated run per dogfood-verification §0: own free port (not 3000/3001/3210, checked with lsof), own file DB (--seed-admin -d file:/tmp/<run>/data.db)"
+      ],
+      "steps": [
+        "boot examples/app-showcase via `objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db`",
+        "poll GET http://localhost:<port>/api/v1/health until 200; record time-to-healthy",
+        "GET /api/v1/ready and record the status (the readiness probe is a separate route — packages/runtime/src/route-ledger.ts)",
+        "read the FULL boot log: capture the Flows: banner, any ⚠ lines, any ERROR-level lines, and every SeedLoader line",
+        "GET /_console/ and confirm the console shell HTML is served (200, text/html)",
+        "GET /api/v1/meta/app?id=com.example.showcase and capture the merged app/nav metadata",
+        "cross-check the nav payload: the grp_data group lists the seeded objects (showcase_project, showcase_task, showcase_account, showcase_contact, showcase_invoice, showcase_field_zoo, …)"
+      ],
+      "acceptance": [
+        {
+          "clause": "GET /api/v1/health returns 200 within the boot window",
+          "oracle": "api",
+          "verify": "curl -s -o /dev/null -w '%{http_code}' http://localhost:<port>/api/v1/health → 200",
+          "evidence": "the curl output + time-to-healthy"
+        },
+        {
+          "clause": "GET /api/v1/ready returns 200 once boot completes (readiness, not just liveness)",
+          "oracle": "api",
+          "verify": "curl the /ready probe after health goes green",
+          "evidence": "the curl output"
+        },
+        {
+          "clause": "the `Flows:` startup banner reports no ⚠ misauthored flows and no ERROR-level lines appear anywhere in the boot log",
+          "oracle": "log",
+          "verify": "grep the boot log for '⚠' in the Flows banner and for ERROR lines; seed rejections count as failures (see #3415 — SeedLoader rejections were silent)",
+          "evidence": "the grepped log excerpt"
+        },
+        {
+          "clause": "the console shell is served at /_console/ and the seeded app's merged metadata resolves",
+          "oracle": "api",
+          "verify": "GET /_console/ → 200 text/html; GET /api/v1/meta/app?id=com.example.showcase returns the merged app/nav metadata (dogfood skill §1 names this exact endpoint)",
+          "evidence": "response statuses + top-level keys"
+        },
+        {
+          "clause": "the served nav matches the authored app: every grp_data object entry from src/ui/apps/index.ts appears in the meta/app response — nothing silently dropped at merge",
+          "oracle": "api",
+          "verify": "diff the nav object names in the response against examples/app-showcase/src/ui/apps/index.ts",
+          "evidence": "the diff (empty)"
+        }
+      ],
+      "negative": [
+        "any SeedLoader rejection line in the boot log is a FAIL against the seed (RUNNER rule 3: a defect in the fixture is a fail, not a block — #3408/#3415)",
+        "a health 200 with ERROR lines in the log is NOT a clean boot — the log clause fails independently of the probe"
+      ],
+      "traps": ["seed-data-thin", "stale-dist"],
+      "source": [
+        "dogfood-verification skill §0–§1",
+        "#3415",
+        "packages/runtime/src/route-ledger.ts (GET /health, GET /ready)",
+        "examples/app-showcase/src/ui/apps/index.ts (authored nav)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — standing P0 smoke distilled from the dogfood boot protocol", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.seed-integrity",
+      "title": "Seed integrity: row counts match the authored seed, values land verbatim, replay is idempotent",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a FRESH isolated boot (new file DB) so first-boot seed behavior is what is measured, then a restart against the SAME DB for the idempotence clause"
+        ]
+      },
+      "steps": [
+        "after a clean fresh boot, derive the expected per-object row counts from the app's own seed module (examples/app-showcase/src/data/seed/index.ts — count the records arrays; re-derive rather than trusting a stale list if seeds changed)",
+        "authoring-time baseline for cross-checking the derivation: showcase_account=14, showcase_contact=33 (9 named + 24 bulk prospects), showcase_project=5, showcase_task=10, showcase_invoice=12, showcase_invoice_line=5, showcase_expense_report=4, showcase_expense_line=13, showcase_field_zoo=2",
+        "for each seeded object, GET /api/v1/data/<object>?$top=1 and read the server total; build the expected-vs-actual table",
+        "GET the Field Zoo 'Specimen — Full' row and spot-diff authored values (f_multiselect ['red','green'] as a set, f_lookup resolving to the Northwind account id, f_json nested object intact)",
+        "re-read the boot log's seed lines: every seed reports success; no rejection or partial-load line",
+        "restart the server against the SAME file DB; re-run the count sweep and diff against the first sweep (upsert mode must no-op, not duplicate)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every seeded object's server row count equals the count authored in the seed module — no silent partial load",
+          "oracle": "api",
+          "verify": "expected-vs-actual table from GET /api/v1/data/<object>?$top=1 totals vs the records arrays in src/data/seed/index.ts; zero mismatches",
+          "evidence": "the table"
+        },
+        {
+          "clause": "seed VALUES land verbatim, not just rows: the Specimen — Full spot-diff matches the authored literal (arrays as sets, JSON objects structurally, references resolved to real ids)",
+          "oracle": "api",
+          "verify": "field-by-field diff of the API read against the seed literal for the sampled fields",
+          "evidence": "the diff"
+        },
+        {
+          "clause": "the boot log reports every seed load as success — a rejection is a FAIL against the seed even when the server otherwise boots green (#3415: four of five projects were silently rejected once)",
+          "oracle": "log",
+          "verify": "grep the boot log for SeedLoader/seed lines; no rejected/failed entries",
+          "evidence": "the log excerpt"
+        },
+        {
+          "clause": "seed replay is idempotent: a restart against the same DB changes no count (upsert with externalId no-ops on unchanged rows)",
+          "oracle": "api",
+          "verify": "second count sweep diffs empty against the first",
+          "evidence": "both sweeps"
+        },
+        {
+          "clause": "deliberately-unseeded fields stay unseeded for their documented reasons (f_user/f_users: sys_user rows come from sign-up; f_secret: no CryptoProvider on the seed path; task.cover: a managed sys_file cannot be honestly seeded, #4891/ADR-0104) — their absence is CORRECT, not a gap to 'fix'",
+          "oracle": "api",
+          "verify": "the Specimen reads show these fields null/absent; record them as expected-absent in the run, never as findings",
+          "evidence": "the reads + the expected-absent list"
+        }
+      ],
+      "negative": [
+        "a count of 0 on any nav-visible object is a FAIL against the seed, never 'feature has nothing to show' (seed-data-thin trap: check row counts vs the built artifact, read the boot log)",
+        "counts that GROW on restart are a FAIL of upsert idempotence even though every row individually looks valid"
+      ],
+      "traps": ["seed-data-thin", "single-datapoint"],
+      "source": [
+        "examples/app-showcase/src/data/seed/index.ts (authored counts + expected-value comments)",
+        "#3408",
+        "#3415",
+        "packages/spec/src/data/seed-loader.zod.ts",
+        "RUNNER.md trap 'seed-data-thin'"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — makes the #3408/#3415 class of silent seed failure a standing P0 check with exact authored baselines", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.console-login",
+      "title": "Seeded admin signs in through the console; the session survives reload and re-authenticates cleanly after expiry",
+      "since": "v15",
+      "status": "active",
+      "revision": 2,
+      "priority": "P0",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "steps": [
+        "open /_console/ in the browser; screenshot the login form",
+        "sign in with the seeded admin credentials — drive the React controlled inputs with the native setter + input/change events, or POST the auth endpoint from the page (dogfood skill §4; naive fills submit empty)",
+        "screenshot the post-login shell; capture the first authed API responses",
+        "reload the page; capture the first authed API request after reload",
+        "expire the session: clear the auth cookies for the origin; then trigger an authed navigation/API call",
+        "observe the console's reaction (redirect to login vs dead shell); screenshot",
+        "sign in again and verify the console restores a working session on the same route",
+        "negative pass: sign out, then attempt login with a wrong password; capture the auth response and the UI"
+      ],
+      "acceptance": [
+        {
+          "clause": "login succeeds and lands in the console shell (nav + header rendered, not the login form)",
+          "oracle": "screenshot",
+          "verify": "post-login screenshot shows the app shell",
+          "evidence": "screenshot"
+        },
+        {
+          "clause": "the session survives a reload — the first authed API call after reload returns 200 with no redirect back to login",
+          "oracle": "network",
+          "verify": "network trace of the first authed request after reload (e.g. GET /api/v1/meta/app?id=com.example.showcase)",
+          "evidence": "the trace"
+        },
+        {
+          "clause": "an expired/cleared session is answered 401 by the SERVER on authed API calls — the deny side of the auth gate, proven on the wire",
+          "oracle": "network",
+          "verify": "after clearing cookies, the authed API call in the trace returns 401 (auth is the better-auth passthrough at /api/v1/auth/** — packages/runtime/src/route-ledger.ts; plugin-auth/src/auth-route-ledger.ts)",
+          "evidence": "the 401 trace"
+        },
+        {
+          "clause": "the console reacts to expiry by returning the user to login (or an explicit re-auth prompt) — never a dead shell rendering stale data as if authed",
+          "oracle": "screenshot",
+          "verify": "post-expiry screenshot shows the login/re-auth surface",
+          "evidence": "screenshot"
+        },
+        {
+          "clause": "re-authentication after expiry restores a working session: the same authed calls return 200 again and the shell renders current data",
+          "oracle": "network",
+          "verify": "post-re-login trace shows 200s; a mutation or fresh read succeeds",
+          "evidence": "the trace + screenshot"
+        }
+      ],
+      "negative": [
+        "a wrong password is rejected with a visible, named error AND no session cookie is set — a silent no-op or an error-free bounce is a FAIL",
+        "an expired session that keeps serving the shell with cached data (no 401, no redirect) is a FAIL of the expiry clause"
+      ],
+      "traps": ["automation-input", "shared-browser-tab"],
+      "source": [
+        "dogfood-verification skill §4 (React controlled inputs; auth POST fallback)",
+        "packages/runtime/src/route-ledger.ts ('* /auth/**' better-auth passthrough)",
+        "--seed-admin credentials: dogfood-verification skill §0"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.nav-surfaces-render",
+      "title": "Every showcase nav surface renders without page errors, and failures surface the error boundary — never a blank page",
+      "since": "v15",
+      "status": "active",
+      "revision": 2,
+      "priority": "P0",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "knownGaps": [
+          "no stock showcase fixture deliberately throws inside a route, so the ErrorBoundary fallback ('Something went wrong' + Try Again / Go Home — objectui packages/app-shell/src/chrome/ErrorBoundary.tsx) is verified opportunistically on any failure encountered, plus via the bad-route probe below"
+        ]
+      },
+      "steps": [
+        "run the pinned suite: pnpm -C examples/app-showcase test:smoke (the SURFACES array in e2e/showcase-smoke.spec.ts — 31 surfaces: pages, object lists, dashboards, reports, the view-gallery pages)",
+        "GET /api/v1/meta/app?id=com.example.showcase and extract every nav destination from the response",
+        "diff the served nav destinations against the SURFACES array; hand-walk any destination the suite does not cover (screenshot first, then DOM)",
+        "on each hand-walked surface: wait for render, screenshot, then check for pageerror / empty <main> / placeholder leaks ('no actions configured')",
+        "probe the failure path: navigate to a nonexistent route under the app (/_console/apps/com.example.showcase/object_that_does_not_exist); screenshot what renders",
+        "if ANY surface fails during the sweep, verify the failure presents as the shell's error boundary or a named empty/error state — capture it"
+      ],
+      "acceptance": [
+        {
+          "clause": "no surface throws a pageerror, renders an empty <main>, or leaks a 'no actions configured' placeholder; chart surfaces draw a real SVG",
+          "oracle": "test",
+          "verify": "pnpm -C examples/app-showcase test:smoke (SURFACES array in e2e/showcase-smoke.spec.ts) — green",
+          "evidence": "test run output"
+        },
+        {
+          "clause": "the smoke's coverage is CURRENT: every nav destination served in meta/app is either in the SURFACES array or hand-walked this run — no surface silently outside the net",
+          "oracle": "api",
+          "verify": "diff of served nav destinations vs SURFACES + the hand-walk records for the remainder",
+          "evidence": "the diff + per-surface screenshots"
+        },
+        {
+          "clause": "a bad route renders a NAMED not-found/error state inside the shell — nav and header stay alive, never a white page or dead shell",
+          "oracle": "dom",
+          "verify": "after the screenshot confirms the shell rendered, assert the main region carries an explicit empty/error message for the nonexistent object",
+          "evidence": "screenshot + DOM excerpt"
+        },
+        {
+          "clause": "any render failure encountered anywhere in the sweep surfaces the route-level ErrorBoundary fallback (recoverable via Try Again), not a blank page",
+          "oracle": "screenshot",
+          "verify": "if a failure occurs: screenshot shows the boundary fallback; Try Again re-mounts the route; record none-encountered explicitly otherwise",
+          "evidence": "failure screenshot or the explicit none-encountered note"
+        }
+      ],
+      "negative": [
+        "a surface that renders a blank <main> is a FAIL even with no console error — transitional emptiness must be ruled out by the screenshot-first protocol, then the persistent blank is the finding",
+        "a bad route producing a white page (shell gone) is a FAIL of the error-boundary clause"
+      ],
+      "automated": { "kind": "e2e", "ref": "examples/app-showcase/e2e/showcase-smoke.spec.ts" },
+      "traps": ["hydration-race", "single-datapoint", "stale-console-bundle"],
+      "source": [
+        "examples/app-showcase/e2e/showcase-smoke.spec.ts (SURFACES)",
+        ".github/workflows/showcase-smoke.yml",
+        "objectui: packages/app-shell/src/chrome/ErrorBoundary.tsx (route-level fallback + recovery actions)",
+        "examples/app-showcase/src/ui/apps/index.ts (nav truth)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — wraps the existing automated smoke as a checklist row so runs report it alongside manual items", "ref": "#3358" },
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.metadata-registry-serving",
+      "title": "The metadata registry is served over REST: /meta lists every registered type with its spec-derived create seed",
+      "since": "v15",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": { "app": "showcase" },
+      "steps": [
+        "authenticated GET /api/v1/meta — the types listing (entries[]); capture the response",
+        "check the entries against DEFAULT_METADATA_TYPE_REGISTRY (packages/spec/src/kernel/metadata-plugin.zod.ts): the built-in kinds the showcase registers are present (object, view, page, dashboard, app, action, report, dataset, flow, seed, mapping, permission, position, translation, email_template, doc, book, datasource, api, …)",
+        "GET /api/v1/meta/types (the richer Studio listing — a distinct server-only route per packages/runtime/src/route-ledger.ts) and capture it",
+        "GET /api/v1/meta/view/showcase_task and confirm the stored view item is served with its authored shape (list + listViews + formViews keys)",
+        "GET /api/v1/meta/:type for 'view' and confirm the showcase's authored views are enumerated",
+        "run the pinned create-seed contract: pnpm --filter @objectstack/dogfood exec vitest run test/meta-types-create-seed.dogfood.test.ts",
+        "object-extension overlay: GET /api/v1/meta/object/showcase_account and confirm the additive fields contributed by examples/app-showcase/src/data/extensions/account.extension.ts (loyalty_tier select bronze/silver/gold/platinum, linkedin_url url, csat_score number 0–100) are present in the MERGED object — the extension carries priority 210 and never re-declares showcase_account (defineObjectExtension, merged at registerApp)",
+        "render + round-trip the overlay: open a showcase_account record form and confirm the three extension fields render alongside the base fields; PATCH /api/v1/data/showcase_account/<id> setting loyalty_tier='gold' and csat_score=88, then GET the row and confirm both persisted (the overlay is a real column, not a display-only badge)"
+      ],
+      "acceptance": [
+        {
+          "clause": "GET /api/v1/meta answers 200 with a non-empty entries[] naming the registered metadata types",
+          "oracle": "api",
+          "verify": "response parses; entries.length > 0; the registry kinds listed in the steps are all present",
+          "evidence": "the response + the presence table"
+        },
+        {
+          "clause": "entries carry the AUTHORITATIVE spec-derived create seeds: dashboard's seed is {widgets: []}, action's is a script with a valid js body, and report exposes NO seed by design (canvas-create) — consumers derive create defaults from the spec, not re-invent them",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/dogfood exec vitest run test/meta-types-create-seed.dogfood.test.ts — green (it asserts entry.createSeed equals getMetadataCreateSeed(type) for every seeded registered type)",
+          "evidence": "test run output"
+        },
+        {
+          "clause": "GET /api/v1/meta/types (the richer Studio-facing listing) is served — a real route distinct from GET /meta, per the route ledger",
+          "oracle": "api",
+          "verify": "authenticated GET returns 200 with the type registry payload",
+          "evidence": "the response"
+        },
+        {
+          "clause": "a stored item is retrievable by type+name with its authored shape: GET /api/v1/meta/view/showcase_task returns the task view gallery as authored",
+          "oracle": "api",
+          "verify": "the response carries the authored keys (list, listViews incl. in_progress/board/gantt, formViews incl. wizard/quick)",
+          "evidence": "the response's key inventory"
+        },
+        {
+          "clause": "type-scoped listing works: GET /api/v1/meta/view enumerates the showcase's authored views (task, project, contact, field-zoo, business-unit, inquiry families present)",
+          "oracle": "api",
+          "verify": "the listing contains the expected view names from examples/app-showcase/src/ui/views/",
+          "evidence": "the listing"
+        },
+        {
+          "clause": "an object extension merges ADDITIVELY into the served object: GET /api/v1/meta/object/showcase_account carries the account.extension.ts fields (loyalty_tier, linkedin_url, csat_score) merged in without re-declaring the object — the mechanism a package uses to extend an object it does not own",
+          "oracle": "api",
+          "verify": "the /meta/object response's fields include all three overlay fields with their declared types/options; showcase_account is authored once (defineObjectExtension priority 210 wins on conflict, merged at registerApp)",
+          "evidence": "the merged field inventory"
+        },
+        {
+          "clause": "the overlay fields are real columns, not display-only: they render on the showcase_account form and a write to loyalty_tier + csat_score round-trips through /api/v1/data/showcase_account",
+          "oracle": "api",
+          "verify": "PATCH /api/v1/data/showcase_account/<id> {loyalty_tier:'gold', csat_score:88} then GET the row returns both values; a screenshot confirms the fields render on the form",
+          "evidence": "the PATCH + GET pair + the form screenshot"
+        }
+      ],
+      "negative": [
+        "a registered type missing from GET /meta (or served without its registry contract) is a FAIL — the Studio designer derives its create UX from this response, and drift here produced real create-save 422s (the dashboard-layout / action-body incidents the pinned test memorializes)",
+        "an extension field present in account.extension.ts but ABSENT from GET /meta/object/showcase_account (or present in /meta but not writable through /data) is a FAIL — the overlay did not merge, and a package's additive fields would silently vanish",
+        "an unauthenticated GET /api/v1/meta that returns the full registry is a finding for the access-security area — capture and cross-file it, do not tick past it"
+      ],
+      "traps": ["dispatcher-vs-hono-route"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/meta-types-create-seed.dogfood.test.ts" },
+      "source": [
+        "packages/spec/src/kernel/metadata-plugin.zod.ts (MetadataTypeSchema + DEFAULT_METADATA_TYPE_REGISTRY)",
+        "packages/spec/src/kernel/metadata-create-seeds.ts",
+        "packages/runtime/src/route-ledger.ts (GET /meta, GET /meta/types, GET /meta/:type, GET /meta/:type/:name)",
+        "examples/app-showcase/src/data/extensions/account.extension.ts (AccountExtension — additive overlay on showcase_account, priority 210)",
+        "packages/spec/src/data (defineObjectExtension — extend merges fields at registerApp, higher priority wins on conflict)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — pins the registry-serving contract the Studio create path depends on", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-08", "change": "added the object-extension-overlay clauses: account.extension.ts (Loyalty Tier / LinkedIn / CSAT) merges additively into /meta/object/showcase_account, renders on the form, and round-trips a write", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.metadata-authoring-roundtrip",
+      "title": "Metadata authoring round-trip: draft → publish on a WRITABLE package; read-only packages and locked types are server-side refused",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a runtime-created WRITABLE package to author into (create one via Studio or POST /api/v1/packages) — the showcase's own code package is read-only by design (ADR-0070)"
+        ]
+      },
+      "steps": [
+        "create a writable package (Studio package switcher → new, or POST /api/v1/packages); record its id",
+        "save a draft view into it: PUT /api/v1/meta/view/os_qa_view_<runid> with a minimal valid ListView body bound to showcase_task and the writable packageId; capture the response",
+        "GET /api/v1/meta/_drafts and confirm the draft is listed",
+        "publish: POST /api/v1/packages/<id>/publish-drafts; then GET /api/v1/meta/view/os_qa_view_<runid>/published and capture it",
+        "verify in the console that the published view is live for showcase_task (reload, open the view switcher)",
+        "denied side A: attempt the same runtime create targeting the read-only CODE package; capture the refusal (expect writable_package_required — ADR-0070 D1)",
+        "denied side B: attempt a PUT overlay against a PACKAGED object item (type 'object' has allowOrgOverride: false); capture the refusal (expect HTTP 403 not_overridable)",
+        "Studio browser half: create a new record page via Studio bound to an object and capture the PUT /api/v1/meta/page/... it issues"
+      ],
+      "acceptance": [
+        {
+          "clause": "a draft saved via PUT /api/v1/meta/view/:name persists and is listed by GET /api/v1/meta/_drafts",
+          "oracle": "api",
+          "verify": "the PUT succeeds; the drafts listing contains os_qa_view_<runid> (routes per packages/runtime/src/route-ledger.ts: PUT /meta/:type/:name, GET /meta/_drafts)",
+          "evidence": "PUT response + drafts listing"
+        },
+        {
+          "clause": "publish-drafts promotes the draft: GET /meta/view/:name/published serves the authored body afterwards, and the console renders the view after reload",
+          "oracle": "api",
+          "verify": "POST /packages/:id/publish-drafts → success; the /published read returns the body; console screenshot shows the view in the switcher",
+          "evidence": "publish response + published read + screenshot"
+        },
+        {
+          "clause": "Studio's designer authors through the same pipeline: creating a record page issues PUT /api/v1/meta/page/<name> bound to its object and seeded from the default layout",
+          "oracle": "network",
+          "verify": "capture the PUT during Studio create (pinned by objectui e2e/live/studio-record-page.spec.ts, which waits on exactly that request)",
+          "evidence": "the captured PUT"
+        },
+        {
+          "clause": "DENY side of the package gate: a runtime-only create targeting a read-only code/installed package is REJECTED with writable_package_required — not silently coerced to a package-less orphan (the pre-ADR-0070 #2252 bug)",
+          "oracle": "api",
+          "verify": "the refusal names writable_package_required (pinned by packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts)",
+          "evidence": "the refusal response"
+        },
+        {
+          "clause": "DENY side of the overlay gate: a per-org overlay write against a type with allowOrgOverride unset (object/field) answers HTTP 403 not_overridable, while view/dashboard (the ADR-0005 Phase 1 opt-ins) accept",
+          "oracle": "api",
+          "verify": "the object-targeting PUT returns 403 not_overridable (contract stated on allowOrgOverride in packages/spec/src/kernel/metadata-plugin.zod.ts); the view PUT from the happy path succeeded",
+          "evidence": "both responses side by side"
+        },
+        {
+          "clause": "a malformed body is refused by schema validation, never stored: a PUT with an invalid shape for the type answers a named validation error (validateOnWrite; the #5206 lesson — an unvalidated store is the defect)",
+          "oracle": "api",
+          "verify": "PUT /api/v1/meta/view/os_qa_bad_<runid> with a nonsense body (e.g. columns: 42) → 4xx naming the validation failure; a subsequent GET finds no stored item",
+          "evidence": "the refusal + the empty GET"
+        }
+      ],
+      "negative": [
+        "a 200 on either deny-side attempt (read-only package, locked overlay type) is a FAIL — both gates are server-side contracts, not Studio courtesies",
+        "a malformed metadata body stored as-is (200 on PUT, garbage on GET) is a FAIL — this is the exact pre-#5271 'api' kind hole",
+        "a published view that never appears in the console after reload is a FAIL of the round-trip even though every API call returned success (check against a fresh objectui build before filing — stale-console-bundle)"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "stale-console-bundle"],
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts; objectui: e2e/live/studio-record-page.spec.ts, e2e/live/studio-object-designer.spec.ts" },
+      "source": [
+        "packages/runtime/src/route-ledger.ts (PUT /meta/:type/:name, GET /meta/_drafts, GET /meta/:type/:name/published, POST /packages/:id/publish-drafts)",
+        "packages/spec/src/kernel/metadata-plugin.zod.ts (allowOrgOverride 403 not_overridable contract; validateOnWrite; registry flags per type)",
+        "ADR-0070 via packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts (writable_package_required)",
+        "ADR-0033 (drafts / publish)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-07", "change": "initial — grounds the Studio authoring pipeline end-to-end with both deny gates as first-class clauses", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.builtin-apps-nav-render",
+      "title": "The three built-in apps (Setup / Studio / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)",
+        "a plain member (fresh runtime sign-up — lands in member_default, holds neither setup.access nor studio.access)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the three platform apps ship with @objectstack/platform-objects and register as one-app packages @objectstack/{setup,studio,account} (ADR-0048), so their ids are com.objectstack.setup / com.objectstack.studio / com.objectstack.account — present on any stock boot, no showcase-specific fixture",
+          "a second, non-admin persona: sign up a fresh user in-run to drive the app-level and entry-level permission gates (do not reuse the admin — wrong-persona masks the guard)"
+        ],
+        "knownGaps": [
+          "the SSO Providers entry (nav_sso_providers → sys_sso_provider) is contributed ONLY when the external-IdP RP is wired (OS_SSO_ENABLED self-host / cloud planAllowsSso — plugin-auth auth-plugin.ts isSsoWired()). On a stock open-framework boot it is ABSENT by design (not gated-and-erroring); assert its absence, never treat it as a missing surface"
+        ]
+      },
+      "steps": [
+        "as admin, GET /api/v1/meta/app?id=com.objectstack.setup and extract every merged nav destination — Setup is a SHELL of empty group anchors (packages/platform-objects/src/apps/setup.app.ts: group_overview/apps/people_org/access_control/approvals/configuration/diagnostics/integrations/advanced) filled by SETUP_NAV_CONTRIBUTIONS (setup-nav.contributions.ts) plus capability-plugin contributions (plugin-security Positions/Permission Sets, plugin-sharing Sharing Rules/Record Shares, plugin-approvals, plugin-webhooks)",
+        "GET /api/v1/meta/app?id=com.objectstack.studio (studio.app.ts — static nav: Overview, Data Model, User Experience, Logic, Automation, AI, Developer, Integration) and GET /api/v1/meta/app?id=com.objectstack.account (account.app.ts — Profile + Inbox/Security/Developer groups)",
+        "as admin, hand-walk each destination in each app: navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
+        "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form (localization/company/branding/auth/mail/storage/ai/knowledge/feature_flags), and Users / Organization / Business Units / Teams / Sessions / OAuth Applications / Identity Links / User Preferences render",
+        "Studio detail: confirm each metadata:resource list (object/app/view/page/dashboard/report/dataset/action/hook/flow/agent/tool/skill/email_template) renders, and the component surfaces render (App Builder studio:builder, All Metadata Types metadata:directory, Packages developer:packages, API Console developer:api-console, Flow Runs developer:flow-runs, Public Forms developer:public-forms)",
+        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (sys_approval_request/my_pending), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) each render",
+        "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys (requiredPermissions manage_platform_settings, sys_jwks private per ADR-0066) is PRESENT for admin; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
+        "sign in as the plain member: attempt to open Setup (com.objectstack.setup) and Studio (com.objectstack.studio) — capture the app-level refusal (App.requiredPermissions setup.access / studio.access); open Account (declares no requiredPermissions) — capture it opening",
+        "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (JWKS, API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide",
+        "cross-check served-vs-rendered: diff each app's meta/app nav destinations against what actually rendered so nothing is silently outside the walk"
+      ],
+      "acceptance": [
+        {
+          "clause": "every merged-nav destination in all three apps renders a real surface for the admin — no pageerror, no 'failed to load', no blank <main>, no placeholder leak; this closes the gap platform-core.nav-surfaces-render leaves (it only sweeps the showcase app)",
+          "oracle": "screenshot",
+          "verify": "per-destination screenshot (screenshot-first) then DOM mark-check, across Setup + Studio + Account",
+          "evidence": "per-app per-destination screenshot set + verdict table"
+        },
+        {
+          "clause": "the served merged nav matches each app's authored shell + contributions: Setup's group anchors (setup.app.ts) are filled by SETUP_NAV_CONTRIBUTIONS and capability plugins; Studio's static groups (studio.app.ts) are all present; Account's Profile/Inbox/Security/Developer groups present",
+          "oracle": "api",
+          "verify": "the three GET /meta/app payloads list the expected group ids + entries per the app source files",
+          "evidence": "the three nav payloads"
+        },
+        {
+          "clause": "as a plain member, Setup and Studio REFUSE (app-level requiredPermissions setup.access / studio.access) with a named access-denied surface — never a blank shell — while Account OPENS (declares no requiredPermissions, RLS scopes its rows)",
+          "oracle": "screenshot",
+          "verify": "run the two refusals + the Account open as the member persona (wrong-persona trap — do it as the member, not the admin)",
+          "evidence": "three screenshots"
+        },
+        {
+          "clause": "the app-level gate is server-side, not a client courtesy: a forged member GET /api/v1/meta/app?id=com.objectstack.setup is denied/empty at the server, not merely hidden in the launcher (ADR-0057 D10 both-sides)",
+          "oracle": "api",
+          "verify": "the forged request's status/body proves server-side denial",
+          "evidence": "the forged response"
+        },
+        {
+          "clause": "permission-gated ENTRIES are absent from the member's merged nav, not present-and-erroring: JWKS (nav_jwks), API Keys (nav_api_keys) and the manage_platform_settings settings entries do not appear in the member's payload",
+          "oracle": "api",
+          "verify": "diff of admin vs member /meta/app nav destinations — the gated entries are only in the admin set",
+          "evidence": "the admin-vs-member diff"
+        },
+        {
+          "clause": "service/object-gated entries resolve to ABSENCE on stock fixtures rather than an entry that can only error: nav_organizations (requiresService org-scoping) absent in single-org mode; nav_business_units (requiresObject sys_business_unit) present only when the object is registered",
+          "oracle": "api",
+          "verify": "the gated-entry presence in the served payload matches the requiresService/requiresObject conditions in setup-nav.contributions.ts / account.app.ts",
+          "evidence": "the gated-entry presence table"
+        },
+        {
+          "clause": "an off-capability destination is PRUNED from the nav, never rendered as a dead 'failed to load' list — the setup-nav.contributions.ts rationale (sys_verification/sys_device_code omit list; SSO absent unless wired) holds at runtime",
+          "oracle": "screenshot",
+          "verify": "the absent entries do not appear; SSO Providers absent on stock boot per the knownGap",
+          "evidence": "absence confirmation + the knownGap note"
+        }
+      ],
+      "negative": [
+        "a built-in app destination that renders a blank <main> or a 'failed to load' / 'no actions configured' placeholder with no error boundary is a FAIL (screenshot-first rules out transitional emptiness, then the persistent blank is the finding)",
+        "the member reaching Setup or Studio content (app gate bypassed) is a FAIL — App.requiredPermissions is a server contract, prove denial on the wire, not just a hidden launcher tile",
+        "a permission-gated entry rendered for the member and then erroring on click is a FAIL of the 'absent not erroring' contract — the nav must prune server-side"
+      ],
+      "traps": ["hydration-race", "wrong-persona", "stale-console-bundle"],
+      "source": [
+        "packages/platform-objects/src/apps/setup.app.ts (shell group anchors + requiredPermissions setup.access)",
+        "packages/platform-objects/src/apps/studio.app.ts (static nav; requiredPermissions studio.access)",
+        "packages/platform-objects/src/apps/account.app.ts (no requiredPermissions; hidden from App Switcher; requiresObject/requiresService entry gates)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_jwks manage_platform_settings; nav_organizations requiresService org-scoping; nav_api_keys manage_platform_settings)",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts (SSO Providers nav_sso_providers contributed only when isSsoWired())",
+        "ADR-0048 (Setup/Studio/Account as one-app packages com.objectstack.{setup,studio,account}); ADR-0029 (nav contributions); ADR-0066 (sys_jwks private)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "initial — the big built-in-apps nav sweep (Setup/Studio/Account merged nav render + app-level and entry-level gates both-sides), complementing nav-surfaces-render which only walks the showcase app", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.settings-hub-roundtrip",
+      "title": "Settings hub round-trip: a value saves, PERSISTS, reaches an observable consumer, audits, env-locks, tests honestly, and stores secrets as handles — anonymous denied",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123 — holds setup.access/setup.write/manage_platform_settings)",
+        "anonymous"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the 10 open-framework settings namespaces registered by @objectstack/service-settings (packages/services/service-settings/src/manifests: localization, company, branding, auth, mail, sms, storage, ai, knowledge, feature_flags)",
+          "the settings service wired with a data engine so it swaps from in-memory to the sys_setting table, and with the sys_secret store + auditWriter (SettingsServicePlugin binds these on kernel:ready; the showcase stack mounts the engine)"
+        ],
+        "knownGaps": [
+          "HONORING the ai.json caveat: a saved settings FORM is NOT proof of effect — the AI namespace's test action is a stub validator until @objectstack/service-ai is mounted, and a saved ai.provider does nothing observable without it. The effect clause therefore uses localization, whose consumer (resolve-authz-context.ts reads localization.timezone/locale/currency onto every ExecutionContext) is stock and observable; branding.workspace_name in the shell is the browser fallback. Never tick effect off a persisted form."
+        ]
+      },
+      "steps": [
+        "as admin, GET /api/settings — capture the visible manifests (the 10 open-framework namespaces above; the route is the SettingsService REST surface in settings-routes.ts)",
+        "pick localization (an OBSERVABLE-CONSUMER namespace — packages/core/src/security/resolve-authz-context.ts reads localization.timezone/locale/currency onto ExecutionContext). GET /api/settings/localization — capture {manifest, values}; note timezone value 'UTC' with source 'default'",
+        "change it: PUT /api/settings/localization { timezone: 'Asia/Tokyo' }; re-read GET /api/settings/localization and confirm the value persists and source FLIPS default→tenant (localization scope is 'tenant')",
+        "prove EFFECT (not just the saved form): re-derive an ExecutionContext-dependent output — an analytics date-bucket aggregate or a today()/rendered-datetime on showcase_task — and confirm it now resolves against Asia/Tokyo, not UTC. If the deployment surfaces no observable localization effect, fall back to branding.workspace_name visible in the console shell — but never tick effect off the form alone",
+        "audit: GET /api/v1/data/sys_setting_audit filtered to namespace=localization,key=timezone — a row exists with action='set', source='api', actor_id=<admin>, new_hash set (SettingsServicePlugin.buildAuditWriter → sys_setting_audit)",
+        "source badge: open /apps/setup/system/settings/localization and confirm the timezone field's source indicator flips from default to the persisted scope after save; screenshot",
+        "env-lock: set OS_LOCALIZATION_TIMEZONE=Europe/Paris (envKeyOf convention: OS_<NAMESPACE>_<KEY>, settings-service.types.ts) and restart; GET /api/settings/localization now reports timezone source='env', locked=true, lockedReason 'Set via env: OS_LOCALIZATION_TIMEZONE', and the console renders the EnvLockBadge; PUT /api/settings/localization { timezone: 'UTC' } is REFUSED 409 SETTINGS_LOCKED (server-side, effectiveEnvOverride)",
+        "test action at the dev transport: POST /api/settings/mail/test with provider=log (or no email plugin mounted) — the handler answers ok:false and NO mail is faked (mail.manifest.ts mailTestActionHandler / plugin-email honest degradation, framework#5087)",
+        "secret handling: on a namespace with an encrypted specifier (mail.smtp_password or ai.*_api_key — type 'password' or encrypted:true), PUT a value; then read sys_secret + sys_setting — the ciphertext lands in sys_secret keyed by a 'sec_' handle and sys_setting.value_enc holds the handle id, NOT plaintext; GET /api/settings never returns the plaintext",
+        "anonymous deny: GET /api/settings/localization with no session → 403 SETTINGS_FORBIDDEN (assertPermitted read); GET /api/settings (list) as anon returns an EMPTY manifest set — zero namespaces enumerated (Finding-1 secure default)",
+        "guardrails: PUT /api/settings/localization { timezone: 'Mars/Phobos' } → 400 SETTINGS_VALIDATION invalid_option (declared options table); PUT { bogus_key: 1 } → 400 UNKNOWN_KEY"
+      ],
+      "acceptance": [
+        {
+          "clause": "a settings value round-trips: PUT /api/settings/localization persists and GET re-reads it, with source FLIPPING default→tenant (the scope), not staying 'default'",
+          "oracle": "api",
+          "verify": "the PUT + GET responses; the timezone value is Asia/Tokyo and source is the scope, not 'default'",
+          "evidence": "the PUT + GET bodies with the source field"
+        },
+        {
+          "clause": "EFFECT, not just a form: the saved value reaches its consumer — localization.timezone resolves onto ExecutionContext (resolve-authz-context.ts), so an ExecutionContext-dependent output (analytics date bucket / today() / rendered datetime) shifts from UTC to the saved zone",
+          "oracle": "api",
+          "verify": "the before/after output pair differs by exactly the zone change; NOTE (ai.json caveat) this clause requires an observable consumer — only localization/branding/auth qualify on stock fixtures, a persisted form is NOT proof",
+          "evidence": "the before/after consumer output"
+        },
+        {
+          "clause": "every write appends a sys_setting_audit row (namespace/key/scope/action='set'/source='api'/actor_id/new_hash)",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/sys_setting_audit shows the row for localization.timezone (SettingsServicePlugin.buildAuditWriter)",
+          "evidence": "the audit row"
+        },
+        {
+          "clause": "the console source badge flips from default to the persisted-scope source after save",
+          "oracle": "screenshot",
+          "verify": "before/after field screenshots of the localization timezone source indicator",
+          "evidence": "the two screenshots"
+        },
+        {
+          "clause": "an OS_*-env-pinned key is server-authoritative: GET reports source='env' locked=true, and PUT is REFUSED 409 SETTINGS_LOCKED — the write refusal is the SERVER's, not the UI's",
+          "oracle": "api",
+          "verify": "the locked GET (source='env', lockedReason names OS_LOCALIZATION_TIMEZONE) + the 409 on the write (effectiveEnvOverride)",
+          "evidence": "the locked GET + the 409"
+        },
+        {
+          "clause": "the env-pinned field renders the EnvLockBadge and is non-editable in the console",
+          "oracle": "screenshot",
+          "verify": "screenshot of the locked field with the badge",
+          "evidence": "the screenshot"
+        },
+        {
+          "clause": "a declared test action does not fake success: POST /api/settings/mail/test with no deliverable transport answers ok:false (400 SETTINGS_ACTION_FAILED envelope) naming that no mail was sent",
+          "oracle": "api",
+          "verify": "the action response body (ok:false, message names the honest non-delivery — framework#5087)",
+          "evidence": "the action response"
+        },
+        {
+          "clause": "an encrypted specifier's value lands in sys_secret as a handle, never plaintext: sys_setting.value_enc holds a 'sec_' handle id and sys_secret holds the ciphertext; GET /api/settings never echoes the plaintext",
+          "oracle": "api",
+          "verify": "the sys_secret row (id starts 'sec_', ciphertext present) + sys_setting.value_enc = that handle + the redacted GET (materialiseRow dereferences through sys_secret)",
+          "evidence": "the sys_secret row + sys_setting.value_enc + the redacted GET"
+        },
+        {
+          "clause": "anonymous is denied: GET /api/settings/:namespace → 403 SETTINGS_FORBIDDEN, and GET /api/settings lists ZERO namespaces for an unauthenticated caller (no enumeration — Finding-1)",
+          "oracle": "api",
+          "verify": "the two anonymous responses",
+          "evidence": "the 403 + the empty list"
+        },
+        {
+          "clause": "each of the 10 open-framework namespaces resolves GET /api/settings/:ns with its manifest + values — no namespace 500s or serves an empty manifest",
+          "oracle": "api",
+          "verify": "one GET per variant in variants[]; each returns {manifest, values} with the manifest's specifiers",
+          "evidence": "the per-namespace responses"
+        }
+      ],
+      "negative": [
+        "a saved settings form treated as proof of effect (no observable consumer checked) is the ai.json anti-pattern — ticking the effect clause on the form alone is a FALSE PASS",
+        "a 200 on an env-locked PUT is a FAIL (the lock is a server contract, effectiveEnvOverride)",
+        "an encrypted value returned as plaintext by GET /api/settings, or stored inline in sys_setting.value rather than sys_secret, is a FAIL",
+        "a test action answering ok:true for a send that did not happen is a FAIL (framework#5087)",
+        "GET /api/settings enumerating namespaces for an anonymous caller is a FAIL (Finding-1 — the old default trusted x-user-id/x-permissions headers)"
+      ],
+      "variants": [
+        "localization",
+        "company",
+        "branding",
+        "auth",
+        "mail",
+        "sms",
+        "storage",
+        "ai",
+        "knowledge",
+        "feature_flags"
+      ],
+      "traps": ["stale-console-bundle", "dispatcher-vs-hono-route"],
+      "source": [
+        "packages/services/service-settings/src/settings-routes.ts (GET/PUT /api/settings, POST :ns/:actionId; 403 SETTINGS_FORBIDDEN / 409 SETTINGS_LOCKED / 400 SETTINGS_VALIDATION|UNKNOWN_KEY mapping; secure anonymous default)",
+        "packages/services/service-settings/src/settings-service.ts (cascade source default→scope; effectiveEnvOverride lock; encrypted→sys_secret handle via cryptoProvider+secretStore; validatePatch invalid_option)",
+        "packages/services/service-settings/src/settings-service-plugin.ts (verifiedContextFromRequest fail-closed; buildAuditWriter→sys_setting_audit; buildSecretStore→sys_secret; LocalCryptoProvider)",
+        "packages/services/service-settings/src/settings-service.types.ts (envKeyOf OS_<NAMESPACE>_<KEY>)",
+        "packages/services/service-settings/src/manifests/{localization,mail,ai,branding}.manifest.ts",
+        "packages/core/src/security/resolve-authz-context.ts (localization timezone/locale/currency → ExecutionContext — the observable consumer)",
+        "framework#5087 (a test action must not fake success), #5204 (env override enforcement)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "initial — settings hub round-trip with persistence + observable-consumer effect (honoring the ai.json form-is-not-effect caveat), sys_setting_audit, env-lock server refusal, honest test action, sys_secret handle-not-plaintext, anonymous deny", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.package-lifecycle-enable-disable",
+      "title": "Package lifecycle: disable stops serving, enable restores, uninstall de-registers, commits grow per publish and revert restores the prior published shape",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a runtime-created WRITABLE probe package — the SAME fixture platform-core.metadata-authoring-roundtrip creates via POST /api/v1/packages (reuse it, or create one in-run); author an object + a view + a nav entry into it and publish so it actually serves objects/nav/routes. The showcase's own code package is read-only by design (ADR-0070), so it cannot be the probe"
+        ],
+        "knownGaps": [
+          "if the deployment blocks runtime package install/enable (e.g. a locked-down prod profile), record blocked(fixture) — the lifecycle routes still exist (route-ledger.ts) but there is nothing writable to drive them against"
+        ]
+      },
+      "steps": [
+        "create or reuse the writable probe package (POST /api/v1/packages); author a probe object + view + nav entry into it and publish (POST /api/v1/packages/:id/publish or /publish-drafts). Record its id",
+        "confirm it serves: GET /api/v1/meta lists the probe object; GET /api/v1/data/<probe_object> answers 200; the probe nav appears in the relevant /api/v1/meta/app",
+        "disable: PATCH /api/v1/packages/:id/disable → capture; then GET /api/v1/data/<probe_object> and the probe routes → now 404/403 (stopped serving); /meta/app no longer lists its nav",
+        "enable: PATCH /api/v1/packages/:id/enable → capture; the object/nav/routes serve again (restore)",
+        "commits grow per publish: GET /api/v1/packages/:id/commits before and after a second publish — the list grows by exactly one entry; capture both listings",
+        "revert restores the prior published shape: change the probe (e.g. add a field) and publish, then POST /api/v1/packages/:id/commits/:commitId/revert (or POST /api/v1/packages/:id/revert) → GET the /published shape and confirm it is back to the prior commit",
+        "uninstall: DELETE /api/v1/packages/:id → capture; GET /api/v1/meta no longer lists the probe object/kinds and GET /api/v1/packages no longer lists the package",
+        "both-sides deny: attempt PATCH /disable and DELETE against a READ-ONLY code package (a platform package or the showcase's own) → refused server-side (ADR-0070); capture the refusal"
+      ],
+      "acceptance": [
+        {
+          "clause": "disable STOPS serving: after PATCH /packages/:id/disable, the package's objects/routes answer 404/403 and /meta/app drops its nav — disable is an enforcement, not a cosmetic flag",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/<probe_object> and the probe routes return 404/403 after disable (were 200 before)",
+          "evidence": "before/after reads"
+        },
+        {
+          "clause": "enable RESTORES: PATCH /packages/:id/enable and the same objects/nav/routes serve again",
+          "oracle": "api",
+          "verify": "the post-enable reads return 200 and the nav is back",
+          "evidence": "before/after reads"
+        },
+        {
+          "clause": "uninstall DE-REGISTERS: DELETE /packages/:id, then GET /meta no longer lists its kinds and GET /packages no longer lists it",
+          "oracle": "api",
+          "verify": "the meta + packages listings after DELETE",
+          "evidence": "the two listings"
+        },
+        {
+          "clause": "the commits list GROWS per publish: GET /packages/:id/commits gains exactly one entry per publish",
+          "oracle": "api",
+          "verify": "commit count after the second publish == count before + 1",
+          "evidence": "the two commit listings"
+        },
+        {
+          "clause": "revert RESTORES the prior published shape: POST /packages/:id/commits/:commitId/revert (or /revert) returns the published metadata to the prior commit, and a subsequent /published read matches the pre-change shape",
+          "oracle": "api",
+          "verify": "the pre-change /published read equals the post-revert /published read",
+          "evidence": "the pre/post published reads"
+        },
+        {
+          "clause": "the disabled package's surface is gone from the console — its nav entry is absent and a stale deep-link to its object shows a named not-found inside the shell, never a dead white page",
+          "oracle": "screenshot",
+          "verify": "screenshot the console after disable (nav absent) and a stale deep-link (named not-found in the shell)",
+          "evidence": "the two screenshots"
+        },
+        {
+          "clause": "DENY side: PATCH /disable and DELETE against a read-only code package are refused server-side (ADR-0070), not silently applied",
+          "oracle": "api",
+          "verify": "the refusal status/code on the read-only package",
+          "evidence": "the refusal"
+        },
+        {
+          "clause": "state is coherent across the cycle: a disabled-then-enabled package's DATA rows survive the toggle (disable stops serving, it does not destroy rows)",
+          "oracle": "api",
+          "verify": "row count before disable == row count after re-enable",
+          "evidence": "the two counts"
+        }
+      ],
+      "negative": [
+        "a disabled package still serving its objects/routes (200 on /data/<probe_object>) is a FAIL — disable is an enforcement, not a flag",
+        "uninstall leaving orphaned metadata in /meta (or the package still in GET /packages) is a FAIL",
+        "a revert that does not restore the prior published shape, or a commits list that grows without a working revert, is a FAIL",
+        "a 2xx on the read-only-package disable/uninstall attempt is a FAIL of the ADR-0070 gate"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "stale-console-bundle"],
+      "source": [
+        "packages/runtime/src/route-ledger.ts (PATCH /packages/:id/enable|disable, DELETE /packages/:id, POST /packages/:id/publish|publish-drafts, GET /packages/:id/commits, POST /packages/:id/commits/:commitId/revert, POST /packages/:id/revert)",
+        "platform-core.metadata-authoring-roundtrip (the writable probe package this reuses)",
+        "ADR-0070 (writable vs read-only packages), ADR-0033 (drafts/publish/commits)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "initial — package enable/disable/uninstall + commits/revert lifecycle, driven against the writable probe package the authoring round-trip already creates", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.notification-center",
+      "title": "Notification center (bell / InboxPopover): badge counts distinct unread topics + pending approvals, repeats coalesce, per-group and global mark-read drop the badge",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a recurring notification that produces many identical rows (the showcase_scheduled_digest firing once a minute — the exact flood inboxGrouping.ts was written for), so the topic-coalescing is exercised rather than assumed",
+          "at least one pending approval request (sys_approval_request / my_pending) so the approvals portion of the badge and the Approvals tab have something to show"
+        ],
+        "knownGaps": [
+          "rows without a notification_id (legacy/synthetic inbox rows) flip read optimistically but do NOT persist server-side — read-state lives in sys_notification_receipt keyed by the L2 event id (ADR-0030), so only rows carrying a notification_id survive reload. Verify persistence on a keyed row, and record synthetic rows as expected-non-persistent"
+        ]
+      },
+      "steps": [
+        "open the console as admin; the header (AppHeader.tsx) polls GET /api/v1/notifications?view=mine — capture the initial inbox rows",
+        "read the bell badge: it must equal distinct unread (topic,title) TOPICS + pending approvals, NOT raw row count (#2765) — the recurring digest producing many identical rows must not inflate it to 9+ off one topic",
+        "cross-check: count distinct unread (topic,title) groups from the payload (groupNotifications in inboxGrouping.ts) + pendingApprovalsCount and confirm it equals the rendered totalBadge",
+        "open the popover; confirm THREE tabs render: Notifications / Approvals / Activity",
+        "confirm coalescing: repeats of the same (topic,title) collapse into ONE expandable group with a ×N count pill; click the chevron to expand and reveal the members",
+        "per-group mark-read: click a group's 'Mark read' → capture POST /api/v1/notifications/read {ids:[...]} on the wire (ONE request for the whole group, not N); the group's unread dot clears and the badge drops by one topic",
+        "global mark-all-read: click 'Mark all read' → capture POST /api/v1/notifications/read/all; the notifications portion of the badge drops to 0; the approvals portion is unaffected",
+        "Approvals tab: confirm it lists/points at the pending approval request(s) and pendingApprovalsCount equals the sys_approval_request my_pending count",
+        "persistence: reload; read-state persists for rows carrying a notification_id (sys_notification_receipt upsert, ADR-0030); synthetic rows without one flip only optimistically (knownGap)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the badge counts distinct unread TOPICS + pending approvals, not raw rows — a recurring digest producing N identical rows contributes 1 to the badge (#2765)",
+          "oracle": "network",
+          "verify": "distinct-(topic,title) unread group count from the GET /notifications payload + pendingApprovalsCount == the rendered totalBadge",
+          "evidence": "the payload + the badge value"
+        },
+        {
+          "clause": "three tabs render (Notifications / Approvals / Activity)",
+          "oracle": "screenshot",
+          "verify": "the popover shows all three TabsTrigger surfaces",
+          "evidence": "popover screenshot"
+        },
+        {
+          "clause": "(topic,title) repeats COALESCE into one expandable group with a ×N pill; expanding reveals the members (a group of one renders as a plain row, no pill)",
+          "oracle": "dom",
+          "verify": "after the screenshot confirms the popover rendered, assert the group row carries the ×N pill and the expanded list holds N members",
+          "evidence": "collapsed + expanded screenshots + DOM excerpt"
+        },
+        {
+          "clause": "per-group mark-read issues POST /api/v1/notifications/read {ids} as a SINGLE request for the whole group (not one per row), and the group's unread state clears",
+          "oracle": "network",
+          "verify": "the captured POST carries the group's member ids in one body; the badge drops by one topic",
+          "evidence": "the captured POST + before/after badge"
+        },
+        {
+          "clause": "global mark-all-read issues POST /api/v1/notifications/read/all and drops the notifications portion of the badge to 0",
+          "oracle": "network",
+          "verify": "the captured POST + the badge's notifications portion at 0 afterward",
+          "evidence": "the captured POST + badge"
+        },
+        {
+          "clause": "the Approvals tab lists the pending request(s) and pendingApprovalsCount equals the sys_approval_request my_pending count",
+          "oracle": "dom",
+          "verify": "the tab content + the count vs a direct sys_approval_request my_pending query",
+          "evidence": "the tab + the count comparison"
+        },
+        {
+          "clause": "read-state PERSISTS across reload for rows carrying a notification_id (sys_notification_receipt upsert, ADR-0030) — after mark-read + reload the keyed row stays read; a mark-read that reverts on the next poll is the pre-ADR-0030 receipt bug",
+          "oracle": "network",
+          "verify": "the post-reload GET /notifications shows the keyed row still read",
+          "evidence": "the post-reload payload"
+        }
+      ],
+      "negative": [
+        "a badge showing raw unread ROW count (inflating to 9+ off one recurring topic) is the #2765 regression — FAIL",
+        "mark-read firing one POST per row for a coalesced group (instead of one {ids} request) is a FAIL of the coalescing contract",
+        "read-state reverting to unread on the next poll for a keyed row (writing sys_notification_receipt through the generic data API, which rejects it — ADR-0103) is a FAIL",
+        "cross-ref: this is distinct from i18n.notification-localized-and-clears (single-entry localization + clear) and approvals.notification-deep-link (deep-link) — do not double-count their coverage here"
+      ],
+      "traps": ["hydration-race", "single-datapoint"],
+      "source": [
+        "objectui packages/app-shell/src/layout/InboxPopover.tsx (totalBadge = unreadTopics + pendingApprovalsCount; three tabs; per-group markGroupRead + global onMarkAllRead)",
+        "objectui packages/app-shell/src/layout/inboxGrouping.ts (groupNotifications — (topic,title) coalescing, #2765)",
+        "objectui packages/app-shell/src/layout/AppHeader.tsx (postMarkRead → POST /api/v1/notifications/read[/all]; poll GET /notifications?view=mine)",
+        "packages/runtime/src/route-ledger.ts (GET /notifications, POST /notifications/read, POST /notifications/read/all)",
+        "packages/runtime/src/domains/notifications.ts (markRead upserts sys_notification_receipt; empty/mis-keyed ids → 400)",
+        "ADR-0030 (sys_inbox_message L5 materialization + sys_notification_receipt); ADR-0103 (receipt object api-method lockdown)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "initial — bell/InboxPopover: topic-based badge (#2765), (topic,title) coalescing, per-group + global mark-read on the wire, approvals tab, receipt persistence; cross-referenced with i18n + approvals notification items", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.shell-nav-personalization",
+      "title": "Shell nav personalization: sidebar collapse, pin/reorder, favorites, recents and header breadcrumbs each persist and stay navigable across reload",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "stock showcase nav (multiple objects/dashboards/reports so there is something to pin, reorder, favorite, and visit as recents)"
+        ]
+      },
+      "steps": [
+        "sidebar collapse: toggle the sidebar to icon (collapsed) mode; confirm nav items still NAVIGATE in icon mode; reload — the collapsed state persists (cookie sidebar_state, packages/components/src/ui/sidebar.tsx SIDEBAR_COOKIE_NAME)",
+        "nav pin/unpin: pin a nav item (UnifiedSidebar → useNavPins.togglePin → favorite id nav:<navId>, backed by FavoritesProvider/UserDataAdapter); it appears in the Pinned section; reload — the pin persists (syncs via UserDataAdapter; migrates the legacy objectui-nav-pins key); unpin removes it",
+        "drag-reorder: reorder nav items by drag (UnifiedSidebar useNavOrder, enableReorder / onReorder=handleReorder); reload — the order persists (localStorage per-app key)",
+        "favorites star/unstar: star an object/record as a favorite (useFavorites / FavoritesProvider); it appears in favorites; reload — persists; unstar removes it",
+        "recents rail: visit several records/objects/dashboards; the sidebar Recent section (collapsed by default, top 5 — useTrackRouteAsRecent → RecentItemsProvider, localStorage objectui-recent-items scoped by userId, hydrates UserDataAdapter) lists them; reload — recents survive",
+        "header record-trail breadcrumbs: on a record detail the AppHeader breadcrumb shows the app/section/record trail; click a crumb to navigate back to its level; reload — the trail rebuilds from the route",
+        "record which persistence each feature uses: pins/favorites/recents are UserDataAdapter-backed (cross-device sync), reorder + collapse are local (localStorage / cookie)"
+      ],
+      "acceptance": [
+        {
+          "clause": "collapsing the sidebar to icon mode still NAVIGATES — clicking an icon routes correctly — and the collapsed state survives reload (cookie sidebar_state)",
+          "oracle": "screenshot",
+          "verify": "collapsed screenshot + a nav click that routes + the collapsed state present after reload",
+          "evidence": "collapsed screenshot + post-reload state + the routed click"
+        },
+        {
+          "clause": "pin/unpin: a pinned nav item appears in the Pinned section and survives reload; unpin removes it (useNavPins → nav:<navId> favorite)",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms render, assert the pinned item present pre- and post-reload; absent after unpin",
+          "evidence": "pre/post-reload DOM"
+        },
+        {
+          "clause": "drag-reorder persists: the reordered nav order is restored after reload (useNavOrder localStorage)",
+          "oracle": "dom",
+          "verify": "the nav item order before reload equals the order after reload",
+          "evidence": "order before/after reload"
+        },
+        {
+          "clause": "favorites star/unstar persists across reload",
+          "oracle": "dom",
+          "verify": "the starred item is present in favorites before and after reload; gone after unstar",
+          "evidence": "pre/post-reload favorites list"
+        },
+        {
+          "clause": "the Recents rail lists recently-visited entities (top 5) and survives reload (RecentItemsProvider)",
+          "oracle": "dom",
+          "verify": "the visited entities appear in the Recent section after reload",
+          "evidence": "visit sequence + post-reload recents"
+        },
+        {
+          "clause": "header record-trail breadcrumbs render on a record and each crumb navigates back to its level; the trail rebuilds after reload",
+          "oracle": "screenshot",
+          "verify": "breadcrumb screenshot + a crumb navigation that routes back + the trail present after reload",
+          "evidence": "breadcrumb screenshot + the crumb navigation"
+        }
+      ],
+      "negative": [
+        "a collapsed sidebar whose icon items no longer navigate (dead icon mode) is a FAIL",
+        "a pin / favorite / reorder / recent that does NOT survive reload is a FAIL of its persistence contract",
+        "a breadcrumb crumb that is inert (does not navigate) is a FAIL",
+        "transitional emptiness right after navigation (empty nav/recents) must be ruled out by the screenshot-first protocol before any persistence FAIL is recorded"
+      ],
+      "traps": ["hydration-race", "shared-browser-tab"],
+      "source": [
+        "objectui packages/app-shell/src/layout/UnifiedSidebar.tsx (useNavOrder drag-reorder localStorage; Recent section; applyPins)",
+        "objectui packages/app-shell/src/hooks/useNavPins.ts (togglePin → nav:<navId> favorite, MAX_PINS 20, UserDataAdapter-backed, legacy objectui-nav-pins migration)",
+        "objectui packages/app-shell/src/hooks/useFavorites.ts + context/FavoritesProvider.tsx (favorites state)",
+        "objectui packages/app-shell/src/context/RecentItemsProvider.tsx + hooks/useTrackRouteAsRecent.ts (recents — objectui-recent-items localStorage + UserDataAdapter hydrate)",
+        "objectui packages/app-shell/src/layout/AppHeader.tsx (breadcrumb record-trail)",
+        "objectui packages/components/src/ui/sidebar.tsx (SIDEBAR_COOKIE_NAME sidebar_state — collapse persistence)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "initial — sidebar collapse/icon-mode, nav pin+reorder, favorites, recents rail, header breadcrumbs, each with its real persistence layer (cookie/localStorage/UserDataAdapter)", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "platform-core.app-management-toggle",
+      "title": "App management: the launcher/App Switcher filters by active+hidden and isDefault drives post-login landing — but the AppManagementPage toggle is a client-only stub today",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)",
+        "a plain member (fresh runtime sign-up — member_default)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a writable package to author an app overlay into (POST /api/v1/packages) so the active/isDefault EFFECT can be exercised at the metadata layer — the seeded showcase/platform apps are read-only code packages (ADR-0070)"
+        ],
+        "knownGaps": [
+          "AppManagementPage's Enable/Disable/Set-default/Delete/Bulk handlers are CLIENT-ONLY STUBS today (objectui apps/console/src/pages/system/AppManagementPage.tsx — every handler is a toast.success() + refresh() carrying a 'TODO: Replace with real API call when backend supports app management' marker; no request is issued and no metadata changes). So the page's toggle CANNOT prove the effect — the launcher/landing behavior is exercised at the metadata layer instead, and the stub is recorded as an expected-fail probe (RUNNER rule 3: a stub that reports success is the finding)"
+        ]
+      },
+      "steps": [
+        "establish the launcher filter is real: the App Switcher (objectui AppSwitcher.tsx) lists only apps with active !== false && hidden !== true. Confirm the Account app (hidden:true — account.app.ts) is ABSENT from the switcher while reachable via the avatar dropdown; Setup/Studio/showcase present",
+        "prove DISABLE-effect at the metadata layer (the UI toggle is a stub): author an app overlay with active:false into a writable package (POST /api/v1/packages + PUT /api/v1/meta/app/<name> active:false, publish) → confirm it leaves the App Switcher/launcher for end users (absent); flip active:true → it returns",
+        "prove DEFAULT→landing: the isDefault app drives post-login landing — confirm login lands on the current default app, and that changing which app is isDefault (at the metadata layer) changes the post-login landing route",
+        "member view: as a plain member the App Switcher shows only accessible apps (Setup/Studio absent by App.requiredPermissions); disabled/hidden apps also absent",
+        "open Setup → Apps → Applications (AppManagementPage) as admin; it lists configured apps with Active/Default badges and per-row controls",
+        "EXPECTED-FAIL / known-stub probe: click Disable on a seeded app in AppManagementPage → a success toast appears BUT no request is issued (empty network) and GET /api/v1/meta/app shows the app still active on reload. Record the toast-without-persistence; do NOT credit the app as disabled off the toast",
+        "same probe for Set-default and Delete: the toast fires, the metadata is unchanged on reload"
+      ],
+      "acceptance": [
+        {
+          "clause": "the App Switcher lists only active, non-hidden apps: hidden apps (Account) and inactive apps are absent; active apps present (AppSwitcher.tsx activeApps = active !== false && hidden !== true)",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms the switcher rendered, diff its entries against the served /meta/app list — Account (hidden) absent, active apps present",
+          "evidence": "switcher DOM vs the served app list"
+        },
+        {
+          "clause": "disabling an app removes it from the launcher for end users — proven by setting active:false at the metadata layer (writable-package overlay), then confirming absence; re-enable returns it",
+          "oracle": "screenshot",
+          "verify": "before/after App Switcher screenshots bracketing the active:false and active:true meta writes",
+          "evidence": "before/after switcher screenshots + the meta writes"
+        },
+        {
+          "clause": "the default app drives post-login landing: login lands on the isDefault app, and changing the default changes the landing route",
+          "oracle": "screenshot",
+          "verify": "post-login screenshots for two different isDefault choices land on different apps",
+          "evidence": "the two post-login screenshots"
+        },
+        {
+          "clause": "a member sees only accessible apps in the switcher (Setup/Studio absent by requiredPermissions; disabled/hidden absent)",
+          "oracle": "dom",
+          "verify": "the member's switcher DOM excludes Setup/Studio and any disabled/hidden app",
+          "evidence": "the member switcher DOM"
+        },
+        {
+          "clause": "AppManagementPage renders the Applications list with Active/Default badges and per-row controls",
+          "oracle": "screenshot",
+          "verify": "the page renders the app cards with the Active/Default/Inactive badges",
+          "evidence": "the page screenshot"
+        },
+        {
+          "clause": "EXPECTED-FAIL / known-stub probe — AppManagementPage's Disable/Set-default/Delete are client-only stubs: clicking Disable issues NO request (empty network) and GET /api/v1/meta/app is UNCHANGED on reload, while a success toast is shown. A run records the stub and MUST NOT tick 'disabled for end users' off the toast",
+          "oracle": "network",
+          "verify": "the network trace shows no PATCH/DELETE on the click; /meta/app unchanged on reload; the toast fired (AppManagementPage TODO handlers)",
+          "evidence": "the absent request + the unchanged meta + the toast"
+        }
+      ],
+      "negative": [
+        "ticking 'app disabled' off the AppManagementPage success toast is a FALSE PASS — the handler is a stub (no backend), the effect must be proven at the metadata/launcher layer",
+        "the App Switcher showing a hidden (Account) or inactive app to end users is a FAIL of the launcher filter",
+        "post-login landing that ignores isDefault is a FAIL"
+      ],
+      "traps": ["wrong-persona", "stale-console-bundle", "hydration-race"],
+      "source": [
+        "objectui apps/console/src/pages/system/AppManagementPage.tsx (the stubbed Enable/Disable/Set-default/Delete/Bulk handlers — TODO 'when backend supports app management')",
+        "objectui packages/app-shell/src/layout/AppSwitcher.tsx (activeApps = active !== false && hidden !== true)",
+        "packages/platform-objects/src/apps/account.app.ts (hidden:true example)",
+        "packages/runtime/src/route-ledger.ts (PUT /meta/app/:name, POST /packages/:id/publish — the metadata layer that actually changes app active/default)",
+        "ADR-0048 (app package routing / launcher)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "initial — launcher active+hidden filter and isDefault→landing proven at the metadata layer, with the AppManagementPage toggle recorded as a client-only stub (expected-fail probe) rather than faked", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    }
+  ]
+}
