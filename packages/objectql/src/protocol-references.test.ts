@@ -19,7 +19,7 @@ describe('ObjectStackProtocolImplementation - findReferencesToMeta', () => {
         registry = new SchemaRegistry({ multiTenant: false });
         // Target object — must use registerObject so listItems('object')
         // surfaces it (objects live in their own contributor map).
-        registry.registerObject({ name: 'account', label: 'Account', fields: {} } as any, 'pkg');
+        registry.registerObject({ name: 'account', label: 'Account', fields: {} }, 'pkg');
         // Sibling object whose field points at it.
         registry.registerObject({
             name: 'task',
@@ -94,7 +94,7 @@ describe('ObjectStackProtocolImplementation - findReferencesToMeta', () => {
     });
 
     it('returns empty array when nothing points at the target', async () => {
-        registry.registerObject({ name: 'orphan', fields: {} } as any, 'pkg');
+        registry.registerObject({ name: 'orphan', fields: {} }, 'pkg');
         const result = await protocol.findReferencesToMeta({ type: 'object', name: 'orphan' });
         expect(result.references).toEqual([]);
     });

@@ -112,7 +112,7 @@ describe('atomic batchData over the real engine (ADR-0119 D4 / ADR-0034)', () =>
         d = makeSnapshotDriver();
         engine.registerDriver(d.driver, true);
         await engine.init();
-        engine.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } } as any);
+        engine.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } });
         protocol = new ObjectStackProtocolImplementation(engine as any);
     });
 
@@ -204,7 +204,7 @@ describe('atomic batchData over the real engine (ADR-0119 D4 / ADR-0034)', () =>
         delete plain.driver.beginTransaction;
         bare.registerDriver(plain.driver, true);
         await bare.init();
-        bare.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } } as any);
+        bare.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } });
         const p = new ObjectStackProtocolImplementation(bare as any);
 
         await expect(p.batchData({
@@ -222,7 +222,7 @@ describe('ADR-0119 D1 — transaction is reachable through the contract', () => 
         const d = makeSnapshotDriver();
         engine.registerDriver(d.driver, true);
         await engine.init();
-        engine.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } } as any);
+        engine.registry.registerObject({ name: 'invoice', fields: { title: { type: 'text' } } });
 
         // The point of the pin is the TYPE, not the runtime: before ADR-0119 D1
         // this line could not compile — `transaction` was absent from the

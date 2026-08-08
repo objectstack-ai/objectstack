@@ -133,8 +133,8 @@ async function buildEngine(withCrypto: boolean) {
   const { driver, stores } = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(sysSecretObject as any);
-  engine.registry.registerObject(dsObject as any);
+  engine.registry.registerObject(sysSecretObject);
+  engine.registry.registerObject(dsObject);
   const crypto = makeFakeCrypto();
   if (withCrypto) engine.setCryptoProvider(crypto.provider);
   return { engine, stores, crypto };
@@ -259,8 +259,8 @@ async function buildPasswordEngine() {
   const { driver, stores } = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(deviceObject as any);
-  engine.registry.registerObject(authUserObject as any);
+  engine.registry.registerObject(deviceObject);
+  engine.registry.registerObject(authUserObject);
   return { engine, stores };
 }
 

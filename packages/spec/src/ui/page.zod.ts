@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-import { normalizeVisibleWhen, strictVisibilityError } from '../shared/visibility';
+import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
 import { SortItemSchema } from '../shared/enums.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -93,8 +93,15 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
 /**
  * Page Component Schema
  * A configured instance of a UI component.
+ *
+ * Closed under ADR-0089 D3a. Its unknown-key error came from the bespoke
+ * `strictVisibilityError` until #6619 folded that map into the shared
+ * `strictObject` template's set-keyed `guidance` channel — same prescription,
+ * now under `alias-integrity.test.ts` and with an edit-distance rename for the
+ * page-component keys the hand-written map had no channel for (`classNam` →
+ * `className`).
  */
-export const PageComponentSchema = lazySchema(() => z.object({
+export const PageComponentSchema = lazySchema(() => strictObject(VISIBILITY_STRICT_OPTIONS, {
   /** Definition */
   type: z.union([
     PageComponentType,
@@ -152,7 +159,7 @@ export const PageComponentSchema = lazySchema(() => z.object({
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-}, { error: strictVisibilityError }).strict().transform(normalizeVisibleWhen));
+}).transform(normalizeVisibleWhen));
 
 /**
  * Page Variable Schema

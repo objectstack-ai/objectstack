@@ -70,6 +70,7 @@ import {
   PAGINATION_CASES,
   PAGINATION_ROWS,
   PAGINATION_UNORDERED_CASES,
+  PAGINATION_ZERO_LIMIT_CASES,
 } from '@objectstack/spec/data';
 import type { QueryAST } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
@@ -268,6 +269,27 @@ function declarePartitionSweep(cell: DialectCell): void {
       // asserted per dialect in the clause sweep below.
       if (!cell.live) {
         expect(rows.map((r) => r.id)).toEqual(PAGINATION_ROWS.map((r) => r.id));
+      }
+    });
+
+    /**
+     * `limit: 0` means "return no records" (#6485/#6577). `findRows()` has
+     * always compiled `limit` on presence, so this cell is green on arrival —
+     * which is the point of pinning it: two sibling doors in this same file
+     * compiled it on TRUTHINESS until #6577, and returned the whole table for a
+     * query that asked for none. Run per dialect because `LIMIT 0` is the one
+     * bound value a server is free to treat as a special case.
+     */
+    describe('`limit: 0` returns no records', () => {
+      for (const testCase of PAGINATION_ZERO_LIMIT_CASES) {
+        it(testCase.name, async () => {
+          const rows = await driver.find(
+            PAGED_TABLE,
+            { ...testCase.query },
+            { bypassTenantAudit: true },
+          );
+          expect(rows).toHaveLength(testCase.expectedRowCount);
+        });
       }
     });
   });

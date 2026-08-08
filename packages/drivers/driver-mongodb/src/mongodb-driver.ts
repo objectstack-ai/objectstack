@@ -233,7 +233,34 @@ export class MongoDBDriver implements IDataDriver {
     return findOptions;
   }
 
+  /**
+   * `limit: 0` means **return no records** (#6485) — and this is the one driver
+   * where forwarding the value faithfully is not enough to say so.
+   *
+   * {@link buildFindOptions} already tests PRESENCE (`!== undefined`), so `0`
+   * reaches the client exactly as written. The divergence is one layer lower:
+   * the MongoDB Node driver DEFINES `limit: 0` as *no limit*, so a correctly
+   * forwarded `0` came back as the entire collection — the same wrong answer
+   * `driver-memory` gave for the opposite reason (it dropped the value; this
+   * one delivers it to a reader that means something else by it).
+   *
+   * So the contract is answered HERE rather than delegated: the empty result is
+   * returned without consulting the client at all. Two consequences worth being
+   * explicit about, because both are the point rather than side effects — no
+   * round trip is made for a query whose answer is already known, and no future
+   * change in the upstream driver's reading of `0` can move this behaviour.
+   *
+   * Deliberately `=== 0` and not `<= 0`: a negative limit is not a shape the
+   * contract defines, and quietly folding it into "no records" would invent an
+   * answer here instead of letting the layer that owns validation give one.
+   */
+  private returnsNoRecords(query: DriverQuery): boolean {
+    return query.limit === 0;
+  }
+
   async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    if (this.returnsNoRecords(query)) return [];
+
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
@@ -246,6 +273,14 @@ export class MongoDBDriver implements IDataDriver {
   }
 
   async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+    // Same guard as `find()`, because this door has the same hole: `findOne`
+    // hands `query.limit` to the client through the SAME `buildFindOptions`, so
+    // `limit: 0` was read as "no limit" and answered with the first document —
+    // a record, where the contract says none. `null` is this signature's empty
+    // result. Leaving it out would have recreated, inside one driver, exactly
+    // the "one query, two answers" divergence this issue is about.
+    if (this.returnsNoRecords(query)) return null;
+
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
