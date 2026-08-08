@@ -79,6 +79,37 @@ export interface AuthRouteLedgerEntry {
   client?: string;
   /** Optional better-auth plugin this route needs (absent = always mounted). */
   requires?: string;
+  /**
+   * Name of the `@objectstack/spec/api` export declaring this route's response
+   * PAYLOAD — the `data` of the shared `{ success, data }` envelope where the
+   * route emits one, the whole body where it does not. The envelope itself is
+   * not this field's business; `pnpm check:route-envelope` guards it
+   * structurally, and a single field cannot describe both halves honestly.
+   *
+   * ABSENT MEANS "UNDECLARED", and that is the state of most of the mounted
+   * surface: at the #3877 audit, 0 of 237 ledgered routes carried a schema
+   * reference. #3877 ruled that authoring the ~190 missing ones is NOT
+   * scheduled — a response schema is a product decision about what an endpoint
+   * promises, and mass-producing them is precisely how declarations nobody
+   * validated come to exist (the four defects #3676/#3833/#3847/#3870 fixed).
+   * So this field is filled incrementally, as a family lands conformance
+   * coverage or a route is touched for other reasons; a blank one changes no
+   * behaviour and is not a defect.
+   *
+   * ⛔ DO NOT FILL A ROW THAT HAS NO CONFORMANCE COVERAGE. The field exists to
+   * make "what does this route declare" queryable so #3877's Stage D ratchet
+   * can demand coverage for it; a name written ahead of the test it points at
+   * would BE the "declared but unverified" surface the programme exists to
+   * remove. `packages/client/src/route-ledger-response-schema.test.ts` resolves
+   * every name written here against the live `@objectstack/spec/api` exports,
+   * so a typo or a retired schema fails loudly rather than rotting.
+   *
+   * A NAME rather than a live schema object, deliberately: this module stays
+   * import-free — the client-side guards compile it as a relative SOURCE file,
+   * and `zod` is not a dependency of every package that owns a ledger. The
+   * resolution belongs in the guard that can import the spec, not in the data.
+   */
+  responseSchema?: string;
   /** One-line rationale. Required for every non-`sdk` disposition. */
   note?: string;
 }
