@@ -36,6 +36,10 @@ import {
   type FilterVerdict as SharedFilterVerdict,
   type FilterVerdictHooks,
 } from '@objectstack/spec/data';
+// [#5702] The retired filter operators and the prescription each refusal
+// prints, read from the spec so this driver's sentence about `$regex` cannot
+// drift from the four other refusal sites' (#5701).
+import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 import {
   coerceTemporalValue,
   type TemporalFieldKind,
@@ -266,10 +270,13 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
  * swaps one driver for another must see one `400 INVALID_FILTER`, not a coded
  * refusal on three backends and a bare `{ error }` on the fourth.
  *
- * Note what this does NOT do: the `default:` arm of {@link translateFieldOperators}
- * still throws a bare `Error` with a `[mongodb]` prefix, outside this envelope.
- * That is #5346's, filed and measured separately — converting it here would be
- * an unrelated behaviour change riding on #5347.
+ * [#5702] The carve-out that used to close this comment is GONE. It read: *"the
+ * `default:` arm of {@link translateFieldOperators} still throws a bare `Error`
+ * with a `[mongodb]` prefix, outside this envelope. That is #5346's, filed and
+ * measured separately."* That arm now routes through this constructor, so this
+ * package no longer answers an unknown or retired operator with a 500-shaped
+ * body while its three siblings answer `400 INVALID_FILTER` — which was the last
+ * place the sentence two paragraphs up was not yet true.
  */
 function unsupportedFilterError(message: string): Error {
   const err = new Error(message) as Error & { code?: string; status?: number };
@@ -580,12 +587,47 @@ function translateFieldOperators(
         }
         break;
 
-      default:
+      default: {
         // Reject unknown operators instead of passing them through (P0). Keys
         // like `$where` / `$function` / `$expr` / `$accumulator` would reach
         // MongoDB and execute server-side JavaScript or bypass query intent.
         // Every legitimate ObjectQL field operator is allowlisted above.
-        throw new Error(`[mongodb] unsupported filter operator '${op}'`);
+        //
+        // [#5702] Two changes, both about the SHAPE of the refusal rather than
+        // its verdict — this arm already refused, including `$regex`, which is
+        // why mongo was the one backend already satisfying #4706's requirement 3:
+        //
+        //  1. It threw a bare `new Error`, with no `code` and no `status`, three
+        //     lines from a helper in this same file that sets `INVALID_FILTER` /
+        //     400 and whose own comment says "a test suite that swaps one driver
+        //     for another must see one `400 INVALID_FILTER`". A 500-shaped body
+        //     for a 400-class client mistake is the half of #5324 the refusal
+        //     itself does not fix.
+        //  2. A RETIRED spelling now gets the spec's prescription instead of the
+        //     generic sentence: `$regex`'s author needs `$icontains`, and
+        //     "unsupported filter operator" does not say so.
+        const retired = RETIRED_FILTER_OPERATORS[op];
+        if (retired) {
+          const replacement = retired.to ? ` Write "${retired.to}" instead.` : '';
+          const alsoRetired = Object.keys(ops).filter(
+            (key) => key !== op && RETIRED_FILTER_OPERATORS[key],
+          );
+          const also = alsoRetired.length
+            ? ` The same field constraint also carries the retired ` +
+              `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${retired.to}" replaces ` +
+              `the whole shape, so this is ONE mistake with ONE fix, not one per key.`
+            : '';
+          throw unsupportedFilterError(
+            `Filter operator "${op}" on field "${field}" at ${path} is RETIRED and is no longer ` +
+              `translated by this driver.${replacement} ${retired.why}${also}`,
+          );
+        }
+        throw unsupportedFilterError(
+          `Unsupported filter operator "${op}" on field "${field}" at ${path}. It is refused ` +
+            `rather than passed through to MongoDB, where keys like $where / $function / $expr ` +
+            `execute server-side JavaScript or bypass the query's intent (P0).`,
+        );
+      }
     }
   }
 

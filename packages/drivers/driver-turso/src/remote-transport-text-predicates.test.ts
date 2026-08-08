@@ -53,12 +53,26 @@ const META_ROWS = [
 
 async function makeRemoteDriver(schema: Record<string, unknown>, rows: Record<string, unknown>[]) {
   const stub = makeLibsqlSqliteStub();
-  const driver = new TursoDriver({ url: 'libsql://text.turso.io', client: stub as never });
+  // [#5702] The stub is wrapped so the STATEMENTS are readable, not only the
+  // rows. Rows are the right witness for almost everything this file pins — but
+  // `$icontains`'s fold is invisible in rows on SQLite (`LIKE` already folds
+  // ASCII there), so the emitted SQL is the only place a dropped `LOWER()` can
+  // be seen. Recording here rather than standing up a third hand-rolled mock
+  // client keeps every case on the same engine.
+  const executed: string[] = [];
+  const recording: LibsqlSqliteStub = {
+    ...stub,
+    async execute(stmt: unknown) {
+      executed.push(typeof stmt === 'string' ? stmt : String((stmt as { sql?: unknown }).sql ?? ''));
+      return stub.execute(stmt);
+    },
+  };
+  const driver = new TursoDriver({ url: 'libsql://text.turso.io', client: recording as never });
   await driver.connect();
   expect(driver.transportMode).toBe('remote');
   await driver.syncSchema(schema.name as string, schema);
   for (const row of rows) await driver.create(schema.name as string, row);
-  return { driver, stub };
+  return { driver, stub, executed };
 }
 
 const ids = async (driver: TursoDriver, object: string, where: DriverQuery['where']) =>
@@ -67,9 +81,10 @@ const ids = async (driver: TursoDriver, object: string, where: DriverQuery['wher
 describe('TursoDriver remote — declared text predicates return rows', () => {
   let driver: TursoDriver;
   let stub: LibsqlSqliteStub;
+  let executed: string[];
 
   beforeAll(async () => {
-    ({ driver, stub } = await makeRemoteDriver(TEXT_OBJECT, ROWS));
+    ({ driver, stub, executed } = await makeRemoteDriver(TEXT_OBJECT, ROWS));
   });
 
   afterAll(async () => {
@@ -99,11 +114,96 @@ describe('TursoDriver remote — declared text predicates return rows', () => {
     expect(await ids(driver, 'widget', { name: { $contains: 'lp' } })).toEqual(['w1', 'w2']);
   });
 
-  // Not spec-declared: better-auth's adapter emits `$regex` for a plain
-  // substring search, and SqlDriver compiles it as one. Remote must agree or a
-  // Turso-backed auth store answers differently from a local one.
-  it('$regex compiles as the substring search its only producer means', async () => {
-    expect(await ids(driver, 'widget', { name: { $regex: 'lph' } })).toEqual(['w1']);
+  /**
+   * [#5702] REPLACED. This slot held `$regex compiles as the substring search
+   * its only producer means` — `{ name: { $regex: 'lph' } } → ['w1']` — kept in
+   * lockstep with `SqlDriver`'s identical fallthrough so a Turso-backed auth
+   * store answered like a local one. #5710 flipped that producer to `$contains`
+   * and #4706 retired the spelling on all five backends, so the row it pinned
+   * no longer exists.
+   *
+   * What takes its place is the operator that replaces it. `$icontains` is
+   * REMOTE-side work in its own right: this transport does not go through knex,
+   * it hand-assembles its own `LIKE`, so "local inherits SqlDriver" buys it
+   * nothing — the fold has to be written here too, and the only witness that it
+   * was is rows.
+   */
+  it('$icontains folds ASCII case, in both directions', async () => {
+    expect(await ids(driver, 'widget', { name: { $icontains: 'alp' } })).toEqual(['w1', 'w2']);
+    expect(await ids(driver, 'widget', { name: { $icontains: 'ALP' } })).toEqual(['w1', 'w2']);
+    // The fold must run on BOTH operands: folding only the comparand leaves the
+    // column raw and quietly matches nothing here, since no row is lower-case.
+    expect(await ids(driver, 'widget', { name: { $icontains: 'BETA' } })).toEqual(['w3']);
+  });
+
+  /**
+   * [#5702] MEASURED, and the measurement contradicts the assertion this case
+   * was first written with — recorded as it came out rather than as it was
+   * predicted.
+   *
+   * The intended pin was `$contains: 'ALP'` → `[]` beside `$icontains: 'ALP'` →
+   * `['w1','w2']`, i.e. the two operators told apart by their answers. It fails:
+   * `$contains` returns `['w1','w2']` too. SQLite's `LIKE` folds ASCII case by
+   * itself, so on this dialect `col LIKE '%ALP%'` and `LOWER(col) LIKE
+   * LOWER('%ALP%')` select the SAME rows for EVERY comparand — the second fold
+   * is a no-op on top of the first.
+   *
+   * That is not a defect in `$icontains`; it is the `$contains` half of the
+   * #4706 Q2 = A ruling ("the `$contains` family is case-SENSITIVE"), which is
+   * NOT delivered by this PR. Making SQLite's LIKE case-exact needs a different
+   * construct (GLOB / `instr()` / a binary collation) applied in three places
+   * that must move together — this transport, `SqlDriver.applyLike`, and the
+   * RLS/analytics twins (`read-scope-sql`, `service-analytics`'s
+   * `like-pattern.ts`) — or one permission rule compiles to two row sets. It is
+   * filed separately; the `FILTER_TEXT` DEBT rows in
+   * `scripts/check-driver-conformance.mjs` stay open for it.
+   *
+   * So the honest pin here is the CURRENT pair — equal on this dialect — plus
+   * the compiled SQL, which is the only place the fold is observable on SQLite
+   * and therefore the only thing that can catch a `LOWER()` silently dropped.
+   */
+  it('$contains and $icontains agree on SQLite today — LIKE already folds ASCII', async () => {
+    expect(await ids(driver, 'widget', { name: { $contains: 'ALP' } })).toEqual(['w1', 'w2']);
+    expect(await ids(driver, 'widget', { name: { $icontains: 'ALP' } })).toEqual(['w1', 'w2']);
+  });
+
+  it('$icontains compiles LOWER() on BOTH operands, where $contains compiles neither', async () => {
+    executed.length = 0;
+    await driver.find('widget', { where: { name: { $icontains: 'ALP' } } });
+    const icontainsSql = executed.join('\n');
+    expect(icontainsSql).toContain('LOWER("name") LIKE LOWER(?) ESCAPE');
+
+    executed.length = 0;
+    await driver.find('widget', { where: { name: { $contains: 'ALP' } } });
+    const containsSql = executed.join('\n');
+    expect(containsSql).toContain('"name" LIKE ? ESCAPE');
+    expect(containsSql).not.toContain('LOWER');
+  });
+
+  it('REFUSES the retired $regex, in the ADR-0112 envelope, naming $icontains', async () => {
+    const err = await driver
+      .find('widget', { where: { name: { $regex: 'lph' } } })
+      .then(() => null, (e: any) => e);
+    expect(err).toBeInstanceOf(Error);
+    // `code` and `status`, not a bare rejection: this transport's whole family
+    // of filter refusals exists to be a 400-class client error rather than an
+    // opaque 500, and `rejects.toThrow()` alone cannot tell the two apart.
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('$regex');
+    expect(err.message).toContain('$icontains');
+  });
+
+  it('REFUSES an $icontains comparand that constrains nothing', async () => {
+    for (const comparand of ['', 42]) {
+      const err = await driver
+        .find('widget', { where: { name: { $icontains: comparand } } })
+        .then(() => null, (e: any) => e);
+      expect(err, `expected ${JSON.stringify(comparand)} to be refused`).toBeInstanceOf(Error);
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('$icontains');
+    }
   });
 
   it('$null: true / false select the null and non-null rows', async () => {
@@ -170,6 +270,31 @@ describe('TursoDriver remote — LIKE metacharacters match literally', () => {
 
   it('an ordinary substring is unaffected by the escaping', async () => {
     expect(await ids(driver, 'meta', { name: { $contains: 'sale' } })).toEqual(['m1']);
+  });
+
+  /**
+   * [#5702] The same three metacharacters, through `$icontains`.
+   *
+   * Written out per character rather than once, because the escape is the P0
+   * here and `$icontains` reaches it through a NEW parameter of `pushLike`
+   * (`fold`) that wraps both operands in `LOWER()`. A fold implemented as a
+   * second emitter — the obvious shape, and the one this parameter exists to
+   * avoid — would have re-derived the pattern without the `%`/`_`/`\` class,
+   * and an unescaped `%` matches every row.
+   */
+  it('$icontains escapes "%" — a "%" comparand must not match every row', async () => {
+    expect(await ids(driver, 'meta', { name: { $icontains: '%' } })).toEqual(['m1']);
+    expect(await ids(driver, 'meta', { name: { $icontains: '% OFF' } })).toEqual(['m1']);
+  });
+
+  it('$icontains escapes "_" — a literal underscore, not any single character', async () => {
+    expect(await ids(driver, 'meta', { name: { $icontains: '_' } })).toEqual(['m3']);
+    expect(await ids(driver, 'meta', { name: { $icontains: 'A_B' } })).toEqual(['m3']);
+  });
+
+  it('$icontains escapes "\\" — a literal backslash, not the escape character', async () => {
+    expect(await ids(driver, 'meta', { name: { $icontains: '\\' } })).toEqual(['m4']);
+    expect(await ids(driver, 'meta', { name: { $icontains: 'BACK\\SLASH' } })).toEqual(['m4']);
   });
 });
 
