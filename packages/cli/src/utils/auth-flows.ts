@@ -15,6 +15,15 @@
  * I/O so callers can persist the resulting token wherever they need to.
  * They DO write to stdout for the interactive device-flow UX; pass
  * `silent: true` to suppress all human-readable output (used by `--json`).
+ *
+ * ⚠ `silent: true` on its own is NOT a complete `--json` story, and #6730 is
+ * what that costs. Silence removes the human-readable verification URL and
+ * puts nothing in its place, so `os cloud login --json` reached stdout with a
+ * single well-formed document and never handed automation the URL at all —
+ * switching off the half of device flow that a script exists to use. A
+ * `--json` caller therefore passes `silent: true` **and**
+ * {@link BrowserFlowOptions.onDeviceCode}, which re-emits the same event in
+ * machine-readable form, before the user authorizes.
  */
 
 import { ObjectStackClient } from '@objectstack/client';
@@ -70,6 +79,27 @@ async function openBrowser(url: string): Promise<void> {
   });
 }
 
+/**
+ * RFC 8628 §3.2 device-authorization fields, spelled exactly as the server
+ * sends them.
+ *
+ * Handed to {@link BrowserFlowOptions.onDeviceCode} verbatim rather than
+ * re-derived by the caller, because for a `--json` caller these field names
+ * ARE the wire contract: `os cloud login --json` emits this object as its
+ * first NDJSON record (#6730), and it has to be field-identical to the record
+ * `os login --json` emits (#6531) — a consumer written against the documented
+ * stream must not have to special-case which of the two commands produced it.
+ * The camelCase conveniences beside it exist for human-facing UI, where the
+ * spelling is nobody's contract.
+ */
+export interface DeviceAuthorizationRecord {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete?: string;
+  expires_in?: number;
+}
+
 export interface BrowserFlowOptions {
   /** OAuth client id; defaults to `OS_CLI_CLIENT_ID` env or `objectstack-cli`. */
   clientId?: string;
@@ -77,12 +107,22 @@ export interface BrowserFlowOptions {
   noBrowser?: boolean;
   /** Suppress all human-readable stdout (callers using --json). */
   silent?: boolean;
-  /** Override the spinner / verification-URL printer for custom UI. */
+  /**
+   * Override the spinner / verification-URL printer for custom UI.
+   *
+   * Awaited: the `--json` caller writes an NDJSON record here, and
+   * {@link emitJson} only resolves once the stdout write has actually drained
+   * (a pipe buffers asynchronously — see `utils/format.ts`). Firing it and
+   * walking straight into the poll loop would leave that guarantee to luck on
+   * exactly the record automation needs first.
+   */
   onDeviceCode?: (info: {
     verificationUrl: string;
     userCode: string;
     expiresIn: number;
-  }) => void;
+    /** The server's own fields, for callers whose output shape is a contract. */
+    record: DeviceAuthorizationRecord;
+  }) => void | Promise<void>;
 }
 
 /**
@@ -121,7 +161,12 @@ export async function loginWithBrowser(
     verification_uri_complete || `${verification_uri}?user_code=${encodeURIComponent(user_code)}`;
 
   if (opts.onDeviceCode) {
-    opts.onDeviceCode({ verificationUrl, userCode: user_code, expiresIn: expires_in ?? 600 });
+    await opts.onDeviceCode({
+      verificationUrl,
+      userCode: user_code,
+      expiresIn: expires_in ?? 600,
+      record: { device_code, user_code, verification_uri, verification_uri_complete, expires_in },
+    });
   } else if (!silent) {
     console.log('  To authorize this CLI, visit:');
     console.log('');
