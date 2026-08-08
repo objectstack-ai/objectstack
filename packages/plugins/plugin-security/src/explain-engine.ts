@@ -19,9 +19,14 @@
  * the SEMANTIC impact of a grant change instead of a JSON diff.
  */
 
-import { isGrantActive, isGrantExpired, derivePosture as deriveAdminPosture } from '@objectstack/core';
+import {
+  isGrantActive,
+  isGrantExpired,
+  derivePosture as deriveAdminPosture,
+  resolveUserAuthzGrants,
+} from '@objectstack/core';
 import { matchesFilterCondition } from '@objectstack/formula';
-import { BUILTIN_IDENTITY_PLATFORM_ADMIN, ADMIN_FULL_ACCESS, ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
+import { BUILTIN_IDENTITY_PLATFORM_ADMIN, ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type {
   AuthzPosture,
@@ -75,17 +80,21 @@ function isAuthzPosture(v: unknown): v is AuthzPosture {
  *  2. **Reuse `ctx.posture` verbatim when present.** A principal resolved through
  *     the full `resolveAuthzContext` already carries the enforcement-derived
  *     rung; consuming it directly makes drift structurally impossible.
- *  3. **Fallback — re-derive from capability-grant evidence.** The explain API's
- *     `buildContextForUser` builds a context WITHOUT running the full
- *     `resolveAuthzContext`, so no `posture` is attached. We then derive from the
- *     SAME evidence `resolveAuthzContext` uses — NOT the previous loose
- *     permission-set-NAME match:
+ *  3. **Fallback — re-derive from capability-grant evidence.** Reached only by a
+ *     HAND-BUILT context (tests, an internal caller assembling `{ userId,
+ *     positions, permissions }` itself). Since #6352 the explain API's
+ *     `buildContextForUser` resolves through `resolveUserAuthzGrants` and
+ *     therefore carries the enforcement-derived `posture`, so it lands on (2) —
+ *     structurally, not by agreement. This branch derives from the SAME evidence
+ *     `resolveAuthzContext` uses — NOT the previous loose permission-set-NAME
+ *     match:
  *       - `PLATFORM_ADMIN` ← the **unscoped `admin_full_access` USER grant**
- *         (`hasPlatformAdminGrant`, computed by `buildContextForUser` byte-for-
- *         byte as `resolveAuthzContext` computes it), OR the `platform_admin`
- *         built-in position (which is itself only ever PROJECTED from that same
- *         grant — ADR-0068 D2). A merely-SCOPED `admin_full_access` grant (name
- *         present in `permissions`, not held unscoped) no longer over-labels.
+ *         (`hasPlatformAdminGrant`, which `buildContextForUser` now READS OFF the
+ *         resolver's own verdict rather than recomputing), OR the
+ *         `platform_admin` built-in position (which is itself only ever
+ *         PROJECTED from that same grant — ADR-0068 D2). A merely-SCOPED
+ *         `admin_full_access` grant (name present in `permissions`, not held
+ *         unscoped) no longer over-labels.
  *       - `TENANT_ADMIN` ← the `organization_admin` **capability** grant, exactly
  *         like enforcement (ADR-0095 D3). The better-auth `org_owner`/`org_admin`
  *         role positions are a provisioning source only and are no longer read
@@ -230,105 +239,136 @@ export interface ExplainInput {
   recordId?: string;
 }
 
+/** The ADR-0091 `valid_until` of a grant row, as the panel prints it. */
+function untilOfGrantRow(r: any): string | undefined {
+  const v = r?.valid_until ?? r?.validUntil;
+  return v == null || v === '' ? undefined : String(v);
+}
+
 /**
- * Reconstruct an evaluation context for an arbitrary user, mirroring the
- * runtime resolver's semantics (`@objectstack/core` resolveAuthzContext):
- * positions from `sys_user_position` (+ the implicit `everyone` anchor,
- * ADR-0090 D5/D9), direct grants from `sys_user_permission_set`. Used by the
- * explain API's `userId` parameter — the caller-facing authorization for
- * explaining OTHERS lives in the route/service wrapper, not here.
+ * [#6352 / ADR-0091 D2/D3] The explain-ONLY provenance pass: the two annotations
+ * the panel prints that the authorization resolver, correctly, throws away.
+ *
+ * This is presentation, not aggregation. It decides nothing about who is
+ * authorized — `resolveUserAuthzGrants` has already decided that, and this pass
+ * never feeds `positions` / `permissions` / the `platform_admin` derivation. It
+ * only re-reads the same rows to answer two questions the resolver's output
+ * cannot express, because the resolver's output is by construction the set of
+ * grants that DID resolve:
+ *
+ *  - **expired** — a row whose `valid_until` has passed, so the panel can say
+ *    "held until … — expired" instead of silently omitting a grant the admin
+ *    knows they granted. This is "why did access DISAPPEAR", and only a dropped
+ *    row can answer it.
+ *  - **delegated** — the `delegated_from` provenance of a row that DID resolve,
+ *    so a position can be attributed "via delegation from X, until Y".
+ *
+ * Both verdicts come from the SAME shared ADR-0091 predicate module the resolver
+ * uses (`isGrantActive` / `isGrantExpired`, `@objectstack/core`) — one
+ * implementation of the window rule, consulted twice, never re-derived here.
  */
-export async function buildContextForUser(ql: any, userId: string, nowMs: number = Date.now()): Promise<any> {
-  const positions: string[] = [];
-  const permissions: string[] = [];
-  // [ADR-0091 D2] Rows outside their validity window resolve to NOTHING (same
-  // predicate as resolveAuthzContext, fail-closed). Expired-but-present rows
-  // are collected separately so the principal layer can report the dedicated
-  // "held until … — expired" contributor state.
+async function collectGrantProvenance(
+  ql: any,
+  userId: string,
+  nowMs: number,
+): Promise<{
+  expiredGrants: Array<{ kind: 'position' | 'permission_set'; name: string; until?: string }>;
+  delegatedPositions: Array<{ name: string; from: string; until?: string }>;
+}> {
   const expiredGrants: Array<{ kind: 'position' | 'permission_set'; name: string; until?: string }> = [];
-  // [ADR-0091 D3] Delegation provenance: a position held via a `delegated_from`
-  // row is reported "via delegation from X, until Y" in the principal layer.
   const delegatedPositions: Array<{ name: string; from: string; until?: string }> = [];
-  const untilOf = (r: any): string | undefined => {
-    const v = r?.valid_until ?? r?.validUntil;
-    return v == null || v === '' ? undefined : String(v);
-  };
+
   try {
     const rows = await ql.find('sys_user_position', { where: { user_id: userId }, limit: 500, context: SYSTEM_CTX });
     for (const r of Array.isArray(rows) ? rows : []) {
       const p = String((r as any)?.position ?? '');
       if (!p) continue;
-      if (!isGrantActive(r, nowMs)) {
-        if (isGrantExpired(r, nowMs)) expiredGrants.push({ kind: 'position', name: p, until: untilOf(r) });
-        continue;
-      }
-      if (!positions.includes(p)) positions.push(p);
-      const from = (r as any)?.delegated_from;
-      if (from != null && from !== '') {
-        delegatedPositions.push({ name: p, from: String(from), until: untilOf(r) });
+      if (isGrantActive(r, nowMs)) {
+        const from = (r as any)?.delegated_from;
+        if (from != null && from !== '') {
+          delegatedPositions.push({ name: p, from: String(from), until: untilOfGrantRow(r) });
+        }
+      } else if (isGrantExpired(r, nowMs)) {
+        // Pending (future `valid_from`) rows are inactive but NOT expired — they
+        // are not reported, because nothing was lost yet.
+        expiredGrants.push({ kind: 'position', name: p, until: untilOfGrantRow(r) });
       }
     }
-  } catch { /* table unavailable → positions stay empty */ }
-  // [ADR-0095 D3 / ADR-0068 D2] platform_admin posture is DERIVED from an
-  // UNSCOPED (`organization_id == null`) `admin_full_access` USER grant — the
-  // single source of truth enforcement (`resolveAuthzContext.hasPlatformAdminGrant`)
-  // trusts. We compute it here with the IDENTICAL rule so the explain panel's
-  // posture cannot sit higher than enforcement's: a merely org-SCOPED
-  // admin_full_access grant must NOT confer platform_admin.
-  let hasPlatformAdminGrant = false;
+  } catch { /* table unavailable → no provenance to report */ }
+
   try {
-    const grants = await ql.find('sys_user_permission_set', { where: { user_id: userId }, limit: 500, context: SYSTEM_CTX });
-    const grantRows = (Array.isArray(grants) ? grants : []) as any[];
-    const activeRows = grantRows.filter((g) => isGrantActive(g, nowMs));
-    const expiredRows = grantRows.filter((g) => !isGrantActive(g, nowMs) && isGrantExpired(g, nowMs));
-    // permission-set-ids held via an UNSCOPED active user grant (org == null).
-    const unscopedActiveIds = new Set<string>(
-      activeRows
-        .filter((g) => ((g?.organization_id ?? g?.organizationId) ?? null) === null)
-        .map((g: any) => String(g?.permission_set_id ?? g?.permissionSetId ?? ''))
-        .filter(Boolean),
+    const rows = await ql.find('sys_user_permission_set', { where: { user_id: userId }, limit: 500, context: SYSTEM_CTX });
+    const expiredRows = (Array.isArray(rows) ? rows : []).filter(
+      (g: any) => !isGrantActive(g, nowMs) && isGrantExpired(g, nowMs),
     );
-    const ids = [...activeRows, ...expiredRows].map((g: any) => g?.permission_set_id).filter(Boolean);
+    const ids = expiredRows
+      .map((g: any) => g?.permission_set_id ?? g?.permissionSetId)
+      .filter(Boolean);
     if (ids.length > 0) {
       const sets = await ql.find('sys_permission_set', { where: { id: { $in: ids } }, limit: ids.length, context: SYSTEM_CTX });
       const nameById = new Map<string, string>();
       for (const s of Array.isArray(sets) ? sets : []) {
         if ((s as any)?.id && (s as any)?.name) nameById.set(String((s as any).id), String((s as any).name));
       }
-      for (const g of activeRows) {
-        const id = String(g?.permission_set_id ?? '');
-        const n = nameById.get(id);
-        if (n && !permissions.includes(n)) permissions.push(n);
-        // Same predicate as resolveAuthzContext: name is admin_full_access AND
-        // the granting row is an unscoped user grant.
-        if (n === ADMIN_FULL_ACCESS && unscopedActiveIds.has(id)) hasPlatformAdminGrant = true;
-      }
       for (const g of expiredRows) {
-        const n = nameById.get(String(g?.permission_set_id ?? ''));
-        if (n) expiredGrants.push({ kind: 'permission_set', name: n, until: untilOf(g) });
+        const n = nameById.get(String((g as any)?.permission_set_id ?? (g as any)?.permissionSetId ?? ''));
+        if (n) expiredGrants.push({ kind: 'permission_set', name: n, until: untilOfGrantRow(g) });
       }
     }
-  } catch { /* ignore */ }
-  // [ADR-0090 D5] Authenticated principals implicitly hold the everyone anchor.
-  if (!positions.includes('everyone')) positions.push('everyone');
-  // [ADR-0105 D2] The user's OWN org access set. Resolved here rather than
-  // inherited from the live principal: under the `group` posture this is the
-  // Layer 0 read reach, and a delegated read must be bounded by the DELEGATOR's
-  // memberships. Absent → empty → the group wall denies (fail-closed), which is
-  // the safe direction for an unresolvable delegator.
-  const accessible_org_ids: string[] = [];
-  try {
-    const rows = await ql.find('sys_member', { where: { user_id: userId }, limit: 200, context: SYSTEM_CTX });
-    for (const m of Array.isArray(rows) ? rows : []) {
-      if (!isGrantActive(m, nowMs)) continue;
-      const org = (m as any)?.organization_id ?? (m as any)?.organizationId;
-      if (typeof org === 'string' && org && !accessible_org_ids.includes(org)) {
-        accessible_org_ids.push(org);
-      }
-    }
-  } catch { /* table unavailable → empty set → fails closed under `group` */ }
+  } catch { /* table unavailable → no provenance to report */ }
 
-  return { userId, positions, permissions, accessible_org_ids, expiredGrants, delegatedPositions, hasPlatformAdminGrant };
+  return { expiredGrants, delegatedPositions };
+}
+
+/**
+ * Reconstruct an evaluation context for an arbitrary user, for the explain API's
+ * `userId` parameter. The caller-facing authorization for explaining OTHERS
+ * lives in the route/service wrapper (`explainAccessForCaller`), not here.
+ *
+ * [#6352] **The authorization aggregation is not implemented here.** It is
+ * `@objectstack/core`'s `resolveUserAuthzGrants` — the userId-driven core of
+ * `resolveAuthzContext`, i.e. the exact function every inbound request resolves
+ * through, called with the exact arguments (`ql`, `userId`, the ADR-0091 clock).
+ * So the positions (`sys_member` role projection + `sys_user_position` + the
+ * ADR-0090 D5 `everyone` anchor), the permission-set names (user-bound AND
+ * position-bound), the ADR-0091 validity windows, the ADR-0068 D2 `platform_admin`
+ * derivation, the ADR-0095 posture rung and the ADR-0105 D2 `accessible_org_ids`
+ * are all ONE implementation, not two kept in step by comment.
+ *
+ * This used to be a hand-written mirror whose only guarantee was two comments
+ * saying it matched. It did not: measured over identical rows it dropped the
+ * `sys_member` role positions, every position-bound permission set
+ * (`sys_position_permission_set`), the `ai_seat` synthesis, `systemPermissions`
+ * and the posture rung — so a user whose grants arrive through a POSITION was
+ * explained as holding nothing, and the panel reported a deny that enforcement
+ * did not make. That is the failure mode the panel exists to prevent, so the
+ * mirror is gone rather than pinned.
+ *
+ * What stays explain-side is presentation only, and additive: the expired /
+ * delegated row annotations ({@link collectGrantProvenance}), and
+ * `hasPlatformAdminGrant`, which is now READ OFF the resolver's own posture
+ * verdict instead of being recomputed from the grant rows.
+ */
+export async function buildContextForUser(ql: any, userId: string, nowMs: number = Date.now()): Promise<any> {
+  const grants = await resolveUserAuthzGrants(ql, userId, { nowMs });
+  const { expiredGrants, delegatedPositions } = await collectGrantProvenance(ql, userId, nowMs);
+  return {
+    userId,
+    positions: grants.positions,
+    permissions: grants.permissions,
+    systemPermissions: grants.systemPermissions,
+    org_user_ids: grants.org_user_ids,
+    accessible_org_ids: grants.accessible_org_ids,
+    ...(grants.tabPermissions ? { tabPermissions: grants.tabPermissions } : {}),
+    ...(grants.email != null ? { email: grants.email } : {}),
+    ...(grants.posture ? { posture: grants.posture } : {}),
+    expiredGrants,
+    delegatedPositions,
+    // [ADR-0068 D2] Not a second derivation: `derivePosture` returns
+    // PLATFORM_ADMIN if and only if the resolver saw the unscoped
+    // `admin_full_access` USER grant, so this reads that one verdict back.
+    hasPlatformAdminGrant: grants.posture === 'PLATFORM_ADMIN',
+  };
 }
 
 /**
@@ -358,19 +398,26 @@ export type DelegatorResolution =
  *    baseline for ANY `userId`, so a deleted delegator would otherwise still
  *    intersect against baseline-level access. The `sys_user` existence check is
  *    the only correct fail-closed point.
- *  - **Tenant-scoped bags are inherited from the live principal.** The agent and
- *    its delegator are, by construction, in the same org, so `tenantId` /
- *    `org_user_ids` carry over — delegator-side RLS that substitutes them then
- *    compiles faithfully instead of collapsing to the deny sentinel.
+ *  - **Tenant-scoped bags are inherited from the live principal, and the
+ *    inheritance still WINS.** The agent and its delegator are, by construction,
+ *    in the same org, so `tenantId` / `org_user_ids` carry over — delegator-side
+ *    RLS that substitutes them then compiles faithfully instead of collapsing to
+ *    the deny sentinel. Since #6352, `buildContextForUser` returns the resolver's
+ *    own `org_user_ids`, which without a known `tenantId` is the degenerate
+ *    `[delegatorId]` seed — the live principal's real org peer set is the better
+ *    answer, so the assignment below overwrites it exactly as before.
  *    `accessible_org_ids` (ADR-0105 D2) is the exception: it is resolved from
  *    the DELEGATOR's own memberships by `buildContextForUser`, never inherited,
  *    because inheriting it would widen a delegated read past the organizations
  *    the delegator actually belongs to.
- *  - **Person-specific membership bags (`rlsMembership`) are left unresolved**
- *    for the first cut. Absent → the RLS compiler's fail-closed substitution
- *    NARROWS the delegator's row set, never widens it — safe by construction.
- *    Full parity (team/territory bags) is a follow-up routing the delegator
- *    through the shared `resolveAuthzContext`.
+ *  - **Person-specific membership bags (`rlsMembership`) are left unresolved.**
+ *    Absent → the RLS compiler's fail-closed substitution NARROWS the
+ *    delegator's row set, never widens it — safe by construction. #6352 routed
+ *    the delegator through the shared resolver (`resolveUserAuthzGrants`), which
+ *    closed the positions / permission-set / posture half of this gap; the
+ *    team/territory bags are not part of that envelope on either side, so they
+ *    remain a follow-up for the `RlsMembershipResolver` contract rather than for
+ *    this function.
  *  - **One hop only (edge a).** The `onBehalfOf` shape carries a single delegator
  *    id with no nested link, so a transitive agent→service→user chain is not
  *    representable in one context. Intersecting against the immediate delegator
