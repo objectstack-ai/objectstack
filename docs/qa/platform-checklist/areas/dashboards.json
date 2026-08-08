@@ -279,7 +279,7 @@
       "title": "Every ChartTypeSchema member renders a real chart with the correct marks and series count",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -417,8 +417,19 @@
           "date": "2026-08-08",
           "change": "added the period-over-period compareTo: { kind: 'previousPeriod' } clause + scratch-draft probe + parse pin (dashboard-compareto.test.ts #5011)",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-08",
+          "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift now fails CI on this item directly",
+          "ref": "claude/platform-test-checklist-ocwugl"
         }
-      ]
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/ui/chart.zod.ts",
+        "export": "ChartTypeSchema",
+        "expect": 20
+      }
     },
     {
       "id": "dashboards.dataset-report-authoring",

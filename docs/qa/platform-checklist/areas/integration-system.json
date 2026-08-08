@@ -499,7 +499,7 @@
       "title": "Outbound webhooks materialize (spec object→object_name, isActive→active), fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, reject retired trigger kinds, and never clobber admin edits",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
@@ -600,8 +600,19 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-08",
+          "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift now fails CI on this item directly",
+          "ref": "claude/platform-test-checklist-ocwugl"
         }
-      ]
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/automation/webhook.zod.ts",
+        "export": "WebhookTriggerType",
+        "expect": 5
+      }
     },
     {
       "id": "integration-system.job-scheduled-run",

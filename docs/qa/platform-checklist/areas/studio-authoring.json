@@ -742,6 +742,288 @@
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: permission-matrix editor UX — field-filter + bulk apply scoped to exactly the visible fields (wrong scope writes wrong grants) and the Bulk column's anti-clip min-width, grounded in PermissionMatrixEditor.tsx + its fieldBulk/readonly tests; cross-refs the permission-matrix-edit-loop for the grant→access side", "ref": "claude/platform-test-checklist-ocwugl" }
       ]
+    },
+    {
+      "id": "studio-authoring.custom-page-render-and-blocks",
+      "title": "Declarative custom pages render their real block COMPOSITION (not just 'no error'): each declared block resolves its renderer and binds its data source, data-bound blocks show seeded rows (API cross-check), and a block that cannot bind degrades with a NAMED error, never a blank region",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase with seeded data present — GET /api/v1/data/showcase_project · /showcase_task · /showcase_account must each return rows, and the chart datasets showcase_task_metrics / showcase_project_metrics (examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts) must resolve (seed-data-thin guard: an empty seed makes every data-bound block look 'broken')",
+          "a scratch page name (e.g. qa_page_probe) authorable via the draft door PUT /api/v1/meta/page/qa_page_probe?mode=draft — used ONLY for the degradation probe, so no shipped showcase page is mutated"
+        ],
+        "knownGaps": [
+          "objectui e2e/live/showcase-smoke.spec.ts sweeps only a SUBSET of these pages (My Work, Project Workspace, Active Projects, Component Gallery are in its SURFACES list; Command Center 大屏 / showcase_command_center is NOT) and only asserts render-clean (no pageerror / no placeholder leak / non-empty <main>). This item DEEPENS that shallow pin: it asserts the block composition and the data binding, which the smoke does not — so it is NOT marked `automated`.",
+          "command-center's KPIs read via the console adapter's aggregate path; where the exact aggregate endpoint differs from a plain GET, cross-check the tile against the same filter applied to the data plane (count of the matching rows), not against a pixel."
+        ]
+      },
+      "steps": [
+        "boot the showcase, sign in admin@objectos.ai/admin123, and confirm the seed is not thin: GET /api/v1/data/showcase_project, /showcase_task, /showcase_account each return rows (record the counts — the data-bound clauses read them back)",
+        "Command Center (大屏): open /_console/apps/showcase_app/page/showcase_command_center (the objectui smoke drives the package-id form /apps/com.example.showcase/page/showcase_command_center); screenshot the full-bleed board FIRST (confirm render), THEN read the region DOM",
+        "object-metric KPIs (kind:'full', variant:'bare'): read the 6 hero tiles and cross-check them against the data plane — '活跃项目 Active' == count of showcase_project where status=active, '待办任务 Open' == count of showcase_task where status != done, '风险项目 At-Risk' == count of showcase_project where health=red (aggregate authored in command-center.page.ts)",
+        "object-chart (bar / donut / area) bound to datasets: confirm each chart drew a sized SVG (no recharts width(-1)/height(-1) collapse) with more than one bucket, and cross-check the '任务状态分布' bar buckets against the showcase_task_metrics dataset aggregation (dimensions ['status'], values ['task_count'])",
+        "object-grid (待审核列表 work queue) bound to showcase_task: the grid's rows and its columns (title/project/status/priority/due_date) match GET /api/v1/data/showcase_task",
+        "My Work: open /_console/apps/showcase_app/page/showcase_my_work — the personal object-grid is filtered `owner_id = {current_user_id}`; cross-check its rows against GET /api/v1/data/showcase_task filtered to the signed-in user's id, and confirm the page:card 'Leadership View' (visible: user.email == 'admin@objectos.ai') renders for admin",
+        "Project Workspace: open /_console/apps/showcase_app/page/showcase_project_workspace — the object-master-detail-form renders the showcase_project parent form AND the inline Tasks child (the block composes parent + children, not a bare error)",
+        "Active Projects (type:'list', interfaceConfig): open /_console/apps/showcase_app/page/showcase_active_projects — the always-on base filterBy (status != completed) hides completed rows, the default sort (budget desc) orders them, and the grid/kanban visualization switch + health/status userFilters render",
+        "degradation probe (scratch page, no shipped file touched): PUT /api/v1/meta/page/qa_page_probe?mode=draft a type:'app' page with (a) an object-grid whose objectName is a NONEXISTENT object and (b) a component whose `type` is a bogus string; publish; open /_console/apps/showcase_app/page/qa_page_probe and screenshot — each bad block must surface a NAMED error (SchemaRenderer 'Unknown component type: <t>' red panel / the SchemaErrorBoundary 'Component … failed to render' panel / the block's own empty-or-error state), never a silently blank region",
+        "capture the server log across the whole sweep (the render-clean and no-restart baseline)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every block TYPE declared on the shipped declarative pages resolves to a real renderer — no region renders the OBJUI-001 'Unknown component type' panel or the SchemaErrorBoundary failure panel on command-center / my-work / project-workspace / active-projects; the composition the page authored is the composition on screen",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms each page rendered, the region DOM contains each declared block's rendered output (a chart SVG, a grid table, a metric tile, the master-detail form) and NOT a role=alert error/'Unknown component type' panel",
+          "evidence": "per-page screenshot + region DOM read"
+        },
+        {
+          "clause": "a data-bound block shows SEEDED rows, cross-checked against the server not pixels — command-center's object-grid rows equal GET /api/v1/data/showcase_task, and the '活跃项目 Active' object-metric equals the active-project count from the data plane",
+          "oracle": "api",
+          "verify": "the grid's visible rows and the KPI numbers each match the same query/filter run against /api/v1/data/* — a tile or grid that renders but disagrees with the data plane is caught here",
+          "evidence": "the data reads paired with the tile/grid screenshot"
+        },
+        {
+          "clause": "object-chart buckets are data-real and multi-bucket: each chart drew a sized SVG (no width(-1)/height(-1) collapse) and its buckets match the dataset aggregation — not a single-datapoint smear that 'renders' but proves nothing",
+          "oracle": "api",
+          "verify": "the '任务状态分布' bar buckets equal the showcase_task_metrics aggregate (dimensions status, values task_count); the SVG bounding box has width>0 and height>0",
+          "evidence": "chart screenshot (sized SVG) + the dataset aggregate read"
+        },
+        {
+          "clause": "my-work's {current_user_id} filter is SERVER-honoured: the personal grid's rows equal GET /api/v1/data/showcase_task filtered to the signed-in owner, and a task owned by another user is ABSENT — the token resolved to the real actor, not to every row",
+          "oracle": "api",
+          "verify": "the grid rows are a subset of showcase_task and equal the owner_id={signed-in id} filtered set; a foreign-owned task id is not among them",
+          "evidence": "the filtered data read + the grid screenshot"
+        },
+        {
+          "clause": "the interface (list) page honours its interfaceConfig: active-projects hides completed rows (base filterBy status != completed), orders by budget desc, and exposes the grid/kanban switch plus the health/status user-filters — the page IS the view definition (ADR-0047), not a bare object dump",
+          "oracle": "screenshot",
+          "verify": "the rendered list shows no completed rows, biggest-budget first, with the visualization switch and userFilters controls present; cross-check the no-completed-rows claim against the data plane",
+          "evidence": "the list screenshot + a data read confirming completed rows exist but are filtered out"
+        },
+        {
+          "clause": "object-master-detail-form composes parent + child: project-workspace renders the showcase_project create form AND the inline Tasks child affordance (grid/add-button), not just the parent or an error",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms render, the DOM carries the parent field inputs and the child Tasks section (the master_detail relationship the block auto-derives from showcase_task.project)",
+          "evidence": "screenshot + the master-detail DOM read"
+        },
+        {
+          "clause": "a page block that cannot bind degrades with a NAMED error, never a blank — the scratch page's bogus-`type` block renders 'Unknown component type', and the missing-object object-grid renders an attributable error/empty-state (the SchemaErrorBoundary or the block's own message), so a broken binding is SEEN, not swallowed",
+          "oracle": "screenshot",
+          "verify": "the qa_page_probe render shows the named error for each bad block; a silently blank region for either would be the failure this clause exists for",
+          "evidence": "the scratch-page screenshot"
+        }
+      ],
+      "negative": [
+        "a data-bound region rendering EMPTY over seeded data with no error and no empty-state (silently swallowed) is a FAIL — the OBJUI-001 'Unknown component type' panel is the CORRECT behaviour for a bad block; a blank is the bug",
+        "a declared block silently ABSENT (dropped) while the page still 'renders clean' is a FAIL — render-clean (the smoke's bar) is necessary but not sufficient; the block must actually be composed",
+        "an object-chart 'rendering' as a zero-height or single-bucket smear over a multi-bucket seed is a FAIL (single-datapoint trap)"
+      ],
+      "variants": [
+        "layout container: flex (command-center) / grid (my-work, component-gallery)",
+        "structure: page:header / page:card (with a per-user `visible` gate)",
+        "content: element:text / element:divider",
+        "data-bound: object-metric (aggregate KPI, variant bare) / object-chart (dataset-bound bar/donut/area) / object-grid (object-bound list, {current_user_id} filter) / object-form (create form) / object-master-detail-form (parent + children)"
+      ],
+      "traps": ["hydration-race", "stale-console-bundle", "seed-data-thin", "single-datapoint", "automation-input"],
+      "source": [
+        "packages/spec/src/ui/page.zod.ts (PageComponentType enum — namespaced page:/record:/element: block types; PageComponentSchema.dataSource per-element binding; PageComponentSchema.type = union(enum, string) so objectui-registered custom blocks like object-metric/object-chart/object-grid/object-form/object-master-detail-form/flex/grid are valid)",
+        "examples/app-showcase/src/ui/pages/command-center.page.ts (object-metric bare KPIs + object-chart bar/donut/area on datasets + object-grid work queue), my-work.page.ts ({current_user_id} object-grid + page:card visible-gate), project-workspace.page.ts (object-master-detail-form), active-projects.page.ts (interfaceConfig list: filterBy/sort/appearance/userFilters/addRecord)",
+        "objectui: packages/components/src/renderers/layout/page.tsx (PageRenderer — region/template dispatch, full-bleed for width:'full' main)",
+        "objectui: packages/react/src/SchemaRenderer.tsx (the OBJUI-001 'Unknown component type' red panel + the SchemaErrorBoundary 'Component failed to render' panel — the NAMED-degradation contract; page.<var>/data/user expression scope)",
+        "objectui: e2e/live/showcase-smoke.spec.ts (the shallow render-clean sweep for my-work/project-workspace/active-projects — this item deepens it with block-composition + data-binding assertions)",
+        "examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts (showcase_task_metrics / showcase_project_metrics — the chart bindings)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: declarative custom pages render their real block composition and bind data (API cross-check, not pixels), with a scratch-page probe proving a bad binding degrades to a NAMED error not a blank — grounded in the four showcase declarative page sources, the PageComponentType enum, objectui PageRenderer + SchemaRenderer, and deepening the shallow showcase-smoke render-clean pin", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.page-variables-and-actions",
+      "title": "Page variables + page-level actions are runtime-live: variables initialize empty, an interactive writer updates one and dependent visibleWhen predicates re-evaluate WITHOUT reload, and a page action reads the live variable snapshot to POST resolved values that create a real record",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "seeded showcase_project rows (the element:record_picker on showcase_page_variables lists them)",
+          "the public web-to-lead endpoint POST /api/v1/forms/contact-us/submit and its showcase_inquiry sink (ADR-0056) reachable on the stock showcase boot — the contact-form submit action posts here"
+        ],
+        "knownGaps": [
+          "neither showcase_page_variables nor showcase_contact_form is in objectui e2e/live/showcase-smoke.spec.ts's SURFACES sweep — there is no automated render-clean pin for either, so this item is browser-driven end to end (not marked `automated`)"
+        ]
+      },
+      "steps": [
+        "open /_console/apps/showcase_app/page/showcase_page_variables and screenshot the INITIAL state: the empty-hint (element:text, visibleWhen \"page.selectedProjectId == ''\") is VISIBLE and the detail panel (divider/heading/body, visibleWhen \"page.selectedProjectId != ''\") is ABSENT — the variable initialized to its empty value",
+        "select a project in the element:record_picker (id: project_picker — the `source` of the selectedProjectId variable) with a ref-targeted selection (not a coordinate click); screenshot again: the empty-hint disappears and the detail panel appears LIVE, with NO page reload",
+        "read the DOM to confirm the toggle is real, not a repaint: the detail-panel nodes are present and the empty-hint absent once the picker wrote page.selectedProjectId",
+        "open /_console/apps/showcase_app/page/showcase_contact_form; type into the element:text_input id=field_email (native setter + input event); the ready_hint (element:text, visibleWhen \"page.inquiryEmail != ''\") must appear the instant a value is present",
+        "fill all four inputs (field_name/field_email/field_company/field_message — each the `source` of its string page variable), click the submit element:button (id: submit_inquiry), and capture the network request its `api` action issues to POST /api/v1/forms/contact-us/submit",
+        "assert the request BODY carries the RESOLVED variable values (name/email/company/message from the typed text), not the literal {{page.inquiryName}} … tokens — the PageVariableActionBridge resolved them from the live snapshot",
+        "cross-check the server effect: GET /api/v1/data/showcase_inquiry — a new row carrying the entered name/email/company/message",
+        "negative probe: reload showcase_page_variables without picking — the detail panel stays hidden (the variable re-initialized empty, it did not retain a stale selection)"
+      ],
+      "acceptance": [
+        {
+          "clause": "page variables initialize to their empty value and GATE dependent blocks on first render: page.selectedProjectId == '' so the empty-hint shows and the detail panel is withheld — the master/detail surface starts in its empty state, driven by the declared variable",
+          "oracle": "screenshot",
+          "verify": "the first render of showcase_page_variables shows the empty-hint and no detail panel",
+          "evidence": "the initial-state screenshot"
+        },
+        {
+          "clause": "an interactive writer updates its variable and dependent visibleWhen predicates re-evaluate LIVE: selecting in project_picker (the `source` of selectedProjectId) reveals the detail panel and hides the hint with NO reload — the write re-runs the predicates immediately (ADR-0049 runtime-live variables)",
+          "oracle": "screenshot",
+          "verify": "before/after screenshots across a single selection: empty-hint→gone, detail panel→shown, same page load",
+          "evidence": "before/after screenshots"
+        },
+        {
+          "clause": "the DOM reflects the toggle, not just pixels: after a screenshot confirms render, the detail-panel nodes are present and the empty-hint absent once a value is written to page.selectedProjectId",
+          "oracle": "dom",
+          "verify": "the gated nodes' presence/absence in the DOM matches the variable state (page.<var> in the SchemaRenderer expression scope)",
+          "evidence": "the before/after DOM reads"
+        },
+        {
+          "clause": "contact-form's per-field variables bind live: typing into field_email flips the ready_hint visible (page.inquiryEmail != '') — one text input writing one page variable drives another component's visibility",
+          "oracle": "screenshot",
+          "verify": "the ready_hint appears the instant an email value is present in the input",
+          "evidence": "the ready-hint screenshot"
+        },
+        {
+          "clause": "the page-level action dispatches with RESOLVED variables: the submit button's `api` action POSTs /api/v1/forms/contact-us/submit with params resolved from the live page-variable snapshot (PageVariableActionBridge), NOT literal {{page.<var>}} strings",
+          "oracle": "network",
+          "verify": "the captured POST body's name/email/company/message equal the typed values; no field carries an unresolved '{{page.…}}' token",
+          "evidence": "the submit request body"
+        },
+        {
+          "clause": "the action's server effect is real: a new showcase_inquiry record carrying the entered fields exists after submit (ADR-0056 web-to-lead) — the page action moved data, it did not just toast",
+          "oracle": "api",
+          "verify": "GET /api/v1/data/showcase_inquiry returns a row with the submitted name/email/company/message",
+          "evidence": "the data read of the new inquiry"
+        }
+      ],
+      "negative": [
+        "a detail/ready block visible BEFORE any interaction (the variable was not initialized empty) is a FAIL — the empty state is the declared initial condition",
+        "a variable write that needs a page RELOAD to take effect is a FAIL — the whole point of runtime-live variables (ADR-0049) is immediate re-evaluation of dependent predicates",
+        "a submit that POSTs the literal {{page.inquiryName}} token (the bridge did not resolve the snapshot) is a FAIL",
+        "a 2xx submit that creates NO showcase_inquiry (the action reported success but moved nothing) is a FAIL — server truth is the oracle, not the toast"
+      ],
+      "variants": [
+        "writer: element:record_picker → record_id variable (page-variables)",
+        "writer: element:text_input → string variable (contact-form)",
+        "reader: component visibleWhen `page.<var>` (empty-state / detail gating)",
+        "reader: page action params `{{page.<var>}}` (submit POST body)"
+      ],
+      "traps": ["hydration-race", "stale-console-bundle", "automation-input"],
+      "source": [
+        "packages/spec/src/ui/page.zod.ts (PageVariableSchema — `source` is the WRITER component id, read by predicates as page.<name>; PageSchema.variables runtime-live per ADR-0049; PageComponentSchema.visibleWhen binds record/current_user/page.<var>, ADR-0089)",
+        "examples/app-showcase/src/ui/pages/page-variables.page.ts (selectedProjectId ← project_picker; empty-hint vs detail gated on page.selectedProjectId), contact-form.page.ts (four string vars ← text_inputs; submit `api` action posting {{page.<var>}} to /api/v1/forms/contact-us/submit → showcase_inquiry)",
+        "objectui: packages/components/src/renderers/layout/page.tsx (PageVariablesProvider mounts the declared variables; PageVariableActionBridge publishes the live snapshot into the action runtime so a submit resolves {{page.<var>}})",
+        "objectui: packages/react/src/SchemaRenderer.tsx (page.<var> threaded into the ExpressionEvaluator scope; visibleWhen/visibility re-evaluated on variable change)",
+        "ADR-0056 (public web-to-lead form → showcase_inquiry), ADR-0089 (visibleWhen canonical predicate)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: the end-to-end page-variable loop (initialize empty → interactive writer updates → dependent visibleWhen re-evaluates live, no reload) and the page-level `api` action resolving {{page.<var>}} from the live snapshot to create a real showcase_inquiry — grounded in PageVariableSchema, the page-variables + contact-form sources, and objectui's PageVariablesProvider/PageVariableActionBridge", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "studio-authoring.custom-page-source-tiers",
+      "title": "Source-authored page tiers render by the RIGHT path: kind:'html' source is PARSED-never-executed (static, in-browser sdui-parser compile), kind:'react' source is EXECUTED behind its capability gate (live data + interactivity) — command-center-jsx / capability-map (html) vs crm-workbench (react)",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "seeded showcase_project rows (the react page's live KPI + <ListView> read them)",
+          "the react-pages capability ON — CAP_REACT_PAGES defaults ON; a boot with OS_PAGE_REACT=off flips it OFF (the both-sides gate check)"
+        ],
+        "knownGaps": [
+          "NO manual build step is needed to VIEW either tier in the running showcase (contra the task's guess): a kind:'html' page compiles IN-BROWSER via @object-ui/sdui-parser compile(source, manifest) at render, against a whitelist manifest built from the LIVE ComponentRegistry (packages/components/src/renderers/layout/page.tsx); a kind:'react' page is transpiled IN-BROWSER by a lazily-loaded Sucrase @object-ui/react-runtime chunk. The only build-shaped risk is the vendored /_console bundle being stale (stale-console-bundle) — a stale sdui-parser/react-runtime mis-compiles a page that is fine on a fresh build.",
+          "none of showcase_command_center_jsx / showcase_capability_map / showcase_crm_workbench is in objectui e2e/live/showcase-smoke.spec.ts's SURFACES sweep — there is no automated render-clean pin for the html/react tiers, so this item is browser-driven (not marked `automated`)."
+        ]
+      },
+      "steps": [
+        "capability-map (kind:'html', isDefault landing): open /_console/apps/showcase_app/page/showcase_capability_map; screenshot the six protocol-domain cards; confirm the compiled SchemaNode tree rendered (flex/div/a nodes with theme-token style objects), NOT the 'HTML page failed to compile' panel",
+        "command-center-jsx (kind:'html'): open /_console/apps/showcase_app/page/showcase_command_center_jsx; screenshot the KPI board (Open Tasks 128 / In Progress 47 / Completed 1,902 / Cycle Time 2.4d) and the weekly-throughput bars",
+        "prove the html tier is PARSED-NEVER-EXECUTED and STATIC: the KPI numbers are hand-authored sample copy — 128 does NOT equal GET /api/v1/data/showcase_task's count, and NO data query fires for those tiles (the page's own on-screen copy says the numbers are static sample copy)",
+        "crm-workbench (kind:'react'): open /_console/apps/showcase_app/page/showcase_crm_workbench; screenshot the workbench — the KPI strip (Total / Active) + the real <ListView> and <ObjectForm> master/detail over showcase_project",
+        "prove the react tier is EXECUTED against LIVE data: the 'Total projects' KPI equals GET /api/v1/data/showcase_project's count (the page computes it via useAdapter().find('showcase_project'), reading the QueryResult .data envelope), and a showcase_project find query fires on the network — the number is computed at render, not authored",
+        "prove react interactivity (executed handlers, not a parsed tree): click a ListView row → the ObjectForm binds THAT record (React useState); click '+ New project' → the form switches to create mode",
+        "both-sides gate: on a boot with OS_PAGE_REACT=off, re-open crm-workbench — it must render the NAMED 'React pages are disabled on this deployment' notice (CapabilityDisabledNotice), never a blank and never an executed page; the html pages still render (html is not gated). If the env toggle cannot be flipped on the stock fixture, record this clause blocked(environment)",
+        "degradation: confirm an html compile error would surface the 'HTML page failed to compile (N)' panel with the diagnostic messages, and a react runtime error the 'React page error' fallback — neither a blank page (drive via the scratch draft door if a shipped page cannot be made to fault)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the renderer dispatches on `kind`: an html page renders the sdui-parser-COMPILED tree (parsed, never executed) via SchemaRenderer, and a react page renders through ReactKindPage — evidenced by the distinct surfaces each produces (html = static composed board; react = live data + interactivity)",
+          "oracle": "screenshot",
+          "verify": "capability-map/command-center-jsx render composed static boards; crm-workbench renders a data-driven interactive workbench — the two paths produce their characteristic surfaces",
+          "evidence": "the three page screenshots"
+        },
+        {
+          "clause": "the html tier is STATIC and UNEXECUTED: command-center-jsx's KPI numbers are hand-authored sample copy — they do NOT equal the data-plane counts, and NO data query fires for them (parse-never-execute, ADR-0080)",
+          "oracle": "api",
+          "verify": "the on-screen KPI (e.g. Open Tasks 128) differs from GET /api/v1/data/showcase_task's count, and the network shows no find/aggregate request backing those tiles",
+          "evidence": "the KPI screenshot + the data read (mismatch is the point) + the network trace showing no data query"
+        },
+        {
+          "clause": "the react tier is EXECUTED against live data: crm-workbench's 'Total projects' KPI equals GET /api/v1/data/showcase_project's count and a showcase_project find query fires — the value is computed at render by author JS (useAdapter().find), not authored (ADR-0081)",
+          "oracle": "api",
+          "verify": "the KPI number equals the live showcase_project count, and the network carries the find query the page's useEffect issues",
+          "evidence": "the KPI screenshot + the data read (match) + the find-query network trace"
+        },
+        {
+          "clause": "react HANDLERS run (execution, not a parsed tree): selecting a ListView row binds the ObjectForm to that record and '+ New project' switches the form to create mode — React state transitions the html tier could never express",
+          "oracle": "dom",
+          "verify": "after a screenshot confirms render, a ref-targeted row click updates the form to the selected record; the New button switches modes",
+          "evidence": "before/after screenshots + the form DOM read"
+        },
+        {
+          "clause": "the react capability gate is real and BOTH-sided: with CAP_REACT_PAGES on, crm-workbench executes; with OS_PAGE_REACT=off it renders the NAMED 'React pages are disabled on this deployment' notice — never a blank, never a bypassed execution (the html pages are unaffected)",
+          "oracle": "screenshot",
+          "verify": "the on-state executes; the off-state shows CapabilityDisabledNotice with the OS_PAGE_REACT=off text; record blocked(environment) if the toggle cannot be exercised on the stock fixture",
+          "evidence": "the on-state + off-state screenshots (or the blocked-environment note)"
+        },
+        {
+          "clause": "compile/runtime failures degrade NAMED, never blank: an html compile error is the 'HTML page failed to compile (N)' panel listing the diagnostics; a react error is the 'React page error' fallback carrying the message",
+          "oracle": "screenshot",
+          "verify": "a faulted html source shows the compile-error panel; a faulted react source shows the error fallback — a blank page for either is the failure this clause exists for",
+          "evidence": "the error-panel screenshot(s)"
+        }
+      ],
+      "negative": [
+        "an html page whose source is EXECUTED (author JS runs) rather than parsed is a security FAIL — ADR-0080's html tier is parse-never-execute; execution is the react tier's gated privilege only",
+        "a react page that executes with OS_PAGE_REACT=off (the gate bypassed) is a FAIL — the capability is the whole safety boundary for the trusted-execution tier",
+        "a react KPI stuck at 0 while the <ListView> beside it shows rows is the crm-workbench QueryResult-envelope bug regressed (reading .records instead of .data) — FAIL, cross-checked against the live count",
+        "a compile or runtime error swallowed to a blank page (no named panel) is a FAIL — the author must SEE why the page did not render"
+      ],
+      "variants": [
+        "html tier: command-center-jsx (composition of registered components with structured props) + capability-map (domain cards + out-links, isDefault landing)",
+        "react tier: crm-workbench (useAdapter + <ListView>/<ObjectForm> + React useState master/detail)"
+      ],
+      "traps": ["stale-console-bundle", "hydration-race", "single-datapoint", "automation-input"],
+      "source": [
+        "packages/spec/src/ui/page.zod.ts (PageSchema.kind = full|slotted|html|react|jsx; html = constrained JSX/HTML+Tailwind compiled by @objectstack/sdui-parser 'parse, never execute' ADR-0080; react = real React executed at render, gated by a host capability defaulting ON, disabled via OS_PAGE_REACT=off, ADR-0081; the superRefine that fails an html/react page with no `source`)",
+        "objectui: packages/components/src/renderers/layout/page.tsx (PageRenderer kind dispatch — compile(src, getJsxManifest()) + SchemaRenderer for html with the 'HTML page failed to compile' panel; ReactKindPage for react; the manifest whitelist is built from the LIVE registry's known types)",
+        "objectui: packages/components/src/renderers/layout/react-page.tsx (ReactKindPage — CAP_REACT_PAGES gate + CapabilityDisabledNotice for OS_PAGE_REACT=off; lazy Sucrase @object-ui/react-runtime transpile; useAdapter/ListView/ObjectForm scope; the 'React page error' fallback)",
+        "objectui: packages/sdui-parser/src/index.ts (compile(source, manifest) — the pure in-browser parse used at render, no build step)",
+        "examples/app-showcase/src/ui/pages/command-center-jsx.page.ts (kind:'html', static sample KPIs — 'parsed, never executed'), capability-map.page.ts (kind:'html' landing), crm-workbench.page.ts (kind:'react' — useAdapter().find reads the .data envelope, note the #… KPIs-stuck-at-0 fix)",
+        "objectui: content/docs/guide/react-pages.md (react tier: transpiled + evaluated in-app, react-pages capability, OS_PAGE_REACT=off disable)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-08", "change": "new item: the html (parse-never-execute, in-browser sdui-parser compile, static) vs react (executed at render, capability-gated, live data + interactivity) source-page tiers — the objectui renderer-path split grounded in PageRenderer's kind dispatch + react-page.tsx's gate, distinguishing command-center-jsx/capability-map (html) from crm-workbench (react); records the honest build-step finding (none needed to view — in-browser compile/transpile) as a knownGap", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
     }
   ]
 }

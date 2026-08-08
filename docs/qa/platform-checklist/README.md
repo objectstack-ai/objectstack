@@ -108,14 +108,64 @@ demonstrated-or-waived ratchet, applied to testing instead of demonstration.
 
 Enumerable surfaces *inside* a capability (49 field types, 20 chart types, flow node
 types, query operators, decision actions, …) are covered by `variants` matrices on the
-items themselves, each derived from the spec's own Zod enums with the source cited —
-when the spec grows a variant, the matrix item's next revision must grow with it (and
-the showcase `coverage.test.ts` ratchet will already be failing if the variant isn't
-demonstrable at all).
+items themselves, each derived from the spec's own Zod enums with the source cited.
+
+**Variants stay fresh automatically.** A matrix item may pin the spec enum it was
+authored against with an `enumSource` field:
+
+```jsonc
+"enumSource": {
+  "file": "packages/spec/src/data/field.zod.ts",  // repo-root-relative spec source
+  "export": "FieldType",                           // the exported z.enum(...) const
+  "expect": 49                                     // member count the variants match
+}
+```
+
+The validator extracts the enum's *current* member count from that source (comment-
+stripped, deduped) and fails when it no longer equals `expect`. So when the platform
+grows a 50th field type or a 21st chart type, this item's next CI run goes red with a
+precise instruction: revise the variants matrix, bump the item revision, set `expect`
+to the new count. This closes the automation gap the coverage ratchet alone left — the
+kind-level ratchet catches a *new metadata kind*, `enumSource` catches a *new value in
+an existing kind's enum* — so "spec grew a variant" becomes a checklist-blocking event
+instead of a silent drift the showcase `coverage.test.ts` only catches indirectly.
+Items currently pinned: field types, chart types, action locations, webhook triggers,
+flow node types. Pin more as matrices are added.
 
 A waiver is a debt marker, not an exemption: it names what fixture or surface is
 missing, so paying it down is a matter of adding the fixture and flipping the entry to
 `items`.
+
+### Variants freshness — spec enum drift fails CI on the item itself
+
+Matrix items may pin the spec enum their `variants` were authored against:
+
+```jsonc
+"enumSource": { "file": "packages/spec/src/data/field.zod.ts", "export": "FieldType", "expect": 49 }
+```
+
+The validator extracts the enum's CURRENT member count from the spec source at check
+time (comment-stripped, deduped) and fails with `VARIANTS STALE` when it no longer
+equals `expect` — so a PR that adds a 50th field type cannot merge without revising the
+matrix (or consciously bumping `expect` with a revision). This closes the loop the
+kind-level ratchet leaves open: new *kinds* are caught by the liveness-derived universe,
+new *members of an existing kind* are caught by these pins. Enums declared inline
+(anonymous `z.enum` inside an object literal) cannot be pinned by export name — those
+matrices still rely on the showcase `coverage.test.ts` demonstrability gate.
+
+### How the checklist keeps itself current (the automation model)
+
+1. **New capability kind** → a `packages/spec/liveness/<kind>.json` ledger appears →
+   coverage ratchet fails CI until the kind is mapped or waived. Automatic.
+2. **New member of an enumerable surface** → `enumSource` pin fails CI on the matrix
+   item. Automatic for pinned enums.
+3. **New feature inside an existing kind** → process: the feature PR lands a `since:
+   v<current>` item (same discipline as changesets); the release sweep filter catches
+   stragglers.
+4. **Periodic re-sweep** → [SWEEP.md](./SWEEP.md) is a runbook any AI session can
+   execute on request ("run a coverage sweep") — five independent gap-hunt angles,
+   dedupe, author, validate. The 2026-08 sweep it encodes found 3 stale waivers and
+   ~55 missing items; re-running it is how drift that slips past 1–3 gets caught.
 
 ## How a release sweep works
 

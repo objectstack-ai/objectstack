@@ -143,6 +143,68 @@ for (const file of files) {
     if (item.automated !== undefined && item.automated !== null) {
       if (typeof item.automated.ref !== 'string' || !item.automated.ref) where('"automated.ref" must point at the pinning test');
     }
+
+    if (item.enumSource !== undefined) {
+      const es = item.enumSource;
+      if (typeof es?.file !== 'string' || typeof es?.export !== 'string' || !Number.isInteger(es?.expect)) {
+        where('"enumSource" needs { file, export, expect } — the spec enum this item\'s variants matrix was authored against');
+      }
+    }
+  }
+}
+
+// ── Variants-freshness ratchet ──────────────────────────────────────────────
+// A matrix item's `variants` list is hand-authored against a spec value enum
+// (49 field types, 20 chart types, …). When the spec grows or shrinks that
+// enum, nothing used to force the matrix to follow — the drift was only caught
+// indirectly by the showcase coverage.test.ts demonstrability gate. `enumSource`
+// pins the enum here: {file, export, expect}. This check extracts the CURRENT
+// member count from the spec source (comment-stripped, deduped — enum blocks
+// carry prose comments quoting member names) and fails when it no longer equals
+// `expect`. Fixing the failure = revising the item's variants for the new
+// member(s), bumping the item revision, and updating `expect` — exactly the
+// "platform grew a capability, the checklist must follow" moment this gate
+// exists to force. Extractor rot is loud, not fail-open: a missing file or
+// export is an error, never a silent skip.
+function extractEnumMembers(absFile, exportName) {
+  const src = readFileSync(absFile, 'utf8');
+  const decl = src.match(new RegExp(`(?:export\\s+)?const\\s+${exportName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b[^=]*=`));
+  if (!decl) return null;
+  const start = src.indexOf('[', decl.index + decl[0].length);
+  if (start === -1) return null;
+  let depth = 0;
+  for (let j = start; j < src.length; j++) {
+    if (src[j] === '[') depth++;
+    else if (src[j] === ']') {
+      depth--;
+      if (depth === 0) {
+        const seg = src.slice(start, j + 1)
+          .replace(/\/\/[^\n]*/g, '')
+          .replace(/\/\*[\s\S]*?\*\//g, '');
+        const seen = new Set();
+        for (const m of seg.matchAll(/'([a-zA-Z0-9_\-]+)'/g)) seen.add(m[1]);
+        return [...seen];
+      }
+    }
+  }
+  return null;
+}
+
+for (const { file, item } of allItems) {
+  const es = item.enumSource;
+  if (!es || typeof es.file !== 'string' || typeof es.export !== 'string') continue;
+  const abs = join(ROOT, es.file);
+  if (!existsSync(abs)) {
+    err(file, item.id, `enumSource.file not found: ${es.file} — the pinned spec source moved; re-point the pin`);
+    continue;
+  }
+  const members = extractEnumMembers(abs, es.export);
+  if (members === null) {
+    err(file, item.id, `enumSource export "${es.export}" not found in ${es.file} — renamed or reshaped; re-point the pin (extractor must stay loud, never fail-open)`);
+    continue;
+  }
+  if (members.length !== es.expect) {
+    err(file, item.id, `VARIANTS STALE — ${es.export} in ${es.file} now has ${members.length} members but this item's variants were authored against ${es.expect}. The platform grew/shrank this surface: revise the variants matrix, bump the item revision, and set enumSource.expect to ${members.length}.`);
   }
 }
 

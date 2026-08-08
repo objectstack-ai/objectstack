@@ -11,10 +11,14 @@
       "revision": 2,
       "priority": "P1",
       "surface": "mixed",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
-        "requires": ["showcase_batch_reminders (examples/app-showcase/src/automation/flows/index.ts BatchRemindersFlow) — an autolaunched loop flow with a `tasks` list input, runnable on demand via the trigger route"]
+        "requires": [
+          "showcase_batch_reminders (examples/app-showcase/src/automation/flows/index.ts BatchRemindersFlow) — an autolaunched loop flow with a `tasks` list input, runnable on demand via the trigger route"
+        ]
       },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
@@ -60,7 +64,10 @@
       "negative": [
         "a flat rendering in which all steps show success is a FAIL of the nesting clause — every step passing is exactly what makes the missing tree easy to tick past; the developer Flow Runs page renders steps flat and must never be cited as this item's oracle"
       ],
-      "traps": ["wrong-panel", "hydration-race"],
+      "traps": [
+        "wrong-panel",
+        "hydration-race"
+      ],
       "source": [
         "#3358 §2 — 'the developer Flow Runs page renders steps flat; looking there alone reads as a miss'",
         "packages/spec/src/automation/execution.zod.ts (ExecutionStepLogSchema parentNodeId/iteration/regionKind)",
@@ -68,8 +75,18 @@
         "examples/app-showcase/src/automation/flows/index.ts (BatchRemindersFlow)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358, encoding its wrong-panel lesson as a trap", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358, encoding its wrong-panel lesson as a trap",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -80,11 +97,17 @@
       "revision": 2,
       "priority": "P2",
       "surface": "mixed",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
-        "requires": ["showcase_task_due_reminder (type schedule, start config.timeRelative {object: showcase_task, dateField: due_date, offsetDays: [3,1], filter: {status: {$ne: 'done'}}}, runAs system)"],
-        "knownGaps": ["the stock sweep cadence is the timeRelative default — daily 08:00 UTC — so an in-session fire needs either a cadence override (config.schedule cron/interval on a writable copy of the flow) or a manually provoked sweep; the run record must state which method was used"]
+        "requires": [
+          "showcase_task_due_reminder (type schedule, start config.timeRelative {object: showcase_task, dateField: due_date, offsetDays: [3,1], filter: {status: {$ne: 'done'}}}, runAs system)"
+        ],
+        "knownGaps": [
+          "the stock sweep cadence is the timeRelative default — daily 08:00 UTC — so an in-session fire needs either a cadence override (config.schedule cron/interval on a writable copy of the flow) or a manually provoked sweep; the run record must state which method was used"
+        ]
       },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
@@ -133,7 +156,10 @@
         "a sweep that also fires for the filter-excluded or out-of-window record is a FAIL even though the matching record fired correctly",
         "a both-windowing-modes flow accepted silently is a FAIL — the schema declares exactly one mode"
       ],
-      "traps": ["seed-data-thin", "stale-dist"],
+      "traps": [
+        "seed-data-thin",
+        "stale-dist"
+      ],
       "source": [
         "#3358 §2",
         "packages/spec/src/automation/time-relative-trigger.zod.ts",
@@ -141,8 +167,18 @@
         "packages/triggers/trigger-schedule/src/time-relative-trigger.ts"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -153,11 +189,17 @@
       "revision": 2,
       "priority": "P1",
       "surface": "mixed",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
-        "requires": ["a parent with several filtered roll-ups in different filter shapes (showcase_expense_report: equality / boolean / operator / unfiltered)"],
-        "knownGaps": ["the visual filter-editor half needs a summary field in a WRITABLE package — the showcase ships read-only, so Studio editing is not reachable on stock fixtures (#3358)"]
+        "requires": [
+          "a parent with several filtered roll-ups in different filter shapes (showcase_expense_report: equality / boolean / operator / unfiltered)"
+        ],
+        "knownGaps": [
+          "the visual filter-editor half needs a summary field in a WRITABLE package — the showcase ships read-only, so Studio editing is not reachable on stock fixtures (#3358)"
+        ]
       },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
@@ -203,15 +245,30 @@
       "negative": [
         "an untouched-filter roll-up that moves on an edit outside its filter (e.g. rejected_count changing on the billable flip) is a FAIL even if every touched value is right"
       ],
-      "blocked": { "by": "fixture", "ref": "#3358 (editor half needs a writable-package summary field fixture)" },
-      "traps": ["seed-data-thin"],
+      "blocked": {
+        "by": "fixture",
+        "ref": "#3358 (editor half needs a writable-package summary field fixture)"
+      },
+      "traps": [
+        "seed-data-thin"
+      ],
       "source": [
         "#3358 §2 (recompute half proven; editor half explicitly left unticked)",
         "examples/app-showcase/src/data/objects/expense-report.object.ts (the six roll-up shapes and their filters)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; clause 1 runnable today, clause 2 carries the fixture blocker", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial import from #3358; clause 1 runnable today, clause 2 carries the fixture blocker",
+          "ref": "#3358"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-07",
+          "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -219,10 +276,12 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -233,10 +292,27 @@
         ]
       },
       "variants": [
-        "start", "end", "decision", "assignment", "loop",
-        "create_record", "update_record", "delete_record", "get_record",
-        "http", "notify", "script", "screen", "wait", "subflow", "map",
-        "connector_action", "parallel", "try_catch", "approval", "approval_revise"
+        "start",
+        "end",
+        "decision",
+        "assignment",
+        "loop",
+        "create_record",
+        "update_record",
+        "delete_record",
+        "get_record",
+        "http",
+        "notify",
+        "script",
+        "screen",
+        "wait",
+        "subflow",
+        "map",
+        "connector_action",
+        "parallel",
+        "try_catch",
+        "approval",
+        "approval_revise"
       ],
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
@@ -284,8 +360,15 @@
       "negative": [
         "registering a flow with an unregistered node type (e.g. type 'bogus_node') must be REFUSED at registerFlow / POST /api/v1/automation — the type is validated against the live action registry (ADR-0018), and silent acceptance of an inert node is the #1887 failure shape"
       ],
-      "traps": ["wrong-panel", "seed-data-thin", "automation-input"],
-      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/flow-node.dogfood.test.ts" },
+      "traps": [
+        "wrong-panel",
+        "seed-data-thin",
+        "automation-input"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "packages/qa/dogfood/test/flow-node.dogfood.test.ts"
+      },
       "source": [
         "packages/spec/src/automation/flow.zod.ts (FlowNodeAction — the built-in seed set; type validated at registerFlow, not by a closed enum)",
         "packages/spec/src/automation/control-flow.zod.ts (LOOP_NODE_TYPE / PARALLEL_NODE_TYPE / TRY_CATCH_NODE_TYPE, ADR-0031)",
@@ -295,8 +378,24 @@
         "packages/runtime/src/route-ledger.ts (GET /automation/actions, POST /automation/:name/trigger, GET /automation/:name/runs)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — node-type matrix derived from FlowNodeAction + ADR-0031 containers + plugin-approvals registry types, mapped onto the seeded showcase flows", "ref": "claude/platform-test-checklist-ocwugl" }
-      ]
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — node-type matrix derived from FlowNodeAction + ADR-0031 containers + plugin-approvals registry types, mapped onto the seeded showcase flows",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-08",
+          "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift now fails CI on this item directly",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/automation/flow.zod.ts",
+        "export": "FlowNodeAction",
+        "expect": 20
+      }
     },
     {
       "id": "automation.trigger-type-matrix",
@@ -306,14 +405,23 @@
       "revision": 1,
       "priority": "P1",
       "surface": "mixed",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "one seeded flow per trigger kind: record_change=showcase_urgent_task_alert (record-after-write, the only type:'record_change' flow) · autolaunched=showcase_batch_reminders (trigger route) · schedule=showcase_scheduled_digest (60s interval) · screen=showcase_reassign_wizard (Tasks row action showcase_bulk_reassign) · api=showcase_inbound_task_webhook (HMAC intake hook) · time_relative=showcase_task_due_reminder (schedule flow hosting config.timeRelative)"
         ]
       },
-      "variants": ["record_change", "autolaunched", "schedule", "screen", "api", "time_relative"],
+      "variants": [
+        "record_change",
+        "autolaunched",
+        "schedule",
+        "screen",
+        "api",
+        "time_relative"
+      ],
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
         "record_change (create leg): POST /api/v1/data/showcase_task with priority='urgent' — showcase_urgent_task_alert fires via record-after-write with previous == null (#3427)",
@@ -367,8 +475,14 @@
         "anonymous POST /api/v1/automation/:name/trigger must be denied (401) with NO run row created — a 2xx or a run row is a FAIL (pinned by packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts)",
         "an intake POST with a wrong or missing HMAC signature must be refused (not 202) and create no task — a silent 202 on a bad signature is a FAIL"
       ],
-      "traps": ["seed-data-thin", "dispatcher-vs-hono-route"],
-      "automated": { "kind": "test", "ref": "packages/qa/dogfood/test/flow-trigger-conformance.test.ts" },
+      "traps": [
+        "seed-data-thin",
+        "dispatcher-vs-hono-route"
+      ],
+      "automated": {
+        "kind": "test",
+        "ref": "packages/qa/dogfood/test/flow-trigger-conformance.test.ts"
+      },
       "source": [
         "packages/spec/src/automation/flow.zod.ts (Flow.type enum: autolaunched|record_change|schedule|screen|api)",
         "packages/qa/dogfood/test/flow-trigger-conformance.ledger.ts (one enforced row per type, each with its runtime + proof)",
@@ -377,7 +491,12 @@
         "packages/spec/src/automation/execution.zod.ts (ExecutionLogSchema.trigger)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — trigger matrix derived from the Flow.type enum and its ADR-0060 D5 conformance ledger; time_relative added as the declarative sweep the schedule runtime hosts", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — trigger matrix derived from the Flow.type enum and its ADR-0060 D5 conformance ledger; time_relative added as the declarative sweep the schedule runtime hosts",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -388,7 +507,9 @@
       "revision": 1,
       "priority": "P1",
       "surface": "mixed",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -448,7 +569,10 @@
         "an unhandled node failure that leaves its run status=completed, or leaves the run-level error empty, is a FAIL — a dead outbound call reporting success is the inert-automation failure shape (#1887)",
         "a catch region that runs when the try did NOT fail is a FAIL of the container semantics — check the catch steps are absent from a successful run"
       ],
-      "traps": ["wrong-panel", "single-datapoint"],
+      "traps": [
+        "wrong-panel",
+        "single-datapoint"
+      ],
       "source": [
         "examples/app-showcase/src/automation/flows/index.ts (ResilientSyncFlow, ADR-0031 try/catch/retry; canonical retry keys #4661)",
         "packages/spec/src/automation/control-flow.zod.ts (TryCatchConfigSchema)",
@@ -457,7 +581,12 @@
         "packages/runtime/src/route-ledger.ts (POST /automation — automation.create)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — splits handled (try_catch) vs unhandled failure into one contrast item with API + panel + log oracles", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — splits handled (try_catch) vs unhandled failure into one contrast item with API + panel + log oracles",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -468,10 +597,14 @@
       "revision": 2,
       "priority": "P1",
       "surface": "browser",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
-        "requires": ["the Tasks list row action showcase_bulk_reassign wired to showcase_reassign_wizard (type screen, runAs user; screen node 'collect' with required field new_assignee; downstream update_record)"]
+        "requires": [
+          "the Tasks list row action showcase_bulk_reassign wired to showcase_reassign_wizard (type screen, runAs user; screen node 'collect' with required field new_assignee; downstream update_record)"
+        ]
       },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin; open /apps/showcase_app/showcase_task",
@@ -534,8 +667,14 @@
         "a resume with the required new_assignee absent that answers 2xx or completes the run is a FAIL — the screen contract's required flag must be enforced server-side, not only by the dialog",
         "a cancel that leaves the run status=cancelled/completed, deletes the paused row, or silently fires the downstream update_record is a FAIL — dismissing the dialog must not consume the durable suspension (the run must stay resumable); equally, a cancel that makes the run unresumable (a later valid resume 404s 'no suspended run') is a FAIL"
       ],
-      "traps": ["automation-input", "hydration-race"],
-      "automated": { "kind": "e2e", "ref": "objectui e2e/live/screen-flow.spec.ts" },
+      "traps": [
+        "automation-input",
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "objectui e2e/live/screen-flow.spec.ts"
+      },
       "source": [
         "objectui e2e/live/screen-flow.spec.ts (framework#3528 — the trigger → dialog → resume → refresh seam)",
         "objectui packages/app-shell/src/views/FlowRunner.tsx (onClose = dismiss without POSTing resume; the durable suspension is untouched, so the paused run stays resumable)",
@@ -544,8 +683,18 @@
         "packages/runtime/src/route-ledger.ts (resume + getScreen routes)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — promotes the objectui live e2e's seam to a ledger item and adds the server-side required-input negative", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-08", "change": "added the FlowRunner cancel-mid-flow clause — dismissing the screen dialog parks the run (still paused, resumable) rather than orphaning/cancelling it; API run state is the oracle", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — promotes the objectui live e2e's seam to a ledger item and adds the server-side required-input negative",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-08",
+          "change": "added the FlowRunner cancel-mid-flow clause — dismissing the screen dialog parks the run (still paused, resumable) rather than orphaning/cancelling it; API run state is the oracle",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -556,7 +705,9 @@
       "revision": 1,
       "priority": "P1",
       "surface": "api",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -610,14 +761,25 @@
       "negative": [
         "a paused run that vanishes after restart — or a resume that reports success while the paused row still reads paused — is a FAIL against durability; both were real (#4420: every persist failed into an unread warn while the pause reported success)"
       ],
-      "traps": ["stale-dist", "seed-data-thin"],
-      "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/flow-durable-suspend.dogfood.test.ts" },
+      "traps": [
+        "stale-dist",
+        "seed-data-thin"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "packages/qa/dogfood/test/flow-durable-suspend.dogfood.test.ts"
+      },
       "source": [
         "packages/qa/dogfood/test/flow-durable-suspend.dogfood.test.ts (#4470 · #4420 · #4518)",
         "examples/app-showcase/src/automation/flows/index.ts (TaskFollowUpFlow, ProjectClosureFlow/ClosureSignoffSubflow — nested durable pause, linked-runs model)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — promotes the #4470 durable-suspend proof to a ledger item and adds the nested linked-run pair", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — promotes the #4470 durable-suspend proof to a ledger item and adds the nested linked-run pair",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -628,7 +790,9 @@
       "revision": 1,
       "priority": "P2",
       "surface": "mixed",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -639,7 +803,12 @@
           "slack DELIVERY is not assertable on stock fixtures — TaskCompletedSlackFlow points at a placeholder channel with no real bot token, so the slack variant is registry-enumeration only"
         ]
       },
-      "variants": ["rest (plugin)", "slack (plugin, enumeration only)", "showcase_status_api (declarative rest)", "showcase_mcp_tools (declarative MCP)"],
+      "variants": [
+        "rest (plugin)",
+        "slack (plugin, enumeration only)",
+        "showcase_status_api (declarative rest)",
+        "showcase_mcp_tools (declarative MCP)"
+      ],
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
         "GET /api/v1/automation/connectors — record the descriptor list and each connector's action list (the MCP instance's actions must come from its tools/list handshake)",
@@ -678,7 +847,10 @@
       "negative": [
         "a connector_action naming an unregistered connectorId must FAIL its step with a named 'connector … not registered'-class error — a silent no-op success is a FAIL (the retired logger-backed stubs delivered nothing while reporting success, #4343)"
       ],
-      "traps": ["stale-console-bundle", "single-datapoint"],
+      "traps": [
+        "stale-console-bundle",
+        "single-datapoint"
+      ],
       "source": [
         "examples/app-showcase/src/automation/flows/index.ts (TaskCompletedRestPingFlow, ShowcaseDeclarativeConnectorPingFlow, ShowcaseMcpConnectorEchoFlow)",
         "examples/app-showcase/objectstack.config.ts (ConnectorRestPlugin/ConnectorSlackPlugin/ConnectorMcpPlugin + declarative connectors)",
@@ -686,7 +858,12 @@
         "ADR-0097 (provider-bound declarative connector instances)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — connector dispatch matrix over the plugin / declarative-rest / declarative-MCP kinds the showcase seeds, with the unregistered-id negative", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-07",
+          "change": "initial — connector dispatch matrix over the plugin / declarative-rest / declarative-MCP kinds the showcase seeds, with the unregistered-id negative",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -697,7 +874,9 @@
       "revision": 1,
       "priority": "P2",
       "surface": "mixed",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -753,7 +932,11 @@
         "a screen-flow test run that dumps the {status:'paused'} JSON envelope and stops — no dialog, no way to finish it — leaving a paused run stranded is a FAIL: that is the framework#3528 regression this page's FlowRunner hand-off exists to prevent",
         "citing the Studio flow-designer Runs preview (metadata-admin FlowRunsPanel) as this item's surface is a wrong-panel FAIL — this item is the developer:flow-runs PAGE (trigger + inline history), which renders steps FLAT; the nested step-tree lives in automation.flow-run-step-nesting"
       ],
-      "traps": ["wrong-panel", "hydration-race", "automation-input"],
+      "traps": [
+        "wrong-panel",
+        "hydration-race",
+        "automation-input"
+      ],
       "source": [
         "objectui apps/console/src/pages/developer/FlowRunsPage.tsx (FlowTestRunner + inline FlowRunsPanel; framework#3528 — hands a paused screen run to FlowRunner so it no longer orphans a paused row)",
         "objectui packages/app-shell/src/views/FlowRunner.tsx (the shared screen runner reused here)",
@@ -762,7 +945,12 @@
         "examples/app-showcase/src/automation/flows/index.ts (BatchRemindersFlow tasks input, ReassignWizardFlow screen)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — pins the developer Flow Runs page's typed-input trigger + the framework#3528 screen-flow hand-off (paused run driven to completion, no orphaned row); distinct from flow-run-step-nesting which reads the designer's Runs preview", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "initial — pins the developer Flow Runs page's typed-input trigger + the framework#3528 screen-flow hand-off (paused run driven to completion, no orphaned row); distinct from flow-run-step-nesting which reads the designer's Runs preview",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     },
     {
@@ -773,7 +961,9 @@
       "revision": 1,
       "priority": "P2",
       "surface": "api",
-      "personas": ["admin"],
+      "personas": [
+        "admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -822,14 +1012,22 @@
         "a toggle that answers 2xx while /_status still reports enabled/bound unchanged is a FAIL — the reported state must match the enforced state",
         "toggling an unknown flow that answers 2xx (rather than not-found) is a FAIL"
       ],
-      "traps": ["seed-data-thin", "dispatcher-vs-hono-route"],
+      "traps": [
+        "seed-data-thin",
+        "dispatcher-vs-hono-route"
+      ],
       "source": [
         "packages/runtime/src/route-ledger.ts (POST /automation/:name/toggle → automation.toggle; GET /automation/_status → automation.getRuntimeStatus)",
         "packages/services/service-automation/src/engine.ts (toggleFlow → flowEnabled + activateFlowTrigger/deactivateFlowTrigger; getFlowRuntimeStates enabled/bound)",
         "examples/app-showcase/src/automation/flows/index.ts (UrgentTaskAlertFlow — the record_change flow, #3427)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — pins the /toggle runtime kill switch on a record_change flow: OFF unbinds the trigger so the firing mutation produces no run, ON restores it; runs list + runtime state as oracles", "ref": "claude/platform-test-checklist-ocwugl" }
+        {
+          "revision": 1,
+          "date": "2026-08-08",
+          "change": "initial — pins the /toggle runtime kill switch on a record_change flow: OFF unbinds the trigger so the firing mutation produces no run, ON restores it; runs list + runtime state as oracles",
+          "ref": "claude/platform-test-checklist-ocwugl"
+        }
       ]
     }
   ]

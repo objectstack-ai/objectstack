@@ -75,7 +75,9 @@
       ]
     },
     "hook": {
-      "waived": "record hooks are exercised INDIRECTLY by every CRUD/roll-up/attachment item (their side effects are those items' oracles), but no item asserts hook execution itself; needs a fixture hook with an observable, attributable side effect. Candidate follow-up item: hook fires on insert/update/delete with ctx.user populated (PD#9 organizationId contract)."
+      "items": [
+        "records-forms.object-hook-lifecycle"
+      ]
     },
     "job": {
       "items": [
