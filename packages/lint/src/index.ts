@@ -39,6 +39,31 @@ export {
 } from './validate-null-guards.js';
 export type { NullGuardFinding, NullGuardOptions } from './validate-null-guards.js';
 
+// #4776 — "the provider is not registered YET" and "there is no provider" are
+// the same value in a registry that is still filling, and a verdict recorded
+// from that value is never retracted. Exported as a decision procedure over
+// plugin SOURCE (not over a stack), for the same reason the null-guard one
+// above is: cloud graph-lint, the AI authoring path and a plugin author outside
+// this repo must reach ONE verdict rather than re-derive it. In-repo
+// enforcement is `lint-startup-registry-verdict.corpus.test.ts`, which sweeps
+// `packages/**` with it; the SERVICE-registry half of the same family stays
+// with `pnpm check:startup-registry-verdict` (see the module note for the
+// measured division of labour between the two).
+export {
+  findStartupRegistryVerdicts,
+  OPEN_VOCABULARY_PROBES,
+  PRE_SEAL_PHASES,
+  SEAL_MARKERS,
+  STARTUP_VERDICT_HINT,
+  STARTUP_OPEN_VOCABULARY_VERDICT,
+  STARTUP_VERDICT_ASSERTIVE_WORDING,
+} from './lint-startup-registry-verdict.js';
+export type {
+  StartupRegistryVerdictFinding,
+  StartupRegistryVerdictOptions,
+  StartupRegistryVerdictSeverity,
+} from './lint-startup-registry-verdict.js';
+
 export { validateListViewMode, LIST_VIEW_FILTERS_IN_VIEWS_MODE } from './validate-list-view-mode.js';
 
 // [ADR-0078] The functional-completeness gate. All judgement lives in the shared
