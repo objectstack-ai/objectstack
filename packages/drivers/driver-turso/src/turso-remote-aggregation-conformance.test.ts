@@ -27,19 +27,36 @@
  *
  * ## Reverse verification — direction predicted BEFORE it was run
  *
- * Prediction, with `REMOTE_AGGREGATE_FUNCTIONS`'s `count_distinct` entry
- * deleted: the three `count_distinct` cases fail by THROWING 501 out of
- * `refuseAggregateFunction`, the rest stay green. With the entry present but
- * `distinct: false` — the copied-neighbour mistake, and the one that would
- * survive a review that only checked the two tables have the same KEYS — the
- * same cases fail on VALUES (4 vs 2 ungrouped; 3 vs 2 for `west`), while
- * `count_distinct(score)` stays green because that column has nothing to dedup.
+ * The twin's two reverts, applied to BOTH faces at once (which is how a real
+ * change to this lowering would land — see the note on
+ * `REMOTE_AGGREGATE_FUNCTIONS`).
  *
- * Measured after writing the above: entry deleted → **3 failed / 10 passed**,
- * all three throwing `NOT_IMPLEMENTED`, none on a value. `distinct: false` →
- * **2 failed / 11 passed**, on `expected 4 to be 2` and `expected 3 to be 2`,
- * with `count_distinct(score)` green — the same two numbers the local twin
- * reports, which is the pairing working.
+ * **(A) the `count_distinct` entry deleted** — the pre-#6409 state. Predicted:
+ * the `count_distinct` cases fail by THROWING `NOT_IMPLEMENTED`/501 out of
+ * `refuseAggregateFunction`, never on a value.
+ *
+ * **(B) `distinct` flipped to `false`** — the copied-neighbour mistake, and the
+ * one a review that only checked the two faces' tables have the same KEYS would
+ * pass. Predicted: failures on VALUES (4 vs 2 ungrouped, `west` 3 vs 2), with
+ * `count_distinct(score)` GREEN because that column has nothing to dedup.
+ *
+ * Measured after writing the above, of 17:
+ *
+ * - **(A) 6 failed / 11 passed.** The three value cases, both emitted-SQL cases
+ *   and the field-less refusal case. The value cases died on the thrown 501,
+ *   none on a number — as predicted. The refusal case went red on
+ *   `expected 'NOT_IMPLEMENTED' to be 'INVALID_QUERY'`: unnamed in the
+ *   prediction, kept because it is what proves the two refusals are
+ *   distinguishable rather than interchangeable.
+ * - **(B) 5 failed / 12 passed**, on the two value comparisons, on
+ *   `expected 'SELECT count("stage") AS "count_disti…' to be
+ *   'SELECT count(distinct "stage") AS "co…'`, and on the field-less case
+ *   RESOLVING instead of refusing — `count(*)` is valid, so a non-distinct
+ *   lowering has nothing to refuse. `count_distinct(score)` green throughout.
+ *
+ * Both directions report the SAME two wrong numbers the local twin reports,
+ * which is the pairing doing its job: the shared table is what makes "the two
+ * faces agree" a measured fact rather than a side-by-side read of two files.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

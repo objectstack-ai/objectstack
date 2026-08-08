@@ -24,25 +24,40 @@
  *
  * ## Reverse verification — direction predicted BEFORE it was run
  *
- * Prediction, with `SQL_AGGREGATE_FUNCTIONS`'s `count_distinct` entry deleted
- * and nothing else changed: the three `count_distinct` cases fail by THROWING
- * (`NOT_IMPLEMENTED`/501 out of `refuseAggregateFunction` — the pre-#6409
- * behaviour), not by returning a wrong number, and every other case stays
- * green. With the entry present but its `distinct` flag flipped to `false` —
- * the "lowering copied from its neighbour" mistake — the same three fail on
- * VALUES: 4 instead of 2 ungrouped, and 3/1 instead of 2/1 grouped, while
- * `count_distinct(score)` stays green at 6 because that column has nothing to
- * dedup. That second direction is the one this file exists for; the first is
- * reachable by any test that merely calls the function.
+ * Two reverts, because the two mistakes this file guards against fail in
+ * different ways and only one of them needs a database to see.
  *
- * Measured after writing the above:
+ * **(A) `SQL_AGGREGATE_FUNCTIONS`'s `count_distinct` entry deleted** — the
+ * pre-#6409 state. Predicted: the `count_distinct` cases fail by THROWING
+ * `NOT_IMPLEMENTED`/501 out of `refuseAggregateFunction`, never by returning a
+ * wrong number, and nothing else moves.
  *
- * - entry deleted: **3 failed / 10 passed** of 13, all three on
- *   `NOT_IMPLEMENTED` thrown out of the aggregate door, none on a value.
- * - `distinct: false`: **2 failed / 11 passed**, on
- *   `expected 4 to be 2` (ungrouped) and `expected 3 to be 2` (west, grouped) —
- *   and `count_distinct(score)` GREEN throughout, exactly as predicted, which
- *   is why the table carries both columns.
+ * **(B) the entry present but `distinct` flipped to `false`** — the "lowering
+ * copied from its neighbour" mistake, and the one a review that only checked
+ * the two faces' tables have the same KEYS would pass. Predicted: failures on
+ * VALUES — 4 instead of 2 ungrouped, `west` 3 instead of 2 grouped — while
+ * `count_distinct(score)` stays GREEN at 6, because that column has nothing to
+ * dedup. (B) is the direction this file exists for; (A) is reachable by any
+ * test that merely calls the function.
+ *
+ * Measured after writing the above, of 16:
+ *
+ * - **(A) 5 failed / 11 passed.** The three `count_distinct` value cases and
+ *   the emitted-SQL case all died on the thrown 501 — not one on a wrong
+ *   number, as predicted. The fifth is the field-less refusal case, red on
+ *   `expected 'NOT_IMPLEMENTED' to be 'INVALID_QUERY'`: with no entry in the
+ *   table the name never reaches the distinct-without-field check, so it is
+ *   answered as a capability gap. That case was NOT named in the prediction and
+ *   is recorded rather than tidied — it is the one that proves the two refusals
+ *   are distinguishable rather than interchangeable.
+ * - **(B) 4 failed / 12 passed**, on
+ *   `expected [{ group: null, value: 4 }] to deeply equal [{ group: null, value: 2 }]`,
+ *   on the grouped case (`west` 3 vs 2), on the emitted SQL
+ *   (`select count(\`stage\`) …` missing the keyword), and on the field-less
+ *   case now RESOLVING instead of refusing — `count(*)` is valid, so a
+ *   non-distinct lowering has nothing to refuse. `count_distinct(score)` stayed
+ *   green throughout, exactly as predicted, which is why the table carries both
+ *   columns.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
