@@ -1,9 +1,16 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, resolveInjectedSystemColumns, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, type AuditProvenanceField } from '@objectstack/spec/data';
-// [#4513] The audit-family governance table — see the re-export below for why
-// it lives in a package both `objectql` and `metadata-protocol` depend on.
-import { AUDIT_FIELD_GOVERNANCE } from '@objectstack/metadata-core';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, resolveInjectedSystemColumns, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+// [#4513] The audit-family governance table, and [#6562] the injected-column
+// DEFINITION tables it governs — see the re-exports below for why both live in a
+// package `objectql` and `metadata-protocol` both depend on.
+import {
+  AUDIT_FIELD_GOVERNANCE,
+  AUDIT_FIELD_DEFS,
+  TENANT_SCOPE_FIELD_DEF,
+  OWNER_FIELD_DEF,
+  OWNING_BUSINESS_UNIT_FIELD_DEF,
+} from '@objectstack/metadata-core';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
@@ -250,51 +257,21 @@ export interface SchemaRegistryOptions {
  *     site for why that shape presumes nothing about the undecided D2 policy.
  */
 /**
- * Column definitions for the audit-provenance family, keyed by the spec's
- * {@link AUDIT_PROVENANCE_FIELDS} tuple — the canonical declaration of WHICH
- * columns exist (#3786). This table owns only WHAT each column looks like.
+ * [#6562] The column-definition tables — `AUDIT_FIELD_DEFS` and the three
+ * ownership/tenancy anchors below — now live in `@objectstack/metadata-core`,
+ * re-exported here so the symbols still resolve from `@objectstack/objectql`.
  *
- * The `satisfies` clause is the sync mechanism: a name added to the spec tuple
- * without a definition here — or a definition for a name the spec dropped — is
- * a compile error, not a silently diverging copy. Same discipline as the
- * spec's `APPROVER_VALUE_BINDINGS`.
+ * Same criterion, same package and the same cycle as {@link AUDIT_FIELD_GOVERNANCE}
+ * one comment down: the `/meta` READ path lives in
+ * `@objectstack/metadata-protocol`, which `@objectstack/objectql` depends on, so
+ * it could not import WHAT each injected column looks like from the registry
+ * that provisions it. Until it could, an overlay-backed read served the stored
+ * document verbatim and reported the platform's own columns as *absent* while a
+ * registry-backed read of the same object reported them present — one endpoint,
+ * two field sets, and nothing telling the caller which it had received. The read
+ * exits and this injection now derive one answer from one table.
  */
-const AUDIT_FIELD_DEFS = {
-  created_at: {
-    type: 'datetime',
-    label: 'Created At',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'Timestamp when the record was created (auto-populated by the driver).',
-  },
-  created_by: {
-    type: 'lookup',
-    reference: 'sys_user',
-    label: 'Created By',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'User who created the record (populated when an authenticated session is present).',
-  },
-  updated_at: {
-    type: 'datetime',
-    label: 'Last Modified At',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'Timestamp of the most recent modification (auto-populated by the driver).',
-  },
-  updated_by: {
-    type: 'lookup',
-    reference: 'sys_user',
-    label: 'Last Modified By',
-    required: false,
-    readonly: true,
-    system: true,
-    description: 'User who last modified the record (populated when an authenticated session is present).',
-  },
-} satisfies Record<AuditProvenanceField, Record<string, unknown>>;
+export { AUDIT_FIELD_DEFS, TENANT_SCOPE_FIELD_DEF, OWNER_FIELD_DEF, OWNING_BUSINESS_UNIT_FIELD_DEF };
 
 /**
  * [#4447] The subset of {@link AUDIT_FIELD_DEFS} that is NOT authorable — the
@@ -432,36 +409,32 @@ export function applySystemFields(
   const indexAdditions: Array<{ fields: string[] }> = [];
 
   if (wantTenant && !schema.fields?.organization_id) {
-    additions.organization_id = {
-      type: 'lookup',
-      reference: 'sys_organization',
-      label: 'Organization',
-      required: false,
-      hidden: true,
-      readonly: true,
-      system: true,
-      description:
-        'Tenant scope (auto-populated by org-scoping on insert; NULL on single-tenant stacks).',
-    };
+    // [#6562] The authorable shape is the shared table's, spread verbatim.
+    //
+    // [#6810] Nothing is spread ON TOP of it any more. This line used to read
+    // `{ ...TENANT_SCOPE_FIELD_DEF, indexed: opts.multiTenant }`, and `indexed`
+    // is the one key that was never a `FieldSchema` key at all — removed in the
+    // 16.x line (#2377, ADR-0049) because a field-level index flag built no
+    // index, and `FieldSchema` is a `strictObject`, so a document carrying it is
+    // rejected BY NAME ("never a FieldSchema key; a field-level index flag built
+    // no index"). #6562's reasoning for leaving it here — that its only consumer
+    // reads the REGISTERED schema, never a served document — held for the
+    // consumer and not for the document: `registerObject` runs this function
+    // BEFORE storing and `getItem('object', …)` serves that post-injection
+    // document, so the key reached `/meta`, where `decorateMetadataItem`
+    // re-parsed the served body and stamped `_diagnostics: { valid: false,
+    // errors: [{ path: 'fields.organization_id', code: 'unrecognized_keys' }] }`
+    // on EVERY registry-backed object — both tenancy modes, both read exits. A
+    // defect report the platform wrote about its own column, on a document the
+    // author never wrote and could not fix, in the channel Studio renders
+    // invalid-metadata banners from.
+    additions.organization_id = { ...TENANT_SCOPE_FIELD_DEF };
 
-    // [#6810] The tenant index is declared in `indexes[]`, NOT as a field-level
-    // `indexed` flag.
+    // [#6810] So the tenant index is declared where every other index in this
+    // system is declared: the object's `indexes[]`.
     //
-    // Until #6810 this line read `indexed: opts.multiTenant` on the field def
-    // above. `indexed` is not a `FieldSchema` key — #2377 / ADR-0049 removed it
-    // precisely because a field-level index flag built no index — and
-    // `FieldSchema` is a `strictObject` that rejects it BY NAME. `registerObject`
-    // runs this function BEFORE storing, and `getItem('object', …)` serves the
-    // post-injection document, so the key travelled out to `/meta` where
-    // `decorateMetadataItem` re-parsed it and stamped
-    // `_diagnostics: { valid: false, errors: [{ path: 'fields.organization_id',
-    // code: 'unrecognized_keys' }] }` on EVERY registry-backed object, in both
-    // tenancy modes and at both read exits. That is a defect report the platform
-    // wrote about its own column, on a document the author never wrote and could
-    // not fix — and it drowned real authoring errors in the same channel.
-    //
-    // Declaring it here instead is also the first time the intent is actually
-    // ENFORCED: the sole reader of the old flag was one line in `driver-mongodb`
+    // This is also the first time the intent is actually ENFORCED. The sole
+    // reader of the old flag was one line in `driver-mongodb`
     // (`mongodb-schema.ts`), while `driver-sql` — which every walled deployment
     // runs — only ever materialized `indexes[]`, so the wall's hottest predicate
     // ran unindexed no matter what the flag said.
@@ -469,8 +442,8 @@ export function applySystemFields(
     // No `name`: each driver derives its own (SQL's `buildIndexName` is
     // table-qualified, which a hardcoded name could not be without colliding
     // across tables on Postgres; Mongo's index names are per-collection).
-    // `unique` is left at its default `false` — this is a plain lookup index,
-    // never a constraint.
+    // `unique` is left at its default `false` — a plain lookup index, never a
+    // constraint.
     //
     // `multiTenant: false` declares NO index rather than a false one: on an
     // unwalled stack nothing filters by organization, so the index is dead
@@ -522,17 +495,7 @@ export function applySystemFields(
   // editable in forms and assignable via the API. SecurityPlugin auto-stamps
   // it to the acting user on insert when left NULL.
   if (wantOwner && !schema.fields?.owner_id) {
-    additions.owner_id = {
-      type: 'lookup',
-      reference: 'sys_user',
-      label: 'Owner',
-      required: false,
-      readonly: false,
-      system: true,
-      description:
-        'Record owner (auto-stamped to the creating user on insert; reassignable). ' +
-        'Drives owner-scoped views, reports and notifications.',
-    };
+    additions.owner_id = { ...OWNER_FIELD_DEF };
   }
 
   // [ADR-0117 D1] Record-level business-unit ownership. Shaped after
@@ -567,18 +530,7 @@ export function applySystemFields(
   // writes and nothing filters is dead weight — the same reasoning that gates
   // `organization_id`'s index on `multiTenant`.
   if (wantOwningBusinessUnit && !schema.fields?.[OWNING_BUSINESS_UNIT_FIELD]) {
-    additions[OWNING_BUSINESS_UNIT_FIELD] = {
-      type: 'lookup',
-      reference: 'sys_business_unit',
-      label: 'Owning Business Unit',
-      required: false,
-      hidden: true,
-      readonly: true,
-      system: true,
-      description:
-        'Record-level business-unit ownership (ADR-0117 D1). Server-stamped scope anchor; ' +
-        'NULL until the stamping middleware lands.',
-    };
+    additions[OWNING_BUSINESS_UNIT_FIELD] = { ...OWNING_BUSINESS_UNIT_FIELD_DEF };
   }
 
   if (
