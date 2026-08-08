@@ -7273,6 +7273,48 @@ export class ObjectQL implements IObjectQLEngine {
       // the predicate path — see the pre-phase below. `delete()` was already
       // the right shape here; what changed is that the predicate branch grew
       // the same discipline the by-id branch has had since #5272.
+      //
+      // [#5929] The gate's THREE terms, unchanged by that card and enumerated
+      // here because it had to enumerate them to answer it:
+      //   1. `hasHooksFor('beforeDelete', object)`
+      //   2. `hasHooksFor('afterDelete', object)`
+      //   3. `getSummaryDescriptors(object).length > 0`
+      // No validation term, deliberately — see `needsPriorRecord` above.
+      //
+      // What #5929 changed is not this expression but what term 1 MEANS. Until
+      // then, objectql's own `ObjectQLPlugin` registered a builtin
+      // `sys_fetch_previous_delete` on `beforeDelete` with `object: '*'`, so on
+      // every kernel-hosted engine term 1 was true for every object and the
+      // per-object skip this gate exists to perform could never happen. The
+      // builtin's only remaining effect WAS holding this gate open: the read
+      // below binds `previous` before `beforeDelete` dispatches, so its own
+      // `!ctx.previous` guard was already unreachable. Retiring it (plugin.ts,
+      // ADR-0049 enforce-or-remove) makes term 1 an honest question.
+      //
+      // ⚠️ Honest is not the same as usually-false, and the difference is worth
+      // knowing before anyone reads a skip into a production trace. Every
+      // delete-phase hook below registers with NO `object` — global — so each
+      // holds term 1 or term 2 open for every object on a kernel that loads it:
+      //
+      //   * `plugin-auth`   identity-write-guard  beforeDelete  (filters by
+      //                     `isManaged(ctx.object)` inside the handler)
+      //   * `plugin-sharing` record-share-cascade  before+afterDelete (filters
+      //                     by `targets(objectName)` inside the handler)
+      //   * `service-storage` file-reference-lifecycle before+afterDelete
+      //                     (filters by `activeFileFields(object)` inside)
+      //   * `plugin-audit`  captureBefore / writeAudit before+afterDelete,
+      //                     global MINUS `excludeObjects: AUDIT_EXCLUDED_OBJECTS`
+      //                     (#5860) — the one that narrows at the ENGINE face,
+      //                     so `hookMatchesObject` can subtract it and an
+      //                     excluded object really does skip this read.
+      //
+      // The first three are real handlers with real work, merely deciding their
+      // own applicability at dispatch time rather than at registration time;
+      // this gate answering "yes" for them is the gate WORKING, not a second
+      // instance of the #5929 defect. Narrowing any of them to the objects it
+      // actually serves — plugin-audit's `excludeObjects` face is the worked
+      // example — is what would convert them into skips, and that is each
+      // package's own card, not this one's.
       const deleteSchema = this._registry.getObject(object);
       const wantsPreImage =
         this.hasHooksFor('beforeDelete', object) ||

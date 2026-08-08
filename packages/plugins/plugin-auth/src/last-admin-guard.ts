@@ -205,9 +205,11 @@
  *    the id alone — and reading it that way approved a sweep of every
  *    administrator one legitimate-looking row at a time. `options.multi` is the
  *    discriminator, and `resolveTargetIds` asks it FIRST. See that function.
- *  - `ctx.previous` (the engine's #5272 pre-image, and objectql's
- *    `sys_fetch_previous_delete` builtin — `object: '*'`, priority 5) is now
- *    bound on BOTH shapes: by-id since #5272, and per matched row since #5574.
+ *  - `ctx.previous` (the engine's #5272 pre-image — its SOLE producer since
+ *    #5929, which retired objectql's `sys_fetch_previous_delete` builtin
+ *    (`object: '*'`, priority 5) once the engine's own earlier read made that
+ *    hook's `!ctx.previous` guard unreachable) is now bound on BOTH shapes:
+ *    by-id since #5272, and per matched row since #5574.
  *    The guard still never consumes it, and the reason is sharper than before:
  *    it needs the target IDS as a SET, and a `previous`-based implementation
  *    would see exactly one row per dispatch — correct for a single write and
