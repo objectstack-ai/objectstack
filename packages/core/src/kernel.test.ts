@@ -894,7 +894,7 @@ describe('ObjectKernel', () => {
             const plugin: Plugin = {
                 name: 'dual-path-shutdown',
                 version: '1.0.0',
-                init: async (ctx) => {
+                init: async (ctx: PluginContext) => {
                     captured = ctx;
                     ctx.hook('kernel:shutdown', async () => { throw new Error('manual boom'); });
                     ctx.hook('kernel:shutdown', async () => { reached.push('later-shutdown'); });

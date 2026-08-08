@@ -6,7 +6,7 @@ import {
     dispatchHookPropagating,
     type HookDispatchLogger,
     type HookHandler,
-} from './hook-dispatch';
+} from './hook-dispatch.js';
 
 /**
  * Direct pins for the two shared dispatch flavours (#5282).

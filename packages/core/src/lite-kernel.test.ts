@@ -411,7 +411,7 @@ describe('LiteKernel with Configurable Logger', () => {
 
             const plugin: Plugin = {
                 name: 'shutdown-thrower-logging',
-                init: async (ctx) => {
+                init: async (ctx: PluginContext) => {
                     ctx.hook('kernel:shutdown', async () => { throw new Error('shutdown boom'); });
                 },
             };
@@ -449,7 +449,7 @@ describe('LiteKernel with Configurable Logger', () => {
 
             const plugin: Plugin = {
                 name: 'dual-path-shutdown',
-                init: async (ctx) => {
+                init: async (ctx: PluginContext) => {
                     captured = ctx;
                     ctx.hook('kernel:shutdown', async () => { throw new Error('manual boom'); });
                     ctx.hook('kernel:shutdown', async () => { reached.push('later-shutdown'); });
