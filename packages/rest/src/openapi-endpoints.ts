@@ -256,13 +256,25 @@ export function buildEndpointOperation(
   if (facts.readsBody && BODY_METHODS.has(endpoint.method)) {
     // Free-form object, deliberately: the executor forwards the body (through
     // `inputMapping`, when declared) to the same pipeline the built-in route
-    // uses, and this document has no PER-OBJECT schemas to point at. Since
-    // #5168 `components.schemas` is no longer empty — it carries the nine
-    // contract schemas, and the six built-in `$ref`s resolve — but those are
-    // the generic CRUD envelopes (`CreateRequest`, `ApiError`, …), not the
-    // shape of `showcase_task`'s body. An empty `type: object` says "a JSON
-    // object, shape not described here", which is true; naming fields we have
-    // not derived would not be.
+    // uses, and this document has no PER-OBJECT schemas to point at.
+    //
+    // Since #5168 `components.schemas` is no longer empty — it carries the
+    // nine contract schemas — but they are an ISLAND: the served document
+    // contains ZERO `$ref`s, so nothing in it points INTO them (#6797,
+    // re-measured against the real `GET /openapi.json` handler and against
+    // the static artifact, both 0). That is structural rather than an
+    // oversight — no step of the assembly emits one. Since #5588 (ruling C)
+    // the built-in section is produced at request time by `buildBuiltinPaths`,
+    // which emits none DELIBERATELY: the artifact's old section pointed at
+    // `CreateRequest`/`UpdateRequest` and was wrong about the wire shape those
+    // routes accept (`openapi-builtin-paths.ts`, "What it will NOT say"). And
+    // #5744 stopped the generator emitting `paths` at all.
+    //
+    // So there is no reference graph to hang a body schema on; and the nine
+    // are generic CRUD envelopes (`ApiError`, …) rather than the shape of
+    // `showcase_task`'s body in any case. An empty `type: object` says "a
+    // JSON object, shape not described here", which is true; naming fields we
+    // have not derived would not be.
     operation.requestBody = {
       required: true,
       content: { 'application/json': { schema: { type: 'object' } } },
