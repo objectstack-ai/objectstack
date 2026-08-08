@@ -1,19 +1,40 @@
-# Run records
+# Run records — format contract (results are NOT committed)
 
-One JSON file per executed checklist sweep, named `YYYY-MM-DD-<slug>.json`,
-**append-only**: a record is never edited after landing — a re-run is a new record.
-The record shape and the verdict rules are defined in [../RUNNER.md](../RUNNER.md);
-verdicts are only meaningful next to the item `revision` they ran against.
+A **run record** is one execution of the checklist against one build: per-clause
+verdicts + evidence pointers. It is **output, not source** — a transient assertion
+about a specific build, not part of the version-controlled contract. Run records and
+their evidence (screenshots, network traces) are therefore **git-ignored** and never
+land in the repo (`.gitignore` here tracks only this README). The durable source is
+the checklist itself under `../areas/`; a run is a snapshot that goes stale the moment
+the build moves.
 
-Each run record may carry an `evidenceDir` pointing at a committed folder of
-screenshots and network traces (see the landed run below).
+**Where results go instead:** the executing environment — a CI artifact, the runner's
+own workspace, the sweep's tracking issue, or an external QA store. Keep them there;
+do not commit them.
 
-## Landed runs
+## Record shape (write to `YYYY-MM-DD-<slug>.json`, kept out of git)
 
-- **`2026-08-08-console-login-demo.json`** — first real execution: `platform-core.console-login`
-  driven in headless Chromium against an isolated showcase boot. Verdict **pass** (6 clauses +
-  wrong-password negative). Screenshots + network traces under `evidence/2026-08-08-console-login/`.
-  Notable: the runner's automation self-check (RUNNER rule 2) caught a false "dead shell" P0 — a
-  cookie-only clear left the console authed via its localStorage bearer token; a full credential
-  clear produced the real redirect-to-login. Also surfaced a run-time precondition (the vendored
-  `/_console` dist must be built separately) now noted in the env block.
+The shape and the verdict rules are defined in [../RUNNER.md](../RUNNER.md); verdicts
+are only meaningful next to the item `revision` they ran against.
+
+```jsonc
+{
+  "run": "2026-08-07-v17-release-sweep",
+  "date": "2026-08-07",
+  "scope": "since:v17 + P0",            // the filter that selected items
+  "app": "showcase",
+  "env": { "framework": "<sha>", "objectuiPin": "<sha>", "port": 3456, "db": "file:/tmp/<run>/data.db" },
+  "runner": "<agent/session identifier>",
+  "evidenceDir": "<local path — not committed>",
+  "results": [
+    {
+      "id": "approvals.per-group-signoff",
+      "revision": 1,                     // ← the revision this verdict is valid for
+      "verdict": "pass",                 // derived: pass | partial | fail | blocked | not-run
+      "clauses": [ { "clause": 0, "verdict": "pass", "evidence": "…what was captured, where…" } ],
+      "issues": [],
+      "notes": "…"
+    }
+  ]
+}
+```

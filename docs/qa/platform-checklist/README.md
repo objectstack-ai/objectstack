@@ -20,7 +20,7 @@ docs/qa/platform-checklist/
   RUNNER.md        ← how an AI runs the checklist accurately (verdicts, oracles, evidence)
   areas/*.json     ← the ledger, sharded by feature area (append here)
   coverage.json    ← capability-coverage ratchet: every governed metadata kind → items or waiver
-  runs/            ← durable run records (one JSON per executed sweep)
+  runs/            ← run-record FORMAT contract only; results are git-ignored, never committed
 ```
 
 Sharding by area keeps parallel edits conflict-free: two agents appending to different
@@ -172,8 +172,9 @@ matrices still rely on the showcase `coverage.test.ts` demonstrability gate.
 A release no longer gets a hand-written checklist. The sweep for `vN` is a **filter
 over this ledger**: `since == vN` (the new capabilities) ∪ all `P0` (the standing
 smoke) ∪ any item whose `source` cites a PR in the release. The tracking issue for the
-sweep links here and hosts discussion; results land as a run record under `runs/`
-(plus findings filed as issues, one per failure). Item text, fixtures learned, and new
+sweep links here and hosts discussion; results live as a run record kept OUT of the
+repo (in the CI artifact / tracking issue / QA store — `runs/` is git-ignored), plus
+findings filed as issues, one per failure. Item text, fixtures learned, and new
 traps discovered flow **back into the ledger** as revisions — that is the accumulation
 the one-off checklists never had.
 

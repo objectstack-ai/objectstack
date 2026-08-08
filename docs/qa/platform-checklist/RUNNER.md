@@ -90,9 +90,11 @@ test-run output the clause's `evidence` field names.
 
 ## Run records
 
-One JSON per executed sweep, committed as
-`runs/YYYY-MM-DD-<slug>.json` (never edited afterwards — append a new record for a
-re-run). Shape:
+One JSON per executed sweep, written to `runs/YYYY-MM-DD-<slug>.json`. **Results are
+NOT committed** — a run record is output about one build, not source; `runs/` is
+git-ignored except its README (the format contract). Keep the record and its evidence
+in the executing environment (CI artifact, runner workspace, the sweep's tracking
+issue, or an external QA store). Shape:
 
 ```jsonc
 {
@@ -121,7 +123,7 @@ re-run). Shape:
 }
 ```
 
-A run summary for humans may additionally go to `docs/audits/` (house convention,
-date-prefixed) or the sweep's tracking issue — but the JSON record is the durable,
-diffable truth, and it is what makes "this item last passed at revision N on date D"
-answerable without archaeology.
+A run summary for humans may additionally go to the sweep's tracking issue or an
+external QA store — but none of it lands in the repo. The durable, version-controlled
+truth is the checklist under `areas/`; a run is a dated assertion about a build that
+belongs wherever that build's other artifacts live.
