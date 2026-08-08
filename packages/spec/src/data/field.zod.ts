@@ -79,6 +79,25 @@ export const FieldType = z.enum([
 export type FieldType = z.input<typeof FieldType>;
 
 /**
+ * Field types whose stored value the RUNTIME owns outright — issued by the
+ * engine (or the driver's persistent sequence), never supplied by a caller on
+ * either write path. Today exactly `autonumber` (#5503).
+ *
+ * This is the PROTOCOL's statement of that ownership, so the consumers that act
+ * on it read one vocabulary instead of each carrying its own literal: objectql's
+ * write-path strips (`isRuntimeOwnedField` / `stripRuntimeOwnedFields`, which
+ * treat these types as implicitly read-only), and the DataProtocol create
+ * ingress, which defers to those strips rather than pre-empting them with its
+ * own narrower exemption set (`stripReadonlyForInsert`, #5628).
+ *
+ * Keep the set to types whose value is (a) persisted, (b) issued by the runtime,
+ * and (c) never legitimately supplied by a caller. `formula` and `summary` are
+ * deliberately NOT here: they are derived-on-read/roll-up, not stored values a
+ * caller could forge into a sequence.
+ */
+export const RUNTIME_OWNED_FIELD_TYPES: ReadonlySet<string> = new Set<string>(['autonumber']);
+
+/**
  * Select Option Schema
  * 
  * Defines option values for select/picklist fields.
@@ -910,7 +929,29 @@ export const Field = {
   avatar: (config: FieldInput = {}) => ({ type: 'avatar', ...config } as const),
   formula: (config: FieldInput = {}) => ({ type: 'formula', ...config } as const),
   summary: (config: FieldInput = {}) => ({ type: 'summary', ...config } as const),
-  autonumber: (config: FieldInput = {}) => ({ type: 'autonumber', ...config } as const),
+  /**
+   * Auto-number — a record number the RUNTIME issues from its sequence.
+   *
+   * The builder injects `readonly: true` (#5628). `readonly` is a TWO-part
+   * contract (see `FieldSchema.readonly`): "never editable in forms" AND
+   * server-enforced on both write paths. #5503 closed the server half for
+   * `autonumber` by type ({@link RUNTIME_OWNED_FIELD_TYPES}), but the FORM half
+   * is keyed on the flag — so without it a renderer drew an editable "record
+   * number" box whose value the server was already guaranteed to discard: the
+   * user types a number, the create succeeds, and the record comes back
+   * carrying a different one. Declaring the flag the builder's output already
+   * behaves like is the shortest "declared = enforced" path.
+   *
+   * The injection is UNCONDITIONAL — it is applied after `config`, so it cannot
+   * be spread away — and `readonly: false` is a compile error at the authoring
+   * site rather than a silent coercion: an autonumber field is runtime-owned by
+   * construction, so "editable record number" is not a state the author can
+   * ask for. Restating `readonly: true` is allowed (it is merely redundant).
+   * A hand-written `{ type: 'autonumber' }` literal is unaffected — it is
+   * covered by the by-TYPE server enforcement, which never depended on the flag.
+   */
+  autonumber: (config: FieldInput & { readonly?: true } = {}) =>
+    ({ type: 'autonumber', ...config, readonly: true } as const),
   markdown: (config: FieldInput = {}) => ({ type: 'markdown', ...config } as const),
   html: (config: FieldInput = {}) => ({ type: 'html', ...config } as const),
   password: (config: FieldInput = {}) => ({ type: 'password', ...config } as const),

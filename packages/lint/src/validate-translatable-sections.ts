@@ -72,7 +72,10 @@
  *
  *   - a view container's `sections`, its DEFAULT `form.sections` (#5415 — the
  *     anchor that is neither a `formViews.*` entry nor the record's own), and
- *     every `listViews.*` / `formViews.*` sub-container's `sections`;
+ *     every `listViews.*` / `formViews.*` sub-container's `sections` — reached
+ *     through the shared `view-walk.ts` ladder (#6381; never a private copy,
+ *     for the reason that file's header states — three copies of this descent
+ *     had each been fixed separately, twice for the same missing rung);
  *   - the same three on views embedded in an object (`objects[].views`,
  *     `objects[].listViews`);
  *   - `record:details` sections nested anywhere in a page's component tree,
@@ -86,6 +89,7 @@
  */
 
 import { walkPageComponents } from './page-walk.js';
+import { viewContainerSites } from './view-walk.js';
 
 export const TRANSLATION_SECTION_NAME_MISSING = 'translation-section-name-missing';
 
@@ -181,48 +185,40 @@ function joinWhere(...parts: string[]): string {
 /**
  * Register every `sections` array ONE view container declares.
  *
- * The binding ladder mirrors `validate-translation-references.ts`'s
- * `collectViewRecord` exactly: a sub-container resolves its own object first
- * and falls back to the record's, then to the default list's — because on the
- * canonical shape the binding lives INSIDE the container (`list.data.object`),
- * not at the record root.
+ * The DESCENT is the shared one (`view-walk.ts`, #6381) — the entry itself, the
+ * container's default `form` (#5415: the anchor that is neither a `formViews.*`
+ * entry nor the record's own), and every `listViews.*` / `formViews.*`
+ * sub-container. This rule takes the FULL ladder, `listViews.*` included: that
+ * rung is how it reaches an object's own `listViews` container, which the module
+ * docblock above declares as part of its section face.
+ *
+ * The BINDING ladder stays here, because it is this rule's own: it mirrors
+ * `validate-translation-references.ts`'s `collectViewRecord` — a sub-container
+ * resolves its own object first and falls back to the record's, then to the
+ * default list's, because on the canonical shape the binding lives INSIDE the
+ * container (`list.data.object`), not at the record root. The sibling rules
+ * compose their fallbacks differently and folding them together would change
+ * verdicts.
+ *
+ * One equivalence worth writing down, since it is what let the two branches
+ * collapse into one: the entry's OWN site used to resolve `recordObject ??
+ * listBinding` while sub-containers resolved `viewObjectName(sub) ??
+ * recordObject ?? listBinding`. For the entry, `viewObjectName(view)` IS
+ * `recordObject`, so the sub-container formula returns exactly the same answer
+ * on it — the uniform expression below is the old two-branch behaviour, not a
+ * widening of it.
  */
 function collectViewSites(view: AnyRec, basePath: string, label: string, sites: SectionSite[]): void {
   const recordObject = viewObjectName(view);
   const listBinding = isRec(view.list) ? viewObjectName(view.list) ?? recordObject : undefined;
-  const bindingOf = (container: AnyRec): string | undefined =>
-    viewObjectName(container) ?? recordObject;
 
-  sites.push({
-    path: `${basePath}.sections`,
-    surface: label,
-    objectName: recordObject ?? listBinding,
-    sections: view.sections,
-  });
-
-  // The container's DEFAULT form — the one `defineView({ form: … })` declares
-  // and `ObjectForm` renders when no named form view is asked for (#5415).
-  if (isRec(view.form)) {
+  for (const site of viewContainerSites(view, basePath)) {
     sites.push({
-      path: `${basePath}.form.sections`,
-      surface: joinWhere(label, 'form'),
-      objectName: bindingOf(view.form) ?? listBinding,
-      sections: view.form.sections,
+      path: `${site.path}.sections`,
+      surface: joinWhere(label, site.surface),
+      objectName: viewObjectName(site.view) ?? recordObject ?? listBinding,
+      sections: site.view.sections,
     });
-  }
-
-  for (const key of ['listViews', 'formViews'] as const) {
-    const container = view[key];
-    if (!isRec(container)) continue;
-    for (const [subKey, sub] of Object.entries(container)) {
-      if (!isRec(sub)) continue;
-      sites.push({
-        path: `${basePath}.${key}.${subKey}.sections`,
-        surface: joinWhere(label, `${key}.${subKey}`),
-        objectName: bindingOf(sub) ?? listBinding,
-        sections: sub.sections,
-      });
-    }
   }
 }
 

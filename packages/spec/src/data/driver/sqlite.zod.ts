@@ -20,15 +20,13 @@
 import { z } from 'zod';
 
 import { lazySchema } from '../../shared/lazy-schema';
-import { strictUnknownKeyError } from '../../shared/suggestions.zod';
+import { strictObject } from '../../shared/strict-object';
 import {
   driverConfigJsonSchema,
   READ_ONLY_BELONGS_ON_DATASOURCE,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
   SqlAutoMigrateSchema,
 } from './common.zod';
-
-const SQLITE_CONFIG_KEYS = ['filename', 'autoMigrate'] as const;
 
 const FILENAME_ALIASES = {
   file: 'filename',
@@ -49,22 +47,21 @@ const IN_MEMORY_GUIDANCE =
   '`memory` is not a sqlite key. An ephemeral database is `filename: \':memory:\'`; for the '
   + 'mingo in-memory engine (a different driver entirely) set `driver: \'memory\'`.';
 
-const sqliteConfigUnknownKeyError = strictUnknownKeyError({
-  surface: "this sqlite datasource's config",
-  knownKeys: SQLITE_CONFIG_KEYS,
-  aliases: FILENAME_ALIASES,
-  guidance: {
-    schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
-    readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
-    memory: IN_MEMORY_GUIDANCE,
-    persist:
-      '`persist` is a `sqlite-wasm` key — the native sqlite driver writes through on every '
-      + "statement and has nothing to schedule. Set `driver: 'sqlite-wasm'` to use it.",
+export const SqliteConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: "this sqlite datasource's config",
+    aliases: FILENAME_ALIASES,
+    guidance: {
+      schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+      readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
+      memory: IN_MEMORY_GUIDANCE,
+      persist:
+        '`persist` is a `sqlite-wasm` key — the native sqlite driver writes through on every '
+        + "statement and has nothing to schedule. Set `driver: 'sqlite-wasm'` to use it.",
+    },
+    history: sqliteHistory,
   },
-  history: sqliteHistory,
-});
-
-export const SqliteConfigSchema = lazySchema(() => z.object({
+  {
   /**
    * Database file path, or `:memory:` for an ephemeral in-process database.
    * A relative path resolves against the server's working directory.
@@ -75,7 +72,7 @@ export const SqliteConfigSchema = lazySchema(() => z.object({
 
   /** Dev-only, loosen-only schema self-heal (#2186). */
   autoMigrate: SqlAutoMigrateSchema.optional(),
-}, { error: sqliteConfigUnknownKeyError }).strict()
+})
   .describe('SQLite connection configuration'));
 
 export type SqliteConfig = z.input<typeof SqliteConfigSchema>;
@@ -97,24 +94,21 @@ export const SqliteWasmPersistModeSchema = z.union([
 
 export type SqliteWasmPersistMode = z.input<typeof SqliteWasmPersistModeSchema>;
 
-const SQLITE_WASM_CONFIG_KEYS = ['filename', 'persist'] as const;
-
-const sqliteWasmConfigUnknownKeyError = strictUnknownKeyError({
-  surface: "this sqlite-wasm datasource's config",
-  knownKeys: SQLITE_WASM_CONFIG_KEYS,
-  aliases: FILENAME_ALIASES,
-  guidance: {
-    schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
-    readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
-    memory: IN_MEMORY_GUIDANCE,
-    autoMigrate:
-      '`autoMigrate` is honoured by the native sqlite / postgres / mysql drivers only — the '
-      + 'wasm driver is constructed without it, so writing it here would change nothing.',
+export const SqliteWasmConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: "this sqlite-wasm datasource's config",
+    aliases: FILENAME_ALIASES,
+    guidance: {
+      schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+      readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
+      memory: IN_MEMORY_GUIDANCE,
+      autoMigrate:
+        '`autoMigrate` is honoured by the native sqlite / postgres / mysql drivers only — the '
+        + 'wasm driver is constructed without it, so writing it here would change nothing.',
+    },
+    history: sqliteHistory,
   },
-  history: sqliteHistory,
-});
-
-export const SqliteWasmConfigSchema = lazySchema(() => z.object({
+  {
   /**
    * Database file path, or `:memory:` for an ephemeral in-process database.
    * A file-backed wasm database persists according to {@link SqliteWasmPersistModeSchema}.
@@ -128,7 +122,7 @@ export const SqliteWasmConfigSchema = lazySchema(() => z.object({
    * filename is given; `:memory:` never persists.
    */
   persist: SqliteWasmPersistModeSchema.optional().meta({ title: 'Persist mode' }),
-}, { error: sqliteWasmConfigUnknownKeyError }).strict()
+})
   .describe('SQLite (WASM) connection configuration'));
 
 export type SqliteWasmConfig = z.input<typeof SqliteWasmConfigSchema>;

@@ -23,6 +23,15 @@ import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
 import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
 import { TranslationDataSchema } from '../system/translation.zod';
+// #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
+// responses publish. Same three vocabularies the resolver filters against, so a
+// value this spec cannot name is a value the resolver would have dropped.
+import {
+  MetadataLockSchema,
+  MetadataLockSourceSchema,
+  MetadataProvenanceSchema,
+} from '../kernel/metadata-protection.zod';
+import { MetadataValidationResultSchema } from '../kernel/metadata-plugin.zod';
 import {
   ListPackagesRequestSchema,
   ListPackagesResponseSchema,
@@ -229,12 +238,186 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * ADR-0010 read-side protection envelope — the flags a metadata READ publishes
+ * alongside the document, all derived from one `resolveLockState()` call.
+ *
+ * These are the UN-prefixed, envelope-level counterparts of the `_lock` /
+ * `_provenance` fields `MetadataProtectionFields` splices into the document
+ * itself: the document stores `_lock`, and the read RESOLVES it into `lock`
+ * plus the three `editable` / `deletable` / `resettable` verdicts Studio
+ * renders affordances from (ADR-0010 §5), so no consumer re-implements the
+ * lock algebra.
+ *
+ * Shared by {@link GetMetaItemResponseSchema} and
+ * {@link GetMetaItemLayeredResponseSchema} — both are produced by the SAME
+ * `resolveLockState` call in `metadata-protocol`, so a mixin is what keeps the
+ * two declarations from drifting apart key by key. Module-local on purpose: it
+ * is a shape these two responses share, not a new public vocabulary.
+ *
+ * Every key is optional HERE and tightened per-response where the producer
+ * guarantees presence — see each schema's note. Optionality is measured, not
+ * assumed: the six `lockReason` … `packageVersion` keys are spread only when
+ * `!== undefined` (they read off `_`-prefixed document fields that are
+ * themselves optional), so they are conditional on EVERY path.
+ */
+const MetadataProtectionEnvelopeFields = {
+  lock: MetadataLockSchema.optional().describe(
+    'Resolved lock verdict for this item (ADR-0010 §3.3). `none` means unlocked; '
+    + '`no-overlay` / `no-delete` / `full` refuse the corresponding write with '
+    + '403 `ITEM_LOCKED`. Resolved from the document\'s `_lock`, with the packaged '
+    + 'artifact winning over any org overlay.',
+  ),
+  lockReason: z.string().optional().describe(
+    'Human-readable explanation shown next to a refused write. Present only when '
+    + 'the resolved item declares `_lockReason`.',
+  ),
+  lockSource: MetadataLockSourceSchema.optional().describe(
+    'Which layer asserted the lock. Present only when the resolved item declares '
+    + '`_lockSource`.',
+  ),
+  lockDocsUrl: z.string().optional().describe(
+    'Documentation link surfaced beside `lockReason`. Present only when the '
+    + 'resolved item declares `_lockDocsUrl`.',
+  ),
+  provenance: MetadataProvenanceSchema.optional().describe(
+    'Where the item came from (package | org | env-forced). Present only when the '
+    + 'resolved item declares `_provenance`.',
+  ),
+  packageId: z.string().optional().describe(
+    'Owning package machine id. Present only when the resolved item declares '
+    + '`_packageId`.',
+  ),
+  packageVersion: z.string().optional().describe(
+    'Owning package version. Present only when the resolved item declares '
+    + '`_packageVersion`.',
+  ),
+  editable: z.boolean().optional().describe(
+    'Whether an overlay write is permitted — false iff `lock` is `no-overlay` or '
+    + '`full`. A derived verdict: do not recompute it from `lock` client-side.',
+  ),
+  deletable: z.boolean().optional().describe(
+    'Whether deleting the overlay is permitted — false iff `lock` is `no-delete` '
+    + 'or `full`.',
+  ),
+  resettable: z.boolean().optional().describe(
+    'Whether the item can be reset to its packaged default — true iff it is '
+    + 'artifact-backed, i.e. there is a baseline to reset TO.',
+  ),
+} as const;
+
+/**
  * Get Metadata Item Response
+ *
+ * Describes the FULL body `GET /api/v1/meta/:type/:name` can return, not the
+ * three-key subset it used to claim (#5950 — the read-side twin of the write-side
+ * gap #5745 closed on {@link SaveMetaItemResponseSchema}).
+ *
+ * The declaration stopped at `{ type, name, item }` while the uncached branch
+ * served ten more keys: the ADR-0010 protection envelope, spread onto the wire
+ * verbatim by the REST layer (`rest-server.ts`'s `translateMetaEnvelope` does
+ * `{ ...envelope, item }`). `lock` in particular is the read half of the ADR-0008
+ * optimistic-concurrency story the write half already declares — so an SDK caller
+ * typed against this response could not see it, and reading it meant a cast, the
+ * consumer-side tolerance this repo rejects by Prime Directive #12.
+ *
+ * **Why every protection key is optional, measured rather than assumed.** This
+ * route reaches a body by two branches and they publish different amounts:
+ *
+ * - **cached** (`getMetaItemCached`, THE DEFAULT — `enableCache` defaults to
+ *   `true`): the REST layer rebuilds the envelope as `{ type, name, item }` and
+ *   deliberately resolves NO lock — it is the fast published-value path and
+ *   never consults the lock resolver (`rest-server.ts`, the `cachedEnvelope`
+ *   note). All ten keys are ABSENT.
+ * - **uncached** (`getMetaItem`): `lock`, `editable`, `deletable` and
+ *   `resettable` are always set; the other six appear only when the resolved
+ *   document carries the corresponding `_`-prefixed field.
+ *
+ * So `optional` here means "this deployment/branch did not publish it", NEVER
+ * "unlocked" — a consumer that needs the OCC carriers must read the uncached
+ * path and must not read absence as `lock: 'none'`. Declaring them required
+ * would make the default deployment's own response fail its own contract, which
+ * is the #5563 defect in mirror image.
+ *
+ * ⚠️ This is a DECLARATION change only — zero runtime behaviour is altered. That
+ * lock presence depends on a server-side cache setting is a separate, larger
+ * question (#5950 says so explicitly) and is deliberately NOT decided here.
  */
 export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
   item: z.unknown().describe('Metadata item definition'),
+  ...MetadataProtectionEnvelopeFields,
+}));
+
+/**
+ * Get Metadata Item — LAYERED Response
+ *
+ * The body of `GET /api/v1/meta/:type/:name/layers`: a three-layer diagnostic
+ * projection that shows the packaged baseline, the tenant's customization row
+ * and the merged result SIDE BY SIDE, which is what drives Studio's
+ * "code default vs override vs effective" comparison tabs.
+ *
+ * **Why this is a separate schema on a separate path** (#5882, ruled B by the
+ * maintainer 2026-08-06). This projection used to be reached by putting
+ * `?layers=true` on the ordinary read, so one route answered two unrelated
+ * resource representations while `packages/spec` declared only one of them —
+ * anything generating a client from the route table (SDK annotations, codegen,
+ * an AI-written integration) produced a parser that was simply wrong for the
+ * flagged call. Collapsing the three layers into
+ * {@link GetMetaItemResponseSchema}'s single `item` was never an option: seeing
+ * the layers apart IS the diagnostic. The rejected alternative was teaching the
+ * route declaration to express "two shapes, chosen by query flag"; that adds a
+ * new primitive every future tool must understand, and conditional response
+ * selection is precisely where codegen and AI clients go wrong. One path, one
+ * response shape — so the projection got its own path.
+ *
+ * The `?layers=` flag still answers this same body during its deprecation
+ * window, marked with `Deprecation` / `Link` response headers.
+ *
+ * **Required vs optional, measured against the producer.** Unlike the ordinary
+ * read there is exactly ONE producer path here (`getMetaItemLayered`; the
+ * layered view deliberately skips the cache), so the four resolved verdicts
+ * `lock` / `editable` / `deletable` / `resettable` are ALWAYS set and are
+ * required below. The six conditional protection keys stay optional for the
+ * same reason they are optional on the ordinary read.
+ */
+export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name (canonical singular)'),
+  name: z.string().describe('Item name'),
+  code: z.unknown().describe(
+    'LAYER 1 — the packaged artifact baseline exactly as shipped, before any '
+    + 'tenant customization. `null` when no artifact ships this item (it exists '
+    + 'only as an overlay).',
+  ),
+  overlay: z.unknown().describe(
+    'LAYER 2 — the stored customization row ALONE, not merged with `code`. '
+    + '`null` when this tenant has not customized the item.',
+  ),
+  overlayScope: z.enum(['org', 'env']).nullable().describe(
+    'Which scope the `overlay` row was read from — `org` for a tenant overlay, '
+    + '`env` for an environment-level one. `null` exactly when `overlay` is null.',
+  ),
+  effective: z.unknown().describe(
+    'LAYER 3 — the merged result, i.e. the value an ordinary '
+    + '`GET /meta/:type/:name` would return under `item`. `null` when the item '
+    + 'resolves to nothing at all.',
+  ),
+  _diagnostics: MetadataValidationResultSchema.optional().describe(
+    'Load-time spec-validation verdict for `effective`, so the Studio edit page '
+    + 'can raise invalid-metadata banners and inline field errors without a '
+    + 'second round trip. ABSENT for metadata types that register no Zod schema '
+    + '(function / service / router) — absence means "no opinion", never "valid".',
+  ),
+  ...MetadataProtectionEnvelopeFields,
+  // The four resolved verdicts are unconditional on this single-producer path —
+  // tightened from the mixin's optional baseline. See the note above.
+  lock: MetadataLockSchema.describe(
+    'Resolved lock verdict (ADR-0010 §3.3), artifact winning over overlay. Always '
+    + 'present on this path.',
+  ),
+  editable: z.boolean().describe('Whether an overlay write is permitted. Always present on this path.'),
+  deletable: z.boolean().describe('Whether deleting the overlay is permitted. Always present on this path.'),
+  resettable: z.boolean().describe('Whether the item can be reset to its packaged default. Always present on this path.'),
 }));
 
 /**
@@ -1353,6 +1536,7 @@ export type GetMetaItemsRequest = z.input<typeof GetMetaItemsRequestSchema>;
 export type GetMetaItemsResponse = z.input<typeof GetMetaItemsResponseSchema>;
 export type GetMetaItemRequest = z.input<typeof GetMetaItemRequestSchema>;
 export type GetMetaItemResponse = z.input<typeof GetMetaItemResponseSchema>;
+export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredResponseSchema>;
 export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
 export type DeleteMetaItemRequest = z.input<typeof DeleteMetaItemRequestSchema>;

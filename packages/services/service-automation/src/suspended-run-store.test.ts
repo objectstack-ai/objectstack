@@ -4,6 +4,19 @@ import { describe, it, expect } from 'vitest';
 import { AutomationEngine } from './engine.js';
 import { ObjectStoreSuspendedRunStore, type SuspendedRunStoreEngine } from './suspended-run-store.js';
 import type { RunRecord, SuspendedRun } from './engine.js';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
+
+/**
+ * The `resumeAuthority: 'any'` declaration every pausing fixture below needs
+ * since #5561: these tests continue their pause through the public `resume`
+ * door, and a node type that declares nothing is refused there. None of them is
+ * about the resume gate (that is `resume-authority-gate.test.ts`), so each
+ * states the posture it relies on — as the four pausing built-ins do.
+ */
+const PAUSE_NODE_DESCRIPTOR = defineActionDescriptor({
+    type: 'pause_node', version: '1.0.0', name: 'Pause Node',
+    supportsPause: true, resumeAuthority: 'any',
+});
 
 function createTestLogger() {
     return { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => createTestLogger() } as any;
@@ -119,6 +132,7 @@ describe('ObjectStoreSuspendedRunStore', () => {
             const e = new AutomationEngine(createTestLogger(), new ObjectStoreSuspendedRunStore(engine, createTestLogger()));
             e.registerNodeExecutor({
                 type: 'pause_node',
+                descriptor: PAUSE_NODE_DESCRIPTOR,
                 async execute() { return { success: true, suspend: true, correlation: 'areq_1' }; },
             });
             e.registerNodeExecutor({
@@ -169,6 +183,7 @@ function pausableEngine(store?: any, logger = createTestLogger()) {
     const e = new AutomationEngine(logger, store);
     e.registerNodeExecutor({
         type: 'pause_node',
+        descriptor: PAUSE_NODE_DESCRIPTOR,
         async execute() { return { success: true, suspend: true, correlation: 'areq_1' }; },
     });
     e.registerFlow('approval_flow', {

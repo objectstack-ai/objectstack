@@ -459,6 +459,7 @@ export type Iso131 = Assert<Eq< z.input< typeof M28.GetMetaItemsRequestSchema >,
 export type Iso132 = Assert<Eq< z.input< typeof M28.GetMetaItemsResponseSchema >, z.infer< typeof M28.GetMetaItemsResponseSchema > >>;
 export type Iso133 = Assert<Eq< z.input< typeof M28.GetMetaItemRequestSchema >, z.infer< typeof M28.GetMetaItemRequestSchema > >>;
 export type Iso134 = Assert<Eq< z.input< typeof M28.GetMetaItemResponseSchema >, z.infer< typeof M28.GetMetaItemResponseSchema > >>;
+export type Iso833 = Assert<Eq< z.input< typeof M28.GetMetaItemLayeredResponseSchema >, z.infer< typeof M28.GetMetaItemLayeredResponseSchema > >>;
 export type Iso135 = Assert<Eq< z.input< typeof M28.SaveMetaItemRequestSchema >, z.infer< typeof M28.SaveMetaItemRequestSchema > >>;
 export type Iso136 = Assert<Eq< z.input< typeof M28.SaveMetaItemResponseSchema >, z.infer< typeof M28.SaveMetaItemResponseSchema > >>;
 export type Iso137 = Assert<Eq< z.input< typeof M28.DeleteMetaItemRequestSchema >, z.infer< typeof M28.DeleteMetaItemRequestSchema > >>;
@@ -1730,9 +1731,21 @@ describe('ADR-0122 type-alias convention', () => {
     // re-added to 749 rather than to the 748 it was computed against — the same
     // rebase discipline the -7 entry above records, applied in the other
     // direction.
+    //
+    // 822 -> 823 is #6487's `GetMetaItemLayeredResponseSchema` (#5882): the
+    // three-layer projection `GET /meta/:type/:name/layers` now declares. Its
+    // tree is enums, booleans, `z.unknown()` and
+    // `MetadataValidationResultSchema` — no `.default()` anywhere — so its two
+    // shapes coincide and ADR-0122 gives it a pin. Sweep siblings #5950 and
+    // #6442 contribute 0 (already pinned / carries a Parsed alias). This
+    // receipt was written twice before landing — as 749 -> 750 against the
+    // pre-backfill count — and recomputed here after #4593's +73 merged in;
+    // the pin also took its THIRD number (759 -> 760 -> 833), each time
+    // because the next-free id had been claimed by a branch that merged
+    // first. The file, not the history, is the operand.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(822);
+    expect(pins).toHaveLength(823);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {

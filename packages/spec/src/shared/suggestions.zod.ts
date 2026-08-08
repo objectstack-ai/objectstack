@@ -4,7 +4,6 @@ import type { z } from 'zod';
 import { FieldType } from '../data/field.zod';
 
 import { aliasProbe } from './alias-probe';
-import { registerDirectAliasTable } from './alias-table-registry';
 
 /**
  * "Did you mean?" Suggestion Utilities
@@ -292,25 +291,23 @@ export interface StrictUnknownKeyErrorOptions {
  * ~220 on the single-line displays several consumers use. It is still emitted
  * verbatim and unconditionally — only its position moved.
  *
- * ## The table is recorded as it is built (#5483)
+ * ## No in-repo caller passes `knownKeys` by hand any more (#5593)
  *
- * Every call registers its `{ surface, knownKeys, aliases, guidance }` with
- * `alias-table-registry`, which is what puts the 44 remaining direct call sites
- * under `alias-integrity.test.ts`. Registering **here** rather than at the call
- * sites is the entire trick: the gate gains 44 tables and the schemas gain no
- * edit, so the migration to `strictObject` (#5593) stays a clean, separable
- * change rather than something this guard has already half-done.
+ * `knownKeys` is a hand-transcribed array — a second copy of the shape it
+ * describes — so a table built this way could only ever be audited against the
+ * transcription, and a drifted array dragged the audit with it. #5483 shipped a
+ * transitional registry that at least put those 44 call sites under
+ * `alias-integrity.test.ts`; #5593 migrated every one of them to
+ * `strictObject`, which derives the candidate list from the shape, and
+ * deleted the registry with the last of them.
  *
- * What the gate can judge from a registration is bounded by what a direct call
- * offers. `knownKeys` is a hand-transcribed array, so "is this alias target a
- * real key?" is answered against the transcription, not the shape — the
- * array-vs-shape drift `strictObject` exists to abolish stays unguarded until
- * the call site migrates. The `aliasProbe` collision claim has no such caveat:
- * it reads the alias table alone, so it is judged here exactly as it is on a
- * `strictObject` surface.
+ * This factory stays PUBLISHED and unchanged for external callers, but inside
+ * `packages/spec` the only caller is `strictObject` itself. That is enforced,
+ * not merely true: `alias-integrity.test.ts` fails on any new direct call site
+ * here, because a new one would mint a fresh second copy of a key list and
+ * arrive outside the shape-backed audit.
  */
 export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.core.$ZodErrorMap {
-  registerDirectAliasTable(options);
   const { surface, knownKeys, guidance = {}, history } = options;
   const aliases: Record<string, string> = {};
   for (const [key, canonical] of Object.entries(options.aliases ?? {})) {

@@ -377,6 +377,68 @@ function firstRangeViolation(bounds: DeclaredBounds, value: unknown): RangeViola
   return null;
 }
 
+/**
+ * A declared `pattern` in enforceable form (#6580): the source string as the
+ * manifest spelled it (for `FieldError.constraint` and the env log line) and
+ * the compiled `RegExp`. Compiled once and shared safely — `new RegExp(source)`
+ * takes no flags here, and a flagless RegExp's `test()` is stateless
+ * (`lastIndex` only advances under `g`/`y`).
+ */
+interface DeclaredPattern {
+  source: string;
+  re: RegExp;
+}
+
+/**
+ * The `pattern` this specifier declares as something enforceable, or `null`
+ * when it declares none — where "none" deliberately includes a declaration
+ * that does not compile.
+ *
+ * The invalid-RegExp tolerance is the write gate's own, hoisted verbatim: the
+ * `validatePatch` branch has always answered an uncompilable `pattern` with
+ * `re = undefined` ("invalid manifest pattern — don't block writes"), and it
+ * is the same disposition {@link declaredBounds} gives an impossible `step`
+ * (#6199): such a manifest rejects no values and misconfigures no deployment,
+ * it merely fails to constrain. Because BOTH doors obtain the declaration
+ * through this one function, the tolerance can no longer drift between them.
+ */
+function declaredPattern(pattern: unknown): DeclaredPattern | null {
+  if (typeof pattern !== 'string') return null;
+  try {
+    return { source: pattern, re: new RegExp(pattern) };
+  } catch {
+    return null; // invalid manifest pattern — nothing to enforce, never a refusal
+  }
+}
+
+/**
+ * The value, wrapped, when it is a string the declared pattern does not admit;
+ * `null` when the pattern has nothing to say about it.
+ *
+ * ONE comparison, shared by both paths that produce an effective value — the
+ * save path ({@link SettingsService.validatePatch}) and the env path
+ * ({@link SettingsService.effectiveEnvOverride}) — for the reason #5204 is on
+ * file and #5932's triage turned into a ruling: the same comparison living in
+ * one door only is how `PUT /api/settings/:ns` came to refuse the very value
+ * an `OS_*` override slid straight through (#6580). `pattern` was the last
+ * declared constraint family judged on one door.
+ *
+ * A non-string value is left alone: a `pattern` constrains character shape, so
+ * the value's SHAPE decides applicability — exactly how the write gate's
+ * branch has always behaved (`typeof value === 'string'`), and the same
+ * posture, same sentence, as `firstRangeViolation`'s length window. Policing
+ * the value's type is a different constraint (`invalid_type`) with a different
+ * owner.
+ *
+ * Returns a WRAPPER rather than a boolean for symmetry with
+ * {@link firstRejectedOption}: the caller reports the offending value, and the
+ * wrapper is the shape every family hands back at both call sites.
+ */
+function firstPatternMiss(declared: DeclaredPattern, value: unknown): { value: string } | null {
+  if (typeof value !== 'string') return null;
+  return declared.re.test(value) ? null : { value };
+}
+
 interface RegisteredManifest {
   manifest: SettingsManifest;
   /** Resolved specifier scopes for fast lookup. */
@@ -423,6 +485,17 @@ interface RegisteredManifest {
    * standard's membership and degrades `options` to a UI convenience list.
    */
   valueDomains: Map<string, SpecifierValueDomain>;
+  /**
+   * Declared, compilable `pattern` for every specifier that has one (#6580),
+   * keyed by specifier key.
+   *
+   * Precomputed for the same reason and read the same way as `optionTables`:
+   * `get()` is the hottest path, and an ABSENT key means "nothing to enforce"
+   * — no pattern declared, or a declaration that does not compile (the write
+   * gate's own tolerance, see {@link declaredPattern}) — rather than "an
+   * impossible pattern", which would reject everything.
+   */
+  patterns: Map<string, DeclaredPattern>;
 }
 
 /**
@@ -577,6 +650,7 @@ export class SettingsService {
     const optionTables = new Map<string, string[]>();
     const bounds = new Map<string, DeclaredBounds>();
     const valueDomains = new Map<string, SpecifierValueDomain>();
+    const patterns = new Map<string, DeclaredPattern>();
     const defaultScope = manifest.scope ?? 'tenant';
     for (const spec of manifest.specifiers) {
       if (!spec.key || LAYOUT_ONLY_TYPES.has(spec.type)) continue;
@@ -597,6 +671,12 @@ export class SettingsService {
       // unenforceable claim or an accept-everything hole.
       const domain = knownValueDomain((spec as { valueDomain?: unknown }).valueDomain);
       if (domain) valueDomains.set(spec.key, domain);
+      // The declared `pattern`, compiled once (#6580). `declaredPattern`
+      // carries the write gate's own tolerance — an uncompilable declaration
+      // records nothing to enforce — so an absent entry means unchanged
+      // behaviour at both call sites, never "reject everything".
+      const pattern = declaredPattern(spec.pattern);
+      if (pattern) patterns.set(spec.key, pattern);
       if (OPTION_BEARING_TYPES.has(spec.type)) {
         // A manifest with no option table cannot say what is legal. The spec
         // refuses that shape at parse time, but `registerManifest` takes
@@ -618,6 +698,7 @@ export class SettingsService {
       optionTables,
       bounds,
       valueDomains,
+      patterns,
     });
     this.auditEnvOverrides(manifest.namespace);
   }
@@ -644,13 +725,14 @@ export class SettingsService {
     if (!reg) return;
     // Only the keys that declare something enforceable can be rejected, so only
     // they are worth walking: an option table (#5131/#5204), a value window
-    // (#5932) or a standard value domain (#5712). `effectiveEnvOverride` does
-    // the judging (and the reporting); the value it returns is of no interest
-    // here.
+    // (#5932), a standard value domain (#5712) or a pattern (#6580).
+    // `effectiveEnvOverride` does the judging (and the reporting); the value it
+    // returns is of no interest here.
     const enforceable = new Set([
       ...reg.optionTables.keys(),
       ...reg.bounds.keys(),
       ...reg.valueDomains.keys(),
+      ...reg.patterns.keys(),
     ]);
     for (const key of enforceable) {
       this.effectiveEnvOverride(reg, namespace, key);
@@ -689,6 +771,11 @@ export class SettingsService {
    * family rather than opening a third branch: it rides `DeclaredBounds` and
    * `firstRangeViolation`, so it arrives on both paths at once by construction
    * and cannot be the next constraint that is enforced on one door only.
+   * #6580 closed the set out: `pattern`, the LAST declared constraint family
+   * still judged on one door only, now arrives through the same shared helper
+   * the save path calls ({@link firstPatternMiss}), in the same family order
+   * the save path applies — options → pattern → valueDomain → bounds — so the
+   * two doors report the same family for the same value.
    */
   private effectiveEnvOverride(
     reg: RegisteredManifest,
@@ -701,6 +788,11 @@ export class SettingsService {
 
     const value = coerceEnvValue(envRaw, reg.defaults.get(key));
 
+    // Families are judged in the SAME order `validatePatch` judges them —
+    // options (when no domain is declared) → pattern → valueDomain → bounds —
+    // so a value that breaks several declarations is rejected for the same
+    // reason at both doors, not just rejected at both (#6580).
+    //
     // A declared standard value domain (#5712) REPLACES the option table as
     // the membership boundary: the standard's membership is what the override
     // is judged against, and `options` is a UI convenience list this door does
@@ -708,18 +800,7 @@ export class SettingsService {
     // is on file: the same comparison in two places is how the env half came to
     // disagree with the save half in the first place.
     const domain = reg.valueDomains.get(key);
-    if (domain) {
-      const rejected = firstRejectedDomainMember(domain, value);
-      if (rejected) {
-        const { member, example } = valueDomainPhrasing(domain);
-        this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
-          what: `is not a valid ${member} for`,
-          detail: `Allowed values: any ${member} (e.g. '${example}').`,
-          fix: `a valid ${member}`,
-        });
-        return null;
-      }
-    } else {
+    if (!domain) {
       // A key with no declared table has nothing to enforce — unchanged
       // behaviour (#5131's exhaustive-options semantics, untouched when no
       // domain is declared).
@@ -734,6 +815,39 @@ export class SettingsService {
           });
           return null;
         }
+      }
+    }
+
+    // The declared `pattern` (#6580) — the last declared constraint family
+    // that was judged on one door only. Judged by the same helper the save
+    // path calls ({@link firstPatternMiss}), in the same position it holds
+    // there: after the option table, before the domain membership and the
+    // value window. A key with no compilable pattern has nothing to enforce
+    // ({@link declaredPattern} — the write gate's invalid-RegExp tolerance,
+    // shared by construction).
+    const pattern = reg.patterns.get(key);
+    if (pattern) {
+      const miss = firstPatternMiss(pattern, value);
+      if (miss) {
+        this.reportRejectedEnvOverride(reg, namespace, key, envName, miss.value, {
+          what: 'does not match the declared pattern for',
+          detail: `Allowed values: strings matching /${pattern.source}/.`,
+          fix: 'a value matching the declared pattern',
+        });
+        return null;
+      }
+    }
+
+    if (domain) {
+      const rejected = firstRejectedDomainMember(domain, value);
+      if (rejected) {
+        const { member, example } = valueDomainPhrasing(domain);
+        this.reportRejectedEnvOverride(reg, namespace, key, envName, rejected.value, {
+          what: `is not a valid ${member} for`,
+          detail: `Allowed values: any ${member} (e.g. '${example}').`,
+          fix: `a valid ${member}`,
+        });
+        return null;
       }
     }
 
@@ -1420,14 +1534,13 @@ export class SettingsService {
         }
       }
 
-      if (!empty && typeof spec.pattern === 'string' && typeof value === 'string') {
-        let re: RegExp | undefined;
-        try {
-          re = new RegExp(spec.pattern);
-        } catch {
-          re = undefined; // invalid manifest pattern — don't block writes
-        }
-        if (re && !re.test(value)) {
+      // Shared with the env path (#6580) — see `firstPatternMiss` for the
+      // string-shape applicability and `declaredPattern` for the
+      // invalid-RegExp tolerance (unchanged: an uncompilable manifest pattern
+      // never blocks writes).
+      if (!empty) {
+        const declared = declaredPattern(spec.pattern);
+        if (declared && firstPatternMiss(declared, value)) {
           const hint = typeof spec.description === 'string' ? ` ${spec.description}` : '';
           errors.push({
             field: key,
@@ -1436,7 +1549,7 @@ export class SettingsService {
             label,
             // The declared pattern, so a client can format its own message
             // rather than parsing ours (`FieldError.constraint`, ADR-0114).
-            constraint: { pattern: spec.pattern },
+            constraint: { pattern: declared.source },
           });
           continue;
         }

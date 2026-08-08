@@ -8,14 +8,18 @@ import {
     ensureViewDefinitionActiveIndex,
     resolveIndexExec,
     buildActiveIndexSql,
+    buildDuplicateProbeSql,
     classifyIndexFailure,
+    viewActiveIndexKeyParts,
     VIEW_ACTIVE_INDEX_NAME,
     VIEW_ACTIVE_PROBE_INDEX_NAME,
+    VIEW_ACTIVE_NULL_SENTINELS,
     type IndexExec,
 } from './view-definition-active-index.js';
 
 /**
- * `sys_view_definition` — "unique among ACTIVE rows" (#5839).
+ * `sys_view_definition` — "unique among ACTIVE rows" (#5839), on a key that is
+ * NULL-SAFE (#6417).
  *
  * Every assertion here runs against a REAL SQLite database, because the whole
  * defect was a claim about DDL that no test ever asked the database to confirm.
@@ -30,7 +34,7 @@ import {
  * in the lockfile purely for fixture purposes. The built-in gives the same real
  * SQLite — real partial indexes, real UNIQUE enforcement — for free.
  */
-describe('sys_view_definition active-row uniqueness (#5839)', () => {
+describe('sys_view_definition active-row uniqueness (#5839) on a NULL-safe key (#6417)', () => {
     let db: DatabaseSync;
     let exec: IndexExec;
 
@@ -101,7 +105,7 @@ describe('sys_view_definition active-row uniqueness (#5839)', () => {
         expect(insert('v2', 'lead.my_pipeline', 'org1', 'user1', 'active').ok).toBe(true);
     });
 
-    it('the index it leaves behind is the PARTIAL one, under the DECLARED name', async () => {
+    it('the index it leaves behind is the PARTIAL, NULL-SAFE one, under the DECLARED name', async () => {
         await ensureViewDefinitionActiveIndex(exec);
 
         const ddl = indexDdl(VIEW_ACTIVE_INDEX_NAME);
@@ -109,6 +113,11 @@ describe('sys_view_definition active-row uniqueness (#5839)', () => {
         // The predicate the declaration always promised and never delivered.
         expect(ddl!.toLowerCase()).toContain("where state = 'active'");
         expect(ddl!.toLowerCase()).toContain('unique');
+        // …over the NULL-safe key parts (#6417), each copied from its own
+        // in-repo precedent: ADR-0120 D3's sentinel for the tenant column,
+        // `ensureOverlayIndex`'s `COALESCE(package_id, '')` form for `owner`.
+        expect(ddl).toContain("COALESCE(organization_id, '__global__')");
+        expect(ddl).toContain("COALESCE(owner, '')");
         // Reusing the declared name is what stops `syncDeclaredIndexes` — which
         // skips by name — from re-imposing the unrestricted form next boot.
         expect(ddl).not.toEqual(DECLARED_INDEX_DDL);
@@ -118,13 +127,17 @@ describe('sys_view_definition active-row uniqueness (#5839)', () => {
 
     // ── Uniqueness is scoped, NOT relaxed ─────────────────────────────────
 
-    it('still rejects two ACTIVE rows with the same (name, organization_id, owner)', async () => {
+    /** CASE 2 of #6417 — the one bucket that WAS already constrained. */
+    it('still rejects two ACTIVE PERSONAL rows with the same (name, organization_id, owner)', async () => {
         await ensureViewDefinitionActiveIndex(exec);
 
         expect(insert('v3', 'lead.hot', 'org1', 'user1', 'active').ok).toBe(true);
         const dup = insert('v4', 'lead.hot', 'org1', 'user1', 'active');
         expect(dup.ok).toBe(false);
+        // The constraint's IDENTITY, not merely "something threw": SQLite names
+        // the index for an expression key, so this pins WHICH constraint fired.
         expect(dup.error).toContain('UNIQUE constraint failed');
+        expect(dup.error).toContain(VIEW_ACTIVE_INDEX_NAME);
     });
 
     it('admits MANY archived rows under one name — the slot is scoped, not shared', async () => {
@@ -148,22 +161,85 @@ describe('sys_view_definition active-row uniqueness (#5839)', () => {
         expect(insert('o3', 'lead.mine', 'org2', 'user1', 'active').ok).toBe(true);
     });
 
+    // ── The NULL-distinct hole, now CLOSED (#6417) ────────────────────────
+
     /**
-     * Honest scope note. `owner` is NULL for SHARED views and `organization_id`
-     * is NULL for env-wide ones, and SQL UNIQUE treats NULLs as DISTINCT — so
-     * two active SHARED views may carry the same name. That hole is older than
-     * this migration and is NOT what #5839 decided: the partial index changes
-     * the ROW SCOPE (`WHERE state = 'active'`) and deliberately leaves the KEY
-     * spelling alone, which is also what makes it strictly weaker than the
-     * index it replaces and therefore incapable of failing on existing data.
-     * Pinned so the gap is a recorded fact rather than a surprise; closing it
-     * needs the NULL-safe key (`COALESCE`) and its own ruling — filed separately.
+     * The pin PR #6415 left here read `does NOT close the pre-existing
+     * NULL-distinct hole for shared views (recorded, not fixed)` and asserted
+     * that the second insert succeeded. The maintainer ruling of 2026-08-08
+     * forbids that outcome, so the pin flips: same fixture, opposite verdict.
+     *
+     * `owner` is NULL for SHARED views, and SQL UNIQUE treats NULLs as mutually
+     * DISTINCT, so the raw column constrained nothing for them —
+     * `COALESCE(owner, '')` folds every shared row into ONE bucket that is
+     * unique among itself. CASE 3 of the issue, measured.
      */
-    it('does NOT close the pre-existing NULL-distinct hole for shared views (recorded, not fixed)', async () => {
+    it('rejects a second ACTIVE SHARED view (owner NULL) under the same name', async () => {
         await ensureViewDefinitionActiveIndex(exec);
 
         expect(insert('s1', 'lead.team', 'org1', null, 'active').ok).toBe(true);
-        expect(insert('s2', 'lead.team', 'org1', null, 'active').ok).toBe(true);
+        const dup = insert('s2', 'lead.team', 'org1', null, 'active');
+        expect(dup.ok).toBe(false);
+        expect(dup.error).toContain('UNIQUE constraint failed');
+        expect(dup.error).toContain(VIEW_ACTIVE_INDEX_NAME);
+    });
+
+    /** CASE 4 — `organization_id` is NULL for environment-level views. */
+    it('rejects a second ACTIVE ENVIRONMENT-LEVEL view (organization_id NULL) under the same name', async () => {
+        await ensureViewDefinitionActiveIndex(exec);
+
+        expect(insert('e1', 'lead.env', null, 'user9', 'active').ok).toBe(true);
+        const dup = insert('e2', 'lead.env', null, 'user9', 'active');
+        expect(dup.ok).toBe(false);
+        expect(dup.error).toContain('UNIQUE constraint failed');
+        expect(dup.error).toContain(VIEW_ACTIVE_INDEX_NAME);
+    });
+
+    /** Both nullable parts NULL at once — an environment-level SHARED view. */
+    it('rejects a second ACTIVE view with BOTH organization_id and owner NULL', async () => {
+        await ensureViewDefinitionActiveIndex(exec);
+
+        expect(insert('b1', 'lead.both', null, null, 'active').ok).toBe(true);
+        const dup = insert('b2', 'lead.both', null, null, 'active');
+        expect(dup.ok).toBe(false);
+        expect(dup.error).toContain('UNIQUE constraint failed');
+        expect(dup.error).toContain(VIEW_ACTIVE_INDEX_NAME);
+    });
+
+    /**
+     * The tightening must not have swallowed #5839's row scoping. Shared views
+     * are the bucket #6417 newly constrains, so the archived exemption is
+     * re-proved THERE and not only on personal rows.
+     */
+    it('archived SHARED rows stay exempt — the #5839 active-only scoping survives', async () => {
+        await ensureViewDefinitionActiveIndex(exec);
+
+        expect(insert('sa1', 'lead.shared_arc', 'org1', null, 'archived').ok).toBe(true);
+        expect(insert('sa2', 'lead.shared_arc', 'org1', null, 'archived').ok).toBe(true);
+        // …plus exactly one active shared view alongside them.
+        expect(insert('sa3', 'lead.shared_arc', 'org1', null, 'active').ok).toBe(true);
+        expect(insert('sa4', 'lead.shared_arc', 'org1', null, 'active').ok).toBe(false);
+
+        // And the recycling the whole of #5839 was about, on a shared view.
+        archive('sa3');
+        expect(insert('sa5', 'lead.shared_arc', 'org1', null, 'active').ok).toBe(true);
+    });
+
+    /**
+     * The half of the declaration's comment that WAS true stays true: a shared
+     * view and a personal view may carry one name, and so may two environments'
+     * / two tenants' rows. The sentinels are chosen so they cannot collide with
+     * real data — an organization id may never be `'__global__'` (ADR-0120 D3
+     * reserves the token) and an owner is a user id, never `''`.
+     */
+    it('a SHARED view and a PERSONAL view still share a name, across tenants too', async () => {
+        await ensureViewDefinitionActiveIndex(exec);
+
+        expect(insert('x1', 'lead.mix', 'org1', null, 'active').ok).toBe(true);
+        expect(insert('x2', 'lead.mix', 'org1', 'user1', 'active').ok).toBe(true);
+        // A shared view in another tenant, and the environment-level one.
+        expect(insert('x3', 'lead.mix', 'org2', null, 'active').ok).toBe(true);
+        expect(insert('x4', 'lead.mix', null, null, 'active').ok).toBe(true);
     });
 
     // ── Idempotence ───────────────────────────────────────────────────────
@@ -197,17 +273,43 @@ describe('sys_view_definition active-row uniqueness (#5839)', () => {
         expect(indexDdl(VIEW_ACTIVE_INDEX_NAME)!.toLowerCase()).toContain("where state = 'active'");
     });
 
+    /**
+     * The upgrade every already-migrated deployment takes: the table arrives
+     * carrying #5839's partial index with the OLD, NULL-distinct key, and this
+     * run has to replace it in place — same name, tighter key.
+     */
+    it('upgrades a table already carrying #5839\'s NULL-distinct partial index', async () => {
+        db.exec(`DROP INDEX ${VIEW_ACTIVE_INDEX_NAME}`);
+        db.exec(
+            `CREATE UNIQUE INDEX ${VIEW_ACTIVE_INDEX_NAME} ON sys_view_definition ` +
+                `(name, organization_id, owner) WHERE state = 'active'`,
+        );
+        // The #5839 shape admits two shared views under one name…
+        expect(insert('pre1', 'lead.pre', 'org1', null, 'active').ok).toBe(true);
+        db.prepare("UPDATE sys_view_definition SET state='archived' WHERE id='pre1'").run();
+
+        const result = await ensureViewDefinitionActiveIndex(exec);
+
+        expect(result.status).toBe('created');
+        expect(indexDdl(VIEW_ACTIVE_INDEX_NAME)).toContain("COALESCE(owner, '')");
+        // …and after the upgrade it does not.
+        expect(insert('post1', 'lead.pre', 'org1', null, 'active').ok).toBe(true);
+        expect(insert('post2', 'lead.pre', 'org1', null, 'active').ok).toBe(false);
+    });
+
     // ── Degradation: the constraint is never destroyed ────────────────────
 
     /**
-     * MySQL has no partial indexes. The paradigm this module follows
+     * MySQL has no partial indexes (and, before 8.0.13, no functional key parts
+     * for the `COALESCE` parts either). The paradigm this module follows
      * (`ensureOverlayIndex`) drops the legacy index BEFORE attempting the
      * partial one, so a rejected `WHERE` leaves the table with no unique index
      * at all. This module probes first for exactly that reason, and this test
      * is the proof: after a dialect refusal the ORIGINAL index is still there,
-     * still enforcing, byte-for-byte unchanged.
+     * still enforcing, byte-for-byte unchanged — which IS ADR-0120 D3's
+     * bare-composite degradation, reached by keeping rather than rebuilding.
      */
-    it('a dialect without partial indexes keeps the original UNIQUE index intact', async () => {
+    it('a dialect that cannot build the form keeps the original UNIQUE index intact', async () => {
         const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
         const mysqlish: IndexExec = async (sql: string) => {
             if (/where/i.test(sql)) {
@@ -226,24 +328,77 @@ describe('sys_view_definition active-row uniqueness (#5839)', () => {
         expect(indexDdl(VIEW_ACTIVE_INDEX_NAME)).toEqual(DECLARED_INDEX_DDL);
         expect(insert('m1', 'lead.x', 'org1', 'user1', 'active').ok).toBe(true);
         expect(insert('m2', 'lead.x', 'org1', 'user1', 'active').ok).toBe(false);
-        // Reported, and not as an operator error — this is expected on MySQL.
-        expect(logger.info).toHaveBeenCalledTimes(1);
-        expect(String(logger.info.mock.calls[0]![0])).toContain('no partial indexes');
-        expect(logger.error).not.toHaveBeenCalled();
+        // Reported at `error`, RAISED from #6415's `info` by #6417: the same
+        // missing DDL now costs an integrity guarantee the platform states it
+        // enforces (not merely slot recycling), so it lands in the durability
+        // arm of AGENTS.md's rule — the system keeps looking healthy while
+        // duplicates accumulate. An `error` owes the consequence and the fix,
+        // and both gaps that stay open are named.
+        expect(logger.error).toHaveBeenCalledTimes(1);
+        const note = String(logger.error.mock.calls[0]![0]);
+        expect(note).toContain('UNRESTRICTED and NULL-distinct');
+        expect(note).toContain('keeps looking healthy');
+        expect(note).toContain('#5839');
+        expect(note).toContain('#6417');
+        // The fix, and the query that surfaces the duplicates meanwhile.
+        expect(note).toContain('SQLite/PostgreSQL');
+        expect(note).toContain(buildDuplicateProbeSql());
+        expect(logger.info).not.toHaveBeenCalled();
     });
 
     /**
-     * ADR-0120 D4's wording contract: name what is NOT enforced and the command
-     * that lists the offending rows, at `error`, without failing the boot.
+     * The tightening-failure path, on a REAL database rather than a mocked
+     * throw: seed the exact duplicate pair the old index admitted (#6417 CASE
+     * 3), then run the migration and assert ADR-0120 D4's whole disposition.
+     *
+     * This is the case #5839 could not have — its partial index was strictly
+     * WEAKER than the one it replaced, so it could not fail on existing data.
+     * A NULL-safe key can, and does.
      */
-    it('conflicting rows are named at error level and the old index survives', async () => {
+    it('a pre-existing duplicate pair blocks the tightening — old index kept, rows named, boot survives', async () => {
+        const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+        // Two ACTIVE shared views under one name — legal until today.
+        expect(insert('d1', 'lead.team', 'org1', null, 'active').ok).toBe(true);
+        expect(insert('d2', 'lead.team', 'org1', null, 'active').ok).toBe(true);
+
+        const result = await ensureViewDefinitionActiveIndex(exec, logger);
+
+        // Reported, never thrown: a boot must not fail over an index.
+        expect(result.status).toBe('conflict');
+        expect(result.detail).toContain('UNIQUE constraint failed');
+        // The PREVIOUS index survives byte-for-byte, and still enforces what it
+        // always did — at no point is the table left unconstrained.
+        expect(indexDdl(VIEW_ACTIVE_INDEX_NAME)).toEqual(DECLARED_INDEX_DDL);
+        expect(insert('d3', 'lead.hot', 'org1', 'user1', 'active').ok).toBe(true);
+        expect(insert('d4', 'lead.hot', 'org1', 'user1', 'active').ok).toBe(false);
+        // No probe residue, and no half-built index under either name.
+        expect(indexDdl(VIEW_ACTIVE_PROBE_INDEX_NAME)).toBeUndefined();
+
+        // D4's wording contract: what is not enforced, the rows, the command.
+        expect(logger.error).toHaveBeenCalledTimes(1);
+        const msg = String(logger.error.mock.calls[0]![0]);
+        expect(msg).toContain("COALESCE(owner, '')");
+        expect(msg).toContain('os migrate plan');
+        expect(msg).toContain(buildDuplicateProbeSql());
+
+        // …and that shipped query really does name the offending rows, on this
+        // very database. It is not a decorative string.
+        const offenders = db.prepare(buildDuplicateProbeSql()).all() as Array<Record<string, unknown>>;
+        expect(offenders).toHaveLength(1);
+        expect(offenders[0]!.name).toBe('lead.team');
+        expect(offenders[0]!.duplicate_rows).toBe(2);
+    });
+
+    /**
+     * The same disposition when the driver reports the conflict in MySQL's
+     * wording rather than SQLite's — the classification, not the dialect, is
+     * what selects the branch.
+     */
+    it('conflicting rows are named at error level and the old index survives (MySQL wording)', async () => {
         const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
         const conflicting: IndexExec = async (sql: string) => {
             if (/CREATE UNIQUE INDEX/i.test(sql)) {
-                throw new Error(
-                    'UNIQUE constraint failed: sys_view_definition.name, ' +
-                        'sys_view_definition.organization_id, sys_view_definition.owner',
-                );
+                throw new Error("Duplicate entry 'lead.team-__global__-' for key 'idx_sys_view_def_active'");
             }
             return db.exec(sql);
         };
@@ -254,8 +409,28 @@ describe('sys_view_definition active-row uniqueness (#5839)', () => {
         expect(indexDdl(VIEW_ACTIVE_INDEX_NAME)).toEqual(DECLARED_INDEX_DDL);
         expect(logger.error).toHaveBeenCalledTimes(1);
         const msg = String(logger.error.mock.calls[0]![0]);
-        expect(msg).toContain('name, organization_id, owner');
+        expect(msg).toContain("COALESCE(organization_id, '__global__')");
         expect(msg).toContain('os migrate plan');
+    });
+
+    /**
+     * The catch-all arm. Same class as the dialect arm — the DDL did not run
+     * and nothing else looks wrong — so it is `error` too, and it must not be
+     * QUIETER than the failure we can name.
+     */
+    it('an unclassifiable failure is reported at error and leaves the index alone', async () => {
+        const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+        const broken: IndexExec = async (sql: string) => {
+            if (/CREATE UNIQUE INDEX/i.test(sql)) throw new Error('disk I/O error');
+            return db.exec(sql);
+        };
+
+        const result = await ensureViewDefinitionActiveIndex(broken, logger);
+
+        expect(result.status).toBe('failed');
+        expect(indexDdl(VIEW_ACTIVE_INDEX_NAME)).toEqual(DECLARED_INDEX_DDL);
+        expect(logger.error).toHaveBeenCalledTimes(1);
+        expect(String(logger.error.mock.calls[0]![0])).toContain('can still coexist');
     });
 
     it('a host with no raw-SQL driver is a silent no-op, not a failure', async () => {
@@ -276,14 +451,44 @@ describe('sys_view_definition active-row uniqueness (#5839)', () => {
             'conflict',
         );
         expect(classifyIndexFailure('near "WHERE": syntax error')).toBe('unsupported');
+        // MariaDB's refusal of a functional key part, which #6417 introduces.
+        expect(classifyIndexFailure('Functional index on a column is not supported')).toBe('unsupported');
         expect(classifyIndexFailure('disk I/O error')).toBe('failed');
     });
 
-    it('buildActiveIndexSql scopes rows without changing the declared key', () => {
+    it('buildActiveIndexSql scopes rows AND spells the key NULL-safe', () => {
         const sql = buildActiveIndexSql(VIEW_ACTIVE_INDEX_NAME);
-        expect(sql).toContain('(name, organization_id, owner)');
+        expect(sql).toContain("(name, COALESCE(organization_id, '__global__'), COALESCE(owner, ''))");
         expect(sql).toContain("WHERE state = 'active'");
         expect(sql).toContain('IF NOT EXISTS');
+    });
+
+    /**
+     * The sentinels are the point of #6417, so they are asserted as literals
+     * rather than only through the builder that produces them: `'__global__'`
+     * is ADR-0120 D3's reserved token (the driver's `GLOBAL_TENANT`), `''` is
+     * `ensureOverlayIndex`'s `COALESCE(package_id, '')` form. A silent change
+     * to either would re-partition every existing index without a migration.
+     */
+    it('pins the two sentinels and the key order', () => {
+        expect(VIEW_ACTIVE_NULL_SENTINELS).toEqual({ organization_id: '__global__', owner: '' });
+        expect(viewActiveIndexKeyParts()).toEqual([
+            'name',
+            "COALESCE(organization_id, '__global__')",
+            "COALESCE(owner, '')",
+        ]);
+    });
+
+    it('buildDuplicateProbeSql groups by exactly the index key the CREATE uses', () => {
+        const probe = buildDuplicateProbeSql();
+        // Same key parts as the index, so what it reports and what the index
+        // rejects cannot diverge.
+        expect(probe).toContain(`GROUP BY ${viewActiveIndexKeyParts().join(', ')}`);
+        // Selected columns are the RAW ones — an operator needs the stored
+        // values (NULLs included), not the folded bucket keys.
+        expect(probe).toContain('SELECT name, organization_id, owner, COUNT(*) AS duplicate_rows');
+        expect(probe).toContain("WHERE state = 'active'");
+        expect(probe).toContain('HAVING COUNT(*) > 1');
     });
 
     it('resolveIndexExec prefers raw(), falls back to execute(), else undefined', async () => {
