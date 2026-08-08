@@ -698,6 +698,22 @@ export type HookHandler = (context: HookContext) => Promise<void> | void;
 export interface HookEntry {
   handler: HookHandler;
   object?: string | string[];  // undefined = global hook
+  /**
+   * [#5928] Object name(s) SUBTRACTED from whatever `object` admits — the
+   * negative half of a registration's scope. Absent = subtract nothing.
+   *
+   * `object` alone can only say "these objects" (plus the `'*'` full set), and
+   * the two are interchangeable only over a CLOSED universe. This one is open:
+   * `applyObjectRegistryMutation` registers objects into a running engine on a
+   * successful `/meta` PUT, emitting no event a plugin could subscribe to, so a
+   * registrant that enumerated the complement of its skip list would keep a
+   * frozen list and silently stop covering every object registered after boot.
+   * For the audit plugin that is a compliance regression, and a silent one.
+   *
+   * Read only through {@link hookMatchesObject} — never re-implemented at a
+   * call site (see that function's note on the one-semantic rule).
+   */
+  excludeObjects?: string | string[];
   priority: number;
   packageId?: string;
   /**
@@ -708,6 +724,122 @@ export interface HookEntry {
   meta?: any;
   /** Hook `name` from metadata; used for diagnostics & deduplication. */
   hookName?: string;
+}
+
+/** `object` / `excludeObjects` in either accepted spelling → a name list. */
+function hookTargetList(target: string | string[] | undefined): string[] {
+  if (target === undefined) return [];
+  return Array.isArray(target) ? target : [target];
+}
+
+/**
+ * [#5928] Does `entry` cover `objectName`? **The** answer — one function, both
+ * consumers.
+ *
+ * ## Why this is a function and not two `if`s
+ *
+ * `triggerHooks` (dispatch) and `hasHooksFor` (the #5038 / #5284 bulk-write
+ * gate that decides whether the matched row set is worth reading) used to carry
+ * this rule as two hand-written copies of one semantic. `hasHooksFor`'s own
+ * comment named the hazard that arrangement carries: a gate LOOSER than the
+ * dispatch only wastes a query, but a gate TIGHTER than the dispatch silently
+ * drops hooks that were going to fire. Two copies stay in agreement only for as
+ * long as everyone who edits one remembers the other, and #5928 adds a second
+ * dimension to the rule — exactly the edit that would have desynchronised them.
+ * So the copies are gone: both consumers call this, and the property test in
+ * `hook-exclude-objects.test.ts` pins the implication (`dispatched ⇒ gate open`)
+ * over the full allow × exclude matrix rather than trusting the structure.
+ *
+ * ## The semantic
+ *
+ * `matches = allowMatches && !excludeMatches`, where an absent `object` admits
+ * everything (global) and `'*'` in `object` does the same explicitly.
+ * `excludeObjects` names are matched literally — `'*'` is refused at
+ * registration, so it can never reach this as a subtract-everything wildcard.
+ *
+ * The allow half keeps the TRUTHINESS test both copies used verbatim, rather
+ * than the `!== undefined` that reads more precisely. They differ on exactly one
+ * input, `object: ''`, which today registers a GLOBAL hook (falsy ⇒ no filter) —
+ * #4281's failure mode surviving on the code path it never covered, since it
+ * closed the metadata path at the schema and the binder. Flipping it here would
+ * turn a hook that fires on everything into one that fires on nothing, silently,
+ * inside a PR about a different face of the contract. Out of scope by
+ * construction: preserved, pinned in `hook-exclude-objects.test.ts`, and filed
+ * separately.
+ */
+export function hookMatchesObject(
+  entry: Pick<HookEntry, 'object' | 'excludeObjects'>,
+  objectName: string,
+): boolean {
+  // Allow half: absent = global; otherwise the wildcard or a literal name.
+  if (entry.object) {
+    const targets = hookTargetList(entry.object);
+    if (!targets.includes('*') && !targets.includes(objectName)) return false;
+  }
+  // Subtract half: any literal hit removes the object from the admitted set.
+  if (entry.excludeObjects) {
+    if (hookTargetList(entry.excludeObjects).includes(objectName)) return false;
+  }
+  return true;
+}
+
+/**
+ * [#5928] Registration-time refusal for the `excludeObjects` face, following
+ * the sister ruling on empty hook targets (#4281 / #4001, ADR-0078 "no silently
+ * inert declaration").
+ *
+ * Two shapes are refused, both statically decidable at the call site:
+ *
+ *  - **`''` / `['']`** (or any blank member) — no object is named `''`, so the
+ *    entry subtracts nothing while reading as though it subtracts something.
+ *    Inert, and inert in the direction that quietly keeps a hook firing on
+ *    objects its author believed they had excluded.
+ *  - **`'*'` anywhere in the list** — subtracting the full set from any allow
+ *    set leaves the empty set: a hook that can never fire, registered
+ *    "successfully". That is ADR-0078's silently-inert declaration exactly, and
+ *    the same never-fire shape #4281 refused when `['']` produced it from the
+ *    other side.
+ *
+ * `[]` is deliberately ACCEPTED. It is the honest spelling of "subtract
+ * nothing" — identical in meaning to omitting the key, and the natural value of
+ * a spread (`excludeObjects: [...SKIP_OBJECTS]`) whose source list is empty.
+ * The refusal above is not "empty is bad"; it is "a name that matches nothing"
+ * and "a name that matches everything". #4281 refused `[]` on `object` for a
+ * reason that does not exist here: there, the binder WIDENED the empty target
+ * into `'*'`, so blank intent silently became the maximum blast radius. Nothing
+ * transforms this value.
+ *
+ * A throw, not a warn: `excludeObjects` ships in this release with no callers,
+ * so strictness costs no migration, and unlike the unknown-event branch above
+ * (where a custom driver dispatching its own events is a legitimate reading)
+ * neither refused shape has one.
+ */
+function assertValidHookExcludeObjects(
+  excludeObjects: string | string[] | undefined,
+  event: string,
+): void {
+  if (excludeObjects === undefined) return;
+  const names = hookTargetList(excludeObjects);
+  for (const name of names) {
+    if (typeof name !== 'string' || name.trim().length === 0) {
+      throw new Error(
+        `[ObjectQL] Hook '${event}' declares an empty \`excludeObjects\` entry. `
+        + 'No object is named \'\', so it would subtract nothing while reading as if it '
+        + 'subtracted something — a hook still firing on objects it appears to exclude. '
+        + 'Name the object(s) to exclude — `excludeObjects: [\'sys_audit_log\']` — or omit '
+        + 'the option entirely (an empty array is accepted and subtracts nothing).',
+      );
+    }
+    if (name === '*') {
+      throw new Error(
+        `[ObjectQL] Hook '${event}' excludes the wildcard '*', which subtracts every `
+        + 'object and leaves a hook that can never fire (ADR-0078: no silently inert '
+        + 'declaration). Exclude the object names you mean — '
+        + '`excludeObjects: [\'sys_audit_log\']` — or, if the hook really should not be '
+        + 'registered, do not register it.',
+      );
+    }
+  }
 }
 
 /** Function registry entry — see `registerFunction`. */
@@ -1142,10 +1274,17 @@ export class ObjectQL implements IObjectQLEngine {
    * Register a hook
    * @param event The event name (e.g. 'beforeFind', 'afterInsert')
    * @param handler The handler function
-   * @param options Optional: target object(s) and priority
+   * @param options Optional: target object(s), objects to exclude, and priority
    */
   registerHook(event: string, handler: HookHandler, options?: {
     object?: string | string[];
+    /**
+     * [#5928] Object name(s) subtracted from what `object` admits — the way to
+     * say "global, except these". See {@link HookEntry.excludeObjects} for why
+     * an allow list cannot express it, and
+     * {@link assertValidHookExcludeObjects} for the two refused shapes.
+     */
+    excludeObjects?: string | string[];
     priority?: number;
     packageId?: string;
     /** Original metadata Hook definition (set by `bindHooksToEngine`). */
@@ -1153,6 +1292,9 @@ export class ObjectQL implements IObjectQLEngine {
     /** Stable name from metadata (set by `bindHooksToEngine`). */
     hookName?: string;
   }) {
+    // [#5928] Refuse an exclusion face that subtracts nothing (`''`) or
+    // everything (`'*'`) before anything is registered or reported.
+    assertValidHookExcludeObjects(options?.excludeObjects, event);
     // [#3195] Guard against enum-vs-dispatch drift: a hook on an event the
     // engine never triggers would register "successfully" and then silently
     // never fire. Warn loudly rather than swallow it. Not a hard reject — a
@@ -1172,6 +1314,7 @@ export class ObjectQL implements IObjectQLEngine {
     entries.push({
       handler,
       object: options?.object,
+      excludeObjects: options?.excludeObjects,
       priority: options?.priority ?? 100,
       packageId: options?.packageId,
       meta: options?.meta,
@@ -1179,7 +1322,10 @@ export class ObjectQL implements IObjectQLEngine {
     });
     // Sort by priority (lower runs first)
     entries.sort((a, b) => a.priority - b.priority);
-    this.logger.debug('Registered hook', { event, object: options?.object, priority: options?.priority ?? 100, totalHandlers: entries.length });
+    // The exclusion face is reported alongside the allow face: a registration's
+    // scope is BOTH halves (#5928), and a log that printed only `object` would
+    // describe a global hook for an entry that is global-minus-twenty-tables.
+    this.logger.debug('Registered hook', { event, object: options?.object, excludeObjects: options?.excludeObjects, priority: options?.priority ?? 100, totalHandlers: entries.length });
   }
 
   /**
@@ -1409,12 +1555,10 @@ export class ObjectQL implements IObjectQLEngine {
       (context.session as { skipAutomations?: boolean } | undefined)?.skipAutomations === true;
 
     for (const entry of entries) {
-      // Per-object matching
-      if (entry.object) {
-        const targets = Array.isArray(entry.object) ? entry.object : [entry.object];
-        if (!targets.includes('*') && !targets.includes(context.object)) {
-          continue; // Skip non-matching hooks
-        }
+      // Per-object matching — allow face minus exclusion face, the one shared
+      // rule `hasHooksFor` also reads (#5928).
+      if (!hookMatchesObject(entry, context.object)) {
+        continue; // Skip non-matching hooks
       }
       if (skipAutomations && entry.meta) {
         this.logger.debug('Skipping metadata-bound hook (skipAutomations)', { event, hook: entry.hookName });
@@ -1427,26 +1571,26 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * [#5038] Would `triggerHooks(event, ctx)` reach ANY handler for `object`?
    *
-   * Mirrors the per-object filter in `triggerHooks` exactly (an entry with no
-   * `object` is global; an array or `'*'` widens it), because this answer gates
-   * a READ of the whole matched row set on the bulk write path. Getting it
-   * looser than the dispatch loop only costs a wasted query; getting it
-   * TIGHTER would silently drop hooks that were going to fire, so the two must
-   * be read together.
+   * Applies the SAME per-object rule the dispatch loop applies — literally the
+   * same function, {@link hookMatchesObject}, since #5928 — because this answer
+   * gates a READ of the whole matched row set on the bulk write path. Getting
+   * it looser than the dispatch loop only costs a wasted query; getting it
+   * TIGHTER would silently drop hooks that were going to fire. Until #5928 the
+   * two were separate hand-written copies of one semantic and this comment
+   * asked the reader to keep them in step; sharing the function is what
+   * actually keeps them in step, and the property test in
+   * `hook-exclude-objects.test.ts` pins the direction that matters.
    *
    * `session.skipAutomations` is deliberately NOT consulted: it suppresses only
    * metadata-bound entries, and code-registered hooks (audit, sharing) still
    * run, so the row set is still needed. Over-reading in that case is a cost,
-   * never a correctness loss.
+   * never a correctness loss — and it is the SAFE side of the asymmetry above,
+   * which is why the pin asserts an implication rather than an equality.
    */
   private hasHooksFor(event: string, object: string): boolean {
     const entries = this.hooks.get(event);
     if (!entries || entries.length === 0) return false;
-    return entries.some((entry) => {
-      if (!entry.object) return true;
-      const targets = Array.isArray(entry.object) ? entry.object : [entry.object];
-      return targets.includes('*') || targets.includes(object);
-    });
+    return entries.some((entry) => hookMatchesObject(entry, object));
   }
 
   /**
