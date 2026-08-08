@@ -1,5 +1,187 @@
 # @objectstack/service-messaging
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- 932d7e2: Migrate the inbox read-receipt race fallback onto the shared `isUniqueViolationError` predicate from `@objectstack/types` (#6542), deleting the last hand-written `isUniqueViolation()` copy that #6250 inventoried. One behaviour change, in the direction the call site wants: the shared predicate follows a bounded step down the `cause` chain, so a unique-constraint conflict wrapped by a pool or query-builder layer now triggers the `flipToRead()` convergence instead of being rethrown as a failed mark-read.
+- f1850d8: fix(services): `markAllRead` clears the WHOLE inbox, not one 200-row window (#6436)
+
+  `POST /api/v1/notifications/read/all` is published as "mark **every**
+  currently-unread inbox message as read". It swept
+  `listInbox(userId, { read: false, limit: 200 })` — one page of the LIST, and
+  `200` is that list's hard cap — so it cleared at most 200 receipts per call.
+
+  Measured over the real stack (sqlite-wasm + ObjectQL + service-messaging + hono
+
+  - dispatcher), one user, 260 unread:
+
+  | request                                |            before |            after |
+  | :------------------------------------- | ----------------: | ---------------: |
+  | `POST /notifications/read/all`         |  `readCount: 200` | `readCount: 260` |
+  | `GET /notifications` (same user, next) | `unreadCount: 60` | `unreadCount: 0` |
+
+  **#6363 did not cause this — it removed the cover.** While `unreadCount` was
+  itself window-scoped the shortfall was self-consistent and invisible: clear 200,
+  poll, see a window with nothing unread in it, badge 0. Now that the badge is a
+  true total, the same request pair states the contradiction out loud, which also
+  raises the severity — a user presses "mark all read" and the badge stays lit.
+
+  **A second, sharper face of the same defect, fixed with it.** That window was
+  `created_at desc` over ALL rows, with the `read` filter applied in memory AFTER
+  the truncation. An inbox whose newest 200 were already read therefore handed the
+  sweep an EMPTY id list and marked **nothing at all**, however much older unread
+  sat behind it. That is also why "loop the pages until one comes back empty" is
+  not the fix: it exits on exactly that empty first page.
+
+  **What it does now.** It reads the unread SET rather than a page of the list, in
+  a FIXED two reads whatever the inbox size — the same one-column, unwindowed
+  projection of `sys_inbox_message` that #6363's `countUnreadTotal` already issues
+  to answer the badge, joined against the receipt spine `listInbox` already reads
+  unbounded. No loop and no page count to bound; nothing is asked of the data
+  layer that the bell's poll does not already ask on every saturated page. The
+  write stays one receipt per unread notification — that is the receipt model
+  itself (ADR-0030) — and `markRead`'s check-then-act upsert, its unique-conflict
+  convergence and its "no receipt row yet" insert are untouched.
+
+  `readCount` now reports the number of **distinct notifications this call flipped
+  to `read`** (it reported "the unread ones inside the newest 200 rows"). Two
+  consequences: a notification materialized by several inbox rows counts once, and
+  an inbox row carrying no `notification_id` is skipped rather than counted —
+  read-state is keyed by the event id, so the receipt the old code wrote for those
+  (keyed by the inbox ROW id) was one the join could never read back.
+
+  Unchanged: the list window (default 50, cap 200, newest first), `unreadCount`,
+  `markRead`, and an inbox smaller than the old window — which does the same
+  writes it always did, and no extra ones.
+
+- 17d0954: fix(services): `unreadCount` counts the TOTAL unread, not the returned window (#6363)
+
+  `ListNotificationsResponseSchema.unreadCount` is published into the API
+  reference as **"Total number of unread notifications"** — a `.describe()`, so it
+  is the documentation shipped to every consumer of
+  `GET /api/v1/notifications`. It was counted inside `rows.map(...)` in
+  `MessagingService.listInbox`, i.e. over the rows that `limit` had already
+  truncated, so the badge saturated at the window size forever.
+
+  Measured on a real stack (sqlite-wasm + ObjectQL + service-messaging + hono +
+  dispatcher) with 60 unread messages:
+
+  | request     | `notifications[]` | `unreadCount` (before) | `unreadCount` (after) |
+  | :---------- | ----------------: | ---------------------: | --------------------: |
+  | no `limit`  |                50 |                 **50** |                **60** |
+  | `?limit=10` |                10 |                 **10** |                **60** |
+
+  The declaration was right and the implementation was wrong, so the
+  implementation moved (maintainer ruling, 2026-08-07). Every consumer that
+  renders `unreadCount` as a bell badge now gets the number it asked for; nothing
+  had to learn an implementation detail to read the field correctly.
+
+  **The list itself is unchanged.** `notifications[]` is still the window —
+  `limit` rows, default 50, hard cap 200, newest first. The two bounds were
+  conflated, not shared.
+
+  Read-state lives on `sys_notification_receipt`, not on the inbox row
+  (ADR-0030), so the total is a reverse join rather than a `count()`. It is
+  computed only when the window came back **saturated** (`rows.length === limit`)
+  — a short window is already the whole matching set, so the common inbox costs
+  exactly what it cost before. When the window does saturate, the extra work is
+  one projection read of a single column (`notification_id`) under the same
+  `where`, no `orderBy` and no `limit`: the same order as the receipt scan
+  `listInbox` already performs unconditionally, and exact under a `type` filter
+  and for rows carrying no `notification_id`.
+
+  Two related behaviours are unchanged and now pinned: a `read` filter narrows
+  the list and never the badge (asking for the read half does not mean zero
+  unread), and a `type` filter narrows both (the count answers the query that was
+  asked).
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

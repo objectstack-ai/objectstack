@@ -1,5 +1,273 @@
 # @objectstack/client
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- f549a0d: refactor(spec,client)!: retire `ViewProtocol`'s five viewId-addressed methods and their ten schemas (#6239)
+
+  `listViews`, `getView`, `createView`, `updateView` and `deleteView` — the
+  `ViewProtocol` interface and `ListViews`/`GetView`/`CreateView`/`UpdateView`/`DeleteView`
+  Request+Response schemas in `api/protocol.zod.ts` — are REMOVED under ADR-0049
+  enforce-or-remove (maintainer ruling 2026-08-07). `@objectstack/client` drops the
+  five response types it re-exported.
+
+  Measured on `origin/main` immediately before the removal, the surface had none of
+  the three things a protocol method needs:
+
+  - **no implementation** — `packages/metadata-protocol/src/protocol.ts` declares no
+    `listViews`/`getView`/`createView`/`updateView`/`deleteView`; its only view
+    resolver is `getUiView`;
+  - **no route** — `packages/rest/src/rest-server.ts` never mentions `viewId`, so
+    nothing viewId-addressed was reachable over HTTP at all;
+  - **no caller** — the only `ViewProtocol` mention outside its own file was
+    `content/docs/kernel/services-checklist.mdx`, which already recorded the five as
+    declared-and-unrouted.
+
+  FROM → TO — both replacements are surfaces that were always the live ones:
+
+  | removed                                                                                   | use instead                                                                                                                                                |
+  | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `listViews` / `getView` / `createView` / `updateView` / `deleteView` (+ their 10 schemas) | the generic metadata methods with `type: 'view'` — `getMetaItem` / `getMetaItems` / `saveMetaItem` / `deleteMetaItem`, served at `/api/v1/meta/view/:name` |
+  | `GetViewResponse` as "the shape of the resolved view"                                     | `GetUiViewResponse` — `getUiView`, served at `GET /api/v1/ui/view/:object/:type`                                                                           |
+
+  **The fix:** delete the import and address views by NAME through the metadata API
+  (`view` is a metadata type), or by object+type through `getUiView`. Nothing
+  addressed a view by `viewId` before this change either; that is the finding.
+
+  **Why a removal rather than a note.** The declared surface is name-identical and
+  semantics-adjacent to a real one, which makes it an attractive nuisance in every
+  grep — and it has already mis-directed a decision: **#5948's issue body AND its
+  2026-08-07 maintainer ruling both read `GetViewResponseSchema` (zero
+  implementations) as the contract of `GET /ui/view/:object/:type`**, whose declared
+  response is `GetUiViewResponseSchema`, 250 lines up and one word different. That
+  ruling's reasoning happened to survive the mix-up; this removal stops relying on
+  that luck.
+
+  The retirement kit — route 3: **no tombstone and no D2 conversion** (none of the ten
+  was a key on an authorable shape, and nothing parsed them, so there is no source or
+  `sys_metadata` row to rewrite). `RETIRED_DEFS_BY_MAJOR[17]` (10 defs) plus the D3
+  `SemanticMigration` `view-management-protocol-retired` are the declaration; the
+  generated baselines and reference docs lose their entries in the same change.
+
+  If "read and write ONE view by id" becomes a real requirement, it returns
+  implementation-first.
+
+  <!-- adr-0087: registered view-management-protocol-retired -->
+
+### Patch Changes
+
+- ec3dfd7: fix(client): `data.find({ limit })` reached the server as an empty query, and `QueryOptionsV2.expand` reached it as nothing at all (#6322)
+
+  `data.find()` accepts two vocabularies — the canonical `QueryOptionsV2`
+  (`where` / `fields` / `orderBy` / `limit` / `offset` / `expand`) and the legacy
+  `QueryOptions` (`filter` / `select` / `sort` / `top` / `skip`) — and picked the
+  branch with a hand-written condition that named four keys:
+  `'where' in options || 'fields' in options || 'orderBy' in options || 'offset' in options`.
+  That condition was a second, independent statement of what `QueryOptionsV2`
+  declares, and it had fallen behind the interface twice.
+
+  **`limit` was missing from it.** `client.data.find('task', { limit: 20 })` — a
+  canonical key as the only key, and the most natural spelling of "first 20" —
+  was not recognised as canonical, fell to the legacy branch, and that branch
+  reads only `top` / `skip` / `sort` / `select` / `filter` / `filters` /
+  `aggregations` / `groupBy`. Nothing there reads `limit`, so the value was
+  dropped between the call and the wire: the request went out with an **empty
+  query string**, the caller got the server's default page size, HTTP 200, no
+  warning. Its pagination twin `{ offset: 5 }` worked correctly, because `offset`
+  happened to be one of the four listed keys — one interface, two pagination
+  keys, opposite behaviour.
+
+  **`expand` was missing too, and had no mapping either.** It is declared on
+  `QueryOptionsV2`, documented as the replacement for a legacy `populate` that
+  `QueryOptions` never had, and was carried by neither branch — not one character
+  of it reached the wire, on either of the two `find` implementations.
+
+  **What changed.** The branch predicate is now derived from the interface rather
+  than restated beside it: the canonical-only key set is
+  `Exclude<keyof QueryOptionsV2, keyof QueryOptions>`, held as a
+  `Record<…, true>` that TypeScript rejects when a key is missing or extra. A key
+  added to `QueryOptionsV2` from now on is a compile error until it is listed, so
+  the next canonical key is covered on the day it is declared. Appending `limit`
+  to the old list would have been the third round of the same mistake.
+
+  `expand` now maps onto the spelling the server actually accepts:
+  `?expand=<comma-separated relation names>`, which
+  `HttpFindQueryParamsSchema` declares for the GET list route and the protocol
+  normalizer splits on commas before folding each name into the engine's expand
+  map. The `Record` form contributes its keys — the same relation names the
+  server derives from the comma list. A **nested** per-relation query inside
+  `expand` has no spelling on a GET, so it is now refused with an error naming
+  the relation and the keys it could not carry, rather than trimmed away
+  silently; `data.query()` carries a QueryAST body and is where nested expand
+  detail belongs.
+
+  Both `find` implementations — `ObjectStackClient.data.find` and
+  `ScopedProjectClient.data.find`, which were byte-identical copies of the same
+  defect — read the one shared predicate and the one shared `expand` mapping.
+
+  No change to the five paired keys: canonical and legacy spellings of the same
+  query still produce byte-identical transport parameters, and that parity is now
+  pinned by a test table both implementations are driven through.
+
+- 466c503: fix(client): `data.find()` emits `top`/`skip` on presence, so `limit: 0` reaches the server (#6485)
+
+  Both `find` implementations — `ObjectStackClient.data.find` and its
+  byte-identical `ScopedProjectClient.data.find` copy — emitted the two pagination
+  transport params on **truthiness**:
+
+  ```ts
+  if (normalizedOptions.top)
+    queryParams.set("top", normalizedOptions.top.toString());
+  if (normalizedOptions.skip)
+    queryParams.set("skip", normalizedOptions.skip.toString());
+  ```
+
+  while the canonical normalizer ten lines above already tested **presence**
+  (`if (v2.limit != null) normalizedOptions.top = v2.limit`). So `0` survived the
+  normalizer and was then discarded by the emitter. Both now test presence, in
+  both copies.
+
+  **What changes on the wire, and why that is the fix rather than a preference.**
+  `find('task', { limit: 0 })` — and equally `{ top: 0 }` — used to reach the
+  server with **no `top` param at all**. The GET list route has no default page
+  size, so an absent `top` returns the _entire_ match set: the caller who asked
+  for no records received every record, under HTTP 200 with no warning.
+
+  The direction was measured before the change rather than assumed, because a
+  client fix is only worth having if the server honours what it sends:
+
+  | layer                                                                                                               | `top=0`                                                                                                                                                         |
+  | :------------------------------------------------------------------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | REST list route → `ObjectStackProtocolImplementation.findData`                                                      | not rejected, not ignored — folds `top` into `limit`, coerces `Number('0')`, forwards `{ limit: 0 }` to the engine; envelope reports `total: 0, hasMore: false` |
+  | `SqlDriver.find` (the driver behind the default file-backed SQLite datasource, and every Postgres/MySQL deployment) | paginates on presence — `LIMIT 0`, **zero rows**                                                                                                                |
+  | `TursoRemoteTransport`                                                                                              | presence — `LIMIT ?` bound to `0`, zero rows                                                                                                                    |
+
+  So `limit: 0` now means "return no records" end to end, which is what the
+  canonical branch already implied.
+
+  **`offset: 0` / `skip: 0` were dropped too, and that half is a consistency
+  change with no behavioural consequence** — `skip=0` is already the server's
+  default, so the request means the same thing whether the param is sent or not.
+  They are aligned because one emitter must not hold two rules for one pair, not
+  because a wrong answer was being returned.
+
+  Callers passing a non-zero `limit`/`top`/`offset`/`skip`, or omitting them
+  entirely, are unaffected — the emitted query string is byte-identical.
+
+- 11066f6: feat(spec,metadata-protocol,rest,client): the direct-mount surfaces (`packages`, `datasources/:name/external/*`) become discoverable, and the SDK follows the advertised base (#6633)
+
+  The rest surface's `/discovery` never advertised `routes.packages` — routes
+  mounted but not advertised, the unstated half of ADR-0076 D12 — so the SDK's
+  `packages.*` always fell back to the hard-coded `/api/v1/packages`; and the
+  SDK's `datasources.external.*` had no discovery mechanism at all, hard-coding
+  `/api/v1/datasources/...` in each of its five methods. On any deployment with a
+  non-default API base, both families built wrong URLs (measured in #6633).
+  Maintainer ruling 2026-08-08 (route B, prerequisite for #6306):
+
+  - **spec** (minor, additive): `ApiRoutesSchema` declares a `datasources` key —
+    the base of the federation-admin family. Optional like `mcp`: absent = not
+    mounted.
+  - **metadata-protocol** (minor, additive): `getDiscovery()` advertises
+    `routes.packages: '/api/v1/packages'` iff the `package` service is
+    registered (`serviceToRouteKey` gains the mapping; the route flows through a
+    non-slot table because `package` is not a `CoreServiceName`). `datasources`
+    is deliberately NOT advertised by this builder — the mount belongs to the
+    REST host it cannot see (same disposition as `mcp`).
+  - **rest** (minor): `/discovery` advertises `routes.packages` and
+    `routes.datasources` as projections of the RECORDED direct mounts (#5822) —
+    advertisement and mounting derive from one fact, so #6306's later mount-base
+    move carries the advertisement along by construction. Not mounted ⇒ not
+    advertised. An end-to-end parity pin (`discovery-advertised-direct-mounts.
+parity.test.ts`) drives the composed surface and goes red on any change that
+    moves only one side.
+  - **client** (patch, behavior fix): the five `datasources.external.*` methods
+    derive their base via `getRoute('datasources')` — connected clients follow
+    the advertised base; unconnected clients (or servers that advertise no
+    `datasources` key) keep building byte-identical `/api/v1/...` URLs.
+
+  No key is removed and no wire shape changes for existing deployments: servers
+  gain two advertised keys, and the SDK changes URLs only when a server
+  advertises the new keys with a non-default base.
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Major Changes

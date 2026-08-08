@@ -1,5 +1,444 @@
 # @objectstack/service-automation
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- 0e043d8: feat(automation)!: 未声明 `resumeAuthority` 的暂停节点改为 fail-closed —— 通用 resume 路由从「默认开门」变成「显式 `'any'` 才开门」(#5561 第二步)
+
+  <!-- adr-0087: registered action-descriptor-resume-authority-default-flip -->
+
+  **BREAKING**(仅影响注册了暂停型节点、且描述符未声明 `resumeAuthority` 的执行器 ——
+  本仓内为零)。`AutomationEngine.resolveResumeAuthority` 对缺省值的解析由 `'any'` 翻成
+  `'service'`:一个从未声明「谁可以续跑它产生的暂停」的节点类型,其暂停在通用路由
+  `POST /automation/:name/runs/:runId/resume` 上被拒绝(`PERMISSION_DENIED` / 403),
+  直到它的描述符把话说出来。通用 resume 门从此是描述符**主动 opt-in** 的一扇门,不是每个
+  暂停节点**继承**来的默认。
+
+  这是 ADR-0044 2026-07-28 修正案里「记录但刻意不在此建造」的第一项,分两步落地。
+  第一步(#5561 / PR #5725,非 breaking)把 `ActionDescriptorSchema.resumeAuthority`
+  的 Zod `.default('any')` 摘成 `.optional()`。那个默认值的问题不只是取值不对,而是它
+  **抹掉了事实**:`defineActionDescriptor` 在任何消费者看到对象之前就把 key 填上了,于是
+  「作者选了 `'any'`」和「作者从没考虑过」parse 出逐字节相同的描述符,遗漏根本无法被观测。
+  默认值摘掉之后「缺省」才重新可见,注册告警与 `check:resume-authority-declared` CI 门也
+  才写得出来。第二步就是本次改动:让缺省真正意味着 fail-closed。
+
+  ### 为什么往「拒绝」这个方向猜
+
+  两种猜错的代价不对称,这就是全部理由。猜 `'any'`,会让一次 resume 走过一个**没有任何
+  记录的决策**,而且悄无声息 —— #3823 就是这么发生的:ADR-0044 把审批的 `revise` 边指向
+  了通用 `wait`,`wait` 本身声明 `'any'` 完全正确,而站在「服务持有」位置上的那个暂停
+  继承了一个没人选过的 fail-open 值;实测代价是一次未经审计的重新提交,外加一个被销毁的
+  远程 run。猜 `'service'`,则是返回一次拒绝,并把修好它的那一行原样交回作者手里。
+  两种错误里只有一种能被犯错的人自己发现。
+
+  ### 迁移:`resumeAuthority` 未声明 → 显式声明(一行)
+
+  只有**注册暂停型节点的插件作者**需要动手,处方是在描述符上加一行:
+
+  ```ts
+  // FROM —— 依赖旧默认值,暂停可被通用路由续跑
+  defineActionDescriptor({
+    type: "my_pause",
+    version: "1.0.0",
+    name: "My Pause",
+    supportsPause: true,
+  });
+
+  // TO —— 通用路由确实是这个暂停的正门时(screen 式收集输入、signal wait 式外部生产者)
+  defineActionDescriptor({
+    type: "my_pause",
+    version: "1.0.0",
+    name: "My Pause",
+    supportsPause: true,
+    resumeAuthority: "any",
+  });
+
+  // TO —— 续跑是「某个服务必须先授权并记录的决策」的尾巴时
+  defineActionDescriptor({
+    type: "my_pause",
+    version: "1.0.0",
+    name: "My Pause",
+    supportsPause: true,
+    resumeAuthority: "service",
+  });
+  ```
+
+  两个值都被接受,**只有沉默改变了含义**。三条运行时通道会指着同一件事说话:注册时按类型
+  去重的一次告警、resume 被拒时那条点名缺省字段并给出处方的错误消息,以及本仓自有执行器的
+  `check:resume-authority-declared` CI 门。
+
+  ⚠️ `supportsPause` 本身是一个没有任何执行路径强制的声明(#5703)—— run 会暂停是因为
+  `execute()` 返回了 `suspend: true`。所以一个「会暂停但把 `supportsPause` 留成 false」
+  的执行器,注册告警与 CI 门**都看不见它**,只有 resume 时的拒绝消息会带上同一份处方。
+  请按同一条规则手工核一遍这类执行器。
+
+  ### 仓内零行为变化
+
+  在册的六个暂停类型全部已显式声明:`screen` / `wait` / `subflow` / `map` 声明 `'any'`
+  (第一步补齐),`approval` / `approval_revise` 声明 `'service'`。解析器测试与端到端测试
+  都把这份清单和它们的解析结果一起断言 —— 一个只靠「什么都没注册」而变绿的零点名,和真的
+  零点名是两回事。
+
+  `@objectstack/runtime` 只是注释与路由账本(`route-ledger`)的记述同步,无行为改动。
+
+### Patch Changes
+
+- 6517448: fix(service-automation): 降级版挂起态读取器的「存储读不到」告警不再把驱动错误拼进 message,改走 meta (#6230)
+
+  `engine.ts` 的 `loadSuspendedRun` —— `loadSuspendedRunStrict` 的**降级版**读取器 ——
+  在 catch 里把**我们不控制文本**的数据源驱动失败原因直接插进了 `logger.warn` 的 message。
+  `ObjectLogger.write()` 一次调用只加一个「时间戳 + 级别」记录头,message 里的换行会把
+  **一条**记录变成多个物理行,后面几行既无级别也无时间戳。
+
+  这条比 #5912(PR #6228)刚治完的那条**多一层危害**:`ObjectLogger` 把 `warn` 路由到
+  **stdout**,而 `serve` 的 boot-quiet 窗口只包了 `process.stdout.write`,其
+  `BootLogCapture.offer()` 仅在该物理行带级别头时才保留 —— 所以无头续行是被**直接丢弃**,
+  不只是被误读。而它在 boot 期真实可达:`plugin.ts` 的 `start()` → `rearmSuspendedWaitTimers`
+  → 对 overdue 运行 `engine.resume()` → `resume()` 的授权 gate 走的正是这个降级版读取器。
+
+  实测:一个三行的 better-sqlite3 驱动错误把这条告警切成 **3 个物理行**,过 boot 缓冲的
+  过滤后**只剩 1 行**留下 —— 而留下的那一行恰恰不含任何驱动事实。
+
+  改法与 #5048 / #5575 / #5636 / #5661 / #5737 / #5912 完全同一套,零新词汇:**message
+  单行自足**,外来 cause 交给 `Logger` 契约(`packages/spec/src/contracts/logger.ts`)
+  `warn(message, meta?)` 的**第二**参 —— 注意与 `error(message, error?, meta?)` 的第三参
+  不同,`warn` 没有 `Error` 槽。
+
+  对运维可见的变化(日志形状,非行为):
+
+  - 这条记录恒为**一个**物理行,不论日志格式,boot-quiet 窗口内不再丢字节;
+  - 原因文本从 `msg` 末尾的 `: <驱动文本>` 移到记录的 `error` 字段(`meta`),多行驱动
+    错误由 `JSON.stringify` 转义换行后完整保留 —— 一个字节都不丢;
+  - message 补上了这条降级的**后果**:读失败被翻译成 `null`,调用方(resume gate、screen
+    取数)看到的与「本来就没有这个挂起运行」完全一样,而运行本身未被触碰、仍停在原处;
+    原文本只说了「读失败」,没说读失败被翻译成了什么。
+
+  刻意**不变**的一处,已钉上回归测试:**级别仍是 `warn`**。这是一个刻意的**功能性**降级
+  读取器(注释写明它服务于只需要 best-effort 答案的顺带读取方),真正需要区分「存储挂了」
+  与「运行没了」的 `resumeInternal` 用的是严格版 —— 按 #4632 的判据这不是耐久性降级,
+  上调到 `error` 才是该规则的镜像误用(整个故障期间每次 gate 查询都报警)。
+
+  按记录末尾驱动文本字面量 grep 这条记录的日志查询,需要改成读记录的 `error` 字段。
+
+- c308064: Enforce `ActionDescriptor.supportsPause` at the engine boundary: an executor whose
+  `execute()` returns `suspend: true` while its descriptor declares `supportsPause: false`
+  is now refused instead of pausing the run (#6667, from #5703).
+
+  `supportsPause` used to be read only at authoring time — the designer palette, the
+  registration warning, and the `check:resume-authority-declared` CI gate, all of which key
+  on `supportsPause: true` and so were silent on exactly this mismatch. The pause it let
+  through was already broken, just later and elsewhere: a type that declares no pause
+  declares no `resumeAuthority` either, and since #5561 an unclaimed pause is fail-closed,
+  so the run parked on a durable continuation that the generic resume route then refused
+  with `PERMISSION_DENIED` — a message naming `resumeAuthority`, not the `supportsPause`
+  that actually caused it. The refusal fails the run where the mistake was made, writes no
+  continuation, and names the one-line fix.
+
+  Behaviour change for third-party executors in that state (no built-in is: all six pausing
+  built-ins declare `supportsPause: true`). The refusal is guard-class, so a `fault` edge
+  does not route it — a wrong declaration is not a condition a re-run can fix. Two shapes
+  are deliberately untouched: declaring `supportsPause: true` and never suspending is legal
+  (a capability, not an obligation), and an executor that publishes no descriptor at all
+  declares nothing to enforce — its pauses stay governed by the #5561 resume gate.
+
+- 24122a9: fix(service-automation): the 13 residual `engine.ts` seams stop splicing uncontrolled thrown text into log messages, plus the one self-authored multi-line message; run-history persist failure is re-graded `error` (#6499)
+
+  #6299 / PR #6498 fixed three `engine.ts` seams and closed with "this file is now
+  clean"; #6499 is the corrective record: 13 more logger calls in the same file
+  still interpolated a thrown value's `.message` — a datasource driver's, a
+  plugin's (trigger / node-executor), or, second-hand via the
+  `AutomationResult.error` envelope, a failing node's — into the log MESSAGE.
+  `ObjectLogger.write()` adds one `<ts> <LEVEL>` head per call, so a cause
+  carrying newlines turned ONE record into several physical lines of which only
+  the first is greppable, and `serve`'s boot-quiet window drops the headless
+  continuations outright on the stdout (warn) path. All 13 now log a single-line
+  message stating the site's own consequence and hand the cause to the logger's
+  structured slot (`describeThrownForLog`).
+
+  A 14th site with the opposite cause is fixed alongside, argued on its own
+  terms: `validateFlowExpressions`' advisory schema pass authored a literal
+  `\n      source: …` continuation into a message we control, with the flow
+  author's (newline-tolerant CEL) expression as the second line. The message now
+  stays one line; the expression source rides the structured slot (`source`).
+
+  The level was judged per seam (#4632), not batch-copied:
+
+  - **`recordLog`'s fire-and-forget `store.recordTerminal` → RAISED to `error`.**
+    The write half of the run-history claim: a TERMINAL run's history row failed
+    to land while the run completed and every caller reads healthy — nothing
+    retries it, nothing upstream is told. After the next restart the run is
+    invisible to the Runs surfaces, `inspectStrandedRequests` (#3456) reads
+    "no suspension + no terminal row" as a STRANDED approval, and
+    `releasePendingForTerminalRuns` (#4469) reads "no terminal row" as
+    still-alive, so a finished run's leftover pending approvals are never
+    auto-released.
+  - **`persistSuspendedRun` stays `error`** (#4460's raise; #4420 is this exact
+    seam's accident) — no re-grade, message and slot fixed only.
+  - **Everything else stays `warn`** (functional): `listRuns` / `getRun`
+    (observability reads degrading to ring buffer / null — each record now says
+    the caller cannot tell the degraded answer from a real one), the four
+    plugin-supplied seams (`releaseSuspension`, `unregisterTrigger`,
+    `activateFlowTrigger`, `deactivateFlowTrigger`), the grants resolver, lookup
+    expansion, the screen `visibleWhen` probe, and both `bubbleToParent`
+    branches. Nothing these degrade claims to be persisted.
+
+  Operator-visible: one record moves from stdout/`WARN` to stderr/`ERROR`
+  (run-history persist failure), and the reworded messages keep their original
+  lead phrases (`run-history read failed`, `durable run lookup failed`,
+  `Failed to bind flow`, `could not resolve grants`, …) so existing greps still
+  match; alert rules keyed on the trailing `: <error text>` splice need the
+  structured `error` / `source` / `visibleWhen` fields instead.
+
+- b0d54bf: fix(service-automation): the last three `engine.ts` seams stop splicing a driver's failure into the log message, and two of them are re-graded `error` (#6299)
+
+  All three catches sit around the `SuspendedRunStore` driver and rendered their
+  failure by interpolating the thrown value's `.message` into the log MESSAGE.
+  `ObjectLogger.write()` adds exactly one `<ts> <LEVEL>` head per call, so a
+  driver error carrying newlines turned ONE record into several physical lines of
+  which only the first was greppable — and on the `warn` path, inside `serve`'s
+  boot-quiet window, `BootLogCapture.offer()` keeps only lines with a level head,
+  so the continuation lines were dropped outright. Measured on the restored
+  concatenation: a three-line driver error became 3 physical lines and the boot
+  filter retained 1, and that one carried no driver fact. The cause now goes to
+  the logger's structured slot (`describeThrownForLog`), so the record stays on
+  one physical line in every format. This closes the family of #5048 / #5575 /
+  #5636 / #5661 / #5737 / #5912 / #6230 for this file.
+
+  The level was judged per seam (#4632), not batch-copied from #6230:
+
+  - **`forgetSuspendedRun` → raised to `error`.** The hot cache is dropped before
+    the store delete and this is the single choke point every consumption of a
+    suspension passes through, so a failed `delete` leaves the suspension gone
+    in-process and the durable row alive. Callers still report success, and the
+    surviving row is re-listed and re-resumed after the next restart, running a
+    continuation that already ran.
+  - **`cancelRun` → raised to `error`.** An unreadable store makes the failed read
+    read as "no such suspended run", so the method returns `false` — which its
+    contract calls idempotent success — and the cancellation is silently skipped
+    while the call reads clean. The run stays parked and durably resumable.
+  - **`listSuspendedRunsDurable` → stays `warn`.** Nothing claimed-persisted
+    failed to land: the rows are intact and still resumable by id. The listing
+    degrades to the in-memory cache alone, so the message now says out loud that
+    the result is short and that the caller cannot tell.
+
+  Operator-visible: two records move from stdout to stderr and from `WARN` to
+  `ERROR`, and all three messages are reworded to state their consequence. Log
+  filters or alert rules keyed on the old `warn`-level text for a failed
+  suspended-run delete or cancel need updating.
+
+- 4d552af: feat(spec)!: `FlowNodeSchema` parses its own ADR-0031 regions — the post-parse pass retires (#4415)
+
+  `FlowSchema.parse` normalized a flow's own `nodes[]` / `edges[]` but could not reach a
+  **region**, because a region lives inside `FlowNodeSchema.config` — a deliberately open
+  `z.record` (ADR-0018). #4381 closed the resulting gap with a **post-parse pass**,
+  `normalizeControlFlowRegions`, that every caller had to remember to run:
+
+  ```ts
+  const flowShell = FlowSchema.parse(converted);
+  validateControlFlow(flowShell);
+  const parsed = normalizeControlFlowRegions(flowShell); // ← had to remember
+  ```
+
+  That is an unwritten rule on top of a parse, and it is exactly the condition the #4347
+  family of defects grows in: a new consumer — a Studio publish path, an MCP tool, a bulk
+  validation script — takes a `FlowParsed` and uses it, holding a **half-parsed flow that
+  looks finished**. Nested edge predicates were still bare strings, nested nodes had not been
+  through `.strict()`, and nothing said so.
+
+  Now the schema does it. `FlowNodeSchema` carries a `.transform()` that parses each declared
+  region slot — `loop.config.body`, `parallel.config.branches[]`, `try_catch.config.try` /
+  `.catch` — through the schema that slot's value _is_. Nesting needs no manual recursion: a
+  region's `nodes` are `z.array(FlowNodeSchema)`, so Zod re-enters the transform on the way
+  down. **"Parsed" now means parsed at every depth** (Prime Directive #1), from any entry
+  point — including `FlowNodeSchema.parse(node)` on a single node, which the old whole-flow
+  pass could not serve at all.
+
+  ## Migration
+
+  **`normalizeControlFlowRegions` is removed from `@objectstack/spec/automation`.** Delete the
+  call; the parse above it already did the work:
+
+  ```diff
+    const parsed = FlowSchema.parse(converted);
+    validateControlFlow(parsed);
+  - const normalized = normalizeControlFlowRegions(parsed);
+  ```
+
+  Its replacement, `parseFlowNodeRegions(node)`, is exported for the same purpose one node at
+  a time, but you should not normally need it — it is the transform's own body.
+
+  **`FlowNodeSchema` is now a `ZodPipe`, not a `ZodObject`,** so it no longer has `.shape` /
+  `.extend()` / `.pick()`. `z.infer` / `z.input` / `.parse` / `.safeParse` and
+  `z.toJSONSchema` are unaffected, and the authorable key set is byte-identical (verified by
+  `check:authorable-surface`). If you were reaching for the object half, read it from the
+  pipe's input side — `FlowNodeSchema.def.in` — which is also what the repo's own generators
+  do (`pipeAuthorableSide` in `scripts/lib/zod-graph.ts`).
+
+  One visible consequence in the generated reference: `content/docs/references/automation/flow.mdx`
+  now renders FlowNode's **input** shape, so keys carrying a `.default()` (`boundaryConfig.interrupting`,
+  `inputSchema[].required`) show as optional. That is what an author actually writes, which is
+  what an authoring reference should say.
+
+- cfeb9a0: fix(service-automation): the five NAME-shaped log splices stop interpolating foreign identifiers into log messages (#6654)
+
+  The tail #6499 reported but did not fix and #6587 deliberately excluded: five
+  `service-automation` log records still spliced **names/identifiers** that
+  originate outside the engine's control and are not schema-constrained to reject
+  newlines. `ObjectLogger.write()` adds one `<ts> <LEVEL>` head per call, so a
+  newline in any of them turns ONE record into several physical lines of which
+  only the first is greppable, and `serve`'s boot-quiet window drops the headless
+  continuations outright on the stdout (warn) path — the same downstream damage as
+  the closed thrown-text class, reached through a different door.
+
+  All five now log a single-line message carrying only controlled facts, with the
+  foreign identifier(s) in the logger's structured slot:
+
+  - the **re-entrancy guard** — the caller's record id → `recordId`;
+  - the **refused resume** — the caller's resume-signal keys → `rejected`;
+  - the **screen-input refusal** — the user-submitted keys, which reach the
+    message via `validateScreenInputs`' `Unknown screen field "…"` findings →
+    `issues` (the message now states the issue COUNT);
+  - **`warnUnknownNodeTypes`** — the flow's unknown node type names and the
+    registered vocabulary → `unknownTypes` / `knownTypes`;
+  - the **unclaimed branch label** (#4414) — the computed, potentially
+    record-derived branch label and the out-edge labels → `branchLabel` /
+    `outEdges`.
+
+  **No level changes**: every one of the five is #4632-FUNCTIONAL and stays
+  `warn`. Behaviour is unchanged at all five sites, and the caller-facing refusal
+  ENVELOPES (`INVALID_SIGNAL`, `INVALID_SCREEN_INPUT`) are untouched — they still
+  name the offending variables and fields, because an envelope is not a log
+  record.
+
+  Operator-visible: each message keeps its lead phrase so existing greps still
+  match — `re-entered for the same record`, `signal writes engine-internal`,
+  `violates its declared field contract`, `no registered executor or descriptor`
+  (load-bearing: tests and log filters count per-flow findings by it), and
+  `no out-edge carries that label`. Anything keyed on the spliced identifier
+  inside those messages must read the structured field instead.
+
+- 72847c5: fix(service-automation): resume 时「存储不可达」的日志不再把驱动错误拼进 message,改走 meta (#5912)
+
+  `engine.ts` 的 `resumeInternal` 在读挂起态存储失败的那一支,把**我们不控制文本**的
+  数据源驱动失败原因直接插进了 `logger.error` 的 message。`ObjectLogger.write()` 一次
+  调用只加一个「时间戳 + 级别」记录头,所以 message 里的换行会把**一条**记录变成多个
+  物理行,后面几行既无级别也无时间戳。在 `pretty` / `text` 格式(`os dev` / `os serve`
+  的默认)下,文件 sink 会把它们当成独立记录存,而 `grep ERROR` 只捞得到不含任何事实
+  的那一行 —— 恰恰是运维正在找的那条。实测:一个三行的 better-sqlite3 驱动错误把这条
+  告警切成 **3 个物理行**,只有第 1 行带 `ERROR` 头。
+
+  改法与 #5048 / #5575 / #5636 / #5661 / #5737 完全同一套,零新词汇:**message 单行
+  自足**,外来 cause 交给 `Logger` 契约(`packages/spec/src/contracts/logger.ts`)
+  `error(message, error?, meta?)` 的**第三**参(第二参留空,否则每条记录都会带上整个栈)。
+
+  这是这条 resume 路径上最后一处。#5737(PR #5911)修完 `wait` 节点五处之后,同一次
+  「resume 时存储不可达」会产生两条记录:wait 节点那条已是干净单行,engine 这条仍被
+  切碎;本次之后两条都干净。
+
+  对运维可见的变化(日志形状,非行为):
+
+  - 这条记录恒为**一个**物理行,不论日志格式;
+  - 原因文本从 `msg` 末尾的 `: <驱动文本>` 移到记录的 `error` 字段(`meta`),多行驱动
+    错误由 `JSON.stringify` 转义换行后完整保留 —— 一个字节都不丢;
+  - message 补齐了 #4632 要求的后果与修法(挂起态**未被消费**、运行仍停在原处、存储
+    恢复后可原样重试),并指明 cause 在本记录的 meta 里。
+
+  刻意**不变**的两处,已各自钉上回归测试:
+
+  - **返回值信封** `AutomationResult.error`(`STORE_UNAVAILABLE`)仍逐字拼接驱动文本。
+    它是给调用方读的结构化返回值,经 REST 出去是 JSON 字符串字段、不按行切分;#5636
+    对 `degradedReason` 是同源取舍,且 PR #5911 已让 wait 节点侧把它整体放进 meta 保留。
+  - **级别仍是 `error`**。运行在盘上而 resume 没落地,正是 #4632 定义的耐久性降级,
+    `pnpm check:durability-log-level` 照旧覆盖。
+
+  按记录末尾驱动文本字面量 grep 这条记录的日志查询,需要改成读记录的 `error` 字段。
+
+- e218483: A failed trigger-fired flow run's `error` record now stays on one physical line: the `AutomationResult.error` envelope — which carries a failing node's / driver's text verbatim — moved from the log MESSAGE into the structured meta slot (`error` field), the same #6499/#6568 family shape, applied to the one same-class site that sweep left on the fired-run path. The message keeps its `Trigger-fired run of flow '…' failed` lead phrase and now also names the trigger type and the consequence; anything keyed on the old trailing `: [error text]` splice must read the structured `error` field instead.
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [e9b5265]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [6965160]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/formula@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Minor Changes

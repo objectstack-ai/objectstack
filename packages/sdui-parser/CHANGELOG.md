@@ -1,5 +1,7 @@
 # @objectstack/sdui-parser
 
+## 17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ## 17.0.0-rc.4

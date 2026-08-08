@@ -1,5 +1,534 @@
 # @objectstack/driver-sql
 
+## 17.0.0-rc.6
+
+### Major Changes
+
+- 29e28a3: refactor(drivers)!: `aggregate` 的 query 参数收窄到 `DriverQuery`，并退役 `aggregate` / `func` 两个未声明别名 (#6212 批 B、#6321)
+
+  #5181（PR #6076）收窄了 `IDataDriver` 声明的六个方法，#6075（PR #6210）让五个驱动的实现跟上，#6212 批 A+E 处理了 SQL 驱动自有的另两道门。本次是同一条线上的 `aggregate`：`driver-sql`、`driver-turso` 的转发层与 `RemoteTransport` 三处，全部从 `query: any` 收到 `DriverQuery`（`@objectstack/spec/contracts`）。
+
+  `any` 在 query 参数上不是「对象名没检查」，而是**检查全关**：`where` 的 filter 方言、`groupBy` 的节点联合、`aggregations` 的节点形状——而这三样恰恰是这几个方法体读的全部内容。
+
+  ## 一、退役两个协议从未声明的别名（#6321，ADR-0049）
+
+  ```ts
+  const aggregates = query.aggregations || query.aggregate; // driver-sql
+  const funcName = agg.function || agg.func;
+  const aggregations = query?.aggregations || query?.aggregate || []; // RemoteTransport
+  const func = String(agg.function || agg.func || "");
+  ```
+
+  `QueryASTSchema` 声明的是 `aggregations`，`AggregationNodeSchema` 声明的是 `function`；`aggregate` / `func` 在 `packages/spec` 里**一个字都没有**。实测全仓唯一书写者是这两个驱动包自己的 fixture（`sql-driver-advanced` 7 处、`sql-driver-queryast` 1 处、`sqlite-wasm-driver-advanced` 7 处、`sqlite-wasm-driver-queryast` 1 处），非测试面零书写者——#4984 那一家：**fixture 拼着别名，宽容分支就永远绿着活下去，没有任何测试能在删掉它时转红**。fixture 已按已声明拼写重拼，写者归零，PD#12 与 ADR-0049 enforce-or-remove 于是把这两条 `||` 一并删掉。
+
+  顺带删掉的还有 `|| ''`：它只在**两个键都没写**时才生效，而那时这一面把名字回引成 `""`、本地面回引成 `"undefined"`，同一份越界输入两种措辞（#5240）。别名在时这条岔路够不着，删别名恰恰让它够得着，所以同一次关掉。
+
+  **迁移**：`aggregate:` → `aggregations:`，`func:` → `function:`。写旧拼写的内联字面量现在是编译错误（TS2353）；越过 `tsc` 的 JS 调用方，`aggregate:` 会静默拿不到聚合列，`func:` 则拿到已有的具名 400（`INVALID_QUERY`，#5907）。本仓实测需要改动的非测试调用点为零。
+
+  ## 二、一处真实行为改动：`RemoteTransport` 现在会编 `GroupByNode` 联合
+
+  `GroupByNodeSchema` 是 `z.union([z.string(), z.object({ field, dateGranularity?, alias? })])`，而这一层把它当 `string[]` 读。收窄后 `tsc` 直接把这条假设摆上台面（TS2322）。联合的两半状况完全不同，所以这不是一个 cast 能了事的：
+
+  - **无 granularity 的结构化条目**（`{ field: 'region' }`）是 spec 合法、且**今天就会下推到驱动**的形状：objectql 的 aggregate 派发对它一律判为「受支持」（`engine.ts` 里逐字写着 `plain {field} object is fine`），`objectql/src/secret-fields.test.ts:341` 就是这个形状的活体。本驱动的**本地面**把它编成普通的 `GROUP BY "region"`，远端面却把它插值成 `"[object Object]"`、死在标识符安全检查里——一条查询两种答案、由连接串决定，正是 #6203 那个形状，而且**是活体不是休眠**：能力位 `queryDateGranularity` 只管带 granularity 的那一半，管不到这一半。现在读 `.field`，两面收敛。
+  - **带 dateGranularity 的条目**远端确实编不出来，而这一点是**已声明**的：remote 模式发布 `queryDateGranularity: {}`，引擎据此全部落到内存分桶，因此不会下推。缺的是「绕过能力位、直连驱动」的那个调用方该得到什么答案——现在得到 ADR-0112 信封（`NOT_IMPLEMENTED` / 501），与聚合函数「协议已声明、本后端编不出」用的是同一类，而不是一句 SQL 注入告警。
+
+  `alias` **不读**，与本地面一致：`SqlDriver.aggregate` 也不读它，只在这一面读会是新的分叉而不是修复。
+
+  ## 三、`SqlDriver` 那一面的同一条件也换上了信封
+
+  `SqlDriver.aggregate` 对「本方言编不出这个 granularity」原本抛裸 `Error`（`code`/`status` 皆 `undefined` ⇒ `mapDataError` 落默认分支，一个具名能力缺口以不透明 500 到达调用方）。只给远端面加信封就会造出 #5907 花一整个 issue 才关掉的那种分叉——`TursoDriver` 由 `url` 选面，同一条件不能有两种线上身份。两面首句逐字一致（`Date bucketing by '<g>' is not supported by this backend.`），尾句各报**本面**编得出的 granularity，由一条跨包 parity 用例比对两个**运行时**消息钉住。
+
+  **消息文本变更**（可能影响按文本匹配的下游断言）：
+
+  ```
+  - SqlDriver: dateGranularity 'week' not supported on dialect 'better-sqlite3'. Engine must fall back to in-memory bucketing.
+  + Date bucketing by 'week' is not supported by this backend. Bucketed here: day, month, quarter, year (dialect 'better-sqlite3'). … (code=NOT_IMPLEMENTED, status=501)
+  ```
+
+  ## 定级依据
+
+  标 major 与 #5181 / #6075 / #6210 一致：**源码级破坏性**（调用点内联字面量、以及被删的两个别名键），加上第二、三节两处真实的运行期改动。`check:api-surface` 只记录导出的存在与否、不记录签名，所以这条说明是该变更唯一的下游载体。
+
+  `driver-sqlite-wasm` 未列入：它整个继承 `SqlDriver.aggregate`，自身源码零改动（改的只有它的 fixture 与一条断言）——与批 A+E 的处理一致。它读的是 driver-sql 的 `dist/*.d.ts`，因此验证时**必须先重建 driver-sql** 再 typecheck/test，否则是假绿。
+
+  <!-- adr-0087: registered driver-aggregate-undeclared-key-aliases-removed -->
+
+- d367f03: refactor(drivers)!: 五个驱动的 query 参数跟进 `DriverQuery`，休眠的类型谎言就此没有藏身处 (#6075)
+
+  #5181（PR #6076）把 `IDataDriver.find/findOne/count/updateMany/deleteMany/explain` 的 query 参数收窄为 `DriverQuery`（`Omit<QueryAST, 'object'>`），并在同一条 changeset 里写明：「把驱动签名一并迁到 `DriverQuery` 是后续的机械收尾」。这就是那次收尾。
+
+  在此之前，五个驱动的实现仍旧声明 `query: QueryAST`（turso 侧是 `query: any`）。**它不红，也不会红** —— 方法参数按双变比较，实现声明得比契约宽照样满足契约。但调用方现在**有权**省略 `object`，于是这些实现的类型说 `query.object` 是 `string`，运行期却可能是 `undefined`：一句休眠的谎言，没有任何门拦得住下一个照着它写代码的人。
+
+  收尾之后，「驱动读 `query.object`」直接变成编译错误：
+
+  ```ts
+  // 收窄前：编译通过，运行期可能是 undefined —— 谎言
+  // 收窄后：error TS2339: Property 'object' does not exist on type 'DriverQuery'.
+  const name = query.object;
+  ```
+
+  **零运行时改动。** 本次改的全部是类型注解：五个驱动的六个契约方法签名，以及为让类型自洽而必须跟进的少量私有辅助方法参数（mongodb 的 `buildFindOptions` / `buildSortSpec`，sql 的 `findRows` / `orderKeysFor`，turso 的 `toRemoteQuery` / `toRemoteReadQuery`，memory 的 `performAggregation`）—— 它们都只转发或读取 `where` / `orderBy` / `groupBy` 这些字段，本来就不读 `object`。turso 的几处 `query: any` 一并收紧，多拿回一批本已放弃的检查。emit 无差异，测试全绿（memory 524、mongodb 206、sql 906、sqlite-wasm 254、turso 788）。
+
+  **迁移面：删掉驱动调用字面量里的 `object:` 键**，与 #5181 是同一句话，只是现在也覆盖了直接按具体驱动类（`SqlDriver` / `MemoryDriver` / …）而非按 `IDataDriver` 取类型的调用方。编译器会逐处指出来（TS2353 `'object' does not exist in type 'DriverQuery'`）。本仓下游 25 个包实测零处需要改动，改动只落在五个驱动自己的测试里。
+
+  标 major 的依据与 #5181 一致：**源码级破坏性**（调用点内联字面量），运行时行为零变化。`check:api-surface` 只记录导出的存在与否、不记录签名，因此这条说明同样是该变更唯一的下游载体。
+
+  `aggregate` / `distinct` / `syncSchemasBatch` 不在本次范围内 —— 它们不是 `IDataDriver` 收窄的那六个方法，其中 `syncSchemasBatch` 的条目里 `object` 是被真实读取的必填键，`expand` 条目里的 `object` 同理命名的是关联对象，都不是冗余。
+
+- 62159bd: refactor(driver-sql)!: `SqlDriver.distinct` 的第三参收成裸 `FilterCondition`，一个静默返回全集的写法就此编译不过 (#6320)
+
+  `distinct` 不在 `IDataDriver` 上，所以 #5181（PR #6076）与 #6075（PR #6210）的收窄都没走到它，#6212 批 A+E（#6355）收的是 `analyzeQuery` / `findWithWindowFunctions`，也没覆盖它。它的方法体一直说得很清楚——`applyFilters(builder, filters)` 拿的是**实参本身**，因此它要的是 `find()` 放在 `query.where` 里的那个值，**不是 query 信封**；`filters?: any` 只是没把这句话写进类型里。
+
+  ```ts
+  // 收窄前后都成立，一处调用点都不用改
+  await driver.distinct("orders", "product", { status: "completed" });
+  ```
+
+  **收窄真正买到的东西，是实测出来的，不是推断的。** 三行数据（`Laptop`/`Mouse` 为 `completed`，`Ghost` 为 `pending`），逐个形状喂给 `distinct('orders','product', …)`：
+
+  | 第三参                       | 收窄前                             | 收窄后       |
+  | :--------------------------- | :--------------------------------- | :----------- |
+  | `{ status: 'completed' }`    | 返回 `["Laptop","Mouse"]`          | 不变         |
+  | 省略                         | 返回全集                           | 不变         |
+  | `'completed'`（标量）        | **编译通过，返回全集**             | **编译错误** |
+  | `{ object, where }`（信封）  | 抛 `INVALID_FILTER` / 400          | 不变         |
+  | `['status','=','completed']` | 抛 `INVALID_FILTER` / 400（#5158） | 不变         |
+
+  第三行就是本次消掉的那一格：一个真心想问「completed 订单里有哪些商品」的调用，编译通过，然后拿到**每一个**商品。`applyFilters` 对「真值但非对象、非数组」的 filter 不发射任何谓词（该方法尾注写着这件事），于是过滤条件被整条丢掉。方向是**放宽**——这正是 #6320 与 #5234 同族的那类「静默错答案」。
+
+  **有一格是任何类型都关不上的，本次如实写进注释而不是假装关上了。** `FilterCondition` 的键**就是字段名**，所以它是开放映射（`[key: string]: any`）：`{ object, where }` 在结构上是一个完全合法的 filter——约束两个分别叫 `object` 和 `where` 的列。没有任何注解能把它和正当 filter 分开。#6320 提出的「让反向错配也编译不过」在这个参数上**不可达**，实测确认；能拿到的保证是**运行期响亮失败**：信封里的 `where` 是对象，而没有任何比较值可以是对象，于是 `assertCompilableComparand` 抛 `INVALID_FILTER` / 400。这半边 driver-sql 从来就不是静默的；`driver-memory` 那半边（裸 filter 交给它会静默返回全集）留在 #5499 冻结面内，本次不碰。
+
+  **零运行时改动**：非测试改动 100% 是一个类型注解加一段注释，无逻辑、无行为、无 emit 差异。
+
+  **逐处复核了全部 14 个调用点**（本单正文记的是 3 处，实测偏低）：driver-sql 11 处、driver-sqlite-wasm 3 处、driver-turso 0 处；其中真正传第三参的是 4 处（driver-sql 2 + driver-sqlite-wasm 2），全部本来就写的裸 filter，**零报错、零 fixture 改动**。
+
+  **driver-sqlite-wasm 也标 major**：`SqliteWasmDriver extends SqlDriver` 且不覆写 `distinct`，所以它**已发布的 `.d.ts`** 里这个方法的签名同样收窄，它的使用者看到的是同一个变化。该包读的是 driver-sql 构建后的 `dist/*.d.ts` 而非源码，是一处已知门禁盲区，本次用「往参数类型里临时塞一个调用方不可能满足的成员、重建、看调用点是否逐一变红」证明它确实读到了新 d.ts：driver-sql 6 处红、driver-sqlite-wasm 3 处红，与预判逐一相符。
+
+  ### 迁移
+
+  调用点若把**标量**（或任何非 `FilterCondition` 值）交给第三参，编译器会指出来：
+
+  ```
+  error TS2345: Argument of type 'string' is not assignable to parameter of type 'FilterCondition'.
+  ```
+
+  改法是把它写成它本来就该是的裸 filter 对象（`'completed'` → `{ status: 'completed' }`）。⚠️ 这类调用点在收窄前拿到的是**未过滤的全集**，所以这不是一次等价改写：修完之后返回值会变，而变化后的那个才是调用方本来想要的答案。本仓零处这样的调用点。
+
+  ⚠️ 无类型的 JS 调用方**既不会拿到编译错误、也不会有任何行为变化**（本次零运行时改动）。对他们而言，上面那条是「你一直没在过滤」的**唯一通知渠道** —— 这也是本次记台账条目的理由，见下。
+
+  <!-- adr-0087: registered driver-sql-distinct-bare-filter-typed -->
+
+- d48aad5: refactor(driver-sql)!: `analyzeQuery` / `findWithWindowFunctions` 不再吃 `any`，窗口门自带扁平形类型 (#6212 批 A+E)
+
+  #5181（PR #6076）收窄了 `IDataDriver` 声明的六个方法，#6075（PR #6210）让五个驱动的实现跟上。收尾漏下的是**驱动自有、不在 `IDataDriver` 上**的那批查询门：它们同样吃 query AST，签名却是 `any`。本次处理 SQL 驱动的两个。
+
+  `any` 在 query 参数上不是「对象名没检查」，而是**检查全关**：`where` 的 filter 方言、`orderBy` 的 sort node 形状、`limit`/`offset` 是不是数字，全部被抹掉——而这两个方法体读的恰恰就是这些字段。`$like` 当年就是从同一个口子活到运行时的（cloud#1030、cloud#1053 实测 20 处）。
+
+  **`analyzeQuery` → `DriverQuery`。** 它是 `explain()` 的实现体，而 `explain()` 本来就声明 `DriverQuery` 并一行转发过来——收窄前这一对是自相矛盾的：契约门声明 AST，它背后的实现声明 `any`。方法体只读 `fields` / `where` / `orderBy` / `limit` / `offset`，全在 `DriverQuery` 内，因此这是一次纯注解：driver-sql 与 driver-sqlite-wasm 实测零报错、零 fixture 改动。
+
+  **`findWithWindowFunctions` → 驱动本地的扁平形类型**，新导出 `SqlWindowFunctionQuery` / `SqlWindowFunctionSpec`：
+
+  ```ts
+  import type { SqlWindowFunctionQuery } from "@objectstack/driver-sql";
+
+  const ranked = await sqlDriver.findWithWindowFunctions("employee", {
+    windowFunctions: [
+      {
+        function: "rank",
+        alias: "salary_rank",
+        partitionBy: ["department"],
+        orderBy: [{ field: "salary", order: "desc" }],
+      },
+    ],
+  });
+  ```
+
+  它**不能**标 `DriverQuery`：`query.windowFunctions` 在 spec 是 `retiredKey()` 墓碑（#4286），`QueryAST['windowFunctions']` 解析为 `undefined`，标上去会让这道门自己已发布文档里的载荷编译不过。类型因此写成 `Omit<DriverQuery, 'windowFunctions'> & { windowFunctions?: SqlWindowFunctionSpec[] }`——契约那一半照旧受检，驱动私有那一半由驱动自己声明。
+
+  类型放在驱动层、**不进 `packages/spec`**，是接着 #4286 的判断往下走：那次删掉 `WindowFunctionNodeSchema` 的理由正是它声明了 `field` / `over` / `frame` 这些门从不读的成员；再往 spec 加一套窗口词汇就是反悔那个判断。spec 的删除注记与 `migrations/registry.ts` 的迁移处方里逐字写着的 `{ function, alias, partitionBy?, orderBy? }`，就是这个类型的出处，三处必须始终说同一句话。请求面的墓碑**没有**被重新打开：`analyzeQuery('o', { windowFunctions: [...] })` 依然是编译错误。
+
+  **顺带（#6212 批 F）**：`@objectstack/verify` 的 `BucketableDriver.aggregate` 从 `query: unknown` 收到 `DriverQuery`。这是一个**已发布**的结构替身，cloud 的 driver-turso 照着它实现——声明 `unknown` 不叫「最小」，叫没检查，并且放任该文件里两处 AST 字面量各自把对象名多写一遍（#5181 的那种冗余）。同时删掉一处 `as never`：那个 cast 只是因为字面量推断把 `'count'` 放宽成了 `string`，注上类型就不需要它了。这里**不预断**驱动自身 `aggregate` 参数类型的收窄（#6212 批 B，排在 #6203 之后）——方法参数按双变比较，驱动那边声明 `any`、`QueryAST` 还是收窄后的类型，都照样满足这个替身。
+
+  **零运行时改动**，全部是类型注解与两处冗余键的删除（实测全仓驱动无一读 `query.object`）。测试：driver-sql 935、driver-sqlite-wasm 254、driver-turso 804、verify 17、dogfood 520 全绿。
+
+  **迁移面**：直接调用这两道门的嵌入方，把内联字面量里编译器指出来的键改对即可（TS2353）。本仓实测非测试生产者为零，两道门只有各自驱动包的测试在用，零处需要改动。标 major 的依据与 #5181 / #6075 一致：**源码级破坏性**（调用点内联字面量与 `BucketableDriver` 的导出形状），运行时行为零变化；`check:api-surface` 只记录导出的存在与否、不记录签名，所以这条说明是该变更唯一的下游载体。
+
+### Minor Changes
+
+- 82397b6: feat(drivers,objectql): `$regex` / `$options` are refused everywhere, and `$icontains` is implemented on the SQL family (#5702)
+
+  The driver half of the #4706 ruling. #5701 landed the contract (the vocabulary,
+  the `RETIRED_FILTER_OPERATORS` prescriptions, the shared text case-set) and
+  #5710 flipped the last live producer — `plugin-auth`'s ObjectQL adapter, which
+  emitted `$regex` on the authentication path — so the refusal can now land
+  without breaking sign-in.
+
+  **BREAKING for anyone writing `$regex` or `$options` in a filter.** Both are
+  refused on every backend with `INVALID_FILTER` / 400 and a message that names
+  the replacement. `$regex` was never a declared operator: `driver-sql` compiled
+  it to a LIKE-escaped substring (so `a.b` matched only the literal `a.b`),
+  `driver-memory` ran it as a real `RegExp` (so the same filter also matched
+  `axb`, and an _invalid_ pattern was caught and answered `false` — zero rows, in
+  silence), and `objectql`'s `having` did the same. Write `$icontains` for the
+  case-insensitive substring search this was almost always used for, `$contains`
+  for a case-sensitive one; a pattern that genuinely needs a regex has no
+  filter-level replacement.
+
+  **`$icontains` now runs on the SQL family** — `driver-sql`, `driver-sqlite-wasm`,
+  and both of `driver-turso`'s transports (the remote one does not go through
+  knex, so it needed its own). It compiles to `LOWER(col) LIKE LOWER(?) ESCAPE ?`
+  through the same `applyLike` / `pushLike` that carries the `%` / `_` / `\`
+  escaping, as a `fold` parameter rather than a second emitter — a copied emitter
+  is where the escape class would have been dropped, and an unescaped `%` matches
+  every row. An empty or non-string comparand is refused on the validating walk
+  (an empty one matches every row, which widens rather than narrows). On SQLite
+  `lower()` folds ASCII only, which IS the contract (#4706 Q1 = A): `$icontains:
+'café'` does not match `CAFÉ`.
+
+  <!-- adr-0087: registered filter-regex-options-retired -->
+
+  `driver-mongodb`'s unknown-operator arm was throwing a bare `Error` with no
+  `code` and no `status`, three lines from the helper in its own file that sets
+  `INVALID_FILTER` / 400 — a 500-shaped body for a 400-class client mistake. It
+  now speaks the same envelope as its three siblings.
+
+  Two parts of the ruling are deliberately NOT in this change and stay tracked in
+  `scripts/check-driver-conformance.mjs`'s ledger: the `$contains` family's
+  case-sensitivity (#4706 Q2 = A) needs SQLite's `LIKE` replaced by a case-exact
+  construct in the driver, the RLS lowering and the analytics lowering together,
+  or one permission rule compiles to two row sets (#6518); and `$icontains` on the
+  JS evaluation faces needs the spec vocabulary to take the operator, which cannot
+  happen before `driver-memory` has an arm for it (#6520).
+
+- 3264516: fix(driver-sql,service-analytics)!: 两类无意义比较对象不再编译成「静默空谓词」——`$in`/`$nin` 的对象成员与 LIKE 族的对象比较值一律拒收 (#5234)
+
+  两个形状此前都**编译通过、执行、并给出一个作者没写过的答案**,而且没有任何东西记录这件事:
+
+  | filter                             | 改前                                                                                   | 改后                                               |
+  | ---------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------- |
+  | `{status: {$in: ['a', {foo: 1}]}}` | 该成员绑不上任何行,查询答得**就像第二个成员从没被写过**                                | `INVALID_FILTER` / 400,点名 `index 1`              |
+  | `{status: {$nin: [{foo: 1}]}}`     | `NOT IN ('[object Object]')` —— **一行都没排除**,作者写下的排除悄悄没发生              | 同上                                               |
+  | `{name: {$contains: {}}}`          | `LIKE '%[object Object]%'` —— 对一行文本恰好是 `[object Object]` 的记录,**真的命中了** | `INVALID_FILTER` / 400,点名 `StringOperatorSchema` |
+  | `{name: {$notContains: {}}}`       | 反过来:为一个没人记录的理由**排除了一条真实记录**                                      | 同上                                               |
+
+  #5041(PR #5223)在 `assertCompilableComparand` 的头注释里把这两个形状写为 "Deliberately NOT
+  extended",理由是它们 fail-closed(只收窄结果集)、比 #5041 实测的裸 `TypeError` 低一级。**实测下来这
+  两条理由都不成立**:`$nin` / `$notContains` 方向是**放宽**(该排除的没排除,在 read-scope 下即 #5347 /
+  #5324 判过的 over-reach);而 `$contains: {}` 给的从来不是「零行」,是**错行**。
+
+  ## 三份实现一起动,否则修完仍是方言
+
+  同一个 `String()` 宽容在本仓有多份;只收紧 `driver-sql` 会变成「哪个面接的就是哪个答案」——
+  #5146 / #5332 / #5567 各花一轮消掉的那类分叉。守卫因此落在**每个包自己的收口点**,而不是三个发射器:
+
+  - **`driver-sql`** —— `assertCompilableComparand`,#5041 已有的那一个门。
+  - **`service-analytics` 的 `where` 门** —— `filter-normalizer.ts` 的 `fieldLeaves`。它是本包**唯一**的
+    leaf 生产者,所以一处拒收同时覆盖三个消费方:`NativeSQLStrategy`(真正执行的语句)、
+    `ObjectQLStrategy.generateSql`(`/analytics/sql` 回显)与 `ObjectQLStrategy.convertFilter`(引擎路径)。
+    这个顺序是关键而非顺手:`convertFilter` 是**生产者**,在那里 `String()` 会把对象洗成一个类型完全正确
+    的 `'[object Object]'` 字符串交给驱动,下游再严格的驱动也永远看不到它该严格的那个形状。
+  - **`service-analytics` 的 read-scope 门** —— `read-scope-sql.ts` 的 `compileOperator`,它编译的
+    `FilterCondition` 不经过上面那个门。
+
+  `like-pattern.ts` 与 `applyLike` 里的 `String(value)` **原样保留**:它们不再是缺陷所在,因为门前已经没有
+  渲染不出来的值能到达。两包的谓词由 `like-metacharacter-escape.test.ts` 逐值互锁——正是该文件已经用来锁
+  转义表达式的同一套办法。
+
+  ## 围栏是 allow-list,而且每一条都是实测后决定的
+
+  抄 `driver-turso` `RemoteTransport` 的形状(cloud#1004 / #1058):deny-list 会把下一个被发明出来的值形状
+  悄悄放进来,这正是那个 bug 熬过第一次修复的原因。顺带说明,**turso 自 #1058 起就已经拒收这两个形状**,
+  所以本地 SQLite 与远程 SQLite 此前对同一条查询给的是不同答案;本次改动把它们收敛到一起。
+
+  留在围栏内的(逐条实测,不是假设):
+
+  - **数字 / 布尔 / `null`**:`{$contains: 5}` → `%5%`、`{$contains: null}` → `%null%` 在 `driver-sql`、
+    `driver-memory` 与 analytics 两个面上**今天答案一致**,#5526 还专门把 `null` 这条钉住了。拒收它们是在
+    **破坏**一致,不是建立一致——所以只拒**对象**。
+  - **`Date`**:turso 的 allow-list 把它作为唯一的对象转换保留,拒收会重新叉开本地与远程。
+  - **binary**:`$in` 成员照收(`isBindableComparand` 与写路径 `formatInput` 同一套分类),LIKE 拒收——它
+    绑得上但渲染不出作者想要的东西。这就是两个谓词而不是一个带 flag 的原因。
+  - **`undefined`**:不可授权(JSON 没有 `undefined`),analytics 门按 #5526 / #5332 归一为 `null` 而非拒收;
+    在 `driver-sql` 拒收它会**造出**一个分歧而不是消除一个,故照旧。
+
+  被拒的**数组**是本次唯一一个「拒收即消分叉」的形状:`{name: {$contains: ['al','be']}}` 在 `read-scope-sql`
+  (与 `driver-sql`)绑 `%al,be%`,在 analytics 的 `where` 门却绑 `%al%`(它读 `values[0]`,后面的成员被
+  静默丢弃)。同一个包对同一条 filter 有两个答案,两个门现在都拒。
+
+  ## 作者需要知道的迁移
+
+  这两个形状本来就没有能用的读法——`filter.zod.ts` 的 `StringOperatorSchema` 早就把 LIKE 族比较数声明为
+  `z.string()`,本次只是让声明变成强制(Prime Directive #12,declared = enforced)。改后它们答 400 而不是
+  一个错答案;把比较数换成字面值即可。`{$eq: {…}}` **不在本次范围**,仍按 `toSqlBindValue` 绑 JSON(#5526
+  钉住的行为)。
+
+- 3172831: fix(drivers): text-operator case folding is the CONTRACT's answer, not the dialect's (#6518)
+
+  The `$contains` family and `$icontains` returned **different rows on different
+  databases** for the same filter, because case sensitivity was decided by whatever
+  `LIKE` happened to mean on the dialect underneath. Both directions **over-matched**
+  — they returned rows the filter excludes, which on an ADR-0021 RLS read scope is
+  over-reach rather than a loose filter (#3948):
+
+  |                              | `$contains` / `$notContains` / `$startsWith` / `$endsWith` — case-SENSITIVE (#4706 Q2 = A) | `$icontains` — folds ASCII ONLY (#4706 Q1 = A) |
+  | :--------------------------- | :----------------------------------------------------------------------------------------- | :--------------------------------------------- |
+  | SQLite / turso / sqlite-wasm | ❌ `LIKE` folds ASCII                                                                      | ✅ `lower()` is ASCII-only                     |
+  | Postgres                     | ✅ `LIKE` is case-exact                                                                    | ❌ `LOWER()` folds all of Unicode              |
+  | MySQL                        | ❌ follows the column's collation                                                          | ❌ `LOWER()` folds all of Unicode              |
+
+  Read across: **each dialect was already right on the half another one got wrong**,
+  which is why neither half could be found from one backend alone.
+
+  ## What now runs
+
+  The construct is chosen per dialect, in one emitter, so the escaping and the fold
+  stay a single code path (an unescaped wildcard is a filter bypass, P0 — #5567):
+
+  - **SQLite family → `GLOB`.** `LIKE`'s ASCII fold cannot be switched off per
+    statement (`PRAGMA case_sensitive_like` is connection-global, so one query would
+    redefine every other query on the connection), and `CAST(col AS BLOB) LIKE ?` was
+    measured to match _nothing at all_. `GLOB` is case-exact and brings its own
+    escaped class — `*`, `?`, `[` as the self-closing classes `[*]`, `[?]`, `[[]`,
+    because SQLite's grammar gives `GLOB` no `ESCAPE` clause. `$icontains` keeps
+    `lower()` on both operands, still ASCII-only.
+  - **Postgres → `LIKE`, unchanged.** Only the fold moved, from `LOWER()` to an
+    explicit `translate()` over the 26 ASCII letters. Measured on a live PostgreSQL
+    16 (ICU database): `LOWER('CAFÉ')` is `'café'` — the over-fold — while the
+    `translate()` form leaves `É` alone.
+  - **MySQL → `LIKE` over `CAST(… AS BINARY)`**, so the comparison is byte-wise and
+    no collation decides the case; `$icontains` folds byte-wise over the same binary
+    rendering, which is ASCII-only because UTF-8 is self-synchronising.
+  - **Any other client** keeps the previous `LIKE` / `LOWER()` shape — it is the only
+    form that still runs there — and is recorded as residue rather than left to be
+    discovered.
+
+  `driver-turso`'s remote transport carries the twin (it compiles filters itself and
+  inherits nothing), and the two transports are now held to the same rows by a
+  parity suite that runs the shared `FILTER_TEXT_CASES` on both.
+
+  ## Behaviour change — read this before upgrading
+
+  A filter whose comparand's case did not match the stored text used to match on
+  SQLite/turso/sqlite-wasm and may have matched on MySQL. It no longer does:
+
+  ```ts
+  // rows: { id: '1', name: 'ACME Corp' }, { id: '2', name: 'acme corp' }
+  {
+    name: {
+      $contains: "acme";
+    }
+  } // was ['1','2'] on SQLite → now ['2'] everywhere
+  {
+    name: {
+      $icontains: "acme";
+    }
+  } // ['1','2'] — unchanged, and now correct on PG/MySQL too
+  {
+    name: {
+      $icontains: "café";
+    }
+  } // was ['3','4'] on PG/MySQL → now ['4'] everywhere
+  ```
+
+  If you were relying on `$contains` to ignore case, **write `$icontains`** — that is
+  the operator for it, and it now folds the same ASCII-only range on every backend.
+  Result sets only ever get NARROWER, never wider, so a filter that was already
+  correct stays correct.
+
+  ## Why `minor` rather than `major`
+
+  No declared surface moves. `$contains` still exists, still takes the same
+  comparand, and `filter.zod.ts` is untouched — the case-sensitivity this delivers
+  was **already published** as the contract by #5701 (`FILTER_TEXT_CASES`, one
+  release earlier in this same v17 major), and the drivers were the half that had
+  not caught up. This is Prime Directive #12 applied in the direction it points:
+  declared = enforced. It is graded the way its sibling #5702/#6549 was graded for
+  the same operator family in the same rc cycle, and it registers nothing in the
+  ADR-0087 registries because it retires no authorable key.
+
+  ## What is deliberately NOT in this change
+
+  `driver-memory` and `driver-mongodb` still fold case on their query paths — they
+  are the #5499 frozen family, so their `FILTER_TEXT_CASES` cells stay honest DEBT
+  and are tracked as #6682 (case sensitivity) and #6520 (`$icontains`). The
+  `service-analytics` SQL compilers were measured already compliant: they emit
+  Postgres-shaped statements, where `LIKE` is case-exact, and that assumption is now
+  written down and pinned rather than implied.
+
+### Patch Changes
+
+- 6f6fec7: fix(objectql,driver-sql): 自增号播种按声明的 `suffix` 定位计数器,两侧收敛到同一答案 (#6468)
+
+  `autonumberFormat` 允许序号槽 `{0..0}` **后面**还有 token —— `renderAutonumber`
+  专门返回 `suffix`,其契约就是 `prefix + zero-padded(seq) + suffix`。这类格式渲染
+  出的值**序号不在串尾**:`{000}-{YYYY}` 渲染成 `001-2026`,是很常见的单号写法。
+
+  两侧的播种解析却都假定「串尾的数字就是计数器」,而且各错各的:
+
+  - 引擎兜底播种 `seedAutonumber()` 取整串的**最后一个**数字段 —— 读到的是年份。
+    库里三行 `001-2026`/`002-2026`/`003-2026`(真实计数器 3)把计数器播种成 **2026**,
+    下一个发出的号直接跳到 `2027-2026`;
+  - driver-sql 的 `scanMaxNumericTail()` 把 tail 里**所有**数字拼接后 `parseInt` ——
+    同样三行读成 **12026**,下一个号是 `12027-2026`。
+
+  于是**同一份元数据、同一批行,换个驱动号段就不一样**;中间跳过的号已经烧掉,事后
+  无法回收。只修一侧会把「两个不同的错误答案」变成「一个对一个错」,跨驱动仍不一致,
+  所以两侧同 PR 修。
+
+  **修法:两侧解析器尊重已声明的 `prefix`/`suffix`。** 两个字符串都由调用方从
+  `renderAutonumber` 的返回值取得后传入 —— 两侧都不再自行理解格式,driver-sql 只收
+  参数(`getNextSequenceValue` 仅多转发一个位置参数,序列逻辑本身未动):
+
+  - **prefix / suffix 任一非空 ⇒ 计数器「有锚」**:取 prefix 之后的**首个**数字段,
+    并在该行确实带有声明的 suffix 时先把它去掉;
+  - **两者皆空 ⇒ 「无锚」**:各自的既有读法**逐字保留**(引擎取整串最后一个数字段,
+    driver-sql 拼接全部数字)—— 无 `{0..0}` 槽的格式渲染的就是串尾裸计数器,而早于
+    格式存在的历史值根本没有锚可依。
+
+  **suffix 只在匹配时剥离,绝不要求匹配。** `{000}-{YYYY}` 的计数器 scope 是渲染后的
+  **prefix**(此处为空),即全局一个计数器、只有显示的年份在变,所以去年的 `007-2025`
+  持有计数器 7,必须计入。把 suffix 下推成 `like '%-2026'` 会把这些行整批漏掉、播种
+  **低于**真实 max —— 那正是 #6249 修掉的重复单号伤害,自己再造一遍。因此 SQL 谓词
+  保持 `like 'prefix%'`,suffix 只在 JS 侧逐行使用。
+
+  无后缀格式(`D-{0000}`、`{0000}`)两侧本来就正确,行为不变并已 pin 住;#6467 的
+  播种扫描结构未触碰。
+
+- 3510e4a: refactor(spec,drivers,lint): one implementation of the filter identity reduction (#5659)
+
+  `{ $and: [] }` matches every row, `{ $or: [] }` matches none, `{}` is a TRUE
+  disjunct that absorbs its `$or`, `{ $not: {} }` is FALSE. That is a ruling
+  (#5322/#5134) pinned for every backend by the four identity cases in
+  `FILTER_LOGIC_CASES` — and it was implemented four times over: `reduceFilterNode`
+  in `driver-sql`, the same function again in `driver-mongodb`, the
+  `every`/`some`/truthiness algebra of `driver-memory`'s matcher, and nearly a
+  fifth hand-written copy inside `@objectstack/lint`, which declined to write one
+  and filed this issue instead.
+
+  **New in `@objectstack/spec` (`@objectstack/spec/data`): `reduceFilterVerdict`**,
+  beside the case table that proves it. It answers `'true' | 'false' | 'clause'`
+  for a filter node and never throws on its own; each backend's own refusals — the
+  undeclared `$`-combinator and the `undefined` comparand in `driver-sql`, the
+  query-level keys and the `$null` comparand in `driver-mongodb` — are passed in as
+  `FilterVerdictHooks` and are invoked from exactly the positions they were invoked
+  from before. `reduceFilterKeyVerdict` answers the same question for one key, which
+  is what both SQL and MongoDB emitters consult while walking a node.
+
+  **No behaviour changes in the three drivers.** The move is mechanical: the shared
+  algebra replaces each private copy, the refusals stay where they were, and the
+  `FILTER_LOGIC_CASES` conformance suites are green on both sides of the change —
+  including the SQL-inheriting `driver-sqlite-wasm` and `driver-turso`.
+
+  **`@objectstack/lint` gains two warnings it was structurally blind to.** The
+  `multi: true` unbounded-bulk-write rule (#5482) asked "does this filter have zero
+  keys", so a `delete_record` bounded by `filter: { $and: [] }` or
+  `filter: { $or: [{}] }` — a whole-object write by the ruling every driver executes
+  — passed silently. It now asks the reduction, and it warns about both while
+  staying quiet on `{ $or: [] }` and `{ $not: {} }`, which match nothing. The
+  message names the shape it saw (`a filter that REDUCES TO TRUE ({"$and":[]})`)
+  rather than calling a non-empty filter "empty".
+
+  If you have a flow declaring a bulk write bounded by one of those two shapes, the
+  lint will now tell you so — the write was already unbounded at run time; only the
+  feedback is new.
+
+- 939f579: drivers(sql,turso): 聚合函数拒收带上 ADR-0112 信封,并把两类条件分开措辞
+
+  `SqlDriver.mapAggregateFunc()` 与 `RemoteTransport.aggregate()` 此前对同一条件各抛一个裸
+  `Error`(`code`/`status` 皆 `undefined`),`mapDataError` 因此落默认分支——一条本该 4xx 的
+  调用方错误以不透明 500 到达客户端。两处同时改,同一信封体例、首句逐字一致(#5240):
+
+  - **协议未声明的函数名**(如 `median`)→ `INVALID_QUERY` / 400。这正是协议门
+    (`metadata-protocol` 的 `invalidQueryError`,#4254)对同一条件已经给出的码,于是
+    进程内调用方与 REST 调用方读到同一个答案。
+  - **协议已声明、本后端编不出**(`count_distinct` / `array_agg` / `string_agg`)→
+    `NOT_IMPLEMENTED` / 501。这是能力缺口而不是调用方的错(`driver-mongodb` 编得出这三个),
+    措辞明确说明查询拼写无误,不把作者说成打错字。
+
+  两面都只改拒收的身份:编得出的五个函数生成的 SQL 逐字节不变。
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+  - @objectstack/observability@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

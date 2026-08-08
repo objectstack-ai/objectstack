@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-sms",
-  "version": "17.0.0-rc.5",
+  "version": "17.0.0-rc.6",
   "license": "Apache-2.0",
   "description": "SMS service for ObjectStack — ISmsService + transport-pluggable outbound delivery (Aliyun / Twilio / log).",
   "main": "dist/index.js",

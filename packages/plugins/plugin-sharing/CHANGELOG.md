@@ -1,5 +1,211 @@
 # @objectstack/plugin-sharing
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- 54299ca: feat(sharing): `ISharingService` 的每行写判定补三态 —— 放行 / 不表态 / 拒绝(#6428)
+
+  #5492 的维护者裁决(2026-08-07,B 案)分两步兑现两种已声明的写扩权,本次是 **step 1:
+  契约与默认实现**。plugin-security 前像门的 provenance 分层合成是 step 2,本次一行未动。
+
+  **为什么二态不够(实测,不是推演)。** `canEdit()` 用同一个 `true` 表达了两件事 ——
+  「我有依据放行」与「本服务对这一行根本不设门」。对只**追加**一道门的调用方(sharing
+  中间件、`sys_attachment` 父记录门、ADR-0055 master 判定)这没问题:`true` = 「我不拦
+  你」。对让这个答案去**顶替另一个权威的地板**的调用方就是 fail-open —— #5492 的 E2 实验
+  把前像写门委托给 `canEdit()` 后,在**没有 `owner_id` 列**的对象上,普通成员跨 creator
+  的 UPDATE 变成 `ok: true`(main 上是 403),因为平台的 `created_by` 所有权地板正是这类
+  对象唯一的行级写门,而一个「不表态」的 `true` 把它盖掉了。
+
+  **新增契约面**(`@objectstack/spec/contracts`):
+
+  - `SharingWriteVerdict = 'allow' | 'abstain' | 'deny'` —— 闭合联合,普通 TS 类型
+    (非 zod 派生,不进 ADR-0122 的 pin 计数)。
+  - `ISharingService.checkEdit()` / `checkDelete()` —— 三态主形态,动作边界照 ADR-0111 D3
+    继承:`edit` 级共享让 `checkEdit` 答 `allow`、同一行 `checkDelete` 仍答 `deny`;两者
+    的 `abstain` 集合完全相同(两道门对「哪些对象由共享设门」意见一致,只在动词上分歧)。
+
+  **兼容:`canEdit()` / `canDelete()` 原样保留,语义零漂移。** 它们被定义为三态的
+  **投影** `verdict !== 'deny'` —— 从前对 public / 无 owner 字段 / bypass 对象返回的那个
+  `true`,现在落在 `abstain` 上,投影回来仍是 `true`。真值表逐分支被测试钉住(9 个分支
+  × 两个动词),因为 `resolveSharingCanEdit`(plugin-security)与 `sys_attachment` 父记录
+  门读的正是这一列,翻掉任何一格都是本 PR 未触及的包里的静默权限变更。
+
+  **fail-closed 落点:查询失败是 `deny`,永远不是 `abstain`。** 两者对合成方是相反的指令
+  (`abstain` 把这一行交给另一个权威,`deny` 就地终结),把失败读成「没有意见」正是造出上述
+  fail-open 的那个混淆。默认实现把所有权查询与共享查询整段包在 fail-closed 分支里,并
+  `logger.error` 记名,不静默吞。
+
+  **行为变化(一处,方向收紧)**:引擎查询抛错时,`canEdit`/`canDelete` 从**向外抛**改为
+  返回 `false`。两个既有调用点本来就在自己那侧 catch 成 `false`(`resolveSharingCanEdit`
+  的 #5386 fail-closed、attachment hook 的降级读),所以对它们是同一结果;其余调用点由
+  「异常中止写入」变成「403 拒绝写入」,严格不更宽松。
+
+  **解锁**:#5492 step 2 的前像门可以按 provenance 分层合成 —— `abstain` 回落平台所有权
+  地板、`allow` 按声明顶替地板、`deny` 维持拒绝 —— 而不必在 security 侧重算一份
+  owner/depth/share/bypass(那会是同一契约的第二份实现)。#5491 与 #5492 同批落地。
+
+### Patch Changes
+
+- db59e9c: hooks: drop the last three `doc` / `previousDoc` alias reads on a hook context — read the engine's own keys only
+
+  Behaviour is unchanged: every one of these limbs guarded against a producer that
+  has never existed, so none of them could be reached.
+
+  - `service-storage` attachment lifecycle read `ctx.result ?? ctx.input.doc ?? ctx.input.data`
+  - `plugin-sharing` primary-BU projection read `(ctx.input.data ?? ctx.input.doc).user_id`
+  - `runtime`'s hook sandbox read `engineCtx.input ?? engineCtx.doc` and `engineCtx.previous ?? engineCtx.previousDoc`
+
+  Every ObjectQL write context spells the payload `data` — measured and pinned by
+  `hook-input-shape-contract.test.ts` in `@objectstack/objectql` ("insert carries
+  `data` — never `doc`", #5273). The top-level pair is the same family one level
+  up: `HookContextSchema` declares `input` / `result` / `previous` and neither a
+  `doc` nor a `previousDoc`, and `engine.ts` — the sole producer of a HookContext
+  — builds neither. The limbs survived only because the old `HookContext.input`
+  contract table documented insert as `{ doc, options }`; that table was corrected
+  in #5668, and the same alias was removed from `trigger-record-change` in #5671.
+  These are the remainder (#5906), removed rather than left as a second de-facto
+  contract (PD #12).
+
+- 8e13ca8: fix(plugin-sharing): share-link 路由把完整授权信封交给 enforcement,修复 `group` 姿态下建链恒 403(#6206,裁决 A 案的消费半边)
+
+  `SharingServicePlugin` 的 share-link 路由此前在 `resolveAuthzContext` 之后重新
+  拼一个四字段对象(`userId` / `tenantId` / `positions` / `permissions`),而这个
+  对象被原样当作 enforcement context 喂进 `engine.find` —— 即 [Finding-2]
+  「只能为你自己看得见的记录建链接」那道可见性校验。被丢在半路的是
+  `accessible_org_ids`、`org_user_ids`、`systemPermissions`、`posture`、
+  `tabPermissions`。
+
+  实害(已复现,非仅代码读出):`group` 租户姿态下 `accessible_org_ids` 就是
+  Layer 0 那堵墙(ADR-0105 D2),集合缺席即判否(fail closed)。于是可见性校验
+  查不到任何行,建链接对**调用方本来读得到的记录**返回
+  `403 FORBIDDEN: Not permitted to share <object>/<id>` —— 一个已发布姿态上,
+  已发布功能完全不可用。`single` 姿态(默认)不读该字段,行为不变。
+
+  改法按维护者 2026-08-07 的 A 案裁决(契约半边 #6430 / PR #6511 已落):信封
+  **整个**透传(`{ ...authz, isSystem: false }`),不再逐字段挑选 —— 逐字段挑选正是
+  这条缝出问题的方式,也是下一个新增授权维度会再次漏掉的地方。`posture` 随上下文
+  流动、不在 enforcement 处重推(ADR-0095 D2)。窄类型 `ShareLinkExecutionContext`
+  保留,但只服务路由自己的 401 判定(认证与否),不再出现在任何裁决路径上。
+
+  `ShareLinkService.createLink` / `revokeLink` / `listLinks` 与 `canManageShares`
+  探针的参数类型随之收成完整 `ExecutionContext`,与 #6511 落地的契约一致。
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [ad878e7]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [6f6fec7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [e0f300b]
+- Updated dependencies [10c4ea9]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [e9b5265]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [9c82b89]
+- Updated dependencies [b7d3be4]
+- Updated dependencies [2a0d65e]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [f09a2e7]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [53ef057]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [c804f19]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [6965160]
+- Updated dependencies [dbe92a7]
+- Updated dependencies [2f59da0]
+- Updated dependencies [114e727]
+- Updated dependencies [1a53a02]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [bfe689b]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [3fb42d2]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [82397b6]
+- Updated dependencies [9bc846b]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [d13f627]
+- Updated dependencies [a841151]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [d86815e]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [2bd4e5e]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+- Updated dependencies [c9bf940]
+- Updated dependencies [a682670]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/objectql@17.0.0-rc.6
+  - @objectstack/formula@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

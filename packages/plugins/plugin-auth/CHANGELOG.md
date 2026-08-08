@@ -1,5 +1,223 @@
 # Changelog
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- 1fa224a: feat(plugin-auth): the fixed-window counter gets its own `./rate-limit-storage` entry (#6040)
+
+  `rate-limit-storage.ts` is the repo's ONE fixed-window counter —
+  `incrementFixedWindow` / `createLazyCounterStore` / `InProcessCounterStore`,
+  ADR-0069 D2 — and #4790's cross-reference asks later arrivals to reuse it
+  rather than write a third copy. They did, and from outside auth:
+  `@objectstack/runtime` counts inbound requests and endpoint policy through it,
+  and `@objectstack/service-sms` counts its daily SMS budget through it (#2814).
+
+  `@objectstack/plugin-auth` published exactly one entry, `"."`, whose `export *`
+  chain takes **value** imports on `better-auth/adapters`
+  (`objectql-adapter.ts`) and `@better-auth/core/db` (`backfill-account-issuer.ts`).
+  Value imports are evaluated eagerly, so reaching those ~90 lines of counting
+  loaded `better-auth` + `@better-auth/{core,oauth-provider,scim,sso}` + `jose` +
+  `@noble/hashes` + `@objectstack/rest` + `@objectstack/platform-objects` first.
+  Measured against the built package: `require('@objectstack/plugin-auth')` puts
+  109 modules in `require.cache`; the counter needs one.
+
+  So the counter is now published on its own:
+
+  ```ts
+  // before — 109 modules, the whole better-auth family
+  import { incrementFixedWindow } from "@objectstack/plugin-auth";
+  // after — 1 module, 3.7 KB
+  import { incrementFixedWindow } from "@objectstack/plugin-auth/rate-limit-storage";
+  ```
+
+  `tsup` emits the second entry with `splitting: false`, so it is a self-contained
+  bundle rather than a nominal split: `dist/rate-limit-storage.mjs` is 3.71 KB
+  against `dist/index.mjs`'s 330.28 KB, contains zero top-level imports and zero
+  occurrences of the string `better-auth`. The one better-auth reference that
+  survives is `import type { BetterAuthRateLimitStorage }`, which is erased at
+  build and costs a consumer nothing at runtime.
+
+  **Nothing is removed.** The root still re-exports every one of these symbols, so
+  existing `@objectstack/plugin-auth` imports keep working unchanged — this is a
+  new entry point, which is why it is `minor` rather than breaking. The `patch` on
+  `runtime` and `service-sms` is the import-specifier switch in those packages;
+  their behaviour is identical.
+
+  `src/rate-limit-storage-isolation.test.ts` pins the invariant from both sides,
+  in the shape `packages/types/src/node-isolation.test.ts` (#4700) established for
+  the `./node` split: it walks the real import graph from the subpath entry and
+  fails on any better-auth **value** import or any undeclared external package,
+  it fails if a consumer reaches the counter through the package root again, and
+  it fails if the root ever _stops_ pulling better-auth eagerly — because at that
+  point the split stopped buying anything and deserves re-measuring rather than a
+  suite that passes for the wrong reason.
+
+### Patch Changes
+
+- ea1d916: fix(plugin-auth): keep the last-administrator guard exact when `before*` hooks fire per row (#5574)
+
+  The break-glass guard resolved a write's target set as "a scalar `input.id` if
+  there is one, otherwise the caller's predicate". That was sound only because a
+  predicate (`multi: true`) write's `before*` dispatch left `input.id`
+  present-but-**undefined**. ADR-0058 Addendum II makes the `before*` phase fire
+  once per MATCHED ROW, each context naming its own row — so read that way, a
+  `multi` ban of every administrator arrives as N separate by-id bans, each of
+  which is legitimately allowed (banning one admin out of three leaves two), and
+  the batch locked the environment out with no refusal anywhere.
+
+  `resolveTargetIds` now asks `options.multi` FIRST: on a predicate write the
+  target set is the caller's predicate, whichever row the current dispatch names;
+  the id is consulted only when the write really is by-id. `input.options` is the
+  caller's bag during `before*` — `where` and `multi` included — and the contract
+  preserves that deliberately, so the discriminator the guard needs is unchanged.
+
+  All eight guarded halves (#5892 ban, #5941 delete, #5978 standing) are covered
+  by the existing predicate cases, which went red on the engine change and are now
+  the pin that a population-scoped invariant survives being asked one row at a
+  time.
+
+- f8fe47e: feat(runtime,rest,plugin-auth,service-i18n,service-storage): route-ledger 条目类型加可选 `responseSchema` (#5791)
+
+  #3877 的「最小首步」，维护者 2026-08-06 已批。**纯增量、零行为变更**：五个 route
+  ledger 的现有条目一行未改，字段缺省即「未声明」。
+
+  ## 为什么是这一步
+
+  #3877 量到的洞不是「发出的和声明的不一致」，而是**大多数路由根本没有可对账的声明**：
+  237 条已挂载路由里 215 条是 `sdk` 面，而携带 schema 引用的是 **0 条**。于是同一单
+  里裁定了两件事——Stage C（批量补 ~190 条响应 schema）**永不排期**（一条响应 schema
+  是「这个端点承诺什么」的产品决定，批量生产正是 #3676 / #3833 / #3847 / #3870 四个
+  缺陷的成因），以及先把「这条路由声明了什么」变成**可查询数据**，让 Stage D 的棘轮
+  将来有东西可棘。本次落地的就是后者。
+
+  ## 字段语义
+
+  `responseSchema` 是 `@objectstack/spec/api` 导出名，指向该路由**响应载荷**的声明：
+  路由套 `{ success, data }` 信封时指 `data`，不套时指整个 body。信封本身不归它管，
+  由 `pnpm check:route-envelope` 结构化守住——一个字段无法同时诚实地描述两层。
+
+  五个 ledger 是五个各自独立声明、按约定同形的 interface，因此是五处同名同措辞的可选
+  字段，**不是**新建共享类型包。三个 ledger 明确要求保持 import-free（客户端守卫按
+  相对**源文件**编译它们），且 `zod` 并非每个持有 ledger 的包的依赖，故字段存的是
+  **名字**而非 live schema 对象，解析放在能 import spec 的守卫里。
+
+  ## 已填的两条（实证，不是批量）
+
+  只填 #5682 已给出双断言覆盖（safeParse 判**值** + 键集判**键**）的 discovery 族两条，
+  且刻意分处两个 ledger，以证明一个字段形状确实服务五个独立声明的条目类型：
+
+  - `packages/runtime` `GET /discovery` → `DiscoverySchema`（走信封，指 `data`）
+  - `packages/rest` `GET /api/v1/discovery` → `DiscoverySchema`（裸发，指整个 body）
+
+  `GET /api/v1` 这条 bare-base 别名**故意不填**：它与上面那条共用同一个
+  `discoveryHandler` 闭包，但 #5682 的测试只驱动 `/api/v1/discovery`，「同一个 handler
+  所以同一个形状」是对代码的论证而非对代码的测量。没有覆盖就不填。
+
+  ## 新增守卫
+
+  - `packages/client/src/route-ledger-response-schema.test.ts` —— 五个 ledger 的并集里
+    每一个 `responseSchema` 都到**活的** `@objectstack/spec/api` 导出里解析，并且真的
+    调用一次 `safeParse`（spec 的 schema 是 `lazySchema()` 代理，只查属性存在会被代理
+    陷阱满足）。含否定对照（少一个字母的名字、空串、导出了但不是 schema）与反空转下界。
+  - `discovery-schema-conformance.test.ts`（runtime / rest 各一）—— 钉住 ledger 报的
+    schema 就是该套件实际解析用的**同一个对象**，并各自测量了载荷所在的层级。
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [de6b7f1]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [53ef057]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [465c5fc]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [83a3b1f]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [2c2a212]
+- Updated dependencies [773f80a]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [f8fe47e]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/rest@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

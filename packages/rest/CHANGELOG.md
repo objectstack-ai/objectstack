@@ -1,5 +1,677 @@
 # @objectstack/rest
 
+## 17.0.0-rc.6
+
+### Minor Changes
+
+- 11066f6: feat(spec,metadata-protocol,rest,client): the direct-mount surfaces (`packages`, `datasources/:name/external/*`) become discoverable, and the SDK follows the advertised base (#6633)
+
+  The rest surface's `/discovery` never advertised `routes.packages` — routes
+  mounted but not advertised, the unstated half of ADR-0076 D12 — so the SDK's
+  `packages.*` always fell back to the hard-coded `/api/v1/packages`; and the
+  SDK's `datasources.external.*` had no discovery mechanism at all, hard-coding
+  `/api/v1/datasources/...` in each of its five methods. On any deployment with a
+  non-default API base, both families built wrong URLs (measured in #6633).
+  Maintainer ruling 2026-08-08 (route B, prerequisite for #6306):
+
+  - **spec** (minor, additive): `ApiRoutesSchema` declares a `datasources` key —
+    the base of the federation-admin family. Optional like `mcp`: absent = not
+    mounted.
+  - **metadata-protocol** (minor, additive): `getDiscovery()` advertises
+    `routes.packages: '/api/v1/packages'` iff the `package` service is
+    registered (`serviceToRouteKey` gains the mapping; the route flows through a
+    non-slot table because `package` is not a `CoreServiceName`). `datasources`
+    is deliberately NOT advertised by this builder — the mount belongs to the
+    REST host it cannot see (same disposition as `mcp`).
+  - **rest** (minor): `/discovery` advertises `routes.packages` and
+    `routes.datasources` as projections of the RECORDED direct mounts (#5822) —
+    advertisement and mounting derive from one fact, so #6306's later mount-base
+    move carries the advertisement along by construction. Not mounted ⇒ not
+    advertised. An end-to-end parity pin (`discovery-advertised-direct-mounts.
+parity.test.ts`) drives the composed surface and goes red on any change that
+    moves only one side.
+  - **client** (patch, behavior fix): the five `datasources.external.*` methods
+    derive their base via `getRoute('datasources')` — connected clients follow
+    the advertised base; unconnected clients (or servers that advertise no
+    `datasources` key) keep building byte-identical `/api/v1/...` URLs.
+
+  No key is removed and no wire shape changes for existing deployments: servers
+  gain two advertised keys, and the SDK changes URLs only when a server
+  advertises the new keys with a non-default base.
+
+- 465c5fc: REST 的 9 条 direct-mount 路由现在对 `RestServer` 可枚举,并随之进入 `GET {apiPath}/openapi.json`
+
+  `package-routes.ts`(4 条 `packages.*`)与 `external-datasource-routes.ts`(5 条
+  `datasources/:name/external/*`)一直绕过 `RouteManager`、直接挂在宿主 `IHttpServer` 上,
+  `RestServer` 因此不持有「这 9 条本次 boot 是否挂载」的事实。#5588(PR #5821)把
+  `/openapi.json` 的 built-in 段改成服务器自身路由表的投影之后,这 9 条(其中 8 条在
+  `rest-route-ledger.ts` 里是 `disposition: 'sdk'` 的真实能力)就不在生成的文档里 ——
+  用 `/openapi.json` 生成客户端的 consumer 拿不到它们,任何基于 `getRoutes()` 的自省也看不见。
+
+  现在两个 registrar 各自把「实际挂载的那一个数组」原样返回,由组合步骤
+  (`mountAndRecordDirectRoutes`,`rest-api-plugin.ts` 调用)登记到 `RestServer` 上:
+
+  - `RestServer.getRoutes()` 返回本次 boot 的**全部**已挂载路由,每条带 `source`
+    (`'route-manager' | 'direct-mount'`),类型为新导出的 `MountedRoute`;
+  - `/openapi.json` 的 built-in 段随之覆盖这 9 条,带各自的 summary / tags / 路径参数;
+  - 描述与挂载**同源**:返回的数组就是用来挂载的那个数组,不存在第二份手工清单。
+
+  诚实性两个方向都保持不变:某次 boot 没有 `package` 服务 ⇒ `packages.*` 既没挂载、
+  也不出现在 `getRoutes()` 与文档里;federation 那 5 条无条件挂载(服务缺席时按请求答 503),
+  所以它们始终出现 —— 文档说的仍然只是「什么被挂载了」。
+
+  对使用者的影响:`getRoutes()` 的返回值多了 9 条(服务在场时)以及每条上的 `source`
+  字段;既有的 `method` / `path` / `handler` / `metadata` 读法不变。
+
+- a954634: feat(meta): object schemas served by `/meta` and `/metadata` are masked per caller (ADR-0106, #3682)
+
+  The data plane has enforced field-level security everywhere it matters for
+  several releases — list reads mask values, exports project columns, and the
+  write path 403s forbidden fields. The **metadata** plane did not: any
+  authenticated caller who asked `GET /meta/object/:name` received the full object
+  schema, including fields they have no read access to at all.
+
+  That is more than a list of names. A field carries its label, type, **picklist
+  option values** (often a sensitive operational taxonomy), its **formula**
+  expression (pricing and scoring IP), its `visibleWhen` predicate, its
+  `defaultValue`, and — via ADR-0066 D3 — the `requiredPermissions` capability
+  names guarding it. For a customer running a dealer, supplier or patient portal
+  on ObjectStack, the only remediation available in their own tier was modelling
+  discipline: keep sensitive fields off portal-visible objects, or split one
+  business entity into an internal object and a portal object and synchronize
+  them. This is a platform-side fix, so every deployment inherits it.
+
+  **What changes.** Serving an object schema now projects `fields` onto the set
+  the caller may read, and a field outside that set is removed **whole** — no
+  name, no label, no options, no formula, no `requiredPermissions`. Partial
+  redaction was rejected: keeping the name still leaks existence and invites
+  clients to render ghost columns. Masking keys on the `readable` bit only; a
+  readable-but-not-editable field stays in the schema, because the UI must render
+  it and the `editable` affordance is already served per caller by
+  `/auth/me/permissions`.
+
+  Every outlet that serves an object schema goes through one shared projection,
+  so coverage is not a per-route promise:
+
+  - `GET /meta/object/:name` — the cached branch (the default) **and** the
+    uncached branch, which is what `?state=draft`, `?preview=draft` and
+    `?package=` take;
+  - `GET /meta/object/:name?layers=true` — the layered diagnostic view, all three
+    of `code` / `overlay` / `effective`;
+  - `GET /meta/:type/:section/:name` — the compound-name read;
+  - `GET /meta/object` — the list read, each item projected independently;
+  - the runtime `/metadata` catch-all — the protocol-backed, registry-backed and
+    last-ditch single reads, the `/metadata/objects` list (protocol and registry),
+    and the legacy one-segment `/metadata/:objectName` spelling.
+
+  **Caching is unchanged in cost and correct per cohort.** The shared metadata
+  cache still stores one full schema per (type, name, locale, environment) — no
+  caller dimension in the key — and the mask runs after retrieval. What varies
+  per caller is the validator: a stable hash of the caller's _denied_ field set is
+  folded into the ETag. A caller who can read everything denies nothing, so their
+  fingerprint is empty and both their ETag and their response body are
+  **byte-identical** to previous releases. Callers in one permission cohort share
+  `304`s; a permission change moves the fingerprint and self-invalidates the stale
+  `304`, so nothing needs purging after a permission-set edit.
+
+  **Exemptions** are a property of the caller, not of the route: `isSystem` and
+  platform-admin callers (holders of `studio.access` / `setup.access`, the same
+  judgement the app filter uses) receive the full schema on any route, because
+  Studio and Setup authoring cannot work against a projected schema.
+
+  **Failure posture is explicit and three-tiered.** With no `security` service
+  registered the schema is served unmasked — that deployment has no FLS posture at
+  all and tightening only the metadata plane would be theater. When field
+  visibility cannot be _determined_ (a registry-hydration window), the schema is
+  served unmasked but loudly: a structured warning, a new
+  `objectstack_meta_field_visibility_undetermined_total` counter, and a response
+  downgraded to `Cache-Control: private, no-store` with no shared ETag. Failing
+  closed there would brick every render of the object for every user and can
+  deadlock console bootstrap, since permission sets are themselves metadata. When
+  permission evaluation **throws**, the request fails with `503
+FIELD_VISIBILITY_UNRESOLVED` — an unhealthy security service must not auto-open
+  a disclosure hole, and an empty-fields `200` would be both a silently wrong UI
+  and cacheable poison.
+
+  **Guest and public deployments** get a deliberate posture rather than an
+  accidental one: `@objectstack/plugin-security` gains
+  `getMetadataReadableFields`, which resolves the configured fallback permission
+  set (`security.fallbackPermissionSet`, default `member_default`) for a caller
+  who resolves to zero sets, exactly as `/auth/me/permissions` does.
+  `getReadableFields` is unchanged — on the data plane, mirroring the engine
+  middleware's fall-open is what keeps it drift-free.
+
+  **Escape hatch.** Masking is the platform default. A deployment that explicitly
+  wants an unmasked metadata plane sets `OS_ALLOW_UNMASKED_OBJECT_METADATA=1`, or
+  `metadata.maskObjectFields: false` on the REST server. Toggling it changes
+  disclosure only: the console reads every field affordance from
+  `/auth/me/permissions`, so UI correctness is unaffected either way.
+
+  Operators fronting the runtime with a CDN or reverse proxy should read the new
+  "CDN / reverse-proxy caching of `/meta` object schemas" section in the
+  production-readiness guide before tuning anything — in particular, do not
+  configure a proxy to ignore `Cache-Control: private`, and do not strip or
+  rewrite `ETag` on these routes.
+
+- 361bd5b: fix(spec,rest): three routes stop serving shapes their `responseSchema` never declared (#5882 #5950 #6442)
+
+  Sweep #6487. One admission criterion: a route serves a response shape its
+  declared `responseSchema` does not describe. Three members, one direction each,
+  stated per member rather than picked for cheapness.
+
+  **`GET /meta/:type/:name` — the ADR-0010 protection envelope is now declared
+  (#5950).** The uncached branch has always sent `lock` plus nine siblings on top
+  of `{ type, name, item }`, and `GetMetaItemResponseSchema` declared only the
+  three, so `.parse()` silently stripped every one of them. `lock` is the READ
+  half of the ADR-0008 optimistic-concurrency chain whose write half `#5745`
+  already declared — leaving it undeclared meant an SDK caller had to cast to read
+  it, the consumer-side tolerance Prime Directive #12 rejects. All ten keys are
+  declared **optional**, measured rather than assumed: the cached branch (the
+  default, `enableCache: true`) rebuilds the envelope as three keys and resolves
+  no lock at all, so `optional` here means "this branch did not publish it", never
+  "unlocked". Zero runtime change. Whether lock presence should depend on a cache
+  setting at all is the larger question #5950 raises and is deliberately left open.
+
+  **`?layers=true` becomes `GET /meta/:type/:name/layers` (#5882).** The flag made
+  one route answer two unrelated resource representations — the ordinary envelope,
+  and a three-layer diagnostic projection (`code` / `overlay` / `effective`) that
+  drives Studio's "code default vs override vs effective" tabs — while the route
+  declared a single `responseSchema`. Anything generating a client from the route
+  table wrote a parser that was simply wrong for the flagged call. Per the
+  maintainer's ruling the projection gets its own path and its own
+  `GetMetaItemLayeredResponseSchema`: one path, one shape. The alternative —
+  teaching the route declaration to express "two shapes chosen by a query flag" —
+  was rejected as a new primitive every future tool would have to understand, and
+  conditional response selection is exactly where codegen and AI-written clients
+  go wrong.
+
+  The `?layers=` spelling still answers the identical body during a deprecation
+  window (both entry points run one helper, so the two cannot drift), and now
+  carries `Deprecation: true` plus a `Link` header naming its successor. No
+  `Sunset` date: choosing the hard cut-off is a maintainer call.
+
+  **`GET /analytics/meta` narrows to what it serves (#6442).**
+  `AnalyticsMetadataResponseSchema.data` declared `{ cubes: CubeSchema[] }` while
+  both implementations of `AnalyticsService.getMeta` return a bare `CubeMeta[]`
+  that the runtime hands to `success()` verbatim. A client written against the
+  published contract read `data.cubes` and got `undefined`; validating a live
+  response against the schema failed outright. Per the maintainer's ruling the
+  declaration narrows to the `CubeMeta[]` projection — zero runtime change — and
+  the generated `references/api/analytics.mdx`, which was publishing the wrong
+  shape, corrects itself. If a dashboard ever needs `format` or `description`, the
+  recorded return path is to add the key to the `CubeMeta` projection (additive);
+  widening the endpoint back to full cube definitions would push each cube's `sql`
+  to clients and is not revisited.
+
+### Patch Changes
+
+- de6b7f1: fix(rest): dashboard 组件门禁在默认配置下真正执行 (#5881)
+
+  ADR-0057 D10 的 `requiresService` 组件门禁 —— 剔除指向未注册可选服务的 dashboard
+  磁贴 —— 在默认部署里一次都没跑过。`GET /meta/:type/:name` 的单条读取有一条缓存分支,
+  它排除了 `app`(per-user RBAC 过滤)与 `doc` / `book`(per-caller audience),唯独没有
+  排除 `dashboard`;而 `enableCache` 默认为 `true`。门禁写在非缓存分支里,于是只有显式
+  关掉缓存的部署才会执行到它。
+
+  后果正是该 ADR 点名要防的那一幕:在没有某个可选服务的部署里(比如单租户运行时里的
+  Organizations KPI,其 `org-scoping` 服务不存在),console 会渲染一块绑定到缺失服务的
+  死磁贴 —— 尽管服务端的门禁代码在、测试也在。
+
+  **修复**:`dashboard` 与 `app` 同款,从缓存分支排除,两种拼写(`/meta/dashboard/x`
+  与规范复数 `/meta/dashboards/x`)都覆盖。其它元数据类型的 ETag 快路径不受影响。
+
+  **为什么不是"把门禁提到分支之外、两条路径共用"** —— 那读起来更整齐,但 ETag 无法承载
+  门禁结论:validator 是**未过滤文档**的哈希,而 `notModified` 在 protocol 内部就已判定,
+  REST 层没有机会重判。共用之后送出的就是"过滤过的正文 + 指向未过滤正文的 validator"。
+  一次 boot 之内这没有危害(已注册服务集在 bootstrap 之后不可变),但 `Cache-Control:
+private, no-cache` 意味着客户端**存下正文**、之后只做重验证,而存下的正文比进程活得久:
+  一次关掉该可选服务的重新部署并不改变文档,ETag 不变 ⇒ 每次重验证都回 304 ⇒ 那块死磁贴
+  恰好在移除其服务的那次部署之后被永久缓存下来。放弃快路径的代价则接近于零:
+  `getMetaItemCached` 本就委托给 `getMetaItem`,服务端两条路做的是同样的工作,失去的只是
+  304 省下的正文字节。
+
+  对调用方的可见变化:dashboard 的单条读取不再返回 ETag / 304,每次都是完整的 200。
+
+- d9bef45: fix(spec,rest): `OVERLAY_PERSISTENCE_FAILED` leaves the error-code ledger — it lost its only producer (#5783)
+
+  `ERROR_CODE_LEDGER` registered `OVERLAY_PERSISTENCE_FAILED` under
+  `@objectstack/metadata-protocol`, but nothing in the repository can emit it any
+  more. Its one emission point was the `catch` inside `saveMetaItem`'s legacy
+  raw-engine branch, and #5264 (PR #5782) deleted that branch. A registered code
+  with no producer is ADR-0112's "no silent fourth state" read backwards: the
+  vocabulary promises a client a code no response can carry, and the ledger's own
+  admission test cannot notice, because it checks casing, duplication and
+  shadowing — never whether anyone still throws the code.
+
+  Verified before removing: a declaration-and-emission search over `origin/main`
+  finds the name only in the ledger row itself, two generated reference pages, one
+  `rest-server.ts` comment, one historical changeset plus its CHANGELOG entry, and
+  two `packages/rest` tests that construct the error themselves. No producer, and
+  no consumer — including `objectui` and `cloud`, both searched at their
+  `origin/main` — reads the literal. Removal only shrinks a dead row: nothing
+  gates an emission on ledger membership, so no runtime or gate starts rejecting
+  anything it accepted before.
+
+  **Wire impact: none.** No response carried this code, so no client can lose one.
+  The narrowing is type-level: `ErrorCode` (`StandardErrorCode` ∪ the ledger, what
+  `ApiErrorSchema.code` validates) no longer admits the string, so TypeScript
+  would now reject `code: 'OVERLAY_PERSISTENCE_FAILED'` at a call site — and there
+  is no such call site left to reject.
+
+  Note for whoever compiles the release: #5437's changeset
+  (`rest-5xx-message-withheld.md`) names this code as one of two examples of a
+  `code` that "still rides on the response". That sentence was accurate when it
+  was written; the other example, `NOT_IMPLEMENTED`, is unaffected and still
+  demonstrates the same behaviour.
+
+  The two `packages/rest` tests that asserted `resolveErrorResponse`'s handling of
+  a declared 5xx keep their substance and switch to a producer that still exists —
+  `metadata-protocol`'s `batchData` atomic refusal (`501` / `NOT_IMPLEMENTED`) and
+  the surviving overlay-delete `500`. Three stale comments are corrected in the
+  same pass: the `agent` entry in `metadata-plugin.zod.ts` (which described a
+  routing mechanism replaced by #5086's 403 refusal), the reachability argument in
+  `rest-5xx-message-sanitization.test.ts`, and `resolveErrorResponse`'s own
+  docblock in `rest-server.ts`.
+
+- 53ef057: fix(rest,objectql): the import dry run asks the engine for its verdict instead of predicting it (#4633 ruling D)
+
+  `POST /api/v1/data/:object/import?dryRun=true` green-lit rows the very same
+  endpoint then rejected. Measured on 17.0.0-rc.1: a CSV cell aimed at a
+  structured `address` field reported `{ ok: 1, created: 1 }` on the dry run and
+  `{ errors: 1, code: 'VALIDATION_FAILED' }` on the real write.
+
+  The dry run predicted the write's verdict with a hand-copied mirror of a slice
+  of the engine's rules (`import-coerce.ts`'s `firstMissingRequiredField` and
+  `firstConstraintViolation`). A copy cannot structurally keep up with the family
+  it mirrors: ADR-0104 value shapes (`address` / `location` / references / media),
+  `format` checks, object-level `validations` and the state machine had no
+  counterpart, and `coerceFieldValue` routes structured shapes through its
+  pass-through catch-all, so no verdict was formed at all.
+
+  **The mirror is retired.** The dry run now calls `DataProtocol.validateData`
+  (#6037), which runs the same `validateRecord` / `evaluateValidationRules` that
+  `insert()` runs, under the deployment's own ADR-0104 posture — so a bad value
+  shape is an error on a self-certified deployment and an admitted warning on a
+  warn-first one, exactly as on the write. Agreement is by construction, not by a
+  copy kept in step by hand.
+
+  Also in this change:
+
+  - **`engine.validate()` now resolves `defaultValue`s and seeds owned roll-up
+    `summary` fields before validating, on `insert` mode**, because `insert()`
+    does. Without it a required-but-defaulted column left unmapped was previewed
+    `failed` and written `created` — a false alarm on the row a preview is meant
+    to reassure you about. `update` mode still does not default (#2706).
+  - **A row report failed by validation now names the offending column.** The
+    engine's `ValidationError` carries `fields[]`, so the row's `field` is set and
+    its `code` is the field-level code (`required`, `min_value`, `max_length`,
+    `invalid_type`, …) rather than the wrapper's `VALIDATION_FAILED`. This is the
+    same vocabulary the dry run and the per-cell coercion failures already spoke;
+    before, a `min: 0` violation was `min_value` on the dry run and
+    `VALIDATION_FAILED` on the write.
+  - **Dry-run rows may carry `warnings[]`** — findings this deployment admits
+    rather than rejects (ADR-0104 warn-first). The row is `ok`, and the complaint
+    is visible instead of living only in a server log line.
+
+  A protocol that does not implement `validateData` (plugin-auth's identity
+  import, whose write is better-auth rather than the engine) is not handed a
+  substitute: its dry run reports coercion and create/update/skip resolution only.
+  An engine-derived preview of a non-engine write would report findings that write
+  never produces.
+
+- 83a3b1f: fix(rest): `GET /meta/books/:name` no longer bypasses the ADR-0046 §6.7 audience gate (#6241)
+
+  The single-item metadata read has a cached branch and an uncached one, and the
+  ADR-0046 §6.7 audience gate lives in the uncached one. The comment above the
+  cached branch's entry condition has always stated why `doc` and `book` must skip
+  it:
+
+  > `doc` and `book` bypass the shared cache: their §6.7 audience gate is
+  > per-caller, and a shared ETag would leak gated content across viewers.
+
+  The condition beneath that sentence compared the **raw** `:type` path segment
+  against the literals `'doc'` / `'book'`. The route serves both spellings, and
+  Prime Directive #3 makes the **plural** one canonical — so
+  `GET /api/v1/meta/books/:name` did not match the exclusion, took the cached
+  branch, and the audience gate never ran. `enableCache` defaults to `true`, which
+  made the failing path the default one.
+
+  Measured against a real `RestServer` — one book declaring
+  `audience: { permissionSet: … }`, one signed-in caller holding no permission
+  set:
+
+  ```
+  singular "book"  :: cachedCalls=0 status=[403] PERMISSION_DENIED
+  plural   "books" :: cachedCalls=1 status=[]    full gated body served
+  ```
+
+  Same book, same caller, two spellings of one route. `GET /meta/docs/:name` took
+  the same path. This was **fail-open**: the wrong outcome is disclosure of gated
+  documentation, not an availability error.
+
+  **The fix is structural, not two corrected literals.** This is #3984 recurring
+  in the same file eight days later, so the handler now normalizes the type
+  **once** at the top (`RestServer.metaTypeSingular`) and every gate below reads
+  that local — a per-type gate added later has no raw param in scope to compare
+  against by accident. The cache exclusion and the §6.7 gate now read one shared
+  predicate, so "which types bypass the cache" and "which types are audience
+  gated" can no longer drift apart. A repository guard
+  (`pnpm check:meta-type-normalized`, AST-based, zero exemptions) refuses the next
+  raw comparison in `packages/rest/src`.
+
+  **Behaviour change worth knowing:** `GET /meta/docs/:name` and
+  `GET /meta/books/:name` now take the uncached branch, as their singular
+  spellings always did, so those two responses no longer carry an `ETag` /
+  `Cache-Control` validator and a conditional request no longer answers `304`. No
+  other metadata type is affected. The cost is only the 304's saved bytes —
+  `getMetaItemCached` delegates to `getMetaItem`, so the server does identical
+  work either way — and the ETag it gave up was a hash of the **unfiltered**
+  document, which is the cross-viewer leak the exclusion exists to prevent.
+
+- 2c2a212: fix(reports): owner-gate the saved-report schedule routes (#2980)
+
+  The report read/run/delete routes are owner-isolated (a caller may only touch a
+  report they own, denied as `REPORT_NOT_FOUND` to avoid leaking that the id
+  exists), but the two schedule routes bypassed that gate: `unscheduleReport` and
+  `listSchedules` took the caller `context` as `_context` and never consulted it,
+  querying under the system context (RLS-bypassing). Any authenticated caller
+  could therefore delete another owner's report schedule — a cross-owner
+  destructive write — or list another owner's schedules (leaking recipient
+  addresses and cron), by supplying an id.
+
+  Both now resolve the schedule's parent report and require the caller to own it,
+  mirroring the sibling routes:
+
+  - **`unscheduleReport`** loads the schedule, then its report, and deletes only
+    when `canAccessReport` holds; a cross-owner attempt throws `REPORT_NOT_FOUND`
+    (mapped to `404` by the REST layer, deny-as-404 anti-enumeration), while a
+    genuinely-absent schedule stays idempotent. `scheduleReport` (create) was
+    already gated via `getReport`, so only the delete/list doors were open.
+  - **`listSchedules`** returns an empty list to any non-system caller who cannot
+    access the report it is scoped to — the same non-leaking posture as
+    `listReports`. The scheduler's system context still sees every schedule.
+
+  No authoring-surface or metadata change; existing owner-path behavior is
+  unchanged.
+
+- 773f80a: fix(rest): REST 面的执行上下文补齐 ADR-0090 D9/D10 的 principal 分类(#6071)
+
+  `resolveAuthzContext`(`@objectstack/core`)被提取出来,正是为了让两个 HTTP 入口
+  不再在**授权**上漂移。但它之后的一步 —— 把授权信封组装成 `ExecutionContext` ——
+  仍是两份手写副本,而两份的字段集已经不一致:runtime / dispatcher 那份
+  (`packages/runtime/src/security/resolve-execution-context.ts`)按 ADR-0090 D9/D10
+  设置 `principalKind`(必要时连同 `onBehalfOf`),`rest-server.ts` 的 `computeExecCtx`
+  两个都不设。
+
+  后果不在装饰面而在 enforcement 面:`plugin-security/explain-engine.ts` 的
+  posture 下限、`security-plugin.ts` 的 agent 基线、`observability/perf-timing.ts`
+  的披露闸门都读 `principalKind`,于是同一个请求走 dispatcher 与走 REST 会拿到不同
+  的上下文,读这个字段的判断在 `os serve` / `dev` 的数据与元数据路由上**从不成立**。
+  问题由 #5859 实施时的 dogfood 全栈 boot 插桩测得:到达消费方的键集里 `__kernel`
+  在(自证是 rest-server 这条组装路径)、`principalKind` 不在。
+
+  本次改动只补这一个传输上缺的字段,口径与 runtime 侧完全一致:
+
+  - 会话(cookie)或 API key 背书的主体 ⇒ `principalKind: 'human'` —— 与 runtime
+    侧「an authenticated (API-key) request resolves as a human principal, never
+    guest」的钉子同一判定。
+  - `'agent'` 与随之而来的 `onBehalfOf` **在本传输上不可表达**:它需要一个指明已授权
+    客户端的 OAuth access token,而该凭据只在 dispatcher 的 `/mcp` 门上被接受
+    (`acceptOAuthAccessToken`),正是为了不让粗粒度的工具族 scope 溜进 REST。
+  - `'guest'` 同样不可表达:`computeExecCtx` 在信封没有 `userId` 时就返回
+    `undefined`,匿名 REST 调用者本来就拿不到任何上下文(随后被 `enforceAuth` 401)。
+    **匿名面零变化** —— 不给匿名调用者凭空发一个 guest 上下文。
+
+  行为差量(逐条核过,无一条改变授权结果):`explain-engine.ts` 的 guest ⇒ `EXTERNAL`
+  与 `security-plugin.ts` 的 agent 分支在 REST 面仍不成立(前者的 `!context?.userId`
+  前肢本就恒真,后者读 `'agent'` 标签、且真正的兜底是委托 LINK);`perf-timing.ts`
+  只认 `'service'` / `'system'`,`'human'` 不开闸。唯一可观测的新增是 explain 输出里
+  多回显一个 `principalKind: 'human'`(该字段在 explain schema 中本就是 optional)。
+
+- f8fe47e: feat(runtime,rest,plugin-auth,service-i18n,service-storage): route-ledger 条目类型加可选 `responseSchema` (#5791)
+
+  #3877 的「最小首步」，维护者 2026-08-06 已批。**纯增量、零行为变更**：五个 route
+  ledger 的现有条目一行未改，字段缺省即「未声明」。
+
+  ## 为什么是这一步
+
+  #3877 量到的洞不是「发出的和声明的不一致」，而是**大多数路由根本没有可对账的声明**：
+  237 条已挂载路由里 215 条是 `sdk` 面，而携带 schema 引用的是 **0 条**。于是同一单
+  里裁定了两件事——Stage C（批量补 ~190 条响应 schema）**永不排期**（一条响应 schema
+  是「这个端点承诺什么」的产品决定，批量生产正是 #3676 / #3833 / #3847 / #3870 四个
+  缺陷的成因），以及先把「这条路由声明了什么」变成**可查询数据**，让 Stage D 的棘轮
+  将来有东西可棘。本次落地的就是后者。
+
+  ## 字段语义
+
+  `responseSchema` 是 `@objectstack/spec/api` 导出名，指向该路由**响应载荷**的声明：
+  路由套 `{ success, data }` 信封时指 `data`，不套时指整个 body。信封本身不归它管，
+  由 `pnpm check:route-envelope` 结构化守住——一个字段无法同时诚实地描述两层。
+
+  五个 ledger 是五个各自独立声明、按约定同形的 interface，因此是五处同名同措辞的可选
+  字段，**不是**新建共享类型包。三个 ledger 明确要求保持 import-free（客户端守卫按
+  相对**源文件**编译它们），且 `zod` 并非每个持有 ledger 的包的依赖，故字段存的是
+  **名字**而非 live schema 对象，解析放在能 import spec 的守卫里。
+
+  ## 已填的两条（实证，不是批量）
+
+  只填 #5682 已给出双断言覆盖（safeParse 判**值** + 键集判**键**）的 discovery 族两条，
+  且刻意分处两个 ledger，以证明一个字段形状确实服务五个独立声明的条目类型：
+
+  - `packages/runtime` `GET /discovery` → `DiscoverySchema`（走信封，指 `data`）
+  - `packages/rest` `GET /api/v1/discovery` → `DiscoverySchema`（裸发，指整个 body）
+
+  `GET /api/v1` 这条 bare-base 别名**故意不填**：它与上面那条共用同一个
+  `discoveryHandler` 闭包，但 #5682 的测试只驱动 `/api/v1/discovery`，「同一个 handler
+  所以同一个形状」是对代码的论证而非对代码的测量。没有覆盖就不填。
+
+  ## 新增守卫
+
+  - `packages/client/src/route-ledger-response-schema.test.ts` —— 五个 ledger 的并集里
+    每一个 `responseSchema` 都到**活的** `@objectstack/spec/api` 导出里解析，并且真的
+    调用一次 `safeParse`（spec 的 schema 是 `lazySchema()` 代理，只查属性存在会被代理
+    陷阱满足）。含否定对照（少一个字母的名字、空串、导出了但不是 schema）与反空转下界。
+  - `discovery-schema-conformance.test.ts`（runtime / rest 各一）—— 钉住 ledger 报的
+    schema 就是该套件实际解析用的**同一个对象**，并各自测量了载荷所在的层级。
+
+- 129b378: fix(types,rest): one named answer for "which column conflicted" — an index name is never returned as one (#6544)
+
+  #6250 retired four private "is this a unique violation?" vocabularies into
+  `isUniqueViolationError`. It left the harder half of the question behind: the
+  import runner's `sanitizeRowError` still carried its own three-dialect regex
+  chain, because it does **more** than answer yes/no — it names the offending
+  column so the importer can say _"A record with this `email` already exists."_
+  This lands that second answer as a shared export and migrates the last private
+  copy onto it.
+
+  **New — `uniqueViolationColumn(error)` in `@objectstack/types`** (`string |
+undefined`), sibling to `isUniqueViolationError` and gated on it, reading the
+  same channels one step down the same bounded `cause` chain, plus
+  node-postgres' `detail` field.
+
+  **Its contract, per the maintainer's 2026-08-08 ruling: a value comes back only
+  when the identifier the driver printed is determinably a COLUMN.** When a
+  dialect names an _index_ instead — MySQL's `Duplicate entry … for key
+'idx_email_unique'`, Postgres' `violates unique constraint "sys_user_email_key"`,
+  SQLite's `UNIQUE constraint failed: index 'x'` — the answer is `undefined`,
+  never the index name. Callers render this into a form field, and an index name
+  mistaken for a column points the user at a field that does not exist, whereas
+  `undefined` degrades to generic copy. A **composite** key (`Key (tenant_id,
+email)=(…)`) is `undefined` for the same reason: there is no single offending
+  column, and naming the first is the same class of wrong answer.
+
+  **⚠️ User-visible change on MySQL imports.** MySQL's duplicate-entry message
+  names the index and never the column, so the importer no longer names a column
+  there: rows that used to read _"A record with this `idx_email_unique` already
+  exists."_ — or, on MySQL 8's table-qualified `for key 'sys_user.email'`, a
+  plausible-looking _`email`_ that was still an index name — now read **"A record
+  with this value already exists."** That is deliberate and is the accepted cost
+  of the ruling. The conflict is still recognised as a conflict; only the naming
+  narrowed.
+
+  Three smaller import messages improve in the same move, all previously wrong
+  rather than merely vague:
+
+  - SQLite's expression/partial-index form used to render as _"A record with this
+    **index** already exists."_
+  - Postgres' expression index used to render the truncated fragment _"A record
+    with this **lower(email** already exists."_
+  - A Postgres conflict with no `DETAIL:` line used to fall through to the SQL
+    backstop and echo the driver's own sentence — index name included — at the
+    importer. It now gets the same generic conflict copy, which is also the exact
+    wording `mapDataError` puts in the 409 `UNIQUE_VIOLATION` body, so the
+    importer and the API say one thing about one condition.
+
+  Not changed: the NOT NULL branch, the raw-SQL backstop, and every non-conflict
+  message, which pass through exactly as before.
+
+- 88f9d94: fix(types,rest): one named unique-violation predicate — a MySQL conflict is 409 UNIQUE_VIOLATION, not 500 (#6250)
+
+  **On MySQL, every unique-constraint conflict came back as `500 INTERNAL_ERROR`.**
+  The API contract registers `UNIQUE_VIOLATION` as a 409 code
+  (`packages/spec/src/api/error-code-ledger.zod.ts`), so a front end had no way to
+  tell "this email is already taken" from "the server fell over" — no retry advice,
+  no field to point at, and a 5xx in the operator's dashboards for what is an
+  ordinary client outcome. SQLite and Postgres deployments never saw it, which is
+  why it survived: their conflict prose happens to contain the words the mapping
+  looked for.
+
+  **Cause: the conflict verdict was nested inside a leak heuristic.** REST's 409
+  branch lived inside the true-branch of `looksLikeInternalErrorLeak()`, keyed on
+  the substrings `unique constraint` / `unique violation`. MySQL says
+  `ER_DUP_ENTRY: Duplicate entry '…' for key '…'`, which matches no limb of that
+  heuristic, so the conflict never reached the `if` at all and fell out of the
+  terminal `UNCLASSIFIED_FAULT`. Two unrelated questions — "is this a conflict?"
+  and "would echoing this text leak internals?" — had been fused into one, and
+  MySQL is where they disagree.
+
+  Measured on the previous release, through the real error mapper:
+
+  ```
+  mysql,    bare message       500 INTERNAL_ERROR  →  409 UNIQUE_VIOLATION
+  mysql,    knex-wrapped SQL   500 DATABASE_ERROR  →  409 UNIQUE_VIOLATION
+  postgres, SQLSTATE only      500 INTERNAL_ERROR  →  409 UNIQUE_VIOLATION
+  sqlite,   message            409 UNIQUE_VIOLATION   (unchanged)
+  postgres, message            409 UNIQUE_VIOLATION   (unchanged)
+  ```
+
+  So the hole was never MySQL-only: the mapping read one of the two channels
+  drivers use. A Postgres error carrying SQLSTATE `23505` with unremarkable prose
+  was a 500 as well.
+
+  **New: `isUniqueViolationError(error)`, exported from `@objectstack/types`.** One
+  named predicate replaces the substring test, reading every channel a driver
+  uses — `code` (`23505` / `ER_DUP_ENTRY` / `SQLITE_CONSTRAINT_UNIQUE`), `errno`
+  (`1062`), the message, and one step down the `cause` chain that pool and
+  query-builder layers wrap with. Its vocabulary is the union of the four
+  hand-written copies the repo already carried, so routing REST through it cannot
+  narrow any verdict clients rely on today; an unrecognised error is never a
+  conflict, because a false 409 tells an SDK not to retry and points the user at a
+  value that is fine.
+
+  **The internal-leak classifier is byte-identical.** The fix hoists the conflict
+  question out of it rather than widening its criteria, so nothing else it guards
+  is reclassified as safe-to-expose. And the 409 body is fixed text: MySQL embeds
+  the offending user data in its message (`Duplicate entry 'a@b.com' …`) and
+  Postgres the index and column names, none of which reaches the client. The full
+  driver text still reaches the server log.
+
+  No action needed. Clients that already handled `409 UNIQUE_VIOLATION` on SQLite
+  and Postgres now receive it on MySQL too.
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [1a53a02]
+- Updated dependencies [a954634]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d42a92f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [61282f9]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [1818998]
+- Updated dependencies [3d4c545]
+- Updated dependencies [bb7cb41]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+  - @objectstack/core@17.0.0-rc.6
+  - @objectstack/metadata-core@17.0.0-rc.6
+  - @objectstack/platform-objects@17.0.0-rc.6
+  - @objectstack/types@17.0.0-rc.6
+  - @objectstack/observability@17.0.0-rc.6
+  - @objectstack/service-package@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Patch Changes

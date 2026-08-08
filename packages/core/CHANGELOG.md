@@ -1,5 +1,192 @@
 # @objectstack/core
 
+## 17.0.0-rc.6
+
+### Patch Changes
+
+- b127c8b: fix(spec,core): a filter placeholder is recognised by INTENT — `{TODAY()}` refuses loudly instead of comparing as a literal (#5586)
+
+  `UnknownFilterTokenError` had a hole exactly where authors fall in. Recognition
+  used the token-NAME grammar `/^\$?\{([a-zA-Z0-9_]+)\}$/`, so any placeholder
+  carrying a **non-word character** classified as "not a placeholder at all" and
+  was handed to the driver verbatim, to be compared as a literal string — the
+  silent-wrong-result failure the diagnostic exists to abolish.
+
+  The failure was inverted against the author. Measured on 17.0.0-rc.2 against a
+  four-row fixture:
+
+  | filter value             | before                           |                                                                                                                            |
+  | ------------------------ | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+  | `due_date < '{today}'`   | 2 rows                           | correct — the two overdue rows                                                                                             |
+  | `due_date < '{TODAY}'`   | throws `UnknownFilterTokenError` | diagnostic working                                                                                                         |
+  | `due_date < '{TODAY()}'` | **4 rows**                       | diagnostic bypassed — literal string compare, and `'2026-…' < '{'` in lexicographic order swallowed a row due a week later |
+
+  So misspelling `{today}` as `{TODAY}` was reported by name, while misspelling it
+  as `{TODAY()}` returned the wrong rows in silence — and the parenthesised,
+  kebab-case, natural-language and dotted spellings (`{TODAY()}`,
+  `{current-user-id}`, `{30 days ago}`, `{user.id}`) are precisely what an author
+  migrating from another system's macro syntax writes first.
+
+  **Both directions of the behaviour change:**
+
+  - **Previously silent, now refuses loudly** — a filter value that is entirely
+    brace-wrapped and outside the vocabulary now throws `UnknownFilterTokenError`
+    (`code: FILTER_TOKEN_UNKNOWN`, `status: 400`) on the ObjectQL read and write
+    paths and the analytics dataset executor, and is reported as
+    `filter-token-unknown` by `objectstack build` / `validate` / `lint`. Before,
+    it reached the data engine and compared as text.
+  - **Unchanged** — `{today}` / `{current_user_id}` still resolve; `{TODAY}` still
+    refuses with the same identity; a value that merely _contains_ braces
+    (`'acme {x} deal'`), or is not ONE pair around the whole value (`{a}{b}`,
+    `{{x}}`, `{}`), is still an ordinary literal and still reaches the driver
+    untouched.
+
+  Recognition and vocabulary are now two named grammars rather than one:
+  `FILTER_TOKEN_WRAPPED_RE` (`/^\$?\{([^{}]+)\}$/`) answers "did the author mean a
+  placeholder", and `isContextToken` / `isDateMacroToken` answer "is it in the
+  vocabulary". Wide in, strict out. No escape hatch for a literal `{…}` comparand
+  ships with this: a repo-wide measurement across structured metadata, examples,
+  seed data and fixtures found zero legitimate consumers comparing a
+  brace-wrapped literal, and an escape syntax is a public micro-contract that can
+  be added the day one shows up.
+
+  Flow templates are unaffected. `interpolateFilter` in
+  `@objectstack/service-automation` already recognised the same wide shape and
+  resolves `{record.id}` / `{TODAY() + 30}` from flow variables **before** the
+  filter reaches ObjectQL; its hand-off to the engine is keyed on the token
+  vocabulary (`isKnownFilterToken`), which this change does not touch.
+
+- d6d1a50: refactor(core): one implementation per hook-dispatch flavour, plus a paired-pin gate (#5282)
+
+  `ObjectKernel` does not extend `ObjectKernelBase` — it is a standalone
+  production kernel with its own `hooks` map, and only `LiteKernel` extends the
+  base. Lifecycle-hook dispatch therefore existed **twice**, with no shared code
+  path: the base's `triggerHook` (isolating) / `triggerHookOrThrow` (propagating) /
+  `context.trigger` on one side, and `ObjectKernel`'s private
+  `triggerShutdownHookIsolating` / `context.trigger` on the other. The two
+  isolating loops printed the same `Hook handler failed: kernel:shutdown` line
+  because someone typed it twice.
+
+  That seam produced three consecutive bugs, each the same shape — one hook name
+  meaning opposite things on the two kernels: `kernel:ready` (#5170),
+  `kernel:bootstrapped` / `kernel:listening` (#5257, where a swallowed
+  `server.listen()` failure let a process print "✅ Bootstrap complete" with
+  nothing listening), and `kernel:shutdown` in the other direction (#5274, where
+  one bad handler skipped every `destroy()`).
+
+  **No behaviour change.** The two dispatch flavours move verbatim into an
+  internal module, `packages/core/src/hook-dispatch.ts`, which both kernels now
+  call:
+
+  - `dispatchHookIsolating` — a failing handler is logged as
+    `Hook handler failed: <name>` and the remaining handlers still run.
+  - `dispatchHookPropagating` — the first failure escapes unwrapped and the
+    handlers behind it are skipped.
+
+  Every call path keeps the flavour, the log wording and the trace line it had
+  before, including the one asymmetry inside the propagating flavour:
+  `PluginContext.trigger` has never emitted the `Triggering hook: <name>` trace on
+  either kernel, so it still does not. The kernels' two `hooks` maps are
+  deliberately **not** unified, and `ObjectKernel` deliberately does **not** gain a
+  base class — both were considered and ruled out of scope.
+
+  How "no behaviour change" was proved: the paired kernel pins from #5170 / #5257 /
+  #5274 pass untouched, and deleting the shared dispatcher's error log now turns
+  **both** kernels' test files red from a single edit — a property the hand-mirrored
+  copies could not have (editing `ObjectKernel`'s private loop could never turn
+  `lite-kernel.test.ts` red).
+
+  Shared dispatch cannot cover the residual two-maps seam, so the pairing of the
+  tests is now a gate rather than a convention: `pnpm check:kernel-hook-pairs`
+  (`scripts/check-kernel-hook-pairs.mjs`, wired into the ESLint job) requires every
+  `kernel:*` hook dispatched in `packages/core/src` to be named in a test title in
+  **both** `kernel.test.ts` and `lite-kernel.test.ts`, and fails naming the hook
+  and the side that lacks it. A fifth lifecycle hook can no longer arrive paired on
+  one kernel only.
+
+  Also pinned, deliberately unchanged: `kernel:shutdown` has two dispatch paths
+  with different flavours on both kernels — the kernel's own teardown isolates,
+  while a plugin calling `ctx.trigger('kernel:shutdown')` by hand propagates.
+  Nothing in the repo triggers it by hand today, so this is dormant; it is now a
+  documented fact with a named test on each side rather than a surprise found at
+  teardown.
+
+- Updated dependencies [c2429b0]
+- Updated dependencies [f6609e6]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [53068c1]
+- Updated dependencies [259459d]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [ae31a19]
+- Updated dependencies [e0f300b]
+- Updated dependencies [5b4780b]
+- Updated dependencies [8140915]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [04476e7]
+- Updated dependencies [11066f6]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [d4df105]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f549a0d]
+- Updated dependencies [881a3cc]
+- Updated dependencies [8a88885]
+- Updated dependencies [b127c8b]
+- Updated dependencies [a80302a]
+- Updated dependencies [474f131]
+- Updated dependencies [4d552af]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [59b794f]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [f549a0d]
+- Updated dependencies [a36db28]
+- Updated dependencies [e1554b1]
+- Updated dependencies [4856789]
+- Updated dependencies [33e0385]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [2f59da0]
+- Updated dependencies [8ad609c]
+- Updated dependencies [eb91eba]
+- Updated dependencies [643b7c7]
+- Updated dependencies [b70e534]
+- Updated dependencies [e15e679]
+- Updated dependencies [2c26040]
+- Updated dependencies [78f0be8]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0e043d8]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [486d526]
+- Updated dependencies [85ec26d]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [54299ca]
+- Updated dependencies [251e888]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [be87153]
+- Updated dependencies [2598216]
+- Updated dependencies [eb7613c]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [361bd5b]
+- Updated dependencies [1818998]
+- Updated dependencies [f549a0d]
+- Updated dependencies [e8f435c]
+  - @objectstack/spec@17.0.0-rc.6
+
 ## 17.0.0-rc.5
 
 ### Minor Changes
