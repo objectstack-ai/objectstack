@@ -5,10 +5,12 @@ import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { strictObject } from '../shared/strict-object';
 
 // ---------------------------------------------------------------------------
-// UNKNOWN-KEY POSTURE (#4001 批 15, ADR-0078) — this file is SPLIT, on a
-// measurement, and the split is the point. Five of its seven object sites are
-// closed; two are deliberately left open with the reason recorded, because
-// closing them would gate nothing.
+// UNKNOWN-KEY POSTURE (#4001 批 15 → #5583, ADR-0078) — this file is CLOSED,
+// and the ORDER it was closed in is the point. 批 15 shut five of its object
+// sites and deliberately left two open with the reason recorded, because
+// closing them would have gated nothing; #5020 supplied the missing parse and
+// #5583 then shut them. Both halves are kept below, because a later sweep
+// meeting a `no gate` verdict elsewhere needs the refusal, not just the result.
 //
 // CLOSED (real door, three measurements, 2026-08-03):
 //   `ChartConfigSchema`, `ChartAxisSchema`, `ChartSeriesSchema`,
