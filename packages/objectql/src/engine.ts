@@ -2588,10 +2588,15 @@ export class ObjectQL implements IObjectQLEngine {
              }
           } else {
              this.logger.debug('Registering objects from manifest (Map)', { id, objectCount: Object.keys(manifest.objects).length });
-             for (const [name, objDef] of Object.entries(manifest.objects)) {
+             // `manifest` is `any` (a raw authored manifest), so the map branch
+             // widens its values to `unknown`. State the contract once, on the
+             // entries, rather than casting the argument at the call: the map
+             // values ARE authored `ServiceObject`s — the INPUT shape, which is
+             // what `registerObject` takes since ADR-0122 phase 2 (#6083).
+             for (const [name, objDef] of Object.entries(manifest.objects) as [string, ServiceObject][]) {
                 // Ensure name in definition matches key
-                (objDef as any).name = name;
-                const fqn = this._registry.registerObject(objDef as any, id, namespace, 'own');
+                objDef.name = name;
+                const fqn = this._registry.registerObject(objDef, id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           }
@@ -2614,7 +2619,7 @@ export class ObjectQL implements IObjectQLEngine {
                   indexes: ext.indexes,
               };
               // Register as extension (namespace is undefined since we're targeting by FQN)
-              this._registry.registerObject(extDef as any, id, undefined, 'extend', priority);
+              this._registry.registerObject(extDef, id, undefined, 'extend', priority);
               this.logger.debug('Registered Object Extension', { target: targetFqn, priority, from: id });
           }
       }
@@ -2809,11 +2814,13 @@ export class ObjectQL implements IObjectQLEngine {
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               } else {
-                  const entries = Object.entries(plugin.objects);
+                  // Same contract statement as the manifest map branch above —
+                  // authored `ServiceObject`s (INPUT shape, ADR-0122 phase 2).
+                  const entries = Object.entries(plugin.objects) as [string, ServiceObject][];
                   this.logger.debug('Registering plugin objects (Map)', { pluginName, count: entries.length });
                   for (const [name, objDef] of entries) {
-                      (objDef as any).name = name;
-                      const fqn = this._registry.registerObject(objDef as any, ownerId, pluginNamespace, 'own');
+                      objDef.name = name;
+                      const fqn = this._registry.registerObject(objDef, ownerId, pluginNamespace, 'own');
                       this.logger.debug('Registered Object', { fqn, from: pluginName });
                   }
               }

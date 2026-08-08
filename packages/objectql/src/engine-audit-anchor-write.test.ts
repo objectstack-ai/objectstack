@@ -114,7 +114,7 @@ describe('[#4447] created_at is engine-owned on an ordinary write', () => {
     const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(taskObject as any);
+    engine.registry.registerObject(taskObject);
   });
 
   /** An ordinary authenticated caller — NOT `isSystem`, no `preserveAudit`. */
@@ -260,7 +260,7 @@ describe('[#4447] a declared audit field cannot loosen the platform posture', ()
     const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(shadowed as any);
+    engine.registry.registerObject(shadowed);
   });
 
   it('the registry restores the engine-owned governance', () => {
@@ -351,7 +351,7 @@ describe('[#4513] the read-path normalizer answers what this engine enforces', (
     // [#4311] Typed call site: `packageId` is required, and the ledger over
     // this package's hidden test layer is a shrink-only ratchet — a new test
     // pays its own way rather than raising the frozen number.
-    engine.registry.registerObject(shadowed as any, 'test');
+    engine.registry.registerObject(shadowed, 'test');
   });
 
   it('the normalizer reproduces the registry\'s governance, field for field', () => {
@@ -400,7 +400,7 @@ describe('[#4513] the read-path normalizer answers what this engine enforces', (
         created_at: { label: 'Created At', type: 'datetime' as const, readonly: false },
       },
     };
-    engine.registry.registerObject(optedOut as any, 'test');
+    engine.registry.registerObject(optedOut, 'test');
 
     const enforced: any = engine.registry.getObject('audit_optout')?.fields.created_at;
     const reported: any = (applyAuditFieldGovernance(optedOut) as any).fields.created_at;

@@ -155,7 +155,7 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     engine = new ObjectQL();
     engine.registerDriver(rec.driver, true);
     await engine.init();
-    engine.registry.registerObject(deal as any);
+    engine.registry.registerObject(deal);
     await engine.insert('deal', { id: 'd1', stage: 'won', amount: 10, owner_id: 'u1' });
     await engine.insert('deal', { id: 'd2', stage: 'lost', amount: 20, owner_id: 'u2' });
     await engine.insert('deal', { id: 'd3', stage: 'won', amount: 30, owner_id: 'u1' });

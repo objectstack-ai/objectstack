@@ -112,7 +112,7 @@ describe('#5262 — SchemaRegistry keys its multi-tenant default off OS_TENANCY_
     // a mode; the posture read is only the DEFAULT when they say nothing.
     process.env.OS_TENANCY_POSTURE = 'isolated';
     const registry = new SchemaRegistry({ multiTenant: false });
-    registry.registerObject({ name: 'lead', fields: {} } as any, 'crm', 'crm', 'own');
+    registry.registerObject({ name: 'lead', fields: {} }, 'crm', 'crm', 'own');
     const stored = (registry as any).objectContributors.get('lead')[0].definition;
     expect(stored.fields.organization_id.indexed).toBe(false);
   });
