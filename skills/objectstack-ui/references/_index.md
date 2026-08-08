@@ -36,7 +36,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
 - `node_modules/@objectstack/spec/src/ui/bulk-action.zod.ts` — Bulk Action Schemas
-- `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — I18n Label Schema
+- `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — Display-label and ARIA-label primitives shared by every `ui/` shape.
 - `node_modules/@objectstack/spec/src/ui/responsive.zod.ts` — Breakpoint Name Enum
 - `node_modules/@objectstack/spec/src/ui/sharing.zod.ts` — Sharing & Embedding Protocol
 

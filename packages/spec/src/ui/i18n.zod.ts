@@ -55,6 +55,25 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 
 /**
+ * Display-label and ARIA-label primitives shared by every `ui/` shape.
+ *
+ * A MODULE doc, deliberately, rather than the first declaration's doc doing the
+ * job by accident: `scripts/build-skill-references.ts` headlines this file in
+ * four skill indexes from the first JSDoc it finds, so without one the headline
+ * silently becomes whatever declaration happens to sort first. It did exactly
+ * that when #5728 added `InlineLocaleMapSchema` above `I18nLabelSchema` — the
+ * indexes started describing the file as a BCP-47 key format. Stating the
+ * headline once, on the module, makes it a decision instead of a side effect of
+ * declaration order.
+ *
+ * Declaration order here is load-bearing and cannot simply be flipped back:
+ * `I18nLabelSchema` names `InlineLocaleMapSchema` in its union, and under
+ * `OS_EAGER_SCHEMAS=1` (which `gen:schema` sets) `lazySchema` evaluates its
+ * factory at module load — so a forward reference would be a TDZ crash in the
+ * schema build rather than a lazy lookup.
+ */
+
+/**
  * The key face of an inline locale map: a BCP-47-shaped language tag (`en`,
  * `zh`, `zh-CN`, `pt-BR`, `zh-Hans-CN`), plus the literal `default`, which the
  * renderer's `pickLocalized` reads as the untagged fallback entry.
