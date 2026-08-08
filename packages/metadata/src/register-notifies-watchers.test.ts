@@ -13,6 +13,28 @@
  *
  * These tests pin both halves of the contract: announcing is the DEFAULT, and
  * silence is only ever opt-in.
+ *
+ * [#6043] The "announces AFTER the write lands" case below used to assert an
+ * ORDERING guarantee by awaiting `get()` inside the callback and reading the
+ * result back after `register()` resolved. `notifyWatchers` dispatches with
+ * `void callback(event)` and never awaits its handlers, so what that shape
+ * actually measured was how many `await` hops `get()` happens to have — fewer
+ * than the microtasks `await register(...)` yields, and the assertion passed.
+ * It was a real cost, not a theoretical one: #5840 abandoned an equivalent,
+ * tidier `getDiagnosed` delegation in `get()` because this case went red on it,
+ * and kept three duplicated lines to preserve the frame count. Measured the
+ * other way, hoisting the announcement above the realtime publish and the
+ * writable-loader save loop — a violation of the ordering `register()`
+ * documents — left the case fully GREEN. The invariant is worth pinning; the
+ * shape could not pin it. It is now asserted where the ordering is decided:
+ * SYNCHRONOUSLY, inside the callback, against the registry `register()` writes.
+ *
+ * Scope note: `register()` claims the announcement follows the write into the
+ * registry AND into every writable loader. Only the registry half is pinned
+ * here — this fixture's `MemoryLoader` declares `memory:`, and `register()`
+ * persists to `datasource:` loaders only, so no loader in this file is ever
+ * written to and the second half is not observable from it. Tracked separately;
+ * it needs a writable-datasource fixture rather than another assertion.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -28,6 +50,23 @@ vi.mock('@objectstack/core', () => ({
     debug: vi.fn(),
   }),
 }));
+
+/**
+ * [#6043] Peek at the manager's private in-memory registry — the state
+ * `register()` writes FIRST and the one every re-reading subscriber resolves
+ * against (it outranks every loader in `get()`). Internal by design, and
+ * load-bearing here precisely because it is the only observation that is
+ * immune to `get()`'s implementation: the ordering claim must not be restated
+ * in terms of the method whose refactors keep breaking it. Same narrow cast the
+ * sibling internal-state peeks use (`metadata-manager-unregister-invalidate-order.test.ts`).
+ */
+type InternalRegistry = Map<string, Map<string, unknown>>;
+const registryOf = (mgr: MetadataManager): InternalRegistry =>
+  (mgr as unknown as { registry: InternalRegistry }).registry;
+const registryHas = (mgr: MetadataManager, type: string, name: string): boolean =>
+  registryOf(mgr).get(type)?.has(name) ?? false;
+const registryPeek = (mgr: MetadataManager, type: string, name: string): unknown =>
+  registryOf(mgr).get(type)?.get(name);
 
 describe('#3112 — register()/unregister() notify subscribe() watchers', () => {
   let manager: MetadataManager;
@@ -69,17 +108,61 @@ describe('#3112 — register()/unregister() notify subscribe() watchers', () => 
       expect(seen[0].data).toEqual({ name: 'account', label: 'V2' });
     });
 
-    it('announces AFTER the write lands, so a subscriber that re-reads sees the new body', async () => {
-      // The ordering guarantee that makes the event useful: ObjectQL's bridge
-      // re-reads via get() on the event rather than trusting the payload.
-      let readBack: unknown;
-      manager.subscribe('object', async () => {
-        readBack = await manager.get('object', 'account');
+    it('announces AFTER the write lands — the registry already holds the new body at broadcast time', async () => {
+      // [#6043] The literal reading of the method's promise, asserted at the one
+      // instant it is decidable: the moment the callback runs. Everything here is
+      // synchronous, so no `await` hop of any consumer method can move the
+      // verdict — hoist the announcement above the write and this reads
+      // `{ had: false }`, which is what the regression looks like.
+      const atBroadcast: Array<{ had: boolean; body: unknown }> = [];
+      manager.subscribe('object', () => {
+        atBroadcast.push({
+          had: registryHas(manager, 'object', 'account'),
+          body: registryPeek(manager, 'object', 'account'),
+        });
       });
 
       await manager.register('object', 'account', { name: 'account', label: 'Fresh' });
 
-      expect(readBack).toEqual({ name: 'account', label: 'Fresh' });
+      expect(atBroadcast).toHaveLength(1);
+      expect(atBroadcast[0].had).toBe(true);
+      expect(atBroadcast[0].body).toEqual({ name: 'account', label: 'Fresh' });
+    });
+
+    it('announces AFTER the write lands on an OVERWRITE too — never with the pre-write body still in place', async () => {
+      // [#6043] The overwrite half exists so the failure is READABLE. On a first
+      // registration an early announcement and an unsettled promise both surface
+      // as `undefined`; here the pre-write body is a distinct value, so
+      // announcing too early fails with 'V1' where 'V2' was required and names
+      // the defect on sight.
+      await manager.register('object', 'account', { name: 'account', label: 'V1' }, { notify: false });
+
+      let bodyAtBroadcast: unknown;
+      manager.subscribe('object', () => {
+        bodyAtBroadcast = registryPeek(manager, 'object', 'account');
+      });
+
+      await manager.register('object', 'account', { name: 'account', label: 'V2' });
+
+      expect(bodyAtBroadcast).toEqual({ name: 'account', label: 'V2' });
+    });
+
+    it('a subscriber that re-reads through get() sees the new body — awaited, not raced', async () => {
+      // [#6043] The consumer-shaped half of the same guarantee: ObjectQL's bridge
+      // re-reads via get() on the event rather than trusting the payload. The
+      // subscriber's promise is CAPTURED and awaited by the test, because
+      // `notifyWatchers` dispatches with `void callback(event)` — nothing else
+      // ever awaits it, so an assertion that just reads a variable afterwards is
+      // asserting against `get()`'s frame count instead of against the read.
+      const reads: Promise<unknown>[] = [];
+      manager.subscribe('object', () => {
+        reads.push(manager.get('object', 'account'));
+      });
+
+      await manager.register('object', 'account', { name: 'account', label: 'Fresh' });
+
+      expect(reads).toHaveLength(1);
+      await expect(reads[0]).resolves.toEqual({ name: 'account', label: 'Fresh' });
     });
 
     it('is silent when the caller opts out with { notify: false }', async () => {

@@ -3,7 +3,11 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveAuthzContext } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
-import type { IHttpServer, IHttpRequest, ShareLinkExecutionContext } from '@objectstack/spec/contracts';
+import type { IHttpServer, IHttpRequest } from '@objectstack/spec/contracts';
+// [#6206] The share-link routes' context is the FULL authorization envelope —
+// it feeds enforcement (`engine.find`), so it is an `ExecutionContext`, never
+// the route-local `ShareLinkExecutionContext`.
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SysRecordShare, SysSharingRule, SysShareLink } from './objects/index.js';
 import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 import { SharingService, type SharingEngine, type SharingTenancyProbe } from './sharing-service.js';
@@ -609,11 +613,30 @@ export class SharingServicePlugin implements Plugin {
           if (http) {
             // [Finding-2] Derive the caller from the platform's VERIFIED
             // resolution (session / API key / OAuth), never from spoofable
-            // `x-user-id` headers. `positions`/`permissions` flow through so the
-            // createLink record-access check evaluates real RLS. An
-            // unresolvable request → anonymous (the authed routes then 401).
+            // `x-user-id` headers. An unresolvable request → anonymous (the
+            // authed routes then 401).
+            //
+            // [#6206 / #6430 — maintainer ruling A, 2026-08-07] The envelope is
+            // handed on WHOLE. This assembly used to name four fields
+            // (`userId`/`tenantId`/`positions`/`permissions`) and the resulting
+            // object was passed straight into `engine.find` as the [Finding-2]
+            // visibility check's context — so `accessible_org_ids`,
+            // `org_user_ids`, `systemPermissions`, `posture` and
+            // `tabPermissions` never reached enforcement. Under the `group`
+            // tenancy posture `accessible_org_ids` IS the Layer 0 wall
+            // (ADR-0105 D2) and an absent set DENIES, so link creation answered
+            // a blanket 403 on a posture that ships. `posture` is likewise
+            // resolved once by the resolver and carried (ADR-0095 D2) — never
+            // re-derived at the enforcement site, which is exactly what a
+            // per-site subset forces the next layer to do.
+            //
+            // A spread, not a field list, on purpose: a field list is how this
+            // seam broke, and it breaks again the day `ResolvedAuthzContext`
+            // grows a dimension nobody remembers to add here. The route's own
+            // 401 decision reads `userId` off the same object (see
+            // `ShareLinkExecutionContext` in the contract for that boundary).
             const ql: any = engine;
-            const verifiedContextFromRequest = async (req: IHttpRequest): Promise<ShareLinkExecutionContext> => {
+            const verifiedContextFromRequest = async (req: IHttpRequest): Promise<ExecutionContext> => {
               try {
                 const headers = new Headers();
                 for (const [k, v] of Object.entries(req.headers ?? {})) {
@@ -631,12 +654,11 @@ export class SharingServicePlugin implements Plugin {
                   }
                 };
                 const authz = await resolveAuthzContext({ ql, headers, getSession });
-                return {
-                  userId: authz.userId,
-                  tenantId: authz.tenantId,
-                  positions: authz.positions,
-                  permissions: authz.permissions,
-                };
+                // `isSystem: false` states what the absence of the flag already
+                // means (ADR-0118 D2: absence is never system) and matches what
+                // both sibling transports build — `rest-server.ts` and
+                // `runtime/src/security/resolve-execution-context.ts`.
+                return { ...authz, isSystem: false };
               } catch {
                 return {}; // anonymous → authed routes 401
               }

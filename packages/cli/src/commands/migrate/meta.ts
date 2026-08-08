@@ -518,6 +518,7 @@ export default class MigrateMeta extends Command {
       // nothing. No storage adapter: unlike the file migration, nothing here
       // reads bytes.
       stack = await bootSchemaStack({
+        jsonOutput: flags.json,
         ...(flags['database-url'] ? { databaseUrl: flags['database-url'] } : {}),
         extraPlugins: await buildDataMigrationPlugins({ automation: true }),
       });

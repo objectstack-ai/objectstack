@@ -311,11 +311,32 @@ export type DiscoveryEnvironment = z.input<typeof DiscoveryEnvironmentSchema>;
  * | `development`, `dev`    | `development`  | exact / short spelling |
  * | `test`                  | `development`  | ephemeral developer-class run (vitest/CI), not a provisioned pre-production copy |
  * | `staging`               | `sandbox`      | pre-production and production-LIKE; certainly not `production`, and `sandbox` is the enum's pre-production member |
- * | unset / anything else   | `development`  | preserves the pre-existing `getEnv('NODE_ENV', 'development')` default, and never CLAIMS production on a guess |
+ * | unset / blank           | `production`   | the host declined to say; every other reader of that absence already says `production`, and of the two ways to be wrong, calling a real production deployment `development` is the dangerous one (#5673, #5936) |
+ * | anything else           | `development`  | an unrecognised spelling is a GUESS, and this function never claims `production` on a guess (#4828) |
  *
- * The last row is the safety-relevant one: an unknown spelling degrades to
- * `development`, so this function can never advertise `production` for an
- * environment it failed to recognise.
+ * The last two rows carry the whole safety argument, and they point opposite
+ * ways on purpose. An unrecognised spelling (`qa`, `preview`) degrades to
+ * `development`, so nothing here ever advertises `production` for an
+ * environment it failed to recognise. **Absence is not a guess** — it is the
+ * host declining to answer, and the conservative response to that is
+ * `production`: `environment` is machine-readable, and a client may skip
+ * production warnings or loosen a destructive action's confirmation on it.
+ *
+ * The unset row moved from `development` to `production` in #5673 (maintainer
+ * ruling 2026-08-06) and moved HERE, into the shared mapper, in #5936 (ruling
+ * 2026-08-07, direction 1). #5673 could only reach its own producer — the
+ * runtime dispatcher, which flipped the default at its call site — so the
+ * second producer (`getDiscovery()` in `@objectstack/metadata-protocol`, served
+ * by `@objectstack/rest`) went on passing a genuinely absent `NODE_ENV` in and
+ * answering `development`. One default in one place is what stops that: a
+ * producer cannot forget to copy a line it never has to write, so the next
+ * discovery producer inherits the right answer.
+ *
+ * "Unset" includes a **blank** value, not only an absent one. `NODE_ENV=`
+ * exports an empty string, and the runtime's `getEnv('NODE_ENV', …)` has always
+ * folded that into its default (it tests with `||`). Had this treated blank as
+ * "anything else" the two producers would have drifted again on exactly that
+ * input — the drift this consolidation exists to end.
  */
 const NODE_ENV_TO_DISCOVERY_ENVIRONMENT: Readonly<Record<string, DiscoveryEnvironment>> = {
   production: 'production',
@@ -335,12 +356,20 @@ const NODE_ENV_TO_DISCOVERY_ENVIRONMENT: Readonly<Record<string, DiscoveryEnviro
  * `serviceUnavailableMessage` / `inProcessServiceMessage` live in
  * `@objectstack/spec/system` rather than in each builder.
  *
- * @param raw the operator-supplied value, typically `process.env.NODE_ENV`
+ * **The unset default is part of the mapping, not the caller's business**
+ * (#5936). Callers pass the operator's value through as they read it and pass
+ * nothing when the operator set nothing; they do not substitute a default of
+ * their own. A caller that supplies one is re-opening the drift this function
+ * exists to close.
+ *
+ * @param raw the operator-supplied value, typically `process.env.NODE_ENV`;
+ *   `undefined`, `null` and a blank string all mean "the host did not say"
  * @returns a value guaranteed to satisfy {@link DiscoveryEnvironmentSchema}
  */
 export function resolveDiscoveryEnvironment(raw?: string | null): DiscoveryEnvironment {
-  if (typeof raw !== 'string') return 'development';
-  return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[raw.trim().toLowerCase()] ?? 'development';
+  const spelling = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (spelling === '') return 'production';
+  return NODE_ENV_TO_DISCOVERY_ENVIRONMENT[spelling] ?? 'development';
 }
 
 // ============================================================================

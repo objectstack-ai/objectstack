@@ -137,7 +137,6 @@ export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layo
 
 export {
   validateVisibilityPredicates,
-  VISIBILITY_ALIAS_DEPRECATED,
   VISIBILITY_ROOT_MISLAYERED,
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_SYNTAX,

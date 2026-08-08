@@ -787,16 +787,30 @@ export class MetadataManager implements IMetadataService {
    * has with {@link loadDiagnosed}, so every existing caller keeps its exact
    * behaviour and only callers that ASK for the verdict pay for it.
    *
-   * [#5840] Deliberately NOT expressed as `(await getDiagnosed(…)).data`,
-   * although that is what it computes. The obvious delegation adds one
-   * `await` hop, and a registry hit here is observed one microtask sooner than
-   * it would be through a second async frame — which `register()`'s watchers
-   * depend on, because `notifyWatchers` does not await its handlers and
-   * ObjectQL's bridge re-reads through `get()` on the event rather than
-   * trusting the payload (`register-notifies-watchers.test.ts` pins it, and
-   * went red on the delegating version). The duplication is three lines and is
-   * pinned from the other side: `get()` and `getDiagnosed().data` are asserted
-   * to agree on every case in `metadata-manager-get-diagnosed.test.ts`.
+   * Not expressed as `(await getDiagnosed(…)).data`, although that is what it
+   * computes — and the reason has CHANGED, so do not read the duplication as a
+   * standing constraint.
+   *
+   * [#5840] recorded the delegation as unsafe: it adds one `await` hop, and
+   * `register-notifies-watchers.test.ts` went red on the delegating version, so
+   * three lines were duplicated to hold the frame count fixed. [#6043] measured
+   * that test and found it was pinning this method's microtask depth rather than
+   * the ordering guarantee it named — `notifyWatchers` never awaits its handlers,
+   * so a subscriber's `await get(…)` had simply been settling inside the
+   * microtasks `await register(…)` yields. That case now asserts the ordering
+   * synchronously against the registry and does not observe this method's frame
+   * count at all; the whole `@objectstack/metadata` suite was re-measured on the
+   * delegating version and stayed green.
+   *
+   * What survives is a plain, local reason: the registry hit is the hot path and
+   * answering it without a second async frame is worth three lines. Nothing
+   * external depends on the hop count any more. Consolidating the two into one
+   * delegation is therefore a viable, deliberately un-taken change (#6043 was
+   * test-scoped) — if you take it, note that `get()`'s callers outside this
+   * package were never surveyed for timing sensitivity, only this package's
+   * tests. Either way the two stay pinned to each other from the other side:
+   * `get()` and `getDiagnosed().data` are asserted to agree on every case in
+   * `metadata-manager-get-diagnosed.test.ts`.
    */
   async get(type: string, name: string): Promise<unknown | undefined> {
     // Check in-memory registry first

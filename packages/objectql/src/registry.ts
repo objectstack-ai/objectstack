@@ -1,6 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, resolveInjectedSystemColumns, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, type AuditProvenanceField } from '@objectstack/spec/data';
+// [#4513] The audit-family governance table — see the re-export below for why
+// it lives in a package both `objectql` and `metadata-protocol` depend on.
+import { AUDIT_FIELD_GOVERNANCE } from '@objectstack/metadata-core';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
@@ -300,16 +303,20 @@ const AUDIT_FIELD_DEFS = {
  * Only `readonly` / `system` travel: everything else an author writes —
  * `label`, `description`, `hidden`, `group`, and even `type` for an
  * external object mapping a differently-typed remote column — stays theirs.
+ * `type` and `reference` are deliberately NOT forced: an external/federated
+ * object legitimately maps its audit column to a differently-typed remote
+ * column, and #4447 is about writability, not storage shape. Narrower is the
+ * point — this overrides an author, so it takes only what the defect requires.
+ *
+ * [#4513] The table itself now lives in `@objectstack/metadata-core`, because
+ * the `/meta` READ surface has to report the same answer this injection
+ * enforces and could not reach it here: `@objectstack/objectql` depends on
+ * `@objectstack/metadata-protocol`, so the import a read-side pin needs would
+ * close a turbo-rejected cycle. Same criterion, same package, and for the same
+ * reason as the #5619 dispatch predicates. Re-exported here so the symbol
+ * still resolves from `@objectstack/objectql`.
  */
-const AUDIT_FIELD_GOVERNANCE: Record<AuditProvenanceField, Record<string, unknown>> =
-  Object.fromEntries(
-    // ONLY the keys that decide WHO MAY WRITE the column. `type` and
-    // `reference` are deliberately NOT forced: an external/federated object
-    // legitimately maps its audit column to a differently-typed remote column,
-    // and #4447 is about writability, not storage shape. Narrower is the point
-    // — this overrides an author, so it takes only what the defect requires.
-    AUDIT_PROVENANCE_FIELDS.map((name) => [name, { readonly: true, system: true }]),
-  ) as unknown as Record<AuditProvenanceField, Record<string, unknown>>;
+export { AUDIT_FIELD_GOVERNANCE };
 
 /**
  * [ADR-0117 D1] The injected BU-ownership column name, spelled out so it greps

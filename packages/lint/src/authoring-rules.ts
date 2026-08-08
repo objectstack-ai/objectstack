@@ -236,7 +236,11 @@ export type AuthoringRuleTier = 'gating' | 'advisory';
  *     ADR-0087 D2 conversion (`view-visibleOn-to-visibleWhen`,
  *     `page-component-visibility-to-visibleWhen`) folds it into `visibleWhen`
  *     INSIDE `normalizeStackInput` — one layer before the tier, not during the
- *     parse. See #6318.
+ *     parse. #6318 acted on that: the alias-KEY rule this premise justified
+ *     (`visibility-alias-deprecated`) was retired, since the D2 conversion
+ *     notice already covers its whole evidence surface with better wording and
+ *     a stated retirement window. The alias-KEY half of premise 3 is therefore
+ *     no longer merely false — there is nothing left reading it.
  *
  * ## What it does buy, and why the tier stays
  *
@@ -746,17 +750,29 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateSeedStateMachine(stack),
   },
-  // ADR-0089 D3b — deprecated visibility aliases and a mis-layered binding root,
-  // plus (#6128) the bare-identifier gate. This entry used to read "pre-parse:
-  // the schema folds `visibleOn`/`visibility` into `visibleWhen` during parse,
-  // so the alias the author wrote is gone from `result.data`". Measured false
-  // at #6073: the ADR-0087 D2 conversions do that fold INSIDE
+  // ADR-0089 D3b — a mis-layered binding root, plus (#6128) the bare-identifier
+  // gate and (#6253) the syntax gate. This entry used to read "pre-parse: the
+  // schema folds `visibleOn`/`visibility` into `visibleWhen` during parse, so
+  // the alias the author wrote is gone from `result.data`". Measured false at
+  // #6073: the ADR-0087 D2 conversions do that fold INSIDE
   // `normalizeStackInput`, one layer BEFORE this tier, so on every spec-valid
-  // alias site `visibility-alias-deprecated` reports zero here too — see #6318,
-  // which carries the per-site table and the retire-or-rewire question. The two
-  // predicate-VALUE rules (`visibility-bare-identifier`,
-  // `visibility-root-mislayered`) are unaffected: the value moves into
-  // `visibleWhen` intact and both still report on this tier.
+  // alias site the alias-KEY rule reported zero here too.
+  //
+  // #6318 closed that: `visibility-alias-deprecated` was RETIRED rather than
+  // re-anchored. Re-anchoring would have had to move this entry's input to a
+  // pre-`normalizeStackInput` value that `runAuthoringRules` does not accept —
+  // a change to this package's external input contract, and the maintainer's
+  // call, not a rule file's. Retirement is ADR-0049 (declared ≠ enforced) and
+  // costs no author a signal: the same D2 conversion already shouts through
+  // `warnConversionNotice` in `defineStack`, naming the site, the conversion and
+  // the protocol-16 retirement window — better wording than the rule ever had.
+  //
+  // Every rule left in the family judges the predicate's VALUE, and the value
+  // moves into `visibleWhen` intact, so all three report normally on this tier.
+  // The tier therefore stays `normalized` on its SURVIVING justification (a
+  // finding still reaches the author when an unrelated schema error would stop
+  // the parse — see `AuthoringRuleInputTier`), never on the retired
+  // "pre-parse evidence" one.
   //
   // `gating` since #6128: `visibility-bare-identifier` emits `error`. The two
   // ADR-0089 rules stay advisory findings within it — the tier is a property of
