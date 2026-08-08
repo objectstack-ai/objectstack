@@ -312,7 +312,19 @@ export class InMemoryDriver implements IDataDriver {
     }
 
     // 4. Pagination (Limit)
-    if (query.limit) {
+    //
+    // PRESENCE, not truthiness (#6577). `limit: 0` means "return no records"
+    // (#6485), and `0` is falsy — so `if (query.limit)` dropped the slice and
+    // answered a request for NOTHING with the WHOLE table. Measured before this
+    // line changed, three rows seeded: `{ limit: 0 }` returned 3, and
+    // `{ limit: 0, offset: 1 }` returned 2 — the OFFSET applied and the LIMIT
+    // silently did not, which is why the shape survived every paging suite.
+    //
+    // `offset` above is deliberately left on truthiness: `slice(0)` IS the
+    // identity slice, so presence and truthiness cannot be told apart there —
+    // no behaviour to fix. The #5499 freeze exception granted here is the limit
+    // door only.
+    if (query.limit !== undefined) {
       results = results.slice(0, query.limit);
     }
 
