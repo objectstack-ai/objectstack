@@ -462,7 +462,6 @@ export type Iso145 = Assert<Eq< z.input< typeof M28.CreateDataResponseSchema >, 
 export type Iso146 = Assert<Eq< z.input< typeof M28.UpdateDataResponseSchema >, z.infer< typeof M28.UpdateDataResponseSchema > >>;
 export type Iso147 = Assert<Eq< z.input< typeof M28.DeleteDataResponseSchema >, z.infer< typeof M28.DeleteDataResponseSchema > >>;
 export type Iso148 = Assert<Eq< z.input< typeof M28.CreateManyDataResponseSchema >, z.infer< typeof M28.CreateManyDataResponseSchema > >>;
-export type Iso149 = Assert<Eq< z.input< typeof M28.DeleteViewResponseSchema >, z.infer< typeof M28.DeleteViewResponseSchema > >>;
 export type Iso150 = Assert<Eq< z.input< typeof M28.CheckPermissionResponseSchema >, z.infer< typeof M28.CheckPermissionResponseSchema > >>;
 export type Iso151 = Assert<Eq< z.input< typeof M28.GetEffectivePermissionsResponseSchema >, z.infer< typeof M28.GetEffectivePermissionsResponseSchema > >>;
 export type Iso152 = Assert<Eq< z.input< typeof M28.RealtimeConnectResponseSchema >, z.infer< typeof M28.RealtimeConnectResponseSchema > >>;
@@ -1101,9 +1100,6 @@ export type Iso563 = Assert<Eq< z.input< typeof M131.Sha256DigestSchema >, z.inf
 
 // system/http-server.zod.ts
 export type Iso564 = Assert<Eq< z.input< typeof M132.MiddlewareType >, z.infer< typeof M132.MiddlewareType > >>;
-export type Iso565 = Assert<Eq< z.input< typeof M132.ServerEventType >, z.infer< typeof M132.ServerEventType > >>;
-export type Iso566 = Assert<Eq< z.input< typeof M132.ServerEventSchema >, z.infer< typeof M132.ServerEventSchema > >>;
-export type Iso567 = Assert<Eq< z.input< typeof M132.ServerStatusSchema >, z.infer< typeof M132.ServerStatusSchema > >>;
 
 // system/incident-response.zod.ts
 export type Iso568 = Assert<Eq< z.input< typeof M133.IncidentResponsePhaseSchema >, z.infer< typeof M133.IncidentResponsePhaseSchema > >>;
@@ -1345,9 +1341,6 @@ export type Iso721 = Assert<Eq< z.input< typeof M28.CreateDataRequestSchema >, z
 export type Iso722 = Assert<Eq< z.input< typeof M28.UpdateDataRequestSchema >, z.infer< typeof M28.UpdateDataRequestSchema > >>;
 export type Iso723 = Assert<Eq< z.input< typeof M28.DeleteDataRequestSchema >, z.infer< typeof M28.DeleteDataRequestSchema > >>;
 export type Iso724 = Assert<Eq< z.input< typeof M28.CreateManyDataRequestSchema >, z.infer< typeof M28.CreateManyDataRequestSchema > >>;
-export type Iso725 = Assert<Eq< z.input< typeof M28.ListViewsRequestSchema >, z.infer< typeof M28.ListViewsRequestSchema > >>;
-export type Iso726 = Assert<Eq< z.input< typeof M28.GetViewRequestSchema >, z.infer< typeof M28.GetViewRequestSchema > >>;
-export type Iso727 = Assert<Eq< z.input< typeof M28.DeleteViewRequestSchema >, z.infer< typeof M28.DeleteViewRequestSchema > >>;
 export type Iso728 = Assert<Eq< z.input< typeof M28.CheckPermissionRequestSchema >, z.infer< typeof M28.CheckPermissionRequestSchema > >>;
 export type Iso729 = Assert<Eq< z.input< typeof M28.GetObjectPermissionsRequestSchema >, z.infer< typeof M28.GetObjectPermissionsRequestSchema > >>;
 export type Iso730 = Assert<Eq< z.input< typeof M28.GetEffectivePermissionsRequestSchema >, z.infer< typeof M28.GetEffectivePermissionsRequestSchema > >>;
@@ -1492,13 +1485,42 @@ describe('ADR-0122 type-alias convention', () => {
     // `ValidateDataResponse` — three new protocol shapes with no defaults or
     // transforms anywhere in their trees, i.e. the second (RISE) case above.
     //
+    //
+    // 751 -> 754 is #6037's `ValidateDataIssue` / `ValidateDataRequest` /
+    // `ValidateDataResponse` — three new protocol shapes with no defaults or
+    // transforms anywhere in their trees, i.e. the second (RISE) case above.
+    //
     // 754 -> 755 is #5933's `SpecifierValueDomain` — one new closed enum on
     // `SettingsManifest`'s SpecifierSchema, the same (RISE) case: a `z.enum`
     // has no default or transform, so its two shapes coincide and it gets a pin
     // rather than a `SpecifierValueDomainParsed` synonym.
+    //
+    // 755 -> 748 is the 2026-08-08 ADR-0049 retirement sweep (#6486), the
+    // first way again — a schema left the package, so its pin left with it.
+    // Written out per member, because a MULTI-member sweep is exactly where a
+    // count gets nudged to fit instead of recomputed:
+    //
+    //   #5295  -3  ServerEventType, ServerEventSchema, ServerStatusSchema
+    //             (`ServerCapabilities` has a `Parsed` alias, so it was never
+    //             pinned here — a retired schema does not always cost a line)
+    //   #6239  -4  DeleteViewResponseSchema, ListViewsRequestSchema,
+    //             GetViewRequestSchema, DeleteViewRequestSchema (four of the
+    //             ten view schemas were isomorphic; the other six were paired)
+    //   #6414   0  every ETL alias already had a `Parsed` counterpart
+    //
+    // -7, and 755 - 7 = 748. Three things this one entry is worth stating,
+    // because they are the ways a MINUS gets miscomputed here. (1) The member
+    // count (3) and the pin count (7) have no relation to each other. (2) The
+    // -7 was computed against 751 at the branch point and had to be rebased
+    // TWICE before landing — onto #6037's 754, then onto #5933's 755 — so the
+    // subtrahend was the only stable operand. (3) A sibling retirement in the
+    // same window contributed ZERO: #6527 retired `array_agg` / `string_agg`
+    // from `AggregationFunction`, and an enum VALUE narrowing is invisible
+    // here, exactly as it is to the four surface ratchets. Recompute from the
+    // file; never from the changelog.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(755);
+    expect(pins).toHaveLength(748);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {

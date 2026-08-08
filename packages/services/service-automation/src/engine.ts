@@ -1262,6 +1262,12 @@ export class AutomationEngine implements IAutomationService {
      * its pause is over ({@link NodeExecutor.onSuspensionReleased}, #5512). It
      * therefore takes the whole {@link SuspendedRun}: the notification needs the
      * node and the correlation the executor minted, not just the id.
+     *
+     * A durable-store `delete` failure does NOT fail the consumption — the run
+     * has already left the node — but it is reported at `error`, not `warn`
+     * (#4632/#6299): the cache entry is gone while the row survives, so the run
+     * reads as terminal now and as still-suspended after a restart. See the
+     * catch below for the full verdict.
      */
     private async forgetSuspendedRun(run: SuspendedRun, reason: SuspensionReleaseReason): Promise<void> {
         this.suspendedRuns.delete(run.runId);
@@ -1269,8 +1275,51 @@ export class AutomationEngine implements IAutomationService {
             try {
                 await this.store.delete(run.runId);
             } catch (err) {
-                this.logger.warn(
-                    `[automation] failed to delete suspended run '${run.runId}' from durable store: ${(err as Error).message}`,
+                // #6299 — the cause goes to the logger's STRUCTURED slot, never
+                // spliced into the message: it is the datasource DRIVER's own
+                // failure text, we do not control how many lines it has, and
+                // `ObjectLogger.write()` adds exactly one `<ts> <LEVEL>` head
+                // per call — so a newline in it turns this ONE record into
+                // several physical lines of which only the first is greppable.
+                // The family of #5048 / #5575 / #5636 / #5661 / #5737 / #5912 /
+                // #6230, and cloud#971's shape.
+                //
+                // #4632 verdict: DURABILITY — raised from `warn` to `error`, and
+                // deliberately NOT a copy of #6230's "the level stays warn". The
+                // hot cache is dropped on the line ABOVE the try, and this
+                // method is the single choke point every consumption of a
+                // suspension passes through (resume / terminal failure /
+                // cancel), so on this path the suspension is gone in-process
+                // while the durable row SURVIVES. Every caller still reports
+                // success — `resume()` returns a successful result, `cancelRun()`
+                // returns `true`, `recordLog` writes a terminal record — and the
+                // surviving row is read straight back out after the next
+                // restart: `rearmSuspendedWaitTimers` lists it and `resume()`
+                // rehydrates it through `loadSuspendedRunStrict`'s store read,
+                // re-running a continuation that has already run. Nothing
+                // retries this delete. That is the shape the durability gate's
+                // own vocabulary already grades `error` for the metadata store
+                // (`deleteMetaItemFromLoader`, #5259: "the surviving row is read
+                // straight back out of storage … so the 'deleted' item reappears
+                // and survives every restart"). `check:durability-log-level`
+                // cannot see it HERE only because `SuspendedRunStore.delete` is
+                // not in its declared callee vocabulary — which is exactly why
+                // this level is pinned by a test instead.
+                //
+                // THIRD argument, per the `Logger` contract
+                // (`packages/spec/src/contracts/logger.ts`):
+                // `error(message, error?, meta?)`. The `Error` slot is left
+                // empty on purpose (#5575) — a raw `Error` there ships its stack
+                // trace on every record.
+                this.logger.error(
+                    `[automation] suspended run '${run.runId}' was consumed (${reason}) but could NOT be deleted from ` +
+                        `the durable store — the in-memory suspension is already gone while the durable row SURVIVES, ` +
+                        `so this run reads as terminal now and as still-suspended after the next restart, where ` +
+                        `rearmSuspendedWaitTimers lists it and resume() rehydrates it from the store and re-runs a ` +
+                        `continuation that has already run. Nothing retries this delete. Fix the store failure in this ` +
+                        `record's meta, then delete the row for '${run.runId}' by hand.`,
+                    undefined,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -3515,6 +3564,11 @@ export class AutomationEngine implements IAutomationService {
      * reject edge to resume down, so the run must end, not continue. Returns
      * `false` when no suspended run exists under the id (already terminal /
      * unknown), which callers treat as idempotent success.
+     *
+     * ⚠️ An UNREADABLE durable store also lands on that `false` — the two are
+     * indistinguishable to the caller, so the run may still be parked and
+     * resumable. That path is reported at `error` (#4632/#6299) precisely
+     * because nothing above it can tell the difference; see the catch below.
      */
     async cancelRun(runId: string, reason?: string): Promise<boolean> {
         let run = this.suspendedRuns.get(runId) ?? null;
@@ -3522,8 +3576,45 @@ export class AutomationEngine implements IAutomationService {
             try {
                 run = await this.store.load(runId);
             } catch (err) {
-                this.logger.warn(
-                    `[automation] cancelRun: failed to load suspended run '${runId}' from durable store: ${(err as Error).message}`,
+                // #6299 — same family, same mechanism as `forgetSuspendedRun`
+                // above: the driver's uncontrolled text goes to the structured
+                // slot so the record stays one physical line.
+                //
+                // #4632 verdict: DURABILITY — raised from `warn` to `error`. The
+                // failed read is silently turned into "no such suspended run"
+                // and this method returns `false`, which its own contract
+                // documents as idempotent success (already terminal / unknown),
+                // so the cancellation is SKIPPED while the call reads clean. The
+                // only in-repo caller measures the cost: plugin-approvals'
+                // revise-window recall
+                // (`packages/plugins/plugin-approvals/src/approval-service.ts`)
+                // never reads the boolean at all — it only catches a THROW, and
+                // grades that throw `error` with "the run may be stranded"
+                // (#4420). A store-read failure produces precisely that stranded
+                // run WITHOUT firing that alarm: the request is marked
+                // `recalled`, the record lock is released, `resumeError` stays
+                // undefined — and the run stays parked in the store, to be
+                // re-armed and resumed by the next restart, inside a flow whose
+                // approval has already been withdrawn.
+                //
+                // This is why #6230's verdict must not be copied here.
+                // `loadSuspendedRun` is a DECLARED best-effort reader for
+                // incidental callers (a gate lookup, a screen fetch), and
+                // `resumeInternal` takes the strict form exactly where the
+                // difference matters. `cancelRun` has no strict alternative, and
+                // its degradation decides a WRITE.
+                //
+                // THIRD argument (`error(message, error?, meta?)`), `Error` slot
+                // deliberately empty (#5575).
+                this.logger.error(
+                    `[automation] cancelRun('${runId}') could not read the durable suspended-run store, so the ` +
+                        `cancellation was SKIPPED and reported as idempotent success — this call returns false, which ` +
+                        `its callers read as "no such suspended run". The run is NOT cancelled: if it is parked in the ` +
+                        `store it stays parked, and the next restart re-arms and resumes it while the caller has ` +
+                        `already recorded the cancellation. Fix the store failure in this record's meta, then re-issue ` +
+                        `cancelRun('${runId}').`,
+                    undefined,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -3598,7 +3689,47 @@ export class AutomationEngine implements IAutomationService {
                     byId.set(r.runId, { runId: r.runId, flowName: r.flowName, nodeId: r.nodeId, correlation: r.correlation });
                 }
             } catch (err) {
-                this.logger.warn(`[automation] failed to list suspended runs from durable store: ${(err as Error).message}`);
+                // #6299 — driver text to the structured slot, message one line,
+                // same as the two seams above. The SLOT differs: the `Logger`
+                // contract declares `warn(message, meta?)`, so `meta` is the
+                // SECOND argument here — `warn` has no `Error` slot, and a
+                // `meta` passed third to it is silently ignored.
+                //
+                // #4632 verdict: FUNCTIONAL — the level deliberately STAYS
+                // `warn`, and this is the one of #6299's three sites where that
+                // is the answer. Nothing the system claims to have persisted
+                // failed to land: the durable rows are intact, still resumable
+                // by id, and the next boot's `rearmSuspendedWaitTimers` still
+                // re-arms them off its OWN `store.list()` — which builtin/
+                // wait-node.ts grades `error` precisely because THAT failure
+                // breaks the promise to resume them. This one breaks no promise,
+                // so #4632's judgment question ("does something the system
+                // claims is persisted fail to land while it keeps looking
+                // healthy?") answers NO.
+                //
+                // What IS wrong here is the shape #5186 owns: an answer INVENTED
+                // for a read that failed — a silently SHORT list. That rule's
+                // remedy is propagation (rethrow, or a discriminated result),
+                // which changes this method's return contract and is outside
+                // #6299's scope, so the record has to say the shortfall out loud
+                // instead. Its scan roots (`packages/metadata`,
+                // `metadata-protocol`, `objectql`) do not reach this package, so
+                // `check:durability-log-level` reports neither rule here.
+                // Reachability is also the weakest of the three: this method has
+                // no production consumer in-repo and is not on the
+                // `AutomationService` spec contract (only the synchronous
+                // `listSuspendedRuns` is), so nothing decides anything on this
+                // list today. Raising it to `error` would alarm for the duration
+                // of an outage on a read nobody acts on — #4632's mirror-image
+                // misuse, the trap #6230 avoided.
+                this.logger.warn(
+                    `[automation] the durable suspended-run store could not be listed — this listing DEGRADES to the ` +
+                        `in-memory cache alone, so every run parked by a previous process is missing from the result ` +
+                        `and the caller cannot tell a short list from a complete one (after a restart the cache is ` +
+                        `empty, so this answers []). The runs themselves are untouched — still stored, still resumable ` +
+                        `by id. Fix the store failure in this record's meta.`,
+                    describeThrownForLog(err),
+                );
             }
         }
         // In-memory entries win — they are the freshest copy.

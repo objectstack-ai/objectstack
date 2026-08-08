@@ -14,10 +14,12 @@ import { retiredKey } from '../shared/retired-key';
  * Connectors enable ObjectStack to sync data with SaaS apps, databases, file storage,
  * and message queues through a unified protocol.
  * 
- * **Positioning in the sync/integration layering** (L1 "Simple Sync" was
- * retired in #4738 — narrative-only, zero consumers; see
- * `packages/spec/docs/SYNC_ARCHITECTURE.md`):
- * - **ETL Pipeline** (automation/etl.zod.ts) - Data engineers - Aggregate 10 sources to warehouse
+ * **Positioning in the sync/integration layering** — this file is now the ONLY
+ * layer. Both layers above it were retired under ADR-0049 for the same measured
+ * reason, that no engine ever executed them: L1 "Simple Sync"
+ * (`automation/sync.zod.ts`) in #4738, and L2 "ETL Pipeline"
+ * (`automation/etl.zod.ts`) in #6414. See
+ * `packages/spec/docs/SYNC_ARCHITECTURE.md`:
  * - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
  * 
  * **SCOPE: Most comprehensive integration layer.**
@@ -98,9 +100,11 @@ import { retiredKey } from '../shared/retired-key';
  * - Microsoft Dynamics 365 connector
  * 
  * **When to downgrade:**
- * - Data transformation only → Use {@link file://../automation/etl.zod.ts | ETL Pipeline}
- *
- * @see {@link file://../automation/etl.zod.ts} for the ETL Pipeline layer (data engineering)
+ * - Per-field value conversion on import only → the import mapping's own
+ *   `transform` (`data/mapping.zod.ts`), which the REST import path executes
+ *   row by row. (This used to point at `automation/etl.zod.ts`; L2 was retired
+ *   at #6414 for having no executor, so the pointer would have been a signpost
+ *   landing nowhere — the same defect class this header names below.)
  * 
  * ## There is no "Trigger Registry" alternative
  *
@@ -113,9 +117,11 @@ import { retiredKey } from '../shared/retired-key';
  * per-provider template cluster). The same defect class as the
  * `capabilities.readOnly` prescription #4487 corrected: a signpost must land
  * somewhere enforced. Lightweight cases are served HERE — a connector instance
- * with simple `auth` — or by `automation/etl.zod.ts` for transformation
- * pipelines. (The automation-side L1 "Simple Sync" file was itself retired as
- * a dead end of the same class in #4738.)
+ * with simple `auth`. (Both automation-side layers were themselves retired as
+ * dead ends of the same class: L1 "Simple Sync" in #4738, L2 `etl.zod.ts` in
+ * #6414. This paragraph named L2 as the transformation destination until the
+ * second retirement; a signpost that must land somewhere enforced cannot make
+ * an exception for itself.)
  */
 
 // ============================================================================

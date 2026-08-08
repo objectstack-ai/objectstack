@@ -37,17 +37,16 @@ function createMockDriver(): IDataDriver {
   return {
     name: 'mock',
     version: '1.0.0',
-    supports: {
-      transactions: false,
-      joins: false,
-      aggregations: false,
-      streaming: false,
-      bulkOperations: true,
-      nestedObjects: false,
-      fullTextSearch: false,
-      geoQueries: false,
-      changeStreams: false,
-    },
+    // An empty advertisement is a legal advertisement: every bit in
+    // `DriverCapabilities` is optional, and this mock needs none of the three
+    // that survive (#4782). The block used to spell nine — four RETIRED by
+    // #4634 (`transactions`/`joins`/`streaming`/`fullTextSearch`, now
+    // tombstoned as `never`) and five that were never keys of
+    // `DriverCapabilitiesSchema` at all (`aggregations`/`bulkOperations`/
+    // `nestedObjects`/`geoQueries`/`changeStreams`). Nothing here read any of
+    // them; their only effect was to be copied into the next mock. Capability
+    // is METHOD presence, not a boolean — do not re-add bits here.
+    supports: {},
 
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn().mockResolvedValue(undefined),
