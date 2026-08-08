@@ -13,7 +13,7 @@
  *    third-party plugins can't ship runaway predicates.
  */
 
-import { Environment, ParseError, serialize } from '@marcbachmann/cel-js';
+import { Environment, EvaluationError, ParseError, serialize } from '@marcbachmann/cel-js';
 import type { ASTNode } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
@@ -842,53 +842,117 @@ function hydrateOverloadStrings(value: unknown): unknown {
 const CEL_LIMIT_EXCEEDED_CODE = 'limit_exceeded';
 
 /**
- * Grade a cel-js fault off the error **class** the parser threw, not off its
- * prose. Returns `undefined` for anything that is not a cel-js error, so the
- * caller can fall back to the legacy keyword table.
+ * The evaluate-time cel-js codes that describe the EXPRESSION rather than the
+ * DATA, and therefore stay `type` instead of falling to `runtime`.
  *
- * Why the class and not the message (#6133): `classifyError` used to decide
- * between `parse` / `type` / `runtime` by regex-matching the error text, and
- * cel-js has ~19 distinct parse-time wordings of which only three contain
- * `parse` / `unexpected` / `syntax`. Everything else — `Expected RPAREN, got
- * EOF` (unbalanced parens), `Expected RBRACKET, got EOF`, `Unterminated
- * string`, `Reserved identifier: package`, the seven escape-sequence faults —
- * fell through to the default `runtime`, and `kind` is not an internal field:
- * it is interpolated verbatim into the author-facing rejection text
- * (`objectql`'s `rule-validator` / `cel-fault`) and into the REST `reason`.
- * An author who forgot a closing paren was told their *data* was at fault.
+ * The membership test is "would this fault reproduce on every input?". At
+ * evaluate time cel-js runs its checker with `isEvaluating: true`
+ * (`Environment#evaluate` → `#evalTypeChecker`, built as
+ * `new TypeChecker(opts, true)`), so *every* fault — including the ones the
+ * checker raises — arrives as an {@link EvaluationError}. The phase therefore
+ * cannot separate the two, and the code has to.
  *
- * Topping the keyword list up cannot fix this, because cel-js embeds the
- * **author's own source line** in `message` (see `formatErrorWithHighlight` in
- * `lib/errors.js`), so the author controls the text being matched. Measured on
- * cel-js 8.0.0: `((record.type_id)` — a plain unbalanced paren — classified as
- * `type`, purely because the echoed source contains the substring "type".
- * Classifying on prose is not a table with holes in it; it is the hole.
+ * Exactly one code qualifies on cel-js 8.0.0, measured per code (#6223):
+ * `unknown_variable` means the ROOT identifier the expression names is not
+ * bound in this scope at all — a property of the expression against the call
+ * site's contract, not of any row. `@objectstack/objectql`'s `cel-fault`
+ * already gives it its own author advice ("the field is fine; the thing you
+ * hung it off isn't available here").
  *
- * Scope note, deliberate: only the ParseError arm is structural here. cel-js's
- * `TypeChecker` picks its error class **by phase**, not by fault
- * (`this.createError = isEvaluating ? evaluationError : typeError`), so the same
- * `unknown_variable` fault is a `TypeError` at check time and an
- * `EvaluationError` at evaluate time. Routing `EvaluationError` → `runtime`
- * wholesale would therefore silently re-grade faults the keyword table gets
- * right today (`Unknown variable: x` → `type`). Those arms stay on the keyword
- * table until that mapping is measured per code — see #6133 for the audit.
+ * Deliberately NOT here, each with the reason:
+ *  - `no_such_key` — a record may carry a key on one row and not the next, so
+ *    it is a fact about the data. `cel-fault` gives it its own sentence too.
+ *  - `no_such_overload` — this is ADR-0032 §1c, the string-serialized numeric /
+ *    date field (`record.rating >= 4` where `rating` is `"5.0"`). Data.
+ *  - `int_conversion_error` / `uint_conversion_error` /
+ *    `double_conversion_error` — cel-js phrases these as `int() type error: …`,
+ *    which is what put them on `type` before #6223. Converting a value that
+ *    cannot convert is a data fault; the word "type" in the prose was the only
+ *    reason they were graded otherwise.
+ *  - `no_matching_overload` — genuinely ambiguous: it covers both an unknown
+ *    function (`PRIOR(x)`) and a known one called with the wrong runtime types
+ *    (`size(record.x)` on a scalar). Under `unlistedVariablesAreDyn` the second
+ *    is data-dependent, so it stays `runtime` — which is also its verdict
+ *    before #6223, i.e. this is not a re-grade. The unknown-function case is
+ *    already caught earlier and louder: {@link celEngine.compile} reads
+ *    `check()`'s `{ valid: false }` and answers `type` at build time (#1877).
+ *  - `heterogeneous_list_element`, `invalid_index_type`,
+ *    `invalid_comprehension_range`, `invalid_condition_type`,
+ *    `invalid_logical_operand` — all "this VALUE has the wrong type", decided
+ *    against the row, not against the source.
  */
-function classifyCelParseFault(err: unknown): 'parse' | 'bounds' | undefined {
-  if (!(err instanceof ParseError)) return undefined;
-  return err.code === CEL_LIMIT_EXCEEDED_CODE ? 'bounds' : 'parse';
+const CEL_DECLARATION_CODES: ReadonlySet<string> = new Set(['unknown_variable']);
+
+/**
+ * Grade a cel-js fault off the error **class** it was thrown as and its
+ * structured `code` — never off its prose. Returns `undefined` for anything
+ * that is not a cel-js error.
+ *
+ * Why not the message (#6133, #6223): `classifyError` used to decide between
+ * `parse` / `type` / `runtime` / `bounds` by regex-matching the error text, and
+ * cel-js embeds the **author's own source line** in `message` (see
+ * `formatErrorWithHighlight` in `lib/errors.js`). The text being matched is
+ * therefore text the author writes. `kind` is not an internal field — it is
+ * interpolated verbatim into the author-facing rejection text (`objectql`'s
+ * `rule-validator` / `cel-fault`) and into the REST error body's `reason` — so
+ * the author is told which of *their* mistakes this was, by a rule their own
+ * field names can flip. Measured on cel-js 8.0.0, one `no such overload`
+ * evaluation fault, four field names, one wrong answer per polluted name:
+ *
+ * ```text
+ * record.status        > 1  ->  runtime   (right)
+ * record.parse_status  > 1  ->  parse     (wrong — "your expression is broken")
+ * record.syntax_mode   > 1  ->  parse     (wrong)
+ * record.type_code     > 1  ->  type      (wrong)
+ * ```
+ *
+ * #6133 / PR #6202 closed the ParseError arm this way and left `type` /
+ * `runtime` on the keyword table pending a per-code audit. #6223 is that audit,
+ * and it deletes the table outright: see {@link CEL_DECLARATION_CODES} for the
+ * evaluate-time verdicts and {@link classifyError} for why nothing is left for
+ * a keyword to decide.
+ *
+ * There is deliberately no `TypeError` arm. cel-js's `TypeError` is raised only
+ * by the non-evaluating `TypeChecker` (`createError = isEvaluating ?
+ * evaluationError : typeError`), which runs only inside `Environment#check` —
+ * and that method catches it and *returns* `{ valid: false, error }` rather
+ * than throwing. So a cel-js `TypeError` can never reach a `catch` block here;
+ * an arm for it would be dead code. The check-time `TypeError → type` mapping
+ * does exist, in {@link celEngine.compile}, where that returned object is read.
+ */
+function classifyCelFault(err: unknown): 'parse' | 'bounds' | 'type' | 'runtime' | undefined {
+  if (err instanceof ParseError) {
+    return err.code === CEL_LIMIT_EXCEEDED_CODE ? 'bounds' : 'parse';
+  }
+  if (err instanceof EvaluationError) {
+    return CEL_DECLARATION_CODES.has(err.code) ? 'type' : 'runtime';
+  }
+  return undefined;
 }
 
+/**
+ * Resolve a thrown fault into the {@link EvalError} the caller reports.
+ *
+ * Everything that is not a cel-js error faulted *while evaluating* and carries
+ * no structured contract at all — our own stdlib bindings, a caller-supplied
+ * `os.*` API, a native JS throw — so `runtime` is the honest answer and the
+ * only one. It is not a fallback worth "improving" with a keyword table: the
+ * residual arm was never dormant, and its prose is author- and *data*-
+ * controlled through our own `matches()` binding, which hands cel-js a native
+ * `SyntaxError` whose message echoes the pattern (measured, #6223):
+ *
+ * ```text
+ * matches(record.name, "type(")                  ->  type    (was)
+ * matches(record.name, "Exceeded maxAstNodes(")  ->  bounds  (was)
+ * matches(record.name, "unexpected(")            ->  parse   (was)
+ * matches(record.name, record.re)                ->  type    (was) — from a ROW
+ * ```
+ *
+ * All four are one native regex-compilation failure, i.e. `runtime`.
+ */
 function classifyError(err: unknown): EvalResult<never> {
   const message = err instanceof Error ? err.message : String(err);
-  let kind: 'parse' | 'type' | 'runtime' | 'bounds' | undefined = classifyCelParseFault(err);
-  if (kind === undefined) {
-    // Legacy keyword table — the residual path for faults that carry no
-    // structured contract at all (our own stdlib, a native JS throw).
-    kind = 'runtime';
-    if (/Exceeded max/i.test(message)) kind = 'bounds';
-    else if (/parse|unexpected|syntax/i.test(message)) kind = 'parse';
-    else if (/type|unknown variable|undeclared/i.test(message)) kind = 'type';
-  }
+  const kind = classifyCelFault(err) ?? 'runtime';
   return { ok: false, error: { kind, message } };
 }
 

@@ -887,6 +887,32 @@ a user typing `acme` does not find `ACME Corp`. Only `select` / `status` option
 `[EXPERIMENTAL — not enforced]` markers (#4286): the schema accepts them, the
 expansion ignores them.
 
+#### Searching by a related record's title — mirror the value
+
+Search targets are **this object's own columns**. A dotted path is not one of
+them: `searchFields: ['project_id.name']` is refused at the ingress rather than
+dropped, because the search axis does not resolve traversal the way `fields`,
+`sort` and `filters` do:
+
+```text
+Unknown field 'project_id.name' on object 'task'. '$searchFields' narrows which
+columns 'search' scans, so a name the object does not declare cannot narrow
+anything — and the engine used to drop it and scan the default columns instead,
+answering a NARROWER search with a WIDER one. 'search' scans this object's own
+columns; a related record's column cannot be a search target.
+```
+
+The declarative answer is a **mirror field**: copy the related record's title
+into a stored field on this object and declare *that* field searchable — a task
+list searched by project name carries a `project_name` text column on `task`,
+maintained on write and listed in `task.searchableFields`, so the expansion stays
+a single-table `$or` of `$contains`. The mirror must be **stored**: a `formula`
+field is virtual, no driver materializes a column for it, and a `$contains`
+against one has nothing to scan. Cross-object search paths are rejected by
+design, not pending — see [Schema Design → Searching by a related record's
+title](/docs/data-modeling/schema-design#searching-by-a-related-records-title--mirror-the-value)
+for the maintenance hooks.
+
 ### Joins — removed (#4286)
 
 `query.joins` was **removed in `@objectstack/spec` 17** (#4286, ADR-0049

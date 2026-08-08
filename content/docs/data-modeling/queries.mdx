@@ -513,6 +513,30 @@ that exists to narrow a search, silently widening it. Internal callers reaching
 `engine.find()` directly are unaffected.
 </Callout>
 
+### Searching by a related record's title — mirror the value
+
+`search` scans **the queried object's own columns**. A dotted path
+(`project_id.name`) is not a search target — unlike `fields` / `sort` / `filters`,
+the search axis does not resolve traversal, and a dotted entry is refused, not
+silently dropped:
+
+```text
+Unknown field 'project_id.name' on object 'task'. '$searchFields' narrows which
+columns 'search' scans, so a name the object does not declare cannot narrow
+anything — and the engine used to drop it and scan the default columns instead,
+answering a NARROWER search with a WIDER one. 'search' scans this object's own
+columns; a related record's column cannot be a search target.
+```
+
+The answer is a **mirror field**: copy the related record's title into a stored
+field on this object and declare *that* field searchable. A task list searched by
+project name gets a `project_name` text column on `task`, maintained on write and
+listed in `task.searchableFields`. It has to be a **stored** field — a `formula`
+field is virtual, so no driver has a column for `$contains` to scan. Cross-object
+search paths are rejected by design, not pending. Full recipe (the hooks that keep
+the mirror fresh, and the lint wording) in [Schema Design → Searching by a related
+record's title](/docs/data-modeling/schema-design#searching-by-a-related-records-title--mirror-the-value).
+
 ### Pinyin recall (Chinese deployments)
 
 When pinyin search is enabled (`OS_SEARCH_PINYIN_ENABLED` — auto-on when the stack's
