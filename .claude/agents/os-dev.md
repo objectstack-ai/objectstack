@@ -176,8 +176,13 @@ Definition of done, in order:
 - Changeset added when the change is user-visible.
 - Pushed with `git push -u origin claude/issue-<n>-<slug>` (retry on network
   failure with backoff).
-- **Draft** PR to `main`, body starting `Fixes #<n>`, explanatory prose in
-  Chinese per repo convention. Close it with the **session-URL** attribution
+- **Draft** PR to `main`, body starting `Fixes #<n>`, **title and explanatory
+  prose in English** — GitHub artifacts (issue and PR titles, bodies, comments)
+  are English per the maintainer ruling of 2026-08-08 quoted in AGENTS.md
+  §Communication; Chinese is for talking to the maintainer in Claude Code, not
+  for what lands on GitHub. A Chinese ruling you cite stays **verbatim and
+  untranslated** inside that English body — rewriting a quoted ruling is
+  rewriting the ruling. Close the body with the **session-URL** attribution
   footer — the bare-URL form is stripped from the stored body on every later
   edit (see the sanitizer note at the end of this file).
 - **`skip-changeset` label — your step, not CI's; the read-back is the proof.**
