@@ -324,10 +324,10 @@ export const HookContextSchema = lazySchema(() => z.object({
    * - find (also fires for findOne): { ast: QueryAST, options: see PHASE below }
    * - insert (one context per row, batch inserts included): { data: Record, options: see PHASE below }
    * - update (single id): { id: ID, data: Record, options: see PHASE below }
-   * - update (bulk, multi:true) — before: { id: undefined, data: Record, options: EngineUpdateOptions }
+   * - update (bulk, multi:true) — before, PER MATCHED ROW: { id: ID, data: Record, options: EngineUpdateOptions }
    * - update (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, data: Record, options: DriverOptions }
    * - delete (single id): { id: ID, options: see PHASE below }
-   * - delete (bulk, multi:true) — before: { id: undefined, options: EngineDeleteOptions }
+   * - delete (bulk, multi:true) — before, PER MATCHED ROW: { id: ID, options: EngineDeleteOptions }
    * - delete (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, options: DriverOptions }
    *
    * PHASE — `input.options` is the one slot whose TYPE depends on when you read
@@ -346,24 +346,36 @@ export const HookContextSchema = lazySchema(() => z.object({
    * Measured and pinned in the same contract test as the rest of this table.
    *
    * A bulk (`multi: true`) update/delete fires the SAME `beforeUpdate`/
-   * `beforeDelete` events as a single-id write, ONCE for the whole batch;
-   * there is no separate `*Many` event. `input.id` is present but `undefined`
-   * there — binding it is precisely the test the engine dispatches on, so a
-   * `before*` handler that sets it REROUTES the write onto the single-id path.
+   * `beforeDelete` events as a single-id write; there is no separate `*Many`
+   * event. Since #5574's engine half it fires them once PER MATCHED ROW, each
+   * on a single-record-shaped context carrying that row's `id` and `previous`
+   * — the same move #5038 made for the `after*` phase, held to the same
+   * yardstick. Zero matched rows is zero dispatches. The full clause set
+   * (D1–D7) with its budget ceiling is `data/bulk-write-hook-conformance.ts`
+   * (ADR-0058 Addendum II).
    *
-   * ⚠️ CONTRACTED TO CHANGE — the two `before` rows above and the paragraph
-   * just above them describe the engine as it is TODAY, which is what this
-   * table is for. #5574's maintainer ruling (2026-08-06, option B) extends the
-   * per-row bulk-write contract from the `after*` phase to the `before*` phase:
-   * a predicate write will dispatch `beforeUpdate`/`beforeDelete` once per
-   * matched row, each carrying that row's `previous` and `id`, over a payload
-   * that stays BATCH-scoped. The contract is stated — with its budget ceiling
-   * and its `delivered` flags — in `data/bulk-write-hook-conformance.ts`
-   * (ADR-0058 Addendum II); the engine half is #5574's engine card, and it
-   * moves these rows in the same PR that makes them false. Until then, a
-   * `before*` handler on a bulk write has NO `previous`: a guard written as
-   * `previous?.x` passes silently on every batch, which is the measured harm
-   * the ruling is about.
+   * Two things a reader of the rows above still has to know:
+   *
+   *  - The PAYLOAD stays BATCH-scoped (D3). Every per-row `beforeUpdate`
+   *    context carries THE one payload, not a copy — `driver.updateMany` takes
+   *    one SET clause for N rows — so a rewrite applies to the whole batch
+   *    whichever row's dispatch made it, and rewrites accumulate in dispatch
+   *    order. A rewrite CONDITIONED on the row is therefore out of contract:
+   *    it widens to every matched row instead of scoping itself. Per-row
+   *    `previous` is supplied so a guard can REFUSE (throw), not so a rewrite
+   *    can be aimed.
+   *  - `input.id` is NOT a reroute lever (D4). It used to be: on the batch
+   *    dispatch `input.id` was present-but-`undefined`, and binding it moved
+   *    the write onto the single-id path. A per-row context arrives with `id`
+   *    already bound and the dispatch already decided, so rebinding retargets
+   *    nothing — and objectql REFUSES it (`HookTargetRebindError`) rather than
+   *    ignoring it, on the by-id path too. A silent no-op is the failure this
+   *    family exists to abolish.
+   *
+   * What the change fixed, recorded because the failure direction is the
+   * dangerous one: a `before*` handler on a bulk write used to have NO
+   * `previous`, so a guard written as `previous?.x` passed silently on every
+   * batch — fail-OPEN, and invisible.
    *
    * The row-scoping predicate a bulk write EXECUTES is not reachable from
    * `input` at all. It is the composed `ast`, which lives on the
@@ -378,20 +390,22 @@ export const HookContextSchema = lazySchema(() => z.object({
    * approximation. That is the safe direction for a fail-closed guard (it may
    * refuse a write that would have touched fewer rows; it can never miss one
    * that touches more) and the wrong direction for anything that needs the
-   * effective set exactly, which should work per row on the `after*` events
-   * below instead. Both of `plugin-auth`'s break-glass last-admin guards
-   * (#5892 ban half, #5941 delete half) are built on that upper bound, and
-   * objectql's own `isPredicateBulkWrite` (`hook-wrappers.ts`, #5038/#4775)
-   * reads `input.options.multi` from the same slot to tell a batch dispatch
-   * from a per-row one. Do not narrow `input.options` on the `before*` paths
-   * without re-reading all three.
+   * effective set exactly, which should work per row instead — on the
+   * `before*` events too, since #5574. Both of `plugin-auth`'s break-glass
+   * last-admin guards (#5892 ban half, #5941 delete half) are built on that
+   * upper bound, so do not narrow `input.options` on the `before*` paths
+   * without re-reading both. (objectql's `isPredicateBulkWrite` read the same
+   * slot to tell a batch dispatch from a per-row one; it is retired with the
+   * batch dispatch — `hook-wrappers.ts` records why.)
    *
    * Since #5038 (ADR-0058's bulk-write addendum) the `after*` events on a bulk
    * write dispatch ONCE PER MATCHED ROW, each on a single-record-shaped
    * context — `input.id` names that row, `previous` is its pre-image and
    * `result` its post-state — so a handler written for a single-id write needs
-   * no bulk-aware branch of its own. The batch-level context keeps the
-   * affected COUNT as `result` and is what the call itself resolves (#4639).
+   * no bulk-aware branch of its own. The `before*` events joined them in #5574,
+   * with `result` absent — the before phase has no post-state. The batch-level
+   * context keeps the affected COUNT as `result` and is what the call itself
+   * resolves (#4639); no handler is dispatched on it any more.
    */
   input: z.record(z.string(), z.unknown()).describe('Mutable input parameters'),
 

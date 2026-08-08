@@ -271,14 +271,243 @@ let canonicalParseEnv: Environment | undefined;
  * asymmetry so neither side drifts.
  */
 export function parseCelToAst(source: string): CelAstNode | null {
-  if (typeof source !== 'string' || !source.trim()) return null;
+  const parsed = parseCelToAstWithReason(source);
+  return parsed.ok ? parsed.ast : null;
+}
+
+// ---------------------------------------------------------------------------
+// The reason-carrying sister entrance (#6132)
+// ---------------------------------------------------------------------------
+
+/** A key of {@link DEFAULT_LIMITS} — the platform bounds a source can overrun. */
+export type CelLimitKey = keyof typeof DEFAULT_LIMITS;
+
+const CEL_LIMIT_KEYS = Object.keys(DEFAULT_LIMITS) as readonly CelLimitKey[];
+
+/** How far past a {@link DEFAULT_LIMITS} bound a source actually reaches. */
+export interface CelBoundsOverrun {
+  /**
+   * WHICH bound was exceeded — `maxAstNodes` / `maxDepth` / `maxListElements` / …
+   * `null` only if cel-js reports a limit fault this package cannot name (see
+   * {@link limitKeyOf}); a guessed key would send the author to shorten the
+   * wrong axis, so the honest answer is "we know it was a bound, not which".
+   */
+  limit: CelLimitKey | null;
+  /** The platform's value for that bound, i.e. what the source had to stay under. */
+  limitValue: number | null;
+  /**
+   * What the source itself measures on that axis: the smallest value of
+   * `limits[limit]` under which it parses, every OTHER bound lifted, so the
+   * number is cel-js's own accounting rather than a second implementation of
+   * it. `null` when the measurement was capped (see {@link CEL_BOUNDS_MEASURE_CAP_FACTOR})
+   * or is not being taken — a bounds *refusal* never measures, because
+   * measuring means re-parsing a source we have just decided is too big.
+   */
+  measured: number | null;
+  /**
+   * cel-js's own one-line summary — `Exceeded maxAstNodes (256)`. Taken from
+   * `ParseError#summary`, NOT `#message`: the latter is
+   * `formatErrorWithHighlight`'s rendering, which interpolates the author's own
+   * source line (the #6223 hazard).
+   */
+  summary: string;
+}
+
+/**
+ * The verdict {@link parseCelToAstWithReason} returns — the same three-way
+ * answer {@link classifyCelFault} already grades a thrown fault into, made
+ * available to a caller that has to ACT differently on `bounds` than on
+ * `parse`, rather than collapsing both to `null`.
+ */
+export type CelParseResult =
+  | { ok: true; ast: CelAstNode }
+  /** Empty / whitespace-only source. Not a fault — "no expression". */
+  | { ok: false; kind: 'empty'; message: string }
+  /** A syntax fault. `message` is cel-js's rendered message, verbatim. */
+  | { ok: false; kind: 'parse'; message: string }
+  | {
+      ok: false;
+      kind: 'bounds';
+      /** cel-js's rendered message, verbatim — same string `parse` carries. */
+      message: string;
+      /** WHICH bound, and by how much. */
+      overrun: CelBoundsOverrun;
+      /**
+       * The AST an otherwise-identical but **unbounded** parse yields, when the
+       * caller asked for it (`{ admitOverLimit: true }`) — the 17.0.0-rc.x
+       * grace window's input, and nothing else's. `null` otherwise.
+       */
+      unboundedAst: CelAstNode | null;
+    };
+
+export interface ParseCelToAstOptions {
+  /**
+   * Also perform the unbounded parse and hand back its AST + the measured
+   * overrun. **Only** the 17.0.0-rc.x pushdown grace window sets this (see
+   * `cel-pushdown-limits.ts`); it is what lets that window keep compiling a
+   * predicate the platform's bounds refuse, while still naming the bound. It
+   * disappears with the grace window at v17 GA.
+   *
+   * Off by default, deliberately: an unbounded parse of a source we have just
+   * measured as over-budget is work proportional to the source, so a caller
+   * that only wants the verdict must not pay for it.
+   */
+  admitOverLimit?: boolean;
+}
+
+/**
+ * How far above the exceeded bound {@link measureOverrun} will search before it
+ * gives up and reports `measured: null`. Bounds the diagnostic's own cost:
+ * without a cap, describing a pathological source means parsing it at whatever
+ * size it happens to be.
+ */
+export const CEL_BOUNDS_MEASURE_CAP_FACTOR = 64;
+
+/**
+ * The canonical env with ONE bound lifted, used only to measure an overrun.
+ * Configured identically to {@link canonicalParseEnv} in every other respect —
+ * same stdlib, same `unlistedVariablesAreDyn`, same `enableOptionalTypes` — so
+ * "the smallest bound this source parses under" is a fact about the source and
+ * not about a second, differently-shaped front end.
+ */
+function buildProbeEnv(limits: Record<string, number>): Environment {
+  const env = new Environment({
+    unlistedVariablesAreDyn: true,
+    enableOptionalTypes: true,
+    limits: limits as unknown as typeof DEFAULT_LIMITS,
+  });
+  return registerNumericCoercions(registerStdLib(env, () => new Date(0), 'UTC'));
+}
+
+/** Every bound lifted out of the way except `key`, which is set to `value`. */
+function probeLimits(key: CelLimitKey, value: number): Record<string, number> {
+  const limits: Record<string, number> = {};
+  for (const k of CEL_LIMIT_KEYS) limits[k] = Number.MAX_SAFE_INTEGER;
+  limits[key] = value;
+  return limits;
+}
+
+function parsesUnder(source: string, key: CelLimitKey, value: number): boolean {
+  try {
+    buildProbeEnv(probeLimits(key, value)).parse(source);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The smallest `limits[key]` under which `source` parses — i.e. what the source
+ * measures on that axis, in cel-js's own units.
+ *
+ * Measured rather than computed. cel-js decrements each counter at its own call
+ * sites (`Parser#node` for `maxAstNodes`, three separate recursion points for
+ * `maxDepth`, …), and `maxDepth` in particular counts parenthesised recursion
+ * that leaves no AST node behind — so a node-walk over the parsed tree would
+ * report `3` for a 60-deep parenthesis nest. Asking the parser is the only way
+ * the number in the WARN means what it says.
+ *
+ * Exponential probe from the exceeded bound, then binary search: `O(log n)`
+ * parses, capped at {@link CEL_BOUNDS_MEASURE_CAP_FACTOR}× the bound.
+ */
+function measureOverrun(source: string, key: CelLimitKey, limitValue: number): number | null {
+  const cap = limitValue * CEL_BOUNDS_MEASURE_CAP_FACTOR;
+  let hi = limitValue * 2;
+  while (hi <= cap && !parsesUnder(source, key, hi)) hi *= 2;
+  if (hi > cap) return null;
+  // It parses at `hi` and (by construction) not at `lo`. Narrow to the boundary.
+  let lo = hi / 2;
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (parsesUnder(source, key, mid)) hi = mid;
+    else lo = mid;
+  }
+  return hi;
+}
+
+/** Read the exceeded bound's key out of cel-js's structured limit fault. */
+function limitKeyOf(err: ParseError): CelLimitKey | null {
+  // `summary` is `Exceeded ${limitKey} (${limit})`, built by `Parser#limitExceeded`
+  // from a fixed set of keys — the author's source never reaches it (that is
+  // `message`, via `formatErrorWithHighlight`). We still validate the capture
+  // against `DEFAULT_LIMITS` rather than trusting the shape, so a cel-js that
+  // rephrases the sentence degrades to "we know it was a bounds fault, not which
+  // bound" instead of inventing a limit name.
+  const key = /^Exceeded (\w+) /.exec(err.summary ?? '')?.[1];
+  return key && (CEL_LIMIT_KEYS as readonly string[]).includes(key) ? (key as CelLimitKey) : null;
+}
+
+/**
+ * {@link parseCelToAst}, but it says WHY it refused (#6132).
+ *
+ * `parseCelToAst` collapses "this is not valid CEL" and "this is valid CEL that
+ * is over the platform's budget" into the same `null`, which is right for a
+ * caller whose job is not to adjudicate syntax. It is wrong for a caller whose
+ * job is to *report* the refusal: the RLS / sharing pushdown path fails closed
+ * on a refusal, and "your policy was rejected: parse error" for a predicate
+ * that is perfectly well-formed but 431 AST nodes long sends the author
+ * hunting for a typo that does not exist. This entrance names the bound
+ * (`maxAstNodes` / `maxDepth` / `maxListElements` / …), the platform's value
+ * for it, and what their source actually measures.
+ *
+ * The verdict is graded by the SAME {@link classifyCelFault} the engine's
+ * `compile` / `evaluate` use — error class plus structured `code`, never prose
+ * (#6223). A `bounds` verdict here and a `bounds` verdict from
+ * `celEngine.compile()` are therefore the same judgement of the same fault,
+ * which is the property `cel-parse-reason.test.ts` pins.
+ */
+export function parseCelToAstWithReason(
+  source: string,
+  opts: ParseCelToAstOptions = {},
+): CelParseResult {
+  if (typeof source !== 'string' || !source.trim()) {
+    return { ok: false, kind: 'empty', message: 'empty expression' };
+  }
+  // The #3306 rewrite is part of the canonical front end, so it happens before
+  // the parse whose verdict we are reporting — and the measurement below probes
+  // the SAME rewritten source, so the number describes what actually parsed.
+  const rewritten = rewriteNullableTernary(source);
   try {
     // A wall-clock-free `now()` — the stdlib is registered for parse-time shape
     // only and is never called on this path.
     canonicalParseEnv ??= buildEnv(() => new Date(0));
-    return canonicalParseEnv.parse(rewriteNullableTernary(source)).ast;
-  } catch {
-    return null;
+    return { ok: true, ast: canonicalParseEnv.parse(rewritten).ast };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (classifyCelFault(err) !== 'bounds') return { ok: false, kind: 'parse', message };
+    const parseErr = err as ParseError;
+    const limit = limitKeyOf(parseErr);
+    const summary = parseErr.summary ?? message.split('\n')[0];
+    if (!limit) {
+      // A bounds fault we cannot NAME — unreachable on cel-js 8.0.0, where
+      // `Parser#limitExceeded` always phrases it `Exceeded <key> (<n>)`, but a
+      // rephrasing upstream has to degrade honestly. Still reported as `bounds`
+      // (the class is not in doubt) and never as a syntax fault, which is the
+      // exact mislabel this entrance exists to stop — but with `limit: null`
+      // rather than a guessed key, and with no AST to admit, so the pushdown
+      // path fails closed on it in either position of the switch.
+      return {
+        ok: false,
+        kind: 'bounds',
+        message,
+        overrun: { limit: null, limitValue: null, measured: null, summary },
+        unboundedAst: null,
+      };
+    }
+    const limitValue = DEFAULT_LIMITS[limit];
+    let unboundedAst: CelAstNode | null = null;
+    let measured: number | null = null;
+    if (opts.admitOverLimit) {
+      try {
+        unboundedAst = buildProbeEnv(probeLimits(limit, Number.MAX_SAFE_INTEGER)).parse(rewritten).ast;
+        measured = measureOverrun(rewritten, limit, limitValue);
+      } catch {
+        // Unbounded still refuses ⇒ a second, non-`limit` bound or a fault the
+        // bounded parse never got far enough to raise. No AST to admit.
+        unboundedAst = null;
+      }
+    }
+    return { ok: false, kind: 'bounds', message, overrun: { limit, limitValue, measured, summary }, unboundedAst };
   }
 }
 

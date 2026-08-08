@@ -136,7 +136,8 @@
     },
     "step": {
       "status": "live",
-      "note": "slider — SliderField.tsx (min/max/step live)."
+      "verifiedAt": "2026-08-08",
+      "note": "CAVEAT — RENDERER-only: objectui SliderField.tsx:14 reads `field.step ?? 1`; the write path never validates the grid (record-validator.ts's numeric branch enforces min/max for slider and reads step nowhere). Ruled UI-only and deliberately unenforced 2026-08-08 (#6514) — see docs/audits/2026-06-dead-surface-disposition-plan.md (P2 field) and the comment beside the declaration in src/data/field.zod.ts."
     },
     "group": {
       "status": "live",
