@@ -570,3 +570,4 @@ export type ElementDataSource = z.input<typeof ElementDataSourceSchema>;
 export type InterfacePageConfig = z.input<typeof InterfacePageConfigSchema>;
 /** Post-parse shape of {@link InterfacePageConfig} — defaults applied, transforms run (ADR-0122). */
 export type InterfacePageConfigParsed = z.infer<typeof InterfacePageConfigSchema>;
+export type PageComponentType = z.input<typeof PageComponentType>;

@@ -11,7 +11,25 @@ import {
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
-import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
+import {
+    allowPerfDisclosure,
+    isPerfDisclosurePrincipal,
+    OBSERVABILITY_METRICS_SERVICE,
+} from '@objectstack/observability';
+// [ADR-0106 / #3682] Metadata-plane FLS. One projection, one fingerprint,
+// shared with the runtime `/metadata` dispatcher — see
+// `@objectstack/metadata-core`'s `object-schema-fls.ts` for why the normalizer
+// lives there rather than beside either set of exits.
+import {
+    ObjectSchemaMaskEvaluationError,
+    applyObjectSchemaMask,
+    foldVisibilityFingerprintIntoEtag,
+    isObjectSchemaMaskingEnabled,
+    normalizeIfNoneMatch,
+    resolveObjectSchemaMaskPosture,
+    OBJECT_SCHEMA_MASK_NOT_APPLICABLE,
+    type ObjectSchemaMaskPosture,
+} from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
@@ -1032,6 +1050,28 @@ function sendError(res: any, error: any, object?: string): void {
 }
 
 /**
+ * [ADR-0106 D6 tier 3] Refuse an object-schema read whose field visibility
+ * could not be evaluated.
+ *
+ * An unhealthy security service must not auto-open a disclosure hole, and the
+ * only safe closed form is an *error*: visible, retryable, never cached. The
+ * two answers this exists to rule out are (a) the unmasked body — D3's
+ * fetch → mask → send ordering means the cached full document never reaches the
+ * wire on this path — and (b) an empty-fields `200`, which is a silently wrong
+ * UI and cacheable poison at once.
+ *
+ * 503 rather than 500: the condition is an unhealthy dependency and a retry is
+ * the right client behaviour.
+ */
+function sendFieldVisibilityFault(res: any, objectName: string): void {
+    sendError(res, {
+        code: 'FIELD_VISIBILITY_UNRESOLVED',
+        message: `Field visibility for object '${objectName}' could not be evaluated; the object schema is not being served.`,
+        status: 503,
+    });
+}
+
+/**
  * [#5437] Log the ORIGINAL error whenever a server fault's own message was
  * withheld from the response body.
  *
@@ -1574,6 +1614,12 @@ type NormalizedRestServerConfig = {
         prefix: string;
         enableCache: boolean;
         cacheTtl: number;
+        /**
+         * [ADR-0106 D8] Per-caller FLS masking of served object schemas.
+         * Default **on**; `false` opts a deployment out of the metadata-plane
+         * mask entirely (the data plane is unaffected either way).
+         */
+        maskObjectFields: boolean;
         endpoints: {
             types: boolean;
             items: boolean;
@@ -2859,6 +2905,85 @@ export class RestServer {
     }
 
     /**
+     * [ADR-0106 D2/D4/D6/D7/D8] Build this request's object-schema masker — a
+     * per-object-name posture resolver whose caller context and `security`
+     * service are resolved ONCE.
+     *
+     * Every exit that serves object schemas (single cached, single uncached,
+     * layered, compound-name, and the list read) goes through the returned
+     * function, so "which outlets mask" is one decision rather than five
+     * (ADR-0106 D5 — "every schema-serving outlet, or the mask is decoration").
+     *
+     * Answers the not-applicable passthrough for every non-`object` type, so a
+     * call site can stand unconditionally at an exit that serves all types.
+     * `metaType` must be the NORMALIZED type (`/meta/objects/x` is the canonical
+     * plural spelling; a gate comparing the raw param is a gate the canonical
+     * spelling walks past — #3984 / #6241).
+     *
+     * The returned function REJECTS with {@link ObjectSchemaMaskEvaluationError}
+     * on D6 tier 3 — the security service threw. Call sites answer 5xx via
+     * {@link sendFieldVisibilityFault}; they must never fall back to the
+     * unmasked body.
+     */
+    private async resolveObjectMasker(
+        environmentId: string | undefined,
+        req: any,
+        metaType: string,
+    ): Promise<(objectName: string) => Promise<ObjectSchemaMaskPosture>> {
+        if (metaType !== 'object' || !this.config.metadata.maskObjectFields) {
+            const fixed: ObjectSchemaMaskPosture = metaType !== 'object'
+                ? OBJECT_SCHEMA_MASK_NOT_APPLICABLE
+                : { kind: 'passthrough', reason: 'disabled' };
+            return async () => fixed;
+        }
+        // Resolved ONCE per request, not once per item: the list read asks the
+        // same caller about every object it serves.
+        const context = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+        const security = await this.resolveSecurityService(environmentId, req);
+        const telemetry = {
+            warn: (message: string, meta: Record<string, unknown>) => logWarn(message, meta),
+            counter: (name: string, labels: Record<string, string>) => {
+                // Best-effort: the D6 middle tier must be OBSERVABLE, but a
+                // deployment without a metrics registry still serves the read.
+                // The structured warn above is the floor.
+                try {
+                    (context as any)?.__kernel?.getService?.(OBSERVABILITY_METRICS_SERVICE)?.counter?.(name, labels);
+                } catch { /* metrics are never load-bearing */ }
+            },
+        };
+        return (objectName: string) => resolveObjectSchemaMaskPosture({
+            objectName,
+            context,
+            security: security as any,
+            enabled: true,
+            telemetry,
+        });
+    }
+
+    /**
+     * Apply {@link resolveObjectMaskPosture}'s verdict to one served document
+     * (ADR-0106 D1/D3).
+     *
+     * Returns `null` after answering 5xx when the projection would leave the
+     * schema with no fields at all — `getReadableFields` answers `[]` only where
+     * its own posture read failed closed (#3545), and D6 rules an empty-fields
+     * `200` out ("silently wrong UI **and** cacheable poison").
+     */
+    private maskObjectDocument<T>(
+        res: any,
+        posture: ObjectSchemaMaskPosture,
+        objectName: string,
+        document: T,
+    ): { document: T; fingerprint: string } | null {
+        const masked = applyObjectSchemaMask(document, posture);
+        if (masked.emptied) {
+            sendFieldVisibilityFault(res, objectName);
+            return null;
+        }
+        return { document: masked.document, fingerprint: masked.fingerprint };
+    }
+
+    /**
      * Translate a list of metadata documents using `translateMetaItem`.
      */
     private async translateMetaItems(req: any, type: string, environmentId: string | undefined, items: any): Promise<any> {
@@ -3016,6 +3141,16 @@ export class RestServer {
                 prefix: metadata.prefix ?? '/meta',
                 enableCache: metadata.enableCache ?? true,
                 cacheTtl: metadata.cacheTtl ?? 3600,
+                // [ADR-0106 D8] Default ON — masking is the platform default and
+                // ships with the current major. Read through `as any` for the
+                // same reason `api.enableOpenApi` / `api.enableSearch` above are:
+                // `MetadataEndpointsConfigSchema` lives in `packages/spec` and
+                // giving this key a declared seat there is a separate change.
+                // `isObjectSchemaMaskingEnabled` also honours the
+                // `OS_ALLOW_UNMASKED_OBJECT_METADATA` escape hatch, which is the
+                // knob the runtime `/metadata` dispatcher shares (it has no REST
+                // config to read).
+                maskObjectFields: isObjectSchemaMaskingEnabled((metadata as any).maskObjectFields),
                 endpoints: {
                     types: metadata.endpoints?.types ?? true,
                     items: metadata.endpoints?.items ?? true,
@@ -4132,6 +4267,47 @@ export class RestServer {
                             }
                         }
 
+                        // [ADR-0106 D5(2)] The list read — each item projected
+                        // the same way, through the same masker. The posture is
+                        // per OBJECT (one caller may read every field of `lead`
+                        // and half of `account`), so the masker is resolved once
+                        // and asked per item.
+                        {
+                            const listMetaType = RestServer.metaTypeSingular(req.params.type);
+                            if (listMetaType === 'object') {
+                                const raw = visible as unknown;
+                                const list = RestServer.metaItemsArray(raw);
+                                if (list.length > 0) {
+                                    const masker = await this.resolveObjectMasker(environmentId, req, listMetaType);
+                                    const projected: any[] = [];
+                                    let undetermined = false;
+                                    for (const item of list) {
+                                        const objectName = String((item as any)?.name ?? '');
+                                        let posture: ObjectSchemaMaskPosture;
+                                        try {
+                                            posture = await masker(objectName);
+                                        } catch (maskError: any) {
+                                            if (maskError instanceof ObjectSchemaMaskEvaluationError) {
+                                                // D6 tier 3 — one unevaluable
+                                                // object fails the whole list
+                                                // rather than serving it with a
+                                                // silent hole in the projection.
+                                                sendFieldVisibilityFault(res, objectName);
+                                                return;
+                                            }
+                                            throw maskError;
+                                        }
+                                        if (posture.kind === 'undetermined') undetermined = true;
+                                        const masked = this.maskObjectDocument(res, posture, objectName, item);
+                                        if (!masked) return;
+                                        projected.push(masked.document);
+                                    }
+                                    if (undetermined) res.header('Cache-Control', 'private, no-store');
+                                    visible = Array.isArray(raw) ? projected : { ...(raw as any), items: projected };
+                                }
+                            }
+                        }
+
                         const translated = await this.translateMetaItems(req, req.params.type, environmentId, visible);
                         res.header('Vary', 'Accept-Language');
                         res.json(translated);
@@ -4311,6 +4487,24 @@ export class RestServer {
                         // in scope for it to compare against by accident.
                         const metaType = RestServer.metaTypeSingular(req.params.type);
 
+                        // [ADR-0106 D2/D5] Resolve the caller's field-visibility
+                        // posture ONCE, here, before any fetch — every exit
+                        // below (layered, cached, uncached) projects through
+                        // THIS value. Resolving per-branch is how an outlet gets
+                        // forgotten; resolving before the fetch is what makes
+                        // D3's `fetch → mask → send` ordering structural rather
+                        // than a convention.
+                        let maskPosture: ObjectSchemaMaskPosture;
+                        try {
+                            maskPosture = await (await this.resolveObjectMasker(environmentId, req, metaType))(req.params.name);
+                        } catch (maskError: any) {
+                            if (maskError instanceof ObjectSchemaMaskEvaluationError) {
+                                sendFieldVisibilityFault(res, req.params.name);
+                                return;
+                            }
+                            throw maskError;
+                        }
+
                         // Phase 3a-layered-get: opt-in 3-state view when client
                         // asks for `?layers=true` (or any non-empty value).
                         // Skips the cache path entirely — layered view is a
@@ -4341,6 +4535,26 @@ export class RestServer {
                                 ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
                                 ...(environmentId ? { environmentId } : {}),
                             });
+                            // [ADR-0106 D5(4)] The layered view is a THIRD
+                            // schema-bearing exit on this route, reached by a
+                            // query flag — `code`, `overlay` and `effective` are
+                            // each a full object schema. Leaving it unprojected
+                            // would have made the mask a one-query-param detour,
+                            // which is precisely the "or the mask is decoration"
+                            // case D5 names. Its usual caller (the Studio
+                            // editor) is exempt under D4 and sees no change.
+                            if (maskPosture.kind === 'project') {
+                                for (const layer of ['code', 'overlay', 'effective'] as const) {
+                                    const masked = this.maskObjectDocument(
+                                        res, maskPosture, req.params.name, (layered as any)?.[layer],
+                                    );
+                                    if (!masked) return;
+                                    if (layered && typeof layered === 'object') (layered as any)[layer] = masked.document;
+                                }
+                            }
+                            if (maskPosture.kind === 'undetermined') {
+                                res.header('Cache-Control', 'private, no-store');
+                            }
                             res.json(layered);
                             return;
                         }
@@ -4436,8 +4650,18 @@ export class RestServer {
                         // the uncached branch below; one predicate, two sites.
                         const isAudienceGatedType = metaType === 'book' || metaType === 'doc';
                         if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && !isAudienceGatedType) {
+                            // [ADR-0106 D3] When a projection applies, the
+                            // protocol is NOT allowed to judge the conditional
+                            // request: `getMetaItemCached` hashes the UNFILTERED
+                            // document, so a `304` decided there would pin this
+                            // caller to a body no mask ever touched — the same
+                            // validator-vs-served-body mismatch #5881 recorded
+                            // for the dashboard gate. The comparison moves below,
+                            // against the fingerprinted ETag, which is the one
+                            // that identifies what we are actually sending.
+                            const maskApplies = maskPosture.kind !== 'passthrough';
                             const cacheRequest = {
-                                ifNoneMatch: req.headers['if-none-match'] as string,
+                                ifNoneMatch: maskApplies ? undefined : (req.headers['if-none-match'] as string),
                                 ifModifiedSince: req.headers['if-modified-since'] as string,
                             };
 
@@ -4462,12 +4686,54 @@ export class RestServer {
                                 return;
                             }
 
+                            // [ADR-0106 D1/D3] fetch → mask → send. The shared
+                            // cache still stores ONE full schema per (type,
+                            // name, locale, environment) — no caller dimension
+                            // in the key — and what varies per caller is this
+                            // projection plus the validator below.
+                            let cachedDocument: any = result.data;
+                            let visibilityFingerprint = '';
+                            if (maskPosture.kind === 'project') {
+                                const masked = this.maskObjectDocument(res, maskPosture, req.params.name, cachedDocument);
+                                if (!masked) return;
+                                cachedDocument = masked.document;
+                                visibilityFingerprint = masked.fingerprint;
+                            }
+
+                            // [ADR-0106 D6 tier 2] Visibility undetermined →
+                            // the body is unmasked, so it must not be stored or
+                            // revalidated under a SHARED validator: a later 304
+                            // would hand this body to a caller whose projection
+                            // did resolve. No ETag, no Last-Modified, no-store.
+                            if (maskPosture.kind === 'undetermined') {
+                                res.header('Cache-Control', 'private, no-store');
+                                res.header('Vary', 'Accept-Language');
+                                res.json(await this.translateMetaEnvelope(
+                                    req, req.params.type, environmentId,
+                                    { type: metaType, name: req.params.name },
+                                    cachedDocument, cacheI18n,
+                                ));
+                                return;
+                            }
+
                             // Set cache headers
                             if (result.etag) {
+                                // [ADR-0106 D3] Fold the caller's field-visibility
+                                // fingerprint into the shared validator. An
+                                // unrestricted caller denies nothing → the
+                                // fingerprint is empty → the ETag is byte-identical
+                                // to the pre-ADR one. A cohort shares 304s; a
+                                // permission change moves the fingerprint and
+                                // self-invalidates the stale 304.
+                                const value = foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint);
                                 const etagValue = result.etag.weak
-                                    ? `W/"${result.etag.value}"`
-                                    : `"${result.etag.value}"`;
+                                    ? `W/"${value}"`
+                                    : `"${value}"`;
                                 res.header('ETag', etagValue);
+                                if (maskApplies && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
+                                    res.status(304).send();
+                                    return;
+                                }
                             }
                             if (result.lastModified) {
                                 res.header('Last-Modified', new Date(result.lastModified).toUTCString());
@@ -4509,7 +4775,7 @@ export class RestServer {
                                 name: req.params.name,
                             };
                             res.json(await this.translateMetaEnvelope(
-                                req, req.params.type, environmentId, cachedEnvelope, result.data, cacheI18n,
+                                req, req.params.type, environmentId, cachedEnvelope, cachedDocument, cacheI18n,
                             ));
                         } else {
                             // Non-cached version
@@ -4639,6 +4905,21 @@ export class RestServer {
                                 const locale = this.extractLocale(req);
                                 const { resolveDocLocale } = await import('@objectstack/spec/system');
                                 visible = resolveDocLocale(visible as any, locale);
+                            }
+
+                            // [ADR-0106 D1/D5(1)] The uncached exit. Same
+                            // posture, same projection — this branch serves
+                            // `?state=draft`, `?preview=draft`, `?package=` and
+                            // any deployment with `enableCache: false`, so a
+                            // mask that lived only in the cached branch would be
+                            // walked past by a query parameter (#5881's shape,
+                            // in reverse).
+                            if (maskPosture.kind === 'project') {
+                                const masked = this.maskObjectDocument(res, maskPosture, req.params.name, visible);
+                                if (!masked) return;
+                                visible = masked.document;
+                            } else if (maskPosture.kind === 'undetermined') {
+                                res.header('Cache-Control', 'private, no-store');
                             }
 
                             res.header('Vary', 'Accept-Language');
@@ -5021,9 +5302,36 @@ export class RestServer {
                             name: compoundName,
                             packageId,
                         } as any) as Record<string, any>;
+                        // [ADR-0106 D5(4)] Compound names express sub-resources,
+                        // and no object uses one today — but this route serves
+                        // EVERY type through one generic `getMetaItem`, so the
+                        // question it answers for `object` is the same question
+                        // the single-item route answers. Running the projection
+                        // here costs one predicate on a path that will never
+                        // reach it, and leaves no exit whose coverage depends on
+                        // a naming convention holding.
+                        let compoundDocument: any = envelope?.item;
+                        const compoundType = RestServer.metaTypeSingular(req.params.type);
+                        let compoundPosture: ObjectSchemaMaskPosture;
+                        try {
+                            compoundPosture = await (await this.resolveObjectMasker(environmentId, req, compoundType))(compoundName);
+                        } catch (maskError: any) {
+                            if (maskError instanceof ObjectSchemaMaskEvaluationError) {
+                                sendFieldVisibilityFault(res, compoundName);
+                                return;
+                            }
+                            throw maskError;
+                        }
+                        if (compoundPosture.kind === 'project') {
+                            const masked = this.maskObjectDocument(res, compoundPosture, compoundName, compoundDocument);
+                            if (!masked) return;
+                            compoundDocument = masked.document;
+                        } else if (compoundPosture.kind === 'undetermined') {
+                            res.header('Cache-Control', 'private, no-store');
+                        }
                         res.header('Vary', 'Accept-Language');
                         res.json(await this.translateMetaEnvelope(
-                            req, req.params.type, environmentId, envelope, envelope?.item,
+                            req, req.params.type, environmentId, envelope, compoundDocument,
                         ));
                     } catch (error: any) {
                         handleRouteError(res, error);

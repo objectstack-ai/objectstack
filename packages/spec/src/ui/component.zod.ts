@@ -421,6 +421,7 @@ export const RecordHighlightsField = z.union([
     readonly: z.boolean().optional().describe('Render this chip read-only — suppresses inline editing on the highlight card. Use for hook/automation-maintained columns that must not be hand-edited from the record header.'),
   }),
 ]).describe('Highlight field: bare name, or {name,label?,icon?,type?,readonly?}');
+export type RecordHighlightsField = z.input<typeof RecordHighlightsField>;
 
 export const RecordHighlightsProps = z.object({
   fields: z.array(RecordHighlightsField).min(1).max(7).describe('Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or {name, label?, icon?, type?, readonly?} for inline overrides.'),
@@ -490,6 +491,7 @@ export const RecordPathProps = z.object({
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
+export type RecordPathProps = z.input<typeof RecordPathProps>;
 
 export const PageAccordionProps = z.object({
   items: z.array(z.object({
@@ -551,6 +553,7 @@ export const ElementNumberPropsSchema = lazySchema(() => z.object({
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
+export type ElementNumberProps = z.input<typeof ElementNumberPropsSchema>;
 
 export const ElementImagePropsSchema = lazySchema(() => z.object({
   src: z.string().describe('Image URL or attachment field'),
@@ -718,6 +721,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
+export type ElementRecordPickerProps = z.input<typeof ElementRecordPickerPropsSchema>;
 
 /**
  * A single-line free-text input — the data-entry half of an SDUI page (Airtable

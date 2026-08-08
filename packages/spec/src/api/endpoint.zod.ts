@@ -14,6 +14,7 @@ export const ApiMappingSchema = lazySchema(() => z.object({
   target: z.string().describe('Target field/path'),
   transform: z.string().optional().describe('Transformation function name — NOT EXECUTED in 17.x, and publish REJECTS the key: there is no transformation-function registry anywhere in the platform, so it stays in the frozen vocabulary and is refused rather than parsed and ignored (#5040 E7). A mapping entry moves and renames fields by dot path and nothing more — shape the value where it is produced instead (a flow endpoint whose flow computes it, or a formula field on the object)'),
 }));
+export type ApiMapping = z.input<typeof ApiMappingSchema>;
 
 /**
  * API Endpoint Schema

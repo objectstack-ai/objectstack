@@ -421,6 +421,7 @@ export type ReportChartParsed = z.infer<typeof ReportChartSchema>;
 export type ReportSort = z.input<typeof ReportSortSchema>;
 /** Post-parse shape of {@link ReportSort} — defaults applied, transforms run (ADR-0122). */
 export type ReportSortParsed = z.infer<typeof ReportSortSchema>;
+export type ReportType = z.input<typeof ReportType>;
 
 /**
  * Report Factory Helper
