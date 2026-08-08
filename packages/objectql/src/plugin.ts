@@ -895,31 +895,48 @@ export class ObjectQLPlugin implements Plugin {
           }
         },
       },
-      {
-        name: 'sys_fetch_previous_update',
-        object: '*',
-        events: ['beforeUpdate'],
-        priority: 5,
-        description: 'Auto-fetch the previous record for update hooks',
-        handler: async (hookCtx: any) => {
-          if (hookCtx.input?.id && !hookCtx.previous) {
-            try {
-              const existing = await this.ql!.findOne(hookCtx.object, {
-                where: { id: hookCtx.input.id },
-                context: {
-                  positions: [],
-                  permissions: [],
-                  isSystem: true,
-                  ...(hookCtx.transaction ? { transaction: hookCtx.transaction } : {}),
-                } as any,
-              });
-              if (existing) hookCtx.previous = existing;
-            } catch (_e) {
-              // Non-fatal: some objects may not support findOne
-            }
-          }
-        },
-      },
+      // ⛔ RETIRED — `sys_fetch_previous_update` (#5846 (a), delivered with
+      // #5574's engine half). Do not reintroduce it.
+      //
+      // It was registered here on `object: '*'` at priority 5, and on every
+      // by-id update it issued its own `ql.findOne` to bind
+      // `hookCtx.previous`, behind the guard `if (input.id && !ctx.previous)`.
+      // That guard is now PERMANENTLY FALSE: `update()` reads the prior row and
+      // binds `hookContext.previous` BEFORE dispatching `beforeUpdate` (the
+      // shape `delete()` has had since #5272), because ADR-0058 Addendum II
+      // makes the before phase a real reader of that row. A hook whose only
+      // statement is a guard that can no longer be true is not a safety net,
+      // it is a second read waiting to be rediscovered — so it goes, rather
+      // than being left in place "just in case".
+      //
+      // What it cost while it stood, measured on #5846: a single by-id update
+      // on a kernel with plugin-audit read the same row THREE times — this
+      // builtin, plugin-audit's `captureBefore`, and the engine's own gated
+      // read. Two of the three were engine reads through the full read pipeline
+      // (middleware, RLS, field masking) and neither consulted any demand gate.
+      // This change removes one and makes the engine's the single producer;
+      // `captureBefore`'s now-redundant read is the identity lane's follow-up.
+      //
+      // ⚠️ `sys_fetch_previous_delete` below is in the SAME position now, and is
+      // deliberately left standing because retiring it is #5929's card, not a
+      // rider on this one. Recording the measurement so that card does not have
+      // to rediscover it:
+      //
+      // `delete()` reads its pre-image when `wantsPreImage` is true, and that
+      // gate is `hasHooksFor('beforeDelete', object) || hasHooksFor(
+      // 'afterDelete', object) || summaries`. The builtin is itself a
+      // `beforeDelete` hook on `'*'`, so it makes the FIRST term true for every
+      // object — and then the engine's read binds `previous` before the builtin
+      // runs, so the builtin's own `!ctx.previous` guard is false and it issues
+      // no `findOne`. It is circular: the builtin's only remaining effect is to
+      // hold open the gate that makes it redundant. That circularity IS #5929
+      // ("the delete-side per-object gate is always true"), and after this
+      // change its resolution is the same retirement performed above, with the
+      // same argument.
+      //
+      // The one shape where the guard can still be true — the engine read found
+      // nothing (the row is already gone) — is one where the builtin's read
+      // finds nothing either, so it changes no binding.
       {
         name: 'sys_fetch_previous_delete',
         object: '*',

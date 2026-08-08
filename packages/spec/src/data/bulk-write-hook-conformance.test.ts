@@ -116,31 +116,39 @@ describe('bulk-write hook dispatch contract — delivery status', () => {
         expect(byEvent('afterDelete')).toMatchObject({ delivered: true, engineDeliveryIssue: 5038 });
     });
 
-    it('records the before half as CONTRACTED but not yet delivered (#5574 engine half)', () => {
-        // ⚠️ This case is meant to go red exactly once. When the engine half of
-        // #5574 lands per-row `before*` dispatch, flip both `delivered` flags
-        // and this expectation in that PR — and move `hook.zod.ts`'s
-        // `HookContextSchema.input` shape table with it, since that table
-        // describes the engine as built and is pinned against a real dispatch
-        // in objectql. A green run here after the engine lands would mean the
-        // contract and the producer had drifted apart in the direction nobody
-        // checks (#5273).
-        expect(byEvent('beforeUpdate')).toMatchObject({ delivered: false, engineDeliveryIssue: 5574 });
-        expect(byEvent('beforeDelete')).toMatchObject({ delivered: false, engineDeliveryIssue: 5574 });
+    it('records the before half as DELIVERED by #5574\'s engine half', () => {
+        // ⚠️ This case was written to go red exactly once, and it did. Until
+        // #5574's engine half it read "CONTRACTED but not yet delivered" and
+        // asserted `delivered: false` on both `before*` entries — the honest
+        // face of a contract-first split. The engine landed per-row `before*`
+        // dispatch, so the flags flipped and this expectation flipped with
+        // them, in that same PR, alongside `hook.zod.ts`'s
+        // `HookContextSchema.input` shape table (which describes the engine as
+        // built and is pinned against a real dispatch in objectql).
+        expect(byEvent('beforeUpdate')).toMatchObject({ delivered: true, engineDeliveryIssue: 5574 });
+        expect(byEvent('beforeDelete')).toMatchObject({ delivered: true, engineDeliveryIssue: 5574 });
+    });
 
+    it('has NOTHING undelivered — the contract-first split is closed', () => {
+        // The pin that replaces the inverted one above. It is the direction
+        // that keeps mattering: a clause added to this table later with
+        // `delivered: false` and no engine behind it fails here immediately,
+        // instead of standing unnoticed the way #5273's three keys did.
         const undelivered = BULK_WRITE_HOOK_DISPATCH_CONTRACT.filter((e) => !e.delivered);
-        expect(undelivered.map((e) => e.event)).toEqual(['beforeUpdate', 'beforeDelete']);
-        expect(undelivered.every((e) => e.phase === 'before')).toBe(true);
+        expect(undelivered.map((e) => e.event)).toEqual([]);
+        expect(BULK_WRITE_HOOK_DISPATCH_CONTRACT.every((e) => e.delivered)).toBe(true);
     });
 });
 
 describe('bulk-write per-row hook budget (D6)', () => {
     it('carries the ceiling objectql enforces today', () => {
-        // Receipt: `ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS = 10_000`
-        // (`packages/objectql/src/engine.ts`, #5038). Two definitions until the
-        // engine half reads this one; this number is what keeps them agreeing
-        // meanwhile, so changing it here without changing it there is the drift
-        // to catch.
+        // Receipt: `ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS` (`engine.ts`) is a
+        // RE-EXPORT of this constant since #5574's engine half, and
+        // `assertBulkPerRowHookBudget` raises what `resolveBulkPerRowHookBudget`
+        // decides — so there is one definition and nothing left to keep in
+        // step. The number is still pinned because it is a contract an
+        // operator reads out of a rejection message, not an implementation
+        // detail free to drift.
         expect(MAX_BULK_PER_ROW_HOOK_ROWS).toBe(10_000);
     });
 

@@ -10370,12 +10370,46 @@ export class ObjectStackProtocolImplementation implements
                 const current = await repo.get(ref, { state: 'active' });
                 if (!it.existedBefore) {
                     // Created by this commit → soft-remove (metadata only; table stays).
+                    //
+                    // [#6620] The write INTENT is derived per item, exactly as
+                    // the sibling DELETE caller {@link deleteMetaItem} derives
+                    // it (and as the sibling revert caller
+                    // {@link rollbackMetaItem} derives its own) — all three now
+                    // agree. Stated as the CONSTANT `'override-artifact'` this
+                    // limb used to carry, `SysMetadataRepository.delete` opened
+                    // with `assertAllowed(ref.type, opts.intent)` — the same
+                    // gate `put` uses — which refuses every type that is not
+                    // `allowOrgOverride`, `object` among them. So a commit that
+                    // CREATED an object could not be reverted at all: the
+                    // first-build undo (publish a brand-new app, then undo it)
+                    // left every created object behind, answered `success:
+                    // false` with a populated `failed[]`, and left the package
+                    // half-reverted — its overlay-allowed items removed, its
+                    // objects not.
+                    //
+                    // Per ITEM, not per call: one first-build commit routinely
+                    // creates a runtime object beside a packaged-artifact name,
+                    // so a hoisted intent has to pick one and be wrong about
+                    // the other. A genuinely artifact-backed item still
+                    // resolves to `'override-artifact'` and is still refused
+                    // with `NOT_OVERRIDABLE` — the derivation states the
+                    // caller's case, it does not widen the repository's gate,
+                    // which is unchanged and right.
+                    //
+                    // Sibling limb: #6563 (PR #6642) did the same for the
+                    // restore branch below, where the intent was UNSTATED and
+                    // fell through to `restoreVersion`'s `?? 'override-artifact'`
+                    // default. Still not addressed here, filed with its own
+                    // measurement: neither limb refreshes the SchemaRegistry the
+                    // way `rollbackMetaItem` does (#6621).
+                    const intent: 'override-artifact' | 'runtime-only' =
+                        this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
                     if (current) {
                         await repo.delete(ref, {
                             parentVersion: current.hash,
                             actor,
                             source: 'protocol.revertCommit',
-                            intent: 'override-artifact',
+                            intent,
                             state: 'active',
                         });
                     }
@@ -10401,12 +10435,12 @@ export class ObjectStackProtocolImplementation implements
                     // resolves to `'override-artifact'` and is still refused — the
                     // derivation states the case, it does not widen the gate.
                     //
-                    // Two neighbours are deliberately NOT changed here, each filed
-                    // with its own measurement: the soft-remove limb above states the
-                    // same intent as a CONSTANT, so a commit that CREATED an object
-                    // still cannot be reverted (#6620); and neither limb refreshes the
-                    // SchemaRegistry the way `rollbackMetaItem` does, so a restored
-                    // body is persisted but not yet dispatched on (#6621).
+                    // The soft-remove limb above stated the same intent as a
+                    // CONSTANT and was fixed the same way (#6620), so both limbs now
+                    // derive it. One neighbour is still open, filed with its own
+                    // measurement: neither limb refreshes the SchemaRegistry the way
+                    // `rollbackMetaItem` does, so a restored body is persisted but not
+                    // yet dispatched on (#6621).
                     const intent: 'override-artifact' | 'runtime-only' =
                         this.isArtifactBacked(it.type, it.name) ? 'override-artifact' : 'runtime-only';
                     await repo.restoreVersion(ref, it.prevVersion, {
