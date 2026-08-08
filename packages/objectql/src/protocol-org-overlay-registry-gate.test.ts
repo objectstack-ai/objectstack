@@ -529,11 +529,24 @@ describe('#6602 — the delete chain needs no re-keying under this fix', () => {
  *
  * Ordinary red, with deliberately green controls. Deleting the
  * `organizationId` refusal from `restoreArtifactRegistryView` must turn the
- * four org-scoped cases red — reproducing the card's `undefined` (and, for
- * the artifact case, the un-shadowing that precedes it) — and leave the three
- * env-wide cases green, because an env-wide delete is exactly what the heal
- * is FOR and #6687's three-tier walk must not regress. Predicted 4 red /
- * 3 green; measured direction is recorded in the PR body.
+ * three org-scoped REGISTRY cases red — reproducing the card's `undefined`
+ * and, for the artifact case, the un-shadowing that precedes it — while the
+ * three env-wide cases stay green (an env-wide delete is exactly what the
+ * heal is FOR: #6687's three-tier walk must not regress) and so does the
+ * org-scoped ROW control, which asserts the delete itself and never reads the
+ * registry. Predicted 3 red / 4 green in this block; measured 3 red / 4 green:
+ *
+ *   × …the card's sequence            → expected undefined to be defined
+ *   × …the SELF-HEAL branch           → expected undefined to be 'Env grid'
+ *   × …the runtime-SHADOW tier        → expected 'Artifact grid' to be 'Env grid'
+ *   ✓ the ORG ROW is still removed · ✓ tier 1 · ✓ tier 3 · ✓ env-wide + org overlay
+ *
+ * A FOURTH red lands in a file this change did not edit, and it is the point
+ * of shape (b) rather than a surprise: PR #6807's own pin
+ * (`protocol-commit-history.test.ts` → "an ORG-scoped soft-remove leaves the
+ * env-wide registry entry alone") goes red too — `expected null to be
+ * 'EnvWide'` — because its call-site `if (orgId === null)` was folded into
+ * the argument it now passes. The gate moved; the coverage did not.
  */
 describe('#6780 — the registry heal is org-gated: an org DELETE never evicts the env-wide entry', () => {
     let registry: SchemaRegistry;
