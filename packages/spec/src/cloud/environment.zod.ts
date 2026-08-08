@@ -49,12 +49,21 @@ import { lazySchema } from '../shared/lazy-schema';
  * coarser THREE-member enum — `production` / `sandbox` / `development` — that
  * answers "am I talking to production?", not "which environment is this". The
  * three are a strict subset of the seven here, and `resolveDiscoveryEnvironment`
- * folds the other four onto them (`staging` → `sandbox`, `test` → `development`,
- * #4828). So a `staging` value that is first-class on this taxonomy is REJECTED
+ * folds the other four onto them (#4828): `test` → `development`; `staging`,
+ * `preview` and `trial` → `sandbox`, the enum's provisioned pre-production
+ * member. So a `staging` value that is first-class on this taxonomy is REJECTED
  * by `DiscoveryEnvironmentSchema`; do not carry a value from here onto a
  * discovery response without going through that resolver. The subset relation is
  * pinned in `api/discovery-environment-subset.pin.test.ts` so neither enum can
  * drift out of it silently (#5676).
+ *
+ * ⚠️ **Adding a member here is a decision over there too** (#6287). The fold
+ * table is typed `Record<EnvironmentType, DiscoveryEnvironment>`, so a new
+ * bucket does not compile until someone says which of the three coarse postures
+ * it advertises. That is on purpose: before #6287 `preview` and `trial` reached
+ * `development` through a `??` fallback instead of a decision, and a new bucket
+ * would have joined them silently — including a production-side one, which is
+ * the dangerous direction (#5673).
  */
 export const EnvironmentTypeSchema = lazySchema(() => z
   .enum(['production', 'sandbox', 'development', 'test', 'staging', 'preview', 'trial'])
