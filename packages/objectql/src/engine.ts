@@ -17,6 +17,10 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
+// The validate-only result IS the protocol's response shape (#6037): the
+// engine is what `metadata-protocol.validateData` returns, so letting the two
+// drift would put a translation layer between a verdict and its contract.
+import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
@@ -112,7 +116,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
+import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
@@ -5365,6 +5369,132 @@ export class ObjectQL implements IObjectQLEngine {
   // FLS write gate throws rather than stripping. So neither member reports on
   // those here — only on what this path actually strips. Any FURTHER strip added
   // here must wire both members at its own site too.
+  /**
+   * Validate-only (#6037, #4633 ruling D) — run the write path's own verdict
+   * over candidate rows and report it, WITHOUT persisting anything.
+   *
+   * ## Why this exists
+   *
+   * `import`'s dry run used to predict the write's verdict with a hand-copied
+   * mirror of the engine's rules (`rest/src/import-coerce.ts`). A copy cannot
+   * structurally keep up with the family it mirrors — value shapes and their
+   * ADR-0104 posture, `format` checks, object-level `validations`, the state
+   * machine — so the ruling replaced prediction with the verdict itself. The
+   * point is that agreement is guaranteed **by construction**: this method
+   * calls the same `validateRecord` and `evaluateValidationRules`, with the
+   * same options, that `insert()` calls a few hundred lines below.
+   *
+   * ## ADR-0104 posture — the whole reason B was rejected
+   *
+   * The verdict is resolved against the TARGET DEPLOYMENT'S REAL POSTURE via
+   * the same `valueShapeStrictFor` / `mediaValueShapeStrictFor` the write path
+   * uses. On a self-certified (strict) deployment a bad value shape is an
+   * error here exactly as it would be on write; on a warn-first deployment it
+   * is admitted here exactly as it would be on write, and reported as a
+   * WARNING rather than an error. An unconditionally-strict dry run (option B)
+   * was rejected precisely because it would fail rows on every un-migrated
+   * deployment that the write would have accepted — a false alarm that teaches
+   * authors to distrust the one gate in front of a bulk import.
+   *
+   * The warn-first admissions are deliberately NOT routed to
+   * `admittedViolationSink`: that sink records "this boot has written data
+   * against the old contract" so the deployment cannot then certify itself
+   * (#4769). A dry run writes nothing, so recording an admission would make a
+   * *preview* block a later migration — a side effect on a call whose whole
+   * contract is to have none.
+   *
+   * ## What it deliberately does NOT simulate
+   *
+   * No hooks run. `beforeInsert` fires BEFORE validation on the real path, so
+   * a hook that derives a business field could in principle change a verdict
+   * this method reports. Running arbitrary user-authored hooks to close that
+   * gap is the worse trade by a wide margin — a "validate without persisting"
+   * call that fires side-effecting hooks (mail, outbound calls, writes to
+   * other objects) is the #4052 defect in a new spelling, where a preview
+   * quietly executes. So the gap is documented rather than closed: audit and
+   * ownership stamps are `system`/`readonly` and are skipped by validation
+   * anyway, so what remains is the narrow case of a hook deriving a
+   * *business* field that its object also validates.
+   *
+   * Nothing is written, no sequence is consumed, and no driver is touched —
+   * validation is in-process, which is what makes row-by-row dry run of a
+   * large import affordable.
+   */
+  async validate(
+    object: string,
+    data: Record<string, unknown> | Record<string, unknown>[],
+    options?: { mode?: 'insert' | 'update'; context?: ExecutionContext },
+  ): Promise<ValidateDataResponse> {
+    object = this.resolveObjectName(object);
+    const mode = options?.mode ?? 'insert';
+    const rows = Array.isArray(data) ? data : [data];
+    const schemaForValidation = this._registry.getObject(object);
+
+    // Resolved once for the whole set, exactly as the write path resolves them
+    // once per batch — this is the "same posture as the real write" guarantee.
+    const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(schemaForValidation);
+    const valueShapeStrict = await this.valueShapeStrictFor(schemaForValidation);
+    const messages = this.validationMessageContext(object, options?.context);
+    const currentUser = this.buildEvalUser(options?.context);
+    const skipStateMachine = shouldSkipStateMachine(options?.context);
+
+    const results: NonNullable<ValidateDataResponse['results']> = rows.map((row) => {
+      const warnings: ValidateDataIssue[] = [];
+      // Warn-first admissions are the posture signal the caller came for, so
+      // they are reported — into this row's own bucket, never into the
+      // certification sink (see the note above).
+      //
+      // Carried under the code the STRICT path would have FAILED with
+      // (`invalid_type`) rather than a warning-specific one: the same bad
+      // value is one finding that changed buckets when the posture changed,
+      // and a caller diffing a preview against a write should see that, not
+      // two vocabularies. The sink's payload is `{gate, field, type, detail}`,
+      // so the message is composed the way the warn-first log line composes it.
+      const onAdmittedValueShapeViolation = (violation: any) => {
+        const field = String(violation?.field ?? '');
+        const type = String(violation?.type ?? '');
+        const detail = String(violation?.detail ?? 'invalid value shape');
+        warnings.push({
+          field,
+          code: 'invalid_type',
+          message: `${field} has an invalid ${type} value: ${detail}`,
+        });
+      };
+      try {
+        validateRecord(schemaForValidation, row, mode, {
+          mediaValueShapeStrict, valueShapeStrict, messages, onAdmittedValueShapeViolation,
+        });
+        evaluateValidationRules(schemaForValidation as any, row, mode, {
+          logger: this.logger, currentUser, skipStateMachine, messages,
+        });
+      } catch (e) {
+        if (e instanceof ValidationError) {
+          return { valid: false, errors: e.fields.map((f) => ({ ...f })), warnings };
+        }
+        throw e;
+      }
+      return { valid: true, errors: [], warnings };
+    });
+
+    return {
+      object,
+      mode,
+      valid: results.every((r) => r.valid),
+      results,
+      // The EFFECTIVE posture, not the raw deployment flag. `validateRecord`
+      // runs the flag through `valueShapeStrictEffective`, where the ADR-0104
+      // env switches take precedence over it, so reporting the flag would
+      // describe a different posture than the one that just decided the
+      // verdict — on a deployment holding the flag but running with
+      // `OS_ALLOW_LAX_VALUE_SHAPES`, exactly backwards. Reporting what decided
+      // is the whole point of returning it.
+      posture: {
+        valueShapeStrict: valueShapeStrictEffective(valueShapeStrict),
+        mediaValueShapeStrict: mediaStrictEffective(mediaValueShapeStrict),
+      },
+    };
+  }
+
   async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });

@@ -28,7 +28,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { emitJson, emitText, createTimer } from './format.js';
+import { emitJson, emitText } from './format.js';
 
 /** Whatever the runner was holding before this file ran — restored after each case. */
 const OUTER_EXIT_CODE = process.exitCode;
@@ -96,10 +96,20 @@ describe('emitJson / emitText — process.exitCode (#4873)', () => {
    * suppressed, the exact call `recorded-by.ts` used to make still reproduces
    * the defect verbatim, so this test states what the type is preventing
    * rather than merely asserting that it prevents something.
+   *
+   * The duration below is a LITERAL, and deliberately so (#6266). It used to
+   * be read off a live clock — `createTimer()` then `timer.elapsed() + 531` —
+   * which made the truncation assertion hold only while `elapsed()` returned
+   * exactly `0`: one millisecond ticking between those two statements (there
+   * is an `await emitJson(...)` in between) turned 531 into 532, `& 0xff` from
+   * 19 into 20, and the case red on a machine that was merely busy. Nothing
+   * this case pins is a function of how long anything took — neither the type
+   * rejection nor Node's truncation of `process.exitCode` — so the clock
+   * supplied a failure mode and no coverage whatsoever. A duration that never
+   * varies still is one.
    */
   it('a duration can no longer reach the exit-code slot (#4873)', async () => {
-    const timer = createTimer();
-    const durationMs = timer.elapsed() + 531; // a plausible `os migrate` run
+    const durationMs = 531; // a plausible `os migrate` run, in milliseconds
 
     // @ts-expect-error — a `number` is not a `CliExitCode`. This is exactly the
     // call `migrate/recorded-by.ts` and `migrate/resume.ts` used to make.
@@ -109,9 +119,16 @@ describe('emitJson / emitText — process.exitCode (#4873)', () => {
     // @ts-expect-error — same rejection at the call site, which is where it bit.
     await emitJson({ pending: 0, applied: false }, durationMs);
 
-    // And this is why the reported codes looked random rather than wrong: Node
-    // truncates the exit status to 8 bits, so 531 leaves the process as 19.
+    // The defect itself, reproduced: the duration lands in the exit-code slot
+    // verbatim, on a run whose JSON was correct and whose stderr was empty.
     expect(process.exitCode).toBe(durationMs);
+
+    // And this is why the reported codes looked random rather than wrong: Node
+    // truncates the exit status to 8 bits, so 531 leaves the process as 19 —
+    // which is not one of the two codes this CLI defines, so every scripted
+    // caller read a successful run as a failure it could not name.
     expect(durationMs & 0xff).toBe(19);
+    const definedExitCodes = [0, 1]; // the whole of `CliExitCode`
+    expect(definedExitCodes).not.toContain(durationMs & 0xff);
   });
 });

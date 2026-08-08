@@ -18,7 +18,12 @@
  *      and profile all flipped to `allowOrgOverride: true` in commit
  *      ba252da0b (feat: add project mode, metadata forms, and org
  *      overlays). The invariant now pins the execution/wiring-layer
- *      types that MUST stay false.
+ *      types that MUST stay false. Several of that commit's flips have
+ *      since been rolled back for want of an ADR behind them —
+ *      object/field (2026-05-29), agent (ADR-0063 §2) and, with #6283,
+ *      `flow`: ADR-0005:57 lists automation as ❌ and always did, so the
+ *      registry had been contradicting the document it is the
+ *      machine-readable form of.
  *
  *   2. **Canonical hash stability** — every overlay row will carry a
  *      content hash once PR-10b lands. The hash must be insensitive
@@ -320,7 +325,16 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             // (packaged-object lock; tenants create new ones via runtime-create).
             expect(allowedFromRegistry.has('object')).toBe(false);
             expect(allowedFromRegistry.has('field')).toBe(false);
-            expect(allowedFromRegistry.has('flow')).toBe(true);
+            // #6283 — `flow` rolled BACK to allowOrgOverride:false. The `true`
+            // this line used to assert came from commit ba252da0b (see the file
+            // header) and never had an ADR behind it: ADR-0005's amendment
+            // table (`docs/adr/0005-metadata-customization-overlay.md:57`) has
+            // always listed automation as ❌ ("Per-org variants are a
+            // deployment, not an overlay"), because flows carry execution
+            // side-effects. #6155 Q1=B upheld the ADR. Doubles as a
+            // reintroduction guard now: re-opening flow requires amending
+            // ADR-0005, not editing this line.
+            expect(allowedFromRegistry.has('flow')).toBe(false);
             // ADR-0020: `workflow` retired as a metadata type.
             expect(allowedFromRegistry.has('workflow')).toBe(false);
             // ADR-0063 §2: tenant custom agents withdrawn — `agent` is now

@@ -1365,6 +1365,9 @@ export type Iso749 = Assert<Eq< z.input< typeof M28.ListAiPendingActionsRequestS
 export type Iso750 = Assert<Eq< z.input< typeof M28.GetLocalesRequestSchema >, z.infer< typeof M28.GetLocalesRequestSchema > >>;
 export type Iso751 = Assert<Eq< z.input< typeof M28.GetTranslationsRequestSchema >, z.infer< typeof M28.GetTranslationsRequestSchema > >>;
 export type Iso752 = Assert<Eq< z.input< typeof M28.GetFieldLabelsRequestSchema >, z.infer< typeof M28.GetFieldLabelsRequestSchema > >>;
+export type Iso755 = Assert<Eq< z.input< typeof M28.ValidateDataIssueSchema >, z.infer< typeof M28.ValidateDataIssueSchema > >>;
+export type Iso756 = Assert<Eq< z.input< typeof M28.ValidateDataRequestSchema >, z.infer< typeof M28.ValidateDataRequestSchema > >>;
+export type Iso757 = Assert<Eq< z.input< typeof M28.ValidateDataResponseSchema >, z.infer< typeof M28.ValidateDataResponseSchema > >>;
 
 // automation/builtin-node-config.zod.ts
 export type Iso753 = Assert<Eq< z.input< typeof M172.ScreenFieldConfigSchema >, z.infer< typeof M172.ScreenFieldConfigSchema > >>;
@@ -1476,7 +1479,12 @@ describe('ADR-0122 type-alias convention', () => {
     // was named. Inverting the gate asked, and 35 of the 57 it turned up
     // answered "isomorphic". A jump this size is normally the shape of a
     // mistake; this one is a gate widening, and the pins are its receipt.
-    // 751 -> 744 is the 2026-08-08 ADR-0049 retirement sweep (#6486), the
+    //
+    // 751 -> 754 is #6037's `ValidateDataIssue` / `ValidateDataRequest` /
+    // `ValidateDataResponse` — three new protocol shapes with no defaults or
+    // transforms anywhere in their trees, i.e. the second (RISE) case above.
+    //
+    // 754 -> 747 is the 2026-08-08 ADR-0049 retirement sweep (#6486), the
     // first way again — a schema left the package, so its pin left with it.
     // Written out per member, because a MULTI-member sweep is exactly where a
     // count gets nudged to fit instead of recomputed:
@@ -1489,11 +1497,15 @@ describe('ADR-0122 type-alias convention', () => {
     //             ten view schemas were isomorphic; the other six were paired)
     //   #6414   0  every ETL alias already had a `Parsed` counterpart
     //
-    // -7, and 751 - 7 = 744. Note that the member count (3) and the pin count
-    // (7) have no relation to each other: recompute from the file.
+    // -7, and 754 - 7 = 747. Two things worth stating, because this is the
+    // first time this number moved twice between one branch point and one
+    // merge: the member count (3) and the pin count (7) have no relation to
+    // each other, and the -7 was computed against 751 on the branch and had to
+    // be REBASED onto #6037's 754 at the merge. Both operands moved; only
+    // recomputing from the file catches that.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(744);
+    expect(pins).toHaveLength(747);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {

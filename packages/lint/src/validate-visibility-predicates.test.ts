@@ -6,7 +6,8 @@ import {
   VISIBILITY_ALIAS_DEPRECATED,
   VISIBILITY_ROOT_MISLAYERED,
   VISIBILITY_BARE_IDENTIFIER,
-} from './validate-visibility-predicates';
+  VISIBILITY_PREDICATE_SYNTAX,
+} from './validate-visibility-predicates.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
 
 describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
@@ -459,13 +460,16 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(bareFindings(formStack("record.data == 1"))).toEqual([]);
     });
 
-    it('a predicate the canonical front end will not parse is left to the syntax verdict', () => {
-      // `===` is not CEL. `parseCelToAst` returns null and this rule stays
-      // silent rather than inventing a second syntax verdict — the same policy
-      // `validate-null-guards.ts` states. (Documented gap: nothing validates
-      // view/page predicate SYNTAX today, so this one is currently un-reported.)
-      expect(validateVisibilityPredicates(formStack('country === "USA"'))).toEqual([]);
-      expect(validateVisibilityPredicates(formStack('status =='))).toEqual([]);
+    it('a predicate that does not parse yields no BARE-IDENTIFIER verdict (the syntax rule owns it)', () => {
+      // This case used to assert whole-rule SILENCE on an unparseable source,
+      // on the policy that a second syntax verdict must not be invented. #6253
+      // ruled that policy wrong for this surface specifically — nothing else
+      // judges view/page syntax — so the source is now reported, by
+      // `visibility-predicate-syntax`. What survives from the old assertion is
+      // the division of labour: the declaredness check needs an AST and gets
+      // none, so `country` is NOT also reported as a bare identifier.
+      expect(bareFindings(formStack('country === "USA"'))).toEqual([]);
+      expect(bareFindings(formStack('status =='))).toEqual([]);
     });
 
     it('an absent / empty predicate is not a finding', () => {
@@ -500,5 +504,235 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(findings).toHaveLength(1);
       expect(findings[0].message).toContain('`status`');
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// `visibility-predicate-syntax` — #6253 (maintainer ruling 2026-08-07:
+// blocking error, same severity as every other predicate surface; no warning
+// tier and no exception for this surface).
+//
+// The surface this closes: `validate-expressions.ts` (ADR-0032) runs
+// `validateExpression` over every predicate it walks, but it walks objects /
+// flows / actions / sharingRules / hooks and never `views` / `pages`. The rules
+// that DO walk views/pages all declined the syntax verdict so as not to invent a
+// second one — correct wherever `validateExpression` runs alongside, and wrong
+// here, where nothing did. Net effect before this rule: `country === "USA"`
+// built clean and then failed OPEN at runtime (#5149).
+// ─────────────────────────────────────────────────────────────────────
+
+/** Only the syntax findings, for assertions that ignore the other three rules. */
+function syntaxFindings(stack: Record<string, unknown>, opts?: { layer: 'runtime' | 'metadata' }) {
+  return validateVisibilityPredicates(stack, opts).filter((f) => f.rule === VISIBILITY_PREDICATE_SYNTAX);
+}
+
+describe('visibility-predicate-syntax (#6253)', () => {
+  describe('the acceptance pair', () => {
+    it('`===` is an ERROR whose message names the token and shows the CEL spelling', () => {
+      // `country === "USA"` is the fixture-proven shape: `packages/spec/src/ui/
+      // view.test.ts` writes it at :1126 / :1240 / :1245 / :1291 / :1373, which
+      // is what the issue cites as evidence that authors reach for it.
+      const findings = validateVisibilityPredicates(formStack('country === "USA"'));
+
+      // The WHOLE reported set, not just "a syntax finding is present" — so the
+      // bare-identifier rule staying out of the way is pinned here too.
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_SYNTAX]);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].path).toBe('views[0].sections[0].fields[0]');
+      expect(findings[0].where).toBe('view "task_form"');
+
+      // Self-correcting, per the ruling: name the offending token, show the CEL
+      // spelling. The raw parser message does neither — cel-js says
+      // `Unexpected character: =` and points a caret, which tells an author
+      // nothing about `==`.
+      expect(findings[0].hint).toContain('`===`');
+      expect(findings[0].hint).toContain('`==`');
+      // The front end's own diagnostic is quoted rather than paraphrased, and
+      // the predicate is echoed so the finding is self-contained.
+      expect(findings[0].message).toContain('Unexpected character: =');
+      expect(findings[0].message).toContain('country === "USA"');
+      // The consequence is stated, because on screen it is invisible.
+      expect(findings[0].message).toContain('#5149');
+    });
+
+    it('the CEL spelling of the SAME predicate is clean — paired so it cannot pass vacuously', () => {
+      // A lone "no syntax finding is reported" assertion is green whenever the
+      // feature is absent, so it can never detect a regression. Pairing it with
+      // the positive case in one test fixes that: delete the rule and the FIRST
+      // expectation goes red.
+      expect(syntaxFindings(formStack('country === "USA"'))).toHaveLength(1);
+      expect(validateVisibilityPredicates(formStack("record.country == 'USA'"))).toEqual([]);
+    });
+  });
+
+  describe('every non-CEL spelling in the table names its own token', () => {
+    // Each row is measured against the canonical front end — `parseCelToAst`
+    // really does refuse all of these — so none of them is a guessed hint.
+    it.each([
+      ['country === "USA"', '===', '=='],
+      ['country !== "USA"', '!==', '!='],
+      ["record.country <> 'USA'", '<>', '!='],
+      ["record.a == 1 and record.b == 2", 'and', '&&'],
+      ["record.a == 1 or record.b == 2", 'or', '||'],
+      ['not record.archived', 'not', '!'],
+      ["record.status = 'open'", '=', '=='],
+    ])('%s → names `%s`, prescribes `%s`', (predicate, wrote, cel) => {
+      const findings = syntaxFindings(formStack(predicate));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].hint).toContain(`\`${wrote}\``);
+      expect(findings[0].hint).toContain(`\`${cel}\``);
+    });
+
+    it('a fault with no single-token equivalent still reports, with the parser\'s own words', () => {
+      // `status ==` is a truncated expression: nothing to swap, so the hint
+      // falls back to the general shape instead of inventing a token.
+      const findings = syntaxFindings(formStack('status =='));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain('Unexpected token: EOF');
+      expect(findings[0].hint).toContain("record.status == 'open'");
+    });
+
+    it('blames the operator that actually broke it, not one quoted inside a string', () => {
+      // The predicate fails on `and`; the `===` sits inside a string literal and
+      // is none of the reason. Blaming it would send the author to edit a
+      // perfectly good literal. (String literals are blanked before the scan.)
+      const findings = syntaxFindings(formStack("record.msg == 'a === b' and record.n > 1"));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].hint).toContain('`and`');
+      expect(findings[0].hint).not.toContain('`===`');
+    });
+
+    it('a non-CEL operator INSIDE a string literal is not a fault at all', () => {
+      // Same string, no `and` — this parses, so there is no finding to word.
+      expect(validateVisibilityPredicates(formStack("record.msg == 'a === b'"))).toEqual([]);
+    });
+  });
+
+  describe('the boundaries', () => {
+    it('an absent / blank predicate is NOT a syntax fault', () => {
+      // `parseCelToAst` returns null for an empty source too, so without an
+      // explicit guard this rule would report "no predicate" as broken CEL.
+      // Paired with a live case so the assertion can actually fail.
+      expect(syntaxFindings(formStack('country === "USA"'))).toHaveLength(1);
+      expect(validateVisibilityPredicates(formStack(undefined))).toEqual([]);
+      expect(validateVisibilityPredicates(formStack('   '))).toEqual([]);
+      expect(validateVisibilityPredicates(formStack(''))).toEqual([]);
+    });
+
+    it('exactly ONE finding per broken predicate — the syntax rule, not also the bare-ref rule', () => {
+      // `country` is rootless as well as mis-spelled, but a source with no AST
+      // yields no identifiers to judge. Asserting the whole set (not just "a
+      // syntax finding exists") is what pins the exclusivity.
+      expect(validateVisibilityPredicates(formStack('country === "USA"')).map((f) => f.rule))
+        .toEqual([VISIBILITY_PREDICATE_SYNTAX]);
+      // …and the converse: a source that PARSES is judged by the bare-ref rule
+      // and never by this one.
+      expect(validateVisibilityPredicates(formStack("status == 'active'")).map((f) => f.rule))
+        .toEqual([VISIBILITY_BARE_IDENTIFIER]);
+    });
+
+    it('does NOT widen to type-checking — the CEL-type blind spot stays a blind spot', () => {
+      // `type == 'grid'` PARSES; only `celEngine.compile`'s type checker rejects
+      // it (`no such overload: type == string`). Routing this rule through
+      // `compile` / `validateExpression` would silently overturn the deliberate,
+      // separately-pinned decision to stay conservative there — and would widen
+      // an error-level gate from "does not parse" to "does not type-check" on a
+      // surface whose predicates are overwhelmingly `dyn`. The ruling said
+      // syntax; the parse verdict is exactly syntax.
+      expect(validateVisibilityPredicates(formStack("type == 'grid'"))).toEqual([]);
+      // The legitimate CEL the overload message cannot be told apart from.
+      expect(validateVisibilityPredicates(formStack('type(record.x) == string'))).toEqual([]);
+    });
+
+    it('a `DEFAULT_LIMITS` overrun is reported too, in the front end\'s own words', () => {
+      // `parseCelToAst` also returns null for a source over the platform bounds.
+      // That is a bounds fault, not a syntax one, and the message says so rather
+      // than pretending to have found a typo — the same way ADR-0032 already
+      // reports it under the "invalid CEL predicate" heading.
+      const overrun = `record.a${' + record.b'.repeat(400)}`;
+      const findings = syntaxFindings(formStack(overrun));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain('Exceeded maxAstNodes');
+      // The echoed predicate is elided, so one runaway expression cannot flood
+      // the console with a 4KB finding.
+      expect(findings[0].message).not.toContain(overrun);
+      expect(findings[0].message).toContain('...');
+    });
+
+    it.each([
+      ['record.a == 1 && record.b == 2', 'the `&&` CEL spells `and` as'],
+      ['record.a == 1 || record.b == 2', 'the `||` CEL spells `or` as'],
+      ['!record.archived', 'the `!` CEL spells `not` as'],
+      ["record.status != 'open'", 'the `!=` CEL spells `<>` as'],
+      ["record.tags.all(t, t != '')", 'a comprehension macro'],
+      ["record.type == 'a' ? record.x > 1 : record.y == 'b'", 'a ternary'],
+      ["record.type in ['lookup', 'master_detail']", 'lowercase `in` — a REAL CEL operator, unlike SQL `IN`'],
+      ["has(record.a) && record.b != null", 'both guard idioms at once'],
+    ])('%s parses and is not reported (%s)', (predicate) => {
+      expect(syntaxFindings(formStack(predicate))).toEqual([]);
+    });
+  });
+
+  describe('every carrier the schema declares, and both layers', () => {
+    it('a form SECTION predicate', () => {
+      const stack = { views: [{ name: 'f', sections: [{ visibleWhen: 'country === "USA"', fields: [] }] }] };
+      expect(syntaxFindings(stack).map((f) => f.path)).toEqual(['views[0].sections[0]']);
+    });
+
+    it('a PAGE COMPONENT predicate', () => {
+      const stack = {
+        pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: 'kind === "a"' }] }] }],
+      };
+      const findings = syntaxFindings(stack);
+      expect(findings.map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
+      expect(findings[0].where).toBe('page "p"');
+    });
+
+    it('reads the value through the deprecated `visibleOn` alias (alias + syntax, both reported)', () => {
+      // Two independent defects on one element, so unlike the syntax/bare-ref
+      // pair these DO both report.
+      const stack = { views: [{ name: 'f', sections: [{ visibleOn: 'status === "x"', fields: [] }] }] };
+      expect(validateVisibilityPredicates(stack).map((f) => f.rule).sort())
+        .toEqual([VISIBILITY_ALIAS_DEPRECATED, VISIBILITY_PREDICATE_SYNTAX].sort());
+    });
+
+    it('reads the value through the deprecated page-side `visibility` alias', () => {
+      const stack = {
+        pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibility: 'shown === true' }] }] }],
+      };
+      expect(syntaxFindings(stack)).toHaveLength(1);
+    });
+
+    it('resolves a `{ dialect, source }` envelope the same as a bare string', () => {
+      expect(syntaxFindings(formStack({ dialect: 'cel', source: 'country === "USA"' }))).toHaveLength(1);
+    });
+
+    it('reaches a container\'s `formViews.<key>` — the shape a real stack emits', () => {
+      const stack = {
+        views: [{ object: 'showcase_task', formViews: { edit: { sections: [{ fields: [{ field: 'n', visibleWhen: 'country === "USA"' }] }] } } }],
+      };
+      expect(syntaxFindings(stack).map((f) => f.path)).toEqual([
+        'views[0].formViews.edit.sections[0].fields[0]',
+      ]);
+    });
+
+    it('is layer-agnostic — a syntax fault is a syntax fault on a metadata form too', () => {
+      // Unlike the root rules, nothing about "does it parse" depends on which
+      // namespace the surface binds.
+      expect(syntaxFindings(formStack('country === "USA"'), { layer: 'metadata' })).toHaveLength(1);
+      expect(syntaxFindings(formStack('country === "USA"'))).toHaveLength(1);
+    });
+  });
+
+  it('the registry entry already gates, so this `error` reaches all three commands', () => {
+    // `severity: 'error'` only fails a build because `authoring-rules.ts` marks
+    // the family `gating` and runs it on validate/build/lint alike. That entry
+    // was already `gating` (#6128 promoted it), so #6253 needed no registry
+    // change — this pins that it is still true rather than assuming it.
+    const entry = AUTHORING_RULES.find((r) => r.name === 'validateVisibilityPredicates');
+    expect(entry, 'validateVisibilityPredicates must be registered').toBeDefined();
+    expect(entry!.tier).toBe('gating');
+    expect([...entry!.commands].sort()).toEqual(['build', 'lint', 'validate']);
   });
 });

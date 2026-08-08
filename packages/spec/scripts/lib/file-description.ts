@@ -386,8 +386,21 @@ function renderProse(text: string, ctx: FileDescriptionContext): string {
   // `*` without moving the `\b` changes nothing, since a group that is never
   // reached repeats zero times either way. Both halves are load-bearing —
   // moving the `\b` alone would still strand the outer level of a `../../`.
+  //
+  // No lookaround guards the parentheses any more (#6420). The pair `(?<!\()`
+  // … `(?!\))` was this step's ORIGINAL, pre-tokenizer attempt at "do not touch
+  // a path that is already a link's destination" — `](route)` puts that path
+  // between exactly those two characters. It never could express that (the
+  // module comment above says why: lookaround cannot say "not nested inside a
+  // link"), and since #6136 it has had nothing left to do — a formed link is a
+  // `link` run and this step is only shown `text` runs. What the pair still did
+  // was refuse every path an AUTHOR wrote in parentheses, which is ordinary
+  // prose and not a link at all: `- **Enterprise Connector**
+  // (integration/connector.zod.ts) - …` rendered as neither a link nor code,
+  // just plain text, on three published pages. So the guards go and the
+  // tokenizer keeps the invariant they were reaching for.
   out = mapProse(out, ['text'], s =>
-    s.replace(/(?<!\()((?:\.\.\/)*\b[\w-]+\/[\w.-]+\.zod\.ts)\b(?!\))/g, (_m, p: string) => {
+    s.replace(/((?:\.\.\/)*\b[\w-]+\/[\w.-]+\.zod\.ts)\b/g, (_m, p: string) => {
       const route = sourcePathToDocsRoute(p);
       return route ? `[${p}](${route})` : `\`${p}\``;
     }));

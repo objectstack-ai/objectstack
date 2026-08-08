@@ -5776,6 +5776,12 @@ logic, conditions }`) into `filter`, where the spec declares `ViewFilterRule[]` 
   top-level `navigation` tree, or in its own app. Trading one false belief for a
   weaker one would have repeated the defect this removal exists to end.
 
+  > **Correction (#5809):** this caveat has not held since #4722, which landed in
+  > the same 17.0.0 window — `filterAppForUser` runs the same `filterNav` over
+  > every `areas[].navigation`, so an item gate inside an area is server-enforced
+  > and needs no navigation restructuring. See the `17.0.0-rc.4` entry `e4c8b6c`
+  > (#5337) higher up in this file.
+
 - 7d21581: feat(spec)!: retire the six remaining `authorWarn` dead keys — book/group `translations`, `job.id`, `translation.validationMessages`, `app.homePageId`, `app.areas[].order` (#4667)
 
   The #4488 liveness audit marked as `authorWarn` the keys whose _declaration_
@@ -7183,6 +7189,12 @@ stack?, code? }`). Neither side had any consumer outside spec; the
   path — the #4411 dual-source trap. Resolution (three-repo,
   import-statement-level consumer scan: framework, cloud, objectui):
 
+  > **Correction (#5781):** this statement-level scan could not see objectui's
+  > `export … from` re-export nor its `@object-ui/types` barrel hop, so the
+  > "zero importers" claims below are false for the two `./ui` declarations
+  > (objectui#3310). The removal itself stands; the corrected tombstone is in
+  > `packages/spec/src/ui/notification.zod.ts`.
+
   - **Removed** `NotificationSchema` / `Notification` from
     `@objectstack/spec/ui`. This was a toast/banner "notification instance"
     shape (`type`/`severity`/`message`/`duration`/`actions`/`position` + ARIA
@@ -7202,6 +7214,13 @@ stack?, code? }`). Neither side had any consumer outside spec; the
       `NotificationTypeSchema`, `NotificationSeveritySchema`,
       `NotificationPositionSchema`, `NotificationActionSchema` (+ their
       types) still live in `@objectstack/spec/ui`.
+
+    > **Correction (#5781):** there is no replacement — following this FROM → TO
+    > does not compile. `./api`'s `Notification` is the REST inbox row and shares
+    > zero fields with the removed toast shape; keep the `./ui` presentation
+    > enums and declare the instance shape locally. (`NotificationActionSchema`
+    > left too, at 17.0.0-rc.3 / #5015 — three enums survive, not four.)
+
   - **Removed** `NotificationConfigSchema` / `NotificationConfig` from **both**
     `@objectstack/spec/system` and `@objectstack/spec/ui` — the bare name left
     the spec export surface entirely. Both declarations had zero importers in
