@@ -322,3 +322,67 @@ describe('SchemaRegistry.getArtifactItem / removeRuntimeShadow', () => {
         expect((registry.getItem('app', 'mine') as any)?.label).toBe('Mine');
     });
 });
+
+/**
+ * [#5079] The other half of the reset heal — the case
+ * {@link SchemaRegistry.removeRuntimeShadow} above deliberately declines.
+ *
+ * A runtime-CREATED item has no packaged artifact under a composite key, so
+ * `removeRuntimeShadow` leaves its plain-key entry standing (pinned directly
+ * above, and correct: that method's job is un-shadowing an artifact). Since
+ * #4521's write-through puts such an item in the registry, nothing else ever
+ * removed it — `getMetaItems` kept enumerating a deleted item for the life of
+ * the process. `removeOverlayEntry` is what `deleteMetaItem` calls once both
+ * lower layers have answered "nothing".
+ */
+describe('SchemaRegistry.removeOverlayEntry', () => {
+    it('removes the plain-key entry of a runtime-only item', () => {
+        const registry = new SchemaRegistry({ multiTenant: false });
+        registry.registerItem('app', { name: 'mine', label: 'Mine' }, 'name');
+
+        expect(registry.removeOverlayEntry('app', 'mine')).toBe(true);
+        expect(registry.getItem('app', 'mine')).toBeUndefined();
+        expect(registry.listItems('app')).toEqual([]);
+    });
+
+    it('removes a `sys_metadata`-sentinel rehydration entry', () => {
+        // `loadMetaFromDb` stamps the sentinel on package-less overlay rows;
+        // it marks the entry as a rehydration, not a shipped artifact.
+        const registry = new SchemaRegistry({ multiTenant: false });
+        registry.registerItem('app', { name: 'hydrated', label: 'Hydrated', _packageId: 'sys_metadata' }, 'name');
+
+        expect(registry.removeOverlayEntry('app', 'hydrated')).toBe(true);
+        expect(registry.getItem('app', 'hydrated')).toBeUndefined();
+    });
+
+    it('removes a tenant-authored entry even when it carries a real package id', () => {
+        const registry = new SchemaRegistry({ multiTenant: false });
+        registry.registerItem('app', { name: 'org_authored', label: 'Org', _packageId: PKG, _provenance: 'org' }, 'name');
+
+        expect(registry.removeOverlayEntry('app', 'org_authored')).toBe(true);
+        expect(registry.getItem('app', 'org_authored')).toBeUndefined();
+    });
+
+    it('REFUSES a plain-key entry that is itself a packaged artifact', () => {
+        // `loadMetadataFromService` passes the item's own `_packageId` through,
+        // so a package-shipped item can be registered under the plain key.
+        // Unregistering it would delete shipped code an overlay delete never
+        // touched — strictly worse than the staleness this method removes.
+        const registry = new SchemaRegistry({ multiTenant: false });
+        registry.registerItem('app', { name: 'shipped', label: 'Shipped', _packageId: PKG }, 'name');
+
+        expect(registry.removeOverlayEntry('app', 'shipped')).toBe(false);
+        expect((registry.getItem('app', 'shipped') as any)?.label).toBe('Shipped');
+    });
+
+    it('never touches composite keys, and reports nothing to remove', () => {
+        const registry = new SchemaRegistry({ multiTenant: false });
+        registry.registerItem('app', artifactApp(), 'name', PKG);
+
+        // No plain-key entry at all: the artifact must survive untouched.
+        expect(registry.removeOverlayEntry('app', 'setup')).toBe(false);
+        expect((registry.getArtifactItem('app', 'setup') as any)?.label).toBe('Setup');
+        // An unknown type is a no-op, not a throw.
+        expect(registry.removeOverlayEntry('nope', 'setup')).toBe(false);
+    });
+});

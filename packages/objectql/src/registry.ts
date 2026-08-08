@@ -1654,6 +1654,55 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#5079] Remove the PLAIN-KEY entry for `(type, name)` — the slot an
+   * ADR-0005 overlay row hydrates into — and nothing else. The composite
+   * (`<packageId>:<name>`) entries are never touched.
+   *
+   * The other half of {@link removeRuntimeShadow}, for the case that method
+   * deliberately declines. `removeRuntimeShadow` drops the plain key only
+   * when a packaged artifact remains underneath, so the name stays
+   * resolvable; that was the whole story while the plain key could only ever
+   * be an artifact's shadow. #4521 changed it: `saveMetaItem` now writes an
+   * overlay through into the registry, so a runtime-CREATED item (nothing
+   * shipped under that name) lives under the plain key too — and its DELETE
+   * had nothing that would ever remove it. `GET /meta/<type>` kept
+   * enumerating a deleted item and `GET /meta/<type>/<name>` kept serving its
+   * body for the life of the process (#4432's "every surface in agreement"
+   * clause, residual). plugin-security's `permission` projection carries a
+   * consumer-side work-around for the same lingering entry
+   * (`readDeclaredBody` skipping shadows so a deleted set is not undeletable);
+   * this is the producer-side removal it was compensating for.
+   *
+   * Whether the item really is gone from every OTHER layer is not a fact this
+   * registry holds — the MetadataService may still serve a baseline for the
+   * name — so the caller decides. `deleteMetaItem`'s
+   * `restoreArtifactRegistryView` calls this only after both lower layers
+   * (composite artifact, MetadataService baseline) have answered "nothing".
+   *
+   * Refuses exactly one entry: a plain-key registration that IS a packaged
+   * artifact — `_packageId` set, not the `'sys_metadata'` rehydration
+   * sentinel, not tenant-authored — which is the same predicate
+   * {@link getArtifactItem} applies to its own bare-key fallback. Artifact
+   * loaders normally register under a composite key, but
+   * `loadMetadataFromService` passes the item's own `_packageId` through, so a
+   * package-stamped item can land here; unregistering shipped code that the
+   * overlay delete never touched would be a worse bug than the one this fixes.
+   *
+   * @returns whether an entry was removed.
+   */
+  removeOverlayEntry(type: string, name: string): boolean {
+    const collection = this.metadata.get(type);
+    if (!collection || !collection.has(name)) return false;
+    const plain = collection.get(name) as any;
+    if (plain && plain._packageId && plain._packageId !== 'sys_metadata' && !isTenantAuthored(plain)) {
+      return false;
+    }
+    collection.delete(name);
+    this.log(`[Registry] Removed overlay entry ${type}: ${name} (no layer serves it any more)`);
+    return true;
+  }
+
+  /**
    * Universal List Method
    */
   listItems<T>(type: string, packageId?: string): T[] {
