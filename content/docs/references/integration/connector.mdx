@@ -14,7 +14,7 @@ and message queues through a unified protocol.
 **Positioning in the sync/integration layering** (L1 "Simple Sync" was
 retired in #4738 — narrative-only, zero consumers; see
 `packages/spec/docs/SYNC_ARCHITECTURE.md`):
-- **ETL Pipeline** (automation/etl.zod.ts) - Data engineers - Aggregate 10 sources to warehouse
+- **ETL Pipeline** ([automation/etl.zod.ts](/docs/references/automation/etl)) - Data engineers - Aggregate 10 sources to warehouse
 - **Enterprise Connector** (THIS FILE) - System integrators - Full SAP integration; connector-attached sync via `syncConfig`
 
 **SCOPE: Most comprehensive integration layer.**

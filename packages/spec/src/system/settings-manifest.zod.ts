@@ -134,6 +134,57 @@ export type SpecifierHandlerParsed = z.infer<typeof SpecifierHandlerSchema>;
 export const SpecifierScopeSchema = z.enum(['global', 'tenant', 'user']);
 export type SpecifierScope = z.input<typeof SpecifierScopeSchema>;
 
+/**
+ * Closed vocabulary of **standard value domains** a specifier's value may be
+ * drawn from (#5933, the spec half of #5712).
+ *
+ * A specifier that declares `valueDomain` says: *the legal values for this key
+ * are the members of this published standard*, and that membership — not the
+ * `options` table — is the enforcement boundary. See {@link Specifier} for the
+ * authoring semantics; enforcement itself lives in `service-settings`
+ * (Prime Directive #2 — the spec declares, it does not execute).
+ *
+ * The vocabulary is closed and deliberately small: a member earns its place by
+ * a metadata key that actually needs it, not by being a standard that exists.
+ * Each member below carries the **definition of membership** the enforcing side
+ * must implement, because "the IANA time zone database" and "what this Node
+ * happens to enumerate" are measurably different sets, and picking the wrong
+ * one rejects legal values.
+ *
+ * - `iana_time_zone` — an IANA/tzdb zone identifier (`UTC`, `Asia/Kolkata`,
+ *   `Europe/Kyiv`). **Membership is the `Intl.DateTimeFormat` probe**
+ *   (construct with `{ timeZone: value }`, catch `RangeError`) — the definition
+ *   already used by `isValidTimeZone` in
+ *   `packages/core/src/security/resolve-authz-context.ts` and by
+ *   `localization.manifest.test.ts`.
+ *   NOT `Intl.supportedValuesOf('timeZone')`: measured on the repo's Node 22
+ *   baseline it returns 418 CLDR *canonical* names and omits `UTC` (this
+ *   platform's own declared default), `Asia/Kolkata` (a curated option in the
+ *   shipped localization manifest), `Europe/Kyiv`, `Asia/Ho_Chi_Minh`,
+ *   `US/Eastern` and `GMT`. Testing membership against that list rejects values
+ *   every runtime accepts.
+ * - `iso_4217_currency` — an ISO 4217 alphabetic currency code (`USD`, `CHF`).
+ *   Here `Intl.supportedValuesOf('currency')` IS usable: measured 162 entries
+ *   on the same baseline, admitting `CHF` and all nine curated localization
+ *   options while rejecting `XYZ`. Known gaps are the recently assigned `VED`
+ *   and the metal/fund codes (`XAU`, `XDR`, …) — widen the definition
+ *   deliberately if a deployment needs one, but never fall back to a regex.
+ * - `iso_3166_alpha2` — an ISO 3166-1 alpha-2 country code (`US`, `GB`, `CN`).
+ *   There is no standard-library oracle for this one: measured,
+ *   `Intl.DisplayNames(…, { type: 'region' }).of()` returns a distinct name for
+ *   `ZZ` ("Unknown Region" — the exact value this domain exists to reject) and
+ *   for `UK` (a CLDR alias that is not an ISO 3166-1 code), so "the name
+ *   differs from the input" is not a membership test. The enforcing side must
+ *   carry an explicit alpha-2 code list; that list does not live here, because
+ *   `packages/spec` holds no data tables (Prime Directive #2).
+ */
+export const SpecifierValueDomainSchema = z.enum([
+  'iana_time_zone',
+  'iso_4217_currency',
+  'iso_3166_alpha2',
+]);
+export type SpecifierValueDomain = z.input<typeof SpecifierValueDomainSchema>;
+
 // ---------------------------------------------------------------------------
 // Specifier schema (the unit of UI in a manifest)
 // ---------------------------------------------------------------------------
@@ -231,6 +282,41 @@ export const SpecifierSchema = lazySchema(() => z.object({
   /** Options for `select` / `radio` / `multiselect`. */
   options: z.array(SpecifierOptionSchema).optional().describe('Options for select/radio/multiselect'),
 
+  /**
+   * Declares that this key's legal values are the members of a published
+   * standard — see {@link SpecifierValueDomainSchema} for the vocabulary and
+   * for each domain's definition of membership.
+   *
+   * **Declaring it moves the enforcement boundary.** When `valueDomain` is
+   * present, the standard's membership is what a write is judged against, and
+   * `options` degrades to a **UI convenience list**: a curated dropdown of the
+   * values worth suggesting, no longer an exhaustive statement of what is
+   * legal. A value outside `options` but inside the domain is accepted.
+   *
+   * When `valueDomain` is ABSENT nothing changes: `options` remains exhaustive
+   * and the save path rejects anything the table does not list (#5131). That is
+   * the right shape for tables the platform itself backs — `mail.provider`,
+   * `sms.provider` — where "legal" means "this deployment ships an adapter for
+   * it", not "some registrar published it". Do not add `valueDomain` to those.
+   *
+   * `pattern` / `minLength` / `maxLength` still apply and still narrow: they
+   * constrain the *shape* of the string, the domain constrains its
+   * *membership*. A value must satisfy both. Reach for `valueDomain` precisely
+   * where `pattern` cannot help — `^[A-Za-z]{2}$` admits `ZZ`, and
+   * `Mars/Olympus` is a shape-valid time zone that does not exist.
+   *
+   * Only meaningful on value-bearing, string-valued specifiers (`text`,
+   * `select`, `radio`, `multiselect`); the parse refuses it on layout-only
+   * specifiers, which carry no value to judge. For a `select`, `options` is
+   * still required — a dropdown needs something to draw.
+   *
+   * The check itself runs in `service-settings` on the write path (#5712);
+   * `packages/spec` only declares the domain.
+   */
+  valueDomain: SpecifierValueDomainSchema
+    .optional()
+    .describe('Standard value domain enforced on write (options degrade to a UI suggestion list)'),
+
   /** `number` / `slider`: numeric bounds and step. */
   min: z.number().optional(),
   max: z.number().optional(),
@@ -268,6 +354,17 @@ export const SpecifierSchema = lazySchema(() => z.object({
       code: z.ZodIssueCode.custom,
       path: ['key'],
       message: `Specifier of type '${spec.type}' must not declare a 'key'.`,
+    });
+  }
+  // A value domain judges a VALUE, so a specifier that carries none cannot
+  // declare one. Caught here rather than left to the renderer because a
+  // `valueDomain` on a `group` is a silent no-op otherwise — declared and never
+  // enforced, which is the shape Prime Directive #10 exists to refuse.
+  if (spec.valueDomain && !SPECIFIERS_REQUIRING_KEY.has(spec.type)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['valueDomain'],
+      message: `Specifier of type '${spec.type}' carries no value, so it must not declare a 'valueDomain'.`,
     });
   }
   // select/radio/multiselect require options.

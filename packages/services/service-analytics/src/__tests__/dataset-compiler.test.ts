@@ -98,15 +98,32 @@ describe('compileDataset', () => {
     expect(cube.joins?.account?.name).toBe('account');
   });
 
-  it('rejects v1-unsupported aggregates with a clear error', () => {
-    const ds = DatasetSchema.parse({
+  // Was: "rejects v1-unsupported aggregates with a clear error", driven by
+  // `array_agg` reaching `compileDataset`. #6188 retired `array_agg` and
+  // `string_agg` from `AggregationFunction`, so that input cannot be built any
+  // more — the refusal moved from this compiler to the schema, and it now
+  // carries a prescription instead of naming the supported list. Re-pointed
+  // rather than deleted: the dataset measure is one of the retirement's two
+  // authoring surfaces, and this is where that surface is exercised.
+  it('rejects a retired aggregate at the schema, with the retirement prescription', () => {
+    expect(() => DatasetSchema.parse({
       name: 'agg',
       label: 'Agg',
       object: 'opportunity',
       dimensions: [],
       measures: [{ name: 'tags', aggregate: 'array_agg', field: 'tag' }],
+    })).toThrowError(/`array_agg`.*was removed.*#6188/s);
+  });
+
+  it('still compiles the aggregate the ruling kept', () => {
+    const ds = DatasetSchema.parse({
+      name: 'agg',
+      label: 'Agg',
+      object: 'opportunity',
+      dimensions: [],
+      measures: [{ name: 'tags', aggregate: 'count_distinct', field: 'tag' }],
     });
-    expect(() => compileDataset(ds)).toThrowError(/not supported by the v1 dataset runtime/);
+    expect(compileDataset(ds).cube.measures.tags?.type).toBe('count_distinct');
   });
 });
 

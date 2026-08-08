@@ -128,6 +128,66 @@ describe('validateSemanticRoles (ADR-0085)', () => {
     expect(hiddenMember.map((f) => f.rule)).toEqual([FIELD_GROUP_SHADOWED]);
   });
 
+  // #6326 — rule (d)'s title resolution used to read
+  // `[nameField, primaryField, displayNameField]`. `primaryField` is declared
+  // NOWHERE in `packages/spec`: measured on 17.0.0-rc.5,
+  // `ObjectSchema.safeParse` returns `unrecognized_keys: ['primaryField']` and
+  // `ObjectSchema.create()` throws, so the entry could never match on an object
+  // the spec accepts, while advertising a title pointer authors cannot write.
+  // `nameField` is ADR-0079's canonical one; the entry is gone.
+  //
+  // The fixture is DELIBERATELY off-spec — that is what is under test.
+  // `validateSemanticRoles` lints metadata as AUTHORED, so a schema-rejected
+  // key can physically reach it; the assertion is that it is IGNORED. Do not
+  // make the fixture schema-valid: that deletes the coverage.
+  //
+  // The pair below is the discriminating one. Title resolution matters here
+  // because the title is filtered OUT of the 4-entry strip, so whether
+  // `ref_no` counts as the title decides whether entry #5 (`d`) lands inside
+  // the strip. Read as the title → strip is [a,b,c,d], group "tail" (only
+  // member `d`) is fully hidden → SHADOWED. Not read → strip is
+  // [ref_no,a,b,c], `d` still renders → clean. No field here is one of the
+  // conventional fallbacks (name/full_name/title/subject/display_name), and
+  // none is an injected system column, so nothing else can supply a title.
+  it('ignores primaryField in title resolution; nameField still resolves (#6326)', () => {
+    const withPhantomKey = validateSemanticRoles(stack([{
+      name: 'ledger_entry',
+      primaryField: 'ref_no',
+      highlightFields: ['ref_no', 'a', 'b', 'c', 'd'],
+      fieldGroups: [{ key: 'tail', label: 'Tail' }],
+      fields: {
+        ref_no: { type: 'text' }, a: { type: 'text' }, b: { type: 'text' },
+        c: { type: 'text' }, d: { type: 'text', group: 'tail' },
+      },
+    }]));
+    // Goes red the moment the `primaryField` entry returns to the chain:
+    // `ref_no` would become the title, `d` would fall inside the strip, and
+    // one FIELD_GROUP_SHADOWED finding would appear.
+    expect(withPhantomKey).toEqual([]);
+
+    // Paired positive — the SAME shape with the one declarable pointer. This
+    // proves the assertion above is about `primaryField` being ignored, not
+    // about the rule being inert on this fixture.
+    const withNameField = validateSemanticRoles(stack([{
+      name: 'ledger_entry',
+      nameField: 'ref_no',
+      highlightFields: ['ref_no', 'a', 'b', 'c', 'd'],
+      fieldGroups: [{ key: 'tail', label: 'Tail' }],
+      fields: {
+        ref_no: { type: 'text' }, a: { type: 'text' }, b: { type: 'text' },
+        c: { type: 'text' }, d: { type: 'text', group: 'tail' },
+      },
+    }]));
+    // Indexed rather than `.map((f) => f.rule)` on purpose: this file's
+    // relative import of the module under test omits the `.js` extension, so
+    // under NodeNext every symbol it names degrades to `any` (TS2835) and each
+    // callback over a finding adds a TS7006 to the package's TEST_DEBT ledger.
+    // Same assertion strength, no new ledger entry.
+    expect(withNameField).toHaveLength(1);
+    expect(withNameField[0]?.rule).toBe(FIELD_GROUP_SHADOWED);
+    expect(withNameField[0]?.message).toContain('tail');
+  });
+
   it('flags stageField pointing at a missing field; false is fine', () => {
     const bad = validateSemanticRoles(stack([{
       name: 'lead', stageField: 'pipeline', fields: { status: {} },

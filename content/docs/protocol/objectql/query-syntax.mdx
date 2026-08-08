@@ -117,8 +117,7 @@ interface SortNode {
 
 // AggregationNode — aggregation definition
 interface AggregationNode {
-  function: 'count' | 'sum' | 'avg' | 'min' | 'max'
-          | 'count_distinct' | 'array_agg' | 'string_agg';
+  function: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct';
   field?: string;        // optional for COUNT(*)
   alias: string;         // result column alias
   distinct?: boolean;    // DISTINCT before aggregation — in-memory path only
@@ -715,17 +714,28 @@ const query: QueryAST = {
 // { count: 100, total: 5000000, average: 50000, min_amount: 10000, max_amount: 500000 }
 ```
 
-**Schema enum:** `count`, `sum`, `avg`, `min`, `max`, `count_distinct`, `array_agg`, `string_agg`.
+**Schema enum:** `count`, `sum`, `avg`, `min`, `max`, `count_distinct`.
 
 <Callout type="warn">
-Only `count`, `sum`, `avg`, `min`, and `max` are portable. `count_distinct`, `array_agg`
-and `string_agg` are implemented by the MongoDB driver and by the engine's in-memory
-aggregation fallback, but not by the SQL drivers — on `SqlDriver` (and on the Turso
-driver, both transports) they are refused as a **capability gap**:
+Only `count`, `sum`, `avg`, `min`, and `max` are portable today. `count_distinct` is
+declared and is implemented by the MongoDB driver and by the engine's in-memory
+aggregation fallback, but not yet by the SQL drivers — on `SqlDriver` (and on the Turso
+driver, both transports) it is refused as a **capability gap**:
 `501 NOT_IMPLEMENTED`, "declared but not implemented by this backend". That is
 deliberately a different answer from a function the schema enum never declared
 (`median`), which is `400 INVALID_QUERY` — the caller's mistake — so an author who
-wrote `count_distinct` is never told they made a typo (#5907).
+wrote `count_distinct` is never told they made a typo (#5907). Its SQL lowering
+(`COUNT(DISTINCT field)`) is scheduled: the declaration leads the implementation here
+by decision, not by drift.
+</Callout>
+
+<Callout type="warn">
+**Removed in 17:** `array_agg` and `string_agg` were declared by this enum and compiled
+by no SQL backend, so which backend could compute them was unpredictable to the author.
+Both were retired (#6188, ADR-0049 enforce-or-remove) and are now refused at parse with
+a prescription. There is no replacement in the query vocabulary — read the rows with an
+ordinary `fields` query and shape them in the caller, or materialise the roll-up as a
+stored field. `os migrate meta --from 16` rewrites affected dataset measures.
 </Callout>
 
 ### Group By Multiple Fields

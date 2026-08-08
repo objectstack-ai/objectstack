@@ -31,8 +31,8 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 5 | 27 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 8 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 37 | 295 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
-| [UI Protocol](/docs/references/ui) | 16 | 147 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
+| [System Protocol](/docs/references/system) | 37 | 296 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [UI Protocol](/docs/references/ui) | 16 | 146 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
 | **Total** | **200** | **1605** | 14 protocol modules |
 
 ---
@@ -318,7 +318,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **37 pages, 295 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **37 pages, 296 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -353,7 +353,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`search-engine.zod.ts`](/docs/references/system/search-engine) | `AnalyzerConfig`, `FacetConfig`, `SearchConfig`, `SearchIndexConfig`, `SearchProvider` |
 | [`security-context.zod.ts`](/docs/references/system/security-context) | `ComplianceAuditRequirement`, `ComplianceEncryptionRequirement`, `ComplianceFramework`, `DataClassification`, `DataClassificationPolicy`, `MaskingVisibilityRule`, `SecurityContextConfig`, `SecurityEventCorrelation` |
 | [`settings-client.zod.ts`](/docs/references/system/settings-client) | `SettingsChangeEvent` |
-| [`settings-manifest.zod.ts`](/docs/references/system/settings-manifest) | `ResolvedSettingValue`, `SettingsActionResult`, `SettingsManifest`, `SettingsNamespacePayload`, `Specifier`, `SpecifierHandler`, `SpecifierOption`, `SpecifierScope`, `SpecifierType` |
+| [`settings-manifest.zod.ts`](/docs/references/system/settings-manifest) | `ResolvedSettingValue`, `SettingsActionResult`, `SettingsManifest`, `SettingsNamespacePayload`, `Specifier`, `SpecifierHandler`, `SpecifierOption`, `SpecifierScope`, `SpecifierType`, `SpecifierValueDomain` |
 | [`stack-server.zod.ts`](/docs/references/system/stack-server) | `ServerRateLimitConfig`, `StackServerConfig`, `StackServerSecurity` |
 | [`supplier-security.zod.ts`](/docs/references/system/supplier-security) | `SupplierAssessmentStatus`, `SupplierRiskLevel`, `SupplierSecurityAssessment`, `SupplierSecurityPolicy`, `SupplierSecurityRequirement` |
 | [`tenant.zod.ts`](/docs/references/system/tenant) | `DatabaseLevelIsolationStrategy`, `DatabaseProvider`, `QuotaEnforcementResult`, `RowLevelIsolationStrategy`, `SchemaLevelIsolationStrategy`, `Tenant`, `TenantConnectionConfig`, `TenantIsolationConfig`, `TenantIsolationLevel`, `TenantQuota`, `TenantSecurityPolicy`, `TenantUsage` |
@@ -366,7 +366,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 
 ## UI Protocol
 
-**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 147 schemas**
+**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 146 schemas**
 
 Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.
 
@@ -380,7 +380,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | [`component.zod.ts`](/docs/references/ui/component) | `AIChatWindowProps`, `ElementButtonProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementTextInputProps`, `ElementTextProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordPathProps`, `RecordRelatedListProps` |
 | [`dashboard.zod.ts`](/docs/references/ui/dashboard) | `Dashboard`, `DashboardHeader`, `DashboardHeaderAction`, `DashboardWidget`, `DashboardWidgetOptions`, `GlobalFilter`, `GlobalFilterOptionsFrom`, `WidgetActionType`, `WidgetColorVariant` |
 | [`dataset.zod.ts`](/docs/references/ui/dataset) | `Dataset`, `DatasetDimension`, `DatasetMeasure`, `DerivedMeasureOp` |
-| [`i18n.zod.ts`](/docs/references/ui/i18n) | `AriaProps`, `I18nLabel`, `InlineLocaleMap` |
+| [`i18n.zod.ts`](/docs/references/ui/i18n) | `AriaProps`, `I18nLabel` |
 | [`notification.zod.ts`](/docs/references/ui/notification) | `NotificationPosition`, `NotificationSeverity`, `NotificationType` |
 | [`page.zod.ts`](/docs/references/ui/page) | `ElementDataSource`, `InterfacePageConfig`, `Page`, `PageComponent`, `PageComponentType`, `PageRegion`, `PageType`, `PageVariable` |
 | [`report.zod.ts`](/docs/references/ui/report) | `JoinedReportBlock`, `Report`, `ReportChart`, `ReportSort`, `ReportType` |

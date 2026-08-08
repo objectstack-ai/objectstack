@@ -58,8 +58,9 @@ export type NotificationPosition = z.input<typeof NotificationPositionSchema>;
 //      notification-actions key; the barrel was this module's only non-test
 //      importer. The `./ui` "notification instance" and "notification system
 //      config" wrappers that could have carried it were themselves deleted in
-//      #4610 for having zero consumers (see the note below), which is what left
-//      this shape an orphan.
+//      #4610 (see the corrected note below — that retirement's "zero consumers"
+//      evidence did not hold, the removal did), which is what left this shape
+//      an orphan.
 //   2. **Graph reachability** — BFS from the 24 metadata-type roots plus
 //      `defineStack`'s `ObjectStackSchema` (the closure `build-schemas.ts` uses
 //      for the #4650 deletion check, including its derived-clone bridge) never
@@ -92,12 +93,45 @@ export type NotificationPosition = z.input<typeof NotificationPositionSchema>;
 
 // [#4610] `NotificationSchema` / `Notification` and `NotificationConfigSchema`
 // / `NotificationConfig` were removed from this module (dual-source cleanup,
-// #4535 C3). The `./ui` "notification instance" and "notification system
-// config" wrappers had ZERO consumers across framework, cloud and objectui —
-// only the presentation vocabulary above (type/severity/position/action) is
-// consumed (objectui pins its toaster implementation against it). The bare
-// name `Notification(Schema)` now belongs to `@objectstack/spec/api` alone:
-// the REST inbox-row contract served by `/api/v1/notifications` (ADR-0030's
-// bell reads that shape). `NotificationConfig(Schema)` left the export
-// surface entirely — its `./system` twin was equally consumer-free and
-// contradicted ADR-0030's accepted delivery model.
+// #4535 C3). The bare name `Notification(Schema)` now belongs to
+// `@objectstack/spec/api` alone: the REST inbox-row contract served by
+// `/api/v1/notifications` (ADR-0030's bell reads that shape).
+// `NotificationConfig(Schema)` left the export surface entirely — its
+// `./system` twin was wired into no parent schema and contradicted ADR-0030's
+// accepted delivery model. What survives on this module is the presentation
+// vocabulary above: `NotificationType` / `NotificationSeverity` /
+// `NotificationPosition` — three enums, not four, since #5015 took
+// `NotificationAction` — which objectui's toaster reads as a vocabulary.
+//
+// ⚠️ [#5781] The retirement STANDS; the evidence #4610 published for it does
+// not. #4610 recorded these two `./ui` wrappers as having ZERO consumers
+// across framework, cloud and objectui. That was false for objectui: at
+// 17.0.0-rc.1 its `packages/types/src/index.ts` re-exported both names with
+// `export … from '@objectstack/spec/ui'`, and
+// `packages/core/src/protocols/NotificationProtocol.ts` consumed them through
+// the `@object-ui/types` barrel, in the public signatures of
+// `resolveNotificationConfig` / `specNotificationToToast` (objectui#3310).
+// objectui does not ask for the retirement back, and this note does not
+// reopen it: that bridge had zero in-repo callers, the implementation that
+// actually runs is `@object-ui/react`'s own locally-declared
+// `NotificationSystemConfig`, and objectui deleted the bridge to FOLLOW this
+// retirement rather than re-declare vocabulary the spec had just dropped.
+//
+// ⚠️ [#5781] There is NO migration target for the removed `./ui`
+// `Notification`. #4610 published a FROM `'@objectstack/spec/ui'` → TO
+// `'@objectstack/spec/api'` line; an author who follows it does not compile.
+// `./api`'s `Notification` is the REST inbox row (`id` / `type` / `title` /
+// `body` / `read` / `data` / `actionUrl` / `createdAt`) and shares ZERO fields
+// with the removed toast shape (`message` / `severity` / `position` /
+// `duration` / `dismissible` / `actions`) — same name, a different contract,
+// which is the dual-source trap #4610 closed, not a new home for the old
+// shape. Keep the three presentation enums above for the vocabulary and
+// declare the instance shape locally, as objectui does.
+//
+// Methodology, so a fourth repetition is not owed to the same blind spot: a
+// cross-repo liveness verdict must be read off the RESOLVED SYMBOL GRAPH, not
+// off `import … from` statement text — at minimum it has to cover
+// `export … from` re-exports and consumption that reaches the spec indirectly
+// through a downstream barrel package. Statement-level scanning missed exactly
+// those two hops here, after missing the same class at #4667 / #4709
+// (`app.homePageId`).

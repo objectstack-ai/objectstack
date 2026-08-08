@@ -245,6 +245,7 @@
     "system/SpecifierOption",
     "system/SpecifierScope",
     "system/SpecifierType",
+    "system/SpecifierValueDomain",
     "system/StackServerConfig",
     "system/StackServerSecurity",
     "system/StorageAcl",

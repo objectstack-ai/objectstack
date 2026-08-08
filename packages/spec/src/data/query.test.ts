@@ -11,7 +11,7 @@ describe('AggregationFunction', () => {
   it('should accept valid aggregation functions', () => {
     const validFunctions = [
       'count', 'sum', 'avg', 'min', 'max',
-      'count_distinct', 'array_agg', 'string_agg'
+      'count_distinct'
     ];
 
     validFunctions.forEach(fn => {
@@ -19,9 +19,51 @@ describe('AggregationFunction', () => {
     });
   });
 
+  it('declares exactly the functions the SQL family can lower', () => {
+    // The roster itself is the contract (#6188): `service-analytics` derives
+    // its supported set from `.options`, so an addition here silently widens
+    // what the dataset compiler claims to support. A change to this list is a
+    // vocabulary decision and must be visible in review.
+    expect(AggregationFunction.options).toEqual([
+      'count', 'sum', 'avg', 'min', 'max', 'count_distinct',
+    ]);
+  });
+
   it('should reject invalid aggregation functions', () => {
     expect(() => AggregationFunction.parse('COUNT')).toThrow();
     expect(() => AggregationFunction.parse('median')).toThrow();
+  });
+
+  // ── #6188: the two retired values carry a prescription, not a bare reject ──
+  //
+  // Both halves matter. The refusal alone is what `median` already got; what
+  // the retirement adds is that the author who wrote a value which USED to be
+  // legal is told it was removed and what to do instead. A test that only
+  // asserted `.toThrow()` would stay green if the error map were deleted.
+  it('prescribes the retirement for `array_agg`', () => {
+    expect(() => AggregationFunction.parse('array_agg'))
+      .toThrow(/`array_agg`.*was removed.*#6188.*Delete the aggregation/s);
+  });
+
+  it('prescribes the retirement for `string_agg`', () => {
+    expect(() => AggregationFunction.parse('string_agg'))
+      .toThrow(/`string_agg`.*was removed.*#6188.*Delete the aggregation/s);
+  });
+
+  it('does NOT tell a mis-spelling that it "was removed"', () => {
+    // `arry_agg` was never legal; claiming it was removed would misinform.
+    // Only the two retired spellings are dispatched — everything else keeps
+    // zod's own enum message listing the legal functions.
+    expect(() => AggregationFunction.parse('arry_agg')).toThrow();
+    const message = (() => {
+      try {
+        AggregationFunction.parse('arry_agg');
+        return '';
+      } catch (e) {
+        return (e as Error).message;
+      }
+    })();
+    expect(message).not.toContain('was removed');
   });
 });
 
@@ -454,8 +496,14 @@ describe('QuerySchema - Aggregations', () => {
     expect(() => QuerySchema.parse(query)).not.toThrow();
   });
 
-  it('should accept query with ARRAY_AGG aggregation', () => {
-    const query: QueryAST = {
+  // These two used to assert that `array_agg` / `string_agg` PARSE. #6188
+  // retired both, so the fixtures are replaced rather than re-spelled: what
+  // needs pinning now is that the refusal reaches the author through the
+  // nested `aggregations[]` parse, carrying the prescription — the enum's
+  // error map is reachable from the real authoring surface, not just from a
+  // bare `AggregationFunction.parse`.
+  it('refuses ARRAY_AGG through the query surface, with the prescription', () => {
+    const query = {
       object: 'order',
       fields: ['customer_id'],
       aggregations: [
@@ -464,15 +512,33 @@ describe('QuerySchema - Aggregations', () => {
       groupBy: ['customer_id'],
     };
 
-    expect(() => QuerySchema.parse(query)).not.toThrow();
+    expect(() => QuerySchema.parse(query))
+      .toThrow(/`array_agg`.*was removed.*os migrate meta/s);
   });
 
-  it('should accept query with STRING_AGG aggregation', () => {
-    const query: QueryAST = {
+  it('refuses STRING_AGG through the query surface, with the prescription', () => {
+    const query = {
       object: 'order',
       fields: ['customer_id'],
       aggregations: [
         { function: 'string_agg', field: 'product_name', alias: 'product_names' },
+      ],
+      groupBy: ['customer_id'],
+    };
+
+    expect(() => QuerySchema.parse(query))
+      .toThrow(/`string_agg`.*was removed.*os migrate meta/s);
+  });
+
+  it('still accepts the aggregation that was kept', () => {
+    // `count_distinct` takes ADR-0049's ENFORCE leg (maintainer ruling
+    // 2026-08-07), so the split must be visible from the authoring surface:
+    // one of the three unlowered functions stayed and two left.
+    const query: QueryAST = {
+      object: 'order',
+      fields: ['customer_id'],
+      aggregations: [
+        { function: 'count_distinct', field: 'product_id', alias: 'products' },
       ],
       groupBy: ['customer_id'],
     };
