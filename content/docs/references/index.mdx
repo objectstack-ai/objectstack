@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1604 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1605 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -31,9 +31,9 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 5 | 27 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 8 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 37 | 295 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [System Protocol](/docs/references/system) | 37 | 296 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 146 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **200** | **1604** | 14 protocol modules |
+| **Total** | **200** | **1605** | 14 protocol modules |
 
 ---
 
@@ -318,7 +318,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **37 pages, 295 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **37 pages, 296 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -353,7 +353,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`search-engine.zod.ts`](/docs/references/system/search-engine) | `AnalyzerConfig`, `FacetConfig`, `SearchConfig`, `SearchIndexConfig`, `SearchProvider` |
 | [`security-context.zod.ts`](/docs/references/system/security-context) | `ComplianceAuditRequirement`, `ComplianceEncryptionRequirement`, `ComplianceFramework`, `DataClassification`, `DataClassificationPolicy`, `MaskingVisibilityRule`, `SecurityContextConfig`, `SecurityEventCorrelation` |
 | [`settings-client.zod.ts`](/docs/references/system/settings-client) | `SettingsChangeEvent` |
-| [`settings-manifest.zod.ts`](/docs/references/system/settings-manifest) | `ResolvedSettingValue`, `SettingsActionResult`, `SettingsManifest`, `SettingsNamespacePayload`, `Specifier`, `SpecifierHandler`, `SpecifierOption`, `SpecifierScope`, `SpecifierType` |
+| [`settings-manifest.zod.ts`](/docs/references/system/settings-manifest) | `ResolvedSettingValue`, `SettingsActionResult`, `SettingsManifest`, `SettingsNamespacePayload`, `Specifier`, `SpecifierHandler`, `SpecifierOption`, `SpecifierScope`, `SpecifierType`, `SpecifierValueDomain` |
 | [`stack-server.zod.ts`](/docs/references/system/stack-server) | `ServerRateLimitConfig`, `StackServerConfig`, `StackServerSecurity` |
 | [`supplier-security.zod.ts`](/docs/references/system/supplier-security) | `SupplierAssessmentStatus`, `SupplierRiskLevel`, `SupplierSecurityAssessment`, `SupplierSecurityPolicy`, `SupplierSecurityRequirement` |
 | [`tenant.zod.ts`](/docs/references/system/tenant) | `DatabaseLevelIsolationStrategy`, `DatabaseProvider`, `QuotaEnforcementResult`, `RowLevelIsolationStrategy`, `SchemaLevelIsolationStrategy`, `Tenant`, `TenantConnectionConfig`, `TenantIsolationConfig`, `TenantIsolationLevel`, `TenantQuota`, `TenantSecurityPolicy`, `TenantUsage` |

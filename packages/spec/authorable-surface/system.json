@@ -1142,6 +1142,7 @@
     "system/Specifier:scope",
     "system/Specifier:step",
     "system/Specifier:type",
+    "system/Specifier:valueDomain",
     "system/Specifier:visible",
     "system/Specifier:writePermission",
     "system/SpecifierOption:description",

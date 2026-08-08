@@ -619,6 +619,8 @@
     "SpecifierScope (type)",
     "SpecifierScopeSchema (const)",
     "SpecifierType (type)",
+    "SpecifierValueDomain (type)",
+    "SpecifierValueDomainSchema (const)",
     "StackServerConfig (type)",
     "StackServerConfigParsed (type)",
     "StackServerConfigSchema (const)",

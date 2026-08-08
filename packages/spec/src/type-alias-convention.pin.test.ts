@@ -1194,6 +1194,7 @@ export type Iso624 = Assert<Eq< z.input< typeof M147.SpecifierType >, z.infer< t
 export type Iso625 = Assert<Eq< z.input< typeof M147.SpecifierOptionSchema >, z.infer< typeof M147.SpecifierOptionSchema > >>;
 export type Iso626 = Assert<Eq< z.input< typeof M147.SpecifierScopeSchema >, z.infer< typeof M147.SpecifierScopeSchema > >>;
 export type Iso627 = Assert<Eq< z.input< typeof M147.SettingsActionResultSchema >, z.infer< typeof M147.SettingsActionResultSchema > >>;
+export type Iso758 = Assert<Eq< z.input< typeof M147.SpecifierValueDomainSchema >, z.infer< typeof M147.SpecifierValueDomainSchema > >>;
 
 // system/supplier-security.zod.ts
 export type Iso628 = Assert<Eq< z.input< typeof M148.SupplierRiskLevelSchema >, z.infer< typeof M148.SupplierRiskLevelSchema > >>;
@@ -1490,9 +1491,14 @@ describe('ADR-0122 type-alias convention', () => {
     // 751 -> 754 is #6037's `ValidateDataIssue` / `ValidateDataRequest` /
     // `ValidateDataResponse` — three new protocol shapes with no defaults or
     // transforms anywhere in their trees, i.e. the second (RISE) case above.
+    //
+    // 754 -> 755 is #5933's `SpecifierValueDomain` — one new closed enum on
+    // `SettingsManifest`'s SpecifierSchema, the same (RISE) case: a `z.enum`
+    // has no default or transform, so its two shapes coincide and it gets a pin
+    // rather than a `SpecifierValueDomainParsed` synonym.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(754);
+    expect(pins).toHaveLength(755);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {
