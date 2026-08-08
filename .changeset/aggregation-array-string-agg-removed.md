@@ -78,3 +78,5 @@ ended — an aggregation that worked on one backend and failed on another is not
 capability — and both of those backends are inside the #5499 freeze. Their code
 is untouched; it is simply no longer reachable through a spec-valid request. On
 the dataset path nothing changes: `compileDataset` refused both by name already.
+
+<!-- adr-0087: registered query-array-string-agg-retired, dataset-measure-array-string-agg-removed -->
