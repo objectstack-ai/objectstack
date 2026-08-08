@@ -24,6 +24,13 @@
 # Assumes sibling layout:
 #   ~/work/objectui
 #   ~/work/objectstack   ← run from here
+# --help ends here
+#
+# ^ SENTINEL, not prose — `--help` prints from the shebang down to the line above
+# and stops there, so the terminator travels with the text it terminates. Add or
+# remove header lines freely; no line number tracks this block any more (#6425).
+# Spell it exactly: the --help branch below refuses to run without it. Everything
+# from here down is internal rationale and is NOT user-facing help.
 #
 # objectui ships @object-ui/console as a static SPA. The framework
 # release pipeline reads .objectui-sha, clones objectui at that commit,
@@ -63,10 +70,25 @@ for arg in "$@"; do
     --no-commit) NO_COMMIT=1 ;;
     --no-changeset) NO_CHANGESET=1 ;;
     -h|--help)
-      # NOTE: this line range is coupled to the header block above (usage → env →
-      # sibling layout, ending at "run from here"). Editing the header means moving
-      # it — #5960 added the pin-update step and had to.
-      sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
+      # The header block above IS the help text, and the `# --help ends here`
+      # sentinel is what ends it — no line range, so growing the header can no
+      # longer truncate the help (#6425; #5960 grew it and PR #6421 had to move a
+      # hand-kept `2,26p`). The leading `2` addresses the shebang, whose position
+      # is fixed by execve rather than by the header's content, so it cannot drift.
+      #
+      # A missing sentinel EXITS 1 rather than running on to EOF: a truncated help
+      # and a complete one both exit 0 and both print something, which is precisely
+      # why the old coupling could fail in silence — same lesson as the `head -40`
+      # this script used to truncate its changeset list with (#4731). Guarded here,
+      # not at startup: a deleted comment must never stop an actual pin bump.
+      if ! grep -qxF '# --help ends here' "$0"; then
+        echo "✗ ${0##*/}: the '# --help ends here' sentinel is missing — cannot tell" >&2
+        echo "  where the help text ends. Restore it at the end of the header block." >&2
+        exit 1
+      fi
+      sed -n '2,/^# --help ends here$/p' "$0" \
+        | grep -vxF '# --help ends here' \
+        | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) EXPLICIT_SHA="$arg" ;;
