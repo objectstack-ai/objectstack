@@ -106,6 +106,51 @@ describe('engine.validate() — validate-only (#6037)', () => {
     expect(out.results![1].errors[0].field).toBe('email');
   });
 
+  // [#4633] The preview must walk the pre-validation steps `insert()` walks,
+  // or it reports findings on rows the write creates. Discovered by the import
+  // dry run this operation exists to serve: a required-but-defaulted column
+  // left unmapped was previewed `failed` and written `created`.
+  describe('insert-time preparation the write does before it validates', () => {
+    const DEFAULTED = {
+      ...LEAD,
+      fields: {
+        ...LEAD.fields,
+        tier: { type: 'text', required: true, defaultValue: 'standard' },
+      },
+    };
+
+    it('a required field with a `defaultValue` is NOT reported missing — the write defaults it first', async () => {
+      const { engine } = makeEngine([DEFAULTED]);
+      const out = await engine.validate('lead', { company: 'Acme' });
+      expect(out.results![0].errors).toEqual([]);
+      expect(out.valid).toBe(true);
+    });
+
+    it('agrees with the write on that row — preview and insert, one engine', async () => {
+      const { engine } = makeEngine([DEFAULTED]);
+      const previewValid = (await engine.validate('lead', { company: 'Acme' })).valid;
+      let writeSucceeded = true;
+      try { await engine.insert('lead', { company: 'Acme' }); } catch { writeSucceeded = false; }
+      expect(previewValid).toBe(writeSucceeded);
+      expect(writeSucceeded).toBe(true);
+    });
+
+    it('does not default in `update` mode — a PATCH never re-applies defaults (#2706)', async () => {
+      const { engine } = makeEngine([DEFAULTED]);
+      // Supplying an explicit null on update means "clear it", so the preview
+      // must judge the null the caller sent, not a default it never gets.
+      const out = await engine.validate('lead', { tier: null }, { mode: 'update' });
+      expect(out.results![0].errors.some((e) => e.field === 'tier')).toBe(true);
+    });
+
+    it('never mutates the caller’s row objects', async () => {
+      const { engine } = makeEngine([DEFAULTED]);
+      const row: Record<string, unknown> = { company: 'Acme' };
+      await engine.validate('lead', row);
+      expect(row).toEqual({ company: 'Acme' });
+    });
+  });
+
   it('judges only supplied keys in `update` mode, matching a PATCH', async () => {
     const { engine } = makeEngine();
     // `company` is required but absent. An insert rejects that; a PATCH that
