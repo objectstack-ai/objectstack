@@ -66,6 +66,18 @@ export const LEGACY_MONOLITH_NAMES = Object.freeze({
   [API_SURFACE_DIR_NAME]: 'api-surface.json',
 } as Record<string, string>);
 
+/**
+ * The array property a category-sharded ratchet keeps its entries in.
+ *
+ * `defaults` is the #4666 default-value ratchet
+ * (`authorable-defaults/<category>.json`). Its entries are
+ * `"<def>:<key> = <canonical JSON>"` rather than a bare key, which the two
+ * readers below do not care about: both route on `categoryOfDefKey`, and that
+ * reads up to the first slash — the same way it already tolerates the
+ * `[RETIRED]` suffix riding on an authorable-surface entry.
+ */
+export type ShardArrayField = 'keys' | 'schemas' | 'defaults';
+
 /** Shard basename for the root entry point (`"."`), which has no path segment. */
 export const ROOT_ENTRY_SHARD = 'root';
 
@@ -339,7 +351,7 @@ function shardTextsByCategory(
  */
 export function aggregateCategoryShards(
   dir: string,
-  field: 'keys' | 'schemas',
+  field: ShardArrayField,
 ): { entries: string[]; shards: ShardOnDisk<Record<string, unknown>>[] } | null {
   const shards = readShards<Record<string, unknown>>(dir);
   if (shards.length === 0 && !fs.existsSync(dir)) return null;
@@ -434,7 +446,7 @@ export function readShardedKeysAtRev(
   git: GitRun,
   rev: string,
   dirName: string,
-  field: 'keys' | 'schemas',
+  field: ShardArrayField,
 ): { entries: string[]; layout: BaselineLayout } | { error: string } | null {
   // `ls-tree` run inside the package prints paths relative to the CWD, which is
   // the same spelling `git show <rev>:./<path>` wants — so the two compose
@@ -462,6 +474,11 @@ export function readShardedKeysAtRev(
   }
 
   const legacyName = LEGACY_MONOLITH_NAMES[dirName];
+  // A ratchet born AFTER the #5837 split (authorable-defaults/, #4666) never had
+  // a single-file layout, so there is nothing to fall back to and "absent" is the
+  // honest answer. Said explicitly rather than left to `git show <rev>:./undefined`
+  // failing its way to the same result — an accident that reads as a decision.
+  if (legacyName === undefined) return null;
   const show = git('show', `${rev}:./${legacyName}`);
   if (show.status !== 0) {
     if (/does not exist in|exists on disk, but not in/.test(show.stderr)) return null;

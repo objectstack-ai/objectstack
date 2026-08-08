@@ -43,12 +43,33 @@ import { lazySchema } from '../shared/lazy-schema';
  * as a dedicated column. It remains in the protocol as a typed advisory used
  * by Studio badges, provisioning policies and SDK helpers; deployments that
  * need to persist it should write it into `metadata.env_type`.
+ *
+ * ⚠️ **This is NOT the enum a discovery response advertises.**
+ * `DiscoverySchema.environment` (`api/discovery.zod.ts`) is a deliberately
+ * coarser THREE-member enum — `production` / `sandbox` / `development` — that
+ * answers "am I talking to production?", not "which environment is this". The
+ * three are a strict subset of the seven here, and `resolveDiscoveryEnvironment`
+ * folds the other four onto them (#4828): `test` → `development`; `staging`,
+ * `preview` and `trial` → `sandbox`, the enum's provisioned pre-production
+ * member. So a `staging` value that is first-class on this taxonomy is REJECTED
+ * by `DiscoveryEnvironmentSchema`; do not carry a value from here onto a
+ * discovery response without going through that resolver. The subset relation is
+ * pinned in `api/discovery-environment-subset.pin.test.ts` so neither enum can
+ * drift out of it silently (#5676).
+ *
+ * ⚠️ **Adding a member here is a decision over there too** (#6287). The fold
+ * table is typed `Record<EnvironmentType, DiscoveryEnvironment>`, so a new
+ * bucket does not compile until someone says which of the three coarse postures
+ * it advertises. That is on purpose: before #6287 `preview` and `trial` reached
+ * `development` through a `??` fallback instead of a decision, and a new bucket
+ * would have joined them silently — including a production-side one, which is
+ * the dangerous direction (#5673).
  */
 export const EnvironmentTypeSchema = lazySchema(() => z
   .enum(['production', 'sandbox', 'development', 'test', 'staging', 'preview', 'trial'])
   .describe('Environment categorical tag (prod/sandbox/dev/test/…)'));
 
-export type EnvironmentType = z.infer<typeof EnvironmentTypeSchema>;
+export type EnvironmentType = z.input<typeof EnvironmentTypeSchema>;
 
 /**
  * Environment lifecycle status.
@@ -61,7 +82,7 @@ export const EnvironmentStatusSchema = lazySchema(() => z
   .enum(['provisioning', 'active', 'suspended', 'archived', 'failed', 'migrating'])
   .describe('Environment lifecycle status'));
 
-export type EnvironmentStatus = z.infer<typeof EnvironmentStatusSchema>;
+export type EnvironmentStatus = z.input<typeof EnvironmentStatusSchema>;
 
 /**
  * Backend driver registry — keys used by the data-plane driver factory.
@@ -73,7 +94,7 @@ export const EnvironmentDriverSchema = lazySchema(() => z
   .min(1)
   .describe('Data-plane driver key (e.g. `turso`, `libsql`, `sqlite`, `postgres`)'));
 
-export type EnvironmentDriver = z.infer<typeof EnvironmentDriverSchema>;
+export type EnvironmentDriver = z.input<typeof EnvironmentDriverSchema>;
 
 /**
  * Public exposure of an environment's compiled artifacts.
@@ -86,7 +107,7 @@ export const EnvironmentVisibilitySchema = lazySchema(() => z
   .enum(['private', 'unlisted', 'public'])
   .describe('Public exposure of this environment artifacts (private | unlisted | public).'));
 
-export type EnvironmentVisibility = z.infer<typeof EnvironmentVisibilitySchema>;
+export type EnvironmentVisibility = z.input<typeof EnvironmentVisibilitySchema>;
 
 /**
  * Environment — one logical runtime of an organization's data.
@@ -178,7 +199,7 @@ export const EnvironmentSchema = lazySchema(() => z.object({
     .describe('Public exposure of this environment artifacts (private | unlisted | public).'),
 }));
 
-export type Environment = z.infer<typeof EnvironmentSchema>;
+export type Environment = z.input<typeof EnvironmentSchema>;
 /** Post-parse shape of {@link Environment} — defaults applied, transforms run (ADR-0122). */
 export type EnvironmentParsed = z.infer<typeof EnvironmentSchema>;
 
@@ -193,7 +214,7 @@ export const EnvironmentCredentialStatusSchema = lazySchema(() => z
   .enum(['active', 'rotating', 'revoked'])
   .describe('Credential lifecycle status'));
 
-export type EnvironmentCredentialStatus = z.infer<typeof EnvironmentCredentialStatusSchema>;
+export type EnvironmentCredentialStatus = z.input<typeof EnvironmentCredentialStatusSchema>;
 
 /**
  * Encrypted credential for an environment's database.
@@ -234,7 +255,7 @@ export const EnvironmentCredentialSchema = lazySchema(() => z.object({
   revokedAt: z.string().datetime().optional().describe('Revocation timestamp (if revoked)'),
 }));
 
-export type EnvironmentCredential = z.infer<typeof EnvironmentCredentialSchema>;
+export type EnvironmentCredential = z.input<typeof EnvironmentCredentialSchema>;
 /** Post-parse shape of {@link EnvironmentCredential} — defaults applied, transforms run (ADR-0122). */
 export type EnvironmentCredentialParsed = z.infer<typeof EnvironmentCredentialSchema>;
 
@@ -249,7 +270,7 @@ export const EnvironmentRoleSchema = lazySchema(() => z
   .enum(['owner', 'admin', 'maker', 'reader', 'guest'])
   .describe('Per-environment role'));
 
-export type EnvironmentRole = z.infer<typeof EnvironmentRoleSchema>;
+export type EnvironmentRole = z.input<typeof EnvironmentRoleSchema>;
 
 /**
  * Environment membership — grants a user access to a specific environment.
@@ -279,7 +300,7 @@ export const EnvironmentMemberSchema = lazySchema(() => z.object({
   updatedAt: z.string().datetime().describe('Last update timestamp (ISO-8601)'),
 }));
 
-export type EnvironmentMember = z.infer<typeof EnvironmentMemberSchema>;
+export type EnvironmentMember = z.input<typeof EnvironmentMemberSchema>;
 
 // ---------------------------------------------------------------------------
 // Provisioning requests / responses
@@ -311,7 +332,7 @@ export const ProvisionEnvironmentRequestSchema = lazySchema(() => z.object({
   ),
 }));
 
-export type ProvisionEnvironmentRequest = z.infer<typeof ProvisionEnvironmentRequestSchema>;
+export type ProvisionEnvironmentRequest = z.input<typeof ProvisionEnvironmentRequestSchema>;
 /** Post-parse shape of {@link ProvisionEnvironmentRequest} — defaults applied, transforms run (ADR-0122). */
 export type ProvisionEnvironmentRequestParsed = z.infer<typeof ProvisionEnvironmentRequestSchema>;
 
@@ -352,7 +373,7 @@ export const ProvisionEnvironmentResponseSchema = lazySchema(() => z.object({
     ),
 }));
 
-export type ProvisionEnvironmentResponse = z.infer<typeof ProvisionEnvironmentResponseSchema>;
+export type ProvisionEnvironmentResponse = z.input<typeof ProvisionEnvironmentResponseSchema>;
 /** Post-parse shape of {@link ProvisionEnvironmentResponse} — defaults applied, transforms run (ADR-0122). */
 export type ProvisionEnvironmentResponseParsed = z.infer<typeof ProvisionEnvironmentResponseSchema>;
 
@@ -374,7 +395,7 @@ export const ProvisionOrganizationRequestSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Free-form metadata'),
 }));
 
-export type ProvisionOrganizationRequest = z.infer<typeof ProvisionOrganizationRequestSchema>;
+export type ProvisionOrganizationRequest = z.input<typeof ProvisionOrganizationRequestSchema>;
 /** Post-parse shape of {@link ProvisionOrganizationRequest} — defaults applied, transforms run (ADR-0122). */
 export type ProvisionOrganizationRequestParsed = z.infer<typeof ProvisionOrganizationRequestSchema>;
 
@@ -387,6 +408,6 @@ export const ProvisionOrganizationResponseSchema = lazySchema(() => z.object({
   warnings: z.array(z.string()).optional().describe('Non-fatal warnings'),
 }));
 
-export type ProvisionOrganizationResponse = z.infer<typeof ProvisionOrganizationResponseSchema>;
+export type ProvisionOrganizationResponse = z.input<typeof ProvisionOrganizationResponseSchema>;
 /** Post-parse shape of {@link ProvisionOrganizationResponse} — defaults applied, transforms run (ADR-0122). */
 export type ProvisionOrganizationResponseParsed = z.infer<typeof ProvisionOrganizationResponseSchema>;

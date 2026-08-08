@@ -6,13 +6,16 @@
 // motivated the extraction:
 //   1. A NEW request-context resolver copy. The original bug: the REST server
 //      kept its own resolver that drifted from the dispatcher's and silently
-//      dropped `sys_user_role`, so custom-role grants didn't apply over REST.
+//      dropped the position assignments table (`sys_user_role` at the time,
+//      `sys_user_position` since ADR-0090 D3), so custom grants didn't apply
+//      over REST.
 //   2. An entry point that stops delegating to the shared resolver.
 //
-// Heuristic for (1): a non-test source file that references BOTH `sys_user_role`
-// and `sys_user_permission_set` is doing request-context role+permission
-// aggregation — the resolver's job — and must be the canonical module (or an
-// explicitly allow-listed non-resolver, e.g. seed definitions).
+// Heuristic for (1): a non-test source file that QUERIES every table in
+// `GRANT_TABLES` — reads rows from each, not merely names them — is doing
+// request-context grant aggregation, the resolver's job, and must be the
+// canonical module (or an explicitly allow-listed non-resolver, each carrying
+// its reason in `ALLOW`).
 //
 //   node scripts/check-single-authz-resolver.mjs
 //   node scripts/check-single-authz-resolver.mjs --self-test
@@ -87,6 +90,68 @@
 // `x.test.ts` is not. None of the twelve files trips check (1)'s heuristic, so the wider
 // corpus changes no verdict today; what changes is that the verdict is now drawn from
 // what the gate says it reads.
+//
+// ## The criterion is the other half, and it had already expired (#6286)
+//
+// Everything above hardens the CORPUS — that the gate reads what it claims to read.
+// None of it can see a gate that reads everything and then judges it with a vocabulary
+// that no longer denotes anything. Check (1) matched `sys_user_role` && `sys_user_permission_set`;
+// ADR-0090 D3 renamed `sys_role` → `sys_position` and `sys_user_role` → `sys_user_position`,
+// after which `sys_user_role` survived repo-wide in exactly ONE place: a "formerly
+// sys_user_role" comment in `plugin-security/src/objects/sys-user-position.object.ts`.
+// Files matching both terms: **0**. Check (1) was structurally incapable of failing, and
+// both `ALLOW` entries exempted callers from a predicate that could never fire. The
+// canonical resolver did not trip its own heuristic.
+//
+// So the vocabulary lives in ONE place (`GRANT_TABLES`) and the criterion is a SHAPE,
+// not a pair of substrings. Two decisions, both measured on the real corpus rather than
+// argued:
+//
+// * **"Queries the table", not "mentions it".** A plain rename of the word list matches 20
+//   files, of which 18 are noise — four generated translation bundles, `object.zod.ts` /
+//   `permission.zod.ts` / `component.zod.ts` / `explain.zod.ts` prose, the
+//   `platform-object-names.ts` constant list, a lint `Set` literal, page metadata, a testkit
+//   fixture. A duplicate resolver is not a file that says these names; it is a file that
+//   READS ROWS from them. Requiring the table name as a quoted argument of a data-read call
+//   (`find` / `query` / `select` / `count` / `aggregate`, including helper spellings like the
+//   resolver's own `tryFind`) takes the same corpus from 20 hits to 2 — the canonical resolver
+//   and one deliberate non-enforcement mirror — with no allow-list doing the narrowing.
+//
+// * **NOT a landing-path filter.** Restricting the scan to `security/` directories is the
+//   other obvious narrowing and it is disqualifying: the ORIGINAL bug lived in
+//   `packages/rest/src/rest-server.ts`, which is not under any `security/` path, so that
+//   shape would not have caught the defect this gate exists for — and it would let the
+//   self-test's own duplicate fixture (`packages/rest/src/my-own-resolver.ts`) through. A
+//   guard narrowed to where the correct code lives cannot see code planted anywhere else.
+//
+// Deliberately NO comment-stripping pre-pass. It was measured and changes nothing (the same
+// 2 hits either way), and a lexical stripper that mis-parses one regex literal would silently
+// shrink what the guard judges — this file's entire failure family, re-planted in the
+// judgment step.
+//
+// ## A guard whose criterion no longer matches the thing it guards is green forever
+//
+// The rename above was invisible for months because every assertion in the self-test ran
+// against SYNTHETIC fixtures: the heuristic provably caught a planted duplicate and released
+// a planted innocent, and it would have kept proving exactly that with a vocabulary denoting
+// nothing in the real repo. Synthetic fixtures can only ever show the criterion is internally
+// consistent; they cannot show it still points at reality.
+//
+// So `assertCanonicalStillMatches` is a POSITIVE CONTROL on the real checkout, evaluated on
+// every run (not only under `--self-test`): the canonical resolver itself must be matched by
+// check (1)'s heuristic. If it is not, the vocabulary has drifted off the tables the resolver
+// actually reads, every "no duplicate resolver" verdict is vacuous, and the gate fails BY NAME
+// pointing at the tables that stopped matching. The next rename lands red in CI on the commit
+// that makes it, instead of surviving until someone happens to measure it.
+//
+// Note the layering, which is what makes the control assertable at all. Being MATCHED by the
+// heuristic and being REPORTED as an error are two steps: the canonical resolver must pass the
+// first (that is the control) and is exempted at the second (it is the legitimate copy). They
+// are separate functions — `queriesAllGrantTables` decides matching, `ALLOW` decides reporting
+// — so the control can assert the first without asserting the file is broken.
+//
+// The same gap is open across the `check:engine-double-contract` / `check:error-code-casing`
+// family: corpus-side floors exist, criterion-side positive controls do not.
 
 import {
   mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync,
@@ -97,11 +162,51 @@ import { dirname, join } from 'node:path';
 const ROOT = process.cwd();
 const CANONICAL = 'packages/core/src/security/resolve-authz-context.ts';
 
-// Files allowed to reference both role tables WITHOUT being a request resolver.
-const ALLOW = new Set([
-  CANONICAL,
-  // Seed/definition of the default permission sets + role bindings — not a resolver.
-  'packages/plugins/plugin-security/src/objects/default-permission-sets.ts',
+/**
+ * The grant link tables a request-context resolver must read to do its job — the
+ * criterion's whole vocabulary, in ONE place.
+ *
+ * Renamed by ADR-0090 D3 (`sys_user_role` → `sys_user_position`). The previous spelling
+ * was inlined twice in an `if`, so the rename left the gate matching a word that denotes
+ * nothing and check (1) could not fail (#6286). Keeping the names here means the next
+ * rename has a single edit site — and `assertCanonicalStillMatches` fails loudly if that
+ * edit is skipped, rather than printing green over a dead predicate.
+ */
+const GRANT_TABLES = ['sys_user_position', 'sys_user_permission_set'];
+
+/**
+ * Files that QUERY every grant table without being a request-context resolver, each with
+ * the reason it is exempt. Re-curated for the query-shaped criterion (#6286): the previous
+ * two entries were written against the dead `sys_user_role` predicate and neither survived
+ * re-measurement unchanged.
+ *
+ * A reason is mandatory — an exemption nobody can justify in a sentence is an exemption
+ * that outlived its cause, which is how the old list rotted unnoticed.
+ *
+ * REMOVED in the same pass: `plugin-security/src/objects/default-permission-sets.ts`, the
+ * old list's second entry. It names both tables in prose and as UNQUOTED object keys
+ * (`sys_user_permission_set: { allowRead: true, ... }`) and queries neither, so the
+ * query-shaped criterion does not reach it — measured, 0 hits. An exemption that no longer
+ * exempts anything is dead weight, and dead weight in an allow-list is indistinguishable
+ * from a live suppression on the day someone reads it.
+ */
+const ALLOW = new Map([
+  [
+    CANONICAL,
+    'The single legitimate resolver. Also the positive control: it MUST be matched by ' +
+    'the heuristic (assertCanonicalStillMatches) and is exempted only from being reported.',
+  ],
+  [
+    'packages/plugins/plugin-security/src/explain-engine.ts',
+    'Explain/diagnostic mirror, NOT a request-context resolver. buildContextForUser() ' +
+    'reconstructs an ARBITRARY user\'s grants for the explain API\'s `userId` parameter; ' +
+    'its only caller is security-plugin.ts explainAccessForCaller, which authorizes the ' +
+    'CALLER separately (manage_users or a delegated adminScope, ADR-0090 D6/D12) through ' +
+    'the normal path. It resolves nobody\'s enforcement context, so it is not the ' +
+    'drift-into-enforcement this gate guards. Its parity with the canonical resolver is a ' +
+    'real but DIFFERENT invariant, unguarded today and filed as #6352 — do not fold it in ' +
+    'here by widening this gate\'s remit without saying so in the header.',
+  ],
 ]);
 
 // Entry points that MUST delegate to the shared resolver (never re-inline it).
@@ -127,6 +232,88 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '__tests__']);
  */
 const SCANNED_EXT = /\.[mc]?ts$/;
 const EXCLUDED_EXT = /\.(?:test|d)\.[mc]?ts$/;
+
+/**
+ * Data-read call verbs. A duplicate resolver reads ROWS; it does not merely name tables.
+ * Kept deliberately broad on the callee (any identifier CONTAINING one of these, so
+ * `ql.find`, `dataEngine.findOne`, a bare `query(...)` and the canonical resolver's own
+ * `tryFind` helper all count) and strict on the argument (the table as a quoted literal,
+ * reached without crossing another quote or EITHER paren — i.e. an early argument of THAT
+ * call, not of something nested inside it, so `find(wrap('sys_user_position'))` is not a
+ * read of that table).
+ */
+const READ_VERBS = 'find|query|select|count|aggregate';
+
+/** Matches a data-read call taking `table` as a quoted argument. */
+function readCallPattern(table) {
+  return new RegExp(
+    '[\\w$.]*(?:' + READ_VERBS + ')[\\w$]*\\s*\\(\\s*' + // callee + open paren
+    '[^()\'"`]{0,80}' +                                   // earlier plain arguments, if any
+    '[\'"`]' + table + '[\'"`]',                          // the table, quoted
+    'i',
+  );
+}
+
+/** Does `src` read rows from `table` (as opposed to mentioning its name)? */
+function queriesGrantTable(src, table) {
+  return readCallPattern(table).test(src);
+}
+
+/**
+ * Check (1)'s criterion: this source queries EVERY grant table, so it is aggregating a
+ * principal's grants — the canonical resolver's job.
+ *
+ * Deliberately independent of `ALLOW`. Matching and being reported are two steps (see the
+ * header): the positive control asserts the canonical resolver passes THIS function, while
+ * `audit` separately decides not to report it.
+ */
+function queriesAllGrantTables(src) {
+  return GRANT_TABLES.every((t) => queriesGrantTable(src, t));
+}
+
+/**
+ * The criterion no longer matches the resolver it was written to describe: the tables were
+ * renamed (or the resolver moved) and `GRANT_TABLES` was not updated with them. Carries the
+ * table names that stopped matching.
+ */
+class ResolverSignatureLostError extends Error {
+  constructor(missing, detail) {
+    super(`check (1)'s criterion no longer matches the canonical resolver: ${detail}`);
+    this.name = 'ResolverSignatureLostError';
+    /** @type {string[]} the GRANT_TABLES entries the canonical resolver does not query. */
+    this.missing = missing;
+    this.detail = detail;
+  }
+}
+
+/**
+ * POSITIVE CONTROL, on the real checkout, every run.
+ *
+ * The canonical resolver must be MATCHED by check (1)'s heuristic. If it is not, the
+ * vocabulary has drifted off the tables the resolver actually reads and every "no duplicate
+ * resolver" verdict below is drawn from a predicate that matches nothing — the exact state
+ * ADR-0090 D3's rename left this gate in for months (#6286).
+ *
+ * @throws {ResolverSignatureLostError}
+ */
+function assertCanonicalStillMatches(root = ROOT) {
+  let src;
+  try {
+    src = readFileSync(join(root, CANONICAL), 'utf8');
+  } catch (err) {
+    throw new ResolverSignatureLostError(
+      [...GRANT_TABLES],
+      `${CANONICAL} could not be read (${err?.code ?? err}) — the resolver moved or was renamed`,
+    );
+  }
+  const missing = GRANT_TABLES.filter((t) => !queriesGrantTable(src, t));
+  if (missing.length) {
+    throw new ResolverSignatureLostError(
+      missing,
+      `${CANONICAL} does not query ${missing.join(', ')}`,
+    );
+  }
+}
 
 /** A declared scan root that could not be resolved to a directory. Carries the names. */
 class DeadRootError extends Error {
@@ -229,18 +416,26 @@ function collectScanFiles(root = ROOT, roots = SCAN_ROOTS) {
 function audit(root = ROOT) {
   const errors = [];
 
+  const files = collectScanFiles(root);
+
+  // The criterion must still match the thing it describes, BEFORE any verdict is drawn
+  // from it — a heuristic that matches nothing reports no duplicates for the same reason
+  // an unread corpus does (#6286).
+  assertCanonicalStillMatches(root);
+
   // (1) No duplicate request-context resolver.
-  for (const abs of collectScanFiles(root)) {
+  for (const abs of files) {
     const rel = abs.slice(root.length + 1);
     if (ALLOW.has(rel)) continue;
     const src = readFileSync(abs, 'utf8');
-    if (src.includes('sys_user_role') && src.includes('sys_user_permission_set')) {
+    if (queriesAllGrantTables(src)) {
       errors.push(
         `Possible duplicate authorization resolver: ${rel}\n` +
-        `  references BOTH sys_user_role and sys_user_permission_set. Request-context\n` +
-        `  role/permission resolution must live ONLY in ${CANONICAL} (resolveAuthzContext),\n` +
-        `  shared by every transport. If this file needs both for a non-resolution reason,\n` +
-        `  add it to ALLOW in scripts/check-single-authz-resolver.mjs.`,
+        `  QUERIES every grant table (${GRANT_TABLES.join(', ')}), which is request-context\n` +
+        `  grant aggregation. That resolution must live ONLY in ${CANONICAL}\n` +
+        `  (resolveAuthzContext), shared by every transport. If this file reads them for a\n` +
+        `  non-resolution reason, add it to ALLOW in scripts/check-single-authz-resolver.mjs\n` +
+        `  WITH the reason — a bare path is not an exemption.`,
       );
     }
   }
@@ -289,18 +484,94 @@ function reportEmptyRoots(err) {
   );
 }
 
+function reportSignatureLost(err) {
+  console.error('\n✗ check:authz-resolver: check (1)\'s criterion no longer matches the canonical resolver,\n' +
+    '  so "no duplicate resolver exists" would have been concluded from a predicate that\n' +
+    '  matches nothing:\n');
+  console.error(`  ${err.detail}`);
+  for (const t of err.missing) console.error(`  ${t} — not queried by the canonical resolver`);
+  console.error(
+    `\nGRANT_TABLES (scripts/check-single-authz-resolver.mjs) must name the tables` +
+    `\n${CANONICAL} actually reads. If they were renamed — ADR-0090 D3 renamed` +
+    `\nsys_user_role → sys_user_position once already — update GRANT_TABLES in the same` +
+    `\ncommit as the rename. If the resolver moved, update CANONICAL to follow it.` +
+    `\n\nDo NOT silence this by deleting the assertion: it exists because the last rename` +
+    `\nleft the heuristic matching a word that denoted nothing, and the gate printed green` +
+    `\nover a check that was structurally incapable of failing for months (#6286).\n`,
+  );
+}
+
 // ── Self-test ───────────────────────────────────────────────────────────────
 //
 // A guard that cannot fail is not a guard. Both invariants are driven over a real
 // temporary tree with the real walker, and both corpus failures are proved in both
 // directions — red when a root is renamed away, red when a root that still resolves
 // yields nothing, green when each is restored.
+//
+// Every fixture body is GENERATED FROM `GRANT_TABLES` rather than spelling table names
+// literally. That is not tidiness: hard-coded fixture bodies are how the criterion rotted
+// undetected (#6286). Literal fixtures keep proving the heuristic works on the words THEY
+// contain, which stay in sync with the predicate and drift away from the repo together —
+// the self-test stays green precisely while the gate stops meaning anything. Generated
+// bodies cannot disagree with the predicate, so the only thing left that CAN disagree is
+// the real repo, and that is what the positive control below asserts.
+
+/** A resolver-shaped body: reads rows from every grant table. Must be CAUGHT. */
+function resolverFixtureBody(tables = GRANT_TABLES) {
+  return tables
+    .map((t) => `  const rows = await ql.find('${t}', { where: { user_id: userId }, limit: 200 });`)
+    .join('\n') + '\n';
+}
+
+/**
+ * A body that NAMES every grant table without reading rows from any — prose, unquoted
+ * object keys, a constant list. The dominant shape in the real corpus (18 of the 20 files
+ * a bare rename would have matched) and the reason the criterion is query-shaped.
+ */
+function mentionOnlyFixtureBody(tables = GRANT_TABLES) {
+  return `// Seed/definition. Grants are stored in ${tables.join(' and ')}.\n` +
+    'export const DEFAULTS = {\n' +
+    tables.map((t) => `  ${t}: { allowRead: true, allowCreate: false },`).join('\n') +
+    `\n};\nexport const NAMES = [${tables.map((t) => `'${t}'`).join(', ')}];\n`;
+}
 
 function selfTest() {
   const failures = [];
   const expect = (label, got, want) => {
     if (got !== want) failures.push(`  ✗ ${label}: expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`);
   };
+
+  // --- Every exemption carries its reason. -----------------------------------
+  // The old list rotted because nothing required an entry to justify itself; two paths
+  // sat there exempting callers from a predicate that could not fire. A path with no
+  // reason is indistinguishable from a path someone added to make a red go away.
+  for (const [path, reason] of ALLOW) {
+    expect(`ALLOW entry ${path} carries a reason`, typeof reason === 'string' && reason.length > 20, true);
+  }
+  expect('the canonical resolver is exempt from being REPORTED', ALLOW.has(CANONICAL), true);
+
+  // --- POSITIVE CONTROL, on the REAL repo. -----------------------------------
+  // The assertion this gate was missing (#6286), and the whole reason the rename was
+  // silent: everything else in this self-test runs on fixtures the predicate cannot
+  // disagree with. This one runs against the actual canonical resolver in the checkout.
+  // Positive polarity — it goes RED when GRANT_TABLES drifts off the real tables.
+  let realCanonicalSrc = null;
+  try {
+    realCanonicalSrc = readFileSync(join(ROOT, CANONICAL), 'utf8');
+  } catch (err) {
+    failures.push(`  ✗ the real canonical resolver is readable: ${CANONICAL} — ${err?.code ?? err}`);
+  }
+  if (realCanonicalSrc !== null) {
+    for (const t of GRANT_TABLES) {
+      expect(`the REAL ${CANONICAL} still queries ${t}`, queriesGrantTable(realCanonicalSrc, t), true);
+    }
+    expect('the REAL canonical resolver is matched by check (1)\'s heuristic',
+      queriesAllGrantTables(realCanonicalSrc), true);
+  }
+  let realControlErr = null;
+  try { assertCanonicalStillMatches(ROOT); } catch (err) { realControlErr = err; }
+  expect('the positive control passes against the real checkout',
+    realControlErr === null ? 'ok' : realControlErr.message, 'ok');
 
   const dir = mkdtempSync(join(tmpdir(), 'check-authz-resolver-selftest-'));
   const write = (rel, body) => {
@@ -309,17 +580,71 @@ function selfTest() {
   };
   try {
     // A tree that mirrors the real one: the canonical resolver, an allow-listed
-    // seed, two delegating entry points, and one innocent file.
-    write(CANONICAL, "sys_user_role sys_user_permission_set\n");
+    // explain mirror, a mention-only seed, two delegating entry points, and one
+    // innocent file.
+    write(CANONICAL, resolverFixtureBody());
+    write('packages/plugins/plugin-security/src/explain-engine.ts', resolverFixtureBody());
     write('packages/plugins/plugin-security/src/objects/default-permission-sets.ts',
-      "sys_user_role sys_user_permission_set\n");
+      mentionOnlyFixtureBody());
     for (const d of DELEGATORS) write(d, "import { resolveAuthzContext } from '@objectstack/core';\n");
     write('packages/core/src/unrelated.ts', 'export const x = 1;\n');
 
     expect('a compliant tree passes', audit(dir).length, 0);
 
-    // (1) — a second file reading both role tables is a duplicate resolver.
-    write('packages/rest/src/my-own-resolver.ts', "sys_user_role sys_user_permission_set\n");
+    // --- The two ALLOW steps are separable, which is what makes them assertable. ---
+    // The explain mirror MUST be matched by the heuristic (positive form — this goes red
+    // if the criterion stops recognising resolver shape) and MUST NOT be reported
+    // (ALLOW's job). Asserting only the second would pass just as well if the heuristic
+    // matched nothing at all — exactly the failure being fixed.
+    expect('the allow-listed explain mirror IS matched by the heuristic',
+      queriesAllGrantTables(readFileSync(join(dir, 'packages/plugins/plugin-security/src/explain-engine.ts'), 'utf8')), true);
+
+    // --- The criterion is query-shaped, not mention-shaped (#6286). ---
+    // NEGATIVE polarity, declared as such: this cannot go red by deleting the predicate,
+    // because a predicate that matches nothing also matches no mention-only file. It is
+    // here to pin the 18-of-20 noise reduction, and it is load-bearing ONLY next to the
+    // positive assertions above and below, which do go red.
+    expect('a mention-only file is NOT a duplicate resolver (unquoted keys, prose, name lists)',
+      queriesAllGrantTables(mentionOnlyFixtureBody()), false);
+    expect('...and it is not reported even though it is NOT allow-listed',
+      audit(dir).some((e) => e.includes('default-permission-sets.ts')), false);
+    // Querying ONE grant table is ordinary domain code, not grant aggregation. Also
+    // negative polarity.
+    for (const t of GRANT_TABLES) {
+      expect(`querying only ${t} is not a resolver`, queriesAllGrantTables(resolverFixtureBody([t])), false);
+    }
+
+    // --- The read-call spellings the criterion must recognise (POSITIVE polarity). ---
+    // These go red if READ_VERBS is narrowed or the argument pattern regresses — the
+    // recall side of the criterion, which no fixture above can reach because
+    // `resolverFixtureBody` only ever emits `ql.find`. The canonical resolver uses the
+    // `tryFind` HELPER spelling, so losing it would break the positive control itself.
+    const t0 = GRANT_TABLES[0];
+    for (const [label, src] of [
+      ['member call', `ql.find('${t0}', { where: {} })`],
+      ['helper call with a leading argument', `await tryFind(ql, '${t0}', { user_id }, 200)`],
+      ['double quotes', `ql.find("${t0}")`],
+      ['template literal', 'dataEngine.findOne(`' + t0 + '`)'],
+      ['argument on the next line', `this.ql.find(\n      '${t0}',\n      { limit: 1 })`],
+    ]) {
+      expect(`a read call is recognised — ${label}`, queriesGrantTable(src, t0), true);
+    }
+    // ...and the shapes that merely CONTAIN the name are not read calls (negative
+    // polarity, listed for the record). The nested-call case is the sharp one: the table
+    // must be an argument of the READ call, not of something nested inside it.
+    for (const [label, src] of [
+      ['a comment', `// we read ${t0} here`],
+      ['a constant list', `const NAMES = ['${t0}'];`],
+      ['an unquoted object key', `${t0}: { allowRead: true },`],
+      ['a Set literal', `new Set(['${t0}'])`],
+      ['page metadata', `objectName: '${t0}',`],
+      ['a nested call inside a read call', `find(wrap('${t0}'))`],
+    ]) {
+      expect(`not a read call — ${label}`, queriesGrantTable(src, t0), false);
+    }
+
+    // (1) — a second file reading rows from every grant table is a duplicate resolver.
+    write('packages/rest/src/my-own-resolver.ts', resolverFixtureBody());
     const dupErrors = audit(dir);
     expect('a duplicate resolver is flagged', dupErrors.length, 1);
     expect('the duplicate is named',
@@ -327,13 +652,13 @@ function selfTest() {
     rmSync(join(dir, 'packages/rest/src/my-own-resolver.ts'));
 
     // (1) — the walker must not report test/type files or skipped directories.
-    write('packages/rest/src/__tests__/fake.ts', "sys_user_role sys_user_permission_set\n");
-    write('packages/rest/src/x.test.ts', "sys_user_role sys_user_permission_set\n");
+    write('packages/rest/src/__tests__/fake.ts', resolverFixtureBody());
+    write('packages/rest/src/x.test.ts', resolverFixtureBody());
     // `.d.ts` was named in this assertion's label from the start but never written, so
     // the exclusion it claims to cover was never exercised. Added with the .mts/.cts
     // pass below, which extends that same exclusion to the rest of the family (#6070).
-    write('packages/rest/src/x.d.ts', "sys_user_role sys_user_permission_set\n");
-    write('packages/rest/dist/x.ts', "sys_user_role sys_user_permission_set\n");
+    write('packages/rest/src/x.d.ts', resolverFixtureBody());
+    write('packages/rest/dist/x.ts', resolverFixtureBody());
     expect('tests, .d.ts and dist/ are out of scope', audit(dir).length, 0);
 
     // (1) — `.mts` / `.cts` are the same corpus (#6070). `'x.mts'.endsWith('.ts')` is
@@ -345,13 +670,13 @@ function selfTest() {
     //   * and the duplicates written in them must be CAUGHT AND NAMED — a verdict an
     //     empty corpus produces zero of, which is what made the original miss silent.
     const beforeExt = collectScanFiles(dir).length;
-    write('packages/rest/src/esm-resolver.mts', "sys_user_role sys_user_permission_set\n");
-    write('packages/rest/src/cjs-resolver.cts', "sys_user_role sys_user_permission_set\n");
+    write('packages/rest/src/esm-resolver.mts', resolverFixtureBody());
+    write('packages/rest/src/cjs-resolver.cts', resolverFixtureBody());
     // The exclusions carry the same family: changing a test's or a declaration's
     // extension must not make it scannable. The repo has none of these four shapes
     // today — that is exactly why they are asserted here rather than trusted.
     for (const excluded of ['x.test.mts', 'x.test.cts', 'x.d.mts', 'x.d.cts']) {
-      write(`packages/rest/src/${excluded}`, "sys_user_role sys_user_permission_set\n");
+      write(`packages/rest/src/${excluded}`, resolverFixtureBody());
     }
     expect('.mts/.cts join the corpus and their test/declaration shapes stay out',
       collectScanFiles(dir).length, beforeExt + 2);
@@ -374,6 +699,45 @@ function selfTest() {
     expect('the entry point is named', delErrors[0]?.startsWith(`${DELEGATORS[0]} no longer delegates`), true);
     write(DELEGATORS[0], "import { resolveAuthzContext } from '@objectstack/core';\n");
     expect('restoring the delegation clears it', audit(dir).length, 0);
+
+    // --- Reverse proof for the positive control (#6286), made permanent. ---
+    // Direction declared before running: rewrite the canonical resolver so it reads
+    // RENAMED tables — exactly what ADR-0090 D3 did — and the control must go RED and
+    // NAME the tables that stopped matching, rather than letting the scan proceed to a
+    // "no duplicate resolver" verdict nothing could have produced. Then restore and
+    // require green, so the red is caused by the drift and nothing else.
+    //
+    // This is the assertion whose ABSENCE was the bug: without it the rename produced a
+    // gate that could not fail, and every other assertion in this file stayed green.
+    write(CANONICAL, resolverFixtureBody(GRANT_TABLES.map((t) => `${t}_v2`)));
+    let lostErr = null;
+    try { audit(dir); } catch (err) { lostErr = err; }
+    expect('a renamed grant table makes the criterion stop matching the canonical resolver',
+      lostErr instanceof ResolverSignatureLostError, true);
+    expect('the failure names every table that stopped matching',
+      lostErr?.missing?.join(',') ?? '<none>', GRANT_TABLES.join(','));
+    expect('the failure names the resolver it could not match',
+      (lostErr?.detail ?? '').includes(CANONICAL), true);
+
+    // A PARTIAL rename is the likelier real accident (one table follows, one is missed),
+    // and it must be just as red — naming only the table left behind.
+    write(CANONICAL, resolverFixtureBody([GRANT_TABLES[0], `${GRANT_TABLES[1]}_v2`]));
+    let partialRenameErr = null;
+    try { audit(dir); } catch (err) { partialRenameErr = err; }
+    expect('a partially renamed vocabulary is red too',
+      partialRenameErr instanceof ResolverSignatureLostError, true);
+    expect('...and names only the table that stopped matching',
+      partialRenameErr?.missing?.join(',') ?? '<none>', GRANT_TABLES[1]);
+
+    // The resolver moving away is the same loss by another route.
+    rmSync(join(dir, CANONICAL));
+    let movedErr = null;
+    try { audit(dir); } catch (err) { movedErr = err; }
+    expect('a canonical resolver that moved away is red, not a silently passing scan',
+      movedErr instanceof ResolverSignatureLostError, true);
+
+    write(CANONICAL, resolverFixtureBody());
+    expect('restoring the canonical resolver restores the green', audit(dir).length, 0);
 
     // --- Reverse proof for the dead-root hard error (#4930), made permanent. ---
     // Everything above ran green over a tree whose scan root resolves. That
@@ -477,11 +841,15 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    '✓ check-single-authz-resolver self-test: duplicate detection, delegation, the extension ' +
-    'family (.mts/.cts enter the corpus and their duplicates are named; .test./.d. shapes of ' +
-    'every extension stay out), the dead-root hard error (red when the scan root is renamed, ' +
-    'green when restored) and the empty-scan hard error (red when one declared root yields ' +
-    'nothing and when the whole scan does, green when restored) all hold.',
+    '✓ check-single-authz-resolver self-test: the query-shaped criterion (resolver shapes are ' +
+    'caught and named, mention-only files and single-table reads are not), the real-repo ' +
+    'positive control (the canonical resolver is still matched by check (1)\'s heuristic) and ' +
+    'its reverse proof (red and named when a grant table is renamed, fully or partially, or the ' +
+    'resolver moves; green when restored), allow-list reasons, duplicate detection, delegation, ' +
+    'the extension family (.mts/.cts enter the corpus and their duplicates are named; .test./.d. ' +
+    'shapes of every extension stay out), the dead-root hard error (red when the scan root is ' +
+    'renamed, green when restored) and the empty-scan hard error (red when one declared root ' +
+    'yields nothing and when the whole scan does, green when restored) all hold.',
   );
 }
 
@@ -499,6 +867,11 @@ function main() {
     }
     if (err instanceof EmptyRootError) {
       reportEmptyRoots(err);
+      process.exit(1);
+      return;
+    }
+    if (err instanceof ResolverSignatureLostError) {
+      reportSignatureLost(err);
       process.exit(1);
       return;
     }

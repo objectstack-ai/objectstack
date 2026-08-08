@@ -9,6 +9,7 @@ import {
   stripReadonlyWhenFieldsMulti,
   hasReadonlyWhenInPayload,
   hasParentScopedReadonlyWhenInPayload,
+  hasParentScopedRequiredWhen,
   stripReadonlyFields,
   stripRuntimeOwnedFields,
   isRuntimeOwnedField,
@@ -278,6 +279,368 @@ describe('hasParentScopedReadonlyWhenInPayload (#4889 gate)', () => {
   });
 });
 
+// #4977 — PARENT-scoped `requiredWhen`, the mirror of the block above on the
+// same field. `readonlyWhen` failing open WROTE a field that should have been
+// frozen; `requiredWhen` failing open ACCEPTS a record that should have been
+// rejected. Ruling (2026-08-06): bind the scope, keep fail-OPEN, gate the
+// unbindable declaration at build time (option B — 422 — was NOT taken).
+const sentLineFields = {
+  fields: {
+    invoice: { type: 'master_detail', reference: 'showcase_invoice', required: true },
+    // THE SUBJECT.
+    description: { type: 'text', requiredWhen: "parent.status == 'sent'" },
+    // Row-scoped — unaffected by the parent binding, and here to prove it.
+    note: { type: 'text', requiredWhen: 'record.quantity >= 100' },
+    quantity: { type: 'number' },
+  },
+};
+
+/** Collect the ValidationError field codes, or `null` when the write is accepted. */
+function violations(
+  schema: unknown,
+  data: Record<string, unknown>,
+  mode: 'insert' | 'update',
+  opts: Record<string, unknown> = {},
+): string[] | null {
+  try {
+    evaluateValidationRules(schema as never, data, mode, opts as never);
+    return null;
+  } catch (err) {
+    if (err instanceof ValidationError) return err.fields.map((f) => f.field);
+    throw err;
+  }
+}
+
+describe('parent-scoped requiredWhen (#4977)', () => {
+  it('REQUIRES the field when the master-detail header says so', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 1 }, 'insert', {
+      parent: { id: 'inv1', status: 'sent' },
+    })).toEqual(['description']);
+  });
+
+  it('does NOT require it when the header does not match', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 1 }, 'insert', {
+      parent: { id: 'inv1', status: 'draft' },
+    })).toBeNull();
+  });
+
+  it('accepts the write once the field is supplied', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', description: 'seat' }, 'insert', {
+      parent: { id: 'inv1', status: 'sent' },
+    })).toBeNull();
+  });
+
+  it('is FAIL-OPEN when `parent` could not be bound — the #4889 asymmetry', () => {
+    // The twin above resolves an unbound root to LOCKED. Here the ruling
+    // deliberately kept the historical fail-open exit: the requirement is
+    // skipped and the write is ACCEPTED. Do not "restore symmetry" — that is
+    // option B, reserved for the next review of ADR-0058 D5.
+    const warnings: string[] = [];
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 1 }, 'insert', {
+      logger: { warn: (m: string) => warnings.push(m) },
+    })).toBeNull();
+    expect(warnings.some((w) => w.includes("reads 'parent'") && w.includes('NOT enforced'))).toBe(true);
+  });
+
+  it('keeps the plain fail-open message for a predicate that is simply broken', () => {
+    // Not an unbound root — `record` IS bound, the key under it is undeclared.
+    const warnings: string[] = [];
+    expect(violations(
+      { fields: { amount: { type: 'currency', requiredWhen: "record.no_such_field == 'x'" } } },
+      { amount: 1 },
+      'insert',
+      { logger: { warn: (m: string) => warnings.push(m) } },
+    )).toBeNull();
+    expect(warnings.some((w) => w.includes('failed to evaluate — skipped'))).toBe(true);
+    expect(warnings.some((w) => w.includes("reads 'parent'"))).toBe(false);
+  });
+
+  it('leaves the ROW-scoped requiredWhen on the same object working unchanged', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 500 }, 'insert', {
+      parent: { id: 'inv1', status: 'draft' },
+    })).toEqual(['note']);
+  });
+
+  // ── ADR-0113 non-regression, with a parent in scope ──────────────────────
+
+  it('lets a legacy row rest: the header ALREADY required it and it was already empty', () => {
+    expect(violations(sentLineFields, { quantity: 7 }, 'update', {
+      previous: { id: 'l1', invoice: 'inv1', description: '', quantity: 1 },
+      parent: { id: 'inv1', status: 'sent' },
+    })).toBeNull();
+  });
+
+  it('rejects a write that NULLS the field while the header requires it', () => {
+    expect(violations(sentLineFields, { description: '' }, 'update', {
+      previous: { id: 'l1', invoice: 'inv1', description: 'seat', quantity: 1 },
+      parent: { id: 'inv1', status: 'sent' },
+    })).toEqual(['description']);
+  });
+
+  it('judges a REPOINT by the header the write LANDS on, not the one it leaves', () => {
+    // The reason `previousParent` exists. The row complied under its draft
+    // header; the write moves it under a sent one. Binding the LANDING header
+    // to the pre-check too would read this as a pre-existing violation and let
+    // it rest — the acceptance hole this issue exists to close, one case in.
+    expect(violations(sentLineFields, { invoice: 'sent_inv' }, 'update', {
+      previous: { id: 'l1', invoice: 'draft_inv', description: '', quantity: 1 },
+      parent: { id: 'sent_inv', status: 'sent' },
+      previousParent: { id: 'draft_inv', status: 'draft' },
+    })).toEqual(['description']);
+  });
+
+  it('`previousParent` defaults to `parent` when the write does not repoint', () => {
+    // No repoint ⇒ the engine does not pay a second header read, and the
+    // legacy-row exemption must still apply.
+    expect(violations(sentLineFields, { quantity: 7 }, 'update', {
+      previous: { id: 'l1', invoice: 'inv1', description: '', quantity: 1 },
+      parent: { id: 'inv1', status: 'sent' },
+    })).toBeNull();
+  });
+
+  // ── blast radius: object-level rules at the SAME evaluation site ─────────
+
+  it('does NOT bind `parent` for object-level rules — still fail-CLOSED (#4649)', () => {
+    const withScriptRule = {
+      fields: { ...sentLineFields.fields },
+      validations: [{
+        type: 'script',
+        name: 'parent_in_object_rule',
+        message: 'nope',
+        condition: "parent.status == 'sent'",
+      }],
+    };
+    // A parent IS supplied, and the field predicate below evaluates with it —
+    // yet the object-level rule still faults on `parent` and still REJECTS.
+    expect(() => evaluateValidationRules(
+      withScriptRule as never,
+      { invoice: 'inv1', description: 'seat' },
+      'insert',
+      { parent: { id: 'inv1', status: 'sent' } } as never,
+    )).toThrow(/could not be evaluated/);
+  });
+});
+
+describe('hasParentScopedRequiredWhen (#4977 gate)', () => {
+  it('is TRUE when a field declares a parent-scoped requiredWhen', () => {
+    expect(hasParentScopedRequiredWhen(sentLineFields)).toBe(true);
+  });
+
+  it('is FALSE for record-scoped requiredWhen only (no needless header read)', () => {
+    expect(hasParentScopedRequiredWhen(invoiceFields)).toBe(false);
+  });
+
+  it('is FALSE for a parent-scoped READONLYWhen — that is the other gate', () => {
+    expect(hasParentScopedRequiredWhen(invoiceLineFields)).toBe(false);
+  });
+
+  it('does not mistake a field NAMED parent_id, or a string literal, for the binding', () => {
+    expect(hasParentScopedRequiredWhen({
+      fields: {
+        a: { type: 'text', requiredWhen: "record.parent_id != ''" },
+        b: { type: 'text', requiredWhen: "record.kind == 'parent'" },
+      },
+    })).toBe(false);
+  });
+
+  it('is NOT payload-filtered, unlike its readonlyWhen twin', () => {
+    // The whole failure `requiredWhen` catches is a field the payload OMITS, so
+    // filtering by `name in data` would skip exactly the writes it is for.
+    // (The twin takes a payload argument; this one deliberately does not.)
+    expect(hasParentScopedRequiredWhen(sentLineFields)).toBe(true);
+    expect(hasParentScopedReadonlyWhenInPayload(invoiceLineFields, { description: 'x' })).toBe(false);
+  });
+});
+
+// #4953 — the record a `readonlyWhen` predicate sees is TOTAL over the object's
+// DECLARED fields, like the two seams that were materialised in #4649/#4770.
+// Before this, `stripReadonlyWhenFields` merged `{...previous, ...data}` raw, so
+// a predicate reading a declared column the DRIVER did not echo back faulted —
+// and a faulting `readonlyWhen` fails open, i.e. WROTE the field the author
+// declared frozen. Which columns come back is a storage property no author can
+// see, so the same declaration was enforced or not depending on the driver.
+const sparseLockFields = {
+  fields: {
+    notes: { type: 'text' },
+    approved_at: { type: 'datetime' },
+    // "while nothing has been approved, the amount is frozen" — the `== null`
+    // spelling #4649 made the supported one (and the null-guard gate prescribes).
+    amount: { type: 'currency', readonlyWhen: 'record.approved_at == null' },
+  },
+};
+
+/** A prior row from a driver that stores only the columns a write touched. */
+const sparsePrior = () => ({ id: 'r1', amount: 100 });
+/** The same row from a driver that returns every declared column. */
+const totalPrior = (approvedAt: unknown) => ({ id: 'r1', amount: 100, notes: null, approved_at: approvedAt });
+
+describe('readonlyWhen binds a TOTAL record (#4953)', () => {
+  it('evaluates `record.<declared> == null` on a SPARSE prior instead of faulting through', () => {
+    // THE bug. Pre-#4953: `No such key: approved_at` ⇒ fail-open ⇒ amount written.
+    const warnings: string[] = [];
+    const out = stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, sparsePrior(), {
+      warn: (m: string) => warnings.push(m),
+    } as never);
+    expect(out).toEqual({});
+    expect(warnings.some((w) => w.includes('failed to evaluate'))).toBe(false);
+    expect(warnings.some((w) => w.includes('is read-only (readonlyWhen)'))).toBe(true);
+  });
+
+  it('still KEEPS the change when the materialised value makes the predicate FALSE', () => {
+    // Materialising is not "lock everything": the row HAS an approval date, so
+    // the lock is off and the legitimate edit lands.
+    expect(
+      stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, { id: 'r1', amount: 100, approved_at: '2026-01-01' }),
+    ).toEqual({ amount: 999 });
+  });
+
+  it('reads the same verdict on a sparse prior as on a total one (the point)', () => {
+    // One declaration, two drivers, one answer. This equality is the guarantee;
+    // before #4953 the left side kept the change and the right side stripped it.
+    const sparse = stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, sparsePrior());
+    const total = stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, totalPrior(null));
+    expect(sparse).toEqual(total);
+    expect(sparse).toEqual({});
+  });
+
+  it('materialises the `previous` root too, not just `record`', () => {
+    const schema = { fields: { ...sparseLockFields.fields, amount: { type: 'currency', readonlyWhen: 'previous.approved_at == null' } } };
+    expect(stripReadonlyWhenFields(schema, { amount: 999 }, sparsePrior())).toEqual({});
+    expect(stripReadonlyWhenFields(schema, { amount: 999 }, { id: 'r1', amount: 100, approved_at: '2026-01-01' })).toEqual({ amount: 999 });
+  });
+
+  it('applies on the BULK path identically — one payload, N sparse rows', () => {
+    // A bulk write must not judge the same predicate by a different record
+    // shape than a single-id write does.
+    expect(stripReadonlyWhenFieldsMulti(sparseLockFields, { amount: 999 }, [sparsePrior()])).toEqual({});
+    // ≥1 locked row still drops it for the batch; no locked row still writes.
+    expect(stripReadonlyWhenFieldsMulti(sparseLockFields, { amount: 999 }, [
+      { id: 'r1', amount: 1, approved_at: '2026-01-01' },
+      sparsePrior(),
+    ])).toEqual({});
+    expect(stripReadonlyWhenFieldsMulti(sparseLockFields, { amount: 999 }, [
+      { id: 'r1', amount: 1, approved_at: '2026-01-01' },
+      { id: 'r2', amount: 2, approved_at: '2026-02-02' },
+    ])).toEqual({ amount: 999 });
+  });
+
+  it('does NOT materialise when the prior row is not in hand (no fabrication)', () => {
+    // `declared-fields.ts`'s standing rule: without the persisted state,
+    // defaulting a declared field to null would FABRICATE a value that
+    // contradicts the stored row. So this case keeps the historical fault →
+    // fail-open exit, and the engine avoids it by fetching the prior row
+    // whenever the object declares a readonlyWhen field (`needsPriorRecord`).
+    const warnings: string[] = [];
+    const out = stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, null, {
+      warn: (m: string) => warnings.push(m),
+    } as never);
+    expect(out).toEqual({ amount: 999 });
+    expect(warnings.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+  });
+
+  it('never mutates the caller\'s prior record (it is the engine\'s hookContext.previous)', () => {
+    const prior = sparsePrior();
+    stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, prior);
+    expect('approved_at' in prior).toBe(false);
+    expect('notes' in prior).toBe(false);
+    const rows = [sparsePrior()];
+    stripReadonlyWhenFieldsMulti(sparseLockFields, { amount: 999 }, rows);
+    expect('approved_at' in rows[0]!).toBe(false);
+  });
+
+  it('leaves the fail-open branch ALIVE — an ordering comparison still faults over a total record', () => {
+    // `null < null` is `no such overload`, so materialising does not make every
+    // predicate evaluable. This is exactly why the null-guard gate exists.
+    const warnings: string[] = [];
+    const out = stripReadonlyWhenFields(
+      { fields: { ...sparseLockFields.fields, amount: { type: 'currency', readonlyWhen: 'record.notes < record.approved_at' } } },
+      { amount: 999 },
+      sparsePrior(),
+      { warn: (m: string) => warnings.push(m) } as never,
+    );
+    expect(out).toEqual({ amount: 999 });
+    expect(warnings.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+  });
+
+  it('keeps fail-OPEN for an UNDECLARED key — materialising covers declared fields only', () => {
+    // The #4649 line, unmoved: a typo must stay unevaluable so it is reported,
+    // not silently read as null.
+    const warnings: string[] = [];
+    expect(stripReadonlyWhenFields(
+      { fields: { amount: { type: 'currency', readonlyWhen: 'record.stauts == null' } } },
+      { amount: 999 },
+      { id: 'r1', amount: 100 },
+      { warn: (m: string) => warnings.push(m) } as never,
+    )).toEqual({ amount: 999 });
+    expect(warnings.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+  });
+
+  // ── the consequence that moves the OTHER way, pinned rather than discovered ──
+  it('`has(record.<declared>)` is uniformly TRUE — so it locks even on a sparse prior', () => {
+    // CEL's own rule: a materialised `null` is a PRESENT key holding null.
+    // `has()` therefore guards against an UNDECLARED key, not an empty value.
+    expect(stripReadonlyWhenFields(
+      { fields: { ...sparseLockFields.fields, amount: { type: 'currency', readonlyWhen: 'has(record.approved_at)' } } },
+      { amount: 999 },
+      sparsePrior(),
+    )).toEqual({});
+  });
+
+  it('`!has(record.<declared>)` is uniformly FALSE — a lock spelled that way STOPS locking', () => {
+    // The one verdict this change moves toward "allowed": pre-#4953 the sparse
+    // binding made `!has(...)` true and the field was stripped. It was never a
+    // guarantee — on a driver returning all columns the same declaration never
+    // locked anything — so the flip replaces a storage-dependent verdict with a
+    // deterministic one, and the deterministic answer is FALSE. An author who
+    // means "while the field is empty" writes `== null` (the spelling
+    // @objectstack/lint's null-guard gate prescribes).
+    expect(stripReadonlyWhenFields(
+      { fields: { ...sparseLockFields.fields, amount: { type: 'currency', readonlyWhen: '!has(record.approved_at)' } } },
+      { amount: 999 },
+      sparsePrior(),
+    )).toEqual({ amount: 999 });
+  });
+
+  // ── blast radius: nothing else at this write gate moves ─────────────────
+  it('does not touch the object-level rules — `script` / `cross_field` stay fail-CLOSED (#4649)', () => {
+    const withRules = {
+      fields: { ...sparseLockFields.fields },
+      validations: [
+        { type: 'script', name: 'typo_rule', message: 'nope', condition: 'record.stauts == null' },
+      ],
+    };
+    expect(() => evaluateValidationRules(withRules as never, { amount: 1 }, 'update', {
+      previous: { id: 'r1', amount: 100 },
+    } as never)).toThrow(/could not be evaluated/);
+    const crossField = {
+      fields: { ...sparseLockFields.fields },
+      validations: [
+        { type: 'cross_field', name: 'typo_cross', message: 'nope', condition: 'record.stauts == null' },
+      ],
+    };
+    expect(() => evaluateValidationRules(crossField as never, { amount: 1 }, 'update', {
+      previous: { id: 'r1', amount: 100 },
+    } as never)).toThrow(/could not be evaluated/);
+  });
+
+  it('does not disturb the #4889 parent binding: unbound root still LOCKS, parent stays unmaterialised', () => {
+    // `parent` is a row of ANOTHER object — this function has no declared-field
+    // list for it — and an ABSENT parent is the signal #4889 depends on.
+    const warnings: string[] = [];
+    expect(stripReadonlyWhenFields(invoiceLineFields, { quantity: 9999 }, { id: 'l1', invoice: 'inv1' }, {
+      warn: (m: string) => warnings.push(m),
+    } as never)).toEqual({});
+    expect(warnings.some((w) => w.includes("reads 'parent'") && w.includes('LOCKED'))).toBe(true);
+    // A parent that IS bound but does not carry the key stays a fault (no
+    // materialisation of the header): fail-open, the change goes through.
+    const warnings2: string[] = [];
+    expect(stripReadonlyWhenFields(invoiceLineFields, { quantity: 9999 }, { id: 'l1', invoice: 'inv1' }, {
+      warn: (m: string) => warnings2.push(m),
+    } as never, { id: 'inv1' })).toEqual({ quantity: 9999 });
+    expect(warnings2.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+  });
+});
+
 // #2948 — static `readonly:true` write enforcement (caller-supplied only).
 const stampedFields = {
   fields: {
@@ -289,32 +652,90 @@ const stampedFields = {
 
 describe('stripReadonlyFields (#2948)', () => {
   it('drops a caller-supplied write to a static readonly field', () => {
-    const supplied = new Set(['title', 'created_by']);
-    const out = stripReadonlyFields(stampedFields, { title: 'x', created_by: 'attacker' }, supplied);
+    const supplied = { title: 'x', created_by: 'attacker' };
+    const out = stripReadonlyFields(stampedFields, { ...supplied }, supplied);
     expect(out).toEqual({ title: 'x' });
   });
 
   it('KEEPS a readonly field the caller did NOT supply (server stamp survives)', () => {
     // `updated_by` was written into `data` by the audit-stamp hook, not the
     // caller — it must not be stripped.
-    const supplied = new Set(['title']);
+    const supplied = { title: 'x' };
     const out = stripReadonlyFields(stampedFields, { title: 'x', updated_by: 'u1' }, supplied);
     expect(out).toEqual({ title: 'x', updated_by: 'u1' });
   });
 
   it('returns the SAME object when nothing is stripped', () => {
     const d = { title: 'x' };
-    expect(stripReadonlyFields(stampedFields, d, new Set(['title']))).toBe(d);
+    expect(stripReadonlyFields(stampedFields, d, { title: 'x' })).toBe(d);
   });
 
   it('drops a caller-forged readonly field even when it also carries a server stamp key', () => {
-    const supplied = new Set(['title', 'created_by']);
+    const supplied = { title: 'x', created_by: 'attacker' };
     const out = stripReadonlyFields(
       stampedFields,
       { title: 'x', created_by: 'attacker', updated_by: 'u1' },
       supplied,
     );
     expect(out).toEqual({ title: 'x', updated_by: 'u1' });
+  });
+});
+
+// #5591 — the strip must delete the value the CALLER SUBMITTED, never the value
+// that happens to sit on the key when the strip runs. The strip executes after
+// `beforeUpdate`, so those two differ exactly when a hook overwrote a key the
+// caller had also named — which is what silently deleted hook-written publish
+// timestamps on whole-record write-backs (hotcrm#788).
+describe('stripReadonlyFields — supplied VALUE identity, not just key presence (#5591)', () => {
+  it('KEEPS a readonly key a hook OVERWROTE, even though the caller supplied it', () => {
+    // The caller echoed `created_by` back; a beforeUpdate hook then wrote its
+    // own value over it. What is on the key now is a PLATFORM write.
+    const supplied = { title: 'x', created_by: 'attacker' };
+    const afterHooks = { title: 'x', created_by: 'hook-resolved-owner' };
+    const out = stripReadonlyFields(stampedFields, afterHooks, supplied);
+    expect(out).toEqual({ title: 'x', created_by: 'hook-resolved-owner' });
+    expect(out).toBe(afterHooks); // nothing dropped ⇒ same reference
+  });
+
+  it('STILL drops it when the hook wrote the caller value back unchanged', () => {
+    // Identity is the whole test: an unchanged value is indistinguishable from
+    // "no hook touched it", and the fail-safe direction is to strip.
+    const supplied = { created_by: 'attacker' };
+    const out = stripReadonlyFields(stampedFields, { created_by: 'attacker' }, supplied);
+    expect(out).toEqual({});
+  });
+
+  it('drops a caller-forged NaN — `Object.is`, not `===`', () => {
+    // `===` reports NaN !== NaN, which would read a forged NaN as "a hook
+    // rewrote this" and KEEP it. The one input where the loose operator
+    // inverts the verdict, so it is pinned rather than left to a reviewer.
+    const numeric = { fields: { score: { type: 'number', readonly: true } } };
+    const supplied = { score: Number.NaN };
+    const out = stripReadonlyFields(numeric, { score: Number.NaN }, supplied);
+    expect(out).toEqual({});
+  });
+
+  it('does not read an inherited `Object.prototype` key as caller-supplied', () => {
+    // `constructor` matches the machine-name regex, so it is a legal field
+    // name; `name in supplied` would be TRUE for it on any plain object and
+    // would strip a hook stamp. Own-property check, pinned.
+    const oddly = { fields: { constructor: { type: 'text', readonly: true } } };
+    const out = stripReadonlyFields(oddly, { constructor: 'hook-stamp' }, {});
+    expect(out).toEqual({ constructor: 'hook-stamp' });
+  });
+
+  it('KNOWN LIMIT: a hook that mutates a caller-supplied object IN PLACE is still stripped', () => {
+    // The snapshot is shallow, so an in-place mutation leaves identity
+    // unchanged and is invisible to any comparison short of a deep clone —
+    // which this path will not pay for on every write. Documented and pinned
+    // so the limit is a decision, not a surprise: a hook meaning to write a
+    // read-only column should ASSIGN to it.
+    const jsonish = { fields: { payload: { type: 'json', readonly: true } } };
+    const shared: Record<string, unknown> = { a: 1 };
+    const supplied = { payload: shared };
+    shared.a = 2; // the "hook" mutates in place — same reference
+    const out = stripReadonlyFields(jsonish, { payload: shared }, supplied);
+    expect(out).toEqual({});
   });
 });
 
@@ -337,22 +758,21 @@ const historicalFields = {
 
 describe('stripReadonlyFields — preserveAudit whitelist (#3493)', () => {
   it('KEEPS the caller-supplied audit/timestamp family under preserveAudit', () => {
-    const supplied = new Set(['created_at', 'created_by', 'updated_at', 'updated_by']);
     const data = {
       created_at: '2020-01-01T00:00:00Z',
       created_by: 'u_creator',
       updated_at: '2021-03-01T00:00:00Z',
       updated_by: 'u_old',
     };
-    const out = stripReadonlyFields(historicalFields, { ...data }, supplied, undefined, { preserveAudit: true });
+    const out = stripReadonlyFields(historicalFields, { ...data }, data, undefined, { preserveAudit: true });
     expect(out).toEqual(data);
   });
 
   it('KEEPS an author-declared business readonly field (closed_at) under preserveAudit', () => {
-    const supplied = new Set(['closed_at']);
+    const supplied = { closed_at: '2021-03-01T00:00:00Z' };
     const out = stripReadonlyFields(
       historicalFields,
-      { closed_at: '2021-03-01T00:00:00Z' },
+      { ...supplied },
       supplied,
       undefined,
       { preserveAudit: true },
@@ -361,10 +781,10 @@ describe('stripReadonlyFields — preserveAudit whitelist (#3493)', () => {
   });
 
   it('STILL strips a non-audit system column (organization_id) under preserveAudit — no tenancy backdoor', () => {
-    const supplied = new Set(['organization_id', 'closed_at']);
+    const supplied = { organization_id: 'org_forged', closed_at: '2021-03-01T00:00:00Z' };
     const out = stripReadonlyFields(
       historicalFields,
-      { organization_id: 'org_forged', closed_at: '2021-03-01T00:00:00Z' },
+      { ...supplied },
       supplied,
       undefined,
       { preserveAudit: true },
@@ -373,13 +793,12 @@ describe('stripReadonlyFields — preserveAudit whitelist (#3493)', () => {
   });
 
   it('strips the whole family as before when preserveAudit is NOT set (regression)', () => {
-    const supplied = new Set(['updated_at', 'closed_at', 'organization_id']);
-    const out = stripReadonlyFields(historicalFields, {
-      title: 'x',
+    const supplied = {
       updated_at: '2021-03-01T00:00:00Z',
       closed_at: '2021-03-01T00:00:00Z',
       organization_id: 'o1',
-    }, supplied);
+    };
+    const out = stripReadonlyFields(historicalFields, { title: 'x', ...supplied }, supplied);
     expect(out).toEqual({ title: 'x' });
   });
 });
@@ -414,31 +833,41 @@ describe('isRuntimeOwnedField (#5503)', () => {
 
 describe('stripReadonlyFields — implicit readonly on autonumber (#5503)', () => {
   it('drops a caller-supplied record number even with no `readonly: true` flag', () => {
-    const supplied = new Set(['title', 'account_number']);
-    const out = stripReadonlyFields(numberedFields, { title: 'x', account_number: 'ACC-888888' }, supplied);
+    const supplied = { title: 'x', account_number: 'ACC-888888' };
+    const out = stripReadonlyFields(numberedFields, { ...supplied }, supplied);
     expect(out).toEqual({ title: 'x' });
   });
 
   it('KEEPS a hook-stamped record number the caller did not supply', () => {
-    const supplied = new Set(['title']);
+    const supplied = { title: 'x' };
+    const out = stripReadonlyFields(numberedFields, { title: 'x', account_number: 'HOOK-1' }, supplied);
+    expect(out).toEqual({ title: 'x', account_number: 'HOOK-1' });
+  });
+
+  it('KEEPS a hook-REWRITTEN record number the caller DID supply (#5591)', () => {
+    // The #5503 limb read through the same key-only guard #5591 replaced, so
+    // it inherited the same defect: a hook that re-issues the record number
+    // lost its value to a caller that had echoed the old one back.
+    const supplied = { title: 'x', account_number: 'ACC-888888' };
     const out = stripReadonlyFields(numberedFields, { title: 'x', account_number: 'HOOK-1' }, supplied);
     expect(out).toEqual({ title: 'x', account_number: 'HOOK-1' });
   });
 
   it('KEEPS it under preserveAudit — a migration reinstates legacy record numbers', () => {
-    const supplied = new Set(['account_number']);
+    const supplied = { account_number: 'LEGACY-7' };
     const out = stripReadonlyFields(
-      numberedFields, { account_number: 'LEGACY-7' }, supplied, undefined, { preserveAudit: true },
+      numberedFields, { ...supplied }, supplied, undefined, { preserveAudit: true },
     );
     expect(out).toEqual({ account_number: 'LEGACY-7' });
   });
 
   it('logs the runtime-owned message, not the author-declared readonly one', () => {
     const warns: string[] = [];
+    const supplied = { account_number: 'ACC-888888', closed_at: '2021-01-01T00:00:00Z' };
     stripReadonlyFields(
       numberedFields,
-      { account_number: 'ACC-888888', closed_at: '2021-01-01T00:00:00Z' },
-      new Set(['account_number', 'closed_at']),
+      { ...supplied },
+      supplied,
       { warn: (m: string) => warns.push(m) } as any,
     );
     expect(warns).toHaveLength(2);
@@ -455,9 +884,8 @@ describe('stripReadonlyFields — implicit readonly on autonumber (#5503)', () =
 
 describe('stripRuntimeOwnedFields — the INSERT-side strip (#5503)', () => {
   it('drops a caller-supplied record number', () => {
-    const out = stripRuntimeOwnedFields(
-      numberedFields, { title: 'x', account_number: 'ACC-777777' }, new Set(['title', 'account_number']),
-    );
+    const supplied = { title: 'x', account_number: 'ACC-777777' };
+    const out = stripRuntimeOwnedFields(numberedFields, { ...supplied }, supplied);
     expect(out).toEqual({ title: 'x' });
   });
 
@@ -466,24 +894,83 @@ describe('stripRuntimeOwnedFields — the INSERT-side strip (#5503)', () => {
     // strip lives (that is the #3043 protocol ingress); this narrower helper
     // must not quietly take over that job and start stripping columns the
     // trusted internal writers legitimately seed on create.
-    const out = stripRuntimeOwnedFields(
-      numberedFields,
-      { title: 'x', closed_at: '2021-01-01T00:00:00Z' },
-      new Set(['title', 'closed_at']),
-    );
+    const supplied = { title: 'x', closed_at: '2021-01-01T00:00:00Z' };
+    const out = stripRuntimeOwnedFields(numberedFields, { ...supplied }, supplied);
     expect(out).toEqual({ title: 'x', closed_at: '2021-01-01T00:00:00Z' });
   });
 
   it('KEEPS a hook-stamped value and returns the SAME object when nothing is stripped', () => {
     const d = { title: 'x', account_number: 'HOOK-1' };
-    expect(stripRuntimeOwnedFields(numberedFields, d, new Set(['title']))).toBe(d);
+    expect(stripRuntimeOwnedFields(numberedFields, d, { title: 'x' })).toBe(d);
   });
 
   it('KEEPS it under preserveAudit', () => {
+    const supplied = { account_number: 'LEGACY-7' };
     const out = stripRuntimeOwnedFields(
-      numberedFields, { account_number: 'LEGACY-7' }, new Set(['account_number']), undefined, { preserveAudit: true },
+      numberedFields, { ...supplied }, supplied, undefined, { preserveAudit: true },
     );
     expect(out).toEqual({ account_number: 'LEGACY-7' });
+  });
+});
+
+// #6339 — the insert-side twin of #5591, and wrong for the identical reason:
+// the strip runs AFTER `beforeInsert`, so the value on the key at strip time is
+// not necessarily the caller's. A key-only guard deleted whatever was standing
+// there, which killed a hook that RE-ISSUED a record number the caller had also
+// submitted — while the same hook's write survived on a caller that had not.
+describe('stripRuntimeOwnedFields — supplied VALUE identity, not just key presence (#6339)', () => {
+  it('KEEPS a record number a hook OVERWROTE, even though the caller supplied it', () => {
+    // The caller forged `account_number`; a beforeInsert hook then wrote its
+    // own over it. What sits on the key now is a PLATFORM write.
+    const supplied = { title: 'x', account_number: 'ACC-777777' };
+    const afterHooks = { title: 'x', account_number: 'HOOK-OVERWRITE' };
+    const out = stripRuntimeOwnedFields(numberedFields, afterHooks, supplied);
+    expect(out).toEqual({ title: 'x', account_number: 'HOOK-OVERWRITE' });
+    expect(out).toBe(afterHooks); // nothing dropped ⇒ same reference
+  });
+
+  it('STILL drops it when the hook wrote the caller value back unchanged', () => {
+    // Identity is the whole test: an unchanged value is indistinguishable from
+    // "no hook touched it", and the fail-safe direction is to strip.
+    const supplied = { account_number: 'ACC-777777' };
+    const out = stripRuntimeOwnedFields(numberedFields, { account_number: 'ACC-777777' }, supplied);
+    expect(out).toEqual({});
+  });
+
+  it('drops a caller-forged NaN — `Object.is`, not `===`', () => {
+    // `===` reports NaN !== NaN, which would read a forged NaN as "a hook
+    // rewrote this" and KEEP it. The one input where the loose operator
+    // inverts the verdict, so it is pinned rather than left to a reviewer.
+    const numeric = { fields: { seq: { type: 'autonumber' } } };
+    const supplied = { seq: Number.NaN };
+    const out = stripRuntimeOwnedFields(numeric, { seq: Number.NaN }, supplied);
+    expect(out).toEqual({});
+  });
+
+  it('does not read an inherited `Object.prototype` key as caller-supplied', () => {
+    // `constructor` matches the machine-name regex, so it is a legal field
+    // name; `name in supplied` would be TRUE for it on any plain object and
+    // would strip a hook stamp. Own-property check, pinned.
+    const oddly = { fields: { constructor: { type: 'autonumber' } } };
+    const out = stripRuntimeOwnedFields(oddly, { constructor: 'HOOK-1' }, {});
+    expect(out).toEqual({ constructor: 'HOOK-1' });
+  });
+
+  it('warns only for the value it really dropped', () => {
+    // The warning is the caller-visible half of the strip: a hook-overwritten
+    // key is COMMITTED, so warning about it would make the log lie in exactly
+    // the direction `runtimeOwnedStripWarning` promises it does not.
+    const warns: string[] = [];
+    const logger = { warn: (m: string) => warns.push(m) } as any;
+    stripRuntimeOwnedFields(
+      numberedFields, { account_number: 'HOOK-OVERWRITE' }, { account_number: 'ACC-777777' }, logger,
+    );
+    expect(warns).toEqual([]);
+    stripRuntimeOwnedFields(
+      numberedFields, { account_number: 'ACC-777777' }, { account_number: 'ACC-777777' }, logger,
+    );
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("Field 'account_number'");
   });
 });
 

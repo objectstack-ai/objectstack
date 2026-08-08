@@ -17,7 +17,7 @@ export const SQLDialectSchema = lazySchema(() => z.enum([
   'mariadb',
 ]));
 
-export type SQLDialect = z.infer<typeof SQLDialectSchema>;
+export type SQLDialect = z.input<typeof SQLDialectSchema>;
 
 /**
  * Data Type Mapping Schema
@@ -46,7 +46,7 @@ export const DataTypeMappingSchema = lazySchema(() => z.object({
   binary: z.string().optional().describe('SQL type for binary fields (e.g., BLOB, BYTEA)'),
 }));
 
-export type DataTypeMapping = z.infer<typeof DataTypeMappingSchema>;
+export type DataTypeMapping = z.input<typeof DataTypeMappingSchema>;
 
 /**
  * SSL Configuration Schema
@@ -74,7 +74,7 @@ export const SSLConfigSchema = lazySchema(() => z.object({
   message: 'Client certificate (cert) and private key (key) must be provided together',
 }));
 
-export type SSLConfig = z.infer<typeof SSLConfigSchema>;
+export type SSLConfig = z.input<typeof SSLConfigSchema>;
 /** Post-parse shape of {@link SSLConfig} — defaults applied, transforms run (ADR-0122). */
 export type SSLConfigParsed = z.infer<typeof SSLConfigSchema>;
 
@@ -135,7 +135,7 @@ export const SQLDriverConfigSchema = lazySchema(() => DriverConfigSchema.extend(
   message: 'sslConfig is required when ssl is true',
 }));
 
-export type SQLDriverConfig = z.infer<typeof SQLDriverConfigSchema>;
+export type SQLDriverConfig = z.input<typeof SQLDriverConfigSchema>;
 /** Post-parse shape of {@link SQLDriverConfig} — defaults applied, transforms run (ADR-0122). */
 export type SQLDriverConfigParsed = z.infer<typeof SQLDriverConfigSchema>;
 

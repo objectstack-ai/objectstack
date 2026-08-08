@@ -48,15 +48,15 @@ import { z } from 'zod';
  * (which describes an existing item). See ADR-0010 §3.3.
  */
 export const MetadataLockSchema = z.enum(['none', 'no-overlay', 'no-delete', 'full']);
-export type MetadataLock = z.infer<typeof MetadataLockSchema>;
+export type MetadataLock = z.input<typeof MetadataLockSchema>;
 
 /** Where the `_lock` declaration came from. Reserved enum for forward compatibility. */
 export const MetadataLockSourceSchema = z.enum(['artifact', 'package', 'env-forced']);
-export type MetadataLockSource = z.infer<typeof MetadataLockSourceSchema>;
+export type MetadataLockSource = z.input<typeof MetadataLockSourceSchema>;
 
 /** Where the metadata item originated. */
 export const MetadataProvenanceSchema = z.enum(['package', 'org', 'env-forced']);
-export type MetadataProvenance = z.infer<typeof MetadataProvenanceSchema>;
+export type MetadataProvenance = z.input<typeof MetadataProvenanceSchema>;
 
 // ─────────────────────────────────────────────────────────────────────
 // Mixin — raw shape that schemas spread into themselves

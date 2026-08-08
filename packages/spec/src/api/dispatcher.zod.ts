@@ -77,10 +77,9 @@ export const DispatcherRouteSchema = z.object({
     .describe('Required permissions for this route namespace'),
 });
 
-export type DispatcherRoute = z.infer<typeof DispatcherRouteSchema>;
+export type DispatcherRoute = z.input<typeof DispatcherRouteSchema>;
 /** Post-parse shape of {@link DispatcherRoute} — defaults applied, transforms run (ADR-0122). */
 export type DispatcherRouteParsed = z.infer<typeof DispatcherRouteSchema>;
-export type DispatcherRouteInput = z.input<typeof DispatcherRouteSchema>;
 
 // ============================================================================
 // Dispatcher Configuration
@@ -126,10 +125,9 @@ export const DispatcherConfigSchema = z.object({
     .describe('Proxy target URL when fallback is "proxy"'),
 });
 
-export type DispatcherConfig = z.infer<typeof DispatcherConfigSchema>;
+export type DispatcherConfig = z.input<typeof DispatcherConfigSchema>;
 /** Post-parse shape of {@link DispatcherConfig} — defaults applied, transforms run (ADR-0122). */
 export type DispatcherConfigParsed = z.infer<typeof DispatcherConfigSchema>;
-export type DispatcherConfigInput = z.input<typeof DispatcherConfigSchema>;
 
 // ============================================================================
 // Default Route Table — REMOVED (#3586)
@@ -168,7 +166,7 @@ export const DispatcherErrorCode = z.enum([
   'SERVICE_UNAVAILABLE',
 ]).describe('Route-resolution failure mode emitted in `error.code`');
 
-export type DispatcherErrorCode = z.infer<typeof DispatcherErrorCode>;
+export type DispatcherErrorCode = z.input<typeof DispatcherErrorCode>;
 
 /**
  * Dispatcher Error Response Schema
@@ -209,4 +207,4 @@ export const DispatcherErrorResponseSchema = z.object({
   }),
 });
 
-export type DispatcherErrorResponse = z.infer<typeof DispatcherErrorResponseSchema>;
+export type DispatcherErrorResponse = z.input<typeof DispatcherErrorResponseSchema>;

@@ -30,7 +30,7 @@ export const QueryAdapterTargetSchema = lazySchema(() => z.enum([
   'odata',      // OData ($filter=field op value)
 ]));
 
-export type QueryAdapterTarget = z.infer<typeof QueryAdapterTargetSchema>;
+export type QueryAdapterTarget = z.input<typeof QueryAdapterTargetSchema>;
 
 /**
  * Operator Mapping Entry
@@ -44,12 +44,11 @@ export const OperatorMappingSchema = lazySchema(() => z.object({
   /** REST query parameter format (e.g., 'filter[{field}][{op}]') */
   rest: z.string().optional().describe('REST query parameter template'),
 
-
   /** OData $filter expression format (e.g., '{field} {op} {value}') */
   odata: z.string().optional().describe('OData $filter expression template'),
 }));
 
-export type OperatorMapping = z.infer<typeof OperatorMappingSchema>;
+export type OperatorMapping = z.input<typeof OperatorMappingSchema>;
 
 // ==========================================
 // 2. REST Adapter Configuration
@@ -105,10 +104,9 @@ export const RestQueryAdapterSchema = lazySchema(() => z.object({
   fieldsParam: z.string().default('fields').describe('Field selection parameter name'),
 }));
 
-export type RestQueryAdapter = z.infer<typeof RestQueryAdapterSchema>;
+export type RestQueryAdapter = z.input<typeof RestQueryAdapterSchema>;
 /** Post-parse shape of {@link RestQueryAdapter} — defaults applied, transforms run (ADR-0122). */
 export type RestQueryAdapterParsed = z.infer<typeof RestQueryAdapterSchema>;
-export type RestQueryAdapterInput = z.input<typeof RestQueryAdapterSchema>;
 
 // ==========================================
 // 4. OData Adapter Configuration
@@ -150,10 +148,9 @@ export const ODataQueryAdapterSchema = lazySchema(() => z.object({
   }).optional().describe('$expand configuration'),
 }));
 
-export type ODataQueryAdapter = z.infer<typeof ODataQueryAdapterSchema>;
+export type ODataQueryAdapter = z.input<typeof ODataQueryAdapterSchema>;
 /** Post-parse shape of {@link ODataQueryAdapter} — defaults applied, transforms run (ADR-0122). */
 export type ODataQueryAdapterParsed = z.infer<typeof ODataQueryAdapterSchema>;
-export type ODataQueryAdapterInput = z.input<typeof ODataQueryAdapterSchema>;
 
 // ==========================================
 // 5. Complete Query Adapter Configuration
@@ -172,12 +169,10 @@ export const QueryAdapterConfigSchema = lazySchema(() => z.object({
   /** REST adapter configuration */
   rest: RestQueryAdapterSchema.optional().describe('REST query adapter configuration'),
 
-
   /** OData adapter configuration */
   odata: ODataQueryAdapterSchema.optional().describe('OData query adapter configuration'),
 }));
 
-export type QueryAdapterConfig = z.infer<typeof QueryAdapterConfigSchema>;
+export type QueryAdapterConfig = z.input<typeof QueryAdapterConfigSchema>;
 /** Post-parse shape of {@link QueryAdapterConfig} — defaults applied, transforms run (ADR-0122). */
 export type QueryAdapterConfigParsed = z.infer<typeof QueryAdapterConfigSchema>;
-export type QueryAdapterConfigInput = z.input<typeof QueryAdapterConfigSchema>;

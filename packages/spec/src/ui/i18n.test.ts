@@ -1,53 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
-  I18nObjectSchema,
   I18nLabelSchema,
   AriaPropsSchema,
-  PluralRuleSchema,
-  NumberFormatSchema,
-  DateFormatSchema,
-  LocaleConfigSchema,
-  type I18nObject,
   type I18nLabel,
   type AriaProps,
-  type PluralRule,
-  type LocaleConfig,
 } from './i18n.zod';
 import { measureDoors } from './door-reachability.testkit';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { PageSchema } from './page.zod';
-
-describe('I18nObjectSchema', () => {
-  it('should accept valid i18n object with key only', () => {
-    const obj: I18nObject = {
-      key: 'views.task_list.label',
-    };
-
-    const result = I18nObjectSchema.parse(obj);
-    expect(result.key).toBe('views.task_list.label');
-    expect(result.defaultValue).toBeUndefined();
-    expect(result.params).toBeUndefined();
-  });
-
-  it('should accept i18n object with all fields', () => {
-    const obj: I18nObject = {
-      key: 'apps.crm.description',
-      defaultValue: 'Sales CRM Application',
-      params: { count: 5, name: 'John' },
-    };
-
-    const result = I18nObjectSchema.parse(obj);
-    expect(result.key).toBe('apps.crm.description');
-    expect(result.defaultValue).toBe('Sales CRM Application');
-    expect(result.params).toEqual({ count: 5, name: 'John' });
-  });
-
-  it('should reject i18n object without key', () => {
-    expect(() => I18nObjectSchema.parse({})).toThrow();
-    expect(() => I18nObjectSchema.parse({ defaultValue: 'Test' })).toThrow();
-  });
-});
 
 describe('I18nLabelSchema', () => {
   it('should accept plain string', () => {
@@ -60,14 +21,53 @@ describe('I18nLabelSchema', () => {
     expect(result).toBe('');
   });
 
-  it('should reject i18n object (no longer accepted)', () => {
-    expect(() => I18nLabelSchema.parse({
-      key: 'views.task_list.label',
-      defaultValue: 'Task List',
-    })).toThrow();
+  // ── #5728: the inline locale map is the SECOND authorized form ──────────
+  //
+  // Ruling B (maintainer, 2026-08-06). Three published platform pages author
+  // 31 of these and objectui resolves them through `pickLocalized`; the schema
+  // declared only the plain string, so the authoritative document was the
+  // wrong one and the #5068 props gate reported the platform's own pages as
+  // broken (42 findings: 34 label + 8 `element:text.content`).
+
+  it('accepts an inline locale map — the shape the platform pages author', () => {
+    const label = { en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー', 'es-ES': 'Miembros' };
+    expect(I18nLabelSchema.parse(label)).toEqual(label);
   });
 
-  it('should reject i18n object with params', () => {
+  it('accepts `default` as a map key — `pickLocalized` reads it as the untagged fallback', () => {
+    expect(I18nLabelSchema.parse({ default: 'Members', 'zh-CN': '成员' }))
+      .toEqual({ default: 'Members', 'zh-CN': '成员' });
+  });
+
+  it('accepts script- and region-qualified BCP-47 tags', () => {
+    expect(I18nLabelSchema.safeParse({ en: 'Members', 'zh-Hans-CN': '成员', 'pt-BR': 'Membros' }).success).toBe(true);
+  });
+
+  it('rejects a map whose values are not strings', () => {
+    expect(() => I18nLabelSchema.parse({ en: 42 })).toThrow();
+  });
+
+  // ── the widening does NOT resurrect the retired key-reference dialect ────
+  //
+  // The direction that would have: a bare `z.record(z.string(), z.string())`
+  // accepts `{ key, defaultValue }` as "a map of strings", it parses clean, and
+  // `pickLocalized`'s last resort ("first string value") then renders the i18n
+  // KEY as the visible label in every locale. `INLINE_LOCALE_KEY` is what keeps
+  // these two red — the #4667 / #5055 retirement and the #5728 widening are the
+  // same declared = enforced principle pointing in two directions.
+
+  it('still rejects the retired `{ key, defaultValue }` i18n object', () => {
+    const r = I18nLabelSchema.safeParse({
+      key: 'views.task_list.label',
+      defaultValue: 'Task List',
+    });
+    expect(r.success).toBe(false);
+    // Rejected for the RIGHT reason: `defaultValue` is not a locale tag, not
+    // merely "the value is an object" (which the string branch would say).
+    expect(JSON.stringify(r.error?.issues)).toContain('invalid_key');
+  });
+
+  it('still rejects the retired i18n object with params', () => {
     expect(() => I18nLabelSchema.parse({
       key: 'common.item_count',
       defaultValue: '{count} items',
@@ -75,11 +75,22 @@ describe('I18nLabelSchema', () => {
     })).toThrow();
   });
 
-  it('should reject non-string values', () => {
+  it('should reject non-string, non-map values', () => {
     expect(() => I18nLabelSchema.parse(123)).toThrow();
     expect(() => I18nLabelSchema.parse(true)).toThrow();
     expect(() => I18nLabelSchema.parse(null)).toThrow();
     expect(() => I18nLabelSchema.parse(undefined)).toThrow();
+  });
+
+  // ── #5377 ②: the describe no longer promises keys nobody generates ───────
+  it('does not claim i18n keys are auto-generated by the framework', () => {
+    const description = (I18nLabelSchema as unknown as { description?: string }).description ?? '';
+    expect(description.length).toBeGreaterThan(0);
+    expect(
+      description,
+      'no key is generated for any label — a plain string is translatable only where a resolver + '
+      + 'translation slot exist for its surface (#5377)',
+    ).not.toMatch(/auto-generated/i);
   });
 });
 
@@ -100,22 +111,30 @@ describe('AriaPropsSchema', () => {
     expect(result.ariaLabel).toBe('Close dialog');
   });
 
-  it('should accept ariaLabel as string only', () => {
-    const props = {
-      ariaLabel: 'Close dialog',
-    };
-
-    const result = AriaPropsSchema.parse(props);
-    expect(result.ariaLabel).toBe('Close dialog');
+  it('accepts ariaLabel as an inline locale map — it rides `I18nLabelSchema` (#5728)', () => {
+    const result = AriaPropsSchema.parse({ ariaLabel: { en: 'Close dialog', 'zh-CN': '关闭对话框' } });
+    expect(result.ariaLabel).toEqual({ en: 'Close dialog', 'zh-CN': '关闭对话框' });
   });
 
-  it('should reject ariaLabel as i18n object (no longer accepted)', () => {
+  it('still rejects ariaLabel as the retired key-reference i18n object', () => {
     expect(() => AriaPropsSchema.parse({
       ariaLabel: {
         key: 'common.close_dialog',
         defaultValue: 'Close dialog',
       },
     })).toThrow();
+  });
+
+  it('does not promise a generated translation key for `ariaLabel` either (#5377)', () => {
+    // The reporter's second surviving point. `ariaLabel` overrides the shared
+    // describe, so it never carried the "auto-generated" sentence verbatim —
+    // but it inherited the assumption, and there is no bundle slot addressing
+    // an `ariaLabel` anywhere in `TranslationDataSchema`. The describe now says
+    // so instead of leaving the author to discover it.
+    const shape = (AriaPropsSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
+    const description = shape.ariaLabel?.description ?? '';
+    expect(description).not.toMatch(/auto-generated/i);
+    expect(description).toMatch(/no translation-bundle slot/i);
   });
 
   it('should accept all ARIA properties', () => {
@@ -141,11 +160,12 @@ describe('AriaPropsSchema', () => {
 });
 
 describe('I18n Integration', () => {
-  it('should only accept string labels', () => {
+  it('accepts both authorized label forms', () => {
     const labels: I18nLabel[] = [
       'Plain String Label',
       'Another Plain String',
       'Setup',
+      { en: 'Setup', 'zh-CN': '设置' },
     ];
 
     labels.forEach(label => {
@@ -153,102 +173,11 @@ describe('I18n Integration', () => {
     });
   });
 
-  it('should reject i18n objects in label context', () => {
+  it('should reject key-reference i18n objects in label context', () => {
     expect(() => I18nLabelSchema.parse({ key: 'labels.translated', defaultValue: 'Translated Label' })).toThrow();
     expect(() => I18nLabelSchema.parse({ key: 'labels.with_params', params: { count: 10 } })).toThrow();
   });
 });
-
-describe('PluralRuleSchema', () => {
-  it('should accept minimal plural rule', () => {
-    const rule: PluralRule = {
-      key: 'items.count',
-      other: '{count} items',
-    };
-    expect(() => PluralRuleSchema.parse(rule)).not.toThrow();
-  });
-  it('should accept full plural rule', () => {
-    const rule = PluralRuleSchema.parse({
-      key: 'items.count',
-      zero: 'No items',
-      one: '{count} item',
-      two: '{count} items',
-      few: '{count} items',
-      many: '{count} items',
-      other: '{count} items',
-    });
-    expect(rule.zero).toBe('No items');
-    expect(rule.one).toBe('{count} item');
-  });
-  it('should reject rule without key', () => {
-    expect(() => PluralRuleSchema.parse({ other: 'items' })).toThrow();
-  });
-  it('should reject rule without other', () => {
-    expect(() => PluralRuleSchema.parse({ key: 'test' })).toThrow();
-  });
-});
-
-describe('NumberFormatSchema', () => {
-  it('should accept minimal number format', () => {
-    const result = NumberFormatSchema.parse({});
-    expect(result.style).toBe('decimal');
-  });
-  it('should accept currency format', () => {
-    const result = NumberFormatSchema.parse({
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-    });
-    expect(result.currency).toBe('USD');
-  });
-  it('should accept percent format', () => {
-    expect(() => NumberFormatSchema.parse({ style: 'percent' })).not.toThrow();
-  });
-});
-
-describe('DateFormatSchema', () => {
-  it('should accept empty date format', () => {
-    expect(() => DateFormatSchema.parse({})).not.toThrow();
-  });
-  it('should accept full date format', () => {
-    const result = DateFormatSchema.parse({
-      dateStyle: 'medium',
-      timeStyle: 'short',
-      timeZone: 'America/New_York',
-      hour12: true,
-    });
-    expect(result.dateStyle).toBe('medium');
-    expect(result.timeZone).toBe('America/New_York');
-  });
-});
-
-describe('LocaleConfigSchema', () => {
-  it('should accept minimal locale config', () => {
-    const result = LocaleConfigSchema.parse({ code: 'en-US' });
-    expect(result.code).toBe('en-US');
-    expect(result.direction).toBe('ltr');
-  });
-  it('should accept RTL locale', () => {
-    const result = LocaleConfigSchema.parse({ code: 'ar-SA', direction: 'rtl' });
-    expect(result.direction).toBe('rtl');
-  });
-  it('should accept locale with fallback chain', () => {
-    const config: z.input<typeof LocaleConfigSchema> = {
-      code: 'zh-CN',
-      fallbackChain: ['zh-TW', 'en'],
-      direction: 'ltr',
-      numberFormat: { style: 'decimal', useGrouping: true },
-      dateFormat: { dateStyle: 'medium', timeStyle: 'short' },
-    };
-    const result = LocaleConfigSchema.parse(config);
-    expect(result.fallbackChain).toEqual(['zh-TW', 'en']);
-    expect(result.numberFormat?.useGrouping).toBe(true);
-  });
-  it('should reject locale without code', () => {
-    expect(() => LocaleConfigSchema.parse({})).toThrow();
-  });
-});
-
 // ============================================================================
 // #4001 批 16 — the SPLIT verdict for this file, both halves pinned.
 //
@@ -411,58 +340,5 @@ describe('#4001 批 16 — AriaPropsSchema is closed (the door is real)', () => 
     // with the riders.
     const pageShape = (PageSchema as never as { shape: Record<string, unknown> }).shape;
     expect(Object.keys(pageShape)).toContain('aria');
-  });
-});
-
-describe('#4001 批 16 — the other five shapes have no authoring door', () => {
-  const NO_DOOR: Array<[string, unknown]> = [
-    ['I18nObjectSchema', I18nObjectSchema],
-    ['PluralRuleSchema', PluralRuleSchema],
-    ['NumberFormatSchema', NumberFormatSchema],
-    ['DateFormatSchema', DateFormatSchema],
-    ['LocaleConfigSchema', LocaleConfigSchema],
-  ];
-
-  it('measures: AriaProps reachable, the other five not — controls in the same run', () => {
-    const { verdict, nodeCount, rootCount } = measureDoors();
-    expect(rootCount).toBeGreaterThan(20);
-    expect(nodeCount).toBeGreaterThan(1000);
-    expect(verdict(PageSchema), 'positive control').toBe('direct');
-    expect(verdict(AriaPropsSchema), 'the half of this file that HAS a door').toBe('direct');
-    expect(verdict(z.object({ a: z.string() })), 'negative control').toBe('unreachable');
-    for (const [name, schema] of NO_DOOR) {
-      expect(verdict(schema), `${name} must have no door`).toBe('unreachable');
-    }
-  });
-
-  it('a synthetic carrier flips all five — the verdict is the graph, not the walker', () => {
-    const carrier = z.object({
-      i18nObject: I18nObjectSchema,
-      plural: PluralRuleSchema,
-      numberFormat: NumberFormatSchema,
-      dateFormat: DateFormatSchema,
-      locale: LocaleConfigSchema,
-    });
-    const { verdict } = measureDoors([carrier]);
-    for (const [name, schema] of NO_DOOR) {
-      expect(verdict(schema), `${name} must become reachable once something carries it`).toBe('direct');
-    }
-  });
-
-  it('they still accept undeclared keys — this pins "open", not "broken"', () => {
-    expect(I18nObjectSchema.safeParse({ key: 'k', notAnI18nKey: 1 }).success).toBe(true);
-    expect(PluralRuleSchema.safeParse({ key: 'k', other: 'x', notAPluralForm: 1 }).success).toBe(true);
-    expect(NumberFormatSchema.safeParse({ notANumberFormatKey: 1 }).success).toBe(true);
-    expect(DateFormatSchema.safeParse({ notADateFormatKey: 1 }).success).toBe(true);
-    expect(LocaleConfigSchema.safeParse({ code: 'en-US', notALocaleKey: 1 }).success).toBe(true);
-  });
-
-  it('`I18nObject.params` stays a record ON PURPOSE — openness there is the contract', () => {
-    // The remeasure's standing warning for this file. `params` is an
-    // interpolation bag whose key space is whatever the message template names;
-    // it is not a site this ratchet could close and must not become one.
-    const r = I18nObjectSchema.safeParse({ key: 'items.count', params: { count: 5, anything: 'at all', ok: true } });
-    expect(r.success).toBe(true);
-    expect((r.data as { params?: Record<string, unknown> }).params).toEqual({ count: 5, anything: 'at all', ok: true });
   });
 });

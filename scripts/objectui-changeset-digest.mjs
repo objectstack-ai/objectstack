@@ -69,26 +69,136 @@
 //
 // This criterion changes the ANNOTATION and the COUNT only. The collected set is
 // untouched: nothing is admitted or dropped because of it.
+//
+// WHY THE FALLBACK IS QUIET, AND WHY IT STILL SAYS SO (#6175)
+// ----------------------------------------------------------
+// `readAt` reads each changeset at `to` and falls back to the commit that ADDED
+// it, because a changeset consumed by a release INSIDE the range is gone at `to`
+// (the reason `collectAddedChangesets` walks the log instead of diffing the
+// endpoints). The fallback works, and the artifact it produces is complete.
+//
+// It used to ANNOUNCE ITSELF AS A FAILURE anyway. `execFileSync` sends the
+// child's stderr to ours unless `stdio` says otherwise, so the first `git show`
+// printed git's own `fatal: path … does not exist in …` before `catch` could run
+// — one line per changeset, then one line saying everything succeeded. Measured
+// on the real pin bump `f995a452d2ca..7dfbeb704e1e` (#6159 / PR #6173): 9
+// `fatal:` lines, 9 complete entries, exit 0.
+//
+// That is the MIRROR of the rule this file already enforces. #4731 wrote "a
+// degraded list and a complete one must never look alike"; here a COMPLETE list
+// looked like a failure. The two failure modes cost the same, because the next
+// reader's first instinct is "the digest is broken, write the changeset by hand
+// with `--no-changeset`" — and that hand-written path really does drop all 9
+// releasing entries. Noise that points at the wrong remedy is not merely noise.
+//
+// So the first attempt CAPTURES its stderr instead of inheriting it, and the
+// fallback is reported once, as a fact, beside the accounting line
+// (`absentAtTo`). Two things this deliberately does not do:
+//
+//   * It does not go silent. Silence would trade a misleading line for no line,
+//     and "this range crossed a release" is worth exactly one sentence — the
+//     same reason the cap and the degraded list announce themselves (#4731).
+//   * It does not mute FAILURE. When BOTH reads fail nothing was read and the
+//     entry would vanish, so both captured diagnostics are re-emitted, named by
+//     attempt, and the error still propagates. Quiet is earned by the fallback
+//     that worked; it is never extended to the one that did not.
+//
+// WHY THE UNDECLARED COMMITS ARE NAMED, NOT ONLY COUNTED (#6174)
+// --------------------------------------------------------------
+// "Read what objectui declared" is the right criterion, and this changes none
+// of it. What it fixes is a REPORTING gap on the criterion's own shadow: a
+// commit that declared nothing is correctly kept out of the releasing list, and
+// used to leave the artifact as one digit inside `omitted: N commits carrying
+// no changeset`. Which commits those were, the record did not say.
+//
+// Measured on the real pin bump `f995a452d2ca..7dfbeb704e1e` (#6159 / PR
+// #6173), the 20 undeclared commits are 1 release commit, 3 dependabot bumps,
+// 15 docs/ci/scripts commits — and `0e50440e8`, `fix(form): bind `previous` for
+// field rules and stop resubmitting read-only fields` (objectui#3518): 26 files
+// across 5 packages and all ten locale packs, a user-visible form behaviour
+// change. Inside the number 20 it is indistinguishable from `chore(deps-dev):
+// Bump postcss from 8.5.25 to 8.5.26`. It shipped in the console build and is
+// in no CHANGELOG anywhere — not even objectui's, because there was no
+// changeset to compile. A count cannot be read; a subject can.
+//
+// Three boundaries this deliberately keeps:
+//
+//   * It does not touch the CRITERION. `noChangesetCommits` is rendered exactly
+//     as `classifyRange` produced it — unfiltered, unreordered. Nothing enters
+//     or leaves the releasing list, no count moves, and the accounting line is
+//     byte-for-byte what it was. Presentation only, the same separation
+//     `objectui-range.mjs` already keeps; the rows are spelled in that script's
+//     `--all` vocabulary (`- _(no changeset)_ …`) so the two artifacts read as
+//     one, which is what "wire up the capability that already exists" means.
+//   * It does not CLASSIFY them. `chore: release packages` and the form fix are
+//     both listed, flatly. Deciding which undeclared commit "matters" means
+//     inferring from a subject line — the exact move #4731 removed, and it
+//     would fail the same way, since the commit worth naming here carries a
+//     `fix(form)` subject no more distinctive than the `fix(ci)` beside it. The
+//     reader judges; the tool only stops hiding.
+//   * It is NOT the stderr fallback line (#6175). That one reports how the tool
+//     READ A FILE, which is not a fact about the release, so it stays on stderr
+//     beside the accounting. This one reports WHICH COMMITS entered the build
+//     with nothing declared for them — which is precisely what a release record
+//     is for. Adjacent facts, different readers, different destinations.
+//
+// The gate that would stop this at the source is objectui#3387 (a PR touching
+// `packages/*/src/**` with no changeset fails). Until it lands, this is the only
+// place the class is visible at all; after it lands, this list goes quiet on its
+// own, because there will be nothing to name.
+//
+// WHY THE ARTIFACT CARRIES AN UNANSWERED ADR-0087 MARKER (#6494)
+// --------------------------------------------------------------
+// #6099 made this script DECLARE breaking changes (`**BREAKING**`), and #6148's
+// gate requires every declared-breaking changeset to state an ADR-0087
+// disposition. The first pin bump after #6289 hit exactly that (PR #6476), was
+// patched by hand — and a hand-patched marker in a GENERATED file survives only
+// until the next bump rewrites it. The recurrence condition is objectui's
+// standing practice, not an edge case: its release window bans `major`, so
+// breaking changes arrive as `minor` plus a body annotation, which is precisely
+// what this script now recognises.
+//
+// So the artifact carries the QUESTION. `<!-- adr-0087: TODO … -->` is a marker
+// the gate parses, refuses, and reports as unanswered — the operator answers it
+// at bump time, in writing, every time. The generator never picks a disposition:
+// #6148's whole design is that the gate does not answer for you, and a generator
+// that answers for you is the same hole with a different author. The argument in
+// full, including the two rejected alternatives, is at `ADR_0087_SCAFFOLD`.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 
-/** Default cap on the rendered list. A cap that fires ANNOUNCES itself (#4731). */
+/**
+ * Default cap on EACH rendered list. The releasing entries (#4731) and the
+ * undeclared commits (#6174) are capped INDEPENDENTLY, so a long release can
+ * never squeeze the other list down to nothing — one budget shared between them
+ * would make the second list's length depend on the first's, which no reader
+ * could infer. A cap that fires ANNOUNCES itself, with the real total (#4731).
+ */
 export const DEFAULT_MAX_ENTRIES = 100;
 
 const LEVEL_RANK = { patch: 1, minor: 2, major: 3 };
 
-/** @param {string} cwd @param {string[]} args */
-function git(cwd, args) {
+/**
+ * @param {string} cwd
+ * @param {string[]} args
+ * @param {{ captureStderr?: boolean }} [options] `captureStderr` routes the
+ *   child's stderr into the thrown error instead of ours. Leave it OFF by
+ *   default: an unset `stdio` inherits our stderr (`execFileSync`'s documented
+ *   behaviour), which is what a call whose failure is a real failure should do.
+ *   Turn it on only where a failure is EXPECTED and retried — `readAt` (#6175).
+ */
+function git(cwd, args, { captureStderr = false } = {}) {
   return execFileSync('git', ['-C', cwd, ...args], {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
+    ...(captureStderr ? { stdio: ['ignore', 'pipe', 'pipe'] } : {}),
   });
 }
 
@@ -245,6 +355,84 @@ export function markBreaking(text) {
 }
 
 /**
+ * The ADR-0087 disposition SCAFFOLD — a question, never an answer (#6494).
+ *
+ * `scripts/check-adr-0087-registration.mjs` (#6148) requires every changeset
+ * that DECLARES a breaking change to carry exactly one `adr-0087:` disposition
+ * marker. From #6099 onward this script declares one as soon as an upstream
+ * entry is annotated — and that is objectui's ORDINARY shape, not an exotic
+ * one: its release window bans `major` (`scripts/check-changeset-no-major.mjs`),
+ * so a breaking change ships as `minor` plus the author's own body annotation,
+ * which is exactly what `hasBreakingAnnotation` above finds. Measured on the
+ * range PR #6476 bumped: 24 changesets, 2 of them annotated-breaking. So the
+ * gate's red is the COMMON case on any substantive pin bump, and a marker
+ * patched in by hand lives exactly until the next bump regenerates the file.
+ *
+ * Hence a placeholder that the gate STILL JUDGES:
+ *
+ *   * `TODO` parses as neither `registered ...` nor `not-required (...) ...`,
+ *     so the gate reports `unparseable disposition: "TODO …"` and stays RED.
+ *     Present-but-unanswered reads differently from absent, and it lands the
+ *     gate's own fix-it block listing the four accepted forms.
+ *   * It is ONE marker. Two would produce a different red ("N markers -- exactly
+ *     one disposition is expected") that names the tooling instead of the
+ *     question, so nothing else in the emitted body may spell `adr-0087:`.
+ *   * It says NOTHING about which disposition applies. Writing `not-required
+ *     (...)` here — even the category that is usually right — would make this
+ *     script perform the judgement #6148 exists to extract from a human, and it
+ *     would then be written unread on every bump forever. That gate's whole
+ *     design is that it never answers for you; a generator that answers for you
+ *     is the same hole with a different author.
+ *
+ * An HTML comment for the reason the gate's own header gives: a changeset body
+ * is copied VERBATIM into CHANGELOG.md, so the marker must render as nothing for
+ * end users while staying fully visible in the diff, in `git grep` and in the
+ * gate's log.
+ */
+export const ADR_0087_SCAFFOLD =
+  '<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->';
+
+/**
+ * Will `check-adr-0087-registration.mjs` judge THIS ARTIFACT as declaring a
+ * breaking change? Read the artifact we actually rendered, not our belief about
+ * it — the scaffold has to appear on exactly the files that gate will judge.
+ *
+ * That gate's `breakingDeclaration()` unions three signals, and this mirrors the
+ * two a generated console changeset can ever raise:
+ *
+ *   1. a `major` bump in the frontmatter — reachable here in RC pre-mode and via
+ *      `CONSOLE_BUMP=major`, and it arms the gate ON ITS OWN, with no marker
+ *      anywhere in the body.
+ *   2. `**BREAKING` (or a `BREAKING CHANGE:` line) in the body.
+ *   3. a conventional-commit `!` on the summary line — UNREACHABLE, deliberately
+ *      not mirrored: the first line of the emitted file is this script's own
+ *      fixed sentence (`Console (objectui) refreshed to …`) and the gate's
+ *      pattern `^[a-z]+(\([^)]*\))?!:` is case-sensitive, so nothing this
+ *      generator writes can start it.
+ *
+ * Why the RENDERED body rather than the `breaking` count: the two nearly agree,
+ * and the gap runs one way. `breaking > 0` always renders `**BREAKING**` (the ⚠️
+ * note restates the marker by construction), so the count implies the signal;
+ * the converse can fail. An entry whose own summary carries an emphasis run too
+ * long for `BREAKING_EMPHASIS_LABEL`'s 48-character tail is NOT counted breaking
+ * here, yet its text reaches the rendered line where the gate's looser
+ * `/\*\*BREAKING/` matches it. Reading the artifact closes that by construction
+ * instead of by agreement between two predicates.
+ *
+ * Why the gate's own function is not imported: that module's CLI dispatch runs
+ * at TOP LEVEL (it has no `import.meta.url === argv[1]` guard), so importing it
+ * would execute the gate; and it would put the release-critical bump path one
+ * rename away from failing. The agreement is pinned in the self-test instead,
+ * which runs the real gate as a child process over a real temp repository.
+ *
+ * @param {{ bump: string, body: string }} artifact
+ */
+export function artifactDeclaresBreaking({ bump, body }) {
+  if (bump === 'major') return true;
+  return /\*\*BREAKING/i.test(body) || /^\s*BREAKING[ -]CHANGE/mi.test(body);
+}
+
+/**
  * Collect the `.changeset/*.md` files ADDED over `from..to`, newest first.
  *
  * Walks the log rather than diffing the two endpoints: a changeset consumed by
@@ -309,12 +497,54 @@ export function collectAddedChangesets(objectuiRoot, from, to) {
   };
 }
 
-/** Read a changeset's content at `to`, falling back to the commit that added it. */
-function readAt(objectuiRoot, to, sha, path) {
+/** A failed `execFileSync` rendered as the child's own diagnostic, indented. */
+function gitDiagnostic(err) {
+  const captured = typeof err?.stderr === 'string' ? err.stderr : '';
+  const text = captured.trim() || err?.message || String(err);
+  return text
+    .split('\n')
+    .map((line) => `    ${line}`)
+    .join('\n');
+}
+
+/**
+ * Read a changeset's content at `to`, falling back to the commit that added it.
+ *
+ * `fellBack` is the caller's only handle on "this range crossed a release".
+ * git's own `fatal:` used to be that handle by accident — which made a complete
+ * result read as a failed one, the defect #6175 records; see the header note.
+ *
+ * Exported for the self-test: the both-reads-failed branch cannot be reached
+ * through `classifyRange`, whose `sha` always comes from `--diff-filter=A` and
+ * therefore always has the path. An error path no test can enter is an error
+ * path that quietly rots into silence, which is the one outcome #6175 forbids.
+ *
+ * @returns {{ text: string, fellBack: boolean }}
+ */
+export function readAt(objectuiRoot, to, sha, path) {
   try {
-    return git(objectuiRoot, ['show', `${to}:${path}`]);
-  } catch {
-    return git(objectuiRoot, ['show', `${sha}:${path}`]);
+    return {
+      text: git(objectuiRoot, ['show', `${to}:${path}`], { captureStderr: true }),
+      fellBack: false,
+    };
+  } catch (atTo) {
+    try {
+      return {
+        text: git(objectuiRoot, ['show', `${sha}:${path}`], { captureStderr: true }),
+        fellBack: true,
+      };
+    } catch (atSha) {
+      // BOTH reads failed: nothing was read, and this entry is about to be lost
+      // from the release record. Say so with everything git told us, twice over.
+      console.error(
+        `✗ objectui-changeset-digest: cannot read ${path} — neither at \`to\` nor at the commit that added it.`,
+      );
+      console.error(`  at \`to\` (${to}):`);
+      console.error(gitDiagnostic(atTo));
+      console.error(`  at the commit that added it (${sha}):`);
+      console.error(gitDiagnostic(atSha));
+      throw atSha;
+    }
   }
 }
 
@@ -366,7 +596,11 @@ export function inPreMode(frameworkRoot) {
  * Nothing here reads a commit type. Grouping output BY type is presentation and
  * belongs to the caller; it must never become a filter again.
  *
- * @returns {{ releasing: Array<object>, releaseNothingEntries: Array<object>, noChangesetCommits: Array<object>, releaseNothing: number, noChangeset: number, changesetsAdded: number, totalCommits: number }}
+ * `absentAtTo` counts the changesets that were gone at `to` and had to be read
+ * from the commit that added them — the readable form of what used to arrive as
+ * a screenful of git `fatal:` lines (#6175).
+ *
+ * @returns {{ releasing: Array<object>, releaseNothingEntries: Array<object>, noChangesetCommits: Array<object>, releaseNothing: number, noChangeset: number, changesetsAdded: number, absentAtTo: number, totalCommits: number }}
  */
 export function classifyRange({ objectuiRoot, from, to }) {
   const { entries, commits, totalCommits, commitsWithChangesetShas } = collectAddedChangesets(
@@ -377,10 +611,11 @@ export function classifyRange({ objectuiRoot, from, to }) {
 
   const releasing = [];
   const releaseNothingEntries = [];
+  let absentAtTo = 0;
   for (const entry of entries) {
-    const { packages, summary, body } = parseChangeset(
-      readAt(objectuiRoot, to, entry.sha, entry.path),
-    );
+    const read = readAt(objectuiRoot, to, entry.sha, entry.path);
+    if (read.fellBack) absentAtTo++;
+    const { packages, summary, body } = parseChangeset(read.text);
     const level = highestLevel(packages);
     if (!level) {
       releaseNothingEntries.push({ ...entry, summary: summary || entry.subject });
@@ -414,6 +649,7 @@ export function classifyRange({ objectuiRoot, from, to }) {
     releaseNothing: releaseNothingEntries.length,
     noChangeset: noChangesetCommits.length,
     changesetsAdded: entries.length,
+    absentAtTo,
     totalCommits,
   };
 }
@@ -421,7 +657,7 @@ export function classifyRange({ objectuiRoot, from, to }) {
 /**
  * Build the digest for a range.
  *
- * @returns {{ bump: string, declaredLevel: string|null, breaking: number, breakingByLevel: number, breakingByAnnotation: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, totalCommits: number, downgradedMajor: boolean, body: string }}
+ * @returns {{ bump: string, declaredLevel: string|null, breaking: number, breakingByLevel: number, breakingByAnnotation: number, releasing: Array<object>, releaseNothing: number, noChangeset: number, noChangesetCommits: Array<object>, changesetsAdded: number, absentAtTo: number, totalCommits: number, downgradedMajor: boolean, adr0087Scaffold: boolean, body: string }}
  */
 export function buildDigest({
   objectuiRoot,
@@ -431,7 +667,15 @@ export function buildDigest({
   max = DEFAULT_MAX_ENTRIES,
   bumpOverride = '',
 }) {
-  const { releasing, releaseNothing, noChangeset, changesetsAdded, totalCommits } = classifyRange({
+  const {
+    releasing,
+    releaseNothing,
+    noChangeset,
+    noChangesetCommits,
+    changesetsAdded,
+    absentAtTo,
+    totalCommits,
+  } = classifyRange({
     objectuiRoot,
     from,
     to,
@@ -522,7 +766,72 @@ export function buildDigest({
     );
   }
 
-  const body = [accounting, '', ...lines, ...(notes.length ? ['', ...notes] : [])].join('\n');
+  // --- #6174: NAME the commits that declared nothing, don't only count them ---
+  // Rendered straight from `classifyRange`'s own `noChangesetCommits`, in its
+  // order, with no predicate of any kind: presentation, never a criterion (see
+  // the header note). Zero-suppressed, and the silence is safe because this
+  // block is never the SOLE record of the fact — whenever the count is non-zero
+  // the accounting line above already carries it, so an absent block can only
+  // mean "every commit in this range declared something", never "the section
+  // was not written" (the same reasoning that lets #6175's fallback sentence
+  // stay quiet on a range that crossed no release).
+  const undeclared = [];
+  if (noChangesetCommits.length > 0) {
+    const n = noChangesetCommits.length;
+    undeclared.push(
+      `**In this console build, declared nowhere** — objectui merged ${n} ` +
+        `commit${n === 1 ? '' : 's'} in this range with no \`.changeset/*.md\`. ` +
+        `The code is inside the pin above and ships here, but nothing upstream declared ` +
+        `${n === 1 ? 'it' : 'them'}, so ${n === 1 ? 'it appears' : 'they appear'} in no objectui ` +
+        `CHANGELOG and in no entry above. Listed by subject rather than counted, because a ` +
+        `count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); ` +
+        `the upstream gate that would prevent this is objectui#3387.`,
+      '',
+    );
+    const shownUndeclared = noChangesetCommits.slice(0, Math.max(0, max));
+    for (const c of shownUndeclared) {
+      undeclared.push(
+        `- _(no changeset)_ ${clampSummary(c.subject)} (objectui \`${c.sha.slice(0, 9)}\`)`,
+      );
+    }
+    const hiddenUndeclared = n - shownUndeclared.length;
+    if (hiddenUndeclared > 0) {
+      // Same rule as the releasing cap, and the reason it is worth repeating:
+      // this list's whole purpose is that a number hides which commits it is
+      // made of, so truncating it back into a number in silence would restore
+      // the exact defect. The marker carries the REAL TOTAL and the command
+      // that produces the rest (#4731: a degraded list and a complete one must
+      // never look alike).
+      undeclared.push(
+        `- …and ${hiddenUndeclared} more commit${hiddenUndeclared === 1 ? '' : 's'} with no ` +
+          `changeset — this list is capped at ${max}, the range has ${n} in total. ` +
+          `Run \`node scripts/objectui-range.mjs --from ${from.slice(0, 12)} ` +
+          `--to ${to.slice(0, 12)} --all\` for the complete list.`,
+      );
+    }
+  }
+
+  const rendered = [
+    accounting,
+    '',
+    ...lines,
+    ...(notes.length ? ['', ...notes] : []),
+    ...(undeclared.length ? ['', ...undeclared] : []),
+  ].join('\n');
+
+  // --- #6494: the artifact carries the ADR-0087 QUESTION, never its answer ---
+  // A changeset that declares breaking must carry a disposition marker (#6148),
+  // and THIS changeset is generated: a marker written by hand survives exactly
+  // until the next pin bump rewrites the file, which is how PR #6476's answer
+  // was already scheduled to disappear. So the generator emits the question and
+  // leaves it deliberately unanswered — see ADR_0087_SCAFFOLD.
+  //
+  // Zero-suppressed against the gate's own subject: on an artifact the gate does
+  // not judge, an unanswered marker would sit there unjudged forever and teach
+  // the next reader that this marker is decoration. It appears exactly where it
+  // is enforced.
+  const adr0087Scaffold = artifactDeclaresBreaking({ bump, body: rendered });
+  const body = adr0087Scaffold ? `${rendered}\n\n${ADR_0087_SCAFFOLD}` : rendered;
 
   return {
     bump,
@@ -533,8 +842,12 @@ export function buildDigest({
     releasing,
     releaseNothing,
     noChangeset,
+    noChangesetCommits,
+    changesetsAdded,
+    absentAtTo,
     totalCommits,
     downgradedMajor,
+    adr0087Scaffold,
     body,
   };
 }
@@ -611,6 +924,37 @@ function main(argv) {
       `${digest.releaseNothing} release-nothing, ${digest.noChangeset} commit(s) without a changeset` +
       (digest.downgradedMajor ? ' — declared major recorded as minor (launch window)' : ''),
   );
+
+  // #6175: the one sentence that replaces the screenful of git `fatal:` lines.
+  // It lands HERE, beside the accounting line on stderr, and NOT in the
+  // changeset body: the body records what the range released, and how the tool
+  // had to read a file is not a fact about the release. The reader who needs it
+  // is the operator watching this run — the same reader the `fatal:` lines used
+  // to mislead. Printed only when it fires, so a range that crossed no release
+  // gains no new line (silence here means "nothing to explain", never "nothing
+  // happened" — the absence itself is not load-bearing).
+  if (digest.absentAtTo > 0) {
+    console.error(
+      `→ ${digest.absentAtTo} of ${digest.changesetsAdded} changeset(s) added in this range ` +
+        `no longer exist at ${short} — a release consumes the changesets it ships; ` +
+        `each was read from the commit that added it, so the account above is complete.`,
+    );
+  }
+
+  // #6494: the one line the operator running the bump must act on. It goes to
+  // stderr beside the accounting, which is where a `BUMP="$(…)"` caller lets it
+  // through — the shell driver captures stdout only. Saying it here is not the
+  // enforcement (the gate is); it is what stops the operator discovering the red
+  // one push later, and it names the marker so the fix is a search away.
+  if (digest.adr0087Scaffold) {
+    console.error(
+      `→ this changeset DECLARES a breaking change, so it carries an UNANSWERED ADR-0087 ` +
+        `disposition placeholder. Replace the \`adr-0087: TODO\` marker in ` +
+        `${out ?? 'the changeset'} with the real disposition before you push: ` +
+        `\`Check Changeset\` rejects the placeholder on purpose, and the generator cannot ` +
+        `answer it for you (objectstack#6494).`,
+    );
+  }
 
   if (out) {
     mkdirSync(dirname(out), { recursive: true });
@@ -726,8 +1070,18 @@ function selfTest() {
       !digest.body.includes('cross-repo token'),
     );
     check(
-      'a `fix(ci)` commit with no changeset at all is NOT represented',
-      !digest.body.includes('budget FAIL'),
+      'a `fix(ci)` commit with no changeset at all is NOT represented as a releasing entry',
+      // #6174 repaired the PROXY, never the claim. This check has always meant
+      // "the criterion did not admit it", and tested that by looking for the
+      // subject ANYWHERE in the body — which stopped expressing it the moment
+      // the body began naming undeclared commits on purpose. It now says what it
+      // always meant, at both layers: the classified set, and the rendered
+      // releasing lines. The other half — that it IS named, under the undeclared
+      // block — is pinned in the #6174 group below.
+      !digest.releasing.some((r) => r.subject.includes('budget FAIL')) &&
+        !digest.body
+          .split('\n')
+          .some((l) => /^- \*\*(?:major|minor|patch)\*\* —/.test(l) && l.includes('budget FAIL')),
     );
     check('release-nothing changesets are counted, not dropped in silence', digest.releaseNothing === 1);
     check(
@@ -998,10 +1352,25 @@ function selfTest() {
     for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs']) {
       writeFileSync(join(fwRun, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
     }
-    execFileSync('bash', [join(fwRun, 'scripts', 'bump-objectui.sh'), '--no-commit', head], {
-      encoding: 'utf8',
-      env: { ...process.env, OBJECTUI_ROOT: ui },
-    });
+    const bumpStdout = execFileSync(
+      'bash',
+      [join(fwRun, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, OBJECTUI_ROOT: ui },
+      },
+    );
+    // #5960: the pin bump is the ONLY trigger of ADR-0082 D4's declaration-parity
+    // ratchet — no workflow produces `sdui.manifest.json`, by ruling — so the
+    // procedure's second half lives in this script's output. Prose alone is
+    // deletable in silence; pinning it here is what makes "the procedure gained a
+    // line" a fact a gate can lose. Asserted on the `--no-commit` path on purpose:
+    // that path moved the pin too, and it is the one that returns early.
+    check(
+      '#5960 a bump prints the `pnpm sdui:manifest` step (the ratchet has no other trigger)',
+      bumpStdout.includes('pnpm sdui:manifest') && bumpStdout.includes('NEXT STEP'),
+      bumpStdout,
+    );
     const written = join(fwRun, '.changeset', `console-${head.slice(0, 12)}.md`);
     const body = existsSync(written) ? readFileSync(written, 'utf8') : '';
     check('bump-objectui.sh writes the digest-derived changeset', body.length > 0);
@@ -1038,6 +1407,532 @@ function selfTest() {
         degraded.includes('**Degraded list**') &&
         degraded.includes('NOT a\ncomplete account'),
       degraded,
+    );
+
+    // --- #6175: a range whose `to` endpoint is a RELEASE COMMIT -------------
+    // The shape that made a COMPLETE result look like a failure. A release
+    // consumes the changesets it ships, so every changeset added in the range
+    // is gone at `to` and every read falls back. Its own repo on purpose: the
+    // #4731 / #6099 fixtures above pin exact counts and must not shift under it.
+    const ui3 = join(tmp, 'objectui-released');
+    mkdirSync(join(ui3, '.changeset'), { recursive: true });
+    const g3 = (...args) => git(ui3, args);
+    g3('init', '-q', '-b', 'main');
+    g3('config', 'user.email', 'selftest@objectstack.ai');
+    g3('config', 'user.name', 'self test');
+    g3('config', 'commit.gpgsign', 'false');
+    const commit3 = (subject, files, removals = []) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(ui3, path)), { recursive: true });
+        writeFileSync(join(ui3, path), content);
+      }
+      for (const path of removals) rmSync(join(ui3, path), { force: true });
+      g3('add', '-A');
+      g3('commit', '-q', '-m', subject);
+      return g3('rev-parse', 'HEAD').trim();
+    };
+
+    const base3 = commit3('chore: base', { 'README.md': 'base\n' });
+    commit3('feat(grid): column pinning survives a layout reload (#3401)', {
+      '.changeset/grid-column-pinning-survives-reload.md':
+        '---\n"@object-ui/plugin-grid": minor\n---\n\nGrid column pinning survives a layout reload.\n',
+      'src/grid.ts': 'a\n',
+    });
+    commit3('fix(fields): the lookup picker keeps the authored value (#3402)', {
+      '.changeset/lookup-picker-keeps-authored-value.md':
+        '---\n"@object-ui/fields": patch\n---\n\nThe lookup picker keeps the authored value.\n',
+      'src/fields.ts': 'b\n',
+    });
+    const release3 = commit3(
+      'chore: release packages (#3403)',
+      { 'package.json': '{"version":"17.1.0"}\n' },
+      [
+        '.changeset/grid-column-pinning-survives-reload.md',
+        '.changeset/lookup-picker-keeps-authored-value.md',
+      ],
+    );
+
+    const released = buildDigest({
+      objectuiRoot: ui3,
+      frameworkRoot: fwPlain,
+      from: base3,
+      to: release3,
+    });
+    check(
+      '#6175 a range crossing a release still collects every changeset',
+      released.releasing.length === 2 && released.changesetsAdded === 2,
+      `releasing=${released.releasing.length} added=${released.changesetsAdded}`,
+    );
+    check(
+      '#6175 the fallback is COUNTED, not merely survived',
+      released.absentAtTo === 2,
+      `got ${released.absentAtTo}`,
+    );
+
+    // The CLI runs as a CHILD so its real stderr can be read: that stream is
+    // where git's `fatal:` used to land, and no in-process assertion can see it.
+    const selfPath = fileURLToPath(import.meta.url);
+    const runCli = (root, from, to, label) =>
+      spawnSync(
+        process.execPath,
+        [
+          selfPath,
+          '--objectui-root', root,
+          '--framework-root', fwPlain,
+          '--from', from,
+          '--to', to,
+          '--out', join(tmp, `cli-${label}.md`),
+        ],
+        { encoding: 'utf8' },
+      );
+
+    const fellBack = runCli(ui3, base3, release3, 'released');
+    check(
+      '#6175 the fallback no longer leaks git `fatal:` onto stderr',
+      fellBack.status === 0 && !fellBack.stderr.includes('fatal:'),
+      fellBack.stderr,
+    );
+    check(
+      '#6175 the fallback SAYS SO — once, with the real count',
+      /^→ 2 of 2 changeset\(s\) added in this range no longer exist at [0-9a-f]{12} —/m.test(
+        fellBack.stderr,
+      ) && fellBack.stderr.split('no longer exist at').length === 2,
+      fellBack.stderr,
+    );
+    const quietArtifact = readFileSync(join(tmp, 'cli-released.md'), 'utf8');
+    check(
+      '#6175 the artifact stays COMPLETE — the quiet read is the whole read',
+      quietArtifact.includes('Grid column pinning survives') &&
+        quietArtifact.includes('lookup picker keeps the authored value'),
+      quietArtifact,
+    );
+
+    const noFallback = runCli(ui, base, head, 'plain');
+    check(
+      '#6175 a range that crossed no release gains NO new line',
+      noFallback.status === 0 &&
+        !noFallback.stderr.includes('no longer exist at') &&
+        !noFallback.stderr.includes('fatal:'),
+      noFallback.stderr,
+    );
+
+    // Both reads failing is a REAL failure — nothing was read and the entry
+    // would vanish from the record. Quiet is earned by the fallback that
+    // worked; it is never extended to this. Driven through the exported
+    // `readAt` because `classifyRange` cannot reach the branch: its `sha`
+    // comes from `--diff-filter=A` and therefore always has the path.
+    const probe = join(tmp, 'probe-both-reads-fail.mjs');
+    writeFileSync(
+      probe,
+      `import { readAt } from ${JSON.stringify(pathToFileURL(selfPath).href)};\n` +
+        `readAt(${JSON.stringify(ui3)}, ${JSON.stringify(release3)}, ${JSON.stringify(base3)}, ` +
+        `'.changeset/never-existed.md');\n`,
+    );
+    const bothFail = spawnSync(process.execPath, [probe], { encoding: 'utf8' });
+    check(
+      '#6175 when BOTH reads fail the failure is LOUD, naming both attempts',
+      bothFail.status !== 0 &&
+        bothFail.stderr.includes('cannot read .changeset/never-existed.md') &&
+        bothFail.stderr.includes(release3) &&
+        bothFail.stderr.includes(base3),
+      bothFail.stderr,
+    );
+    check(
+      "#6175 both attempts' git diagnostics are re-emitted, not swallowed",
+      (bothFail.stderr.match(/fatal:/g) ?? []).length >= 2,
+      bothFail.stderr,
+    );
+
+    // --- #6174: the undeclared commits are NAMED, not only counted -----------
+    // Its own repos, for the reason the two groups above have theirs: the #4731
+    // / #6099 / #6175 fixtures pin exact counts and must not shift underneath.
+    // The row count here is deliberately > 1 so "the list agrees with the count"
+    // is a real claim, and the cap can be made to fire without touching `max`
+    // anywhere else.
+    const SUBJECT_3518 =
+      'fix(form): bind `previous` for field rules and stop resubmitting read-only fields (#3518)';
+
+    const ui4 = join(tmp, 'objectui-undeclared');
+    mkdirSync(join(ui4, '.changeset'), { recursive: true });
+    const g4 = (...args) => git(ui4, args);
+    g4('init', '-q', '-b', 'main');
+    g4('config', 'user.email', 'selftest@objectstack.ai');
+    g4('config', 'user.name', 'self test');
+    g4('config', 'commit.gpgsign', 'false');
+    const commit4 = (subject, files) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(ui4, path)), { recursive: true });
+        writeFileSync(join(ui4, path), content);
+      }
+      g4('add', '-A');
+      g4('commit', '-q', '-m', subject);
+      return g4('rev-parse', 'HEAD').trim();
+    };
+
+    const base4 = commit4('chore: base', { 'README.md': 'base\n' });
+    commit4('feat(grid): row virtualization for long lists (#3600)', {
+      '.changeset/grid-row-virtualization.md':
+        '---\n"@object-ui/plugin-grid": patch\n---\n\nThe grid virtualizes long lists.\n',
+      'src/grid.ts': 'a\n',
+    });
+    // The live specimen this issue is named after: a real, user-visible change
+    // that declared nothing. Committed FIRST of the three so the newest-first
+    // order puts it LAST — which is what lets the cap below hide it.
+    const undeclared3518 = commit4(SUBJECT_3518, {
+      'packages/plugin-form/src/rules.ts': 'previous\n',
+      'packages/components/src/form.tsx': 'readonly\n',
+    });
+    const undeclaredDeps = commit4('chore(deps-dev): Bump postcss from 8.5.25 to 8.5.26 (#3519)', {
+      'package.json': '{"devDependencies":{"postcss":"8.5.26"}}\n',
+    });
+    const undeclaredDocs = commit4('docs(guide): retarget two dead examples/ links (#3509)', {
+      'docs/guide.md': 'links\n',
+    });
+    const head4 = g4('rev-parse', 'HEAD').trim();
+
+    const named = buildDigest({
+      objectuiRoot: ui4,
+      frameworkRoot: fwPlain,
+      from: base4,
+      to: head4,
+    });
+    const namedRows = named.body
+      .split('\n')
+      .filter((l) => l.startsWith('- _(no changeset)_'));
+
+    check(
+      '#6174 every commit with no changeset is NAMED by subject, carrying its sha',
+      namedRows.length === 3 &&
+        named.body.includes(
+          `- _(no changeset)_ ${SUBJECT_3518} (objectui \`${undeclared3518.slice(0, 9)}\`)`,
+        ) &&
+        named.body.includes(
+          `- _(no changeset)_ chore(deps-dev): Bump postcss from 8.5.25 to 8.5.26 (#3519) (objectui \`${undeclaredDeps.slice(0, 9)}\`)`,
+        ) &&
+        named.body.includes(
+          `- _(no changeset)_ docs(guide): retarget two dead examples/ links (#3509) (objectui \`${undeclaredDocs.slice(0, 9)}\`)`,
+        ),
+      named.body,
+    );
+    check(
+      '#6174 the rendered rows AGREE with the count — no list/number drift',
+      namedRows.length === named.noChangeset && named.noChangesetCommits.length === namedRows.length,
+      `rows=${namedRows.length} noChangeset=${named.noChangeset}`,
+    );
+    check(
+      '#6174 the block says WHAT it is — shipped in this build, declared nowhere',
+      named.body.includes(
+        '**In this console build, declared nowhere** — objectui merged 3 commits in this range with no `.changeset/*.md`.',
+      ) && named.body.includes('objectui#3387'),
+      named.body,
+    );
+    check(
+      '#6174 naming is ADDITIVE — the releasing list is unchanged and still leads',
+      named.releasing.length === 1 &&
+        named.body.includes('- **patch** — The grid virtualizes long lists.') &&
+        named.body.indexOf('- _(no changeset)_') > named.body.indexOf('- **patch** —'),
+      named.body,
+    );
+    check(
+      '#6174 the accounting line is untouched — a section was added, no count moved',
+      named.body.includes(
+        'Derived from the changesets objectui declared over the range — 1 releasing of 1 changeset added across 4 non-merge commits; omitted: 3 commits carrying no changeset (they ship no package code).',
+      ),
+      named.body,
+    );
+
+    const named2 = buildDigest({
+      objectuiRoot: ui4,
+      frameworkRoot: fwPlain,
+      from: base4,
+      to: head4,
+      max: 2,
+    });
+    const named2Rows = named2.body.split('\n').filter((l) => l.startsWith('- _(no changeset)_'));
+    check(
+      '#6174 a capped undeclared list SAYS SO, with the real total and the way to the rest',
+      named2Rows.length === 2 &&
+        named2.body.includes(
+          '- …and 1 more commit with no changeset — this list is capped at 2, the range has 3 in total.',
+        ) &&
+        named2.body.includes('--all'),
+      named2.body,
+    );
+    check(
+      '#6174 truncation CAN hide the one commit worth naming — which is why it is loud',
+      // Not a restatement of the check above: it measures the stake. The
+      // specimen is the oldest of the three, so a cap eats it first, and a
+      // SILENT cap would restore exactly the defect this issue is about — a
+      // number where objectui#3518 used to be.
+      !named2.body.includes(SUBJECT_3518) && named2.body.includes('the range has 3 in total'),
+      named2.body,
+    );
+    check(
+      '#6174 the two caps are INDEPENDENT — truncating the releasing list empties nothing else',
+      capped.body.includes('…and 2 more releasing changesets') &&
+        capped.body.includes(
+          '- _(no changeset)_ fix(ci): never render a budget FAIL for a run that measured nothing (#3198)',
+        ),
+      capped.body,
+    );
+    check(
+      '#6174 the commit the old body could only COUNT is now in the record by name',
+      digest.body.includes(
+        '- _(no changeset)_ fix(ci): never render a budget FAIL for a run that measured nothing (#3198)',
+      ),
+      digest.body,
+    );
+    check(
+      '#6174 only the no-changeset class is named — a release-nothing changeset DID declare',
+      // The count clause is the load-bearing one: it goes red both if the block
+      // disappears (1 → 0) and if release-nothing entries are swept in (1 → 2).
+      // The substring clause alone would be green for an empty reason.
+      digest.body.split('\n').filter((l) => l.startsWith('- _(no changeset)_')).length === 1 &&
+        !digest.body.includes('- _(no changeset)_ fix(ci): hand the cross-repo token'),
+      digest.body,
+    );
+    check(
+      '#6174 body names the commits, #6175 keeps the read-fallback on stderr — adjacent, not merged',
+      quietArtifact.includes('- _(no changeset)_ chore: release packages (#3403)') &&
+        !quietArtifact.includes('no longer exist at') &&
+        fellBack.stderr.includes('no longer exist at') &&
+        !fellBack.stderr.includes('_(no changeset)_'),
+      quietArtifact,
+    );
+
+    // NEGATIVE POLARITY, declared as such: this one cannot go red when the
+    // feature is deleted, because deleting it also produces no line. It pins a
+    // DIFFERENT regression — a block that fires on an empty list — so it stays,
+    // with the two positive guards that keep it from passing vacuously: the
+    // fixture must really be the zero case AND must really have produced a
+    // digest. Without them "no new line" would also be satisfied by an empty
+    // range, or by a `body` that failed to build at all.
+    const ui5 = join(tmp, 'objectui-all-declared');
+    mkdirSync(join(ui5, '.changeset'), { recursive: true });
+    const g5 = (...args) => git(ui5, args);
+    g5('init', '-q', '-b', 'main');
+    g5('config', 'user.email', 'selftest@objectstack.ai');
+    g5('config', 'user.name', 'self test');
+    g5('config', 'commit.gpgsign', 'false');
+    const commit5 = (subject, files) => {
+      for (const [path, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(ui5, path)), { recursive: true });
+        writeFileSync(join(ui5, path), content);
+      }
+      g5('add', '-A');
+      g5('commit', '-q', '-m', subject);
+      return g5('rev-parse', 'HEAD').trim();
+    };
+    const base5 = commit5('chore: base', { 'README.md': 'base\n' });
+    commit5('feat(core): every commit in this range declares (#3700)', {
+      '.changeset/core-declares.md':
+        '---\n"@object-ui/core": minor\n---\n\nA declared change.\n',
+      'src/core.ts': 'a\n',
+    });
+    commit5('fix(fields): and so does this one (#3701)', {
+      '.changeset/fields-declares.md':
+        '---\n"@object-ui/fields": patch\n---\n\nAnother declared change.\n',
+      'src/fields.ts': 'b\n',
+    });
+    const head5 = g5('rev-parse', 'HEAD').trim();
+
+    const allDeclared = buildDigest({
+      objectuiRoot: ui5,
+      frameworkRoot: fwPlain,
+      from: base5,
+      to: head5,
+    });
+    check(
+      '#6174 a range where every commit declared gains NO new line (negative polarity)',
+      allDeclared.noChangeset === 0 &&
+        allDeclared.releasing.length === 2 &&
+        !allDeclared.body.includes('_(no changeset)_') &&
+        !allDeclared.body.includes('declared nowhere'),
+      allDeclared.body,
+    );
+
+    // --- #6494: the ADR-0087 disposition scaffold ---------------------------
+    // The gate's own marker pattern (check-adr-0087-registration.mjs:416),
+    // copied rather than imported: that module's CLI dispatch is top-level, so
+    // importing it would RUN the gate. The copy is belt-and-braces — the REAL
+    // gate binary judges a real artifact in the round trip below, and that, not
+    // this regex, is the authority on what the marker means.
+    const markersIn = (text) =>
+      [...text.matchAll(/<!--\s*adr-0087\s*:\s*([\s\S]*?)-->/g)].map((m) =>
+        m[1].replace(/\s+/g, ' ').trim(),
+      );
+
+    // A range with NOTHING breaking in it, forced to `major` the way
+    // `CONSOLE_BUMP=major` does. The frontmatter alone is a breaking declaration
+    // to the gate, so this is the artifact a `breaking > 0` proxy would miss.
+    const majorOverride = buildDigest({
+      objectuiRoot: ui5,
+      frameworkRoot: fwPlain,
+      from: base5,
+      to: head5,
+      bumpOverride: 'major',
+    });
+
+    check(
+      '#6494 an artifact that DECLARES breaking carries EXACTLY ONE adr-0087 marker',
+      annotated.adr0087Scaffold === true &&
+        markersIn(annotated.body).length === 1 &&
+        annotated.body.includes(ADR_0087_SCAFFOLD) &&
+        digest.adr0087Scaffold === true &&
+        markersIn(digest.body).length === 1,
+      annotated.body,
+    );
+    check(
+      '#6494 the marker is a PLACEHOLDER — it names no disposition at all',
+      // Both legal forms must MISS it, or the generator would have answered the
+      // question on the human's behalf — the one thing #6148 forbids.
+      (markersIn(annotated.body)[0] ?? '').startsWith('TODO') &&
+        !/^registered\b/i.test(markersIn(annotated.body)[0] ?? '') &&
+        !/^not-required\b/i.test(markersIn(annotated.body)[0] ?? ''),
+      markersIn(annotated.body)[0],
+    );
+    check(
+      '#6494 a `major` FRONTMATTER alone arms the gate — the scaffold follows it there',
+      // The gate declares breaking on the frontmatter ALONE, with no marker in
+      // the body, so a `breaking > 0` proxy would have missed this artifact.
+      majorOverride.bump === 'major' &&
+        majorOverride.breaking === 0 &&
+        !/\*\*BREAKING/i.test(majorOverride.body) &&
+        majorOverride.adr0087Scaffold === true &&
+        markersIn(majorOverride.body).length === 1,
+      majorOverride.body,
+    );
+    check(
+      '#6494 a NON-breaking artifact carries no marker at all (negative polarity)',
+      // Declared as negative polarity: deleting the emission also produces no
+      // marker, so this cannot go red under that ablation. It pins a DIFFERENT
+      // regression — a marker on an artifact the gate never judges, which would
+      // sit unanswered forever and teach the next reader to ignore it. The three
+      // positive guards keep it from passing for the vacuous reason (an empty or
+      // unbuilt body would satisfy "no marker" just as well).
+      allDeclared.releasing.length === 2 &&
+        allDeclared.breaking === 0 &&
+        allDeclared.bump === 'minor' &&
+        allDeclared.adr0087Scaffold === false &&
+        markersIn(allDeclared.body).length === 0,
+      allDeclared.body,
+    );
+    check(
+      '#6494 the flag, the rendered marker and the gate criterion agree on EVERY fixture',
+      [digest, plain, overridden, capped, annotated, named, named2, released, allDeclared, majorOverride].every(
+        (d) =>
+          d.adr0087Scaffold === (markersIn(d.body).length === 1) &&
+          d.adr0087Scaffold === (d.bump === 'major' || /\*\*BREAKING/i.test(d.body)),
+      ),
+      [digest, plain, overridden, capped, annotated, named, named2, released, allDeclared, majorOverride]
+        .map((d) => `${d.bump}/${d.adr0087Scaffold}/${markersIn(d.body).length}`)
+        .join(' '),
+    );
+
+    // --- #6494 THE ROUND TRIP, through the REAL gate ------------------------
+    // The claim "the gate recognises this as present-but-unanswered" is about
+    // ANOTHER script, so nothing short of that script's own verdict settles it.
+    // A throwaway repo carrying the gate's required inputs (#4690: it refuses to
+    // report a verdict without them) plus a COPY of the gate, so its REPO_ROOT
+    // resolves here — the same idiom the bump-objectui.sh run above uses.
+    const gateRepo = join(tmp, 'fw-gate');
+    mkdirSync(gateRepo, { recursive: true });
+    const gg = (...args) => git(gateRepo, args);
+    const gw = (rel, text) => {
+      mkdirSync(dirname(join(gateRepo, rel)), { recursive: true });
+      writeFileSync(join(gateRepo, rel), text);
+    };
+    gg('init', '-q', '-b', 'main');
+    gg('config', 'user.email', 'selftest@objectstack.ai');
+    gg('config', 'user.name', 'self test');
+    gg('config', 'commit.gpgsign', 'false');
+    const LEDGER_ENTRY = (id) =>
+      `export const X = {\n  semantic: [\n    {\n      id: '${id}',\n      surface: 's',\n    },\n  ],\n};\n`;
+    gw('packages/spec/src/migrations/registry.ts', LEDGER_ENTRY('old-entry-one'));
+    gw('packages/spec/src/conversions/registry.ts', LEDGER_ENTRY('a-conversion'));
+    gw(
+      'packages/spec/spec-changes.json',
+      `${JSON.stringify({ perMajor: [{ to: 17, migrated: [{ migrationId: 'old-entry-one' }] }] }, null, 2)}\n`,
+    );
+    // One declared-breaking changeset in STOCK (committed at base, so it is not
+    // in the judged diff) — the gate's convention-rot assertion needs its
+    // breaking detector to match something.
+    gw('.changeset/stock-breaking.md', '---\n"@objectstack/spec": major\n---\n\nstock\n\n**BREAKING** something\n');
+    gw(
+      'scripts/check-adr-0087-registration.mjs',
+      readFileSync(join(__dirname, 'check-adr-0087-registration.mjs'), 'utf8'),
+    );
+    gg('add', '-A');
+    gg('commit', '-q', '-m', 'base');
+    const gateBase = gg('rev-parse', 'HEAD').trim();
+
+    // The range is the #6099 fixture: `minor` + the author's own annotation,
+    // objectui's ORDINARY breaking shape and the one that reopens this every bump.
+    const gateCs = join(gateRepo, '.changeset', `console-${head2.slice(0, 12)}.md`);
+    const generated = spawnSync(
+      process.execPath,
+      [selfPath, '--objectui-root', ui2, '--framework-root', gateRepo, '--from', base2, '--to', head2, '--out', gateCs],
+      { encoding: 'utf8' },
+    );
+    gg('add', '-A');
+    gg('commit', '-q', '-m', 'chore(console): bump objectui pin');
+    const runGate = () =>
+      spawnSync(process.execPath, [join(gateRepo, 'scripts', 'check-adr-0087-registration.mjs'), '--base', gateBase], {
+        encoding: 'utf8',
+        cwd: gateRepo,
+      });
+
+    const gateRed = runGate();
+    check(
+      '#6494 ROUND TRIP (red): the REAL gate reads the marker and refuses it as UNANSWERED',
+      generated.status === 0 &&
+        gateRed.status !== 0 &&
+        // The EXACT verdict, not merely "it is red": present-but-unparseable is a
+        // different fact from absent, and only the first one proves the scaffold
+        // reached the gate at all.
+        /but unparseable disposition: "TODO/.test(gateRed.stderr) &&
+        gateRed.stderr.includes(`console-${head2.slice(0, 12)}.md`) &&
+        gateRed.stderr.includes('<!-- adr-0087: not-required (no-migration-prescription) why -->'),
+      `generator=${generated.status} gate=${gateRed.status}\n${gateRed.stderr}`,
+    );
+    check(
+      '#6494 the operator is told at BUMP time, not one push later',
+      generated.stderr.includes('UNANSWERED ADR-0087') && generated.stderr.includes('adr-0087: TODO'),
+      generated.stderr,
+    );
+
+    // The other half. Same file, same range, same generator — only the human's
+    // answer is added, and the gate's verdict flips. A red that no answer can
+    // clear would be a broken gate, not a scaffold.
+    //
+    // The replacement is CHECKED before it is committed, and the commit allows an
+    // empty tree. Found while reverse-verifying this group: with the emission
+    // ablated there is no placeholder to replace, so the write was a no-op, `git
+    // commit` exited 1 on a clean tree and threw — the whole self-test died with
+    // a raw `execFileSync` stack instead of naming a failed check. An ablation is
+    // exactly when the next reader needs a NAME, not a stack trace.
+    const answered = readFileSync(gateCs, 'utf8').replace(
+      ADR_0087_SCAFFOLD,
+      '<!-- adr-0087: not-required (already-registered old-entry-one) the pinned frontend range carries no spec surface beyond that entry -->',
+    );
+    check(
+      '#6494 the answer replaces the placeholder IN PLACE — one marker before, one after',
+      answered !== readFileSync(gateCs, 'utf8') &&
+        !answered.includes('adr-0087: TODO') &&
+        markersIn(answered).length === 1,
+      answered.slice(-400),
+    );
+    writeFileSync(gateCs, answered);
+    gg('add', '-A');
+    gg('commit', '-q', '--allow-empty', '-m', 'answer the ADR-0087 question');
+    const gateGreen = runGate();
+    check(
+      '#6494 ROUND TRIP (green): a real disposition written in that same place clears it',
+      gateGreen.status === 0 &&
+        gateGreen.stdout.includes(
+          '✓ check-adr-0087-registration: 1 declared-breaking changeset(s), each carrying an ADR-0087 disposition.',
+        ),
+      `status=${gateGreen.status}\n${gateGreen.stdout}\n${gateGreen.stderr}`,
     );
   } finally {
     rmSync(tmp, { recursive: true, force: true });

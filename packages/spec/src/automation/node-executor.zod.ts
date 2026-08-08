@@ -32,7 +32,7 @@ export const WaitEventTypeSchema = lazySchema(() => z.enum([
   'condition',  // Resume when a data condition is met (polling)
 ]).describe('Wait event type determining how a paused flow is resumed'));
 
-export type WaitEventType = z.infer<typeof WaitEventTypeSchema>;
+export type WaitEventType = z.input<typeof WaitEventTypeSchema>;
 
 // ─── Wait Resume Payload ─────────────────────────────────────────────
 
@@ -71,7 +71,7 @@ export const WaitResumePayloadSchema = lazySchema(() => z.object({
     .describe('Variables to merge into flow context upon resume'),
 }).describe('Payload for resuming a paused wait node'));
 
-export type WaitResumePayload = z.infer<typeof WaitResumePayloadSchema>;
+export type WaitResumePayload = z.input<typeof WaitResumePayloadSchema>;
 
 // ─── Wait Executor Config ────────────────────────────────────────────
 
@@ -84,7 +84,7 @@ export const WaitTimeoutBehaviorSchema = lazySchema(() => z.enum([
   'fallback',   // Execute a fallback edge
 ]).describe('Behavior when a wait node exceeds its timeout'));
 
-export type WaitTimeoutBehavior = z.infer<typeof WaitTimeoutBehaviorSchema>;
+export type WaitTimeoutBehavior = z.input<typeof WaitTimeoutBehaviorSchema>;
 
 /**
  * Configuration for the wait node executor plugin.
@@ -120,7 +120,7 @@ export const WaitExecutorConfigSchema = lazySchema(() => z.object({
     .describe('Max concurrent paused executions (0 = unlimited)'),
 }).describe('Wait node executor plugin configuration'));
 
-export type WaitExecutorConfig = z.infer<typeof WaitExecutorConfigSchema>;
+export type WaitExecutorConfig = z.input<typeof WaitExecutorConfigSchema>;
 /** Post-parse shape of {@link WaitExecutorConfig} — defaults applied, transforms run (ADR-0122). */
 export type WaitExecutorConfigParsed = z.infer<typeof WaitExecutorConfigSchema>;
 
@@ -165,7 +165,7 @@ export const NodeExecutorDescriptorSchema = lazySchema(() => z.object({
     .describe('JSON Schema $ref for executor-specific config'),
 }).describe('Node executor plugin descriptor'));
 
-export type NodeExecutorDescriptor = z.infer<typeof NodeExecutorDescriptorSchema>;
+export type NodeExecutorDescriptor = z.input<typeof NodeExecutorDescriptorSchema>;
 /** Post-parse shape of {@link NodeExecutorDescriptor} — defaults applied, transforms run (ADR-0122). */
 export type NodeExecutorDescriptorParsed = z.infer<typeof NodeExecutorDescriptorSchema>;
 
@@ -185,7 +185,7 @@ export const ActionCategorySchema = lazySchema(() => z.enum([
   'custom',   // plugin-defined, uncategorised
 ]).describe('Action palette category'));
 
-export type ActionCategory = z.infer<typeof ActionCategorySchema>;
+export type ActionCategory = z.input<typeof ActionCategorySchema>;
 
 /**
  * Authoring surfaces that may offer an action. A descriptor opts into the
@@ -199,7 +199,7 @@ export const ActionParadigmSchema = lazySchema(() => z.enum([
   // there is no declarative rule authoring view to compile to Flow.
 ]).describe('Authoring paradigm that may offer this action'));
 
-export type ActionParadigm = z.infer<typeof ActionParadigmSchema>;
+export type ActionParadigm = z.input<typeof ActionParadigmSchema>;
 
 /**
  * Canonical, cross-paradigm **Action descriptor** (ADR-0018 §1).
@@ -406,10 +406,9 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
   aliasOf: z.string().optional().describe('Canonical type this alias forwards to'),
 }).describe('Canonical cross-paradigm action/node descriptor (ADR-0018)'));
 
-export type ActionDescriptor = z.infer<typeof ActionDescriptorSchema>;
+export type ActionDescriptor = z.input<typeof ActionDescriptorSchema>;
 /** Post-parse shape of {@link ActionDescriptor} — defaults applied, transforms run (ADR-0122). */
 export type ActionDescriptorParsed = z.infer<typeof ActionDescriptorSchema>;
-export type ActionDescriptorInput = z.input<typeof ActionDescriptorSchema>;
 
 /**
  * Type-safe factory for an {@link ActionDescriptor}. Validates and applies
@@ -427,7 +426,7 @@ export type ActionDescriptorInput = z.input<typeof ActionDescriptorSchema>;
  * });
  * ```
  */
-export function defineActionDescriptor(input: ActionDescriptorInput): ActionDescriptor {
+export function defineActionDescriptor(input: ActionDescriptor): ActionDescriptorParsed {
   return ActionDescriptorSchema.parse(input);
 }
 

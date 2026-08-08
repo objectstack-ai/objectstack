@@ -27,9 +27,9 @@
  * self-service view, platform admins get the browsable tables.
  */
 
-import type { AppInput } from '@objectstack/spec/ui';
+import type { App } from '@objectstack/spec/ui';
 
-export const ACCOUNT_APP: AppInput = {
+export const ACCOUNT_APP: App = {
   name: 'account',
   label: 'Account',
   description: 'Personal security and identity settings',

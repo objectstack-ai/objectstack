@@ -94,6 +94,29 @@ jobs:
       - name: Engine query-options erasure ratchet
         run: pnpm check:query-options-erasure
 
+      # @objectstack/verify stand-in erasure guard (#6399). The third and
+      # narrowest member of the two above. `checkReadCoercion` /
+      # `checkDateBucketParity` take their driver STRUCTURALLY
+      # (`CoercibleDriver` / `BucketableDriver`) so an out-of-tree driver —
+      # cloud's driver-turso in remote mode — runs the identical contract
+      # without importing a concrete driver type; that parameter type IS the
+      # compile-time half of the conformance, and an assertion on the argument
+      # deletes it for that call site while looking like a call that has it.
+      # #6354 / PR #6396 is the bill: ten `as never` casts, every call site of
+      # both helpers, all of them dead, sitting over a check that was provably
+      # alive — and no gate rang for either fact.
+      #
+      # The ESLint rule (`verify-stand-in/no-asserted-driver-argument`) blocks
+      # the assertion. This step is the half that stops the rule going dead: it
+      # reconciles the guarded set against what packages/verify actually exports
+      # in BOTH directions — so a third stand-in check cannot arrive unguarded
+      # and a stale entry cannot rot — and COUNTS the call sites it reached, so
+      # a rename or a moved import surfaces as a census that fell instead of as
+      # a green run over nothing. `pnpm lint` alone cannot tell "clean tree"
+      # from "matched nothing". Runs its own --self-test first.
+      - name: "@objectstack/verify stand-in erasure guard"
+        run: pnpm check:verify-stand-in
+
       # Raw control-byte guard (#3127 / #4890 / #5157 / #5460). Scans every
       # tracked TEXT file for a raw ASCII control byte and fails on any hit.
       # WHICH bytes are in the set and WHY each is rejected are stated and argued
@@ -139,12 +162,35 @@ jobs:
       - name: Reserved-word ("role") docs ratchet
         run: pnpm check:role-word
 
+      # #6319: content/docs/getting-started/quick-reference.mdx is the protocol
+      # index, and each "## <Name> Protocol (N schemas)" heading is a DECLARATION
+      # about the table under it. The page is hand-written (build-docs.ts writes
+      # only content/docs/references/), so the two drift one edit at a time —
+      # #6319 found Kernel claiming 17 over a 15-row table because two kernel
+      # rows had migrated into the Cloud section and only Cloud's heading was
+      # updated. Nothing breaks at runtime; the cost is that content/docs/ is the
+      # corpus humans and AIs copy from, so a miscounted index is read as a fact
+      # about the schema catalog. Declared = enforced.
+      # It lives in this job with the other docs guards: the change that breaks
+      # the count is a docs edit, so a packages/** paths filter would blind it to
+      # its own failure mode.
+      - name: Quick-reference section counts match their tables
+        run: pnpm check:quick-reference-counts
+
       # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
       # That incident reversed three accepted ADRs with a patch-level changeset,
       # and the mechanism was simply that the edited file never mentioned them —
       # so the author could not have known. Presence check only; the invariant
       # travels in the failure message (scripts/adr-anchors.json).
-      - name: ADR anchors (governed code names its decision)
+      #
+      # Since #5992 the same script also audits the premise the anchors rest on:
+      # an ADR number names exactly ONE decision. Three numbers were each claimed
+      # by two unrelated records (0010/0019/0057) — grandfathered on an explicit
+      # shrink-only allowlist in the script, so a FOURTH collision goes red here.
+      # The `--self-test` in the pnpm script provokes that red path on synthetic
+      # directories every run, because a collision is rare enough that nobody
+      # would otherwise see the gate fail before it mattered.
+      - name: ADR anchors + number uniqueness (governed code names its decision)
         run: pnpm check:adr-anchors
 
       # #3280/#3290 org-identifier guard: `organizationId` is the blessed
@@ -210,6 +256,20 @@ jobs:
       # --self-test first.
       - name: Wildcard fall-through guard
         run: pnpm check:wildcard-fallthrough
+
+      # Raw `:type` route-param comparison guard (#6241). The `/meta/:type`
+      # routes serve BOTH spellings and Prime Directive #3 makes the PLURAL one
+      # canonical, so a gate comparing the raw param is a gate the canonical
+      # spelling skips. That is one authorization bypass fixed three times in
+      # one file: #3984 (every per-type gate), #5881 (the dashboard exclusion),
+      # #6241 (the doc/book cache exclusion, still literal eight days after
+      # #3984's structural fix). Each was found by hand; per-defect tests pin
+      # the gates that exist today and nothing refused the NEXT raw comparison.
+      # AST-based on purpose — the file documents the bad pattern in prose, and
+      # a textual scan would flag its own post-mortems. Zero exemptions today.
+      # Runs its own --self-test first.
+      - name: Normalized metadata-type guard
+        run: pnpm check:meta-type-normalized
 
       # Init-service declaration guard (#4471, ADR-0116). The kernel's ordering
       # contract (dependencies / optionalDependencies / requiresServices /
@@ -460,6 +520,22 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # The authorable-surface deletion gate (#4650) below anchors on the
+          # MERGE BASE of HEAD with origin/main — that is the only anchor under
+          # which "a key this PR deleted" and "a key main gained since the fork
+          # point" are different facts. A shallow clone has no walkable
+          # ancestry, so `merge-base` fails and the gate falls back to
+          # origin/main's TIP, where those two facts collapse into one and the
+          # SECOND one is reported as the first: #6359 had PR #6356 (which
+          # touches no spec file at all) go red for "deleting"
+          # ui/BulkActionDef:requiredPermissions — a key main had just ADDED.
+          #
+          # Same line as the ESLint job above, opposite failure mode, and that
+          # is why it is spelled out here rather than cross-referenced: shallow
+          # degrades the slot-lookup ratchet to "not verified" (a false GREEN),
+          # and degrades this gate to a false RED on an innocent PR.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7

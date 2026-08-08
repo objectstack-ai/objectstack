@@ -323,10 +323,12 @@ export function validateTranslatableSections(stack: AnyRec): TranslatableSection
       const section = site.sections[i];
       if (!isRec(section)) continue;
       if (strName(section.name)) continue;
-      // `record:details` reads `title ?? label`; form views author `label`. A
-      // section with neither has no heading rendered at all, so there is
-      // nothing untranslated to report — that is `required/label`'s question.
-      const heading = strName(section.label) ?? strName(section.title);
+      // `label` is the ONE heading spelling both surfaces declare —
+      // `RecordDetailsProps.sections[]` and `FormSectionSchema` (#5611, #5730).
+      // A section with no `label` has no heading the schema recognises, so
+      // there is nothing untranslated to report — that is `required/label`'s
+      // question, and an off-spec `title` is its business, not this rule's.
+      const heading = strName(section.label);
       if (!heading) continue;
 
       const slug = suggestedName(heading);

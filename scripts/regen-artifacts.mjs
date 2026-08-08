@@ -57,6 +57,13 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // one commit for the whole surface, which a per-shard copy would let drift.
   { path: 'packages/spec/authorable-surface.base.json', gen: 'gen:schema', check: 'check:authorable-surface' },
   { path: 'packages/spec/json-schema.manifest/**', gen: 'gen:schema', check: 'check:authorable-surface' },
+  // The #4666 default-value ratchet — what an author gets when they OMIT a key.
+  // Same producer, same gate and the same sorted-array-per-category shape as its
+  // authorable-surface sibling, so it merges the same way. A CHANGED default is
+  // never resolved by regenerating: `check:authorable-surface` adjudicates it
+  // against the merge base before this file is written at all, so the regen here
+  // can only ever pick up a NEW key's default.
+  { path: 'packages/spec/authorable-defaults/**', gen: 'gen:schema', check: 'check:authorable-surface' },
   // `gen:api-surface` reads the BUILT `dist/*.d.ts`, never the source. On a
   // stale dist it does not fail — it emits a *plausible* surface missing every
   // export added since the last build, and `gen:docs` will ratchet a baseline

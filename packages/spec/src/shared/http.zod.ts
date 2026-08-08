@@ -44,7 +44,7 @@ export const HttpMethod = z.enum([
   'OPTIONS'
 ]).describe('HTTP method — the full routing vocabulary (`api/*` endpoints, router and REST-server routes). The narrower `HttpMethodSubset` is what view data sources may request.');
 
-export type HttpMethod = z.infer<typeof HttpMethod>;
+export type HttpMethod = z.input<typeof HttpMethod>;
 
 /**
  * HTTP Method Subset — the five methods a VIEW DATA SOURCE may request.
@@ -64,7 +64,7 @@ export type HttpMethod = z.infer<typeof HttpMethod>;
 export const HttpMethodSubsetSchema = lazySchema(() => z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
   .describe('HTTP methods a view data source may request — the subset of `HttpMethod` without `HEAD`/`OPTIONS`.'));
 
-export type HttpMethodSubset = z.infer<typeof HttpMethodSubsetSchema>;
+export type HttpMethodSubset = z.input<typeof HttpMethodSubsetSchema>;
 
 /**
  * HTTP Request Configuration Schema
@@ -79,7 +79,7 @@ export const HttpRequestSchema = lazySchema(() => z.object({
   body: z.unknown().optional().describe('Request body for POST/PUT/PATCH'),
 }));
 
-export type HttpRequest = z.infer<typeof HttpRequestSchema>;
+export type HttpRequest = z.input<typeof HttpRequestSchema>;
 /** Post-parse shape of {@link HttpRequest} — defaults applied, transforms run (ADR-0122). */
 export type HttpRequestParsed = z.infer<typeof HttpRequestSchema>;
 
@@ -139,7 +139,7 @@ export const CorsConfigSchema = lazySchema(() => z.object({
   maxAge: z.number().int().optional().describe('Preflight cache duration in seconds'),
 }));
 
-export type CorsConfig = z.infer<typeof CorsConfigSchema>;
+export type CorsConfig = z.input<typeof CorsConfigSchema>;
 /** Post-parse shape of {@link CorsConfig} — defaults applied, transforms run (ADR-0122). */
 export type CorsConfigParsed = z.infer<typeof CorsConfigSchema>;
 
@@ -183,7 +183,7 @@ export const RateLimitConfigSchema = lazySchema(() => z.object({
   maxRequests: z.number().int().default(100).describe('Max requests per window'),
 }));
 
-export type RateLimitConfig = z.infer<typeof RateLimitConfigSchema>;
+export type RateLimitConfig = z.input<typeof RateLimitConfigSchema>;
 /** Post-parse shape of {@link RateLimitConfig} — defaults applied, transforms run (ADR-0122). */
 export type RateLimitConfigParsed = z.infer<typeof RateLimitConfigSchema>;
 
@@ -226,4 +226,4 @@ export const StaticMountSchema = lazySchema(() => z.object({
   cacheControl: z.string().optional().describe('Cache-Control header value'),
 }));
 
-export type StaticMount = z.infer<typeof StaticMountSchema>;
+export type StaticMount = z.input<typeof StaticMountSchema>;

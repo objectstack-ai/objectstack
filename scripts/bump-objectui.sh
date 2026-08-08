@@ -7,6 +7,13 @@
 #   scripts/bump-objectui.sh --no-commit    # update files only, don't commit
 #   scripts/bump-objectui.sh --no-changeset # skip the @objectstack/console changeset
 #
+# After the bump — the second half of the pin-update procedure (#5960):
+#   pnpm sdui:manifest        # dump objectui's sdui.manifest.json and run the
+#                             # spec↔registry declaration-parity ratchet (ADR-0082 D4).
+#                             # The pin bump is that ratchet's ONLY trigger; it is an
+#                             # on-demand gate by decision, never a CI job. Needs
+#                             # Playwright chromium. This script prints the reminder.
+#
 # Env:
 #   CONSOLE_BUMP=major|minor|patch  # force the changeset bump type (default: auto —
 #                             # the HIGHEST level objectui itself declared in the
@@ -17,6 +24,13 @@
 # Assumes sibling layout:
 #   ~/work/objectui
 #   ~/work/objectstack   ← run from here
+# --help ends here
+#
+# ^ SENTINEL, not prose — `--help` prints from the shebang down to the line above
+# and stops there, so the terminator travels with the text it terminates. Add or
+# remove header lines freely; no line number tracks this block any more (#6425).
+# Spell it exactly: the --help branch below refuses to run without it. Everything
+# from here down is internal rationale and is NOT user-facing help.
 #
 # objectui ships @object-ui/console as a static SPA. The framework
 # release pipeline reads .objectui-sha, clones objectui at that commit,
@@ -56,7 +70,25 @@ for arg in "$@"; do
     --no-commit) NO_COMMIT=1 ;;
     --no-changeset) NO_CHANGESET=1 ;;
     -h|--help)
-      sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+      # The header block above IS the help text, and the `# --help ends here`
+      # sentinel is what ends it — no line range, so growing the header can no
+      # longer truncate the help (#6425; #5960 grew it and PR #6421 had to move a
+      # hand-kept `2,26p`). The leading `2` addresses the shebang, whose position
+      # is fixed by execve rather than by the header's content, so it cannot drift.
+      #
+      # A missing sentinel EXITS 1 rather than running on to EOF: a truncated help
+      # and a complete one both exit 0 and both print something, which is precisely
+      # why the old coupling could fail in silence — same lesson as the `head -40`
+      # this script used to truncate its changeset list with (#4731). Guarded here,
+      # not at startup: a deleted comment must never stop an actual pin bump.
+      if ! grep -qxF '# --help ends here' "$0"; then
+        echo "✗ ${0##*/}: the '# --help ends here' sentinel is missing — cannot tell" >&2
+        echo "  where the help text ends. Restore it at the end of the header block." >&2
+        exit 1
+      fi
+      sed -n '2,/^# --help ends here$/p' "$0" \
+        | grep -vxF '# --help ends here' \
+        | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) EXPLICIT_SHA="$arg" ;;
@@ -157,8 +189,36 @@ EOF
   echo "→ wrote changeset $(basename "$CS_FILE") (@objectstack/console: ${BUMP})"
 fi
 
+# --- The other half of the pin-update procedure (#5960) ----------------------
+# ADR-0082 D4's spec↔registry declaration-parity ratchet reads objectui's
+# `sdui.manifest.json`, and that file changes when — and only when — this pin
+# moves. So the pin bump is the ratchet's trigger, and it is the ONLY one:
+# measured on origin/main, no workflow runs `pnpm sdui:manifest`, no workflow
+# installs Playwright for it, `packages/console/dist/` is gitignored and the
+# published @objectstack/console tarball ships no manifest. Producing it in this
+# repo's CI was considered and REJECTED (#5960) — it would put a full objectui
+# build plus a chromium download on every matching PR.
+#
+# Deliberately a REMINDER, not a hard gate: a machine without Playwright must
+# still be able to move the pin, and hard-failing here would be the rejected
+# CI cost wearing a local disguise. The gate itself cannot go falsely green —
+# since #4690 a missing or unusable manifest exits 1 instead of skipping — so
+# the only failure mode left is "nobody ran it", which is what this prints to
+# prevent. Printed on BOTH exits below: --no-commit still moved the pin.
+print_sdui_next_step() {
+  echo
+  echo "→ NEXT STEP — run the declaration-parity ratchet (ADR-0082 D4):"
+  echo "      pnpm sdui:manifest"
+  echo "  It rebuilds objectui at the new pin, dumps packages/console/dist/sdui.manifest.json"
+  echo "  and ratchets spec↔registry declaration parity. A pin bump is its only trigger:"
+  echo "  it is an on-demand gate by decision (#5960), never a CI job."
+  echo "  Needs a Playwright browser — 'pnpm exec playwright install chromium-headless-shell'."
+  echo "  Procedure: docs/releases-maintenance.md → 'After the pin moves'."
+}
+
 if [[ "$NO_COMMIT" -eq 1 ]]; then
   echo "→ --no-commit: leaving files unstaged."
+  print_sdui_next_step
   exit 0
 fi
 
@@ -170,3 +230,4 @@ ${SUBJECT_LINE}
 
 objectui@${NEW_SHA}" -- .objectui-sha ${CS_FILE:+"$CS_FILE"}
 echo "✓ Committed. Push with: git push"
+print_sdui_next_step

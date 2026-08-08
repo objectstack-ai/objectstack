@@ -60,7 +60,39 @@ key for key. A managed runtime binds `services.data` to this same shape.
 - `object`: short object name (for example `task`, `account`)
 - `id`: record ID for single-record operations
 - `data`: partial payload for create/update
-- `options` (`find`): filters, sorting, pagination (`top`, `skip`, `filter`, `sort`, `select`)
+- `options` (`find`): filtering, sorting and pagination — two vocabularies, one
+  behaviour; see the table below
+
+### `find` options: canonical and legacy
+
+The signature above accepts `QueryOptions | QueryOptionsV2`, and the Canonical source
+declares which of the two to write. `QueryOptionsV2` is *"canonical query options using
+Spec protocol field names … the recommended interface for `data.find()` queries"*, while
+`QueryOptions` carries an `@deprecated` tag in the same file describing *"legacy parameter
+names … that require translation to QueryAST"*, with the instruction to *"prefer QueryAST
+fields directly"*. Both interfaces are declared in `packages/client/src/index.ts`, so the
+recommendation is the SDK's own, not this page's.
+
+| Canonical (`QueryOptionsV2`) | Legacy (`QueryOptions`) | Clause |
+|:---|:---|:---|
+| `where` | `filter` | filter conditions (`WHERE`) |
+| `fields` | `select` | field selection (`SELECT`) |
+| `orderBy` | `sort` | sort definition (`ORDER BY`) |
+| `limit` | `top` | maximum records (`LIMIT`) |
+| `offset` | `skip` | records skipped (`OFFSET`) |
+
+**Write the left column.** Those are the QueryAST and protocol field names, so the same
+words carry from here down through `data.query()` into the query layer — one translation
+step fewer to hold in your head.
+
+**The right column still works.** Nothing refuses it: `find` recognises a canonical
+options object and normalizes it into exactly the transport parameters the legacy names
+produce, so the two columns are equivalent, not merely similar. Deprecated here means
+"prefer the other spelling", not "scheduled for removal in this version".
+
+**Use one column per call.** `find` reads either the canonical names or the legacy ones
+for a given options object, never a blend — a key from the other column is dropped
+silently rather than refused, so migrate an options object as a whole.
 
 ## Returns
 
@@ -93,11 +125,12 @@ export async function recentOrdersForContact(data: DataService, contactId: strin
   // `get` resolves the response envelope `{ object, id, record }` — the row is `record`.
   const { record: contact } = await data.get<{ id: string; name: string }>('contact', contactId);
 
-  // `find` resolves `{ records, total?, hasMore? }`.
+  // `find` resolves `{ records, total?, hasMore? }`. The options are the canonical
+  // `QueryOptionsV2` vocabulary — `where` / `orderBy` / `limit`, not `filter` / `sort` / `top`.
   const { records: orders } = await data.find<{ id: string; amount: number }>('sales_order', {
-    filter: { contact_id: contact.id },
-    sort: [{ field: 'created_at', order: 'desc' }],
-    top: 20,
+    where: { contact_id: contact.id },
+    orderBy: [{ field: 'created_at', order: 'desc' }],
+    limit: 20,
   });
 
   return { contact, orders };

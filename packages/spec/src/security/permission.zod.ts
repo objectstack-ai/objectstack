@@ -23,7 +23,7 @@ import { strictUnknownKeyError } from '../shared/suggestions.zod';
  * layered on top of OWD. Widens the owner-match for owner-scoped objects.
  */
 export const ObjectAccessScopeSchema = z.enum(['own', 'own_and_reports', 'unit', 'unit_and_below', 'org']);
-export type ObjectAccessScope = z.infer<typeof ObjectAccessScopeSchema>;
+export type ObjectAccessScope = z.input<typeof ObjectAccessScopeSchema>;
 
 /*
  * ── Unknown-key strictness (#4001, ADR-0078) ────────────────────────────────
@@ -220,7 +220,7 @@ export const EffectiveObjectPermissionSchema = lazySchema(() =>
     // authorable/wire split).
   }).strip(),
 );
-export type EffectiveObjectPermission = z.infer<typeof EffectiveObjectPermissionSchema>;
+export type EffectiveObjectPermission = z.input<typeof EffectiveObjectPermissionSchema>;
 
 /**
  * [ADR-0090 D12] Delegated-administration scope.
@@ -273,11 +273,9 @@ export const AdminScopeSchema = lazySchema(() => z.object({
   assignablePermissionSets: z.array(z.string()).default([]).describe('Allowlist of permission-set names the delegate may hand out'),
 }, { error: adminScopeUnknownKeyError }).strict());
 
-export type AdminScope = z.infer<typeof AdminScopeSchema>;
+export type AdminScope = z.input<typeof AdminScopeSchema>;
 /** Post-parse shape of {@link AdminScope} — defaults applied, transforms run (ADR-0122). */
 export type AdminScopeParsed = z.infer<typeof AdminScopeSchema>;
-/** Authoring input for {@link AdminScope} — defaulted fields are optional. */
-export type AdminScopeInput = z.input<typeof AdminScopeSchema>;
 
 const fieldPermissionUnknownKeyError = strictUnknownKeyError({
   surface: 'this field permission',
@@ -546,15 +544,13 @@ export const PermissionSetSchema = lazySchema(() => z.object({
   ...MetadataProtectionFields,
 }, { error: permissionSetUnknownKeyError }).strict());
 
-export type PermissionSet = z.infer<typeof PermissionSetSchema>;
+export type PermissionSet = z.input<typeof PermissionSetSchema>;
 /** Post-parse shape of {@link PermissionSet} — defaults applied, transforms run (ADR-0122). */
 export type PermissionSetParsed = z.infer<typeof PermissionSetSchema>;
-/** Authoring input for {@link PermissionSet} — defaulted fields are optional. */
-export type PermissionSetInput = z.input<typeof PermissionSetSchema>;
-export type ObjectPermission = z.infer<typeof ObjectPermissionSchema>;
+export type ObjectPermission = z.input<typeof ObjectPermissionSchema>;
 /** Post-parse shape of {@link ObjectPermission} — defaults applied, transforms run (ADR-0122). */
 export type ObjectPermissionParsed = z.infer<typeof ObjectPermissionSchema>;
-export type FieldPermission = z.infer<typeof FieldPermissionSchema>;
+export type FieldPermission = z.input<typeof FieldPermissionSchema>;
 /** Post-parse shape of {@link FieldPermission} — defaults applied, transforms run (ADR-0122). */
 export type FieldPermissionParsed = z.infer<typeof FieldPermissionSchema>;
 
@@ -563,6 +559,6 @@ export type FieldPermissionParsed = z.infer<typeof FieldPermissionSchema>;
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: PermissionSet` literal.
  */
-export function definePermissionSet(config: z.input<typeof PermissionSetSchema>): PermissionSet {
+export function definePermissionSet(config: z.input<typeof PermissionSetSchema>): PermissionSetParsed {
   return PermissionSetSchema.parse(config);
 }

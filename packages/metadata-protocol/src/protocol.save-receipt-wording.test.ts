@@ -163,6 +163,14 @@ describe('#5265 — a save receipt names what was actually written', () => {
         for (const type of Object.keys(OVERLAYLESS_PROBES)) {
             expect(OVERLAYLESS_RUNTIME_WRITABLE, `${type} left the overlay-less set`).toContain(type);
         }
+        // #6283 — the override-artifact case at the bottom of this file needs a
+        // type that is BOTH overlay-less and per-org overridable. `flow` played
+        // that part until its `allowOrgOverride` was rolled back to `false`
+        // (ADR-0005:57); `action` is the surviving member. Pinned from the
+        // registry so a further flip re-opens the case instead of silently
+        // turning it into an untested `NOT_OVERRIDABLE`.
+        const action = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'action');
+        expect(action).toMatchObject({ supportsOverlay: false, allowOrgOverride: true });
     });
 
     // ── runtime-only: nothing was overlaid, so nothing may claim it was ──
@@ -268,10 +276,10 @@ describe('#5265 — a save receipt names what was actually written', () => {
         );
     });
 
-    it('an overlay of a packaged FLOW — supportsOverlay:false, and still an override', async () => {
+    it('an overlay of a packaged ACTION — supportsOverlay:false, and still an override', async () => {
         // The mirror of the first block, and the sharpest case in this file.
-        // `flow` sits in the overlay-less population above (`supportsOverlay:
-        // false`) yet is `allowOrgOverride: true`, so a packaged flow really
+        // `action` sits in the overlay-less population above (`supportsOverlay:
+        // false`) yet is `allowOrgOverride: true`, so a packaged action really
         // can be overridden at runtime — and then the overlay sentence is the
         // true one. A receipt decided by `supportsOverlay` would get this
         // exactly backwards; one decided by artifact backing gets it right.
@@ -280,14 +288,22 @@ describe('#5265 — a save receipt names what was actually written', () => {
         // `SysMetadataRepository.assertAllowed` refuses an `override-artifact`
         // write with `[NOT_OVERRIDABLE]` before any receipt is built. Measured,
         // not assumed — this case was written against `object` first.)
-        const { protocol } = makeProtocol([{ type: 'flow', name: 'rc5_acct' }]);
+        //
+        // The specimen was `flow` until #6283 rolled flow's `allowOrgOverride`
+        // back to `false` (ADR-0005:57 — automation carries execution
+        // side-effects, so a per-org variant is a deployment, not an overlay).
+        // A REPLACEMENT rather than a re-spelling: with the flag off, `flow`
+        // joined `object` in the sentence above and can no longer reach a
+        // receipt at all. `action` is the surviving member of the pairing this
+        // case needs, and the premise pin below reads it from the registry.
+        const { protocol } = makeProtocol([{ type: 'action', name: 'rc5_acct' }]);
 
         const result = await protocol.saveMetaItem({
-            type: 'flow', name: 'rc5_acct', item: OVERLAYLESS_PROBES.flow,
+            type: 'action', name: 'rc5_acct', item: OVERLAYLESS_PROBES.action,
         });
 
         expect(result.message).toBe(
-            `Saved customization overlay (env-wide, state=active) — type=flow, name=rc5_acct [seq=${result.seq}]`,
+            `Saved customization overlay (env-wide, state=active) — type=action, name=rc5_acct [seq=${result.seq}]`,
         );
     });
 

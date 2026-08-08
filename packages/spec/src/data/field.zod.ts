@@ -76,7 +76,7 @@ export const FieldType = z.enum([
   'vector',       // Vector embeddings for AI/ML (semantic search, RAG)
 ]);
 
-export type FieldType = z.infer<typeof FieldType>;
+export type FieldType = z.input<typeof FieldType>;
 
 /**
  * Select Option Schema
@@ -121,10 +121,17 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
   default: z.boolean().optional().describe('Is default option'),
   /**
    * Per-option visibility predicate (CEL) — the option is offered only when this
-   * evaluates TRUE. Omit = always available. Evaluated against the SAME binding
-   * environment as field-level `visibleWhen` (live `record` + `current_user`), so
-   * it expresses BOTH cascading/dependent options (`record.country == 'cn'`) AND
-   * role/context gating (`'admin' in current_user.positions`). When it references
+   * evaluates TRUE. Omit = always available. Evaluated against the live `record`
+   * PLUS the host's global predicate scope, which carries `current_user` — so it
+   * expresses BOTH cascading/dependent options (`record.country == 'cn'`) AND
+   * role/context gating (`'admin' in current_user.positions`).
+   *
+   * This scope is WIDER than field-level `visibleWhen`, not the same (#6146):
+   * options resolve through `resolveCascadingOptions` against the predicate
+   * scope (ADR-0068 / objectui#2284), while field- and section-level rules go
+   * through `evalFieldPredicate`, which binds `record` + `previous` + `parent`
+   * and never `current_user` (objectui#1582). Per-option is the one `*When`
+   * surface where a `current_user` test actually resolves. When it references
    * sibling fields, declare those on the field's `dependsOn` so the form can gate
    * and re-evaluate the option list as the parent changes.
    *
@@ -133,7 +140,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * rule-validator evaluates the picked value's `visibleWhen`) — hiding it in the
    * dropdown alone is bypassable.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Same env as field visibleWhen (record + current_user). e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`"),
+  visibleWhen: ExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user` — wider than field-level visibleWhen, which has no `current_user`. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`"),
 }));
 
 /**
@@ -857,27 +864,29 @@ export const FieldSchema = lazySchema(() => strictObject({
   }
 }));
 
-export type Field = z.infer<typeof FieldSchema>;
+/**
+ * Author-facing shape of a field — what `FieldSchema.parse(...)` accepts. Since
+ * protocol 17 (#3855) it no longer carries the removed `conditionalRequired`
+ * alias — the key is tombstoned, so writing it is a `tsc` error at the authoring
+ * site as well as a parse error. Distinct from the `FieldInput` factory-helper
+ * type further down, which is `Omit<Partial<Field>, 'type'>`, and from
+ * {@link FieldParsed}, which is what a parse returns.
+ *
+ * Spelled `FieldParseInput` until protocol 17; ADR-0122 phase 2 moved the author
+ * state onto the bare name and retired that synonym.
+ */
+export type Field = z.input<typeof FieldSchema>;
 /** Post-parse shape of {@link Field} — defaults applied, transforms run (ADR-0122). */
 export type FieldParsed = z.infer<typeof FieldSchema>;
-/**
- * Author-facing parse INPUT for a field. Since protocol 17 (#3855) it no longer
- * carries the removed `conditionalRequired` alias — the key is tombstoned, so
- * writing it is a `tsc` error at the authoring site as well as a parse error.
- * Distinct from the `FieldInput` factory-helper type further down, which is
- * `Partial<Field>`.
- */
-export type FieldParseInput = z.input<typeof FieldSchema>;
-export type SelectOption = z.infer<typeof SelectOptionSchema>;
+export type SelectOption = z.input<typeof SelectOptionSchema>;
 /** Post-parse shape of {@link SelectOption} — defaults applied, transforms run (ADR-0122). */
 export type SelectOptionParsed = z.infer<typeof SelectOptionSchema>;
-export type LocationCoordinates = z.infer<typeof LocationCoordinatesSchema>;
-export type Address = z.infer<typeof AddressSchema>;
-export type CurrencyConfig = z.infer<typeof CurrencyConfigSchema>;
+export type LocationCoordinates = z.input<typeof LocationCoordinatesSchema>;
+export type Address = z.input<typeof AddressSchema>;
+export type CurrencyConfig = z.input<typeof CurrencyConfigSchema>;
 /** Post-parse shape of {@link CurrencyConfig} — defaults applied, transforms run (ADR-0122). */
 export type CurrencyConfigParsed = z.infer<typeof CurrencyConfigSchema>;
-export type CurrencyConfigInput = z.input<typeof CurrencyConfigSchema>;
-export type CurrencyValue = z.infer<typeof CurrencyValueSchema>;
+export type CurrencyValue = z.input<typeof CurrencyValueSchema>;
 
 /**
  * Field Factory Helper

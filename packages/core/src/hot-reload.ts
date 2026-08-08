@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 
 import type { 
-  HotReloadConfig, 
+  HotReloadConfigParsed, 
   PluginStateSnapshot 
 } from '@objectstack/spec/kernel';
 import type { ObjectLogger } from './logger.js';
@@ -43,7 +43,7 @@ class PluginStateManager {
     pluginId: string,
     version: string,
     state: Record<string, any>,
-    config: HotReloadConfig
+    config: HotReloadConfigParsed
   ): Promise<string> {
     const snapshot: PluginStateSnapshot = {
       pluginId,
@@ -163,7 +163,7 @@ class PluginStateManager {
 export class HotReloadManager {
   private logger: ObjectLogger;
   private stateManager: PluginStateManager;
-  private reloadConfigs = new Map<string, HotReloadConfig>();
+  private reloadConfigs = new Map<string, HotReloadConfigParsed>();
   private watchHandles = new Map<string, any>();
   private reloadTimers = new Map<string, NodeJS.Timeout>();
 
@@ -175,7 +175,7 @@ export class HotReloadManager {
   /**
    * Register a plugin for hot reload
    */
-  registerPlugin(pluginName: string, config: HotReloadConfig): void {
+  registerPlugin(pluginName: string, config: HotReloadConfigParsed): void {
     if (!config.enabled) {
       this.logger.debug('Hot reload disabled for plugin', { plugin: pluginName });
       return;

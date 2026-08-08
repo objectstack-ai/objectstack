@@ -4046,6 +4046,160 @@ const hookBodyCryptoHashRemoved: MetadataConversion = {
 };
 
 /**
+ * `array_agg` / `string_agg` leave `AggregationFunction` (protocol 17, #6188 —
+ * ADR-0049 enforce-or-remove).
+ *
+ * The enum declared eight functions; the SQL family compiles five.
+ * `SqlDriver.mapAggregateFunc` and the Turso `RemoteTransport.aggregate` each
+ * lower `count`/`sum`/`avg`/`min`/`max` and route everything else to the same
+ * refusal, and `service-analytics` carried a hand-written `UNSUPPORTED_AGGREGATES`
+ * list naming exactly these two — a subtraction that existed to stop them
+ * reaching the Cube strategy's `default`, which returned `COUNT(*)`: a row count
+ * in place of the number the author asked for. So the declaration was not merely
+ * unenforced, it was the reason another package had to carry a denylist.
+ *
+ * The maintainer's 2026-08-07 ruling SPLIT the three unlowered functions rather
+ * than retiring them as a block, and the split is the substance of this entry.
+ * `count_distinct` stays: one portable lowering (`COUNT(DISTINCT x)`), a
+ * dashboard staple, and `service-analytics` already lowers it — so it takes
+ * ADR-0049's ENFORCE leg and the SQL implementation follows on its own card.
+ * These two take the REMOVE leg: display conveniences with no measured pull,
+ * and `string_agg` has no single shape to lower to at all (the delimiter is a
+ * second argument in PostgreSQL, a `SEPARATOR` clause in MySQL, a differently
+ * named function in SQL Server).
+ *
+ * Like `hook-body-crypto-hash-removed` above, this is an enum-VALUE retirement:
+ * there is no `retiredKey()` tombstone to hang the prescription on, so the enum's
+ * own error map carries it (`ARRAY_AGG_RETIRED` / `STRING_AGG_RETIRED`,
+ * `data/query.zod.ts`), keyed on `issue.input` so only the two spellings that
+ * used to be legal are told they "were removed". For the same reason nothing
+ * lands in `RETIRED_KEYS_BY_MAJOR` and the four surface ratchets are expected to
+ * be byte-identical — no def and no authorable KEY changed.
+ *
+ * ## What this rewrites, and what it deliberately does not
+ *
+ * The retired values are authorable in two places and only one of them is stored
+ * metadata:
+ *
+ * - **`dataset.measures[].aggregate`** (`ui/dataset.zod.ts`, reusing this enum)
+ *   is carried in the stack, so it is what this conversion walks.
+ * - **`QueryAST.aggregations[].function`** is a REQUEST surface — the client
+ *   SDK's builder output and the `POST /data/:object/query` body, never stored
+ *   (`liveness/query.json` records the same fact for `joins`/`cursor`/`distinct`).
+ *   There is no source for the chain to rewrite, so it is a semantic TODO on the
+ *   D3 step instead.
+ *
+ * The measure is DROPPED rather than stripped down to a bare `{ name, field }`.
+ * A measure with no `aggregate` and no `derived` fails the dataset's own
+ * `superRefine`, so stripping the key alone would hand back an item that cannot
+ * parse — a conversion whose output is invalid is worse than no conversion. And
+ * nothing is lost by dropping it: `compileDataset` has always refused these two
+ * by name with `datasetInvalidError`, so a stored dataset carrying one never
+ * produced a number on any backend. Every drop emits its own notice, so
+ * `os migrate meta` names the measure it removed rather than quietly shrinking
+ * the dataset.
+ *
+ * The cascade is part of that correctness, not extra: a `derived` measure whose
+ * `of` names a dropped measure would leave the dataset failing the "derived
+ * measures may only reference OTHER measures declared in this dataset" refinement.
+ * It is applied to a fixpoint because a derived measure may combine other derived
+ * measures.
+ *
+ * `retiredFromLoadPath`: the enum rejects both values outright, so a live author
+ * is taught at parse rather than silently rewritten. The entry exists so stored
+ * 16.x/17-rc rows replay clean (`applyConversionsToStoredItem` — without it a
+ * pre-removal row flags `metadata_spec_invalid` forever, mislabelling
+ * chain-owned history as a current-contract violation) and so
+ * `os migrate meta --from 16` rewrites author sources.
+ */
+const datasetMeasureAggRemoved: MetadataConversion = {
+  id: 'dataset-measure-array-string-agg-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'dataset.measures[].aggregate',
+  summary:
+    "dataset measure aggregates 'array_agg' / 'string_agg' removed (#6188 — no SQL backend "
+    + 'compiled them and the v1 dataset runtime refused them by name, so a measure declaring '
+    + 'one never produced a value; the measure is dropped, and with it any derived measure '
+    + 'left referencing it)',
+  apply(stack, emit) {
+    const RETIRED = new Set(['array_agg', 'string_agg']);
+    return mapCollection(stack, 'datasets', (dataset, path) => {
+      const measures = dataset.measures;
+      if (!Array.isArray(measures)) return dataset;
+
+      const dropped = new Set<string>();
+      const kept = measures.filter((m, i) => {
+        if (!isDict(m)) return true;
+        const aggregate = m.aggregate;
+        if (typeof aggregate !== 'string' || !RETIRED.has(aggregate)) return true;
+        emit({ from: aggregate, to: '(removed)', path: `${path}.measures[${i}].aggregate` });
+        if (typeof m.name === 'string') dropped.add(m.name);
+        return false;
+      });
+      if (kept.length === measures.length) return dataset;
+
+      // Fixpoint: a derived measure may be built from another derived measure,
+      // so one pass can strand a reference the next pass has to answer for.
+      let survivors = kept;
+      for (;;) {
+        const next = survivors.filter((m) => {
+          if (!isDict(m)) return true;
+          const derived = m.derived;
+          if (!isDict(derived) || !Array.isArray(derived.of)) return true;
+          if (!derived.of.some((name) => typeof name === 'string' && dropped.has(name))) return true;
+          emit({
+            from: `derived measure "${String(m.name)}"`,
+            to: '(removed)',
+            path: `${path}.measures`,
+          });
+          if (typeof m.name === 'string') dropped.add(m.name);
+          return false;
+        });
+        if (next.length === survivors.length) break;
+        survivors = next;
+      }
+
+      return { ...dataset, measures: survivors };
+    });
+  },
+  fixture: {
+    before: {
+      datasets: [{
+        name: 'order_lines',
+        object: 'order_line',
+        dimensions: [{ name: 'status', field: 'status', type: 'string' }],
+        measures: [
+          { name: 'total_amount', aggregate: 'sum', field: 'amount' },
+          { name: 'product_ids', aggregate: 'array_agg', field: 'product_id' },
+          { name: 'product_names', aggregate: 'string_agg', field: 'product_name' },
+          // Derived measures: the first is stranded by the drop above, the
+          // second is stranded by the first — the reason the sweep runs to a
+          // fixpoint rather than once.
+          { name: 'name_list', derived: { op: 'sum', of: ['product_names'] } },
+          { name: 'name_list_ratio', derived: { op: 'ratio', of: ['name_list', 'total_amount'] } },
+          // Survives: derived from measures that are all still here.
+          { name: 'amount_share', derived: { op: 'ratio', of: ['total_amount', 'total_amount'] } },
+        ],
+      }],
+    },
+    after: {
+      datasets: [{
+        name: 'order_lines',
+        object: 'order_line',
+        dimensions: [{ name: 'status', field: 'status', type: 'string' }],
+        measures: [
+          { name: 'total_amount', aggregate: 'sum', field: 'amount' },
+          { name: 'amount_share', derived: { op: 'ratio', of: ['total_amount', 'total_amount'] } },
+        ],
+      }],
+    },
+    // Two retired aggregates, plus the two derived measures the drops stranded.
+    expectedNotices: 4,
+  },
+};
+
+/**
  * `connector.rateLimitConfig` — OUTBOUND throttling for an engine that does not
  * exist (#4911, ADR-0049).
  *
@@ -4519,6 +4673,276 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
   },
 };
 
+/**
+ * The SDUI component-props reconciliation (protocol 17, #5775) — three entries
+ * below, one shared reason.
+ *
+ * #5068 wired the first parse `ComponentPropsMap` ever had and measured what
+ * the corpus actually authors against it. The measurement came back with
+ * divergence in BOTH directions: keys objectui's renderers honour that the
+ * schema never declared, and keys the schema declared (one of them REQUIRED)
+ * that no renderer has ever read. The maintainer's 2026-08-06 ruling took
+ * direction A — the #5611 rule, "the delivered and authorized shape is the
+ * contract" — so the honoured keys were declared and the unread ones retire
+ * here.
+ *
+ * **Region level is the reach, deliberately.** {@link mapPageComponents} walks
+ * `pages[].regions[].components[]` and stops: `PageComponentSchema` declares no
+ * children key, so a picker nested inside a card's `children` sits in another
+ * component's free-form `properties` and is not typed page-component shape.
+ * Same boundary as {@link pageHeaderSubtitleAlias}, drawn for the same reason.
+ * The tombstones are what cover the rest: they type the key `never`, so a
+ * nested authoring site fails `tsc` and carries its own prescription at parse
+ * time whether or not a conversion could reach it.
+ *
+ * All three are **retired from the load path**: each key is tombstoned in
+ * `ui/component.zod.ts`, so the loader rejects it loudly with the prescription
+ * and only `os migrate meta` rewrites sources.
+ */
+const RECORD_PICKER_COMPONENT_TYPE = 'element:record_picker';
+
+/**
+ * `element:record_picker.displayField` → `labelField` (protocol 17, #5775).
+ *
+ * Two spellings of one concept — "which field is the row's text" — of which the
+ * schema required the one nobody reads. `record-picker.tsx` resolves
+ * `props.labelField ?? 'name'` and renders `row[labelField]`; `displayField`
+ * appears nowhere in that renderer, and objectui's own component registry
+ * publishes `labelField` as the designer input. So an author who followed the
+ * schema and wrote `displayField: 'title'` got a picker listing `name`, with a
+ * success receipt and no diagnostic anywhere — the ADR-0078 shape.
+ *
+ * A rename rather than a deletion because the two keys are synonyms: the value
+ * (a field name) is exactly what `labelField` wants. Precedence is
+ * {@link renameKey}'s house rule (#4923) and nothing new — a redundant twin is
+ * dropped, a DISAGREEING pair is left for the author to reconcile rather than
+ * the loader picking a field.
+ */
+const recordPickerDisplayFieldToLabelField: MetadataConversion = {
+  id: 'record-picker-display-field-to-label-field',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'page.component.element:record_picker.displayField',
+  summary:
+    "record-picker component prop 'displayField' → 'labelField' (#5775 — the required key no renderer read; `labelField ?? 'name'` is what renders the row)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== RECORD_PICKER_COMPONENT_TYPE) return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const renamed = renameKey(properties, 'displayField', 'labelField');
+      if (!renamed) return component;
+      emit({ from: 'displayField', to: 'labelField', path: `${path}.properties.labelField` });
+      return { ...component, properties: renamed };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'showcase_page_variables',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:record_picker', properties: { object: 'showcase_project', displayField: 'title' } },
+                // Both spellings, SAME value: the redundant twin goes (#4923).
+                { type: 'element:record_picker', properties: { object: 'a', labelField: 'name', displayField: 'name' } },
+                // Both spellings, DIFFERENT fields: kept, so the author reconciles
+                // the two rather than the loader picking a column.
+                { type: 'element:record_picker', properties: { object: 'b', labelField: 'name', displayField: 'title' } },
+                // `displayField` is a live LOOKUP-FIELD key elsewhere on the
+                // surface — a different component's business, untouched here.
+                { type: 'element:form', properties: { object: 'c', displayField: 'title' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'showcase_page_variables',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:record_picker', properties: { object: 'showcase_project', labelField: 'title' } },
+                { type: 'element:record_picker', properties: { object: 'a', labelField: 'name' } },
+                { type: 'element:record_picker', properties: { object: 'b', labelField: 'name', displayField: 'title' } },
+                { type: 'element:form', properties: { object: 'c', displayField: 'title' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * `element:record_picker.searchFields` / `.multiple` — declared capabilities the
+ * control does not have (protocol 17, #5775, ADR-0049).
+ *
+ * The renderer is a shadcn `Select` over a `find()` result: no search input
+ * exists, so `searchFields` narrowed nothing, and the control is single-choice
+ * writing ONE id into the bound page variable, so `multiple: true` selected
+ * nothing extra while reporting success. Neither key has a reader anywhere in
+ * objectui. Enforce-or-remove: they are removed, not deprecated, and either
+ * returns the day the capability is implemented (#5021 / #4988 precedent).
+ *
+ * Pure lossless deletes — neither key ever had an effect to lose.
+ */
+const recordPickerInertKeysRemoved: MetadataConversion = {
+  id: 'record-picker-inert-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'page.component.element:record_picker.searchFields / page.component.element:record_picker.multiple',
+  summary:
+    "record-picker component props 'searchFields'/'multiple' removed (#5775 — the control is a plain single-select with no search box; neither key had a reader)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== RECORD_PICKER_COMPONENT_TYPE) return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const stripped = stripKeys(properties, ['searchFields', 'multiple'], emit, `${path}.properties`);
+      if (stripped === properties) return component;
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'picker_gallery',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'element:record_picker',
+                  properties: { object: 'showcase_project', searchFields: ['name', 'code'], multiple: true },
+                },
+                // `multiple` is a live FIELD key (lookup fields) — a different
+                // surface entirely, and not this entry's business.
+                { type: 'element:form', properties: { object: 'a', multiple: true } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'picker_gallery',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:record_picker', properties: { object: 'showcase_project' } },
+                { type: 'element:form', properties: { object: 'a', multiple: true } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 2,
+  },
+};
+
+/**
+ * `page:card.body` → `children` (protocol 17, #5775).
+ *
+ * Every container on this surface composes through `children` — `grid`,
+ * `flex`, `page:section`, `page:accordion` items, `page:tabs` items — and the
+ * card renderer reads `schema.body ?? schema.children` with its own comment
+ * saying authors expect `children` to work here too. The showcase's two cards
+ * author `children`. Only the declaration said `body`, which made the #5068
+ * gate report the showcase's own correct pages as authoring an unknown key.
+ *
+ * Converging on `children` rather than declaring both: one composition key, not
+ * two de-facto contracts (Prime Directive #12). `footer` is a genuinely
+ * distinct slot and is untouched. The renderer keeps its `body ??` fallback for
+ * stored documents — that is objectui's to retire on its own schedule, exactly
+ * as {@link pageHeaderSubtitleAlias} left the kebab `page-header` registration
+ * alone.
+ */
+const pageCardBodyToChildren: MetadataConversion = {
+  id: 'page-card-body-to-children',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'page.component.page:card.body',
+  summary:
+    "page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'page:card') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const renamed = renameKey(properties, 'body', 'children');
+      if (!renamed) return component;
+      emit({ from: 'body', to: 'children', path: `${path}.properties.children` });
+      return { ...component, properties: renamed };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'my_work',
+          regions: [
+            {
+              name: 'sidebar',
+              components: [
+                {
+                  type: 'page:card',
+                  properties: { title: 'Shortcuts', body: [{ type: 'element:text' }], footer: [{ type: 'element:text' }] },
+                },
+                // Both spellings, DIFFERENT content: kept, so the author picks
+                // which body the card should have.
+                {
+                  type: 'page:card',
+                  properties: { children: [{ type: 'element:text' }], body: [{ type: 'element:image' }] },
+                },
+                // `body` on a component that is not a card — not this entry's key.
+                { type: 'record:alert', properties: { body: 'Confirm the work before marking it done.' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'my_work',
+          regions: [
+            {
+              name: 'sidebar',
+              components: [
+                {
+                  type: 'page:card',
+                  properties: { title: 'Shortcuts', children: [{ type: 'element:text' }], footer: [{ type: 'element:text' }] },
+                },
+                {
+                  type: 'page:card',
+                  properties: { children: [{ type: 'element:text' }], body: [{ type: 'element:image' }] },
+                },
+                { type: 'record:alert', properties: { body: 'Confirm the work before marking it done.' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -4567,11 +4991,15 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     objectManagedBySystemToSystemData,
     objectEnableTrashMruRemoved,
     hookBodyCryptoHashRemoved,
+    datasetMeasureAggRemoved,
     connectorRateLimitConfigRemoved,
     fieldMappingTransformRemoved,
     themeInertTokenScalesRemoved,
     pageHeaderSubtitleAlias,
     objectIndexTypePartialRemoved,
+    recordPickerDisplayFieldToLabelField,
+    recordPickerInertKeysRemoved,
+    pageCardBodyToChildren,
   ],
 };
 

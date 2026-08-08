@@ -65,8 +65,22 @@ function refusalFor(where: unknown): FilterRefusal | undefined {
  * rows are the sites the bullets missed — same file, same class, same one-line
  * change; leaving them bare would have kept the defect alive for two spellings
  * of the same authoring mistake.
+ *
+ * `addedAfter5352` marks a refusal that did not EXIST when #5352 ran, so
+ * `issueBullet` has no meaning for it. The distinction is kept rather than
+ * folded in because this file's ledger case is a historical record of what
+ * #5352 covered — a row silently joining the `issueBullet: false` set would
+ * rewrite that record — while the ledger's OTHER job, "this list is every
+ * refusing site in the module", has to keep up with the module. A new site
+ * arrives here so the envelope block below covers it automatically.
  */
-const REFUSALS: Array<{ name: string; where: unknown; message: RegExp; issueBullet: boolean }> = [
+const REFUSALS: Array<{
+  name: string;
+  where: unknown;
+  message: RegExp;
+  issueBullet: boolean;
+  addedAfter5352?: string;
+}> = [
   {
     name: 'operator outside the vocabulary (#3948)',
     where: { stage: { $sortOf: 'won' } },
@@ -126,6 +140,34 @@ const REFUSALS: Array<{ name: string; where: unknown; message: RegExp; issueBull
     where: [{ stage: 'won' }],
     message: /received a 'where' array that is not a filter/,
     issueBullet: true,
+  },
+  {
+    // [#6386] `undefined` in a comparand position. Before it, `{stage: undefined}`
+    // was not refused at all — `buildNode` dropped the key, so a single-key
+    // `where` ran with NO filter. The full seven-reading table, the `null`
+    // control group and the position list live in
+    // `filter-normalizer-undefined-comparand.test.ts`; this row exists so the
+    // envelope block below covers the tenth site the way it covers the nine.
+    name: 'an undefined comparand (#6386)',
+    where: { stage: undefined },
+    message: /comparand at "stage" is undefined/,
+    issueBullet: false,
+    addedAfter5352: '#6386',
+  },
+  {
+    // [#6444] A field wrapper mixing $-operator keys with non-$ siblings.
+    // Before it, the non-$ siblings were silently DROPPED — `fieldLeaves`'s
+    // operator arm iterated `opKeys` only and returned, so
+    // `{amount: {gte: 10, $lte: 20}}` (the missing-$ typo) lost its lower
+    // bound with nothing to read. The full position list, the two-rewrite
+    // message contract and the pure-shape control groups live in
+    // `filter-normalizer-mixed-wrapper.test.ts`; this row exists so the
+    // envelope block below covers the eleventh site the way it covers the ten.
+    name: 'a mixed $/non-$ field wrapper (#6444)',
+    where: { amount: { gte: 10, $lte: 20 } },
+    message: /"amount" mixes \$-operator keys \(\$lte\) with non-\$ sibling key\(s\) "gte"/,
+    issueBullet: false,
+    addedAfter5352: '#6444',
   },
 ];
 
@@ -255,10 +297,16 @@ describe('[#5352] every refusal carries the ADR-0112 envelope (INVALID_FILTER / 
     // enumerated four bullets, and enveloping only those would have left
     // `{$not: 5}` and `{$nor: […]}` answering 500 while their neighbours
     // answered 400 — the same one-condition-two-shapes split the issue is about.
-    expect(REFUSALS.filter((c) => !c.issueBullet).map((c) => c.name)).toEqual([
+    // Sites added AFTER #5352 are excluded from that historical set (see the
+    // `addedAfter5352` note on REFUSALS) and enumerated on their own below.
+    expect(REFUSALS.filter((c) => !c.issueBullet && !c.addedAfter5352).map((c) => c.name)).toEqual([
       '$not of a non-object',
       'unsupported TOP-LEVEL operator',
     ]);
-    expect(REFUSALS).toHaveLength(9);
+    expect(REFUSALS.filter((c) => c.addedAfter5352).map((c) => `${c.name} · ${c.addedAfter5352}`)).toEqual([
+      'an undefined comparand (#6386) · #6386',
+      'a mixed $/non-$ field wrapper (#6444) · #6444',
+    ]);
+    expect(REFUSALS).toHaveLength(11);
   });
 });

@@ -109,11 +109,51 @@
  */
 export interface FileDescriptionContext {
   /**
+   * The `packages/spec/src/` category directory the module being rendered lives
+   * in (`identity`, `system`, …) — i.e. what a path written relative to the
+   * module's OWN directory is relative TO.
+   *
+   * Required, not optional, and that is the point of #6484. A module referring
+   * to a neighbour writes `auth.zod.ts`, not `identity/auth.zod.ts`, and until
+   * this member existed the renderer had no way to know which directory that
+   * name was written in: nine such references on four published pages matched
+   * nothing and shipped as plain prose — not a link, not even a code span.
+   *
+   * The completion happens HERE rather than inside `sourcePathToDocsRoute`
+   * because a bare filename is not an identity (#4696): `auth.zod.ts` exists
+   * under more than one category, and a resolver that searched all of them
+   * would answer with whichever the directory walk reached last. The writer's
+   * own category is the only thing that disambiguates it, and only the caller
+   * knows it — the same seam, and the same argument, as `schemaHrefFrom`.
+   */
+  fromCategory: string;
+
+  /**
    * A `*.zod.ts` path as written in JSDoc -> the docs route rendering it, or
    * `null` when no page renders it (the reference is then printed as code,
    * never as a link that 404s).
+   *
+   * Always called with a path that HAS a category segment: `fromCategory`
+   * completes the relative spellings before they get here, so this stays the
+   * `<category>/<file>.zod.ts` lookup #4696 settled on.
    */
   sourcePathToDocsRoute: (target: string) => string | null;
+}
+
+/**
+ * A reference written relative to the module's own directory, completed with
+ * the category it was written in — `auth.zod.ts` inside `identity/` is
+ * `identity/auth.zod.ts`. Anything that already carries a directory segment is
+ * returned untouched.
+ *
+ * The test is deliberately "no `/` at all" rather than "does not start with a
+ * category": `../auth.zod.ts` does NOT get completed, because a `../` from a
+ * category directory leaves that category, and `packages/spec/src/auth.zod.ts`
+ * is not a page. It resolves to no route and prints as code, which is the
+ * honest answer — completing it would invent a page the author never named.
+ */
+function completeFromCategory(target: string, fromCategory: string): string {
+  return /^[\w.-]+\.zod\.ts$/.test(target) ? `${fromCategory}/${target}` : target;
 }
 
 /**
@@ -357,7 +397,13 @@ function mapProse(text: string, kinds: ProseRun['kind'][], fn: (plain: string) =
 
 /** One run of consecutive prose lines, rendered to MDX. */
 function renderProse(text: string, ctx: FileDescriptionContext): string {
-  const { sourcePathToDocsRoute } = ctx;
+  // ONE resolution rule for every position a path can be referenced from — the
+  // two `{@link}` forms and the bare-prose form below. A relative spelling means
+  // the same file whichever of the three it is written in, so completing it in
+  // one place and not the others would make the shape of the tag decide whether
+  // a neighbour resolves (#6484).
+  const routeFor = (target: string) =>
+    ctx.sourcePathToDocsRoute(completeFromCategory(target, ctx.fromCategory));
 
   // A bare `@see <path>` tag renders as noise — turn it into prose.
   let out = text.replace(/^@see[ \t]+/gm, 'See also: ');
@@ -365,9 +411,9 @@ function renderProse(text: string, ctx: FileDescriptionContext): string {
   // `{@link}` first, because this is the step that PRODUCES markdown links.
   out = mapProse(out, ['text'], s => s
     .replace(/\{@link\s+([^|]+?)\s*\|\s*([^}]+?)\s*\}/g, (_m, target: string, label: string) =>
-      `[${label.trim()}](${sourcePathToDocsRoute(target.trim()) ?? target.trim()})`)
+      `[${label.trim()}](${routeFor(target.trim()) ?? target.trim()})`)
     .replace(/\{@link\s+([^}]+?)\s*\}/g, (_m, target: string) => {
-      const route = sourcePathToDocsRoute(target.trim());
+      const route = routeFor(target.trim());
       return route ? `[${target.trim()}](${route})` : `\`${target.trim()}\``;
     }));
 
@@ -375,9 +421,45 @@ function renderProse(text: string, ctx: FileDescriptionContext): string {
   // the whole of #6136's fix: the untitled `{@link}` branch above emits
   // `[<path>](<route>)`, whose link text is the path itself, so a rewriter run
   // over the raw string matched it a second time and nested a link in a link.
+  //
+  // The `\b` sits AFTER the `../` prefix rather than before it (#6229). A word
+  // boundary needs a word character on one side, and every character of `../`
+  // is a non-word one, so a leading `\b` could not match at the `.` — the match
+  // started at the first path segment instead and the prefix was left OUTSIDE
+  // the link it belongs to (`../../[system/cache.zod.ts](route)`, published on
+  // `api/http-cache` and `system/cache`). The prefix group was therefore dead
+  // for every realistic input, not merely capped at one level: widening it to
+  // `*` without moving the `\b` changes nothing, since a group that is never
+  // reached repeats zero times either way. Both halves are load-bearing —
+  // moving the `\b` alone would still strand the outer level of a `../../`.
+  //
+  // No lookaround guards the parentheses any more (#6420). The pair `(?<!\()`
+  // … `(?!\))` was this step's ORIGINAL, pre-tokenizer attempt at "do not touch
+  // a path that is already a link's destination" — `](route)` puts that path
+  // between exactly those two characters. It never could express that (the
+  // module comment above says why: lookaround cannot say "not nested inside a
+  // link"), and since #6136 it has had nothing left to do — a formed link is a
+  // `link` run and this step is only shown `text` runs. What the pair still did
+  // was refuse every path an AUTHOR wrote in parentheses, which is ordinary
+  // prose and not a link at all: `- **Enterprise Connector**
+  // (integration/connector.zod.ts) - …` rendered as neither a link nor code,
+  // just plain text, on three published pages. So the guards go and the
+  // tokenizer keeps the invariant they were reaching for.
+  //
+  // The directory segment is OPTIONAL (#6484). It used to be mandatory on both
+  // sides of the mechanism — here and in `sourcePathToDocsRoute` — so a path
+  // written relative to the module's own directory (`auth.zod.ts` inside
+  // `identity/`) matched nothing at all and fell through as plain prose. Not a
+  // link and not even the code-span fallback: nine such references on four
+  // published pages, the one outcome of the three that is simply wrong.
+  //
+  // `?` and not `*`: the group stays capped at one segment so this widening is
+  // strictly additive. `data/driver/postgres.zod.ts` still matches from
+  // `driver/`, exactly as before — a two-segment group would swallow `data/`
+  // too and change a shape this issue is not about.
   out = mapProse(out, ['text'], s =>
-    s.replace(/(?<!\()\b((?:\.\.\/)?[\w-]+\/[\w.-]+\.zod\.ts)\b(?!\))/g, (_m, p: string) => {
-      const route = sourcePathToDocsRoute(p);
+    s.replace(/((?:\.\.\/)*\b(?:[\w-]+\/)?[\w.-]+\.zod\.ts)\b/g, (_m, p: string) => {
+      const route = routeFor(p);
       return route ? `[${p}](${route})` : `\`${p}\``;
     }));
 

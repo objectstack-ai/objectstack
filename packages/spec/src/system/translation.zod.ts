@@ -10,6 +10,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const LocaleSchema = lazySchema(() => z.string().describe('BCP-47 Language Tag (e.g. en-US, zh-CN)'));
+export type Locale = z.input<typeof LocaleSchema>;
 
 /**
  * Shared history sentence for every shape in this file (#4001).
@@ -45,7 +46,7 @@ export const FieldTranslationSchema = lazySchema(() => strictObject({
   options: z.record(z.string(), z.string()).optional().describe('Option value to translated label map'),
 }).describe('Translation data for a single field'));
 
-export type FieldTranslation = z.infer<typeof FieldTranslationSchema>;
+export type FieldTranslation = z.input<typeof FieldTranslationSchema>;
 
 /**
  * Action Result-Dialog Translation Schema
@@ -76,7 +77,7 @@ export const ActionResultDialogTranslationSchema = lazySchema(() => strictObject
     .describe('Result field labels keyed by the literal field path declared in the action metadata (keys may contain dots)'),
 }).describe('Translations for an action result dialog'));
 
-export type ActionResultDialogTranslation = z.infer<typeof ActionResultDialogTranslationSchema>;
+export type ActionResultDialogTranslation = z.input<typeof ActionResultDialogTranslationSchema>;
 
 /**
  * Action translations — one shape, used at two addresses: an object's
@@ -221,9 +222,38 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     label: z.string().optional().describe('Translated section label'),
     description: z.string().optional().describe('Translated section description'),
   })).optional().describe('Section translations keyed by section name'),
+
+  /**
+   * Filter-preset tab translations keyed by tab name (`ViewTabSchema.name`).
+   * Convention (auto-resolved by `resolveTabLabel`):
+   *   objects.<object>._tabs.<tab_name>.label
+   *
+   * **The hole this closes (#5377).** A tab that references a saved view
+   * (`tabs[].view`) already renders a translated label — the console follows
+   * the reference and reads `_views.<view>.label`. A tab that carries only a
+   * `filter` references nothing, and there was no key to put its label in:
+   * this shape is a `strictObject`, so a translator who invented `_tabs` had it
+   * rejected rather than ignored. The tab bar then sat above a fully localized
+   * grid in the source language, with no authoring workaround.
+   *
+   * **Why it is object-scoped, next to `_views`, rather than under `pages`.**
+   * A tab is a named filter preset over one object's records — "Urgent" names a
+   * slice of tasks, which is object vocabulary in the same way a saved view's
+   * label is. It is also what makes the view-reference fallback expressible at
+   * all: both halves of `resolveTabLabel`'s chain live in one object's
+   * namespace. `_sections` is the shape precedent — those live on page
+   * components too and are addressed under their object, not their page.
+   */
+  _tabs: z.record(z.string(), strictObject({
+    surface: 'this view tab translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', heading: 'label', text: 'label' },
+  }, {
+    label: z.string().optional().describe('Translated tab label'),
+  })).optional().describe('Filter-preset tab translations keyed by tab name'),
 }).describe('Translation data for a single object'));
 
-export type ObjectTranslationData = z.infer<typeof ObjectTranslationDataSchema>;
+export type ObjectTranslationData = z.input<typeof ObjectTranslationDataSchema>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // The retired object-first dialect
@@ -436,13 +466,17 @@ const translationDataShape = () => ({
    *   pages.<name>.title        → the page's `page:header` `properties.title`
    *   pages.<name>.subtitle     → the page's `page:header` `properties.subtitle`
    *
+   *   pages.<name>.components.<componentId>.<key>
+   *                             → that component's `properties.<key>` (#6080)
+   *
    * `title` falls back to `label` when omitted, since a page's header title
    * and its nav/breadcrumb label are usually the same string — translators
    * only author `title` separately when the two genuinely differ.
    *
-   * Header copy lives here rather than under a per-component key because
-   * `page:header` instances carry no stable `id`; the page name is the only
-   * addressable identifier on the metadata document.
+   * Header copy lives at the TOP level here rather than under `components`
+   * because `page:header` instances carry no stable `id`; the page name is the
+   * only addressable identifier for them. Every other component does have one,
+   * which is what `components` addresses — see its own note.
    */
   pages: z.record(z.string(), strictObject({
     surface: 'this page translation',
@@ -453,6 +487,78 @@ const translationDataShape = () => ({
     description: z.string().optional().describe('Translated page description'),
     title: z.string().optional().describe('Translated `page:header` title (defaults to `label`)'),
     subtitle: z.string().optional().describe('Translated `page:header` subtitle'),
+    /**
+     * Per-component copy, keyed by the component's `id`
+     * (`PageComponentSchema.id`) — the page half of what
+     * `dashboards.<name>.widgets.<widgetId>` has always given dashboards
+     * (#6080).
+     *
+     * **Why this existed as a hole.** The two component trees are near-identical
+     * in shape and a dashboard widget's `title`/`description` were translatable
+     * while a page component's were not, so a page's cards, KPI blocks and
+     * related lists had no key to write at all — not a drifted key, no key. The
+     * strings then reached the user as whatever literal the `*.page.ts` author
+     * typed, in every locale. It bit hardest on landing pages: hotcrm's
+     * `sales_home_page` rendered a translated header above four English cards
+     * and four English KPI blocks in zh/ja/es (12 strings across 8 pages).
+     * Nothing was misconfigured — the contract had nowhere to put them, and
+     * `.strict()` (correctly) refused the keys a translator invented.
+     *
+     * **The key face is measured, not mirrored.** Each key below is a copy prop
+     * that some component in `ComponentPropsMap` (`ui/component.zod.ts`)
+     * actually declares:
+     *
+     * | key | declared by |
+     * |:---|:---|
+     * | `title` | `page:card`, `record:related_list` (and `page:header`, see below) |
+     * | `label` | `page:tabs`, `page:accordion`, `record:details`, `record:related_list`, `record:path`, `element:button`, `element:record_picker`, `element:text_input` |
+     * | `description` | `element:text_input` |
+     * | `placeholder` | `element:record_picker`, `element:text_input` |
+     * | `emptyText` | `element:record_picker` |
+     * | `submitLabel` | `element:form` |
+     *
+     * Two deliberate exclusions, both of which a mirror of the issue's proposed
+     * shape would have got wrong:
+     *
+     * - **`help` is not here** — no component in the model declares it. It
+     *   would parse clean and translate nothing, which is the ADR-0078 shape
+     *   this file keeps paying to remove. (`helpText` exists on an ACTION
+     *   PARAM, a different surface with its own translation face.)
+     * - **`subtitle` is not here** — `page:header` is its only declarer, and
+     *   that component is addressed by page name above. Declaring it in both
+     *   places would give one string two spellings, which is how the
+     *   dashboards/pages asymmetry started.
+     *
+     * `properties` is an open record and custom component types are legal, so
+     * these keys are also the route for a bespoke component that speaks the
+     * same vocabulary (hotcrm's `ai_briefing` carries `title` + `description`).
+     *
+     * ⚠️ The bundle is no longer these keys' ONLY localization route (#5728).
+     * `I18nLabelSchema` — which most of them are declared as — now also accepts
+     * an inline `{ en, 'zh-CN' }` locale map, so a component's copy may already
+     * be multilingual at the authoring site. That does not narrow this face:
+     * `translatePage` writes only where the bundle actually has an entry, so an
+     * inline map the bundle does not cover is left intact rather than flattened
+     * to one language, and a bundle entry still wins where both exist. The
+     * bundle stays the route that scales (translators never open a
+     * `*.page.ts`); the inline map is the route for copy that ships with the
+     * page.
+     */
+    components: z.record(z.string(), strictObject({
+      surface: 'this page component translation',
+      history: TRANSLATION_HISTORY,
+      // A page component's headline is `title`; the PAGE's is `label`. Same
+      // document one level apart with opposite spellings — the same trap
+      // `dashboards.widgets` names, so it gets the same alias table.
+      aliases: { name: 'title', heading: 'title', text: 'label', caption: 'description', help: 'description', helpText: 'description', empty: 'emptyText', emptyState: 'emptyText', submit: 'submitLabel' },
+    }, {
+      title: z.string().optional().describe('Translated component title (`page:card`, `record:related_list`, …)'),
+      description: z.string().optional().describe('Translated component description / supporting copy'),
+      label: z.string().optional().describe("Translated component label — overlays the component's own `label` when it declares one, else `properties.label`"),
+      placeholder: z.string().optional().describe('Translated input placeholder (`element:record_picker`, `element:text_input`)'),
+      emptyText: z.string().optional().describe('Translated empty-state text (`element:record_picker`)'),
+      submitLabel: z.string().optional().describe('Translated submit button label (`element:form`)'),
+    })).optional().describe('Per-component copy keyed by component id (`PageComponentSchema.id`)'),
   })).optional().describe('Page translations keyed by page name'),
 
   /**
@@ -617,7 +723,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
   extraKeys: ['locale'],
 }, translationDataShape()).describe('Translation data for objects, apps, and UI messages'));
 
-export type TranslationData = z.infer<typeof TranslationDataSchema>;
+export type TranslationData = z.input<typeof TranslationDataSchema>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Translation Bundle (all locales)
@@ -625,9 +731,7 @@ export type TranslationData = z.infer<typeof TranslationDataSchema>;
 
 export const TranslationBundleSchema = lazySchema(() => z.record(LocaleSchema, TranslationDataSchema).describe('Map of locale codes to translation data'));
 
-export type TranslationBundle = z.infer<typeof TranslationBundleSchema>;
-/** Authoring input for {@link TranslationBundle} — defaulted fields are optional. */
-export type TranslationBundleInput = z.input<typeof TranslationBundleSchema>;
+export type TranslationBundle = z.input<typeof TranslationBundleSchema>;
 
 /**
  * Type-safe factory for an i18n translation bundle (locale code → translations map). Validates at authoring time via
@@ -690,7 +794,7 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
   fallbackLocale: LocaleSchema.optional().describe('Fallback locale code'),
 }).describe('Internationalization configuration'));
 
-export type TranslationConfig = z.infer<typeof TranslationConfigSchema>;
+export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Translation Item (the runtime-authored `translation` metadata type)
@@ -769,7 +873,7 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
 }).describe('One locale of translations — the `translation` metadata type'));
 
 /** A single `translation` metadata item. */
-export type TranslationItem = z.infer<typeof TranslationItemSchema>;
+export type TranslationItem = z.input<typeof TranslationItemSchema>;
 
 /**
  * Type-safe factory for a single-locale `translation` item. Validates at
@@ -795,7 +899,7 @@ export const TranslationDiffStatusSchema = lazySchema(() => z.enum([
   'stale',
 ]).describe('Translation diff status: missing from bundle, redundant (no matching metadata), or stale (metadata changed)'));
 
-export type TranslationDiffStatus = z.infer<typeof TranslationDiffStatusSchema>;
+export type TranslationDiffStatus = z.input<typeof TranslationDiffStatusSchema>;
 
 /**
  * TranslationDiffItemSchema
@@ -836,7 +940,7 @@ export const TranslationDiffItemSchema = lazySchema(() => z.object({
   aiConfidence: z.number().min(0).max(1).optional().describe('AI suggestion confidence score (0–1)'),
 }).describe('A single translation diff item'));
 
-export type TranslationDiffItem = z.infer<typeof TranslationDiffItemSchema>;
+export type TranslationDiffItem = z.input<typeof TranslationDiffItemSchema>;
 
 /**
  * TranslationCoverageResultSchema
@@ -872,7 +976,7 @@ export const CoverageBreakdownEntrySchema = lazySchema(() => z.object({
   coveragePercent: z.number().min(0).max(100).describe('Coverage percentage for this group'),
 }).describe('Coverage breakdown for a single translation group'));
 
-export type CoverageBreakdownEntry = z.infer<typeof CoverageBreakdownEntrySchema>;
+export type CoverageBreakdownEntry = z.input<typeof CoverageBreakdownEntrySchema>;
 
 export const TranslationCoverageResultSchema = lazySchema(() => z.object({
   /** BCP-47 locale code */
@@ -902,4 +1006,4 @@ export const TranslationCoverageResultSchema = lazySchema(() => z.object({
     .describe('Per-group coverage breakdown'),
 }).describe('Aggregated translation coverage result'));
 
-export type TranslationCoverageResult = z.infer<typeof TranslationCoverageResultSchema>;
+export type TranslationCoverageResult = z.input<typeof TranslationCoverageResultSchema>;

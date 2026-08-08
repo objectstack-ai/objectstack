@@ -71,7 +71,7 @@ export const SettingsChangeEventSchema = lazySchema(() => z.object({
   /** Wall-clock timestamp (ISO 8601) when the mutation completed. */
   at: z.string().describe('ISO 8601 mutation timestamp'),
 }));
-export type SettingsChangeEvent = z.infer<typeof SettingsChangeEventSchema>;
+export type SettingsChangeEvent = z.input<typeof SettingsChangeEventSchema>;
 
 /**
  * Bus identifier on which `SettingsChangeEvent`s are published.

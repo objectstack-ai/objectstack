@@ -75,7 +75,7 @@ export const FlowFunctionEffectSchema = lazySchema(() => z.enum([
   'writes',
 ]).describe("What a script-node function does to data: 'pure' (computes and returns — the contract) or 'writes' (performs uncountable writes/effects, reported as unmeasured)"));
 
-export type FlowFunctionEffect = z.infer<typeof FlowFunctionEffectSchema>;
+export type FlowFunctionEffect = z.input<typeof FlowFunctionEffectSchema>;
 
 /**
  * The effect a function is assumed to have when it declares none — the
@@ -159,10 +159,9 @@ export const FlowFunctionDeclarationSchema = lazySchema(() => strictObject({
     .describe("What the function does to data — omit for the pure default"),
 }).describe('A named handler function plus its declared effect (#4396)'));
 
-export type FlowFunctionDeclaration = z.infer<typeof FlowFunctionDeclarationSchema>;
+export type FlowFunctionDeclaration = z.input<typeof FlowFunctionDeclarationSchema>;
 /** Post-parse shape of {@link FlowFunctionDeclaration} — defaults applied, transforms run (ADR-0122). */
 export type FlowFunctionDeclarationParsed = z.infer<typeof FlowFunctionDeclarationSchema>;
-export type FlowFunctionDeclarationInput = z.input<typeof FlowFunctionDeclarationSchema>;
 
 /**
  * The **lowered** form of {@link FlowFunctionDeclarationSchema}: the same
@@ -231,7 +230,7 @@ export const FlowFunctionEntrySchema = lazySchema(() => z.union([
   FlowFunctionLoweredDeclarationSchema,
 ]).describe('A named handler function or a declaration record stating its effect — either as authored, or lowered to a handler ref by `objectstack build`'));
 
-export type FlowFunctionEntry = z.infer<typeof FlowFunctionEntrySchema>;
+export type FlowFunctionEntry = z.input<typeof FlowFunctionEntrySchema>;
 /** Post-parse shape of {@link FlowFunctionEntry} — defaults applied, transforms run (ADR-0122). */
 export type FlowFunctionEntryParsed = z.infer<typeof FlowFunctionEntrySchema>;
 

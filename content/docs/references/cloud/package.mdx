@@ -14,8 +14,8 @@ flows, translations, agents — into a named, versioned artifact.
 
 Architecture:
 - `sys_package`         — identity (one row per logical package)
-- `sys_package_version` — immutable release snapshots (see package-version.zod.ts)
-- `sys_package_installation` — env ↔ version pairing (see environment-package.zod.ts)
+- `sys_package_version` — immutable release snapshots (see [package-version.zod.ts](/docs/references/cloud/package-version))
+- `sys_package_installation` — env ↔ version pairing (see [environment-package.zod.ts](/docs/references/cloud/environment-package))
 
 See `docs/adr/0003-package-as-first-class-citizen.md` for the full rationale.
 

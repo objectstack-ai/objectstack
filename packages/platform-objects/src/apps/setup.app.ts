@@ -25,9 +25,9 @@
  * matching the convention used by the HotCRM reference app.
  */
 
-import type { AppInput } from '@objectstack/spec/ui';
+import type { App } from '@objectstack/spec/ui';
 
-export const SETUP_APP: AppInput = {
+export const SETUP_APP: App = {
   name: 'setup',
   label: 'Setup',
   description: 'Platform settings and administration',

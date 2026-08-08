@@ -64,7 +64,7 @@ export const MetadataCategoryEnum = z.enum([
   'workflows',
 ]).describe('Metadata category within the artifact');
 
-export type MetadataCategory = z.infer<typeof MetadataCategoryEnum>;
+export type MetadataCategory = z.input<typeof MetadataCategoryEnum>;
 
 // ==========================================
 // Artifact File Entry
@@ -85,7 +85,7 @@ export const ArtifactFileEntrySchema = lazySchema(() => z.object({
     .describe('Metadata category this file belongs to'),
 }).describe('A single file entry within the artifact'));
 
-export type ArtifactFileEntry = z.infer<typeof ArtifactFileEntrySchema>;
+export type ArtifactFileEntry = z.input<typeof ArtifactFileEntrySchema>;
 
 // ==========================================
 // Artifact Checksum
@@ -111,7 +111,7 @@ export const ArtifactChecksumSchema = lazySchema(() => z.object({
     .describe('File path to hash value mapping'),
 }).describe('Checksum manifest for artifact integrity verification'));
 
-export type ArtifactChecksum = z.infer<typeof ArtifactChecksumSchema>;
+export type ArtifactChecksum = z.input<typeof ArtifactChecksumSchema>;
 /** Post-parse shape of {@link ArtifactChecksum} — defaults applied, transforms run (ADR-0122). */
 export type ArtifactChecksumParsed = z.infer<typeof ArtifactChecksumSchema>;
 
@@ -145,7 +145,7 @@ export const ArtifactSignatureSchema = lazySchema(() => z.object({
     .describe('Identity of the signer (publisher ID or email)'),
 }).describe('Digital signature for artifact authenticity verification'));
 
-export type ArtifactSignature = z.infer<typeof ArtifactSignatureSchema>;
+export type ArtifactSignature = z.input<typeof ArtifactSignatureSchema>;
 /** Post-parse shape of {@link ArtifactSignature} — defaults applied, transforms run (ADR-0122). */
 export type ArtifactSignatureParsed = z.infer<typeof ArtifactSignatureSchema>;
 
@@ -203,7 +203,6 @@ export const PackageArtifactSchema = lazySchema(() => z.object({
     .describe('Digital signature for artifact authenticity verification'),
 }).describe('Package artifact structure and metadata'));
 
-export type PackageArtifact = z.infer<typeof PackageArtifactSchema>;
+export type PackageArtifact = z.input<typeof PackageArtifactSchema>;
 /** Post-parse shape of {@link PackageArtifact} — defaults applied, transforms run (ADR-0122). */
 export type PackageArtifactParsed = z.infer<typeof PackageArtifactSchema>;
-export type PackageArtifactInput = z.input<typeof PackageArtifactSchema>;

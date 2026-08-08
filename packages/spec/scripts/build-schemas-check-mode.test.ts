@@ -68,7 +68,13 @@ import {
   authorableSurfaceShardTexts,
   schemaManifestShardTexts,
   writeShards,
+  type ShardArrayField,
 } from './lib/sharded-artifacts';
+import {
+  AUTHORABLE_DEFAULTS_DIR_NAME,
+  authorableDefaultsShardTexts,
+  parseDefaultEntries,
+} from './lib/authorable-defaults';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
@@ -103,8 +109,23 @@ function writeManifestShards(dir: string, schemas: readonly string[]): string {
 }
 
 /** Aggregate a shard directory back into its sorted key set. */
-function readShardKeys(dir: string, field: 'keys' | 'schemas'): string[] {
+function readShardKeys(dir: string, field: ShardArrayField): string[] {
   return aggregateCategoryShards(dir, field)?.entries ?? [];
+}
+
+/**
+ * Write the recorded default fingerprints as canonical authorable-defaults
+ * shards (#4666).
+ *
+ * The sandbox has to carry this artifact for the same reason it carries the
+ * authorable-surface one: the default-value ratchet runs on every invocation,
+ * so a fixture tree without it is not a smaller version of a real tree — it is
+ * a tree whose generated record is missing, which `--check` reports as such.
+ * Seeding it keeps every fixture below judging the contract it means to judge.
+ */
+function writeDefaultsShards(dir: string, entries: readonly string[]): string {
+  writeShards(dir, authorableDefaultsShardTexts(parseDefaultEntries([...entries].sort())));
+  return shardBytes(dir);
 }
 
 /**
@@ -126,9 +147,11 @@ let sandbox: string;
 let script: string;
 let manifestDir: string;
 let surfaceDir: string;
+let defaultsDir: string;
 let surfaceBasePath: string;
 let pristine: string[];
 let pristineSurface: string[];
+let pristineDefaults: string[];
 /** The generator's own description line for the in-tree anchor, so fixtures
  *  written here are byte-canonical exactly the way `gen:schema` writes it —
  *  a hand-rolled string would trip the anchor's own hand-edit check (#5235). */
@@ -165,8 +188,13 @@ const readSurfaceBase = () => fs.readFileSync(surfaceBasePath, 'utf8');
 beforeAll(() => {
   pristine = readShardKeys(path.join(PKG, SCHEMA_MANIFEST_DIR_NAME), 'schemas');
   pristineSurface = readShardKeys(path.join(PKG, AUTHORABLE_SURFACE_DIR_NAME), 'keys');
+  pristineDefaults = readShardKeys(path.join(PKG, AUTHORABLE_DEFAULTS_DIR_NAME), 'defaults');
   expect(pristine.length, `${SCHEMA_MANIFEST_DIR_NAME}/ is empty — it is a committed artifact`).toBeGreaterThan(0);
   expect(pristineSurface.length, `${AUTHORABLE_SURFACE_DIR_NAME}/ is empty — it is a committed artifact`).toBeGreaterThan(0);
+  expect(
+    pristineDefaults.length,
+    `${AUTHORABLE_DEFAULTS_DIR_NAME}/ is empty — it is a committed artifact (#4666)`,
+  ).toBeGreaterThan(0);
   const realBase = path.join(PKG, 'authorable-surface.base.json');
   if (!fs.existsSync(realBase)) {
     throw new Error(
@@ -184,15 +212,20 @@ beforeAll(() => {
   script = path.join(sandbox, 'scripts', 'build-schemas.ts');
   manifestDir = path.join(sandbox, SCHEMA_MANIFEST_DIR_NAME);
   surfaceDir = path.join(sandbox, AUTHORABLE_SURFACE_DIR_NAME);
+  defaultsDir = path.join(sandbox, AUTHORABLE_DEFAULTS_DIR_NAME);
   surfaceBasePath = path.join(sandbox, 'authorable-surface.base.json');
   // The authorable-surface ratchet runs after the manifest one; give it the
   // committed snapshot so a check that gets that far judges the same contract.
   writeSurfaceShards(surfaceDir, pristineSurface);
+  // Same for the default-value ratchet (#4666), which runs after both: without
+  // its committed record every fixture would fail on a missing artifact rather
+  // than on the thing it is testing.
+  writeDefaultsShards(defaultsDir, pristineDefaults);
   // Anchor for the #4650 deletion check: a git repo whose origin/main holds the
   // committed baseline. Only the baseline is tracked — src/node_modules stay
   // symlinked, untracked reads the same as any dirty worktree.
   git('init', '-q', '-b', 'main', '.');
-  git('add', AUTHORABLE_SURFACE_DIR_NAME);
+  git('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
   git('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
   // The in-tree anchor (#5235), authentic by construction: it mirrors the
   // baseline at the commit just made, which stays reachable from origin/main for
@@ -1483,23 +1516,35 @@ describe('build-schemas.ts — the drift notice names the direction it measured 
       //
       // Truncation moves TWO things here, and the second was a surprise worth
       // writing down: `merge-base HEAD origin/main` itself fails once the walk is
-      // cut, so `resolveSurfaceBase` falls back to origin/main's TIP as the
-      // baseline (it says so — "using origin/main tip … as the baseline anchor").
-      // The pair being compared is therefore anchor-at-`tip` vs baseline-at-
-      // `mainTip`, not the fork point at all. And the ancestry between them is
-      // exactly what a grafted history cannot answer: `mainTip` is its own shallow
-      // root, so walking down from it to reach `tip` is the walk that was cut, and
-      // the reverse is a plain negative. Neither probe yields a usable answer.
+      // cut, so `resolveSurfaceBase` has to anchor the baseline somewhere else.
+      // The pair being compared is therefore the committed anchor against THAT
+      // baseline, not against the fork point — and the ancestry between them is
+      // exactly what a grafted history cannot answer, in either direction.
       //
-      // The old line printed "trails the baseline at <mainTip> by 1 key(s)" here,
+      // The old line printed "trails the baseline at <rev> by 1 key(s)" here,
       // which happens to be TRUE of the untruncated history — and that is the
       // point: it was never measured, it was assumed, and one fixture over the
       // same assumption printed the exact opposite of the truth. Declining is the
       // same disposition #5370 already took for the write.
+      //
+      // #6452 re-based this fixture without changing its subject. The baseline a
+      // shallow run resolves is no longer origin/main's TIP (that is what made
+      // main's additions read as this branch's deletions), so the fixture now
+      // says on MAIN which upstream rev the anchor names — `older` — instead of
+      // inheriting whichever anchor an earlier case left behind. And BOTH fetched
+      // revs are grafted, which is what a checkout that fetched two commits at
+      // `--depth=1` actually looks like: with `tip` a shallow root too, neither
+      // ancestry probe can answer and the notice must still decline.
+      seedSurfaceBase(older, (k) => k.filter((x) => x !== AHEAD_KEY && x !== LANDED_KEY));
+      git('add', 'authorable-surface.base.json');
+      git('commit', '-q', '-m', 'fixture: main records its anchor at the older baseline');
+      const mainHead = git('rev-parse', 'HEAD');
+      git('update-ref', 'refs/remotes/origin/main', mainHead);
+
       git('checkout', '-q', '-B', 'issue-5847-shallow', older);
       seedSurface((s) => s);
       const anchorAtTip = commitAnchor(tip, (k) => k.filter((x) => x !== LANDED_KEY));
-      fs.writeFileSync(shallowFile(), `${mainTip}\n`);
+      fs.writeFileSync(shallowFile(), `${mainHead}\n${tip}\n`);
       expect(git('rev-parse', '--is-shallow-repository')).toBe('true');
 
       const { status, output } = run([]);
@@ -1509,8 +1554,8 @@ describe('build-schemas.ts — the drift notice names the direction it measured 
       expect(git('status', '--porcelain', '-uno')).toBe('');
       expect(output).toContain('differs from the baseline this build resolved');
       expect(output).toContain(
-        `${tip.slice(0, 12)}, that baseline is at ${mainTip.slice(0, 12)}, and they differ by ` +
-          `1 key(s) only that baseline has`,
+        `${tip.slice(0, 12)}, that baseline is at ${older.slice(0, 12)}, and they differ by ` +
+          `1 key(s) only the anchor has`,
       );
       expect(output).toContain(
         'shallow checkout — a "not an ancestor" answer is not usable about a truncated history',
@@ -1573,6 +1618,241 @@ describe('build-schemas.ts — the drift notice names the direction it measured 
       expect(output).not.toContain('trails the baseline');
       expect(output).not.toContain('AHEAD of');
       expect(output).not.toMatch(/by 0 key\(s\)/);
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #6452 — a truncated history moves the ANCHOR, never the verdict.
+//
+// `merge-base HEAD origin/main` cannot answer in a shallow checkout, and the old
+// fallback anchored on origin/main's TIP. Under a tip anchor "main added a key
+// after this branch forked" and "this branch deleted a key" are the SAME fact,
+// so the gate reported the first as the second: #6359 measured PR #6356 — which
+// touched no packages/spec file at all — being told it had deleted
+// `ui/BulkActionDef:requiredPermissions`, a key main had just added. Nothing
+// guarded that path (the calling block carries no `if (CHECK)`) and its verdict
+// is `process.exit(1)`, so it is every `gen:schema` in a shallow job, not one
+// gate in one mode.
+//
+// The two obvious dispositions were both refused before this one was chosen:
+// reporting "unverified" instead of adjudicating is the #4650 bypass in every
+// shallow job at once (`resolveSurfaceBase`'s own doc comment says so), and
+// erroring on the CI configuration paints that whole set of jobs red. So the
+// anchor moves and the verdict does not: the gate still runs, and a key that
+// existed at the anchored rev and is gone now is still caught.
+//
+// What these cases pin, and why each one can go red:
+//
+//   1. the false red is gone — same tree, same truncation, main's addition is
+//      no longer this branch's deletion;
+//   2. the gate did NOT weaken — a real deletion is still red, and it names the
+//      deleted key rather than main's addition;
+//   3. the baseline's keys come from GIT at that commit, never from the anchor
+//      FILE. This is the acceptance criterion that cannot be assumed: if the
+//      resolution took the file's own `keys`, `verifyCommittedSurfaceBase` would
+//      hit its `rev === resolved.rev` fast path and compare the anchor against
+//      itself, so a line shed from it would pass. The fixture sheds one;
+//   4. an anchor rev nothing upstream vouches for is not used — a PR can point
+//      `baseRev` at one of its OWN commits (a `--depth=1` fetch resolves any sha
+//      the remote advertises), and a truncated history cannot refute it by
+//      walking, so the rev is accepted only when origin/main's own copy of the
+//      anchor names it (or reachability is demonstrated outright);
+//   5. with no upstream anchor at all the run keeps the tip and SAYS so, naming
+//      `fetch-depth: 0`. That residual false red is the honest degradation, and
+//      it is pinned so it stays loud rather than becoming a silent skip.
+describe('build-schemas.ts — a shallow checkout re-anchors the deletion gate, it does not accuse (#6452)', () => {
+  /** Only in the baseline at origin/main's TIP: what main added after this branch forked. */
+  const MAIN_ADDED_KEY = 'data/Object:zzAddedOnMainAfterTheFork6452';
+  /** In the baseline at the ANCHORED rev too, so its absence is a real deletion. */
+  const BRANCH_DELETED_KEY = 'data/Object:zzDeletedByThisBranch6452';
+  /** A live key this build really emits — shed from the anchor FILE by case 3. */
+  const SHED_KEY = 'data/Object:label';
+
+  const shallowFile = (): string => path.join(sandbox, '.git', 'shallow');
+
+  /** `git()` throws on a non-zero exit, which is what the fixture guards expect. */
+  const mergeBaseFails = (rev: string): boolean =>
+    spawnSync('git', ['merge-base', 'HEAD', rev], { cwd: sandbox }).status !== 0;
+
+  beforeAll(() => {
+    expect(pristineSurface, `${SHED_KEY} is no longer in the baseline — pick another live key`).toContain(
+      SHED_KEY,
+    );
+  });
+
+  /**
+   * The upstream ladder every case forks from: a fork point, main's own anchor
+   * committed ON MAIN at it, then a main that moves ahead and ADDS a key.
+   *
+   * Committing the anchor on main is what makes these fixtures model CI rather
+   * than a laboratory: origin/main's copy of that file is the only statement
+   * about which rev the anchor names that a PR cannot rewrite, and it is exactly
+   * what a `--depth=1` fetch of main still carries.
+   */
+  function seedUpstream(baseKeys: (keys: string[]) => string[]): {
+    forkBase: string;
+    anchored: string;
+    mainTip: string;
+  } {
+    seedManifest((s) => s);
+    const forkBase = seedBase(baseKeys);
+    seedSurfaceBase(forkBase, baseKeys);
+    git('add', 'authorable-surface.base.json');
+    git('commit', '-q', '-m', 'fixture: main anchors at the fork point');
+    const anchored = git('rev-parse', 'HEAD');
+    git('update-ref', 'refs/remotes/origin/main', anchored);
+    const mainTip = seedBase((s) => [...baseKeys(s), MAIN_ADDED_KEY].sort());
+    return { forkBase, anchored, mainTip };
+  }
+
+  /** Fork at an upstream commit and truncate history the way CI's checkout does. */
+  function forkBranch(name: string, at: string, mainTip: string): void {
+    git('checkout', '-q', '-B', name, at);
+    // The worktree carries what this build emits, so every case below is judged
+    // on its baseline rather than on artifact staleness.
+    seedSurface((s) => s);
+    fs.writeFileSync(shallowFile(), `${mainTip}\n`);
+    expect(git('rev-parse', '--is-shallow-repository')).toBe('true');
+    expect(mergeBaseFails(mainTip), 'the fixture is not truncated — merge-base still answers').toBe(true);
+  }
+
+  afterEach(() => {
+    fs.rmSync(shallowFile(), { force: true });
+    git('checkout', '-q', '-f', 'main');
+    // Hand `main` back current and CLEAN, so the describes after this one start
+    // from a tree with no fixture of ours in it — the surface first, then an
+    // anchor that names the commit just made, so what is left behind is authentic
+    // by construction rather than by luck (one case here removes main's anchor
+    // outright, and the next describe reads whatever this leaves).
+    seedSurface((s) => s);
+    git('add', AUTHORABLE_SURFACE_DIR_NAME);
+    git('commit', '-q', '--allow-empty', '-m', 'fixture: restore the pristine surface on main');
+    seedSurfaceBase(git('rev-parse', 'HEAD'), (k) => k);
+    git('add', 'authorable-surface.base.json');
+    git('commit', '-q', '-m', 'fixture: restore a current anchor on main');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  });
+
+  it(
+    'no false red: a key main added after the fork is not reported as this branch deleting it',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const { forkBase, anchored, mainTip } = seedUpstream((s) => s);
+      forkBranch('issue-6452-no-false-red', anchored, mainTip);
+
+      const { status, output } = run(['--check']);
+
+      // The anchor moved, and the line says which rev and on whose authority.
+      expect(output).toContain(`anchors on ${forkBase.slice(0, 12)} rather than on`);
+      expect(output).toContain("origin/main's own authorable-surface.base.json names the same commit");
+      expect(output).not.toContain('no merge base is walkable here');
+      // The defect itself: under the tip anchor this run exited 1 naming
+      // MAIN_ADDED_KEY as an unproven deletion.
+      expect(output).not.toContain('deleted without proof');
+      expect(output).not.toContain(MAIN_ADDED_KEY);
+      expect(status).toBe(0);
+    },
+  );
+
+  it(
+    'the gate does not weaken: a genuine deletion is still red under the same truncation',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const { forkBase, anchored, mainTip } = seedUpstream((s) => [...s, BRANCH_DELETED_KEY].sort());
+      forkBranch('issue-6452-real-deletion', anchored, mainTip);
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain(`anchors on ${forkBase.slice(0, 12)} rather than on`);
+      expect(output).toContain('1 authorable baseline line(s) were deleted without proof (#4650)');
+      expect(output).toContain(BRANCH_DELETED_KEY);
+      // Exactly one, and the right one: main's addition is not in the verdict.
+      expect(output).not.toContain(MAIN_ADDED_KEY);
+    },
+  );
+
+  it(
+    'the baseline keys come from git at that commit, never from the anchor file (no self-verification)',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const { forkBase, anchored, mainTip } = seedUpstream((s) => s);
+      forkBranch('issue-6452-shed-anchor-key', anchored, mainTip);
+      // The anchor sheds a line the commit it NAMES really carries — the #4650
+      // attack moved one file over, and the shape the shortcut would bless.
+      seedSurfaceBase(forkBase, (k) => k.filter((x) => x !== SHED_KEY));
+
+      const { status, output } = run(['--check']);
+
+      // THE pin. Resolve the baseline from the anchor file's own `keys` and this
+      // comparison becomes file-against-file: it passes, the run exits 0, and the
+      // shed line is gone from the baseline for good. Reading the keys out of git
+      // at `baseRev` is the only thing that makes it red.
+      expect(status).toBe(1);
+      expect(output).toContain('is not the baseline it claims to be (#4650, #5235)');
+      expect(output).toContain(`- ${SHED_KEY}  (at ${forkBase.slice(0, 12)}, absent here)`);
+    },
+  );
+
+  it(
+    'an anchor rev nothing upstream vouches for is not used — the rev origin/main records is',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const { forkBase, anchored, mainTip } = seedUpstream((s) => [...s, BRANCH_DELETED_KEY].sort());
+      git('checkout', '-q', '-B', 'issue-6452-unvouched', anchored);
+      // The branch deletes the key, commits it, and then points `baseRev` at its
+      // OWN commit — authentic against itself (its keys ARE that commit's
+      // surface), upstream against nothing. A truncated history cannot refute it
+      // by walking, which is why the rev has to be vouched for rather than merely
+      // checked.
+      seedSurface((s) => s);
+      git('add', AUTHORABLE_SURFACE_DIR_NAME);
+      git('commit', '-q', '-m', 'fixture: the branch deletes a baseline key');
+      const branchOwn = git('rev-parse', 'HEAD');
+      seedSurfaceBase(branchOwn, (k) => k);
+      git('add', 'authorable-surface.base.json');
+      git('commit', '-q', '-m', 'fixture: the branch anchors on its own commit');
+      fs.writeFileSync(shallowFile(), `${mainTip}\n`);
+      expect(mergeBaseFails(mainTip)).toBe(true);
+
+      const { status, output } = run(['--check']);
+
+      expect(output).toContain(`names ${branchOwn.slice(0, 12)}, which nothing here can`);
+      expect(output).toContain(`anchors on ${forkBase.slice(0, 12)} rather than on`);
+      // …and the deletion the forged anchor was hiding is still adjudicated.
+      expect(status).toBe(1);
+      expect(output).toContain('deleted without proof (#4650)');
+      expect(output).toContain(BRANCH_DELETED_KEY);
+    },
+  );
+
+  it(
+    'with no upstream anchor at all it keeps the tip and says so, naming fetch-depth: 0',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The honest degradation, pinned so it stays LOUD. A main whose tree carries
+      // no anchor cannot vouch for anything, so this run has only the tip — and
+      // the tip anchor is the defect. It reports the residual false red instead of
+      // waiving the check, because a diagnosable false red beats a silent bypass.
+      seedManifest((s) => s);
+      const forkBase = seedBase((s) => s);
+      seedSurfaceBase(forkBase, (k) => k);
+      git('add', 'authorable-surface.base.json');
+      git('commit', '-q', '-m', 'fixture: anchor at the fork point');
+      const anchored = git('rev-parse', 'HEAD');
+      git('rm', '-q', 'authorable-surface.base.json');
+      const mainTip = seedBase((s) => [...s, MAIN_ADDED_KEY].sort());
+      forkBranch('issue-6452-no-upstream-anchor', anchored, mainTip);
+
+      const { status, output } = run(['--check']);
+
+      expect(output).toContain('no merge base is walkable here, and no upstream anchor was usable');
+      expect(output).toContain(`anchors on the origin/main TIP ${mainTip.slice(0, 12)} instead`);
+      expect(output).toContain('fetch-depth: 0');
+      expect(status).toBe(1);
+      expect(output).toContain('deleted without proof');
+      expect(output).toContain(MAIN_ADDED_KEY);
     },
   );
 });
@@ -1827,12 +2107,16 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    // The #4666 default ratchet runs on every invocation, so every box needs its
+    // committed record too — otherwise a fixture fails on a missing artifact
+    // instead of on the removal/rename it is actually testing.
+    writeDefaultsShards(path.join(box, AUTHORABLE_DEFAULTS_DIR_NAME), pristineDefaults);
     boxScript = path.join(box, 'scripts', 'build-schemas.ts');
     boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
     pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
 
     boxGit('init', '-q', '-b', 'main', '.');
-    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
     boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
     fs.writeFileSync(
       path.join(box, 'authorable-surface.base.json'),
@@ -2137,10 +2421,11 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
 
     writeManifestShards(boxManifestDir, pristine);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    writeDefaultsShards(path.join(box, AUTHORABLE_DEFAULTS_DIR_NAME), pristineDefaults);
     boxGit('init', '-q', '-b', 'main', '.');
     // BOTH artifacts tracked here: the merge-base manifest is what this gate
     // reads, and the surface baseline keeps the #4650 gate honest alongside it.
-    boxGit('add', SCHEMA_MANIFEST_DIR_NAME, AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('add', SCHEMA_MANIFEST_DIR_NAME, AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
     boxGit('commit', '-q', '-m', 'baseline: committed manifest + authorable surface');
     fs.writeFileSync(
       path.join(box, 'authorable-surface.base.json'),
@@ -2466,7 +2751,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
    *  so those lines read as deleted by this build (the main sandbox's shape). */
   const seedBoxBase = (...extra: string[]): void => {
     writeSurfaceShards(boxSurfaceDir, [...pristineSurface, ...extra].sort());
-    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
     boxGit('commit', '-q', '--allow-empty', '-m', 'base variant');
     boxGit('update-ref', 'refs/remotes/origin/main', boxGit('rev-parse', 'HEAD'));
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
@@ -2495,12 +2780,16 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
+    // The #4666 default ratchet runs on every invocation, so every box needs its
+    // committed record too — otherwise a fixture fails on a missing artifact
+    // instead of on the removal/rename it is actually testing.
+    writeDefaultsShards(path.join(box, AUTHORABLE_DEFAULTS_DIR_NAME), pristineDefaults);
     boxScript = path.join(box, 'scripts', 'build-schemas.ts');
     boxRegistry = path.join(box, 'src', 'migrations', 'registry.ts');
     pristineRegistry = fs.readFileSync(boxRegistry, 'utf8');
 
     boxGit('init', '-q', '-b', 'main', '.');
-    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME);
+    boxGit('add', AUTHORABLE_SURFACE_DIR_NAME, AUTHORABLE_DEFAULTS_DIR_NAME);
     boxGit('commit', '-q', '-m', `baseline: committed ${AUTHORABLE_SURFACE_DIR_NAME}/`);
     fs.writeFileSync(
       path.join(box, 'authorable-surface.base.json'),

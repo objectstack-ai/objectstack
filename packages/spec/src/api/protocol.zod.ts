@@ -503,6 +503,71 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * One field-level finding from a validate-only run — the same
+ * `{ field, code, message }` triple the engine's `ValidationError.fields`
+ * carries, so a caller reads one vocabulary whether the verdict arrived from a
+ * preview or from a rejected write.
+ */
+export const ValidateDataIssueSchema = lazySchema(() => z.object({
+  field: z.string().describe('The field the finding is about (`_record` for an object-level rule).'),
+  code: z.string().describe('Machine-readable finding code, e.g. `required`, `invalid_type`, `rule_violation`.'),
+  message: z.string().describe('Human-readable message — a validation rule\'s author-written text where one exists.'),
+}));
+
+/**
+ * Validate Data Request (#6037 — #4633 ruling D)
+ *
+ * Ask for the write path's verdict on candidate rows WITHOUT writing them.
+ *
+ * @example
+ * {
+ *   "object": "leads",
+ *   "mode": "insert",
+ *   "data": [{ "first_name": "John", "email": "not-an-email" }]
+ * }
+ */
+export const ValidateDataRequestSchema = lazySchema(() => z.object({
+  object: z.string().describe('The object name.'),
+  data: z.union([
+    z.record(z.string(), z.unknown()),
+    z.array(z.record(z.string(), z.unknown())),
+  ]).describe('A candidate record, or an array of them. Nothing is persisted.'),
+  mode: z.enum(['insert', 'update']).optional().describe(
+    "Which write the verdict should predict. `insert` (default) walks every declared field, so a " +
+    "missing required field is a finding; `update` judges only the supplied keys, matching a PATCH.",
+  ),
+}));
+
+/**
+ * Validate Data Response
+ *
+ * One entry per submitted row, in submission order.
+ */
+export const ValidateDataResponseSchema = lazySchema(() => z.object({
+  object: z.string().describe('The object name.'),
+  mode: z.enum(['insert', 'update']).describe('The write mode the verdict was reached for.'),
+  valid: z.boolean().describe('True when EVERY row is valid — the whole-set answer.'),
+  results: z.array(z.object({
+    valid: z.boolean().describe('True when this row would be accepted by the write path.'),
+    errors: z.array(ValidateDataIssueSchema).describe('Findings that would REJECT this row. Empty when valid.'),
+    warnings: z.array(ValidateDataIssueSchema).describe(
+      'Findings the target deployment ADMITS rather than rejects — today, ADR-0104 value shapes under a ' +
+      'warn-first posture. The row is valid; the write would store it and log the same complaint.',
+    ),
+  })).describe('Per-row verdicts, in submission order.'),
+  posture: z.object({
+    valueShapeStrict: z.boolean().describe('True when this deployment rejects non-conforming value shapes (ADR-0104 self-certified).'),
+    mediaValueShapeStrict: z.boolean().describe('The same, for media field value shapes.'),
+  }).describe(
+    'The ADR-0104 posture the verdict was reached under — reported because it is the difference between ' +
+    '"this row is fine" and "this row is fine HERE". The same row can be an error on a self-certified ' +
+    'deployment and an admitted warning on an un-migrated one, and a caller explaining a verdict needs to ' +
+    'know which it got. An unconditionally-strict preview was considered and rejected (#4633 option B): it ' +
+    'would fail rows on every un-migrated deployment that the write would have accepted.',
+  ),
+}));
+
+/**
  * Update Data Request
  * Modification of an existing record.
  * 
@@ -681,62 +746,53 @@ export {
 };
 
 // ==========================================
-// View Management Operations
+// View Management Operations — RETIRED
 // ==========================================
 
-export const ListViewsRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  type: z.enum(['list', 'form']).optional().describe('Filter by view type'),
-}));
-
-export const ListViewsResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  views: z.array(ViewSchema).describe('Array of view definitions'),
-}));
-
-export const GetViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  viewId: z.string().describe('View identifier'),
-}));
-
-export const GetViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  view: ViewSchema.describe('View definition'),
-}));
-
-export const CreateViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  data: ViewSchema.describe('View definition to create'),
-}));
-
-export const CreateViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  viewId: z.string().describe('Created view identifier'),
-  view: ViewSchema.describe('Created view definition'),
-}));
-
-export const UpdateViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  viewId: z.string().describe('View identifier'),
-  data: ViewSchema.partial().describe('Partial view data to update'),
-}));
-
-export const UpdateViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  viewId: z.string().describe('Updated view identifier'),
-  view: ViewSchema.describe('Updated view definition'),
-}));
-
-export const DeleteViewRequestSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name (snake_case)'),
-  viewId: z.string().describe('View identifier to delete'),
-}));
-
-export const DeleteViewResponseSchema = lazySchema(() => z.object({
-  object: z.string().describe('Object name'),
-  viewId: z.string().describe('Deleted view identifier'),
-  success: z.boolean().describe('Whether deletion succeeded'),
-}));
+// `ListViews` / `GetView` / `CreateView` / `UpdateView` / `DeleteView` —
+// five methods and their ten Request/Response schemas — were REMOVED per
+// ADR-0049 enforce-or-remove (#6239, protocol 17, maintainer ruling
+// 2026-08-07). Route 3 of the retirement playbook: not one of the ten was a
+// KEY on an authorable shape, nothing parsed them, and no route could reach the
+// methods, so there is no tombstone to write and no source or `sys_metadata`
+// row for a D2 conversion to rewrite. `RETIRED_DEFS_BY_MAJOR[17]` plus the D3
+// `SemanticMigration` `view-management-protocol-retired` ARE the declaration.
+//
+// ## What it declared, and what serves it
+//
+// A viewId-addressed CRUD surface over views: list by object (+ optional
+// list/form filter), read one, create, patch, delete. Measured on `origin/main`
+// immediately before the removal, it had ZERO of the three things a protocol
+// method needs:
+//
+//   - no implementation — `packages/metadata-protocol/src/protocol.ts` declares
+//     no `listViews`/`getView`/`createView`/`updateView`/`deleteView`; its only
+//     view resolver is `getUiView`;
+//   - no route — `packages/rest/src/rest-server.ts` never mentions `viewId`, so
+//     nothing viewId-addressed is reachable over HTTP at all;
+//   - no caller — the only `ViewProtocol` mention outside this file was
+//     `content/docs/kernel/services-checklist.mdx`, which already recorded the
+//     five as declared-and-unrouted.
+//
+// Views are read and written today through surfaces that DO exist: the
+// metadata routes (`/api/v1/meta/view/:name`, i.e. `getMetaItem` /
+// `saveMetaItem` / `deleteMetaItem` with `type: 'view'`) for the stored
+// definition, and `getUiView` (`GET /api/v1/ui/view/:object/:type`) for the
+// resolved render-time view.
+//
+// ## Why this one was worth the removal rather than a note
+//
+// A declared surface that is name-identical and semantics-adjacent to a real
+// one is not merely dead weight; it is an attractive nuisance in every grep.
+// It had already cost once: #5948's issue body AND its 2026-08-07 maintainer
+// ruling both read `GetViewResponseSchema` (this block, zero implementations)
+// as the contract of `GET /ui/view/:object/:type`, whose declared response is
+// `GetUiViewResponseSchema` — 250 lines up, one word different. The ruling's
+// reasoning happened to survive the mix-up, which is the luck that makes this
+// class of defect worth removing rather than annotating.
+//
+// If "read/write ONE view by id" becomes a real requirement, it returns through
+// the ENFORCE route — implementation first, vocabulary second (ADR-0049).
 
 // ==========================================
 // Permission Operations
@@ -1285,29 +1341,28 @@ export const GetFieldLabelsResponseSchema = lazySchema(() => z.object({
 // Protocol Interface Schema
 // ==========================================
 
-
 /**
  * TypeScript Types
  * Derived from Zod schemas using z.infer
  */
-export type GetDiscoveryRequest = z.infer<typeof GetDiscoveryRequestSchema>;
-export type GetDiscoveryResponse = z.infer<typeof GetDiscoveryResponseSchema>;
-export type GetMetaTypesRequest = z.infer<typeof GetMetaTypesRequestSchema>;
-export type GetMetaTypesResponse = z.infer<typeof GetMetaTypesResponseSchema>;
-export type GetMetaItemsRequest = z.infer<typeof GetMetaItemsRequestSchema>;
-export type GetMetaItemsResponse = z.infer<typeof GetMetaItemsResponseSchema>;
-export type GetMetaItemRequest = z.infer<typeof GetMetaItemRequestSchema>;
-export type GetMetaItemResponse = z.infer<typeof GetMetaItemResponseSchema>;
-export type SaveMetaItemRequest = z.infer<typeof SaveMetaItemRequestSchema>;
-export type SaveMetaItemResponse = z.infer<typeof SaveMetaItemResponseSchema>;
-export type DeleteMetaItemRequest = z.infer<typeof DeleteMetaItemRequestSchema>;
-export type DeleteMetaItemResponse = z.infer<typeof DeleteMetaItemResponseSchema>;
-export type GetMetaItemCachedRequest = z.infer<typeof GetMetaItemCachedRequestSchema>;
-export type GetMetaItemCachedResponse = z.infer<typeof GetMetaItemCachedResponseSchema>;
+export type GetDiscoveryRequest = z.input<typeof GetDiscoveryRequestSchema>;
+export type GetDiscoveryResponse = z.input<typeof GetDiscoveryResponseSchema>;
+export type GetMetaTypesRequest = z.input<typeof GetMetaTypesRequestSchema>;
+export type GetMetaTypesResponse = z.input<typeof GetMetaTypesResponseSchema>;
+export type GetMetaItemsRequest = z.input<typeof GetMetaItemsRequestSchema>;
+export type GetMetaItemsResponse = z.input<typeof GetMetaItemsResponseSchema>;
+export type GetMetaItemRequest = z.input<typeof GetMetaItemRequestSchema>;
+export type GetMetaItemResponse = z.input<typeof GetMetaItemResponseSchema>;
+export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
+export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
+export type DeleteMetaItemRequest = z.input<typeof DeleteMetaItemRequestSchema>;
+export type DeleteMetaItemResponse = z.input<typeof DeleteMetaItemResponseSchema>;
+export type GetMetaItemCachedRequest = z.input<typeof GetMetaItemCachedRequestSchema>;
+export type GetMetaItemCachedResponse = z.input<typeof GetMetaItemCachedResponseSchema>;
 /** Post-parse shape of {@link GetMetaItemCachedResponse} — defaults applied, transforms run (ADR-0122). */
 export type GetMetaItemCachedResponseParsed = z.infer<typeof GetMetaItemCachedResponseSchema>;
-export type GetUiViewRequest = z.infer<typeof GetUiViewRequestSchema>;
-export type GetUiViewResponse = z.infer<typeof GetUiViewResponseSchema>;
+export type GetUiViewRequest = z.input<typeof GetUiViewRequestSchema>;
+export type GetUiViewResponse = z.input<typeof GetUiViewResponseSchema>;
 /** Post-parse shape of {@link GetUiViewResponse} — defaults applied, transforms run (ADR-0122). */
 export type GetUiViewResponseParsed = z.infer<typeof GetUiViewResponseSchema>;
 
@@ -1316,147 +1371,140 @@ type AnalyticsResultResponse = z.infer<typeof AnalyticsResultResponseSchema>;
 type GetAnalyticsMetaRequest = z.infer<typeof GetAnalyticsMetaRequestSchema>;
 type GetAnalyticsMetaResponse = z.infer<typeof AnalyticsMetadataResponseSchema>;
 
-export type AutomationTriggerRequest = z.infer<typeof AutomationTriggerRequestSchema>;
-export type AutomationTriggerResponse = z.infer<typeof AutomationTriggerResponseSchema>;
-export type AutomationActionsResponse = z.infer<typeof AutomationActionsResponseSchema>;
+export type AutomationTriggerRequest = z.input<typeof AutomationTriggerRequestSchema>;
+export type AutomationTriggerResponse = z.input<typeof AutomationTriggerResponseSchema>;
+export type AutomationActionsResponse = z.input<typeof AutomationActionsResponseSchema>;
 /** Post-parse shape of {@link AutomationActionsResponse} — defaults applied, transforms run (ADR-0122). */
 export type AutomationActionsResponseParsed = z.infer<typeof AutomationActionsResponseSchema>;
 
 export type FindDataRequest = z.input<typeof FindDataRequestSchema>;
-export type FindDataResponse = z.infer<typeof FindDataResponseSchema>;
+/** Post-parse shape of {@link FindDataRequest} — defaults applied, transforms run (ADR-0122). */
+export type FindDataRequestParsed = z.infer<typeof FindDataRequestSchema>;
+export type FindDataResponse = z.input<typeof FindDataResponseSchema>;
 export type GetDataRequest = z.input<typeof GetDataRequestSchema>;
-export type GetDataResponse = z.infer<typeof GetDataResponseSchema>;
+export type GetDataResponse = z.input<typeof GetDataResponseSchema>;
 export type CreateDataRequest = z.input<typeof CreateDataRequestSchema>;
-export type CreateDataResponse = z.infer<typeof CreateDataResponseSchema>;
+export type CreateDataResponse = z.input<typeof CreateDataResponseSchema>;
+export type ValidateDataIssue = z.input<typeof ValidateDataIssueSchema>;
+export type ValidateDataRequest = z.input<typeof ValidateDataRequestSchema>;
+export type ValidateDataResponse = z.input<typeof ValidateDataResponseSchema>;
 export type UpdateDataRequest = z.input<typeof UpdateDataRequestSchema>;
-export type UpdateDataResponse = z.infer<typeof UpdateDataResponseSchema>;
+export type UpdateDataResponse = z.input<typeof UpdateDataResponseSchema>;
 export type DeleteDataRequest = z.input<typeof DeleteDataRequestSchema>;
-export type DeleteDataResponse = z.infer<typeof DeleteDataResponseSchema>;
+export type DeleteDataResponse = z.input<typeof DeleteDataResponseSchema>;
 
 export type BatchDataRequest = z.input<typeof BatchDataRequestSchema>;
-export type BatchDataResponse = z.infer<typeof BatchDataResponseSchema>;
+/** Post-parse shape of {@link BatchDataRequest} — defaults applied, transforms run (ADR-0122). */
+export type BatchDataRequestParsed = z.infer<typeof BatchDataRequestSchema>;
+export type BatchDataResponse = z.input<typeof BatchDataResponseSchema>;
 /** Post-parse shape of {@link BatchDataResponse} — defaults applied, transforms run (ADR-0122). */
 export type BatchDataResponseParsed = z.infer<typeof BatchDataResponseSchema>;
 export type CreateManyDataRequest = z.input<typeof CreateManyDataRequestSchema>;
-export type CreateManyDataResponse = z.infer<typeof CreateManyDataResponseSchema>;
+export type CreateManyDataResponse = z.input<typeof CreateManyDataResponseSchema>;
 export type UpdateManyDataRequest = z.input<typeof UpdateManyDataRequestSchema>;
-export type UpdateManyDataResponse = z.infer<typeof UpdateManyDataResponseSchema>;
+/** Post-parse shape of {@link UpdateManyDataRequest} — defaults applied, transforms run (ADR-0122). */
+export type UpdateManyDataRequestParsed = z.infer<typeof UpdateManyDataRequestSchema>;
+export type UpdateManyDataResponse = z.input<typeof UpdateManyDataResponseSchema>;
 /** Post-parse shape of {@link UpdateManyDataResponse} — defaults applied, transforms run (ADR-0122). */
 export type UpdateManyDataResponseParsed = z.infer<typeof UpdateManyDataResponseSchema>;
 export type DeleteManyDataRequest = z.input<typeof DeleteManyDataRequestSchema>;
-export type DeleteManyDataResponse = z.infer<typeof DeleteManyDataResponseSchema>;
+/** Post-parse shape of {@link DeleteManyDataRequest} — defaults applied, transforms run (ADR-0122). */
+export type DeleteManyDataRequestParsed = z.infer<typeof DeleteManyDataRequestSchema>;
+export type DeleteManyDataResponse = z.input<typeof DeleteManyDataResponseSchema>;
 /** Post-parse shape of {@link DeleteManyDataResponse} — defaults applied, transforms run (ADR-0122). */
 export type DeleteManyDataResponseParsed = z.infer<typeof DeleteManyDataResponseSchema>;
 
-// View Management Types
-export type ListViewsRequest = z.input<typeof ListViewsRequestSchema>;
-export type ListViewsResponse = z.infer<typeof ListViewsResponseSchema>;
-/** Post-parse shape of {@link ListViewsResponse} — defaults applied, transforms run (ADR-0122). */
-export type ListViewsResponseParsed = z.infer<typeof ListViewsResponseSchema>;
-export type GetViewRequest = z.input<typeof GetViewRequestSchema>;
-export type GetViewResponse = z.infer<typeof GetViewResponseSchema>;
-/** Post-parse shape of {@link GetViewResponse} — defaults applied, transforms run (ADR-0122). */
-export type GetViewResponseParsed = z.infer<typeof GetViewResponseSchema>;
-export type CreateViewRequest = z.input<typeof CreateViewRequestSchema>;
-export type CreateViewResponse = z.infer<typeof CreateViewResponseSchema>;
-/** Post-parse shape of {@link CreateViewResponse} — defaults applied, transforms run (ADR-0122). */
-export type CreateViewResponseParsed = z.infer<typeof CreateViewResponseSchema>;
-export type UpdateViewRequest = z.input<typeof UpdateViewRequestSchema>;
-export type UpdateViewResponse = z.infer<typeof UpdateViewResponseSchema>;
-/** Post-parse shape of {@link UpdateViewResponse} — defaults applied, transforms run (ADR-0122). */
-export type UpdateViewResponseParsed = z.infer<typeof UpdateViewResponseSchema>;
-export type DeleteViewRequest = z.input<typeof DeleteViewRequestSchema>;
-export type DeleteViewResponse = z.infer<typeof DeleteViewResponseSchema>;
-
 // Permission Types
 export type CheckPermissionRequest = z.input<typeof CheckPermissionRequestSchema>;
-export type CheckPermissionResponse = z.infer<typeof CheckPermissionResponseSchema>;
+export type CheckPermissionResponse = z.input<typeof CheckPermissionResponseSchema>;
 export type GetObjectPermissionsRequest = z.input<typeof GetObjectPermissionsRequestSchema>;
-export type GetObjectPermissionsResponse = z.infer<typeof GetObjectPermissionsResponseSchema>;
+export type GetObjectPermissionsResponse = z.input<typeof GetObjectPermissionsResponseSchema>;
 /** Post-parse shape of {@link GetObjectPermissionsResponse} — defaults applied, transforms run (ADR-0122). */
 export type GetObjectPermissionsResponseParsed = z.infer<typeof GetObjectPermissionsResponseSchema>;
 export type GetEffectivePermissionsRequest = z.input<typeof GetEffectivePermissionsRequestSchema>;
-export type GetEffectivePermissionsResponse = z.infer<typeof GetEffectivePermissionsResponseSchema>;
+export type GetEffectivePermissionsResponse = z.input<typeof GetEffectivePermissionsResponseSchema>;
 
 // Workflow Types — removed with the schemas (#4451, v17); see the block comment
 // at "Workflow Operations — REMOVED" above.
 
 // Realtime Types
 export type RealtimeConnectRequest = z.input<typeof RealtimeConnectRequestSchema>;
-export type RealtimeConnectResponse = z.infer<typeof RealtimeConnectResponseSchema>;
+export type RealtimeConnectResponse = z.input<typeof RealtimeConnectResponseSchema>;
 export type RealtimeDisconnectRequest = z.input<typeof RealtimeDisconnectRequestSchema>;
-export type RealtimeDisconnectResponse = z.infer<typeof RealtimeDisconnectResponseSchema>;
+export type RealtimeDisconnectResponse = z.input<typeof RealtimeDisconnectResponseSchema>;
 export type RealtimeSubscribeRequest = z.input<typeof RealtimeSubscribeRequestSchema>;
-export type RealtimeSubscribeResponse = z.infer<typeof RealtimeSubscribeResponseSchema>;
+export type RealtimeSubscribeResponse = z.input<typeof RealtimeSubscribeResponseSchema>;
 export type RealtimeUnsubscribeRequest = z.input<typeof RealtimeUnsubscribeRequestSchema>;
-export type RealtimeUnsubscribeResponse = z.infer<typeof RealtimeUnsubscribeResponseSchema>;
+export type RealtimeUnsubscribeResponse = z.input<typeof RealtimeUnsubscribeResponseSchema>;
 export type SetPresenceRequest = z.input<typeof SetPresenceRequestSchema>;
-export type SetPresenceResponse = z.infer<typeof SetPresenceResponseSchema>;
+export type SetPresenceResponse = z.input<typeof SetPresenceResponseSchema>;
 export type GetPresenceRequest = z.input<typeof GetPresenceRequestSchema>;
-export type GetPresenceResponse = z.infer<typeof GetPresenceResponseSchema>;
+export type GetPresenceResponse = z.input<typeof GetPresenceResponseSchema>;
 
 // Notification Types
 export type RegisterDeviceRequest = z.input<typeof RegisterDeviceRequestSchema>;
-export type RegisterDeviceResponse = z.infer<typeof RegisterDeviceResponseSchema>;
+export type RegisterDeviceResponse = z.input<typeof RegisterDeviceResponseSchema>;
 export type UnregisterDeviceRequest = z.input<typeof UnregisterDeviceRequestSchema>;
-export type UnregisterDeviceResponse = z.infer<typeof UnregisterDeviceResponseSchema>;
-export type NotificationPreferences = z.infer<typeof NotificationPreferencesSchema>;
+export type UnregisterDeviceResponse = z.input<typeof UnregisterDeviceResponseSchema>;
+export type NotificationPreferences = z.input<typeof NotificationPreferencesSchema>;
 /** Post-parse shape of {@link NotificationPreferences} — defaults applied, transforms run (ADR-0122). */
 export type NotificationPreferencesParsed = z.infer<typeof NotificationPreferencesSchema>;
-export type NotificationPreferencesInput = z.input<typeof NotificationPreferencesSchema>;
 export type GetNotificationPreferencesRequest = z.input<typeof GetNotificationPreferencesRequestSchema>;
-export type GetNotificationPreferencesResponse = z.infer<typeof GetNotificationPreferencesResponseSchema>;
+export type GetNotificationPreferencesResponse = z.input<typeof GetNotificationPreferencesResponseSchema>;
 /** Post-parse shape of {@link GetNotificationPreferencesResponse} — defaults applied, transforms run (ADR-0122). */
 export type GetNotificationPreferencesResponseParsed = z.infer<typeof GetNotificationPreferencesResponseSchema>;
 export type UpdateNotificationPreferencesRequest = z.input<typeof UpdateNotificationPreferencesRequestSchema>;
-export type UpdateNotificationPreferencesResponse = z.infer<typeof UpdateNotificationPreferencesResponseSchema>;
+/** Post-parse shape of {@link UpdateNotificationPreferencesRequest} — defaults applied, transforms run (ADR-0122). */
+export type UpdateNotificationPreferencesRequestParsed = z.infer<typeof UpdateNotificationPreferencesRequestSchema>;
+export type UpdateNotificationPreferencesResponse = z.input<typeof UpdateNotificationPreferencesResponseSchema>;
 /** Post-parse shape of {@link UpdateNotificationPreferencesResponse} — defaults applied, transforms run (ADR-0122). */
 export type UpdateNotificationPreferencesResponseParsed = z.infer<typeof UpdateNotificationPreferencesResponseSchema>;
-export type Notification = z.infer<typeof NotificationSchema>;
+export type Notification = z.input<typeof NotificationSchema>;
 /** Post-parse shape of {@link Notification} — defaults applied, transforms run (ADR-0122). */
 export type NotificationParsed = z.infer<typeof NotificationSchema>;
-export type NotificationInput = z.input<typeof NotificationSchema>;
 export type ListNotificationsRequest = z.input<typeof ListNotificationsRequestSchema>;
-export type ListNotificationsResponse = z.infer<typeof ListNotificationsResponseSchema>;
+/** Post-parse shape of {@link ListNotificationsRequest} — defaults applied, transforms run (ADR-0122). */
+export type ListNotificationsRequestParsed = z.infer<typeof ListNotificationsRequestSchema>;
+export type ListNotificationsResponse = z.input<typeof ListNotificationsResponseSchema>;
 /** Post-parse shape of {@link ListNotificationsResponse} — defaults applied, transforms run (ADR-0122). */
 export type ListNotificationsResponseParsed = z.infer<typeof ListNotificationsResponseSchema>;
 export type MarkNotificationsReadRequest = z.input<typeof MarkNotificationsReadRequestSchema>;
-export type MarkNotificationsReadResponse = z.infer<typeof MarkNotificationsReadResponseSchema>;
+export type MarkNotificationsReadResponse = z.input<typeof MarkNotificationsReadResponseSchema>;
 export type MarkAllNotificationsReadRequest = z.input<typeof MarkAllNotificationsReadRequestSchema>;
-export type MarkAllNotificationsReadResponse = z.infer<typeof MarkAllNotificationsReadResponseSchema>;
+export type MarkAllNotificationsReadResponse = z.input<typeof MarkAllNotificationsReadResponseSchema>;
 
 // AI Types
 export type AiMessage = z.input<typeof AiMessageSchema>;
 export type AiChatRequest = z.input<typeof AiChatRequestSchema>;
-export type AiChatResponse = z.infer<typeof AiChatResponseSchema>;
-export type AiStreamChunk = z.infer<typeof AiStreamChunkSchema>;
+export type AiChatResponse = z.input<typeof AiChatResponseSchema>;
+export type AiStreamChunk = z.input<typeof AiStreamChunkSchema>;
 export type AiCompleteRequest = z.input<typeof AiCompleteRequestSchema>;
-export type AiModelsResponse = z.infer<typeof AiModelsResponseSchema>;
-export type AiConversation = z.infer<typeof AiConversationSchema>;
+export type AiModelsResponse = z.input<typeof AiModelsResponseSchema>;
+export type AiConversation = z.input<typeof AiConversationSchema>;
 export type CreateAiConversationRequest = z.input<typeof CreateAiConversationRequestSchema>;
 export type ListAiConversationsRequest = z.input<typeof ListAiConversationsRequestSchema>;
-export type ListAiConversationsResponse = z.infer<typeof ListAiConversationsResponseSchema>;
+export type ListAiConversationsResponse = z.input<typeof ListAiConversationsResponseSchema>;
 export type UpdateAiConversationRequest = z.input<typeof UpdateAiConversationRequestSchema>;
-export type AiAgentCapabilities = z.infer<typeof AiAgentCapabilitiesSchema>;
-export type AiAgentSummary = z.infer<typeof AiAgentSummarySchema>;
-export type AiAgentsResponse = z.infer<typeof AiAgentsResponseSchema>;
+export type AiAgentCapabilities = z.input<typeof AiAgentCapabilitiesSchema>;
+export type AiAgentSummary = z.input<typeof AiAgentSummarySchema>;
+export type AiAgentsResponse = z.input<typeof AiAgentsResponseSchema>;
 export type AiAgentChatRequest = z.input<typeof AiAgentChatRequestSchema>;
-export type AiPendingActionStatus = z.infer<typeof AiPendingActionStatusSchema>;
-export type AiPendingAction = z.infer<typeof AiPendingActionSchema>;
+export type AiPendingActionStatus = z.input<typeof AiPendingActionStatusSchema>;
+export type AiPendingAction = z.input<typeof AiPendingActionSchema>;
 export type ListAiPendingActionsRequest = z.input<typeof ListAiPendingActionsRequestSchema>;
-export type ListAiPendingActionsResponse = z.infer<typeof ListAiPendingActionsResponseSchema>;
-export type ApproveAiPendingActionResponse = z.infer<typeof ApproveAiPendingActionResponseSchema>;
-export type RejectAiPendingActionResponse = z.infer<typeof RejectAiPendingActionResponseSchema>;
+export type ListAiPendingActionsResponse = z.input<typeof ListAiPendingActionsResponseSchema>;
+export type ApproveAiPendingActionResponse = z.input<typeof ApproveAiPendingActionResponseSchema>;
+export type RejectAiPendingActionResponse = z.input<typeof RejectAiPendingActionResponseSchema>;
 
 // i18n Types
 export type GetLocalesRequest = z.input<typeof GetLocalesRequestSchema>;
-export type GetLocalesResponse = z.infer<typeof GetLocalesResponseSchema>;
+export type GetLocalesResponse = z.input<typeof GetLocalesResponseSchema>;
 /** Post-parse shape of {@link GetLocalesResponse} — defaults applied, transforms run (ADR-0122). */
 export type GetLocalesResponseParsed = z.infer<typeof GetLocalesResponseSchema>;
 export type GetTranslationsRequest = z.input<typeof GetTranslationsRequestSchema>;
-export type GetTranslationsResponse = z.infer<typeof GetTranslationsResponseSchema>;
+export type GetTranslationsResponse = z.input<typeof GetTranslationsResponseSchema>;
 export type GetFieldLabelsRequest = z.input<typeof GetFieldLabelsRequestSchema>;
-export type GetFieldLabelsResponse = z.infer<typeof GetFieldLabelsResponseSchema>;
+export type GetFieldLabelsResponse = z.input<typeof GetFieldLabelsResponseSchema>;
 
 // Package Management Types (re-exported from kernel for convenience)
 export type { 
@@ -1507,6 +1555,23 @@ export interface DataProtocol {
   updateData(request: UpdateDataRequest): Promise<UpdateDataResponse>;
   deleteData(request: DeleteDataRequest): Promise<DeleteDataResponse>;
 
+  /**
+   * Validate-only (#6037 — #4633 ruling D): the write path's verdict on
+   * candidate rows, with nothing persisted.
+   *
+   * Declared optional because it is additive to a shipped contract, not
+   * because it is aspirational — `metadata-protocol` implements it in the same
+   * change that declares it. That is a ruling clause, not a style note:
+   * `BatchOptions.validateOnly` was retired in #4052 as a dry-run flag that
+   * "promised a dry-run" while every batch surface persisted regardless, so a
+   * caller previewing a mutation had it EXECUTED. A second declared-and-unmet
+   * validation promise is the one outcome this operation must not become.
+   *
+   * The verdict honours the deployment's real ADR-0104 posture, so it predicts
+   * what THIS deployment would do — see `ValidateDataResponseSchema.posture`.
+   */
+  validateData?(request: ValidateDataRequest): Promise<ValidateDataResponse>;
+
   // Batch Operations (optional)
   batchData?(request: BatchDataRequest): Promise<BatchDataResponse>;
   createManyData?(request: CreateManyDataRequest): Promise<CreateManyDataResponse>;
@@ -1554,14 +1619,11 @@ export interface PackageProtocol {
   disablePackage?(request: DisablePackageRequest): Promise<DisablePackageResponse>;
 }
 
-/** View management (optional). */
-export interface ViewProtocol {
-  listViews?(request: ListViewsRequest): Promise<ListViewsResponse>;
-  getView?(request: GetViewRequest): Promise<GetViewResponse>;
-  createView?(request: CreateViewRequest): Promise<CreateViewResponse>;
-  updateView?(request: UpdateViewRequest): Promise<UpdateViewResponse>;
-  deleteView?(request: DeleteViewRequest): Promise<DeleteViewResponse>;
-}
+// `ViewProtocol` (`listViews` / `getView` / `createView` / `updateView` /
+// `deleteView`) was REMOVED at protocol 17 — see the "View Management
+// Operations — RETIRED" note above (#6239). No host implemented it and no route
+// reached it; view read/write is `MetadataProtocol` (`getMetaItem` /
+// `saveMetaItem` / `deleteMetaItem` with `type: 'view'`) plus `getUiView`.
 
 /** Permissions (optional). */
 export interface PermissionProtocol {

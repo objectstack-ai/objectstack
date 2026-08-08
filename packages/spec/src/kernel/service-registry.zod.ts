@@ -32,7 +32,7 @@ export const ServiceScopeType = z.enum([
   'scoped',       // Instance per scope (request, session, transaction, etc.)
 ]).describe('Service scope type');
 
-export type ServiceScopeType = z.infer<typeof ServiceScopeType>;
+export type ServiceScopeType = z.input<typeof ServiceScopeType>;
 
 /**
  * Service Metadata Schema
@@ -86,7 +86,7 @@ export const ServiceMetadataSchema = lazySchema(() => z.object({
     .describe('Cluster scope & leader strategy. See cluster-semantics.mdx §5.'),
 }));
 
-export type ServiceMetadata = z.infer<typeof ServiceMetadataSchema>;
+export type ServiceMetadata = z.input<typeof ServiceMetadataSchema>;
 /** Post-parse shape of {@link ServiceMetadata} — defaults applied, transforms run (ADR-0122). */
 export type ServiceMetadataParsed = z.infer<typeof ServiceMetadataSchema>;
 
@@ -142,10 +142,9 @@ export const ServiceRegistryConfigSchema = lazySchema(() => z.object({
     .describe('Maximum number of services that can be registered'),
 }));
 
-export type ServiceRegistryConfig = z.infer<typeof ServiceRegistryConfigSchema>;
+export type ServiceRegistryConfig = z.input<typeof ServiceRegistryConfigSchema>;
 /** Post-parse shape of {@link ServiceRegistryConfig} — defaults applied, transforms run (ADR-0122). */
 export type ServiceRegistryConfigParsed = z.infer<typeof ServiceRegistryConfigSchema>;
-export type ServiceRegistryConfigInput = z.input<typeof ServiceRegistryConfigSchema>;
 
 // ============================================================================
 // Service Factory Schemas
@@ -193,7 +192,7 @@ export const ServiceFactoryRegistrationSchema = lazySchema(() => z.object({
     .describe('Cluster scope & leader strategy for this service.'),
 }));
 
-export type ServiceFactoryRegistration = z.infer<typeof ServiceFactoryRegistrationSchema>;
+export type ServiceFactoryRegistration = z.input<typeof ServiceFactoryRegistrationSchema>;
 /** Post-parse shape of {@link ServiceFactoryRegistration} — defaults applied, transforms run (ADR-0122). */
 export type ServiceFactoryRegistrationParsed = z.infer<typeof ServiceFactoryRegistrationSchema>;
 
@@ -233,7 +232,7 @@ export const ScopeConfigSchema = lazySchema(() => z.object({
     .describe('Scope-specific context metadata'),
 }));
 
-export type ScopeConfig = z.infer<typeof ScopeConfigSchema>;
+export type ScopeConfig = z.input<typeof ScopeConfigSchema>;
 
 /**
  * Scope Info Schema
@@ -279,4 +278,4 @@ export const ScopeInfoSchema = lazySchema(() => z.object({
     .describe('Scope-specific context metadata'),
 }));
 
-export type ScopeInfo = z.infer<typeof ScopeInfoSchema>;
+export type ScopeInfo = z.input<typeof ScopeInfoSchema>;

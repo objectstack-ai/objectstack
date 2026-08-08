@@ -310,23 +310,23 @@ export const PublishingAnalyticsResponseSchema = lazySchema(() => z.object({
 // Export Types
 // ==========================================
 
-export type PublisherProfile = z.infer<typeof PublisherProfileSchema>;
+export type PublisherProfile = z.input<typeof PublisherProfileSchema>;
 /** Post-parse shape of {@link PublisherProfile} — defaults applied, transforms run (ADR-0122). */
 export type PublisherProfileParsed = z.infer<typeof PublisherProfileSchema>;
-export type ReleaseChannel = z.infer<typeof ReleaseChannelSchema>;
-export type VersionRelease = z.infer<typeof VersionReleaseSchema>;
+export type ReleaseChannel = z.input<typeof ReleaseChannelSchema>;
+export type VersionRelease = z.input<typeof VersionReleaseSchema>;
 /** Post-parse shape of {@link VersionRelease} — defaults applied, transforms run (ADR-0122). */
 export type VersionReleaseParsed = z.infer<typeof VersionReleaseSchema>;
-export type CreateListingRequest = z.infer<typeof CreateListingRequestSchema>;
+export type CreateListingRequest = z.input<typeof CreateListingRequestSchema>;
 /** Post-parse shape of {@link CreateListingRequest} — defaults applied, transforms run (ADR-0122). */
 export type CreateListingRequestParsed = z.infer<typeof CreateListingRequestSchema>;
-export type UpdateListingRequest = z.infer<typeof UpdateListingRequestSchema>;
-export type ListingActionRequest = z.infer<typeof ListingActionRequestSchema>;
-export type AnalyticsTimeRange = z.infer<typeof AnalyticsTimeRangeSchema>;
-export type PublishingAnalyticsRequest = z.infer<typeof PublishingAnalyticsRequestSchema>;
+export type UpdateListingRequest = z.input<typeof UpdateListingRequestSchema>;
+export type ListingActionRequest = z.input<typeof ListingActionRequestSchema>;
+export type AnalyticsTimeRange = z.input<typeof AnalyticsTimeRangeSchema>;
+export type PublishingAnalyticsRequest = z.input<typeof PublishingAnalyticsRequestSchema>;
 /** Post-parse shape of {@link PublishingAnalyticsRequest} — defaults applied, transforms run (ADR-0122). */
 export type PublishingAnalyticsRequestParsed = z.infer<typeof PublishingAnalyticsRequestSchema>;
-export type TimeSeriesPoint = z.infer<typeof TimeSeriesPointSchema>;
-export type PublishingAnalyticsResponse = z.infer<typeof PublishingAnalyticsResponseSchema>;
+export type TimeSeriesPoint = z.input<typeof TimeSeriesPointSchema>;
+export type PublishingAnalyticsResponse = z.input<typeof PublishingAnalyticsResponseSchema>;
 /** Post-parse shape of {@link PublishingAnalyticsResponse} — defaults applied, transforms run (ADR-0122). */
 export type PublishingAnalyticsResponseParsed = z.infer<typeof PublishingAnalyticsResponseSchema>;

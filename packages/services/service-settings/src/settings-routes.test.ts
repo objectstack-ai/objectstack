@@ -5,6 +5,7 @@ import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@ob
 import { SettingsService } from './settings-service.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { brandingSettingsManifest } from './manifests/branding.manifest.js';
+import { localizationSettingsManifest } from './manifests/localization.manifest.js';
 
 class MockHttp implements IHttpServer {
   routes = new Map<string, RouteHandler>();
@@ -212,5 +213,52 @@ describe('settings-routes', () => {
     const r2 = makeReqRes({ params: { namespace: 'branding' }, body: { workspace_name: 'X' } });
     await write(r2.req, r2.res);
     expect(r2.state.status).toBe(403); // has setup.access, lacks setup.write
+  });
+
+  // ── #5712 — the declared valueDomain, as it lands on the HTTP surface ─────
+  // The card's repros, asserted with the full envelope: status AND code, per
+  // the rejection-test contract — a bare "it threw" carries one bit where the
+  // defect has two.
+
+  it('PUT /api/settings/localization accepts Europe/Zurich + CHF (the #5712 repro)', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(localizationSettingsManifest);
+    registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+
+    const h = http.routes.get('PUT /api/settings/:namespace')!;
+    const { req, res, state } = makeReqRes({
+      params: { namespace: 'localization' },
+      body: { timezone: 'Europe/Zurich', currency: 'CHF' },
+    });
+    await h(req, res);
+    expect(state.status).toBe(200);
+    expect(state.body.error).toBeUndefined();
+    expect(state.body.data.values.timezone.value).toBe('Europe/Zurich');
+    expect(state.body.data.values.currency.value).toBe('CHF');
+  });
+
+  it('PUT /api/settings/localization rejects garbage with 400 + SETTINGS_VALIDATION + invalid_value', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(localizationSettingsManifest);
+    registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+
+    const h = http.routes.get('PUT /api/settings/:namespace')!;
+    const { req, res, state } = makeReqRes({
+      params: { namespace: 'localization' },
+      body: { timezone: 'Mars/Olympus' },
+    });
+    await h(req, res);
+    expect(state.status).toBe(400);
+    expect(state.body.error.code).toBe('SETTINGS_VALIDATION');
+    expect(state.body.error.details.fields).toEqual([
+      expect.objectContaining({
+        field: 'timezone',
+        code: 'invalid_value',
+        constraint: { valueDomain: 'iana_time_zone' },
+        value: 'Mars/Olympus',
+      }),
+    ]);
   });
 });

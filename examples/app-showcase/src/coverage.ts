@@ -151,6 +151,16 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
     files: ['src/security/positions.ts'],
     notes: 'Flat positions only (no hierarchy — ADR-0090 D3); everyone/guest are built-in anchors, never declared.',
   },
+  // [#5961] `capability` graduated into the registry (schema + entry, code-only:
+  // allowRuntimeCreate/allowOrgOverride both false — ADR-0066 D1). The showcase
+  // has declared capabilities since ADR-0066 landed; the registry entry only
+  // made the kind's coverage ownable here.
+  capability: {
+    status: 'demonstrated',
+    files: ['src/security/capabilities.ts'],
+    notes:
+      'Package-declared authorization capabilities (`capabilities: allCapabilities` in objectstack.config.ts), seeded into sys_capability at publish. Code-only kind: runtime creation answers 403 not_creatable, which protocol.capability-write-door.test.ts pins.',
+  },
 
   // ── ai ──
   agent: {

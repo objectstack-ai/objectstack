@@ -27,7 +27,7 @@ export const OTOperationType = z.enum([
   'retain',      // Keep characters (used for composing operations)
 ]);
 
-export type OTOperationType = z.infer<typeof OTOperationType>;
+export type OTOperationType = z.input<typeof OTOperationType>;
 
 /**
  * OT Operation Component
@@ -50,7 +50,7 @@ export const OTComponentSchema = lazySchema(() => z.discriminatedUnion('type', [
   }),
 ]));
 
-export type OTComponent = z.infer<typeof OTComponentSchema>;
+export type OTComponent = z.input<typeof OTComponentSchema>;
 
 /**
  * OT Operation Schema
@@ -68,7 +68,7 @@ export const OTOperationSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Additional operation metadata'),
 }));
 
-export type OTOperation = z.infer<typeof OTOperationSchema>;
+export type OTOperation = z.input<typeof OTOperationSchema>;
 
 /**
  * OT Transform Result
@@ -80,7 +80,7 @@ export const OTTransformResultSchema = lazySchema(() => z.object({
   conflicts: z.array(z.string()).optional().describe('Conflict descriptions if any'),
 }));
 
-export type OTTransformResult = z.infer<typeof OTTransformResultSchema>;
+export type OTTransformResult = z.input<typeof OTTransformResultSchema>;
 
 // ==========================================
 // CRDT (Conflict-free Replicated Data Types)
@@ -102,7 +102,7 @@ export const CRDTType = z.enum([
   'json',            // CRDT-based JSON (e.g., Automerge)
 ]);
 
-export type CRDTType = z.infer<typeof CRDTType>;
+export type CRDTType = z.input<typeof CRDTType>;
 
 /**
  * Vector Clock Schema
@@ -112,7 +112,7 @@ export const VectorClockSchema = lazySchema(() => z.object({
   clock: z.record(z.string(), z.number().int().nonnegative()).describe('Map of replica ID to logical timestamp'),
 }));
 
-export type VectorClock = z.infer<typeof VectorClockSchema>;
+export type VectorClock = z.input<typeof VectorClockSchema>;
 
 /**
  * LWW-Register Schema
@@ -126,7 +126,7 @@ export const LWWRegisterSchema = lazySchema(() => z.object({
   vectorClock: VectorClockSchema.optional().describe('Optional vector clock for causality tracking'),
 }));
 
-export type LWWRegister = z.infer<typeof LWWRegisterSchema>;
+export type LWWRegister = z.input<typeof LWWRegisterSchema>;
 
 /**
  * Counter Operation Schema
@@ -138,7 +138,7 @@ export const CounterOperationSchema = lazySchema(() => z.object({
   timestamp: z.string().datetime().describe('ISO 8601 datetime of operation'),
 }));
 
-export type CounterOperation = z.infer<typeof CounterOperationSchema>;
+export type CounterOperation = z.input<typeof CounterOperationSchema>;
 
 /**
  * G-Counter Schema
@@ -149,7 +149,7 @@ export const GCounterSchema = lazySchema(() => z.object({
   counts: z.record(z.string(), z.number().int().nonnegative()).describe('Map of replica ID to count'),
 }));
 
-export type GCounter = z.infer<typeof GCounterSchema>;
+export type GCounter = z.input<typeof GCounterSchema>;
 
 /**
  * PN-Counter Schema
@@ -161,7 +161,7 @@ export const PNCounterSchema = lazySchema(() => z.object({
   negative: z.record(z.string(), z.number().int().nonnegative()).describe('Negative increments per replica'),
 }));
 
-export type PNCounter = z.infer<typeof PNCounterSchema>;
+export type PNCounter = z.input<typeof PNCounterSchema>;
 
 /**
  * OR-Set Element Schema
@@ -175,7 +175,7 @@ export const ORSetElementSchema = lazySchema(() => z.object({
   removed: z.boolean().optional().default(false).describe('Whether element has been removed'),
 }));
 
-export type ORSetElement = z.infer<typeof ORSetElementSchema>;
+export type ORSetElement = z.input<typeof ORSetElementSchema>;
 /** Post-parse shape of {@link ORSetElement} — defaults applied, transforms run (ADR-0122). */
 export type ORSetElementParsed = z.infer<typeof ORSetElementSchema>;
 
@@ -188,7 +188,7 @@ export const ORSetSchema = lazySchema(() => z.object({
   elements: z.array(ORSetElementSchema).describe('Set elements with metadata'),
 }));
 
-export type ORSet = z.infer<typeof ORSetSchema>;
+export type ORSet = z.input<typeof ORSetSchema>;
 /** Post-parse shape of {@link ORSet} — defaults applied, transforms run (ADR-0122). */
 export type ORSetParsed = z.infer<typeof ORSetSchema>;
 
@@ -206,7 +206,7 @@ export const TextCRDTOperationSchema = lazySchema(() => z.object({
   lamportTimestamp: z.number().int().nonnegative().describe('Lamport timestamp for ordering'),
 }));
 
-export type TextCRDTOperation = z.infer<typeof TextCRDTOperationSchema>;
+export type TextCRDTOperation = z.input<typeof TextCRDTOperationSchema>;
 
 /**
  * Text CRDT State Schema
@@ -221,7 +221,7 @@ export const TextCRDTStateSchema = lazySchema(() => z.object({
   vectorClock: VectorClockSchema.describe('Vector clock for causality'),
 }));
 
-export type TextCRDTState = z.infer<typeof TextCRDTStateSchema>;
+export type TextCRDTState = z.input<typeof TextCRDTStateSchema>;
 
 /**
  * CRDT State Union
@@ -235,7 +235,7 @@ export const CRDTStateSchema = lazySchema(() => z.discriminatedUnion('type', [
   TextCRDTStateSchema,
 ]));
 
-export type CRDTState = z.infer<typeof CRDTStateSchema>;
+export type CRDTState = z.input<typeof CRDTStateSchema>;
 /** Post-parse shape of {@link CRDTState} — defaults applied, transforms run (ADR-0122). */
 export type CRDTStateParsed = z.infer<typeof CRDTStateSchema>;
 
@@ -252,7 +252,7 @@ export const CRDTMergeResultSchema = lazySchema(() => z.object({
   })).optional().describe('Conflicts encountered during merge'),
 }));
 
-export type CRDTMergeResult = z.infer<typeof CRDTMergeResultSchema>;
+export type CRDTMergeResult = z.input<typeof CRDTMergeResultSchema>;
 /** Post-parse shape of {@link CRDTMergeResult} — defaults applied, transforms run (ADR-0122). */
 export type CRDTMergeResultParsed = z.infer<typeof CRDTMergeResultSchema>;
 
@@ -277,7 +277,7 @@ export const CursorColorPreset = z.enum([
   'cyan',
 ]);
 
-export type CursorColorPreset = z.infer<typeof CursorColorPreset>;
+export type CursorColorPreset = z.input<typeof CursorColorPreset>;
 
 /**
  * Cursor Style Schema
@@ -291,7 +291,7 @@ export const CursorStyleSchema = lazySchema(() => z.object({
   pulseOnUpdate: z.boolean().optional().default(true).describe('Whether to pulse when cursor moves'),
 }));
 
-export type CursorStyle = z.infer<typeof CursorStyleSchema>;
+export type CursorStyle = z.input<typeof CursorStyleSchema>;
 /** Post-parse shape of {@link CursorStyle} — defaults applied, transforms run (ADR-0122). */
 export type CursorStyleParsed = z.infer<typeof CursorStyleSchema>;
 
@@ -311,7 +311,7 @@ export const CursorSelectionSchema = lazySchema(() => z.object({
   direction: z.enum(['forward', 'backward']).optional().describe('Selection direction'),
 }));
 
-export type CursorSelection = z.infer<typeof CursorSelectionSchema>;
+export type CursorSelection = z.input<typeof CursorSelectionSchema>;
 
 /**
  * Collaborative Cursor Schema
@@ -333,7 +333,7 @@ export const CollaborativeCursorSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Additional cursor metadata'),
 }));
 
-export type CollaborativeCursor = z.infer<typeof CollaborativeCursorSchema>;
+export type CollaborativeCursor = z.input<typeof CollaborativeCursorSchema>;
 /** Post-parse shape of {@link CollaborativeCursor} — defaults applied, transforms run (ADR-0122). */
 export type CollaborativeCursorParsed = z.infer<typeof CollaborativeCursorSchema>;
 
@@ -351,7 +351,7 @@ export const CursorUpdateSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Updated metadata'),
 }));
 
-export type CursorUpdate = z.infer<typeof CursorUpdateSchema>;
+export type CursorUpdate = z.input<typeof CursorUpdateSchema>;
 
 // ==========================================
 // Awareness State
@@ -368,7 +368,7 @@ export const UserActivityStatus = z.enum([
   'disconnected', // User is disconnected
 ]);
 
-export type UserActivityStatus = z.infer<typeof UserActivityStatus>;
+export type UserActivityStatus = z.input<typeof UserActivityStatus>;
 
 /**
  * Awareness User State Schema
@@ -388,7 +388,7 @@ export const AwarenessUserStateSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Additional user state metadata'),
 }));
 
-export type AwarenessUserState = z.infer<typeof AwarenessUserStateSchema>;
+export type AwarenessUserState = z.input<typeof AwarenessUserStateSchema>;
 
 /**
  * Awareness Session Schema
@@ -403,7 +403,7 @@ export const AwarenessSessionSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Session metadata'),
 }));
 
-export type AwarenessSession = z.infer<typeof AwarenessSessionSchema>;
+export type AwarenessSession = z.input<typeof AwarenessSessionSchema>;
 
 /**
  * Awareness Update Schema
@@ -416,7 +416,7 @@ export const AwarenessUpdateSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Updated metadata'),
 }));
 
-export type AwarenessUpdate = z.infer<typeof AwarenessUpdateSchema>;
+export type AwarenessUpdate = z.input<typeof AwarenessUpdateSchema>;
 
 /**
  * Awareness Event Schema
@@ -437,7 +437,7 @@ export const AwarenessEventSchema = lazySchema(() => z.object({
   payload: z.unknown().describe('Event payload'),
 }));
 
-export type AwarenessEvent = z.infer<typeof AwarenessEventSchema>;
+export type AwarenessEvent = z.input<typeof AwarenessEventSchema>;
 
 // ==========================================
 // Collaboration Session Management
@@ -454,7 +454,7 @@ export const CollaborationMode = z.enum([
   'hybrid',      // Hybrid approach
 ]);
 
-export type CollaborationMode = z.infer<typeof CollaborationMode>;
+export type CollaborationMode = z.input<typeof CollaborationMode>;
 
 /**
  * Collaboration Session Config
@@ -475,7 +475,7 @@ export const CollaborationSessionConfigSchema = lazySchema(() => z.object({
   }).optional().describe('Snapshot configuration'),
 }));
 
-export type CollaborationSessionConfig = z.infer<typeof CollaborationSessionConfigSchema>;
+export type CollaborationSessionConfig = z.input<typeof CollaborationSessionConfigSchema>;
 /** Post-parse shape of {@link CollaborationSessionConfig} — defaults applied, transforms run (ADR-0122). */
 export type CollaborationSessionConfigParsed = z.infer<typeof CollaborationSessionConfigSchema>;
 
@@ -496,6 +496,6 @@ export const CollaborationSessionSchema = lazySchema(() => z.object({
   status: z.enum(['active', 'idle', 'ended']).describe('Session status'),
 }));
 
-export type CollaborationSession = z.infer<typeof CollaborationSessionSchema>;
+export type CollaborationSession = z.input<typeof CollaborationSessionSchema>;
 /** Post-parse shape of {@link CollaborationSession} — defaults applied, transforms run (ADR-0122). */
 export type CollaborationSessionParsed = z.infer<typeof CollaborationSessionSchema>;

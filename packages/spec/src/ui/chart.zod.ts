@@ -10,13 +10,6 @@ import { strictObject } from '../shared/strict-object';
 // closed; two are deliberately left open with the reason recorded, because
 // closing them would gate nothing.
 //
-// ⚠️ Nothing above this block may be a JSDoc block: `build-docs.ts`'s
-// `getFileDescription()` publishes the module's FIRST doc block as the
-// reference page's description (#3746 trap 1). Hence `//`. Note you cannot
-// safely spell that token out here either — see the longer note in
-// `theme.zod.ts`, where quoting it inside a `//` line silently emptied the
-// published page description.
-//
 // CLOSED (real door, three measurements, 2026-08-03):
 //   `ChartConfigSchema`, `ChartAxisSchema`, `ChartSeriesSchema`,
 //   `ChartAnnotationSchema`, `ChartInteractionSchema`.
@@ -143,7 +136,7 @@ export const ChartTypeSchema = lazySchema(() => z.enum([
 // `solid-gauge`/`bullet` render a value today and gain a dial when a gauge
 // renderer lands.
 
-export type ChartType = z.infer<typeof ChartTypeSchema>;
+export type ChartType = z.input<typeof ChartTypeSchema>;
 
 /**
  * Chart Axis Schema
@@ -723,9 +716,11 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
  *
  * A deliberate subset of the engine's `AggregationFunction`: these are the five
  * the chart renderers implement in every path, including the client-side
- * fallback. `count_distinct` / `array_agg` / `string_agg` are engine-level
- * capabilities with no chart renderer behind them — advertising them here would
- * be a declared-but-not-delivered claim (Prime Directive #10).
+ * fallback. `count_distinct` is the one engine-level function left outside the
+ * subset — no chart renderer computes it, and advertising it here would be a
+ * declared-but-not-delivered claim (Prime Directive #10). `array_agg` and
+ * `string_agg` were named here for the same reason until #6188 retired them
+ * from the engine vocabulary outright; the subset is unchanged by that.
  */
 export const ChartAggregateFunctionSchema = lazySchema(() =>
   z.enum(['count', 'sum', 'avg', 'min', 'max']),
@@ -788,22 +783,22 @@ export const ChartAggregateSchema = lazySchema(() =>
     .describe('Inline aggregation for an object-bound chart'),
 );
 
-export type ChartConfig = z.infer<typeof ChartConfigSchema>;
+export type ChartConfig = z.input<typeof ChartConfigSchema>;
 /** Post-parse shape of {@link ChartConfig} — defaults applied, transforms run (ADR-0122). */
 export type ChartConfigParsed = z.infer<typeof ChartConfigSchema>;
-export type ChartAggregate = z.infer<typeof ChartAggregateSchema>;
-export type ChartAggregateFunction = z.infer<typeof ChartAggregateFunctionSchema>;
-export type ChartGroupBy = z.infer<typeof ChartGroupBySchema>;
-export type ChartAxis = z.infer<typeof ChartAxisSchema>;
+export type ChartAggregate = z.input<typeof ChartAggregateSchema>;
+export type ChartAggregateFunction = z.input<typeof ChartAggregateFunctionSchema>;
+export type ChartGroupBy = z.input<typeof ChartGroupBySchema>;
+export type ChartAxis = z.input<typeof ChartAxisSchema>;
 /** Post-parse shape of {@link ChartAxis} — defaults applied, transforms run (ADR-0122). */
 export type ChartAxisParsed = z.infer<typeof ChartAxisSchema>;
-export type ChartSeries = z.infer<typeof ChartSeriesSchema>;
+export type ChartSeries = z.input<typeof ChartSeriesSchema>;
 /** Post-parse shape of {@link ChartSeries} — defaults applied, transforms run (ADR-0122). */
 export type ChartSeriesParsed = z.infer<typeof ChartSeriesSchema>;
-export type ChartAnnotation = z.infer<typeof ChartAnnotationSchema>;
+export type ChartAnnotation = z.input<typeof ChartAnnotationSchema>;
 /** Post-parse shape of {@link ChartAnnotation} — defaults applied, transforms run (ADR-0122). */
 export type ChartAnnotationParsed = z.infer<typeof ChartAnnotationSchema>;
-export type ChartInteraction = z.infer<typeof ChartInteractionSchema>;
+export type ChartInteraction = z.input<typeof ChartInteractionSchema>;
 /** Post-parse shape of {@link ChartInteraction} — defaults applied, transforms run (ADR-0122). */
 export type ChartInteractionParsed = z.infer<typeof ChartInteractionSchema>;
-export type ChartDrillDown = z.infer<typeof ChartDrillDownSchema>;
+export type ChartDrillDown = z.input<typeof ChartDrillDownSchema>;

@@ -998,7 +998,7 @@ Data-model rules (in addition to naming/label/i18n):
 | `relationship/association-inline-edit` | warning | an association (comment/audit/activity) marked `inlineEdit` (clutters the parent form — use a detail-page related list) |
 | `rollup/missing-summary` | suggestion | a parent of numeric master_detail children with no roll-up `summary` |
 | `field/select-missing-options` | warning | a `select`/`multiselect`/`radio` with no `options` (or options source) |
-| `object/missing-name-field` | suggestion | an object with no name/title field or `primaryField` |
+| `object/missing-name-field` | suggestion | an object with no `nameField` (ADR-0079's canonical title pointer) and no name-like field (`name`/`title`/`subject`/`label`/`full_name`/`display_name`/`code`) |
 
 These same rules are the **rubric for AI-generated metadata** — a generation is
 "good" exactly when it is schema-valid and lint-clean:

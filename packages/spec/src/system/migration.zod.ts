@@ -36,12 +36,14 @@ export const ModifyFieldOperation = z.object({
   fieldName: z.string().describe('Name of the field to modify'),
   changes: z.record(z.string(), z.unknown()).describe('Partial field definition updates')
 }).describe('Modify properties of an existing field');
+export type ModifyFieldOperation = z.input<typeof ModifyFieldOperation>;
 
 export const RemoveFieldOperation = z.object({
   type: z.literal('remove_field'),
   objectName: z.string().describe('Target object name'),
   fieldName: z.string().describe('Name of the field to remove')
 }).describe('Remove a field from an existing object');
+export type RemoveFieldOperation = z.input<typeof RemoveFieldOperation>;
 
 export const CreateObjectOperation = z.object({
   type: z.literal('create_object'),
@@ -53,17 +55,20 @@ export const RenameObjectOperation = z.object({
   oldName: z.string().describe('Current object name'),
   newName: z.string().describe('New object name')
 }).describe('Rename an existing object');
+export type RenameObjectOperation = z.input<typeof RenameObjectOperation>;
 
 export const DeleteObjectOperation = z.object({
   type: z.literal('delete_object'),
   objectName: z.string().describe('Name of the object to delete')
 }).describe('Delete an existing object');
+export type DeleteObjectOperation = z.input<typeof DeleteObjectOperation>;
 
 export const ExecuteSqlOperation = z.object({
   type: z.literal('execute_sql'),
   sql: z.string().describe('Raw SQL statement to execute'),
   description: z.string().optional().describe('Human-readable description of the SQL')
 }).describe('Execute a raw SQL statement');
+export type ExecuteSqlOperation = z.input<typeof ExecuteSqlOperation>;
 
 // Union of all possible operations
 export const MigrationOperationSchema = lazySchema(() => z.discriminatedUnion('type', [
@@ -82,6 +87,7 @@ export const MigrationDependencySchema = lazySchema(() => z.object({
   migrationId: z.string().describe('ID of the migration this depends on'),
   package: z.string().optional().describe('Package that owns the dependency migration')
 }).describe('Dependency reference to another migration that must run first'));
+export type MigrationDependency = z.input<typeof MigrationDependencySchema>;
 
 export const ChangeSetSchema = lazySchema(() => z.object({
   id: z.string().uuid().describe('Unique identifier for this change set'),
@@ -100,10 +106,10 @@ export const ChangeSetSchema = lazySchema(() => z.object({
   rollback: z.array(MigrationOperationSchema).optional().describe('Operations to reverse this migration')
 }).describe('A versioned set of atomic schema migration operations'));
 
-export type ChangeSet = z.infer<typeof ChangeSetSchema>;
+export type ChangeSet = z.input<typeof ChangeSetSchema>;
 /** Post-parse shape of {@link ChangeSet} — defaults applied, transforms run (ADR-0122). */
 export type ChangeSetParsed = z.infer<typeof ChangeSetSchema>;
-export type MigrationOperation = z.infer<typeof MigrationOperationSchema>;
+export type MigrationOperation = z.input<typeof MigrationOperationSchema>;
 /** Post-parse shape of {@link MigrationOperation} — defaults applied, transforms run (ADR-0122). */
 export type MigrationOperationParsed = z.infer<typeof MigrationOperationSchema>;
 
@@ -197,7 +203,7 @@ export const DataMigrationFlagSchema = lazySchema(() => z.object({
   details: z.string().optional()
     .describe('JSON-encoded counts from the last run, for diagnostics'),
 }).describe('Deployment-level record that a data migration ran here and its self-check passed — the evidence gate consumers read instead of the platform version'));
-export type DataMigrationFlag = z.infer<typeof DataMigrationFlagSchema>;
+export type DataMigrationFlag = z.input<typeof DataMigrationFlagSchema>;
 
 /**
  * Does a flag row authorise its consumers? The ONE arbiter for both current
@@ -279,7 +285,7 @@ export const MigrationJournalEventSchema = lazySchema(() => z.object({
     .describe('JSON-encoded payload — the chunk plan on run_started, the error on run_failed / a failed compensation'),
   created_at: z.string().datetime().optional().describe('Wall-clock stamp, for humans. Never the ordering authority — that is seq'),
 }).describe('One event in a migration run journal — the durable trace that lets a killed run be resumed forward or compensated back, with rows proving which'));
-export type MigrationJournalEvent = z.infer<typeof MigrationJournalEventSchema>;
+export type MigrationJournalEvent = z.input<typeof MigrationJournalEventSchema>;
 
 /**
  * What a crashed run should do when it is rediscovered.

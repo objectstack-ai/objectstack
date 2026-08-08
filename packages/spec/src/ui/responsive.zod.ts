@@ -72,7 +72,7 @@ import { strictObject } from '../shared/strict-object';
  */
 export const BreakpointName = z.enum(['xs', 'sm', 'md', 'lg', 'xl', '2xl']);
 
-export type BreakpointName = z.infer<typeof BreakpointName>;
+export type BreakpointName = z.input<typeof BreakpointName>;
 
 /**
  * Aliases for the two per-breakpoint MAPS (`columns` / `order`), which are keyed
@@ -120,6 +120,7 @@ export const BreakpointColumnMapSchema = lazySchema(() => strictObject(
     '2xl': z.number().min(1).max(12).optional(),
   },
 ).describe('Grid columns per breakpoint (1-12)'));
+export type BreakpointColumnMap = z.input<typeof BreakpointColumnMapSchema>;
 
 /**
  * Breakpoint Order Map Schema
@@ -141,6 +142,7 @@ export const BreakpointOrderMapSchema = lazySchema(() => strictObject(
     '2xl': z.number().optional(),
   },
 ).describe('Display order per breakpoint'));
+export type BreakpointOrderMap = z.input<typeof BreakpointOrderMapSchema>;
 
 /**
  * A bare breakpoint name written at the `responsive` LEVEL rather than inside
@@ -244,7 +246,7 @@ export const ResponsiveConfigSchema = lazySchema(() => strictObject(
   },
 ).describe('Responsive layout configuration'));
 
-export type ResponsiveConfig = z.infer<typeof ResponsiveConfigSchema>;
+export type ResponsiveConfig = z.input<typeof ResponsiveConfigSchema>;
 
 /**
  * Style Map Schema (ADR-0065)
@@ -268,7 +270,7 @@ export const StyleMapSchema = lazySchema(() =>
   z.record(z.string(), z.union([z.string(), z.number()]))
     .describe('CSS property → value map (camelCase keys; design tokens encouraged)'));
 
-export type StyleMap = z.infer<typeof StyleMapSchema>;
+export type StyleMap = z.input<typeof StyleMapSchema>;
 
 /**
  * Responsive Styles Schema (ADR-0065)
@@ -326,7 +328,7 @@ export const ResponsiveStylesSchema = lazySchema(() => strictObject(
   },
 ).describe('Per-breakpoint scoped style maps (ADR-0065)'));
 
-export type ResponsiveStyles = z.infer<typeof ResponsiveStylesSchema>;
+export type ResponsiveStyles = z.input<typeof ResponsiveStylesSchema>;
 
 /*
  * REMOVED — `PerformanceConfigSchema` / `PerformanceConfig` (#3896 audit

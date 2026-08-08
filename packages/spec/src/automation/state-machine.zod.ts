@@ -12,7 +12,7 @@
  *
  * The ledger carried these shapes as `authorable (p)` — provisional, because
  * nobody had checked. Checking matters here more than usual, because
- * [ADR-0020](../../../docs/adr/0020-state-machine-converge-and-enforce.md)
+ * [ADR-0020](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0020-state-machine-converge-and-enforce.md)
  * **retired this shape as a record-lifecycle declaration**: the top-level
  * `workflow` metadata type and `object.stateMachines` are both gone, and a
  * record's legal transitions are declared as a `state_machine` **validation
@@ -130,6 +130,7 @@ export const GuardRefSchema = lazySchema(() => z.union([
     },
   ),
 ]));
+export type GuardRef = z.input<typeof GuardRefSchema>;
 
 // --- Core Structure ---
 
@@ -166,8 +167,8 @@ export const TransitionSchema = lazySchema(() => strictObject(
 // kernel-side analogue of a signal *declaration* is `EventTypeDefinitionSchema`
 // in the same file.
 
-export type ActionRef = z.infer<typeof ActionRefSchema>;
-export type Transition = z.infer<typeof TransitionSchema>;
+export type ActionRef = z.input<typeof ActionRefSchema>;
+export type Transition = z.input<typeof TransitionSchema>;
 
 export type StateNodeConfig = {
   type?: 'atomic' | 'compound' | 'parallel' | 'final' | 'history';
@@ -256,6 +257,7 @@ export const StateNodeSchema: z.ZodType<StateNodeConfig, StateNodeConfig> = z.la
     ).optional(),
   },
 ));
+export type StateNode = z.input<typeof StateNodeSchema>;
 
 /**
  * Top-Level State Machine Definition
@@ -291,4 +293,4 @@ export const StateMachineSchema = lazySchema(() => strictObject(
   },
 ));
 
-export type StateMachineConfig = z.infer<typeof StateMachineSchema>;
+export type StateMachineConfig = z.input<typeof StateMachineSchema>;

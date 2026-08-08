@@ -80,8 +80,11 @@ export const TestSuiteSchema = lazySchema(() => z.object({
   scenarios: z.array(TestScenarioSchema).describe('List of test scenarios in this suite')
 }).describe('A collection of test scenarios grouped into a test suite'));
 
-export type TestSuite = z.infer<typeof TestSuiteSchema>;
-export type TestScenario = z.infer<typeof TestScenarioSchema>;
-export type TestStep = z.infer<typeof TestStepSchema>;
-export type TestAction = z.infer<typeof TestActionSchema>;
-export type TestAssertion = z.infer<typeof TestAssertionSchema>;
+export type TestSuite = z.input<typeof TestSuiteSchema>;
+export type TestScenario = z.input<typeof TestScenarioSchema>;
+export type TestStep = z.input<typeof TestStepSchema>;
+export type TestAction = z.input<typeof TestActionSchema>;
+export type TestAssertion = z.input<typeof TestAssertionSchema>;
+export type TestActionType = z.input<typeof TestActionTypeSchema>;
+export type TestAssertionType = z.input<typeof TestAssertionTypeSchema>;
+export type TestContext = z.input<typeof TestContextSchema>;

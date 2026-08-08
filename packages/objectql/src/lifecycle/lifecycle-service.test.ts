@@ -1643,10 +1643,16 @@ describe('LifecycleService teardown (#4747)', () => {
     const pageReads: number[] = [];
     const copied: string[] = [];
     const hotDeleted: Array<Array<string | number>> = [];
+    // [#5966] The cold-side `keep` prune is the loop's successor leg, so it is
+    // recorded the same way the loop's legs are — with the predicate it sent,
+    // not just a count, so "the prune ran" and "the prune ran on the right
+    // cutoff" are separable assertions.
+    const coldPruned: Array<Record<string, unknown> | undefined> = [];
     return {
       pageReads,
       copied,
       hotDeleted,
+      coldPruned,
       remaining: () => remaining,
       hot: {
         name: 'default',
@@ -1672,7 +1678,10 @@ describe('LifecycleService teardown (#4747)', () => {
           return row;
         },
         bulkDelete: async () => {},
-        deleteMany: async () => 0,
+        deleteMany: async (_object: string, query?: Record<string, unknown>) => {
+          coldPruned.push(query);
+          return 0;
+        },
       },
     };
   }
@@ -1725,6 +1734,324 @@ describe('LifecycleService teardown (#4747)', () => {
     // …and the batches never begun are still hot, for the next sweep to move.
     expect(pair.remaining()).toHaveLength(9500);
     expect(report.swept.find((e) => e.policy === 'archive')?.archived).toBe(1000);
+  });
+
+  /**
+   * [#5966] The leg AFTER the loop. #5755 stopped the batch loop; the cold-side
+   * `keep` prune sits past its exit and had no check of its own, so teardown
+   * landing anywhere inside `archiveObject` still ended with one predicate
+   * DELETE at the cold datasource.
+   *
+   * The distinction that makes this worth pinning separately: by the time the
+   * prune is reached, the abort bit has already been READ — either the loop
+   * broke on it, or a leg the loop issued raised it. Continuing is a decision
+   * the code makes with the answer in hand, not an await that merely straddled
+   * teardown. The three tests below cover the prune's two ends and both ways
+   * the loop can hand control to it.
+   */
+  const KEEP_OBJ: LifecycleObjectLike = {
+    name: 'sys_audit_log',
+    lifecycle: {
+      class: 'audit',
+      retention: { maxAge: '90d' },
+      // The delta from ARCHIVED_OBJ is `keep`, and only `keep`: the prune leg
+      // does not run at all without it, which is why #5755's fixture omitted it.
+      archive: { after: '90d', to: 'archive', keep: '365d' },
+    } as any,
+  };
+
+  it('a `keep` prune nobody calls off runs, on the cutoff `keep` declares', async () => {
+    // The control: with the abort bit down the prune is ordinary work, and the
+    // guard must not cost it. 700 rows drain inside the budget, so the loop
+    // exits on its short page — not on abort — and the prune follows it.
+    const pair = archivePair(700);
+    const { engine } = captureEngine([KEEP_OBJ], {
+      driver: pair.hot,
+      datasources: { archive: pair.cold },
+    });
+
+    const report = await service(engine).sweep();
+
+    expect(pair.pageReads).toHaveLength(2);
+    expect(pair.copied).toHaveLength(700);
+    expect(pair.remaining()).toHaveLength(0);
+    // Exactly one prune, carrying the `keep` cutoff (not `after`'s).
+    expect(pair.coldPruned).toEqual([{ where: { created_at: { $lt: isoCutoff('365d') } } }]);
+    expect(report.swept.find((e) => e.policy === 'archive')?.archived).toBe(700);
+  });
+
+  it('stop() mid-archive stops the prune too, not just the batch loop', async () => {
+    // Teardown lands while batch 2 copies, so the loop breaks at its head after
+    // READING `aborted === true` — and the very next statement used to send a
+    // predicate DELETE to the cold store the host is closing.
+    let svc!: LifecycleService;
+    const pair = archivePair(10_500, (copied) => {
+      if (copied === 501) svc.stop(); // first row of batch 2
+    });
+    const { engine } = captureEngine([KEEP_OBJ], {
+      driver: pair.hot,
+      datasources: { archive: pair.cold },
+    });
+    svc = service(engine);
+
+    const report = await svc.sweep();
+
+    expect(svc.stopped).toBe(true);
+    expect(pair.pageReads).toHaveLength(2); // #5755's guard, still holding
+    expect(pair.copied).toHaveLength(1000);
+    // The leg this test exists for: nothing at all is sent to the cold store
+    // after the loop reads the bit.
+    expect(pair.coldPruned).toEqual([]);
+    // Deferral, not loss: the rows the prune would have taken are still cold,
+    // and the archiving that DID complete is still reported.
+    expect(pair.remaining()).toHaveLength(9500);
+    expect(report.swept.find((e) => e.policy === 'archive')?.archived).toBe(1000);
+  });
+
+  it('stop() after the loop has made its last check still calls the prune off', async () => {
+    // The other way in, and the one the per-batch check cannot see: the backlog
+    // drains inside the budget, so the loop exits on `rows.length <
+    // ARCHIVE_BATCH_SIZE` and never re-reads the abort bit. Teardown lands in
+    // the final hot delete — after the loop's last check, before the prune —
+    // which is precisely the window #5755 left open.
+    let svc!: LifecycleService;
+    const pair = archivePair(700);
+    const hotBulkDelete = pair.hot.bulkDelete;
+    pair.hot.bulkDelete = async (object: string, ids: Array<string | number>) => {
+      await hotBulkDelete(object, ids);
+      if (pair.remaining().length === 0) svc.stop(); // the last batch just landed
+    };
+    const { engine } = captureEngine([KEEP_OBJ], {
+      driver: pair.hot,
+      datasources: { archive: pair.cold },
+    });
+    svc = service(engine);
+
+    const report = await svc.sweep();
+
+    expect(svc.stopped).toBe(true);
+    // The archive itself completed — every row copied and hot-deleted in pairs.
+    expect(pair.pageReads).toHaveLength(2);
+    expect(pair.hotDeleted.map((ids) => ids.length)).toEqual([500, 200]);
+    expect(pair.hotDeleted.flat()).toEqual(pair.copied);
+    expect(report.swept.find((e) => e.policy === 'archive')?.archived).toBe(700);
+    // …and the prune, the one leg still owed, is left for the next sweep.
+    expect(pair.coldPruned).toEqual([]);
+  });
+
+  /**
+   * [#6412] The two legs left over after #5966. Both are the same shape as the
+   * cold prune above — control flow that has ALREADY read `aborted === true`
+   * and issues a destructive operation anyway — but they sit at two different
+   * scopes, so each gets its own fixture and its own control:
+   *
+   *  - the space reclaim, AFTER `sweep()`'s object loop (VACUUM-class);
+   *  - the shard rotation, inside `reapObject` after the ttl reap (DROPs
+   *    expired physical shards).
+   */
+
+  /** A hot store a reap can page through, with the by-id delete it issues. */
+  function reapStore(rowCount: number) {
+    const store = new Map<string, Record<string, unknown>>();
+    for (let i = 0; i < rowCount; i++) {
+      store.set(`r${i}`, {
+        id: `r${i}`,
+        created_at: '2020-01-01T00:00:00.000Z',
+        expires_at: '2020-01-01T00:00:00.000Z',
+      });
+    }
+    return {
+      store,
+      findImpl: (_object: string, options: any) => {
+        const limit = (options?.limit as number) ?? store.size;
+        const page: Array<Record<string, unknown>> = [];
+        for (const row of store.values()) {
+          if (page.length >= limit) break;
+          page.push(row);
+        }
+        return page;
+      },
+      deleteImpl: (_object: string, options: any) => {
+        const id = options?.where?.id as string | undefined;
+        if (id !== undefined) store.delete(id);
+        return { deletedCount: 1 };
+      },
+    };
+  }
+
+  const REAPED_OBJ: LifecycleObjectLike = {
+    name: 'sys_job_run',
+    lifecycle: { class: 'telemetry', retention: { maxAge: '30d' } } as any,
+  };
+
+  it('a space reclaim nobody calls off runs, once per drained datasource', async () => {
+    // The control: with the abort bit down the reclaim is ordinary work, and the
+    // guard must not cost it. 700 rows drain in two pages, the reap reports rows
+    // deleted, and the datasource is vacuumed exactly once.
+    const hot = reapStore(700);
+    const reclaimSpace = vi.fn(async () => {});
+    const { engine, deletes } = captureEngine([REAPED_OBJ], {
+      driver: { name: 'default', reclaimSpace },
+      findImpl: hot.findImpl,
+      deleteImpl: hot.deleteImpl,
+    });
+
+    const report = await service(engine).sweep();
+
+    expect(deletes).toHaveLength(700); // by-id, two pages
+    expect(hot.store.size).toBe(0);
+    expect(reclaimSpace).toHaveBeenCalledTimes(1);
+    expect(report.reclaimed).toEqual(['default']);
+  });
+
+  it("stop() inside the LAST object's reap calls the space reclaim off too", async () => {
+    // The window the per-object check cannot see. `sweep()` reads the abort bit
+    // at the TOP of the object loop, so teardown landing in the LAST declared
+    // object's reap never meets that check again: `batchedReap` breaks BECAUSE
+    // it read `aborted === true`, the object loop then ends normally rather than
+    // through the check, and the very next statement used to send a VACUUM to
+    // the datasource the host is closing. Probe evidence on #6412:
+    // `reclaims === ['vacuum']`.
+    const hot = reapStore(5_000);
+    const reclaimSpace = vi.fn(async () => {});
+    const { engine, deletes } = captureEngine([REAPED_OBJ], {
+      driver: { name: 'default', reclaimSpace },
+      findImpl: hot.findImpl,
+      deleteImpl: hot.deleteImpl,
+    });
+    const svc = service(engine);
+    // Teardown lands while the first page is being deleted.
+    const original = engine.delete.bind(engine);
+    engine.delete = async (object: string, options: unknown) => {
+      svc.stop();
+      return original(object, options);
+    };
+
+    const report = await svc.sweep();
+
+    expect(svc.stopped).toBe(true);
+    // #5194's guard, still holding: the page in flight finishes, page 2 is never
+    // read — and the reap still reports rows deleted, so the driver IS a reclaim
+    // candidate. The bit, not the candidacy, is what calls the VACUUM off.
+    expect(deletes).toHaveLength(500);
+    expect(hot.store.size).toBe(4_500);
+    // The leg this test exists for.
+    expect(reclaimSpace).not.toHaveBeenCalled();
+    // Deferral, not loss: the pages the reap freed are returned by the next
+    // sweep, which re-derives the same reclaim set from the same deletes.
+    expect(report.reclaimed).toEqual([]);
+  });
+
+  const TTL_ROTATED_OBJ: LifecycleObjectLike = {
+    name: 'sys_activity',
+    lifecycle: {
+      class: 'telemetry',
+      // The delta that makes the rotation leg reachable with the bit already
+      // read: `ttl` puts a paging reap — the thing that reads the bit and breaks
+      // — in front of the rotation, inside one `reapObject` call.
+      ttl: { field: 'expires_at', expireAfter: '7d' },
+      storage: { strategy: 'rotation', shards: 14, unit: 'day' },
+    } as any,
+  };
+
+  const rotation = () => ({
+    object: 'sys_activity',
+    current: 'sys_activity__r20260710',
+    shards: ['sys_activity__r20260710'],
+    dropped: ['sys_activity__r20260626'],
+  });
+
+  it('a shard rotation nobody calls off drops its expired shards', async () => {
+    // The control for the test below: bit down, ttl reap and rotation both run.
+    const hot = reapStore(700);
+    const rotateShards = vi.fn(async () => rotation());
+    const { engine, deletes } = captureEngine([TTL_ROTATED_OBJ], {
+      driver: { name: 'default', supportsRotation: true, rotateShards },
+      findImpl: hot.findImpl,
+      deleteImpl: hot.deleteImpl,
+    });
+
+    const report = await service(engine).sweep();
+
+    expect(deletes).toHaveLength(700); // the ttl reap drained the store
+    expect(rotateShards).toHaveBeenCalledWith(TTL_ROTATED_OBJ, FIXED_NOW);
+    expect(report.swept.map((e) => e.policy)).toEqual(['ttl', 'rotation']);
+    expect(report.swept.find((e) => e.policy === 'rotation')?.droppedShards).toBe(1);
+  });
+
+  it('stop() inside the ttl reap calls the shard rotation off', async () => {
+    // ttl + rotation on ONE object: the reap runs first and `batchedReap` breaks
+    // because it READ `aborted === true`, then returns straight into a rotation
+    // guarded only by strategy and driver capability. The DROP of expired
+    // physical shards is the most destructive operation this service issues, and
+    // it went to a datasource the host is closing. Probe evidence on #6412:
+    // `drops === ['DROP shard']`.
+    const hot = reapStore(5_000);
+    const rotateShards = vi.fn(async () => rotation());
+    const { engine, deletes } = captureEngine([TTL_ROTATED_OBJ], {
+      driver: { name: 'default', supportsRotation: true, rotateShards },
+      findImpl: hot.findImpl,
+      deleteImpl: hot.deleteImpl,
+    });
+    const svc = service(engine);
+    const original = engine.delete.bind(engine);
+    engine.delete = async (object: string, options: unknown) => {
+      svc.stop(); // teardown lands in the ttl reap's first page
+      return original(object, options);
+    };
+
+    const report = await svc.sweep();
+
+    expect(svc.stopped).toBe(true);
+    expect(deletes).toHaveLength(500); // the reap stopped at its own boundary …
+    // … and no shard was dropped after it had read the bit.
+    expect(rotateShards).not.toHaveBeenCalled();
+    expect(report.swept.map((e) => e.policy)).toEqual(['ttl']);
+    // Suppressing the rotation must not divert the object into the age-based
+    // fallback reap — that branch is `!lc.ttl`-gated, so it stays shut.
+    expect(hot.store.size).toBe(4_500);
+  });
+
+  const ROTATED_ONLY_OBJ: LifecycleObjectLike = {
+    name: 'sys_activity',
+    lifecycle: {
+      class: 'telemetry',
+      storage: { strategy: 'rotation', shards: 14, unit: 'day' },
+    } as any,
+  };
+
+  it('rotation without `ttl` is unchanged — nothing has read the bit before the DROP', async () => {
+    // The form #6412's triage graded benign, pinned so the guard above cannot
+    // silently take it as well. Without `ttl` (and without `archive`, which
+    // returns earlier) nothing in `reapObject` awaits before the rotation, so
+    // the bit is structurally false there — not merely unobserved. Teardown
+    // landing INSIDE the rotation is as close as this form gets, and the
+    // rotation must still complete and report exactly as it always did.
+    let svc!: LifecycleService;
+    const rotateShards = vi.fn(async () => {
+      svc.stop(); // mid-DROP: after dispatch, so no decision was made with it
+      return rotation();
+    });
+    const { engine, deletes } = captureEngine([ROTATED_ONLY_OBJ], {
+      driver: { name: 'default', supportsRotation: true, rotateShards },
+    });
+    svc = service(engine);
+
+    const report = await svc.sweep();
+
+    expect(rotateShards).toHaveBeenCalledTimes(1);
+    // No fallback age reap took the rotation's place …
+    expect(deletes).toEqual([]);
+    // … and the entry is identical to the one the unaborted form reports.
+    expect(report.swept).toEqual([
+      {
+        object: 'sys_activity',
+        class: 'telemetry',
+        policy: 'rotation',
+        cutoff: isoCutoff('14d'),
+        droppedShards: 1,
+      },
+    ]);
   });
 
   it('stop() then start() re-arms the service — teardown is not one-way', async () => {

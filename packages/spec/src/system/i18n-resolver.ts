@@ -14,6 +14,7 @@
  *   objects.<object>._actions.<action_name>.label
  *   objects.<object>._actions.<action_name>.confirmText
  *   objects.<object>._actions.<action_name>.successMessage
+ *   objects.<object>._tabs.<tab_name>.label
  *
  * `<view_key>` is the BARE authoring key (`listViews.<key>`, or the default
  * list/form key) — never the `<object>.<key>` identity the registry assigns a
@@ -255,6 +256,87 @@ export function resolveViewDescription(
     }
   }
   return view.description;
+}
+
+/**
+ * Minimal filter-preset tab shape consumed by {@link resolveTabLabel} —
+ * `ViewTabSchema` (`ui/view.zod.ts`) narrowed to what the lookup reads.
+ */
+export interface ViewTabLike {
+  /** Tab identifier (snake_case) — the `_tabs` key. */
+  name: string;
+  label?: string;
+  /** Referenced list view name, when the tab is a saved-view shortcut. */
+  view?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Resolve a translated filter-preset tab label (#5377).
+ *
+ * Lookup order, per locale in the chain:
+ *
+ *  1. `objects.<object>._tabs.<tab_name>.label` — the explicit translation.
+ *  2. `objects.<object>._views.<tab.view>.label` — for a tab that references a
+ *     saved view, the view's own translated label. This is the path that
+ *     already worked before `_tabs` existed (the console follows `tabs[].view`
+ *     and reads the referenced view's label), so it is preserved rather than
+ *     replaced: an app that translated its views and never wrote a `_tabs`
+ *     entry keeps rendering exactly what it rendered before.
+ *  3. The literal `tab.label`, then `tab.name`.
+ *
+ * A `filter`-only tab — legal under `ViewTabSchema`, and the shape the showcase
+ * authors — has no step 2, which is precisely why it had no translation path at
+ * all before this. Each step is evaluated across the whole locale chain in
+ * order, so an explicit `_tabs` entry in ANY locale of the chain outranks a
+ * view label: the more specific key wins over the inherited one, the same
+ * precedence `translatePage` gives component-id copy over page-name copy.
+ */
+export function resolveTabLabel(
+  bundle: TranslationBundle | undefined,
+  objectName: string | undefined,
+  tab: ViewTabLike,
+  opts?: ResolveOptions,
+): string {
+  return lookupTabLabel(bundle, objectName, tab, opts)
+    ?? (typeof tab.label === 'string' ? tab.label : tab.name);
+}
+
+/**
+ * The bundle-only half of {@link resolveTabLabel}: `undefined` when neither
+ * `_tabs` nor the referenced view's label carries a translation.
+ *
+ * `translatePage` needs this distinction rather than the resolved string.
+ * Since #5728 a `label` may itself be an inline locale map, which is already
+ * multilingual and is the author's own resolution route — overwriting it with
+ * `resolveTabLabel`'s string fallback would flatten a four-language label down
+ * to one. Writing only when the bundle actually answered leaves that shape
+ * untouched.
+ */
+function lookupTabLabel(
+  bundle: TranslationBundle | undefined,
+  objectName: string | undefined,
+  tab: ViewTabLike,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle || !objectName || typeof tab.name !== 'string' || tab.name.length === 0) {
+    return undefined;
+  }
+  const chain = localeChain(opts);
+
+  for (const code of chain) {
+    const candidate = pickData(bundle, code)?.objects?.[objectName]?._tabs?.[tab.name]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+
+  if (typeof tab.view === 'string' && tab.view.length > 0) {
+    for (const code of chain) {
+      const candidate = pickData(bundle, code)?.objects?.[objectName]?._views?.[tab.view]?.label;
+      if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+    }
+  }
+
+  return undefined;
 }
 
 function lookupActionField(
@@ -676,6 +758,10 @@ export function translateDashboard<T extends DashboardLike>(
 /** Minimal page-component shape consumed by `translatePage`. */
 export interface PageComponentLike {
   type?: string;
+  /** `PageComponentSchema.id` — the key `pages.<name>.components` addresses (#6080). */
+  id?: string;
+  /** The component's own top-level label, where `label` copy lands when present. */
+  label?: string;
   properties?: Record<string, any>;
   [key: string]: any;
 }
@@ -693,6 +779,18 @@ export interface PageLike {
   label?: string;
   description?: string;
   regions?: PageRegionLike[];
+  /** Bound object for a record page — the `_tabs` fallback binding (#5377). */
+  object?: string;
+  /**
+   * List/interface page config (`InterfacePageConfigSchema`). Carries the
+   * `userFilters.tabs` preset bar this resolver translates, and the `source`
+   * object those presets filter.
+   */
+  interfaceConfig?: {
+    source?: string;
+    userFilters?: { tabs?: ViewTabLike[]; [key: string]: unknown };
+    [key: string]: unknown;
+  };
   [key: string]: any;
 }
 
@@ -714,6 +812,54 @@ function lookupPageAttr(
 }
 
 /**
+ * The copy keys `pages.<name>.components.<id>` carries (#6080). Measured
+ * against `ComponentPropsMap` — see the schema's own note for which component
+ * declares which.
+ *
+ * Exported because the CLI's `i18n-extract` writes exactly these keys into the
+ * skeleton bundle. Two hand-maintained copies of this list would drift into the
+ * classic pair of failures — the extractor offering a key the resolver ignores,
+ * or omitting one it reads — so there is one list and both sides import it.
+ * `translation.zod.ts` declares the same six; `translation.test.ts` pins the
+ * two in agreement.
+ */
+export const PAGE_COMPONENT_COPY_KEYS = [
+  'title', 'description', 'label', 'placeholder', 'emptyText', 'submitLabel',
+] as const;
+
+export type PageComponentCopyKey = typeof PAGE_COMPONENT_COPY_KEYS[number];
+
+/**
+ * Per-component copy for one component id, resolved across the locale chain.
+ *
+ * Resolved KEY BY KEY rather than by taking the first locale that has an entry
+ * for the id: a partially-translated `zh` entry must still fall back to `en`
+ * for the keys it omits, which is how every other resolver on this surface
+ * behaves.
+ */
+function lookupPageComponentCopy(
+  bundle: TranslationBundle | undefined,
+  name: string,
+  id: string,
+  opts?: ResolveOptions,
+): Partial<Record<PageComponentCopyKey, string>> | undefined {
+  if (!bundle) return undefined;
+  let found: Partial<Record<PageComponentCopyKey, string>> | undefined;
+  for (const code of localeChain(opts)) {
+    const entry = pickData(bundle, code)?.pages?.[name]?.components?.[id];
+    if (!entry || typeof entry !== 'object') continue;
+    for (const key of PAGE_COMPONENT_COPY_KEYS) {
+      if (found?.[key] !== undefined) continue;
+      const candidate = (entry as Record<string, unknown>)[key];
+      if (typeof candidate === 'string' && candidate.length > 0) {
+        (found ??= {})[key] = candidate;
+      }
+    }
+  }
+  return found;
+}
+
+/**
  * Apply the active locale to a page metadata document — translates the page's
  * own `label` / `description` and the `properties.title` / `properties.subtitle`
  * of every `page:header` component in its regions, against
@@ -725,9 +871,22 @@ function lookupPageAttr(
  * `pages.<name>.label` so translators need not repeat a string that is normally
  * identical to the page's nav label.
  *
+ * Every OTHER component is addressed by its own `id` through
+ * `pages.<name>.components.<id>` (#6080), which overlays that component's
+ * `properties` — the page half of what `dashboards.<name>.widgets.<id>` has
+ * always given dashboards. Because the id route is the more specific of the
+ * two, it wins wherever both could apply (a `page:header` that does carry an
+ * id).
+ *
  * Only region-level components are visited: `page:header` is a top-level
  * layout block by convention, and components nested inside another component's
  * `properties` (tabs, sections) are untyped free-form props.
+ *
+ * A list page's filter-preset tab bar
+ * (`interfaceConfig.userFilters.tabs[].label`) is translated too, against
+ * `objects.<object>._tabs.<tab_name>.label` — see
+ * {@link translateInterfaceTabs} for why that key is object-scoped and why
+ * only this one of `ViewTabSchema`'s two carriers is covered (#5377).
  */
 export function translatePage<T extends PageLike>(
   doc: T,
@@ -746,13 +905,44 @@ export function translatePage<T extends PageLike>(
 
   const translateComponent = (component: PageComponentLike): PageComponentLike => {
     if (!component || typeof component !== 'object') return component;
-    if (component.type !== PAGE_HEADER_COMPONENT) return component;
-    if (headerTitle === undefined && headerSubtitle === undefined) return component;
+
+    // Per-component copy (#6080) — addressed by the component's own id, so it
+    // is strictly more specific than the page-name route below and is applied
+    // first. A `page:header` that DOES carry an id can therefore be translated
+    // either way, and the id wins.
+    const copy = typeof component.id === 'string' && component.id.length > 0
+      ? lookupPageComponentCopy(bundle, name, component.id, opts)
+      : undefined;
+
+    let next = component;
+    if (copy) {
+      const { label: copyLabel, ...propCopy } = copy;
+      // `label` lands wherever the author declared it. `PageComponentSchema`
+      // has a top-level `label` AND an open `properties` bag, and different
+      // components use different slots — writing both would invent a key the
+      // author never authored, and writing only one would silently miss half
+      // the components.
+      const labelAtTopLevel = copyLabel !== undefined && typeof component.label === 'string';
+      next = {
+        ...component,
+        ...(labelAtTopLevel ? { label: copyLabel } : {}),
+        properties: {
+          ...component.properties,
+          ...propCopy,
+          ...(copyLabel !== undefined && !labelAtTopLevel ? { label: copyLabel } : {}),
+        },
+      };
+    }
+
+    if (next.type !== PAGE_HEADER_COMPONENT) return next;
+    if (headerTitle === undefined && headerSubtitle === undefined) return next;
     return {
-      ...component,
+      ...next,
       properties: {
-        ...component.properties,
-        ...(headerTitle !== undefined ? { title: headerTitle } : {}),
+        ...next.properties,
+        // The id-addressed copy above is more specific — do not overwrite what
+        // it already resolved for this header.
+        ...(headerTitle !== undefined && copy?.title === undefined ? { title: headerTitle } : {}),
         ...(headerSubtitle !== undefined ? { subtitle: headerSubtitle } : {}),
       },
     };
@@ -765,12 +955,62 @@ export function translatePage<T extends PageLike>(
       })
     : doc.regions;
 
+  const interfaceConfig = translateInterfaceTabs(doc, bundle, opts);
+
   return {
     ...doc,
     ...(label !== undefined ? { label } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(regions !== undefined ? { regions } : {}),
+    ...(interfaceConfig !== undefined ? { interfaceConfig } : {}),
   };
+}
+
+/**
+ * Translate a list page's `interfaceConfig.userFilters.tabs[].label` against
+ * `objects.<object>._tabs.<tab_name>.label` (#5377). Returns `undefined` when
+ * the page has no tab bar or nothing resolved, so `translatePage` leaves the
+ * key off the copy entirely.
+ *
+ * **This is where `ViewTabSchema` is actually rendered.** The schema has two
+ * carriers — `UserFiltersSchema.tabs` (page-only preset bar, ADR-0047) and
+ * `ListViewSchema.tabs` ("multi-tab view interface") — and only the first has a
+ * renderer: objectui's `TabFilters` draws it from a page's `interfaceConfig`,
+ * while nothing in either repo reads the ListView carrier. Translating the
+ * carrier nothing draws would declare a capability no user can see, so this
+ * covers the live one and stops there.
+ *
+ * The object comes from `interfaceConfig.source` — the page's own binding for
+ * the records these presets filter — falling back to the page-level `object`.
+ * Same order `i18n-extract` uses when it scaffolds the keys, and the same
+ * "component's own binding first" discipline `_sections` follows.
+ */
+function translateInterfaceTabs(
+  doc: PageLike,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): PageLike['interfaceConfig'] | undefined {
+  const cfg = doc.interfaceConfig;
+  if (!cfg || typeof cfg !== 'object') return undefined;
+  const userFilters = cfg.userFilters;
+  if (!userFilters || typeof userFilters !== 'object' || !Array.isArray(userFilters.tabs)) {
+    return undefined;
+  }
+  const objectName = typeof cfg.source === 'string' && cfg.source.length > 0
+    ? cfg.source
+    : doc.object;
+  if (!objectName) return undefined;
+
+  let changed = false;
+  const tabs = userFilters.tabs.map((tab) => {
+    if (!tab || typeof tab !== 'object') return tab;
+    const label = lookupTabLabel(bundle, objectName, tab, opts);
+    if (label === undefined) return tab;
+    changed = true;
+    return { ...tab, label };
+  });
+
+  return changed ? { ...cfg, userFilters: { ...userFilters, tabs } } : undefined;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

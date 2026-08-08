@@ -47,7 +47,7 @@ export const CoreServiceName = z.enum([
   // quoted token in this block as an enum member, comments included.)
 ]);
 
-export type CoreServiceName = z.infer<typeof CoreServiceName>;
+export type CoreServiceName = z.input<typeof CoreServiceName>;
 
 /**
  * Which published package actually fills each service slot — or `null` when
@@ -189,6 +189,7 @@ export const ServiceCriticalitySchema = lazySchema(() => z.enum([
   'core',     // System warns if missing, functionality degraded (Warn)
   'optional', // System ignores if missing, feature disabled (Info)
 ]));
+export type ServiceCriticality = z.input<typeof ServiceCriticalitySchema>;
 
 /**
  * Service Requirement Definition
@@ -242,6 +243,7 @@ export const KernelServiceMapSchema = lazySchema(() => z.record(
   CoreServiceName, 
   z.unknown().describe('Service Instance implementing the protocol interface')
 ));
+export type KernelServiceMap = z.input<typeof KernelServiceMapSchema>;
 
 // ==========================================
 // Service Interfaces (Stub definitions)
@@ -256,3 +258,4 @@ export const ServiceConfigSchema = lazySchema(() => z.object({
   name: CoreServiceName,
   options: z.record(z.string(), z.unknown()).optional(),
 }));
+export type ServiceConfig = z.input<typeof ServiceConfigSchema>;

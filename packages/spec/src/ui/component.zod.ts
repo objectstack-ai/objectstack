@@ -96,6 +96,31 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 // authors and declared `hideFields`, so wiring the gate no longer turns three
 // showcase pages and the `sys_user` platform page into hard parse errors.
 //
+// #5775 closed the rest of that inventory in both directions, on the same #5611
+// rule (the delivered, authorized shape is the contract): nine keys the
+// renderers honour were DECLARED (`element:record_picker` `labelField` /
+// `valueField` / `label` / `emptyText`, `record:path` `stages[].terminal`,
+// `page:tabs` `items[].value` / `items[].count`, `page:card` `children`, and
+// `children` on the three thin containers that were declared `EmptyProps`),
+// and four that nothing read were RETIRED with tombstones + ADR-0087 D2
+// conversions (`displayField` → `labelField`, `page:card.body` → `children`,
+// `searchFields`, `multiple`). What is deliberately NOT closed here is
+// `page:card.visible`: a component-level visibility predicate written into
+// `properties` and hoisted by `SchemaRenderer`. The canonical spelling is the
+// component-level `visibleWhen` (ADR-0089) — that one is a page to rewrite, not
+// a key to declare.
+//
+// "The rest of that inventory" was one pair short, and how the shortfall
+// happened is the reusable part: #5775's ruling named its keys individually, so
+// the two `element:record_picker` shorthands the renderer reads through the
+// SAME `ds.x ?? props.x` line as the keys that were named — `sort` and `limit`
+// — fell outside it and stayed undeclared. #6276 declared them on the same
+// #5611 rule (maintainer ruling 2026-08-08, direction A). The lesson for the
+// next divergence sweep: enumerate by the RENDERER'S read pattern, not by the
+// key list a previous ruling happened to quote. Retiring the flat family
+// wholesale in favour of `dataSource` is the standing alternative, deferred to
+// v18 as #6590 — not rejected.
+//
 // ── #5068: THE GATE IS WIRED — read the flip precisely ─────────────────────
 //
 // `packages/lint/src/validate-component-props.ts` dispatches on the component's
@@ -125,12 +150,24 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 //     `saveMetaItem` / REST `/meta` write still stores an unvalidated props bag
 //     (#4463's fourth wall). That is recorded, not fixed, by #5068.
 //
-// The gate is WARNING-level in this first step. The live corpus violates these
-// declarations in places that are open contract questions rather than authoring
-// mistakes — inline `{ en, 'zh-CN' }` label maps on three published platform
-// pages against an `I18nLabelSchema` that is a plain `z.string()` (#5728), and
-// keys objectui's renderers honour that this file does not declare. The
-// warning-period inventory is the acceptance baseline for the error upgrade.
+// The gate is WARNING-level in this first step. The live corpus violated these
+// declarations in places that were open contract questions rather than
+// authoring mistakes, and the inventory is the acceptance baseline for the
+// error upgrade. Two of the three entries are now cleared:
+//
+//  - #5775 declared the keys objectui's renderers honour and tombstoned the
+//    four nothing read.
+//  - #5728 settled the inline `{ en, 'zh-CN' }` label maps the three published
+//    platform pages author: the maintainer ruled (2026-08-06) that the map is a
+//    delivered capability, so `I18nLabelSchema` is a union of the plain string
+//    and an inline locale map, and `element:text.content` — declared a bare
+//    `z.string()` and therefore out of that union's reach — was named in the
+//    same ruling and moved onto it. That retired all 42 `component-props-invalid`
+//    findings this gate reported on the platform pages (34 label + 8 content).
+//
+// What remains before the upgrade to error is the page rewrites
+// (`page:card.visible` → the component-level `visibleWhen`, #5776's tab `key`
+// → `value`), not a declaration in this file.
 //
 // The verdict is pinned in `component.test.ts` and in the `ui/` tables of
 // `docs/audits/2026-07-unknown-key-strictness-ledger.md` — change all three
@@ -143,7 +180,40 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { ExpressionInputSchema } from '../shared/expression.zod';
+import { retiredKey } from '../shared/retired-key';
+// `element:record_picker`'s flat `sort` shorthand is the SAME contract as
+// `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
+// shared source rather than re-spelled here (#6276).
+import { SortItemSchema } from '../shared/enums.zod';
 const EmptyProps = z.object({});
+
+/**
+ * The composition slot every thin container renders: `page:section`,
+ * `page:footer`, `page:sidebar`.
+ *
+ * All three were declared `EmptyProps` — "this component takes zero props" —
+ * while their renderers have always rendered a child list
+ * (`renderChildren(schema.children || schema.body)` in objectui's
+ * `containers.tsx`, one per registered renderer). Declaring zero props for a
+ * container that renders children is the ADR-0078 shape from the schema side:
+ * the #5068 gate reports every authored `children` as an unknown key, and a
+ * `.strict()` batch would reject the only thing these components are for.
+ *
+ * `children` is the canonical spelling — it is what `grid`, `flex`,
+ * `page:accordion` items and `page:tabs` items already use, and what the
+ * renderers read FIRST. `body` is deliberately NOT declared here (#5775): one
+ * composition key, not two (Prime Directive #12). The renderers keep reading
+ * `body` as a back-compat fallback for stored documents; that fallback is
+ * objectui's to retire on its own schedule, and it is not a second authorable
+ * spelling.
+ *
+ * Shared by all three entries rather than copied: they are the same contract,
+ * and three identical defs would be three places for it to drift.
+ */
+export const PageContainerProps = z.object({
+  children: z.array(z.unknown()).optional().describe('Child components rendered inside this container, in order'),
+});
+export type PageContainerProps = z.input<typeof PageContainerProps>;
 
 /**
  * ----------------------------------------------------------------------
@@ -180,6 +250,21 @@ export const PageTabsProps = z.object({
     visibleWhen: ExpressionInputSchema.optional().describe(
       'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Binds `record`, `current_user`, `page.<var>`. ADR-0089 canonical name (`visibility`/`visibleOn` aliases are not accepted here).',
     ),
+    /**
+     * Stable URL token for this tab — the value `?tab=` carries and the
+     * renderer restores on reload. Omitted, the renderer derives `tab-<index>`,
+     * which silently points at a DIFFERENT tab as soon as the item list
+     * changes; that is why a durable link needs a semantic value here
+     * (`details`, `related:task`, …). Declared for #5776: the showcase authors
+     * this slot as `key`, which is neither spelling the renderer reads.
+     */
+    value: z.string().optional().describe('Stable `?tab=` URL token for this tab (default: index-derived `tab-<i>`, which is not durable across item-list changes)'),
+    /**
+     * Badge count rendered next to the label. Omitted, the renderer derives it
+     * by probing the `record:related_list` descendants of this tab's children,
+     * so an explicit value is only needed when the count is not that sum.
+     */
+    count: z.number().int().min(0).optional().describe('Badge count shown next to the tab label (default: derived from `record:related_list` descendants)'),
     children: z.array(z.unknown()).describe('Child components')
   })),
   /** ARIA accessibility */
@@ -190,8 +275,29 @@ export const PageCardProps = z.object({
   title: I18nLabelSchema.optional(),
   bordered: z.boolean().default(true),
   actions: z.array(z.string()).optional(),
-  /** Slot for nested content in the Card body */
-  body: z.array(z.unknown()).optional().describe('Card content components (slot)'),
+  /**
+   * Card content, in order — the canonical composition slot, matching every
+   * other container (`grid`, `flex`, `page:section`, `page:tabs` items).
+   *
+   * This spelling was authored by the showcase and rendered by objectui long
+   * before it was declared (`schema.body ?? schema.children`, with the
+   * renderer's own comment saying authors expect `children` to work here); the
+   * declaration was `body` alone. #5775 converges the two on `children` rather
+   * than declaring both — one composition key, not two de-facto contracts
+   * (Prime Directive #12). `footer` is a genuinely distinct slot and stays.
+   */
+  children: z.array(z.unknown()).optional().describe('Card content components, in order (the card body slot)'),
+  /**
+   * REMOVED (#5775). `body` was the declared spelling of the slot every other
+   * container calls `children`; the two are the same slot, and the renderer
+   * already reads both. The live mechanism is `children`.
+   */
+  body: retiredKey(
+    '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — '
+    + 'it was a second spelling of the composition slot every other container calls `children`, '
+    + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '
+    + 'components) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
   /** Slot for footer content */
   footer: z.array(z.unknown()).optional().describe('Card footer components (slot)'),
   /** ARIA accessibility */
@@ -330,6 +436,7 @@ export const RecordHighlightsField = z.union([
     readonly: z.boolean().optional().describe('Render this chip read-only — suppresses inline editing on the highlight card. Use for hook/automation-maintained columns that must not be hand-edited from the record header.'),
   }),
 ]).describe('Highlight field: bare name, or {name,label?,icon?,type?,readonly?}');
+export type RecordHighlightsField = z.input<typeof RecordHighlightsField>;
 
 export const RecordHighlightsProps = z.object({
   fields: z.array(RecordHighlightsField).min(1).max(7).describe('Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or {name, label?, icon?, type?, readonly?} for inline overrides.'),
@@ -385,10 +492,21 @@ export const RecordPathProps = z.object({
   stages: z.array(z.object({
     value: z.string(),
     label: I18nLabelSchema,
+    /**
+     * Declare this stage a terminus and say WHICH one. The renderer classifies
+     * every stage to decide whether it stays in the forward chevron path (won)
+     * or breaks out into the separated alt group (lost); an explicit `terminal`
+     * is honoured FIRST, ahead of the token heuristic that guesses from the
+     * value/label (`closed_won`, `失败`, …). Authors whose stage names the
+     * heuristic cannot read — the showcase's `done` — have no other way to get
+     * the right treatment.
+     */
+    terminal: z.enum(['won', 'lost']).optional().describe('Mark this stage a terminus and its kind — overrides the renderer\'s value/label token heuristic'),
   })).optional().describe('Explicit stage definitions (if not using field metadata)'),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
+export type RecordPathProps = z.input<typeof RecordPathProps>;
 
 export const PageAccordionProps = z.object({
   items: z.array(z.object({
@@ -417,7 +535,19 @@ export const AIChatWindowProps = z.object({
  */
 
 export const ElementTextPropsSchema = lazySchema(() => z.object({
-  content: z.string().describe('Text or Markdown content'),
+  /**
+   * Text or Markdown body copy.
+   *
+   * `I18nLabelSchema` rather than a bare `z.string()` (#5728, named explicitly
+   * in the maintainer's ruling because the label-wide widening could not reach
+   * it): `sys-user.page.ts` authors eight `element:text` nodes whose `content`
+   * is an inline `{ en, 'zh-CN', 'ja-JP', 'es-ES' }` map, and objectui resolves
+   * them through the same `pickLocalized` every label goes through. The bare
+   * string was the declaration disagreeing with the delivered shape, and it was
+   * eight of the 42 findings the #5068 gate reported on the platform's own
+   * pages.
+   */
+  content: I18nLabelSchema.describe('Text or Markdown content — a plain string, or an inline locale map'),
   variant: z.enum(['heading', 'subheading', 'body', 'caption'])
     .optional().default('body').describe('Text style variant'),
   align: z.enum(['left', 'center', 'right'])
@@ -438,6 +568,7 @@ export const ElementNumberPropsSchema = lazySchema(() => z.object({
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
+export type ElementNumberProps = z.input<typeof ElementNumberPropsSchema>;
 
 export const ElementImagePropsSchema = lazySchema(() => z.object({
   src: z.string().describe('Image URL or attachment field'),
@@ -530,17 +661,129 @@ export const ElementFormPropsSchema = lazySchema(() => z.object({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
 
+/**
+ * The record picker — a single-select over one object, writing the picked
+ * record's id into a page variable.
+ *
+ * ⚠️ #5775 rewrote this shape end to end, and the reason is worth keeping: the
+ * declaration and the renderer had drifted into two different contracts. The
+ * schema required `displayField` that no renderer has ever read, and declared
+ * `searchFields` / `multiple` that no renderer implements — while the renderer
+ * honoured `labelField`, `valueField`, `label` and `emptyText`, none of which
+ * were declared. An author following the schema got a picker rendered by
+ * `name` with zero diagnostics (ADR-0078), and the #5068 gate reported the
+ * showcase's own correct page as broken.
+ *
+ * The maintainer's ruling (2026-08-06, direction A) is the #5611 rule applied
+ * again: the delivered, authorized shape is the contract. `labelField` is the
+ * spelling — the renderer reads it, the component registry publishes it as a
+ * designer input, and the showcase authors it — so `displayField` retires as
+ * its synonym. `searchFields` and `multiple` retire under ADR-0049
+ * enforce-or-remove: the control is a single-select `Select` with no search
+ * box, so both were capability claims nothing kept (#5021 / #4988 precedent).
+ * Either may return the day it is implemented; a declaration is not a roadmap.
+ *
+ * ⚠️ #6276 finished the same inventory one key-pair later, and the finding is
+ * worth stating as a rule rather than as two more keys. The renderer resolves
+ * its query from FOUR keys through one identical pattern — `dataSource` first,
+ * the flat `properties` shorthand second:
+ *
+ * ```ts
+ * const object = ds.object ?? props.object;
+ * const filter = ds.filter ?? props.filter;
+ * const sort   = ds.sort   ?? props.sort;
+ * const limit  = ds.limit  ?? props.limit ?? 50;
+ * ```
+ *
+ * After #5775 two of those four shorthands were declared (`object`, `filter`)
+ * and two were not, so one renderer read half a contract and half a trapdoor:
+ * an author who inferred `properties.limit: 20` from the `object`/`filter`
+ * spelling got the renderer's default 50 with zero diagnostics — ADR-0078, on
+ * the same element that had just been rewritten to remove it. The maintainer's
+ * ruling (2026-08-08, direction A) declares the other two, so all four flat
+ * shorthands are contract. Direction B — retiring the whole flat family and
+ * making `dataSource` the single data-binding door — was NOT dropped: it is a
+ * cross-element decision (`element:form` / `element:filter` carry the same flat
+ * `object`), tracked as #6590 for v18, and A does not block it. When B lands
+ * these two retire alongside `object` / `filter` under ADR-0087, together.
+ *
+ * Both keys are declared in the shape `ElementDataSourceSchema` already uses
+ * for its own `sort` / `limit`, deliberately: they are the SAME contract read
+ * through a second spelling, so a divergent shape here would be a third
+ * dialect rather than a shorthand.
+ */
 export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
   object: z.string().describe('Object to pick records from'),
-  displayField: z.string().describe('Field to display as the record label'),
-  searchFields: z.array(z.string()).optional().describe('Fields to search against'),
+  /**
+   * Field rendered as each row's text. Defaults to `name`, which is what the
+   * renderer falls back to (`props.labelField ?? 'name'`) — so this is
+   * optional, not required: omitting it is a working picker, not a broken one.
+   */
+  labelField: z.string().optional().describe("Field rendered as each row's text (default `name`)"),
+  /** Field whose value is written into the bound page variable (default `id`). */
+  valueField: z.string().optional().describe('Field whose value is written into the bound page variable (default `id`)'),
+  /** Control label rendered above the select. */
+  label: I18nLabelSchema.optional().describe('Control label rendered above the select'),
   filter: FilterConditionSchema.optional().describe('Filter criteria for available records'),
-  multiple: z.boolean().optional().default(false).describe('Allow multiple record selection'),
+  /**
+   * Row order (#6276). The flat shorthand for `dataSource.sort`, and the same
+   * shape — `SortItemSchema[]`, the pairs the renderer forwards to the query as
+   * `$orderby`. `dataSource.sort` wins when both are written
+   * (`ds.sort ?? props.sort`).
+   */
+  sort: z.array(SortItemSchema).optional()
+    .describe('Row order — synonym of the component-level `dataSource.sort`, which takes precedence when both are set'),
+  /**
+   * Row cap (#6276). The flat shorthand for `dataSource.limit`, same shape.
+   * `dataSource.limit` wins when both are written, and with neither the
+   * renderer queries `$top: 50` (`ds.limit ?? props.limit ?? 50`) — that 50 is
+   * the renderer's fallback, not a schema default, so it is documented here
+   * rather than declared: declaring it would materialize a `limit: 50` on every
+   * parsed picker and turn an unset key into an authored one.
+   */
+  limit: z.number().int().positive().optional()
+    .describe('Max records offered — synonym of the component-level `dataSource.limit`, which takes precedence when both are set (renderer default 50)'),
   targetVariable: z.string().optional().describe('Page variable to bind selected record ID(s)'),
   placeholder: I18nLabelSchema.optional().describe('Placeholder text'),
+  /** Shown in place of the row list when the query returns nothing. */
+  emptyText: I18nLabelSchema.optional().describe('Text shown when the query returns no records (default "No records")'),
+  /**
+   * REMOVED (#5775). A synonym of `labelField` — the same concept in two
+   * spellings, of which only `labelField` was ever read.
+   */
+  displayField: retiredKey(
+    '`element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 '
+    + '(#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
+    + 'renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key '
+    + 'to `labelField`; the value (a field name) is unchanged. '
+    + 'Run `os migrate meta --from 16` to rewrite it automatically.',
+  ),
+  /**
+   * REMOVED (#5775). ADR-0049 enforce-or-remove: the control has no search
+   * box, so this narrowed nothing.
+   */
+  searchFields: retiredKey(
+    '`element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 '
+    + '(#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no '
+    + 'renderer ever read it and it narrowed nothing. Delete the key. To restrict which records '
+    + 'the picker offers, use `filter` (or the component-level `dataSource.filter`), which the '
+    + 'query path does apply. Run `os migrate meta --from 16` to remove it automatically.',
+  ),
+  /**
+   * REMOVED (#5775). ADR-0049 enforce-or-remove: the control is a single-select
+   * `Select`, and a page variable binds one record id.
+   */
+  multiple: retiredKey(
+    '`element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 '
+    + '(#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable '
+    + 'holds one record id, so `multiple: true` selected nothing extra and reported success. '
+    + 'Delete the key; multi-record selection is not implemented on this element. '
+    + 'Run `os migrate meta --from 16` to remove it automatically.',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
+export type ElementRecordPickerProps = z.input<typeof ElementRecordPickerPropsSchema>;
 
 /**
  * A single-line free-text input — the data-entry half of an SDUI page (Airtable
@@ -580,10 +823,12 @@ export const ComponentPropsMap = {
   'page:header': PageHeaderProps,
   'page:tabs': PageTabsProps,
   'page:card': PageCardProps,
-  'page:footer': EmptyProps,
-  'page:sidebar': EmptyProps,
+  // The three thin containers: one shared `children` contract (#5775). They
+  // were `EmptyProps` while their renderers rendered a child list.
+  'page:footer': PageContainerProps,
+  'page:sidebar': PageContainerProps,
   'page:accordion': PageAccordionProps,
-  'page:section': EmptyProps,
+  'page:section': PageContainerProps,
 
   // Record
   'record:details': RecordDetailsProps,

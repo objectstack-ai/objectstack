@@ -1,16 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { z } from 'zod';
-
-import { lazySchema } from '../../shared/lazy-schema';
-import { strictUnknownKeyError } from '../../shared/suggestions.zod';
-import {
-  driverConfigJsonSchema,
-  READ_ONLY_BELONGS_ON_DATASOURCE,
-  SCHEMA_MODE_BELONGS_ON_DATASOURCE,
-  SqlAutoMigrateSchema,
-} from './common.zod';
-
 /**
  * SQLite driver configuration — the `config` slot of a `datasource` whose
  * `driver` resolves to `sqlite` (native `better-sqlite3`, with the dev-only
@@ -27,6 +16,18 @@ import {
  * rows are rewritten to `filename` at load, the factory reads one spelling,
  * and authoring rejects both with the rename hint below.
  */
+
+import { z } from 'zod';
+
+import { lazySchema } from '../../shared/lazy-schema';
+import { strictUnknownKeyError } from '../../shared/suggestions.zod';
+import {
+  driverConfigJsonSchema,
+  READ_ONLY_BELONGS_ON_DATASOURCE,
+  SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+  SqlAutoMigrateSchema,
+} from './common.zod';
+
 const SQLITE_CONFIG_KEYS = ['filename', 'autoMigrate'] as const;
 
 const FILENAME_ALIASES = {
@@ -77,7 +78,7 @@ export const SqliteConfigSchema = lazySchema(() => z.object({
 }, { error: sqliteConfigUnknownKeyError }).strict()
   .describe('SQLite connection configuration'));
 
-export type SqliteConfig = z.infer<typeof SqliteConfigSchema>;
+export type SqliteConfig = z.input<typeof SqliteConfigSchema>;
 /** Post-parse shape of {@link SqliteConfig} — defaults applied, transforms run (ADR-0122). */
 export type SqliteConfigParsed = z.infer<typeof SqliteConfigSchema>;
 
@@ -94,7 +95,7 @@ export const SqliteWasmPersistModeSchema = z.union([
   z.string().regex(/^debounced:\d+$/, 'Expected `debounced:<milliseconds>`'),
 ]).describe('When to flush a file-backed wasm database to disk');
 
-export type SqliteWasmPersistMode = z.infer<typeof SqliteWasmPersistModeSchema>;
+export type SqliteWasmPersistMode = z.input<typeof SqliteWasmPersistModeSchema>;
 
 const SQLITE_WASM_CONFIG_KEYS = ['filename', 'persist'] as const;
 
@@ -130,7 +131,7 @@ export const SqliteWasmConfigSchema = lazySchema(() => z.object({
 }, { error: sqliteWasmConfigUnknownKeyError }).strict()
   .describe('SQLite (WASM) connection configuration'));
 
-export type SqliteWasmConfig = z.infer<typeof SqliteWasmConfigSchema>;
+export type SqliteWasmConfig = z.input<typeof SqliteWasmConfigSchema>;
 /** Post-parse shape of {@link SqliteWasmConfig} — defaults applied, transforms run (ADR-0122). */
 export type SqliteWasmConfigParsed = z.infer<typeof SqliteWasmConfigSchema>;
 

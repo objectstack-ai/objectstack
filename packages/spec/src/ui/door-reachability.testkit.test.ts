@@ -19,9 +19,32 @@ import { z } from 'zod';
 import { measureDoors } from './door-reachability.testkit';
 import { PageSchema } from './page.zod';
 import { ObjectListViewSchema } from './view.zod';
-import { WidgetManifestSchema } from './widget.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
+
+/**
+ * The #5056 subject, reconstructed.
+ *
+ * The false positive was measured on the real `WidgetManifestSchema`: 19 keys,
+ * of which exactly two (`name`, `label`) were `.describe()` clones of the SHARED
+ * `SnakeCaseIdentifierSchema` / `I18nLabelSchema` leaf instances — which is why
+ * the old any-one-shared-property bridge fired on it. #5055 retired that schema
+ * (ADR-0049 enforce-or-remove: no carrier key, nothing ever parsed it), so the
+ * fixture is rebuilt here from the same two shared leaf instances plus 17
+ * unshared fillers.
+ *
+ * Rebuilding rather than re-pointing at some other live schema is deliberate:
+ * what this pin means is the RATIO (2/19) over those two specific shared leaves,
+ * and a substitute subject would silently change both. Nothing about the
+ * walker's behaviour ever depended on the subject being a widget manifest.
+ */
+const SHARED_LEAF_2_OF_19 = z.object({
+  name: SnakeCaseIdentifierSchema.describe('Machine name'),
+  label: I18nLabelSchema.describe('Display label'),
+  ...Object.fromEntries(
+    Array.from({ length: 17 }, (_, i) => [`osDoorProbeFiller${i}`, z.string()]),
+  ),
+});
 
 /** The walker's identity key, mirrored here so the premise tests can assert on it. */
 const defOf = (s: unknown): unknown => (s as { _zod?: { def?: unknown } })?._zod?.def;
@@ -131,7 +154,7 @@ describe('#5056 controls — the walker finds doors, and only real ones', () => 
 // 3. The #5056 regression boundary itself.
 // ============================================================================
 describe('#5056 regression — the any-one-shared-property bridge stays dead', () => {
-  it('WidgetManifestSchema shares leaves with the live graph but is NOT derived from it', () => {
+  it('a 2-of-19 shared-leaf shape shares leaves with the live graph but is NOT derived from it', () => {
     // The reverse verification, standing rather than one-shot.
     //
     // The OLD bridge fired when ANY one property of the candidate was def-equal
@@ -149,10 +172,10 @@ describe('#5056 regression — the any-one-shared-property bridge stays dead', (
     // a v17 breaking to tighten a file nothing imports (#4583's "precisely
     // validated dead slot").
     const { verdict, cloneOverlap } = measureDoors();
-    const overlap = cloneOverlap(WidgetManifestSchema);
+    const overlap = cloneOverlap(SHARED_LEAF_2_OF_19);
     expect(overlap, 'it DOES share leaves — the old bridge fired on exactly this').toBeGreaterThan(0);
     expect(overlap, 'but nothing structural: measured 2/19').toBeLessThan(0.2);
-    expect(verdict(WidgetManifestSchema)).toBe('unreachable');
+    expect(verdict(SHARED_LEAF_2_OF_19)).toBe('unreachable');
   });
 
   it('the threshold discriminates by SHARE OF SHAPE, not by count of shared keys', () => {
@@ -179,7 +202,8 @@ describe('#5056 regression — the any-one-shared-property bridge stays dead', (
     //
     // It costs nothing today: this is a synthetic shape, and the smallest real
     // `no door` shapes the campaign has measured sit far below the threshold
-    // (WidgetManifestSchema at 2/19). It becomes a real hazard the moment a
+    // (`WidgetManifestSchema` at 2/19, before #5055 retired it). It becomes a
+    // real hazard the moment a
     // batch measures a SMALL shape (roughly 4 keys or fewer) whose keys are all
     // shared leaves — measure `cloneOverlap` and read this pin before trusting
     // a `derived-clone` verdict on one. Filed for the campaign as #5828.

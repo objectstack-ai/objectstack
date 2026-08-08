@@ -92,6 +92,6 @@ export const KnowledgeHitSchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).default({}).optional(),
 }));
 
-export type KnowledgeDocument = z.infer<typeof KnowledgeDocumentSchema>;
-export type KnowledgeChunk = z.infer<typeof KnowledgeChunkSchema>;
-export type KnowledgeHit = z.infer<typeof KnowledgeHitSchema>;
+export type KnowledgeDocument = z.input<typeof KnowledgeDocumentSchema>;
+export type KnowledgeChunk = z.input<typeof KnowledgeChunkSchema>;
+export type KnowledgeHit = z.input<typeof KnowledgeHitSchema>;

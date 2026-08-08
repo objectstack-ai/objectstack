@@ -41,6 +41,7 @@ this contract has (ADR-0104 performance budget).
 
 ```typescript
 import { AddressValueSchema, CalendarDateValueSchema, ClockTimeValueSchema, FileLikeValueSchema, FileReferenceIdValueSchema, FileValueSchema, InstantValueSchema, LocationValueSchema, ReferenceIdValueSchema } from '@objectstack/spec/data';
+import type { AddressValue, CalendarDateValue, ClockTimeValue, FileLikeValue, FileReferenceIdValue, FileValue, InstantValue, LocationValue, ReferenceIdValue } from '@objectstack/spec/data';
 
 // Validate data
 const result = AddressValueSchema.parse(data);

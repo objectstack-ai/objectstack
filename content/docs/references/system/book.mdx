@@ -52,7 +52,7 @@ const result = BookSchema.parse(data);
 | **icon** | `string` | optional |  |
 | **order** | `number` | optional | Orders books within the portal |
 | **audience** | `'org' \| 'public' \| { permissionSet: string }` | optional | Access audience; defaults to 'org' (inherits package grant) |
-| **groups** | `{ key: string; label: string; order?: number; include?: string \| { tag: string }; … }[]` | ✅ | The spine: ordered sections. Two levels total. |
+| **groups** | `{ key: string; label: string; order?: number; include?: string \| object; … }[]` | ✅ | The spine: ordered sections. Two levels total. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |

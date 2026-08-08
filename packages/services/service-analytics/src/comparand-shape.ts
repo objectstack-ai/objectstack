@@ -83,6 +83,16 @@ export function isBindableComparand(value: unknown): boolean {
  * no `undefined`) and {@link comparand} already normalises it to `null` rather
  * than refusing it (#5526, #5332) — refusing it here would invent a
  * disagreement instead of closing one.
+ *
+ * ⚠️ [#6125] `undefined` no longer REACHES either predicate from the read-scope
+ * door: `read-scope-sql.ts` refuses a comparand-position `undefined` upstream of
+ * both, per #6050's ruling B pushed down by #6125. The branch stays because
+ * these two predicates are a value-for-value mirror of `driver-sql`'s twins
+ * (held by `__tests__/like-metacharacter-escape.test.ts`), and those keep it for
+ * exactly the same reason — refused upstream there too, since #6050. Narrowing
+ * the fence here would break the mirror without removing a reachable answer.
+ * The `where` door is unaffected either way: {@link comparand} still normalises
+ * `undefined` to `null` before either predicate sees it.
  */
 export function isRenderableTextComparand(value: unknown): boolean {
   if (value === null || value === undefined) return true;

@@ -36,7 +36,7 @@ export const BatchOperationType = z.enum([
   'delete',    // Batch delete
 ]);
 
-export type BatchOperationType = z.infer<typeof BatchOperationType>;
+export type BatchOperationType = z.input<typeof BatchOperationType>;
 
 // ==========================================
 // Batch Request Schemas
@@ -52,7 +52,7 @@ export const BatchRecordSchema = lazySchema(() => z.object({
   externalId: z.string().optional().describe('External ID for upsert matching'),
 }));
 
-export type BatchRecord = z.infer<typeof BatchRecordSchema>;
+export type BatchRecord = z.input<typeof BatchRecordSchema>;
 
 /**
  * Batch Operation Options Schema
@@ -97,7 +97,7 @@ export const BatchOptionsSchema = lazySchema(() => z.object({
   ),
 }));
 
-export type BatchOptions = z.infer<typeof BatchOptionsSchema>;
+export type BatchOptions = z.input<typeof BatchOptionsSchema>;
 /** Post-parse shape of {@link BatchOptions} — defaults applied, transforms run (ADR-0122). */
 export type BatchOptionsParsed = z.infer<typeof BatchOptionsSchema>;
 
@@ -132,6 +132,8 @@ export const BatchUpdateRequestSchema = lazySchema(() => z.object({
 }));
 
 export type BatchUpdateRequest = z.input<typeof BatchUpdateRequestSchema>;
+/** Post-parse shape of {@link BatchUpdateRequest} — defaults applied, transforms run (ADR-0122). */
+export type BatchUpdateRequestParsed = z.infer<typeof BatchUpdateRequestSchema>;
 
 /**
  * Simplified Batch Update Request (for updateMany API)
@@ -164,7 +166,7 @@ export const UpdateManyRecordSchema = lazySchema(() => z.object({
   data: RecordDataSchema.describe('Fields to update'),
 }));
 
-export type UpdateManyRecord = z.infer<typeof UpdateManyRecordSchema>;
+export type UpdateManyRecord = z.input<typeof UpdateManyRecordSchema>;
 
 export const UpdateManyRequestSchema = lazySchema(() => z.object({
   // [#3939] Cap lives at the route (`batch.maxBatchSize`), not here — see
@@ -174,6 +176,8 @@ export const UpdateManyRequestSchema = lazySchema(() => z.object({
 }));
 
 export type UpdateManyRequest = z.input<typeof UpdateManyRequestSchema>;
+/** Post-parse shape of {@link UpdateManyRequest} — defaults applied, transforms run (ADR-0122). */
+export type UpdateManyRequestParsed = z.infer<typeof UpdateManyRequestSchema>;
 
 // ==========================================
 // Batch Response Schemas
@@ -204,7 +208,7 @@ export const BatchOperationResultSchema = lazySchema(() => z.object({
   ),
 }));
 
-export type BatchOperationResult = z.infer<typeof BatchOperationResultSchema>;
+export type BatchOperationResult = z.input<typeof BatchOperationResultSchema>;
 /** Post-parse shape of {@link BatchOperationResult} — defaults applied, transforms run (ADR-0122). */
 export type BatchOperationResultParsed = z.infer<typeof BatchOperationResultSchema>;
 
@@ -257,7 +261,7 @@ export const BatchUpdateResponseSchema = lazySchema(() => BaseResponseSchema.ext
   results: z.array(BatchOperationResultSchema).describe('Detailed results for each record'),
 }));
 
-export type BatchUpdateResponse = z.infer<typeof BatchUpdateResponseSchema>;
+export type BatchUpdateResponse = z.input<typeof BatchUpdateResponseSchema>;
 /** Post-parse shape of {@link BatchUpdateResponse} — defaults applied, transforms run (ADR-0122). */
 export type BatchUpdateResponseParsed = z.infer<typeof BatchUpdateResponseSchema>;
 
@@ -285,7 +289,7 @@ export const DeleteManyRequestSchema = lazySchema(() => z.object({
   options: BatchOptionsSchema.optional().describe('Delete options'),
 }));
 
-export type DeleteManyRequest = z.infer<typeof DeleteManyRequestSchema>;
+export type DeleteManyRequest = z.input<typeof DeleteManyRequestSchema>;
 /** Post-parse shape of {@link DeleteManyRequest} — defaults applied, transforms run (ADR-0122). */
 export type DeleteManyRequestParsed = z.infer<typeof DeleteManyRequestSchema>;
 
@@ -328,7 +332,7 @@ export const BatchConfigSchema = lazySchema(() => z.object({
   defaultOptions: BatchOptionsSchema.optional().describe('Default batch options'),
 }).passthrough()); // Allow additional properties
 
-export type BatchConfig = z.infer<typeof BatchConfigSchema>;
+export type BatchConfig = z.input<typeof BatchConfigSchema>;
 /** Post-parse shape of {@link BatchConfig} — defaults applied, transforms run (ADR-0122). */
 export type BatchConfigParsed = z.infer<typeof BatchConfigSchema>;
 
@@ -351,6 +355,8 @@ export const CrossObjectBatchOperationSchema = lazySchema(() => z.object({
 }));
 
 export type CrossObjectBatchOperation = z.input<typeof CrossObjectBatchOperationSchema>;
+/** Post-parse shape of {@link CrossObjectBatchOperation} — defaults applied, transforms run (ADR-0122). */
+export type CrossObjectBatchOperationParsed = z.infer<typeof CrossObjectBatchOperationSchema>;
 
 /**
  * Request payload for the cross-object transactional batch
@@ -374,6 +380,8 @@ export const CrossObjectBatchRequestSchema = lazySchema(() => z.object({
 }));
 
 export type CrossObjectBatchRequest = z.input<typeof CrossObjectBatchRequestSchema>;
+/** Post-parse shape of {@link CrossObjectBatchRequest} — defaults applied, transforms run (ADR-0122). */
+export type CrossObjectBatchRequestParsed = z.infer<typeof CrossObjectBatchRequestSchema>;
 
 /**
  * One strip event on a cross-object batch, tagged with the operation it
@@ -387,7 +395,7 @@ export const CrossObjectBatchDroppedFieldsSchema = lazySchema(() => DroppedField
   index: z.number().int().min(0).describe('Index of the operation in the request `operations` array'),
 }).describe('A cross-object batch strip event: dropped fields plus the operation index'));
 
-export type CrossObjectBatchDroppedFields = z.infer<typeof CrossObjectBatchDroppedFieldsSchema>;
+export type CrossObjectBatchDroppedFields = z.input<typeof CrossObjectBatchDroppedFieldsSchema>;
 
 /**
  * Response for the cross-object transactional batch — one result per operation,
@@ -408,4 +416,4 @@ export const CrossObjectBatchResponseSchema = lazySchema(() => z.object({
   ),
 }));
 
-export type CrossObjectBatchResponse = z.infer<typeof CrossObjectBatchResponseSchema>;
+export type CrossObjectBatchResponse = z.input<typeof CrossObjectBatchResponseSchema>;

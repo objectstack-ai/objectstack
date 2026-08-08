@@ -50,6 +50,34 @@ CONSOLE_BUMP=patch scripts/bump-objectui.sh   # force the bump type
 scripts/bump-objectui.sh --no-changeset       # opt out (rarely)
 ```
 
+#### After the pin moves: run the declaration-parity ratchet (#5960)
+
+The bump has a second half, and it is not optional:
+
+```bash
+pnpm sdui:manifest    # rebuild objectui at the new pin, dump sdui.manifest.json, run the ratchet
+```
+
+`sdui.manifest.json` is objectui's registry-inputs dump — the right-hand side of
+ADR-0082 D4's spec↔registry **declaration-parity ratchet** (`scripts/gen-sdui-manifest.sh`
+produces it and runs the ratchet against it; note it is *not* `scripts/build-console.sh`,
+which the ADR named until #5960 corrected it). That file changes when — and only when —
+this pin moves, so **the pin bump is the ratchet's trigger, and its only one.**
+
+This is an **on-demand gate by decision** (maintainer ruling, 2026-08-07). No workflow
+produces the manifest and none should: the only producer drives a Playwright chromium
+over objectui's built console and reads `window.__MANIFEST`, so wiring it into this
+repo's CI would put a full objectui build plus a browser download on every matching PR.
+The trade is deliberate — honest on-demand coverage over expensive full coverage —
+and it is safe because the gate has no unearned green: since #4690 a missing, unreadable,
+malformed or empty manifest **exits 1** rather than skipping. The one failure mode left is
+that nobody runs it, which is what this step exists to close. `scripts/bump-objectui.sh`
+and `scripts/build-console.sh` both print the reminder when they finish.
+
+Needs a Playwright browser (`pnpm exec playwright install chromium-headless-shell`). When
+the ratchet fires, the fix is a spec/overlay edit or an explicit `--update` to re-accept
+the baseline — see ADR-0082 D4 and its addendum 2.
+
 ## 3. Platform layer — `content/docs/releases/vN.mdx` (curated)
 
 The curated, developer-facing "big picture", written for third parties building on
@@ -134,8 +162,10 @@ node scripts/check-objectui-pin-fresh.mjs --ref v17.0.0 --json
   down without turning red into green — the degradation is printed, not swallowed. An
   unreachable remote is reported as `unreadable` and exits non-zero.
 - **Fix when it fires:** `scripts/bump-objectui.sh` to move the pin (which writes the
-  `@objectstack/console` changeset for the crossed range), then re-source the Console
-  section with `scripts/objectui-range.mjs`.
+  `@objectstack/console` changeset for the crossed range), then `pnpm sdui:manifest` to
+  run the declaration-parity ratchet at the new pin (see "After the pin moves" above —
+  the bump is that ratchet's only trigger), then re-source the Console section with
+  `scripts/objectui-range.mjs`.
 
 ## Drift guard
 

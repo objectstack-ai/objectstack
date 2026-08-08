@@ -32,8 +32,17 @@ vi.mock('@objectstack/core', () => ({
 const PKG = 'com.acme.endpoints';
 const NS = 'acme';
 
-/** A stored `api` item that passes every gate under `namespace: 'acme'`. */
-function apiItem(over: Record<string, unknown> = {}): Record<string, unknown> {
+/**
+ * The AUTHORED endpoint document — exactly `ApiEndpointSchema` vocabulary,
+ * nothing else. Passes every gate under `namespace: 'acme'`.
+ *
+ * [#5309] Split out of `apiItem` so the publish-envelope case below can put a
+ * real authored body under `metadata`. It used to nest `apiItem()` there, which
+ * put `packageId` / `state` INSIDE the body as well as on the envelope — an
+ * accident of fixture reuse that only the schema's unknown-key stripping made
+ * invisible.
+ */
+function endpointBody(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     name: 'list_things',
     path: `/api/v1/apps/${NS}/things`,
@@ -41,6 +50,18 @@ function apiItem(over: Record<string, unknown> = {}): Record<string, unknown> {
     type: 'object_operation',
     target: 'acme_thing',
     objectParams: { object: 'acme_thing', operation: 'find' },
+    ...over,
+  };
+}
+
+/**
+ * A STORED `api` item in the flat shape: the authored body plus the metadata
+ * layer's bookkeeping at one level, which is what `MetadataManager.register`
+ * holds and what `publishPackage` filters by.
+ */
+function apiItem(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ...endpointBody(),
     packageId: PKG,
     state: 'draft',
     ...over,
@@ -199,7 +220,9 @@ describe('#5189 — publishPackage gates `api` items', () => {
         name: 'open_things',
         packageId: PKG,
         state: 'draft',
-        metadata: apiItem({ name: 'open_things', authRequired: false }),
+        // [#5309] The body under `metadata` is the AUTHORED document; the
+        // bookkeeping belongs on the envelope around it, and only there.
+        metadata: endpointBody({ name: 'open_things', authRequired: false }),
       });
 
       const result = await manager.publishPackage(PKG, { namespace: NS });
@@ -221,6 +244,61 @@ describe('#5189 — publishPackage gates `api` items', () => {
       const result = await manager.publishPackage(PKG);
       expect(result.success).toBe(true);
       expect(result.itemsPublished).toBe(2);
+    });
+
+    // ── [#5309] The stored ENVELOPE / authored BODY split ────────────────
+    //
+    // `apiItem()` above is already a stored row: it carries `packageId` and
+    // `state`, which are storage identity and not endpoint vocabulary. Every
+    // case in this file therefore depends on those keys not being judged as
+    // vocabulary — silently, via the schema's unknown-key STRIPPING, until the
+    // split made it explicit. These two pin it directly, so the dependency is
+    // stated rather than assumed.
+    it('#5309 — gates the BODY: a fully-published row yields the D6 verdict, not a schema error', async () => {
+      await manager.register('api', 'open_things', apiItem({
+        name: 'open_things',
+        authRequired: false,
+        // Everything `publishPackage` stamps onto a row it has published once.
+        version: 2,
+        publishedAt: '2026-08-08T00:00:00.000Z',
+        publishedBy: 'usr_admin',
+        publishedDefinition: { name: 'open_things' },
+        package: PKG,
+        state: 'active',
+      }));
+
+      const result = await manager.publishPackage(PKG, { namespace: NS });
+
+      expect(result.success).toBe(false);
+      const messages = (result.validationErrors ?? []).map(e => e.message);
+      // The verdict the gate exists to give …
+      expect(messages.some(m => m.includes('authRequired: false'))).toBe(true);
+      // … and NOT the "cannot be gated" precondition failure, which is what a
+      // schema that judged the bookkeeping would produce instead.
+      expect(messages.some(m => m.includes('does not satisfy ApiEndpointSchema'))).toBe(false);
+    });
+
+    it('#5309 — a published row still indexes: publish and the matcher read the same body', async () => {
+      // End to end through both doors of the split. `publishPackage` re-registers
+      // the row with `state`/`version`/`published*` stamped on; the load-time
+      // backstop must still find the declaration underneath.
+      await manager.register('api', 'list_things', apiItem());
+
+      const published = await manager.publishPackage(PKG, { namespace: NS });
+      expect(published.success).toBe(true);
+
+      const stored = (await manager.get('api', 'list_things')) as Record<string, unknown>;
+      expect(stored.state).toBe('active');
+      expect(stored.version).toBe(1);
+
+      const match = await manager.matchEndpoint({ method: 'GET', path: `/api/v1/apps/${NS}/things` });
+      expect(match?.endpoint.name).toBe('list_things');
+      expect(match?.endpoint.authRequired).toBe(true);
+      // The served declaration carries no storage bookkeeping.
+      const body = match!.endpoint as unknown as Record<string, unknown>;
+      expect(body).not.toHaveProperty('packageId');
+      expect(body).not.toHaveProperty('state');
+      expect(body).not.toHaveProperty('publishedDefinition');
     });
 
     it('fails the WHOLE publish, leaving the good items unpublished (publish is atomic)', async () => {

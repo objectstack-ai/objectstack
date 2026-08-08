@@ -26,7 +26,7 @@ Supports Memory, Redis, Memcached, and CDN.
 - **Use case**: Reduce API response time for repeated metadata requests
 - **Scope**: HTTP layer, client-server communication
 
-See also: ../../[api/http-cache.zod.ts](/docs/references/api/http-cache) for HTTP-level caching
+See also: [../../api/http-cache.zod.ts](/docs/references/api/http-cache) for HTTP-level caching
 
 <Callout type="info">
 **Source:** `packages/spec/src/system/cache.zod.ts`
@@ -172,7 +172,7 @@ Distributed cache configuration with consistency and avalanche prevention
 | **encryption** | `boolean` | optional | Enable encryption for cached data |
 | **consistency** | `Enum<'write_through' \| 'write_behind' \| 'write_around' \| 'refresh_ahead'>` | optional | Distributed cache consistency strategy |
 | **avalanchePrevention** | `{ jitterTtl?: object; circuitBreaker?: object; lockout?: object }` | optional | Cache avalanche and stampede prevention |
-| **warmup** | `{ enabled?: boolean; strategy?: Enum<'eager' \| 'lazy' \| 'scheduled'>; schedule?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; patterns?: string[]; … }` | optional | Cache warmup strategy |
+| **warmup** | `{ enabled?: boolean; strategy?: Enum<'eager' \| 'lazy' \| 'scheduled'>; schedule?: string \| object; patterns?: string[]; … }` | optional | Cache warmup strategy |
 
 
 ---

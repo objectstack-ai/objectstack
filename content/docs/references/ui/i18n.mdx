@@ -5,17 +5,22 @@ description: I18n protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
-I18n Object Schema
-Structured internationalization label with translation key and parameters.
+Display-label and ARIA-label primitives shared by every `ui/` shape.
 
-@example
-```typescript
-const label: I18nObject = {
-  key: 'views.task_list.label',
-  defaultValue: 'Task List',
-  params: { count: 5 },
-};
-```
+A MODULE doc, deliberately, rather than the first declaration's doc doing the
+job by accident: `scripts/build-skill-references.ts` headlines this file in
+four skill indexes from the first JSDoc it finds, so without one the headline
+silently becomes whatever declaration happens to sort first. It did exactly
+that when #5728 added `InlineLocaleMapSchema` above `I18nLabelSchema` — the
+indexes started describing the file as a BCP-47 key format. Stating the
+headline once, on the module, makes it a decision instead of a side effect of
+declaration order.
+
+Declaration order here is load-bearing and cannot simply be flipped back:
+`I18nLabelSchema` names `InlineLocaleMapSchema` in its union, and under
+`OS_EAGER_SCHEMAS=1` (which `gen:schema` sets) `lazySchema` evaluates its
+factory at module load — so a forward reference would be a TDZ crash in the
+schema build rather than a lazy lookup.
 
 <Callout type="info">
 **Source:** `packages/spec/src/ui/i18n.zod.ts`
@@ -24,8 +29,8 @@ const label: I18nObject = {
 ## TypeScript Usage
 
 ```typescript
-import { AriaPropsSchema, DateFormatSchema, I18nLabelSchema, I18nObjectSchema, LocaleConfigSchema, NumberFormatSchema, PluralRuleSchema } from '@objectstack/spec/ui';
-import type { AriaProps, DateFormat, I18nLabel, I18nObject, LocaleConfig, NumberFormat, PluralRule } from '@objectstack/spec/ui';
+import { AriaPropsSchema, I18nLabelSchema, InlineLocaleMapSchema } from '@objectstack/spec/ui';
+import type { AriaProps, I18nLabel, InlineLocaleMap } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AriaPropsSchema.parse(data);
@@ -41,95 +46,37 @@ ARIA accessibility attributes
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **ariaLabel** | `string` | optional | Accessible label for screen readers (WAI-ARIA aria-label) |
+| **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
 | **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
 | **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
 
 
 ---
 
-## DateFormat
+## I18nLabel
 
-Date/time formatting rules
+Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time
 
-### Properties
+### Union Options
 
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **dateStyle** | `Enum<'full' \| 'long' \| 'medium' \| 'short'>` | optional | Date display style |
-| **timeStyle** | `Enum<'full' \| 'long' \| 'medium' \| 'short'>` | optional | Time display style |
-| **timeZone** | `string` | optional | IANA time zone (e.g., "America/New_York") |
-| **hour12** | `boolean` | optional | Use 12-hour format |
+This schema accepts one of the following structures:
 
+#### Option 1
+
+Type: `string`
+
+---
+
+#### Option 2
+
+Inline locale map: BCP-47 tag → translated string
+
+Type: `Record<string, string>`
 
 ---
 
 
 ---
-
-## I18nObject
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Translation key (e.g., "views.task_list.label") |
-| **defaultValue** | `string` | optional | Fallback value when translation key is not found |
-| **params** | `Record<string, string \| number \| boolean>` | optional | Interpolation parameters (e.g., `{ count: 5 }`) |
-
-
----
-
-## LocaleConfig
-
-Locale configuration
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **code** | `string` | ✅ | BCP 47 language code (e.g., "en-US", "zh-CN") |
-| **fallbackChain** | `string[]` | optional | Fallback language codes in priority order (e.g., ["zh-TW", "en"]) |
-| **direction** | `Enum<'ltr' \| 'rtl'>` | ✅ | Text direction: left-to-right or right-to-left |
-| **numberFormat** | `{ style: Enum<'decimal' \| 'currency' \| 'percent' \| 'unit'>; currency?: string; unit?: string; minimumFractionDigits?: number; … }` | optional | Default number formatting rules |
-| **dateFormat** | `{ dateStyle?: Enum<'full' \| 'long' \| 'medium' \| 'short'>; timeStyle?: Enum<'full' \| 'long' \| 'medium' \| 'short'>; timeZone?: string; hour12?: boolean }` | optional | Default date/time formatting rules |
-
-
----
-
-## NumberFormat
-
-Number formatting rules
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **style** | `Enum<'decimal' \| 'currency' \| 'percent' \| 'unit'>` | ✅ | Number formatting style |
-| **currency** | `string` | optional | ISO 4217 currency code (e.g., "USD", "EUR") |
-| **unit** | `string` | optional | Unit for unit formatting (e.g., "kilometer", "liter") |
-| **minimumFractionDigits** | `number` | optional | Minimum number of fraction digits |
-| **maximumFractionDigits** | `number` | optional | Maximum number of fraction digits |
-| **useGrouping** | `boolean` | optional | Whether to use grouping separators (e.g., 1,000) |
-
-
----
-
-## PluralRule
-
-ICU plural rules for a translation key
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Translation key |
-| **zero** | `string` | optional | Zero form (e.g., "No items") |
-| **one** | `string` | optional | Singular form (e.g., "`{count}` item") |
-| **two** | `string` | optional | Dual form (e.g., "`{count}` items" for exactly 2) |
-| **few** | `string` | optional | Few form (e.g., for 2-4 in some languages) |
-| **many** | `string` | optional | Many form (e.g., for 5+ in some languages) |
-| **other** | `string` | ✅ | Default plural form (e.g., "`{count}` items") |
 
 
 ---

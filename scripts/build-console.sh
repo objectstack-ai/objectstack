@@ -190,5 +190,12 @@ echo "✓ @objectstack/console dist ready (${BYTES} KB) from objectui@${PINNED_S
 # real browser (Playwright) to enumerate the console registry, and the console
 # build must not drag in a browser dependency. Regenerate them on demand instead:
 #   pnpm sdui:manifest        (see scripts/gen-sdui-manifest.sh)
+#
+# The reminder names the TRIGGER, not just the command (#5960): `pnpm objectui:refresh`
+# runs bump-objectui.sh and then this script, so this is the last output an operator
+# sees while moving the pin — and the pin bump is the ratchet's only trigger, by
+# decision. bump-objectui.sh prints the same step; this repeats it because that one
+# has scrolled past a whole console build by now.
 echo "ℹ SDUI manifest + declaration-parity ratchet are decoupled from the console build."
-echo "  Run 'pnpm sdui:manifest' on demand to regenerate (requires Playwright)."
+echo "  Run 'pnpm sdui:manifest' whenever you move the objectui pin — that is the"
+echo "  ratchet's only trigger, on demand by decision (#5960). Requires Playwright."

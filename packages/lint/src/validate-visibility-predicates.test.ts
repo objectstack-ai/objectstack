@@ -3,10 +3,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateVisibilityPredicates,
-  VISIBILITY_ALIAS_DEPRECATED,
   VISIBILITY_ROOT_MISLAYERED,
   VISIBILITY_BARE_IDENTIFIER,
-} from './validate-visibility-predicates';
+  VISIBILITY_PREDICATE_SYNTAX,
+} from './validate-visibility-predicates.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
 
 describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
@@ -36,40 +36,88 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
     expect(validateVisibilityPredicates(stack)).toEqual([]);
   });
 
-  it('flags a deprecated `visibleOn` alias on a form section (→ visibleWhen)', () => {
-    const stack = {
-      views: [
-        { name: 'task_form', sections: [{ label: 'S', visibleOn: "record.a == 1", fields: [] }] },
-      ],
-    };
-    const findings = validateVisibilityPredicates(stack);
-    expect(findings).toHaveLength(1);
-    expect(findings[0].rule).toBe(VISIBILITY_ALIAS_DEPRECATED);
-    expect(findings[0].severity).toBe('warning');
-    expect(findings[0].path).toBe('views[0].sections[0].visibleOn');
-  });
+  // ── #6318: the alias-KEY rule is RETIRED; the alias-VALUE read is not ──
+  //
+  // Three tests here used to assert that a `visibleOn` / `visibility` KEY
+  // produced a `visibility-alias-deprecated` finding, one per carrier. That
+  // rule never reached a real input: through all three CLI commands the stack
+  // arrives at the `normalized` tier, and the ADR-0087 D2 conversions rename the
+  // key INSIDE `normalizeStackInput`, one layer above. Measured at retirement,
+  // per site: raw object 1 finding, `normalized` tier 0. The only shape that
+  // still fired is the one those three fixtures used — a view CONTAINER with
+  // top-level `sections` — which strict `ViewSchema` refuses outright
+  // ("Unrecognized key(s) on this view container: `sections`"). Green unit test,
+  // impossible fixture: #4984 / #6251.
+  //
+  // What SURVIVES those three assertions, and is what the replacements below
+  // pin instead: the traversal reaches all three carriers, and `checkElement`
+  // still reads the predicate VALUE through the deprecated key, so a value
+  // defect written under an alias is judged rather than skipped. Each asserts
+  // the EXACT finding set — non-empty and named, so it cannot pass by producing
+  // nothing, and restoring the retired rule would fail it on set inequality.
+  //
+  // The surface itself is not unguarded: the same D2 conversion emits a
+  // `warnConversionNotice` from `defineStack` naming the site, the conversion
+  // and the protocol-16 retirement window. `authoring-rule-input-tier.test.ts`
+  // (premise 3) pins that notice as the recorded guard.
+  describe('the deprecated alias keys (#6318 — key rule retired, value read kept)', () => {
+    it('a `visibleOn` KEY with a clean value is clean — no rule judges the spelling', () => {
+      const stack = {
+        views: [
+          { name: 'task_form', sections: [{ label: 'S', visibleOn: "record.a == 1", fields: [] }] },
+        ],
+      };
+      // Deliberately labelled: this green is VACUOUS with respect to the fold —
+      // it is empty because the rule is gone, not because anything normalized.
+      // It earns its place only as the retirement's direct statement, and the
+      // three assertions below are what carry the real evidence.
+      expect(validateVisibilityPredicates(stack)).toEqual([]);
+    });
 
-  it('flags a deprecated `visibleOn` alias on a form field', () => {
-    const stack = {
-      views: [
-        { name: 'task_form', sections: [{ fields: [{ field: 'notes', visibleOn: "record.a == 1" }] }] },
-      ],
-    };
-    const findings = validateVisibilityPredicates(stack);
-    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ALIAS_DEPRECATED]);
-    expect(findings[0].path).toBe('views[0].sections[0].fields[0].visibleOn');
-  });
+    it('a form SECTION predicate is still read through `visibleOn` (value verdict survives)', () => {
+      const stack = {
+        views: [
+          { name: 'task_form', sections: [{ label: 'S', visibleOn: "data.a == 1", fields: [] }] },
+        ],
+      };
+      const findings = validateVisibilityPredicates(stack);
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
+      expect(findings[0].path).toBe('views[0].sections[0]');
+    });
 
-  it('flags a deprecated `visibility` alias on a page component', () => {
-    const stack = {
-      pages: [
-        { name: 'p', regions: [{ components: [{ type: 'element:text', visibility: "page.x != ''" }] }] },
-      ],
-    };
-    const findings = validateVisibilityPredicates(stack);
-    expect(findings).toHaveLength(1);
-    expect(findings[0].rule).toBe(VISIBILITY_ALIAS_DEPRECATED);
-    expect(findings[0].path).toBe('pages[0].regions[0].components[0].visibility');
+    it('a form FIELD predicate is still read through `visibleOn`', () => {
+      const stack = {
+        views: [
+          { name: 'task_form', sections: [{ fields: [{ field: 'notes', visibleOn: "data.a == 1" }] }] },
+        ],
+      };
+      const findings = validateVisibilityPredicates(stack);
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
+      expect(findings[0].path).toBe('views[0].sections[0].fields[0]');
+    });
+
+    it('a PAGE COMPONENT predicate is still read through the page-side `visibility` key', () => {
+      const stack = {
+        pages: [
+          { name: 'p', regions: [{ components: [{ type: 'element:text', visibility: "data.x != ''" }] }] },
+        ],
+      };
+      const findings = validateVisibilityPredicates(stack);
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
+      expect(findings[0].path).toBe('pages[0].regions[0].components[0]');
+    });
+
+    it('the canonical key still wins over an alias on the same element (ADR-0089 ordering)', () => {
+      // Why the surviving alias limbs can only add coverage and never change a
+      // verdict: `visibleWhen` is read first, so a stale alias beside it is
+      // ignored rather than allowed to overrule the canonical spelling.
+      const stack = {
+        views: [
+          { name: 'f', sections: [{ visibleWhen: "record.ok == 1", visibleOn: "data.stale == 1", fields: [] }] },
+        ],
+      };
+      expect(validateVisibilityPredicates(stack)).toEqual([]);
+    });
   });
 
   it('flags a `data.`-rooted predicate in a runtime view as mis-layered', () => {
@@ -83,14 +131,16 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
     expect(findings[0].severity).toBe('warning');
   });
 
-  it('reports BOTH alias + mis-layer when a `visibleOn` predicate is `data.`-rooted', () => {
+  it('a `data.`-rooted predicate under `visibleOn` reports the mis-layer ALONE (#6318)', () => {
+    // Was: "reports BOTH alias + mis-layer". The alias half is retired; the
+    // surviving half — the mis-layer verdict is reached THROUGH the deprecated
+    // key — is what this now pins, as an exact one-element set.
     const stack = {
       views: [
         { name: 'task_form', sections: [{ visibleOn: "data.status == 'x'", fields: [] }] },
       ],
     };
-    const rules = validateVisibilityPredicates(stack).map((f) => f.rule).sort();
-    expect(rules).toEqual([VISIBILITY_ALIAS_DEPRECATED, VISIBILITY_ROOT_MISLAYERED].sort());
+    expect(validateVisibilityPredicates(stack).map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
   });
 
   it('does not confuse a field literally named `data` (e.g. `record.data`) for a data root', () => {
@@ -116,12 +166,20 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
   });
 
   it('walks legacy `groups` (alias of sections) too', () => {
+    // The `groups` bucket has no other test in this file, so the half-fact this
+    // used to carry — the traversal descends `groups` at all — had to survive
+    // #6318's retirement of the alias-KEY rule that used to demonstrate it. It
+    // is re-demonstrated with a rule that still exists, and with the alias key
+    // kept on the fixture so the group walk and the alias-value read are pinned
+    // together exactly as before.
     const stack = {
       views: [
-        { name: 'f', groups: [{ visibleOn: "record.a == 1", fields: [] }] },
+        { name: 'f', groups: [{ visibleOn: "data.a == 1", fields: [{ field: 'x', visibleWhen: 'approved' }] }] },
       ],
     };
-    expect(validateVisibilityPredicates(stack).map((f) => f.rule)).toEqual([VISIBILITY_ALIAS_DEPRECATED]);
+    const findings = validateVisibilityPredicates(stack);
+    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED, VISIBILITY_BARE_IDENTIFIER]);
+    expect(findings.map((f) => f.path)).toEqual(['views[0].groups[0]', 'views[0].groups[0].fields[0]']);
   });
 
   it('is clean on an empty / model-less stack', () => {
@@ -163,13 +221,21 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
       expect(validateVisibilityPredicates(stack, { layer: 'metadata' })).toEqual([]);
     });
 
-    it('still flags a deprecated alias key in the metadata layer (alias check is layer-agnostic)', () => {
+    it('reads the value through a deprecated alias key on the metadata layer too (#6318)', () => {
+      // Was: "still flags a deprecated alias key in the metadata layer (alias
+      // check is layer-agnostic)". The alias-KEY rule is retired, so the
+      // layer-agnostic claim about it is gone. What survives — and is the half
+      // that ever mattered — is that the alias-VALUE read is layer-agnostic:
+      // the same key feeds the layer-directional root verdict in BOTH
+      // directions. Pinned bidirectionally on one fixture, exact sets both ways.
       const stack = {
-        views: [{ name: 'f', sections: [{ visibleOn: "data.a == 1", fields: [] }] }],
+        views: [{ name: 'f', sections: [{ visibleOn: "record.a == 1", fields: [] }] }],
       };
-      const rules = validateVisibilityPredicates(stack, { layer: 'metadata' }).map((f) => f.rule);
-      // alias present, but `data.` is correct for the metadata layer → only the alias finding.
-      expect(rules).toEqual([VISIBILITY_ALIAS_DEPRECATED]);
+      // metadata layer forbids the runtime `record.` root → reported through the alias key…
+      expect(validateVisibilityPredicates(stack, { layer: 'metadata' }).map((f) => f.rule))
+        .toEqual([VISIBILITY_ROOT_MISLAYERED]);
+      // …and the same alias-spelled predicate is correct on the runtime layer.
+      expect(validateVisibilityPredicates(stack)).toEqual([]);
     });
 
     it('does not confuse an identifier ending in `record` (e.g. `my_record.x`) for a record root', () => {
@@ -235,10 +301,13 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(bareFindings(stack).map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
     });
 
-    it('reads the value through the deprecated `visibleOn` alias too (alias + bare, both reported)', () => {
+    it('reads the value through the deprecated `visibleOn` alias too (bare ALONE since #6318)', () => {
+      // Was an "alias + bare, both reported" pair. The alias half is retired;
+      // the half this test existed for — the gate reaches a bare identifier
+      // written under the deprecated key — is unchanged and is now the whole
+      // expected set.
       const stack = { views: [{ name: 'f', sections: [{ visibleOn: "status == 'x'", fields: [] }] }] };
-      const rules = validateVisibilityPredicates(stack).map((f) => f.rule).sort();
-      expect(rules).toEqual([VISIBILITY_ALIAS_DEPRECATED, VISIBILITY_BARE_IDENTIFIER].sort());
+      expect(validateVisibilityPredicates(stack).map((f) => f.rule)).toEqual([VISIBILITY_BARE_IDENTIFIER]);
     });
 
     it('reads the value through the deprecated page-side `visibility` alias too', () => {
@@ -459,13 +528,16 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(bareFindings(formStack("record.data == 1"))).toEqual([]);
     });
 
-    it('a predicate the canonical front end will not parse is left to the syntax verdict', () => {
-      // `===` is not CEL. `parseCelToAst` returns null and this rule stays
-      // silent rather than inventing a second syntax verdict — the same policy
-      // `validate-null-guards.ts` states. (Documented gap: nothing validates
-      // view/page predicate SYNTAX today, so this one is currently un-reported.)
-      expect(validateVisibilityPredicates(formStack('country === "USA"'))).toEqual([]);
-      expect(validateVisibilityPredicates(formStack('status =='))).toEqual([]);
+    it('a predicate that does not parse yields no BARE-IDENTIFIER verdict (the syntax rule owns it)', () => {
+      // This case used to assert whole-rule SILENCE on an unparseable source,
+      // on the policy that a second syntax verdict must not be invented. #6253
+      // ruled that policy wrong for this surface specifically — nothing else
+      // judges view/page syntax — so the source is now reported, by
+      // `visibility-predicate-syntax`. What survives from the old assertion is
+      // the division of labour: the declaredness check needs an AST and gets
+      // none, so `country` is NOT also reported as a bare identifier.
+      expect(bareFindings(formStack('country === "USA"'))).toEqual([]);
+      expect(bareFindings(formStack('status =='))).toEqual([]);
     });
 
     it('an absent / empty predicate is not a finding', () => {
@@ -500,5 +572,237 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(findings).toHaveLength(1);
       expect(findings[0].message).toContain('`status`');
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// `visibility-predicate-syntax` — #6253 (maintainer ruling 2026-08-07:
+// blocking error, same severity as every other predicate surface; no warning
+// tier and no exception for this surface).
+//
+// The surface this closes: `validate-expressions.ts` (ADR-0032) runs
+// `validateExpression` over every predicate it walks, but it walks objects /
+// flows / actions / sharingRules / hooks and never `views` / `pages`. The rules
+// that DO walk views/pages all declined the syntax verdict so as not to invent a
+// second one — correct wherever `validateExpression` runs alongside, and wrong
+// here, where nothing did. Net effect before this rule: `country === "USA"`
+// built clean and then failed OPEN at runtime (#5149).
+// ─────────────────────────────────────────────────────────────────────
+
+/** Only the syntax findings, for assertions that ignore the other three rules. */
+function syntaxFindings(stack: Record<string, unknown>, opts?: { layer: 'runtime' | 'metadata' }) {
+  return validateVisibilityPredicates(stack, opts).filter((f) => f.rule === VISIBILITY_PREDICATE_SYNTAX);
+}
+
+describe('visibility-predicate-syntax (#6253)', () => {
+  describe('the acceptance pair', () => {
+    it('`===` is an ERROR whose message names the token and shows the CEL spelling', () => {
+      // `country === "USA"` is the fixture-proven shape: `packages/spec/src/ui/
+      // view.test.ts` writes it at :1126 / :1240 / :1245 / :1291 / :1373, which
+      // is what the issue cites as evidence that authors reach for it.
+      const findings = validateVisibilityPredicates(formStack('country === "USA"'));
+
+      // The WHOLE reported set, not just "a syntax finding is present" — so the
+      // bare-identifier rule staying out of the way is pinned here too.
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_SYNTAX]);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].path).toBe('views[0].sections[0].fields[0]');
+      expect(findings[0].where).toBe('view "task_form"');
+
+      // Self-correcting, per the ruling: name the offending token, show the CEL
+      // spelling. The raw parser message does neither — cel-js says
+      // `Unexpected character: =` and points a caret, which tells an author
+      // nothing about `==`.
+      expect(findings[0].hint).toContain('`===`');
+      expect(findings[0].hint).toContain('`==`');
+      // The front end's own diagnostic is quoted rather than paraphrased, and
+      // the predicate is echoed so the finding is self-contained.
+      expect(findings[0].message).toContain('Unexpected character: =');
+      expect(findings[0].message).toContain('country === "USA"');
+      // The consequence is stated, because on screen it is invisible.
+      expect(findings[0].message).toContain('#5149');
+    });
+
+    it('the CEL spelling of the SAME predicate is clean — paired so it cannot pass vacuously', () => {
+      // A lone "no syntax finding is reported" assertion is green whenever the
+      // feature is absent, so it can never detect a regression. Pairing it with
+      // the positive case in one test fixes that: delete the rule and the FIRST
+      // expectation goes red.
+      expect(syntaxFindings(formStack('country === "USA"'))).toHaveLength(1);
+      expect(validateVisibilityPredicates(formStack("record.country == 'USA'"))).toEqual([]);
+    });
+  });
+
+  describe('every non-CEL spelling in the table names its own token', () => {
+    // Each row is measured against the canonical front end — `parseCelToAst`
+    // really does refuse all of these — so none of them is a guessed hint.
+    it.each([
+      ['country === "USA"', '===', '=='],
+      ['country !== "USA"', '!==', '!='],
+      ["record.country <> 'USA'", '<>', '!='],
+      ["record.a == 1 and record.b == 2", 'and', '&&'],
+      ["record.a == 1 or record.b == 2", 'or', '||'],
+      ['not record.archived', 'not', '!'],
+      ["record.status = 'open'", '=', '=='],
+    ])('%s → names `%s`, prescribes `%s`', (predicate, wrote, cel) => {
+      const findings = syntaxFindings(formStack(predicate));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].hint).toContain(`\`${wrote}\``);
+      expect(findings[0].hint).toContain(`\`${cel}\``);
+    });
+
+    it('a fault with no single-token equivalent still reports, with the parser\'s own words', () => {
+      // `status ==` is a truncated expression: nothing to swap, so the hint
+      // falls back to the general shape instead of inventing a token.
+      const findings = syntaxFindings(formStack('status =='));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain('Unexpected token: EOF');
+      expect(findings[0].hint).toContain("record.status == 'open'");
+    });
+
+    it('blames the operator that actually broke it, not one quoted inside a string', () => {
+      // The predicate fails on `and`; the `===` sits inside a string literal and
+      // is none of the reason. Blaming it would send the author to edit a
+      // perfectly good literal. (String literals are blanked before the scan.)
+      const findings = syntaxFindings(formStack("record.msg == 'a === b' and record.n > 1"));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].hint).toContain('`and`');
+      expect(findings[0].hint).not.toContain('`===`');
+    });
+
+    it('a non-CEL operator INSIDE a string literal is not a fault at all', () => {
+      // Same string, no `and` — this parses, so there is no finding to word.
+      expect(validateVisibilityPredicates(formStack("record.msg == 'a === b'"))).toEqual([]);
+    });
+  });
+
+  describe('the boundaries', () => {
+    it('an absent / blank predicate is NOT a syntax fault', () => {
+      // `parseCelToAst` returns null for an empty source too, so without an
+      // explicit guard this rule would report "no predicate" as broken CEL.
+      // Paired with a live case so the assertion can actually fail.
+      expect(syntaxFindings(formStack('country === "USA"'))).toHaveLength(1);
+      expect(validateVisibilityPredicates(formStack(undefined))).toEqual([]);
+      expect(validateVisibilityPredicates(formStack('   '))).toEqual([]);
+      expect(validateVisibilityPredicates(formStack(''))).toEqual([]);
+    });
+
+    it('exactly ONE finding per broken predicate — the syntax rule, not also the bare-ref rule', () => {
+      // `country` is rootless as well as mis-spelled, but a source with no AST
+      // yields no identifiers to judge. Asserting the whole set (not just "a
+      // syntax finding exists") is what pins the exclusivity.
+      expect(validateVisibilityPredicates(formStack('country === "USA"')).map((f) => f.rule))
+        .toEqual([VISIBILITY_PREDICATE_SYNTAX]);
+      // …and the converse: a source that PARSES is judged by the bare-ref rule
+      // and never by this one.
+      expect(validateVisibilityPredicates(formStack("status == 'active'")).map((f) => f.rule))
+        .toEqual([VISIBILITY_BARE_IDENTIFIER]);
+    });
+
+    it('does NOT widen to type-checking — the CEL-type blind spot stays a blind spot', () => {
+      // `type == 'grid'` PARSES; only `celEngine.compile`'s type checker rejects
+      // it (`no such overload: type == string`). Routing this rule through
+      // `compile` / `validateExpression` would silently overturn the deliberate,
+      // separately-pinned decision to stay conservative there — and would widen
+      // an error-level gate from "does not parse" to "does not type-check" on a
+      // surface whose predicates are overwhelmingly `dyn`. The ruling said
+      // syntax; the parse verdict is exactly syntax.
+      expect(validateVisibilityPredicates(formStack("type == 'grid'"))).toEqual([]);
+      // The legitimate CEL the overload message cannot be told apart from.
+      expect(validateVisibilityPredicates(formStack('type(record.x) == string'))).toEqual([]);
+    });
+
+    it('a `DEFAULT_LIMITS` overrun is reported too, in the front end\'s own words', () => {
+      // `parseCelToAst` also returns null for a source over the platform bounds.
+      // That is a bounds fault, not a syntax one, and the message says so rather
+      // than pretending to have found a typo — the same way ADR-0032 already
+      // reports it under the "invalid CEL predicate" heading.
+      const overrun = `record.a${' + record.b'.repeat(400)}`;
+      const findings = syntaxFindings(formStack(overrun));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain('Exceeded maxAstNodes');
+      // The echoed predicate is elided, so one runaway expression cannot flood
+      // the console with a 4KB finding.
+      expect(findings[0].message).not.toContain(overrun);
+      expect(findings[0].message).toContain('...');
+    });
+
+    it.each([
+      ['record.a == 1 && record.b == 2', 'the `&&` CEL spells `and` as'],
+      ['record.a == 1 || record.b == 2', 'the `||` CEL spells `or` as'],
+      ['!record.archived', 'the `!` CEL spells `not` as'],
+      ["record.status != 'open'", 'the `!=` CEL spells `<>` as'],
+      ["record.tags.all(t, t != '')", 'a comprehension macro'],
+      ["record.type == 'a' ? record.x > 1 : record.y == 'b'", 'a ternary'],
+      ["record.type in ['lookup', 'master_detail']", 'lowercase `in` — a REAL CEL operator, unlike SQL `IN`'],
+      ["has(record.a) && record.b != null", 'both guard idioms at once'],
+    ])('%s parses and is not reported (%s)', (predicate) => {
+      expect(syntaxFindings(formStack(predicate))).toEqual([]);
+    });
+  });
+
+  describe('every carrier the schema declares, and both layers', () => {
+    it('a form SECTION predicate', () => {
+      const stack = { views: [{ name: 'f', sections: [{ visibleWhen: 'country === "USA"', fields: [] }] }] };
+      expect(syntaxFindings(stack).map((f) => f.path)).toEqual(['views[0].sections[0]']);
+    });
+
+    it('a PAGE COMPONENT predicate', () => {
+      const stack = {
+        pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: 'kind === "a"' }] }] }],
+      };
+      const findings = syntaxFindings(stack);
+      expect(findings.map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
+      expect(findings[0].where).toBe('page "p"');
+    });
+
+    it('reads the value through the deprecated `visibleOn` alias (syntax ALONE since #6318)', () => {
+      // Was an "alias + syntax, both reported" pair, whose point was that two
+      // INDEPENDENT defects on one element both report. The alias half is
+      // retired, so what is left is the syntax verdict reached through the
+      // deprecated key — and the independence claim it was making now belongs
+      // to the syntax/bare-ref exclusivity pin, which states it directly.
+      const stack = { views: [{ name: 'f', sections: [{ visibleOn: 'status === "x"', fields: [] }] }] };
+      expect(validateVisibilityPredicates(stack).map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_SYNTAX]);
+    });
+
+    it('reads the value through the deprecated page-side `visibility` alias', () => {
+      const stack = {
+        pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibility: 'shown === true' }] }] }],
+      };
+      expect(syntaxFindings(stack)).toHaveLength(1);
+    });
+
+    it('resolves a `{ dialect, source }` envelope the same as a bare string', () => {
+      expect(syntaxFindings(formStack({ dialect: 'cel', source: 'country === "USA"' }))).toHaveLength(1);
+    });
+
+    it('reaches a container\'s `formViews.<key>` — the shape a real stack emits', () => {
+      const stack = {
+        views: [{ object: 'showcase_task', formViews: { edit: { sections: [{ fields: [{ field: 'n', visibleWhen: 'country === "USA"' }] }] } } }],
+      };
+      expect(syntaxFindings(stack).map((f) => f.path)).toEqual([
+        'views[0].formViews.edit.sections[0].fields[0]',
+      ]);
+    });
+
+    it('is layer-agnostic — a syntax fault is a syntax fault on a metadata form too', () => {
+      // Unlike the root rules, nothing about "does it parse" depends on which
+      // namespace the surface binds.
+      expect(syntaxFindings(formStack('country === "USA"'), { layer: 'metadata' })).toHaveLength(1);
+      expect(syntaxFindings(formStack('country === "USA"'))).toHaveLength(1);
+    });
+  });
+
+  it('the registry entry already gates, so this `error` reaches all three commands', () => {
+    // `severity: 'error'` only fails a build because `authoring-rules.ts` marks
+    // the family `gating` and runs it on validate/build/lint alike. That entry
+    // was already `gating` (#6128 promoted it), so #6253 needed no registry
+    // change — this pins that it is still true rather than assuming it.
+    const entry = AUTHORING_RULES.find((r) => r.name === 'validateVisibilityPredicates');
+    expect(entry, 'validateVisibilityPredicates must be registered').toBeDefined();
+    expect(entry!.tier).toBe('gating');
+    expect([...entry!.commands].sort()).toEqual(['build', 'lint', 'validate']);
   });
 });

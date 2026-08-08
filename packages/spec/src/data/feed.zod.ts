@@ -32,7 +32,7 @@ export const FeedItemType = z.enum([
   'sharing',
   'system',
 ]);
-export type FeedItemType = z.infer<typeof FeedItemType>;
+export type FeedItemType = z.input<typeof FeedItemType>;
 
 /**
  * Feed Filter Mode
@@ -44,4 +44,4 @@ export const FeedFilterMode = z.enum([
   'changes_only',
   'tasks_only',
 ]);
-export type FeedFilterMode = z.infer<typeof FeedFilterMode>;
+export type FeedFilterMode = z.input<typeof FeedFilterMode>;

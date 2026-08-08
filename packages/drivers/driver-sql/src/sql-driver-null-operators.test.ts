@@ -117,9 +117,31 @@ describe('SqlDriver — null / empty operators (#2704)', () => {
       expect(ids(rows)).toEqual(['1']);
     });
 
-    it('$regex (better-auth contains) → substring LIKE, not exact match', async () => {
-      const rows = await driver.find('tasks', { where: { assignee: { $regex: 'aro' } } });
+    // [#5702] REPLACED. This case was `$regex (better-auth contains) → substring
+    // LIKE, not exact match` and expected `['3']` — it pinned the `case '$regex':`
+    // fallthrough that existed for exactly one producer, plugin-auth's ObjectQL
+    // adapter. #5710 flipped that producer to `$contains`, #4706 retired the
+    // spelling, and the fallthrough is deleted; there is no substring-LIKE
+    // answer left to assert.
+    //
+    // Its replacement is the same query on the operator that DOES mean this,
+    // plus the refusal — asserted on `code` and `status`, not on `toThrow()`
+    // alone, which would stay green against any error including the uncoded ones
+    // the ADR-0112 envelope exists to eliminate.
+    it('$contains → substring LIKE, the operator $regex is retired in favour of', async () => {
+      const rows = await driver.find('tasks', { where: { assignee: { $contains: 'aro' } } });
       expect(ids(rows)).toEqual(['3']);
+    });
+
+    it('$regex is REFUSED, in the ADR-0112 envelope, naming $icontains', async () => {
+      const err = await driver
+        .find('tasks', { where: { assignee: { $regex: 'aro' } } })
+        .then(() => null, (e: any) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('$regex');
+      expect(err.message).toContain('$icontains');
     });
 
     it('$not (CEL `!expr` scope filter) → negated sub-condition, not a bogus "$not" column', async () => {

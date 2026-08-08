@@ -11,7 +11,7 @@ export const LicenseMetricType = z.enum([
   'counter',   // Usage Count (e.g. API Calls, Records Created) - Accumulates
   'gauge',     // Current Level (e.g. Storage Used, Users Active) - Point in time
 ]).describe('License metric type');
-export type LicenseMetricType = z.infer<typeof LicenseMetricType>;
+export type LicenseMetricType = z.input<typeof LicenseMetricType>;
 
 /**
  * Feature/Limit Definition Schema
@@ -80,12 +80,10 @@ export const LicenseSchema = lazySchema(() => z.object({
   signature: z.string().optional().describe('Cryptographic signature of the license'),
 }));
 
-export type Feature = z.infer<typeof FeatureSchema>;
+export type Feature = z.input<typeof FeatureSchema>;
 /** Post-parse shape of {@link Feature} — defaults applied, transforms run (ADR-0122). */
 export type FeatureParsed = z.infer<typeof FeatureSchema>;
-export type FeatureInput = z.input<typeof FeatureSchema>;
-export type Plan = z.infer<typeof PlanSchema>;
+export type Plan = z.input<typeof PlanSchema>;
 /** Post-parse shape of {@link Plan} — defaults applied, transforms run (ADR-0122). */
 export type PlanParsed = z.infer<typeof PlanSchema>;
-export type PlanInput = z.input<typeof PlanSchema>;
-export type License = z.infer<typeof LicenseSchema>;
+export type License = z.input<typeof LicenseSchema>;

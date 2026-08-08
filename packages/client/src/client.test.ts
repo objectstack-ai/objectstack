@@ -5,6 +5,7 @@ import { describe, it, expect, vi } from 'vitest';
 // entered a tsc program (#5449).
 import { WELL_KNOWN_CAPABILITY_KEYS } from '@objectstack/spec/api';
 import { ObjectStackClient, createQuery, createFilter } from './index';
+import type { QueryOptions, QueryOptionsV2 } from './index';
 
 /** Helper: create a client with mocked fetch that returns the given response body */
 function createMockClient(body: any, status = 200) {
@@ -1226,50 +1227,237 @@ describe('ObjectStackClient.automation', () => {
 // QueryOptionsV2 (Canonical Query Syntax) Tests
 // ==========================================
 
-describe('QueryOptionsV2 — canonical find()', () => {
-    it('should accept canonical field names (where, fields, orderBy, limit, offset)', async () => {
-        const { client, fetchMock } = createMockClient({
-            success: true,
-            data: { object: 'account', records: [], total: 0 }
-        });
+/**
+ * `data.find()` transport parameters — ONE expectation table, BOTH copies.
+ *
+ * `find` is implemented twice: `ObjectStackClient.data.find` and
+ * `ScopedProjectClient.data.find`. They are two faces of ONE wire contract
+ * (the scoped one differs only in the URL prefix) and were byte-identical
+ * copies of the same normalization — including the same defect. Every row
+ * below is therefore driven through BOTH and compared against the SAME
+ * expected query string, so a future edit that lands on only one of them goes
+ * red here instead of shipping a fork.
+ *
+ * The expectations are EXACT full query strings, not `toContain` substrings:
+ * the defect this suite was written for (#6322) was a param that never
+ * appeared at all, and a substring assertion on the params that DID appear
+ * stays green through exactly that.
+ *
+ * Seeded from the measurements in #6322.
+ */
+describe('data.find() — canonical/legacy transport parameters (both copies)', () => {
+    /** The query string a call put on the wire (`''` when it sent none). */
+    function queryOf(url: string): string {
+        const q = url.indexOf('?');
+        return q === -1 ? '' : url.slice(q + 1);
+    }
 
-        await client.data.find('account', {
-            where: { status: 'active' },
-            fields: ['name', 'email'],
-            orderBy: ['-created_at'],
-            limit: 10,
-            offset: 5,
-        });
+    /** Drive the SAME options through both `find` implementations. */
+    async function driveBoth(options: QueryOptions | QueryOptionsV2): Promise<{ direct: string; scoped: string }> {
+        const body = { success: true, data: { object: 'task', records: [], total: 0 } };
 
-        const url = fetchMock.mock.calls[0][0] as string;
-        // V2 canonical options are normalized to HTTP transport params
-        expect(url).toContain('top=10');
-        expect(url).toContain('skip=5');
-        expect(url).toContain('select=name%2Cemail');
-        expect(url).toContain('sort=-created_at');
-        // where → filter as JSON
-        expect(url).toContain('status=active');
+        const a = createMockClient(body);
+        await a.client.data.find('task', options);
+        const direct = queryOf(a.fetchMock.mock.calls[0][0] as string);
+
+        const b = createMockClient(body);
+        await b.client.project('env-1').data.find('task', options);
+        const scoped = queryOf(b.fetchMock.mock.calls[0][0] as string);
+
+        return { direct, scoped };
+    }
+
+    interface TransportRow {
+        options: QueryOptions | QueryOptionsV2;
+        /** The exact query string both copies must emit. */
+        wire: string;
+    }
+
+    /**
+     * A key declared on `QueryOptionsV2` and on NO legacy `QueryOptions`
+     * spelling — recomputed here from the two exported interfaces rather than
+     * restated, so it tracks them.
+     */
+    type CanonicalOnlyKey = Exclude<keyof QueryOptionsV2, keyof QueryOptions>;
+
+    /**
+     * ONE ROW PER CANONICAL-ONLY KEY, DRIVEN ALONE. This is the shape of the
+     * #6322 defect: `find('task', { limit: 20 })` — a canonical key as the
+     * ONLY key — was not recognised as canonical vocabulary, fell to the
+     * legacy branch, which reads no `limit`, and reached the server with an
+     * EMPTY query string. HTTP 200, server default page size, no warning.
+     * Its pagination twin `{ offset: 5 }` worked, because `offset` happened to
+     * be in the hand-written sniff list and `limit` did not.
+     *
+     * `Record<CanonicalOnlyKey, …>` is the anti-rot device: a new key added to
+     * `QueryOptionsV2` makes this object a COMPILE error until someone states
+     * what that key puts on the wire — which is the question the old
+     * hand-maintained sniff list let two keys (`limit`, `expand`) slip past.
+     */
+    const SINGLE_CANONICAL_KEY: Record<CanonicalOnlyKey, TransportRow> = {
+        where: { options: { where: { contact_id: 'c1' } }, wire: 'contact_id=c1' },
+        fields: { options: { fields: ['id', 'amount'] }, wire: 'select=id%2Camount' },
+        orderBy: { options: { orderBy: ['-created_at'] }, wire: 'sort=-created_at' },
+        limit: { options: { limit: 20 }, wire: 'top=20' },
+        offset: { options: { offset: 5 }, wire: 'skip=5' },
+        expand: { options: { expand: ['contact'] }, wire: 'expand=contact' },
+    };
+
+    /** The five paired keys, canonical spelling. */
+    const CANONICAL_FULL: QueryOptionsV2 = {
+        where: { contact_id: 'c1' },
+        fields: ['id', 'amount'],
+        orderBy: ['-created_at'],
+        limit: 20,
+        offset: 5,
+    };
+
+    /** The same query, legacy spelling. Must reach the wire byte-identically. */
+    const LEGACY_FULL: QueryOptions = {
+        filter: { contact_id: 'c1' },
+        select: ['id', 'amount'],
+        sort: ['-created_at'],
+        top: 20,
+        skip: 5,
+    };
+
+    const ROWS: Record<string, TransportRow> = {
+        'canonical: where + fields + orderBy + limit + offset': {
+            options: CANONICAL_FULL,
+            wire: 'top=20&skip=5&sort=-created_at&select=id%2Camount&contact_id=c1',
+        },
+        'legacy: filter + select + sort + top + skip': {
+            options: LEGACY_FULL,
+            wire: 'top=20&skip=5&sort=-created_at&select=id%2Camount&contact_id=c1',
+        },
+        ...Object.fromEntries(
+            Object.entries(SINGLE_CANONICAL_KEY).map(([key, row]) => [`canonical single key: { ${key} }`, row]),
+        ),
+        // The legacy twins of the two pagination keys — pinned alongside so a
+        // change that fixes one vocabulary by breaking the other goes red.
+        'legacy single key: { top }': { options: { top: 20 }, wire: 'top=20' },
+        'legacy single key: { skip }': { options: { skip: 5 }, wire: 'skip=5' },
+
+        // ── #6485: ZERO IS A VALUE, NOT AN ABSENCE ──────────────────────────
+        //
+        // The two pagination params were emitted on TRUTHINESS
+        // (`if (normalizedOptions.top)`) while the canonical branch ten lines
+        // above already normalized them on PRESENCE (`if (v2.limit != null)`).
+        // So `0` survived the normalizer and was then discarded by the
+        // emitter, in both copies.
+        //
+        // `limit: 0` is the half that changes the answer, and the direction is
+        // measured, not assumed. Through the REST list route
+        // (`ObjectStackProtocolImplementation.findData`) `top=0` is neither
+        // rejected nor ignored: it folds to `limit: 0` and reaches the engine,
+        // and `SqlDriver.find` — the driver behind the default file-backed
+        // SQLite datasource — applies pagination on presence
+        // (`if (query.limit !== undefined) b.limit(query.limit)`), so the
+        // statement carries `LIMIT 0` and answers with zero rows. Dropping the
+        // param instead did NOT mean "the server's default page": this route
+        // has no default page size, so an absent `top` returns the ENTIRE
+        // match set. `find('task', { limit: 0 })` therefore answered with every
+        // record when it asked for none — HTTP 200, no warning.
+        //
+        // `offset: 0` / `skip: 0` are the consistency half: `skip=0` is already
+        // the server's default, so sending it or omitting it means the same
+        // thing. They are pinned here because the emitter must not have two
+        // rules for one pair, not because the wire meaning changed.
+        'canonical zero: { limit: 0 }': { options: { limit: 0 }, wire: 'top=0' },
+        'canonical zero: { offset: 0 }': { options: { offset: 0 }, wire: 'skip=0' },
+        'legacy zero: { top: 0 }': { options: { top: 0 }, wire: 'top=0' },
+        'legacy zero: { skip: 0 }': { options: { skip: 0 }, wire: 'skip=0' },
+        'canonical zero pair: { limit: 0, offset: 0 }': {
+            options: { limit: 0, offset: 0 },
+            wire: 'top=0&skip=0',
+        },
+        'canonical: where + limit': {
+            options: { where: { contact_id: 'c1' }, limit: 20 },
+            wire: 'top=20&contact_id=c1',
+        },
+        'canonical: where + expand': {
+            options: { where: { contact_id: 'c1' }, expand: ['contact'] },
+            wire: 'contact_id=c1&expand=contact',
+        },
+        // `expand` reaches the wire as `expand=<comma-separated relation
+        // names>` — the one spelling `HttpFindQueryParamsSchema` declares for
+        // the GET list route and the protocol normalizer splits on commas.
+        'canonical: expand as a name array': {
+            options: { expand: ['contact', 'owner'] },
+            wire: 'expand=contact%2Cowner',
+        },
+        // The `Record` form contributes its KEYS — the same relation names the
+        // server derives from the comma list.
+        'canonical: expand as a relation map': {
+            options: { expand: { contact: {}, owner: {} } },
+            wire: 'expand=contact%2Cowner',
+        },
+        'no options at all': { options: {}, wire: '' },
+    };
+
+    for (const [name, row] of Object.entries(ROWS)) {
+        it(`${name} → \`${row.wire}\` on both copies`, async () => {
+            const { direct, scoped } = await driveBoth(row.options);
+            expect(direct).toBe(row.wire);
+            expect(scoped).toBe(row.wire);
+        });
+    }
+
+    it('canonical and legacy spellings of one query are byte-identical on the wire', async () => {
+        const canonical = await driveBoth(CANONICAL_FULL);
+        const legacy = await driveBoth(LEGACY_FULL);
+        expect(canonical.direct).toBe(legacy.direct);
+        expect(canonical.scoped).toBe(legacy.scoped);
     });
 
-    it('should still accept legacy field names (filter, select, sort, top, skip)', async () => {
-        const { client, fetchMock } = createMockClient({
-            success: true,
-            data: { object: 'account', records: [], total: 0 }
-        });
+    /**
+     * [#6485] `{ limit: 0 }` and `{}` are DIFFERENT REQUESTS, and the wire has
+     * to be able to tell them apart.
+     *
+     * The table rows above pin each spelling's exact query string. This asserts
+     * the property those rows exist for: the two bags must not collapse onto
+     * one wire. Stated as an inequality rather than as two more literals
+     * because the defect was precisely a collapse — `top` absent in both cases,
+     * so the caller who asked for no records and the caller who asked for
+     * everything sent byte-identical requests and got byte-identical answers.
+     *
+     * Both copies, one property: a fix landing on only one of them leaves the
+     * other's pair equal and this goes red.
+     */
+    it('`{ limit: 0 }` is distinguishable from `{}` on the wire, on both copies', async () => {
+        const zero = await driveBoth({ limit: 0 });
+        const absent = await driveBoth({});
 
-        await client.data.find('account', {
-            filter: { industry: 'Tech' },
-            select: ['name'],
-            sort: ['-revenue'],
-            top: 20,
-            skip: 0,
-        });
+        expect(zero.direct).not.toBe(absent.direct);
+        expect(zero.scoped).not.toBe(absent.scoped);
+    });
 
-        const url = fetchMock.mock.calls[0][0] as string;
-        expect(url).toContain('top=20');
-        expect(url).toContain('select=name');
-        expect(url).toContain('sort=-revenue');
-        expect(url).toContain('industry=Tech');
+    /**
+     * A nested per-relation query inside `expand` has no spelling on a GET, so
+     * it is REFUSED rather than trimmed away — trimming would send a wider
+     * read than the caller asked for and say nothing.
+     *
+     * This is a client-side pre-flight guard, not an HTTP rejection, so there
+     * is no ADR-0112 `code`/`status` envelope to assert. The two independent
+     * bits asserted instead: the message names the offending relation AND the
+     * nested keys it could not carry, and NO request was issued — so a
+     * "refusal" that fired after the read had already gone out, or one that
+     * resolved instead of throwing, both go red.
+     */
+    it('refuses a nested per-relation expand on both copies, before any request', async () => {
+        const nested: QueryOptionsV2 = { expand: { contact: { fields: ['name'] } } };
+
+        const a = createMockClient({ success: true, data: { object: 'task', records: [] } });
+        await expect(a.client.data.find('task', nested)).rejects.toThrow(
+            /expand\['contact'\] carries a nested query \(fields\)/,
+        );
+        expect(a.fetchMock).not.toHaveBeenCalled();
+
+        const b = createMockClient({ success: true, data: { object: 'task', records: [] } });
+        await expect(b.client.project('env-1').data.find('task', nested)).rejects.toThrow(
+            /expand\['contact'\] carries a nested query \(fields\)/,
+        );
+        expect(b.fetchMock).not.toHaveBeenCalled();
     });
 });
 

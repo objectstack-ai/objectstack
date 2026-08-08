@@ -404,6 +404,161 @@ const queryOptionsPlugin = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// [#6399] `@objectstack/verify` structural stand-in erasure guard.
+//
+// The third member of the family above, and the narrowest. `checkReadCoercion`
+// and `checkDateBucketParity` take their driver STRUCTURALLY — `CoercibleDriver`
+// / `BucketableDriver` — so an out-of-tree driver (cloud's `driver-turso` in
+// remote mode) can run the identical contract without importing a concrete
+// driver type. That parameter type is not decoration around the check: for the
+// compile-time half of the conformance it IS the check. Assert the argument and
+// the stand-in stops standing for anything, at that call site, while the code
+// reads exactly like the checked kind.
+//
+// #6354/PR #6396 is the bill: TEN `as never` casts — every call site of both
+// helpers — had switched that half off, long enough that nobody remembered
+// writing them. They were provably dead (removing all ten left three packages'
+// typecheck at exit=0) and the compile-time check they had been hiding is
+// provably live (adding a member no real driver can have turned all ten sites
+// red, 8+2 matching the cast count exactly). Nothing rang for either fact.
+//
+// ⚠️ The cost is highest on the FAKE-driver side. Six of the ten sites pass a
+// hand-written literal; four pass a real driver. A real driver comes from
+// production code and mostly satisfies the stand-in whether or not anyone
+// checks — a hand-written fake is precisely the thing that drifts, and it is
+// the arm an assertion silences most cheaply.
+//
+// Scope is argument 0 — the driver — and nothing else. The options bag is a
+// different type with its own `unknown` slots, and an assertion there is
+// #6394's subject, not this rule's.
+//
+// WHY A DEDICATED RULE, not a widened `check:query-options-erasure`: measured,
+// that ratchet cannot reach these sites at all. `query-options/no-any-erasure`
+// keys on a MEMBER-expression callee named `find|findOne|count|aggregate` and
+// only inspects arguments at index >= 1; every site here is a bare-identifier
+// callee with the driver at index 0. Teaching it the word `never` would have
+// matched zero of the ten while pulling several hundred unrelated `as never`
+// sites into its baseline and blurring what "query/options type erasure" means.
+//
+// WHY NOT a blanket ban on `as never` at call arguments in tests: 550 of the
+// repo's 703 `as never` assertions sit at a call-argument position, 536 of them
+// in test files across 33 packages, and the large majority are legitimate —
+// a negative test constructing input `tsc` is supposed to refuse. That is the
+// same trade-off QUERY_OPTIONS_TEST_GLOBS already resolved the same way: a
+// blocking rule there fights the tests that prove the contract is enforced.
+//
+// The guarded set is reconciled against `packages/verify/src` in BOTH
+// directions by `pnpm check:verify-stand-in`, so a third stand-in check cannot
+// arrive unguarded and a renamed helper cannot leave this rule silently
+// matching nothing. A guard whose covered set is a hand-list nobody re-checks
+// is the dead-pin shape (#4984 / #5018), and this one is not allowed to become
+// it.
+export const VERIFY_STAND_IN_CHECKS = {
+  checkReadCoercion: 'CoercibleDriver',
+  checkDateBucketParity: 'BucketableDriver',
+};
+
+// The rule's own id, exported so `check:verify-stand-in` identifies this rule's
+// reports exactly rather than by message text — same reasoning as
+// QUERY_OPTIONS_RULE_ID.
+export const VERIFY_STAND_IN_RULE_ID = 'verify-stand-in/no-asserted-driver-argument';
+
+export const VERIFY_STAND_IN_MESSAGE =
+  'Do not type-assert the driver argument of a @objectstack/verify conformance check. ' +
+  '`checkReadCoercion(driver)` / `checkDateBucketParity(driver)` declare that parameter as a ' +
+  'structural stand-in (`CoercibleDriver` / `BucketableDriver`) so any driver — including an ' +
+  'out-of-tree one — can run the identical contract; that declaration is the compile-time half ' +
+  'of the conformance, and an assertion on the argument deletes it for this call site while ' +
+  'looking identical to a call that has it. Ten such casts (`as never`, every call site of both ' +
+  'helpers) lived in this repo long enough that nobody remembered writing them — all ten dead, ' +
+  'and the check underneath them alive (#6354 / PR #6396). Six of the ten passed a HAND-WRITTEN ' +
+  'fake driver, which is the arm that actually drifts. Pass the driver unasserted. If it does ' +
+  'not satisfy the stand-in, that is the finding — fix the driver or widen the stand-in ' +
+  'deliberately, in `packages/verify/src`, where the change is reviewed once instead of ' +
+  'silenced per call site. See issues #6354, #6394 and #6399.';
+
+const verifyStandInPlugin = {
+  rules: {
+    'no-asserted-driver-argument': {
+      meta: {
+        type: 'problem',
+        docs: {
+          description:
+            'Ban type-asserting the driver argument of a @objectstack/verify structural conformance check.',
+        },
+        schema: [],
+        messages: { erased: VERIFY_STAND_IN_MESSAGE },
+      },
+      create(context) {
+        const guarded = new Set(Object.keys(VERIFY_STAND_IN_CHECKS));
+
+        /**
+         * True when `node` is, or wraps, ANY type assertion.
+         *
+         * Deliberately wider than `erasesToAny` above: on this argument there is
+         * no assertion worth allowing. `as unknown as BucketableDriver` is the
+         * sanctioned escape for engine query OPTIONS because a test may need
+         * off-contract input on purpose; here the parameter type is the contract
+         * UNDER TEST, so re-labelling the argument with it asserts exactly the
+         * thing the call was supposed to prove. Every one of the ten historical
+         * casts would be re-admitted by an `any`-only test.
+         */
+        const isAsserted = (node) => {
+          for (let cur = node; cur; cur = cur.expression) {
+            if (cur.type === 'TSAsExpression' || cur.type === 'TSTypeAssertion') return true;
+            if (cur.type === 'TSNonNullExpression') continue;
+            return false;
+          }
+          return false;
+        };
+
+        /**
+         * True when `name` resolves, in scope, to a variable declared `: any` or
+         * `: never` — the split form (`const d: any = brokenDriver(); check(d)`),
+         * which erases the stand-in exactly as the inline assertion does and is
+         * the first shape someone reaches for once the inline one is blocked.
+         * Scope analysis, not a name heuristic — same mechanism, and the same
+         * reason, as `slot-lookup/no-any-assignment`.
+         */
+        const declaredErasedVariable = (name, node) => {
+          for (let scope = context.sourceCode.getScope(node); scope; scope = scope.upper) {
+            const variable = scope.variables.find((v) => v.name === name);
+            if (!variable) continue;
+            return variable.defs.some((d) => {
+              const kind = d.node?.id?.typeAnnotation?.typeAnnotation?.type;
+              return (
+                d.node?.type === 'VariableDeclarator' &&
+                (kind === 'TSAnyKeyword' || kind === 'TSNeverKeyword')
+              );
+            });
+          }
+          return false;
+        };
+
+        return {
+          CallExpression(node) {
+            // Bare-identifier callee only. These names are distinctive enough to
+            // treat as reserved, and matching the name rather than the resolved
+            // import is what keeps a re-export or a test-local alias from
+            // quietly leaving the rule behind.
+            if (node.callee?.type !== 'Identifier' || !guarded.has(node.callee.name)) return;
+            const driver = node.arguments?.[0];
+            if (!driver) return;
+            if (isAsserted(driver)) {
+              context.report({ node: driver, messageId: 'erased' });
+              return;
+            }
+            if (driver.type === 'Identifier' && declaredErasedVariable(driver.name, node)) {
+              context.report({ node: driver, messageId: 'erased' });
+            }
+          },
+        };
+      },
+    },
+  },
+};
+
 export default [
   {
     files: ['**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'],
@@ -628,5 +783,37 @@ export default [
     },
     plugins: { 'query-options': queryOptionsPlugin },
     rules: { 'query-options/no-any-erasure': 'error' },
+  },
+  // issue #6399 — @objectstack/verify stand-in erasure guard. Rationale and the
+  // #6354 / PR #6396 measurement are on `VERIFY_STAND_IN_MESSAGE` above.
+  //
+  // No `ignores` beyond the build dirs and NO baseline, which is the whole
+  // reason this is its own rule rather than a widening of one of the two above:
+  // the tree is clean TODAY (all ten casts removed by PR #6396), so the guard
+  // starts at zero and every future violation is a new one. Both siblings had
+  // to grandfather hundreds of pre-existing sites; there is nothing here to
+  // grandfather, and adding one later would mean the state stopped being locked.
+  //
+  // Scope is unrestricted on purpose. The four files holding call sites today
+  // are `packages/qa/dogfood/test/` and `packages/drivers/driver-turso/src/`,
+  // but `@objectstack/verify` is a PUBLISHED helper whose whole point is being
+  // callable from anywhere — a package-scoped rule would go quiet exactly when
+  // the eleventh call site lands somewhere new, which is the case this issue
+  // exists to cover.
+  //
+  // ⚠️ Test files are IN scope here, unlike the query-options rule. That rule
+  // lifts them because a test may legitimately need off-contract engine input;
+  // this argument has no legitimate off-contract form (see the message), and
+  // six of the ten historical casts were in test files passing hand-written
+  // fakes — the arm the guard is worth the most on.
+  {
+    files: ['**/*.{ts,tsx,mts,cts}'],
+    ignores: ['**/node_modules/**', '**/dist/**', '**/build/**', '**/.next/**', '**/.turbo/**'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+    },
+    plugins: { 'verify-stand-in': verifyStandInPlugin },
+    rules: { 'verify-stand-in/no-asserted-driver-argument': 'error' },
   },
 ];

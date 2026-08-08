@@ -3,6 +3,8 @@ import {
   PageHeaderProps,
   PageTabsProps,
   PageCardProps,
+  PageContainerProps,
+  RecordPathProps,
   RecordDetailsProps,
   RecordRelatedListProps,
   RecordHighlightsProps,
@@ -18,7 +20,7 @@ import {
   ElementRecordPickerPropsSchema,
   ElementTextInputPropsSchema,
 } from './component.zod';
-import { PageComponentSchema, PageSchema } from './page.zod';
+import { PageComponentSchema, PageSchema, ElementDataSourceSchema } from './page.zod';
 
 describe('PageHeaderProps', () => {
   it('should accept minimal header', () => {
@@ -117,13 +119,43 @@ describe('PageTabsProps', () => {
   });
 });
 
+// #5775 — the two tab-item keys the renderer honours and the schema did not
+// declare. `value` is the load-bearing one: it is the `?tab=` token, and the
+// index-derived fallback (`tab-<i>`) silently points at a different tab as soon
+// as the item list changes. Declaring it is what unblocks #5776, whose showcase
+// page authors this slot as `key` — neither spelling the renderer reads.
+describe('PageTabsProps items[].value / items[].count (#5775)', () => {
+  it('accepts a stable `value` token and an explicit `count`', () => {
+    const result = PageTabsProps.parse({
+      items: [
+        { label: 'Details', value: 'details', children: [] },
+        { label: 'Tasks', value: 'related:task', count: 3, children: [] },
+      ],
+    });
+    expect(result.items[0]!.value).toBe('details');
+    expect(result.items[1]!.count).toBe(3);
+  });
+
+  it('leaves both undefined when unauthored — the renderer derives them', () => {
+    const result = PageTabsProps.parse({ items: [{ label: 'Details', children: [] }] });
+    expect(result.items[0]!.value).toBeUndefined();
+    expect(result.items[0]!.count).toBeUndefined();
+  });
+
+  it('rejects a non-integer count rather than silently stripping it', () => {
+    expect(() => PageTabsProps.parse({
+      items: [{ label: 'Tasks', count: 'many', children: [] }],
+    })).toThrow();
+  });
+});
+
 describe('PageCardProps', () => {
   it('should accept empty card with defaults', () => {
     const result = PageCardProps.parse({});
     expect(result.bordered).toBe(true);
     expect(result.title).toBeUndefined();
     expect(result.actions).toBeUndefined();
-    expect(result.body).toBeUndefined();
+    expect(result.children).toBeUndefined();
     expect(result.footer).toBeUndefined();
   });
 
@@ -132,12 +164,60 @@ describe('PageCardProps', () => {
       title: 'Info Card',
       bordered: false,
       actions: ['edit', 'delete'],
-      body: ['component1'],
+      children: ['component1'],
       footer: ['footer-component'],
     };
     const result = PageCardProps.parse(card);
     expect(result.title).toBe('Info Card');
     expect(result.bordered).toBe(false);
+    expect(result.children).toEqual(['component1']);
+  });
+
+  // #5775 — `children` is the composition key on every container, and the card
+  // renderer already reads it (`schema.body ?? schema.children`). `body` was
+  // the second spelling of the same slot and is tombstoned; `footer` is a
+  // genuinely distinct slot and stays.
+  it('accepts the showcase card shape verbatim (my-work.page.ts:64)', () => {
+    const result = PageCardProps.parse({
+      title: 'Shortcuts',
+      children: [{ type: 'element:text', properties: { content: 'Delivery Operations' } }],
+    });
+    expect(result.children).toHaveLength(1);
+  });
+
+  it('rejects the retired `body` with the rename prescription', () => {
+    expect(() => PageCardProps.parse({ body: ['component1'] }))
+      .toThrow(/`body`.*removed.*`children`/s);
+  });
+
+  it('does not materialize the retired `body` on a clean parse', () => {
+    expect(PageCardProps.parse({ children: [] })).not.toHaveProperty('body');
+  });
+});
+
+describe('PageContainerProps — page:section / page:footer / page:sidebar (#5775)', () => {
+  // These three were declared `EmptyProps` ("zero props") while their renderers
+  // have always rendered `schema.children || schema.body`. Declaring zero props
+  // for a container that renders children is the ADR-0078 shape from the schema
+  // side: the #5068 gate reported every authored `children` as an unknown key.
+  it('declares `children` on all three thin containers', () => {
+    for (const type of ['page:section', 'page:footer', 'page:sidebar'] as const) {
+      const result = ComponentPropsMap[type].parse({
+        children: [{ type: 'element:text' }],
+      }) as { children?: unknown[] };
+      expect(result.children).toHaveLength(1);
+    }
+  });
+
+  it('keeps `children` optional — an empty container is still valid', () => {
+    expect(PageContainerProps.parse({})).toEqual({});
+  });
+
+  // `body` is NOT a second authorable spelling here (Prime Directive #12). The
+  // renderers keep reading it as a back-compat fallback for stored documents;
+  // that fallback is objectui's to retire on its own schedule.
+  it('does not declare `body` as a second composition key', () => {
+    expect(PageContainerProps.parse({ body: ['x'] })).not.toHaveProperty('body');
   });
 });
 
@@ -683,38 +763,157 @@ describe('Interactive Elements — element:record_picker', () => {
   it('should accept element:record_picker component', () => {
     expect(() => PageComponentSchema.parse({
       type: 'element:record_picker',
-      properties: { object: 'account', displayField: 'name' },
+      properties: { object: 'account', labelField: 'name' },
     })).not.toThrow();
   });
 
   it('should parse record_picker props with defaults', () => {
     const props = ElementRecordPickerPropsSchema.parse({
       object: 'account',
-      displayField: 'name',
+      labelField: 'name',
     });
     expect(props.object).toBe('account');
-    expect(props.displayField).toBe('name');
-    expect(props.multiple).toBe(false);
+    expect(props.labelField).toBe('name');
   });
 
   it('should accept full record_picker props', () => {
     const props = ElementRecordPickerPropsSchema.parse({
       object: 'account',
-      displayField: 'name',
-      searchFields: ['name', 'email'],
+      labelField: 'name',
+      valueField: 'id',
+      label: 'Account',
       filter: { status: 'active' },
-      multiple: true,
       targetVariable: 'selected_account',
       placeholder: 'Search accounts...',
+      emptyText: 'No accounts',
     });
-    expect(props.multiple).toBe(true);
     expect(props.targetVariable).toBe('selected_account');
-    expect(props.searchFields).toEqual(['name', 'email']);
+    expect(props.labelField).toBe('name');
+    expect(props.valueField).toBe('id');
+    expect(props.label).toBe('Account');
+    expect(props.emptyText).toBe('No accounts');
   });
 
-  it('should reject record_picker without required fields', () => {
+  it('should reject record_picker without its one required field', () => {
     expect(() => ElementRecordPickerPropsSchema.parse({})).toThrow();
-    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'account' })).toThrow();
+  });
+
+  // #5775 — `object` is the ONLY required prop. `labelField` is optional
+  // because the renderer defaults it to `name` (`props.labelField ?? 'name'`),
+  // so omitting it is a working picker, not a broken one. This is the half of
+  // the ruling that lets the showcase's `page-variables` page stop reporting
+  // `component-props-invalid` (a required key it had no reason to write).
+  it('accepts a picker with `object` alone — labelField defaults in the renderer', () => {
+    const props = ElementRecordPickerPropsSchema.parse({ object: 'account' });
+    expect(props.object).toBe('account');
+    expect(props.labelField).toBeUndefined();
+  });
+
+  it('accepts the showcase picker shape verbatim (page-variables.page.ts:59)', () => {
+    const props = ElementRecordPickerPropsSchema.parse({
+      label: 'Project',
+      labelField: 'name',
+      placeholder: 'Choose a project…',
+      object: 'showcase_project',
+    });
+    expect(props.labelField).toBe('name');
+    expect(props.label).toBe('Project');
+  });
+
+  // #5775 tombstones — the prescription IS the payload. `displayField` was a
+  // REQUIRED declaration no renderer read; `searchFields` / `multiple` were
+  // capability claims the single-select control never kept (ADR-0049).
+  it('rejects the retired `displayField` with the rename prescription', () => {
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', displayField: 'title' }))
+      .toThrow(/displayField.*removed.*use `labelField`|displayField.*removed.*`labelField`/s);
+  });
+
+  it('rejects the retired `searchFields` with its prescription', () => {
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', searchFields: ['name'] }))
+      .toThrow(/`searchFields`.*removed.*Delete the key/s);
+  });
+
+  it('rejects the retired `multiple` with its prescription', () => {
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', multiple: true }))
+      .toThrow(/`multiple`.*removed.*Delete the key/s);
+  });
+
+  it('does not materialize the retired keys on a clean parse', () => {
+    const props = ElementRecordPickerPropsSchema.parse({ object: 'a' });
+    expect(props).not.toHaveProperty('displayField');
+    expect(props).not.toHaveProperty('searchFields');
+    expect(props).not.toHaveProperty('multiple');
+  });
+
+  // ── #6276 — the flat `sort` / `limit` shorthands ─────────────────────────
+  // The renderer resolves four keys through one pattern
+  // (`ds.<k> ?? props.<k>`); after #5775 two of the four flat spellings were
+  // declared and two were not. These pin the other two, in BOTH halves of what
+  // a declaration buys: the key is retained (not stripped into silence) and the
+  // VALUE is judged (a wrong shape is rejected by name rather than dropped).
+  it('retains the flat `sort` shorthand — declared, not stripped (#6276)', () => {
+    const props = ElementRecordPickerPropsSchema.parse({
+      object: 'showcase_project',
+      sort: [{ field: 'created_at', order: 'desc' }],
+    });
+    expect(props.sort).toEqual([{ field: 'created_at', order: 'desc' }]);
+  });
+
+  it('retains the flat `limit` shorthand — declared, not stripped (#6276)', () => {
+    const props = ElementRecordPickerPropsSchema.parse({ object: 'showcase_project', limit: 20 });
+    expect(props.limit).toBe(20);
+  });
+
+  // The exact ADR-0078 trap the issue reported: an author who infers
+  // `properties.limit: 20` from the declared `object`/`filter` spelling used to
+  // get the renderer's default 50 with zero diagnostics, because the key was
+  // stripped before anything could read it.
+  it('rejects a non-integer / non-positive `limit` by name (#6276)', () => {
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 0 })).toThrow(/limit/);
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: -5 })).toThrow(/limit/);
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 2.5 })).toThrow(/limit/);
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', limit: 'ten' })).toThrow(/limit/);
+  });
+
+  it('rejects a malformed `sort` by name (#6276)', () => {
+    // A bare field name — the shape an author reaches for when the key is
+    // undeclared and nothing has ever told them otherwise.
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', sort: 'created_at' }))
+      .toThrow(/sort/);
+    // Right container, wrong direction vocabulary.
+    expect(() => ElementRecordPickerPropsSchema.parse({
+      object: 'a',
+      sort: [{ field: 'created_at', order: 'descending' }],
+    })).toThrow(/sort/);
+    // Right container, missing the required half of the pair.
+    expect(() => ElementRecordPickerPropsSchema.parse({ object: 'a', sort: [{ field: 'created_at' }] }))
+      .toThrow(/sort/);
+  });
+
+  // The shorthand IS the `dataSource` key, so one value must parse identically
+  // through both doors. This is what stops the flat spelling drifting into a
+  // third sort dialect (the ledger's `report.zod.ts` row records three already).
+  it('parses `sort` / `limit` identically to `dataSource` (one shape, two spellings) (#6276)', () => {
+    const sort = [{ field: 'name', order: 'asc' as const }];
+    const viaProps = ElementRecordPickerPropsSchema.parse({ object: 'a', sort, limit: 25 });
+    const viaDataSource = ElementDataSourceSchema.parse({ object: 'a', sort, limit: 25 });
+    expect(viaProps.sort).toEqual(viaDataSource.sort);
+    expect(viaProps.limit).toEqual(viaDataSource.limit);
+    // …and the same rejections on the same values.
+    expect(ElementRecordPickerPropsSchema.safeParse({ object: 'a', limit: 0 }).success)
+      .toBe(ElementDataSourceSchema.safeParse({ object: 'a', limit: 0 }).success);
+    expect(ElementRecordPickerPropsSchema.safeParse({ object: 'a', sort: 'name' }).success)
+      .toBe(ElementDataSourceSchema.safeParse({ object: 'a', sort: 'name' }).success);
+  });
+
+  // The renderer's `?? 50` is a RENDERER fallback, deliberately not a schema
+  // default: `.default(50)` would materialize a limit on every parsed picker
+  // and turn an unset key into an authored one (and would then have to be kept
+  // in sync with objectui by hand).
+  it('does not default `limit` — the 50 is the renderer fallback (#6276)', () => {
+    const props = ElementRecordPickerPropsSchema.parse({ object: 'a' });
+    expect(props.limit).toBeUndefined();
+    expect(props.sort).toBeUndefined();
   });
 });
 
@@ -814,7 +1013,7 @@ describe('ComponentPropsMap interactive elements', () => {
   it('should parse element:record_picker props', () => {
     const result = ComponentPropsMap['element:record_picker'].parse({
       object: 'account',
-      displayField: 'name',
+      labelField: 'name',
     });
     expect(result.object).toBe('account');
   });
@@ -822,6 +1021,38 @@ describe('ComponentPropsMap interactive elements', () => {
   it('should parse element:text_input props', () => {
     const result = ComponentPropsMap['element:text_input'].parse({ label: 'Name' });
     expect(result.inputType).toBe('text');
+  });
+});
+
+// #5775 — `stages[].terminal` is honoured FIRST by the record-path renderer,
+// ahead of the token heuristic that guesses "won"/"lost" from the value/label.
+// The showcase's `done` stage is exactly the case the heuristic cannot read, so
+// without this key there is no way to declare the terminus at all.
+describe('RecordPathProps stages[].terminal (#5775)', () => {
+  it('accepts the showcase stage shape verbatim (task-detail.page.ts:40)', () => {
+    const result = RecordPathProps.parse({
+      statusField: 'status',
+      stages: [
+        { value: 'todo', label: 'To Do' },
+        { value: 'done', label: 'Done', terminal: 'won' },
+      ],
+    });
+    expect(result.stages![1]!.terminal).toBe('won');
+  });
+
+  it('leaves terminal undefined when unauthored (no default materialized)', () => {
+    const result = RecordPathProps.parse({
+      statusField: 'status',
+      stages: [{ value: 'todo', label: 'To Do' }],
+    });
+    expect(result.stages![0]!.terminal).toBeUndefined();
+  });
+
+  it('rejects a terminal outside won|lost rather than silently stripping it', () => {
+    expect(() => RecordPathProps.parse({
+      statusField: 'status',
+      stages: [{ value: 'x', label: 'X', terminal: 'closed' }],
+    })).toThrow();
   });
 });
 
