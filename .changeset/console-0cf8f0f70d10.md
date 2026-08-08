@@ -79,3 +79,6 @@ Derived from the changesets objectui declared over the range — 24 releasing of
 - _(no changeset)_ fix(fields): 编辑弹窗 datetime/date 字段回显存量值 (#3565) (objectui `b785a77b3`)
 
 objectui range: `7dfbeb704e1e...0cf8f0f70d10`
+
+<!-- adr-0087: not-required (already-registered dashboard-widget-action-aria-removed) 本条目声明的两处破坏都落在 objectui 自家 npm 包的 TypeScript 导出面（@object-ui/types / core / react / mobile 的类型重命名与 re-export 移除），而 @objectstack/console 发布的是按 pin SHA 构建的冻结 SPA 产物、不转发这些类型入口，所以没有需要新登记的元数据迁移。区间内唯一触及元数据作者面的处方是 dashboard.widgets[] 的 actionUrl/actionType/actionIcon/aria 改为具名报错并附 os migrate meta --from 16 —— 那是 objectstack 自己 protocol-17 的改动，已由 packages/spec/src/conversions/registry.ts 的 dashboard-widget-action-aria-removed 登记（surface 逐字覆盖这四个键，toMajor 17，带 apply 与 fixture），并列在 packages/spec/src/migrations/registry.ts step17 的 conversionIds 中；该条目在 merge base 上即已存在，本 PR 未新增任何台账条目。 -->
+
