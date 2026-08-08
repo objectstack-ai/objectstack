@@ -1,6 +1,6 @@
 # Follow-ups — open items from the capability-coverage sweep (2026-08-08)
 
-Working document, NOT committed pending user confirmation. The gap items found by the
+Decision register from the capability-coverage sweep. The gap items found by the
 five-angle sweep have all been authored into `areas/*.json` (checklist grew 84 → 170
 items; the `api`/`datasource`/`mapping` coverage waivers were corrected). What remains
 here is what the sweep surfaced that is **not** a checklist item: product defects to
@@ -64,5 +64,6 @@ these to the showcase would make them runnable:
 
 - `PENDING-GAPS.md` (the full deduped gap register that drove the authoring) can be deleted
   once you've reviewed §1–§2 above — it was scaffolding; this file is the durable residue.
-- Nothing in this sweep has been committed. The checklist itself (`areas/*.json`, `coverage.json`,
-  `README.md`, `RUNNER.md`, `scripts/check-platform-checklist.mjs`) is ready for your review.
+- The checklist itself (`areas/*.json`, `coverage.json`, `README.md`, `RUNNER.md`,
+  `scripts/check-platform-checklist.mjs`) ships in this branch; this file carries the
+  decisions that remain with the maintainer.
