@@ -649,15 +649,40 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // history (label says it all — admins iterate frequently, want to roll back).
   // `app`: tenants may author custom navigation apps (Salesforce Lightning App
   // parity), so `allowRuntimeCreate: true`.
+  //
+  // `allowOrgOverride` in this section is governed by ADR-0005's amendment
+  // table (`docs/adr/0005-metadata-customization-overlay.md:53-64`), which
+  // whitelists exactly `view`/`dashboard`/`report` ("Pure presentation. Safe
+  // per-org override.") and says ❌ for `page`/`app`/`action` ("Conservative
+  // default — these bind to routes and side-effects. Promote individually if
+  // a concrete need appears."). `page`/`app`/`action`/`dataset` were ROLLED
+  // BACK from an unratified `true` by the 2026-08-08 maintainer ruling on
+  // #6483 (same verdict family as `flow`, #6283): no promotion ADR exists,
+  // and no live org-scoped overlay rows were found in-repo. `dataset` is
+  // absent from the table, so it takes the amendment's default for new types
+  // — `allowOrgOverride: false` until an admission pair (overlay schema + a
+  // WRITTEN render-only rationale) is ratified. Promotion of any of these is
+  // an ADR-0005 revision, not a registry edit.
+  //
+  // NOT closed: `allowRuntimeCreate` stays `true` on all four — a tenant may
+  // still author a BRAND-NEW page/app/action/dataset (the ADR-0005 two-tier
+  // model); what is closed is per-org overlay of a PACKAGED item, now a loud
+  // `403 not_overridable` at the write. ADR-0045's publish visibility flip
+  // (`runtime/domains/packages.ts`) keeps working: it rewrites apps
+  // MATERIALIZED into `sys_metadata` (DB-only provenance), which rides the
+  // `allowRuntimeCreate` tier, not this flag.
   { type: 'view', label: 'View', filePatterns: ['**/*.view.ts', '**/*.view.yml', '**/*.view.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
-  { type: 'page', label: 'Page', filePatterns: ['**/*.page.ts', '**/*.page.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
+  { type: 'page', label: 'Page', filePatterns: ['**/*.page.ts', '**/*.page.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
   { type: 'dashboard', label: 'Dashboard', filePatterns: ['**/*.dashboard.ts', '**/*.dashboard.yml', '**/*.dashboard.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
-  { type: 'app', label: 'Application', filePatterns: ['**/*.app.ts', '**/*.app.yml', '**/*.app.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 70, domain: 'ui' },
-  { type: 'action', label: 'Action', filePatterns: ['**/*.action.ts', '**/*.action.yml'], supportsOverlay: false, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
+  { type: 'app', label: 'Application', filePatterns: ['**/*.app.ts', '**/*.app.yml', '**/*.app.json'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 70, domain: 'ui' },
+  // `action` was additionally the #6283 `flow` shape exactly: its own row
+  // declares `supportsOverlay: false`, so `allowOrgOverride: true` granted a
+  // write nothing could ever read back — the #6190 phantom. (ADR-0005, #6483)
+  { type: 'action', label: 'Action', filePatterns: ['**/*.action.ts', '**/*.action.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
   { type: 'report', label: 'Report', filePatterns: ['**/*.report.ts', '**/*.report.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
   // ADR-0021: dataset is the analytics semantic layer that report/dashboard bind to.
   // loadOrder 55 < report/dashboard (60) so datasets register before their consumers.
-  { type: 'dataset', label: 'Dataset', description: 'Analytics semantic layer — dimensions & measures', filePatterns: ['**/*.dataset.ts', '**/*.dataset.yml', '**/*.dataset.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 55, domain: 'ui' },
+  { type: 'dataset', label: 'Dataset', description: 'Analytics semantic layer — dimensions & measures', filePatterns: ['**/*.dataset.ts', '**/*.dataset.yml', '**/*.dataset.json'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 55, domain: 'ui' },
 
   // Automation Protocol — flow is executionPinned (ADR-0009).
   // ADR-0019: there is no `approval` metadata type — approvals are Approval
@@ -812,13 +837,45 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // never parses `content`. loadOrder is last: nothing references docs.
   { type: 'doc', label: 'Documentation', description: 'Package documentation — flat Markdown items (ADR-0046)', filePatterns: ['**/docs/*.md'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
   // Navigation spine over docs (ADR-0046 §6): ordered groups, membership derived
-  // by rule. Render-time like view/dashboard ⇒ overlay-allowed so Studio can
-  // drag-edit; runtime-creatable for AI/authors. loadOrder last (references docs).
-  { type: 'book', label: 'Documentation Book', description: 'Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)', filePatterns: ['**/*.book.ts'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
+  // by rule. Overlay-mergeable at read (`supportsOverlay: true`); runtime-
+  // creatable for AI/authors. loadOrder last (references docs).
+  //
+  // `allowOrgOverride: false` — ROLLED BACK from an unratified `true` (#6483,
+  // ADR-0005). The "render-time like view/dashboard" argument that used to
+  // sit here is only half of ADR-0005's admission pair; the WRITTEN
+  // render-only rationale ratified into the whitelist table was never filed,
+  // and `book` appears nowhere in that table, so it takes the amendment's
+  // default for absentees: `false` until promoted by an ADR-0005 revision.
+  // Zero live org-scoped book overlay rows in-repo at rollback. Studio's
+  // drag-edit of a PACKAGED book now answers `403 not_overridable`;
+  // authoring a BRAND-NEW book keeps working (`allowRuntimeCreate`).
+  { type: 'book', label: 'Documentation Book', description: 'Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)', filePatterns: ['**/*.book.ts'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
 
   // Security Protocol
-  { type: 'permission', label: 'Permission Set', filePatterns: ['**/*.permission.ts', '**/*.permission.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 15, domain: 'security' },
-  { type: 'position', label: 'Position', filePatterns: ['**/*.position.ts', '**/*.position.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 15, domain: 'security' },
+  //
+  // `permission` / `position`: `allowOrgOverride: false` — ROLLED BACK from
+  // an unratified `true` (#6483, 2026-08-08 maintainer ruling; same verdict
+  // family as `flow`, #6283). ADR-0005's security row says ❌ outright:
+  // "Authorization correctness; overlays would create silent privilege
+  // drift" — a per-org overlay of a packaged permission set IS that drift,
+  // definitionally. `position` is absent from the ADR's table and takes the
+  // amendment's `false` default for new types. Zero live org-scoped overlay
+  // rows for either type in-repo at rollback.
+  //
+  // Blast radius, measured while landing #6483: plugin-security's ADR-0094
+  // write-through (`permission-set-projection.ts`) routes data-door edits of
+  // permission sets into `saveMetaItem`. Runtime-created sets — including
+  // package-bound rows MATERIALIZED through the metadata door, whose
+  // provenance is `sys_metadata`, not an artifact — ride `allowRuntimeCreate`
+  // (still `true`) and keep working; a data-door edit of a CODE-DECLARED
+  // (artifact-backed) set now refuses with 403 — the same refusal that
+  // write-through already issues on kernels without an overlay layer
+  // (ADR-0086 two-doors: edit the package and re-publish). If
+  // ADR-0094's "customize packaged sets via env overlay" direction
+  // (2026-07-14) is to be restored, that is an ADR-0005 whitelist revision —
+  // file it there; do not flip this flag back ad hoc.
+  { type: 'permission', label: 'Permission Set', filePatterns: ['**/*.permission.ts', '**/*.permission.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 15, domain: 'security' },
+  { type: 'position', label: 'Position', filePatterns: ['**/*.position.ts', '**/*.position.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 15, domain: 'security' },
   // [#5961] Package-declared authorization capabilities (ADR-0066 D1).
   //
   // ⛔ CODE-ONLY, and that is the whole point of the entry. ADR-0066 D1 says
@@ -901,8 +958,17 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // an author-owned definition has no git to fall back on, so opening the
   // type and giving it a real history path are the same piece of work.
   { type: 'agent', label: 'AI Agent', filePatterns: ['**/*.agent.ts', '**/*.agent.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: true, executionPinned: true, loadOrder: 90, domain: 'ai' },
-  { type: 'tool', label: 'AI Tool', filePatterns: ['**/*.tool.ts', '**/*.tool.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'ai' },
-  { type: 'skill', label: 'AI Skill', filePatterns: ['**/*.skill.ts', '**/*.skill.yml'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 88, domain: 'ai' },
+  // `tool` / `skill`: `allowOrgOverride: false` — ROLLED BACK from an
+  // unratified `true` (#6483, 2026-08-08 maintainer ruling). ADR-0005's ai
+  // row says ❌: "Behavioural contracts with model providers; treat like
+  // flows" — and `flow` itself was rolled back by #6283 on that very row.
+  // ADR-0063 §2's model (tenants extend the platform by AUTHORING skills +
+  // tools) is the `allowRuntimeCreate: true` tier, which stays open; what
+  // closes is per-org overlay of a PACKAGE-SHIPPED tool/skill, now a loud
+  // `403 not_overridable`. Zero live org-scoped overlay rows for either
+  // type in-repo at rollback; zero production write sites found.
+  { type: 'tool', label: 'AI Tool', filePatterns: ['**/*.tool.ts', '**/*.tool.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'ai' },
+  { type: 'skill', label: 'AI Skill', filePatterns: ['**/*.skill.ts', '**/*.skill.yml'], supportsOverlay: true, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 88, domain: 'ai' },
 ];
 
 // ==========================================

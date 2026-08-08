@@ -71,28 +71,36 @@ describe('two-doors permission separation (ADR-0086 P2)', () => {
     });
   });
 
-  // ── 块2 — admin door: package rows customize via overlay (ADR-0094) ───────
-  it('块2: an admin edit of a package-managed set becomes an env OVERLAY; provenance is preserved', async () => {
+  // ── 块2 — admin door: artifact-backed rows now REFUSE the overlay (#6483) ─
+  it('块2: an admin edit of a package-managed set is refused — no env overlay is minted (#6483)', async () => {
+    // Pre-#6483 this edit became an env-scope overlay (ADR-0094's 2026-07-14
+    // direction). `permission` has since rolled back to
+    // `allowOrgOverride: false` (ADR-0005 security row: "Authorization
+    // correctness; overlays would create silent privilege drift"), so the
+    // write-through's `saveMetaItem` refuses the artifact-backed target with
+    // 403 `not_overridable` — loudly, at the moment of the write. ADR-0086
+    // two-doors names the supported channel: edit the package, re-publish.
     const contributor = await findSet('showcase_contributor');
     expect(contributor?.managed_by, 'showcase_contributor is package-owned').toBe('package');
 
     const res = await stack.apiAs(adminToken, 'PATCH', `/data/sys_permission_set/${contributor.id}`, {
       label: 'Contributor (customized)',
     });
-    expect(res.status).toBeLessThan(300);
+    expect(res.status, 'the refusal surfaces to the data-door caller').toBe(403);
 
-    // The customization landed as a metadata overlay of the packaged definition…
+    // Nothing was minted and nothing projects differently.
     const layered = await protocol.getMetaItemLayered({ type: 'permission', name: 'showcase_contributor' });
-    expect(layered?.overlay, 'edit persisted as an env-scope overlay').toBeTruthy();
-    expect(layered.overlay.label).toBe('Contributor (customized)');
-    // …the record projects the effective body, and the package still owns it.
+    expect(layered?.overlay ?? null, 'no env-scope overlay row exists').toBeFalsy();
     const after = await findSet('showcase_contributor');
-    expect(after.label).toBe('Contributor (customized)');
+    expect(after.label).toBe(contributor.label);
     expect(after.managed_by).toBe('package');
     expect(after.package_id).toBe(contributor.package_id);
   });
 
-  it('块2: "deleting" the customized package set removes the overlay and RESETS to the shipped declaration', async () => {
+  it('块2: "deleting" the package set through the env door still RESETS to the shipped declaration', async () => {
+    // (#6483: with the edit above refused there is no overlay to lift, but
+    // the invariant is unchanged and still pinned: the env door can never
+    // remove a packaged definition — delete degrades to reset.)
     const before = await findSet('showcase_contributor');
     const res = await stack.apiAs(adminToken, 'DELETE', `/data/sys_permission_set/${before.id}`);
     expect(res.status).toBeLessThan(300);
@@ -105,17 +113,51 @@ describe('two-doors permission separation (ADR-0086 P2)', () => {
     expect(layered?.overlay, 'overlay gone after the reset').toBeFalsy();
   });
 
-  it('块2: the admin door CAN still edit an env-authored set (isolates the gate to package rows)', async () => {
-    const memberDefault = await findSet('member_default');
-    expect(memberDefault?.managed_by ?? null, 'member_default is env-owned').not.toBe('package');
+  it('块2: the admin door CAN still edit an env-authored set (isolates the gate to artifact-backed rows)', async () => {
+    // The specimen was `member_default` until #6483: its record is env-owned
+    // (`managed_by` ≠ 'package'), but its METADATA identity is a platform
+    // artifact (`defaultPermissionSets`), so with `permission` rolled back
+    // to `allowOrgOverride: false` the write-through's `saveMetaItem` now
+    // refuses to overlay it — the record's provenance column was never what
+    // the gate reads. A truly env-AUTHORED set (created through the data
+    // door, definition living only in `sys_metadata`) rides the
+    // `allowRuntimeCreate` tier, which #6483 deliberately left open — that
+    // is the boundary this case isolates.
+    const NAME = 'twodoors_env_authored';
+    const created = await stack.apiAs(adminToken, 'POST', '/data/sys_permission_set', {
+      name: NAME,
+      label: 'Env Authored (two doors)',
+      object_permissions: JSON.stringify({ crm_lead: { allowRead: true } }),
+    });
+    expect(created.status).toBeLessThan(300);
+    const row = await findSet(NAME);
+    expect(row?.managed_by, 'env-authored set is admin-owned').toBe('admin');
 
-    const res = await stack.apiAs(adminToken, 'PATCH', `/data/sys_permission_set/${memberDefault.id}`, {
+    const res = await stack.apiAs(adminToken, 'PATCH', `/data/sys_permission_set/${row.id}`, {
       description: 'edited through the admin door',
     });
     expect(res.status).toBeLessThan(300);
 
-    const after = await findSet('member_default');
+    const after = await findSet(NAME);
     expect(after.description).toBe('edited through the admin door');
+  });
+
+  it('块2: the admin door can NO LONGER edit an artifact-backed set (#6483 — the gate reads artifact provenance)', async () => {
+    // The other half of the boundary: `member_default`'s definition ships as
+    // a platform artifact, so the same PATCH that works on an env-authored
+    // set answers 403 `not_overridable` here — loudly, at the moment of the
+    // write, with no overlay minted (ADR-0005 security row; ADR-0086
+    // two-doors names the supported channel: edit the package, re-publish).
+    const memberDefault = await findSet('member_default');
+    expect(memberDefault?.managed_by ?? null, 'member_default record is env-owned').not.toBe('package');
+
+    const res = await stack.apiAs(adminToken, 'PATCH', `/data/sys_permission_set/${memberDefault.id}`, {
+      description: 'edited through the admin door',
+    });
+    expect(res.status, 'artifact-backed set refuses the data-door edit').toBe(403);
+
+    const layered = await protocol.getMetaItemLayered({ type: 'permission', name: 'member_default' });
+    expect(layered?.overlay ?? null, 'no overlay row was minted by the refused edit').toBeFalsy();
   });
 
   it('块2: the admin door cannot forge package provenance on insert', async () => {
