@@ -12,6 +12,9 @@ import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/type
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { MetadataHostEngine } from './host-engine.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
+// [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
+// ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
+import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import { ConflictError, assertProtocolCompat, applyAuditFieldGovernance, type MetadataItem } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
@@ -2623,13 +2626,25 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * One-time guard for ensuring the overlay-uniqueness UNIQUE INDEX exists
-     * on `sys_metadata`. ADR-0005: scopes overlays by
-     * `(type, name, organization_id, environment_id, scope)` for active rows only.
-     * Idempotent SQL — safe to attempt on every protocol instance.
+     * One-time guard for ensuring the overlay-uniqueness UNIQUE INDEXes exist
+     * on `sys_metadata`. ADR-0005 (revised 2026-05) + ADR-0048: per-env DBs
+     * replace the old "per-project" isolation, so `environment_id` is no longer
+     * a discriminator — overlay uniqueness is
+     * `(type, name, organization_id, COALESCE(package_id, ''))`, enforced once
+     * among ACTIVE rows and once among DRAFT rows. Idempotent SQL — safe to
+     * attempt on every protocol instance.
      *
-     * Inlined here (rather than importing from @objectstack/metadata/migrations)
-     * to avoid a circular dependency: metadata already depends on objectql.
+     * ⚠️ This method resolves a raw-SQL seam and nothing more. The DDL, its
+     * ORDER and its reporting live in `./migrations/overlay-index.ts` (#6418),
+     * which replaced the DROP-then-CREATE sequence that used to sit here: the
+     * drop always succeeded and a failing create left `sys_metadata` with no
+     * unique index at all, silently, because both `catch` blocks were empty.
+     * See that module's header for why the order is now probe-first and why the
+     * dialect fallback must stay NON-unique.
+     *
+     * Kept in this package (rather than imported from
+     * `@objectstack/metadata/migrations`) to avoid a circular dependency:
+     * metadata already depends on objectql.
      */
     private overlayIndexEnsured = false;
     private async ensureOverlayIndex(): Promise<void> {
@@ -2660,66 +2675,15 @@ export class ObjectStackProtocolImplementation implements
                     throw new Error('driver has neither raw nor execute');
                 }
             };
-            // ADR-0005 (revised 2026-05) + ADR-0048: per-env DBs replace the old
-            // "per-project" isolation, so `environment_id` is no longer a
-            // discriminator. Overlay uniqueness is `(type, name,
-            // organization_id, COALESCE(package_id,''))` filtered to active
-            // rows — `package_id` is in the key so two installed packages
-            // shipping the same name each get their own overlay, while
-            // `COALESCE(...,'')` keeps the package-less (global) rows unique
-            // among themselves (a plain unique index would treat NULLs as
-            // distinct and allow duplicate globals). Drop the legacy composite
-            // index first so the new partial UNIQUE can claim the same name —
-            // DROP INDEX IF EXISTS is idempotent.
-            try { await exec("DROP INDEX IF EXISTS idx_sys_metadata_overlay_active"); } catch { /* best-effort */ }
-            const partialSql =
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active " +
-                "ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) " +
-                "WHERE state = 'active'";
-            const fallbackSql =
-                "CREATE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active " +
-                "ON sys_metadata (type, name, organization_id, package_id)";
-            try {
-                await exec(partialSql);
-            } catch (err: any) {
-                const msg = err instanceof Error ? err.message : String(err);
-                if (/partial|where clause|syntax/i.test(msg)) {
-                    try {
-                        await exec(fallbackSql);
-                    } catch {
-                        // ignore — non-essential optimization
-                    }
-                }
-                // "already exists" or anything else: best-effort
-            }
-            // Mirror the same partial-UNIQUE for draft rows so a second
-            // simultaneous draft cannot be inserted for the same
-            // (type,name,org,package). The unique-active index above already
-            // guards published rows; the two never collide because the
-            // `state` predicate disambiguates them. DROP first so an existing
-            // legacy 3-column draft index is replaced in-place (ADR-0048).
-            try { await exec("DROP INDEX IF EXISTS idx_sys_metadata_overlay_draft"); } catch { /* best-effort */ }
-            const draftPartialSql =
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_draft " +
-                "ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) " +
-                "WHERE state = 'draft'";
-            try {
-                await exec(draftPartialSql);
-            } catch (err: any) {
-                const msg = err instanceof Error ? err.message : String(err);
-                if (/partial|where clause|syntax/i.test(msg)) {
-                    try {
-                        await exec(
-                            "CREATE INDEX IF NOT EXISTS idx_sys_metadata_overlay_draft " +
-                            "ON sys_metadata (type, name, organization_id, package_id)",
-                        );
-                    } catch {
-                        // ignore — best effort
-                    }
-                }
-            }
+            // `console` satisfies the logger surface structurally; this class
+            // carries no injected logger, and its own diagnostics go to
+            // `console.warn` throughout (see `emitMetadataMutation`).
+            await ensureMetadataOverlayIndexes(exec, console);
         } catch {
-            // ignore — index is an optimization, not a correctness invariant
+            // A boot must never fail over an index. Note this arm is now only
+            // reachable for driver RESOLUTION failures: every DDL failure past
+            // this point is classified and reported by the migration itself,
+            // instead of vanishing into an empty catch (#6418).
         }
     }
 
