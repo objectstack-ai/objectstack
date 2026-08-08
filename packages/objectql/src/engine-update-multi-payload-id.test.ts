@@ -193,14 +193,24 @@ describe('#6262 — the falsy scalars keep the #5747 / #5748 dispatch semantics'
   }
 });
 
-describe('#6262 — the by-id path is untouched', () => {
+describe('#6262 — the by-id path, as this file left it and as #6435 changed it', () => {
+  // These three pins were written by #6262 (PR #6433) to record the by-id
+  // arm's behaviour AT THAT TIME, "so a future widening of the strip is a
+  // deliberate act". #6435 is that deliberate act, and it is a widening of
+  // exactly ONE of the three: the last one, whose payload `id` the dispatch
+  // had already ruled is not a primary key. The first two are unchanged and
+  // stay here as the contrast — a SCALAR `data.id` is still handed to the
+  // driver as sent. Full by-id coverage lives in its own file next door,
+  // `engine-update-by-id-payload-id.test.ts`.
+
   it('a scalar data.id outranks multi:true and reaches driver.update with the payload AS SENT', async () => {
     const call = await observeWrite({ id: 'rec_1', title: 'x' }, { multi: true }, 'update');
     expect(call.id).toBe('rec_1');
-    // The by-id branch has always handed the driver the payload including
-    // `id`, and #6262 is scoped to the multi branch: `driver.update` is given
-    // the primary key SEPARATELY, so the key in the payload is redundant, not
-    // damaging. Pinned so a future widening of the strip is a deliberate act.
+    // UNCHANGED by #6435, and deliberately so: here the payload's `id` IS the
+    // bound primary key (a scalar `data.id` outranks `where` and `multi`
+    // alike), so the write is `SET id = 'rec_1' WHERE id = 'rec_1'` — a
+    // same-value no-op, redundant rather than damaging. Widening the strip
+    // over this shape is a separate decision (#6435's scope note).
     expect(call.data).toEqual({ id: 'rec_1', title: 'x' });
   });
 
@@ -210,18 +220,22 @@ describe('#6262 — the by-id path is untouched', () => {
     expect(call.data).toEqual({ title: 'x' });
   });
 
-  it('operator data.id BESIDE a scalar where.id: the where id wins, and the operator does not reach the payload column', async () => {
-    // #5748's headline shape — verdict `by-id`, bound id `rec_1`. The payload
-    // still carries the operator object here, because this is the by-id branch
-    // and the primary key travels in its own argument; the row's identity is
-    // never taken from the payload. What #6262 fixes is only the branch where
-    // the payload IS the SET clause.
+  it('[#6435] operator data.id BESIDE a scalar where.id: the where id wins, and the operator no longer reaches the SET clause', async () => {
+    // #5748's headline shape — verdict `by-id`, bound id `rec_1`. This pin
+    // FLIPPED at #6435, by design: the assertion used to read
+    // `toEqual({ id: { $in: ['a','b'] }, title: 'x' })`, recording that the
+    // by-id arm handed the operator object straight to `driver.update`'s data
+    // argument. `driver-sql` formats that whole payload into the SET clause,
+    // so `rec_1`'s primary key was rewritten to `'{"$in":["a","b"]}'`.
+    //
+    // The dispatch is untouched — same verdict, same bound id — and only the
+    // payload changed, which is why the two assertions below sit side by side.
     const call = await observeWrite(
       { id: { $in: ['a', 'b'] }, title: 'x' },
       { where: { id: 'rec_1' } },
       'update',
     );
     expect(call.id).toBe('rec_1');
-    expect(call.data).toEqual({ id: { $in: ['a', 'b'] }, title: 'x' });
+    expect(call.data).toEqual({ title: 'x' });
   });
 });

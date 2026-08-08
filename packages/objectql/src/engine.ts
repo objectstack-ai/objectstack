@@ -5970,6 +5970,81 @@ export class ObjectQL implements IObjectQLEngine {
            // terms, so it owes the same counterexample.
            const onAdmittedValueShapeViolation = this.admittedViolationSink(object);
            if (hookContext.input.id) {
+               // [#6435] The by-id half of #6262's strip — same defect, other
+               // arm. Reaching this branch means the dispatch found a truthy
+               // scalar id, but NOT necessarily in the payload: when `data.id`
+               // is a non-scalar (an operator object, an array, `null`) or a
+               // falsy scalar, `resolveEngineUpdateDispatch` rules it is not a
+               // primary key and falls through to `options.where.id`, binding
+               // THAT (#5748 / PR #5919 — `ENGINE_UPDATE_DISPATCH_CASES` states
+               // it: `operator object in data.id, scalar where.id` ⇒ `by-id`,
+               // `expectId: 'rec_1'`). The dispatch is right; the PAYLOAD was
+               // never cleaned. Measured on origin/main, this very branch:
+               //
+               //   driver.update('task', 'rec_1', { id: { $in: ['a','b'] }, title: 'x' })
+               //                                     ^^^^^^^^^^^^^^^^^^^^^^ the SET clause
+               //
+               // `driver-sql`'s `update()` formats the WHOLE payload
+               // (`sql-driver.ts`, `applyWriteColumnMap(formatInput(object,
+               // data))` — `id` is on no skip list), so the row is written as
+               // `UPDATE task SET id = '{"$in":["a","b"]}', title = 'x' WHERE
+               // id = 'rec_1'`: rec_1's identity is overwritten with a
+               // serialized operator object, irreversibly, on any backend that
+               // accepts it.
+               //
+               // The rule is #6262's, unchanged and asked of the payload rather
+               // than of the branch: a value the engine has ALREADY RULED is
+               // not a primary key does not get to sit in the primary-key
+               // column. It is asked by CALLING the dispatch — "would this
+               // payload, on its own, identify a row?" — never by re-deriving
+               // the scalar test here: `asScalarId` is deliberately unexported
+               // (`engine-update-dispatch.ts`: "adding a third public spelling
+               // of the same question is how a rule with one definition grows a
+               // second one"), and a hand-mirrored copy is the #4434 / #4550
+               // failure this family exists to prevent.
+               //
+               // Deliberately NARROW, and the narrowness is the whole scope:
+               //
+               //  - A TRUTHY SCALAR `data.id` is left exactly as it is. There
+               //    the payload's `id` IS the bound key (it outranks `where` —
+               //    same case-set), so the write is `SET id = 'rec_1' WHERE id
+               //    = 'rec_1'`: a same-value no-op, redundant rather than
+               //    damaging, and long-standing behaviour. Widening the strip
+               //    to cover it is a separate decision, not a rider here.
+               //  - Rejecting the call instead (#6435's route B) would reverse
+               //    the `expect: 'by-id'` verdict the case-set states today —
+               //    a partial rollback of #5748's ruling A, i.e. a maintainer
+               //    decision. This change alters NO verdict: the same call
+               //    still dispatches by-id and still binds `rec_1`.
+               //  - Per-driver skip lists (route C) are the #5240 / #4434 shape
+               //    of five backends answering one question five ways.
+               //
+               // Same choice as #6262 on the reporting seam: NOT routed through
+               // `reportDroppedFields`, because `DroppedFieldsEvent.reason` is a
+               // closed enum over the two READ-ONLY strips (`readonly` /
+               // `readonly_when`, #3407/#3042) and this drop is neither;
+               // widening that vocabulary is a `packages/spec` change with its
+               // own consumers (filed separately as #6437). The `warn` is the
+               // #4632 duty meanwhile — the caller is told the write succeeded.
+               const preIdById = hookContext.input.data as Record<string, unknown> | null | undefined;
+               if (
+                   preIdById &&
+                   typeof preIdById === 'object' &&
+                   Object.prototype.hasOwnProperty.call(preIdById, 'id') &&
+                   resolveEngineUpdateDispatch(preIdById as EngineUpdateDispatchData, undefined).kind !== 'by-id'
+               ) {
+                   const { id: notAnId, ...withoutId } = preIdById;
+                   hookContext.input.data = withoutId as any;
+                   this.logger.warn(
+                     `Update on '${object}' of record ${String(hookContext.input.id)}: dropped 'id' from the ` +
+                       `write payload. The row is identified by the id argument, and the engine has already ruled ` +
+                       `this payload value is not a primary key (${JSON.stringify(notAnId) ?? String(notAnId)}) — ` +
+                       `writing it would have overwritten that row's primary-key column. To update ONE row by id, ` +
+                       `pass a SCALAR id (\`update(object, { id, ...fields })\` or \`{ where: { id } }\`); to ` +
+                       `SELECT rows by an id set, put it in \`where\` ` +
+                       `(\`{ where: { id: { $in: [...] } }, multi: true }\`).`,
+                   );
+               }
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
                validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
