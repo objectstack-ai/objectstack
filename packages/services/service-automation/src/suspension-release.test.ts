@@ -164,8 +164,13 @@ describe('NodeExecutor.onSuspensionReleased (#5512)', () => {
   });
 
   it('a teardown that throws is logged and does not fail the continuation', async () => {
-    const warns: string[] = [];
-    const loud = new AutomationEngine(silentLogger(warns));
+    const warns: Array<{ msg: string; meta?: Record<string, unknown> }> = [];
+    const recordingLogger = {
+      info() {}, error() {}, debug() {},
+      warn(msg: string, meta?: Record<string, unknown>) { warns.push({ msg: String(msg), meta }); },
+      child() { return recordingLogger; },
+    } as any;
+    const loud = new AutomationEngine(recordingLogger);
     const ranLoud: string[] = [];
     loud.registerNodeExecutor(markerExecutor(ranLoud));
     loud.registerNodeExecutor({
@@ -180,11 +185,14 @@ describe('NodeExecutor.onSuspensionReleased (#5512)', () => {
 
     expect(resumed.success).toBe(true); // the run is what matters — teardown is best-effort
     expect(ranLoud).toEqual(['after']);
-    const warn = warns.find((w) => w.includes('failed to release its suspension'));
+    const warn = warns.find((w) => w.msg.includes('failed to release its suspension'));
     expect(warn).toBeTruthy();
     // The line has to name the handle an operator would clean up by hand.
-    expect(warn).toContain('test-armature:hold');
-    expect(warn).toContain('job service exploded');
+    expect(warn!.msg).toContain('test-armature:hold');
+    // #6499 — the executor's own text is plugin-supplied, so it rides the
+    // STRUCTURED slot, never the message (whose line count must stay ours).
+    expect(warn!.msg).not.toContain('job service exploded');
+    expect(warn!.meta?.error).toBe('job service exploded');
   });
 
   it('delegates through a deprecated node alias to the canonical executor', async () => {

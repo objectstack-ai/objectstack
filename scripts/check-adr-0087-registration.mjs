@@ -123,10 +123,14 @@
 // was caught while `迁移:`aggregate:` → `aggregations:`` (a real prescription) was
 // not. #6497 -- both branches then required an ARROW, so a rewrite written as a
 // two-column table under `## Migration` read as no prescription at all, and four
-// declared-breaking changesets were holding the exemption on that gap. It now
-// reads framing-anchored rewrites in both languages, in arrow form and in table
-// form. The full argument, the measured numbers and the deliberate residual blind
-// spot are at hasMigrationPrescription.
+// declared-breaking changesets were holding the exemption on that gap. #6559 --
+// branch 3 still required a migration HEADING, so a table framed only by its own
+// `| Wrote | Write instead |` header row was missed, and eleven declared-breaking
+// changesets were holding the exemption on THAT gap. It now reads framing-anchored
+// rewrites in both languages, in arrow form and in table form, whether the frame
+// comes from a heading or from the table's own header. The full argument, the
+// measured numbers and the deliberate residual blind spot are at
+// hasMigrationPrescription.
 //
 // ## Absence is never a pass (#4690)
 //
@@ -255,7 +259,7 @@ export function breakingDeclaration(parsed) {
 //
 // ## What replaced it
 //
-// Three branches, unioned, each ADDED without touching the ones before it, so the
+// Four branches, unioned, each ADDED without touching the ones before it, so the
 // detector is a strict SUPERSET at every step: nothing that used to be refused can
 // now slip through, and the `no-migration-prescription` exemption can only have got
 // harder to claim, never easier.
@@ -294,6 +298,27 @@ export function breakingDeclaration(parsed) {
 //      the arrow arm asks for -- code-ish operands on two sides -- and reads the
 //      `|` instead of the `→`.
 //
+//   4. A HEADER-FRAMED REWRITE TABLE -- the same table row, but the framing comes
+//      from the table's OWN HEADER CELLS rather than from a heading above it
+//      (#6559). Branch 3 still needs a migration heading somewhere; a large class
+//      of this repo's changesets never writes one, because the header row already
+//      says what the two columns are:
+//
+//          **Migration.**
+//
+//          | Wrote                                     | Write instead            |
+//          | ---                                       | ---                      |
+//          | `await storage.list('attachments/task/')` | query the `sys_file` rows |
+//
+//      That is `storage-service-list-retired.md` (#5540), verbatim shape -- one of
+//      ELEVEN declared-breaking stock changesets that held the
+//      `no-migration-prescription` exemption through this gap. The framing here is
+//      a closed vocabulary of COLUMN words (OLD_COLUMN_RE / NEW_COLUMN_RE), not the
+//      framing words branches 2 and 3 use, and both a column naming what the author
+//      HAD and a later one naming what to write INSTEAD are required. That pairing
+//      is the whole anchor: this stock is full of two-column tables, and almost all
+//      of them compare BEHAVIOUR rather than prescribe a rewrite.
+//
 // ## What it moved (measured on the stock, every version run over it)
 //
 // #6419, branch 2 added. 1342 changesets, 235 of them declared-breaking (the only
@@ -314,6 +339,36 @@ export function breakingDeclaration(parsed) {
 // branches 1 and 2 are evaluated first and return on the spot, so the table hit is
 // only ever consulted when they found nothing (it is `old(body) ?? table(body)`,
 // written as one pass).
+//
+// #6559, branch 4 added -- the table framed only by its OWN HEADER ROW. 1402
+// changesets, 245 declared-breaking. Before: 136 hits, 104 breaking. After: 151
+// hits, 115 breaking. FIFTEEN newly flagged, ZERO no longer flagged, and zero
+// existing hits changed branch or evidence line. The superset property stays
+// STRUCTURAL for the same reason one level down: this arm's hit is held back like
+// branch 3's and consulted only after it, so the function is exactly
+// `arrowBranches(body) ?? framedTable(body) ?? headerFramedTable(body)`.
+//
+// Eleven of the fifteen declare breaking, which is the number #6559 set out to
+// reach -- but NOT the same eleven it named, and the difference is the honest part.
+// Ten of its named eleven are here; `adr-0114-field-error-catalog.md` is not,
+// because its header is `| Was | Now |` and admitting `was` costs more than it buys
+// (measured below). The eleventh is `script-branch-keys-retired.md`, a spelling
+// (`| Retired | Use instead |`) the card had not enumerated. A closed vocabulary
+// derived from the stock finds spellings a hand-list misses, and loses ones a
+// hand-list assumed.
+//
+// The arm's FALSE-POSITIVE surface was measured before it was written, IN ISOLATION
+// over the whole stock -- every body it fires on, not just the fifteen it newly
+// wins, because a future changeset can hit this arm alone. It fires on 22 of 1402,
+// 18 of them declared-breaking, and all 22 are genuine rewrite prescriptions on
+// inspection. ZERO false positives, breaking or not.
+//
+// It also collects, for free and without the false positive, the ONE true positive
+// #6558 measured for the rejected `MIGRATION_FRAMING_RE`-on-the-header shortcut:
+// `filter-icontains-and-regex-retirement.md` (`| 原写法 | 改写为 |`). The shortcut
+// bought that row and `rate-limit-config-dual-source-c9.md` with it; a vocabulary
+// of COLUMN words rather than framing words reads the first and not the second,
+// because `(renamed)` there names a column and never opens one (P34 pins it).
 //
 // The table arm's FALSE-POSITIVE surface was measured before it was written, on the
 // whole stock rather than on the four changesets that motivated it: it fires on 7
@@ -349,30 +404,44 @@ export function breakingDeclaration(parsed) {
 // next reader trusts instead of measuring; so the number below is what remains
 // AFTER branch 3, and it says which shapes, not just how many.
 //
-// What is still missed, measured over the 1384-changeset stock after branch 3
+// The two shapes this paragraph listed after #6497 -- FRAMED ONLY BY THE TABLE'S
+// OWN HEADER CELLS (14 / 11) and FRAMED BY A LABEL, NOT A HEADING (4 / 2) -- are
+// what branch 4 closed in #6559. One correction is owed to whoever reads the old
+// numbers: those two were described as overlapping, and on the table arm they turn
+// out to be strictly NESTED. Measured on the pre-#6559 baseline, letting a bold
+// label open a framed region for the TABLE arm wins 13 changesets / 10 breaking --
+// and branch 4 catches every one of the 13 on its own. A changeset that writes
+// `**Migration.**` above a rewrite table also writes that table with an old/new
+// header row, every time, in this entire stock. So there is no label-framed table
+// arm: it would be dead code the day it shipped, and it is not shipped.
+//
+// What is still missed, re-measured over the 1402-changeset stock AFTER branch 4
 // (each number is "changesets / of those, declared-breaking"):
 //
-//   * NO FRAMING AT ALL -- an `old` → `new` list or table under a plain heading
-//     with no migration word anywhere near it: 132 / 21. Typically the
+//   * NO FRAMING AT ALL -- an `old` → `new` list under a plain heading with no
+//     migration word anywhere near it: 131 / 20. Typically the
 //     `unknown-key-strictness-*` and `adr-0112-*` batches. This is the honest
 //     residue of anchoring on framing, and it is deliberate.
-//   * FRAMED BY A LABEL, NOT A HEADING -- `**Migration.**` on its own line, then
-//     the table: 4 / 2 (`data-driver-find-stream-retired.md`,
-//     `storage-service-list-retired.md`). A framing LABEL does not open a framed
-//     region today; only a HEADING does.
-//   * FRAMED ONLY BY THE TABLE'S OWN HEADER CELLS in a vocabulary
-//     MIGRATION_FRAMING_RE does not carry -- `| Wrote | Write instead |`,
-//     `| Removed | Live replacement |`, `| you wrote | write instead |`,
-//     `| Was | Now |`: 14 / 11. This is a real house convention (four spellings,
-//     11 declared-breaking changesets) and reading it needs a NEW closed
-//     vocabulary of old/new column words, which is its own measurement job and its
-//     own false-positive surface. Not done here on purpose.
+//   * AN UNFRAMED rewrite TABLE -- coded cells on two sides, but neither a framing
+//     heading nor an old/new header row: 95 / 18. The table analogue of the line
+//     above, and refused for the same measured reason (see the rejected rules).
+//     Union of the two, since bodies carry both: 205 / 33.
+//   * NO REWRITE PAIR AT ALL -- the IMPERATIVE-SENTENCE prescription: no arrow, no
+//     table, just "write `$icontains` for the case-insensitive substring search,
+//     `$contains` for a case-sensitive one". Recorded on #6559 (05:06Z) against
+//     `.changeset/regex-retirement-icontains-drivers.md`, which is on PR #6549 and
+//     not yet on main, so it is not in the 1402 above and has no stock number here.
+//     It is not a framing gap -- both branches need a matchable "X becomes Y" and
+//     this shape has none -- so widening the vocabulary cannot reach it. It needs a
+//     different criterion (2+ replacements in code spans on a line with an
+//     imperative verb), whose false-positive surface is intuitively much larger:
+//     any changeset enumerating API usage would hit it. Falsify before implementing.
 //
-// Anyone widening this later should start with the last two, with these numbers to
-// beat, and should re-measure the false-positive surface FIRST -- as #6419 and
-// #6497 both did, and as the four rules below were rejected for failing.
+// Anyone widening this later should start with the first two, with these numbers to
+// beat, and should re-measure the false-positive surface FIRST -- as #6419, #6497
+// and #6559 all did, and as the six rules below were rejected for failing.
 //
-// FOUR wider rules were measured and REJECTED as noisier than they are useful.
+// SIX wider rules were measured and REJECTED as noisier than they are useful.
 //
 //   * (#6419) firing on any line carrying >=2 rewrites takes the declared-breaking
 //     hit count 92 -> 102 but adds 35 changesets to hand-check, of which a clear
@@ -394,7 +463,30 @@ export function breakingDeclaration(parsed) {
 //     matrix -- `| | @objectstack/spec/shared (unchanged) | .../integration
 //     (renamed) |` -- caught only because the word `renamed` sits in a header cell
 //     naming a column, not framing a rewrite. Rejected on that trade alone: nothing
-//     gained on the judged population, a new way to be wrong on it.
+//     gained on the judged population, a new way to be wrong on it. (Branch 4 wins
+//     that same true positive with a COLUMN vocabulary and without the false
+//     positive -- P34 pins the matrix out.)
+//   * (#6559) admitting `was` as an OLD column word, which would read
+//     `| Was | Now |` and win `adr-0114-field-error-catalog.md`, a real
+//     declared-breaking prescription. Refused: `was`/`now` (with `before`/`after`,
+//     `之前`/`之后`, `改前`/`改后`, `修复前`/`修复后`) is this repo's BEHAVIOUR-comparison
+//     header vocabulary, not its rewrite vocabulary. The stock carries it on
+//     `| route | was | now |` (wire envelopes), `| compiler | was | now |`,
+//     `| | was | now |` (a type-inference probe table) and a dozen more, none of
+//     which prescribes rewriting anything. One true positive against at least four
+//     false ones on the same header spelling, and no way to separate them from the
+//     header row -- so `adr-0114-field-error-catalog.md` stays missed ON PURPOSE.
+//     P33 pins the refusal so a later author cannot "fix" it without meeting this.
+//   * (#6559) letting a bold LABEL line (`**Migration.**`) open a framed region for
+//     the ARROW branches as well as the table, rather than for the table alone.
+//     Measured: 11 newly flagged / 6 breaking, and at least THREE are plain false
+//     positives -- a conformance-case table (`{d: {$null: true}}` → `['3','4']`), an
+//     env-normalizer mapping (`production`/`prod` → `production`) and a body whose
+//     matched line is unrelated prose about `_packageId`. A label with no closing
+//     heading frames the REST OF THE DOCUMENT, which is why. It also relabels 13 of
+//     branch 4's hits to `framed-table`, hiding which arm read them. Rejected for
+//     both. (The label-framed TABLE arm was rejected separately, as dead code --
+//     see the nesting note above.)
 //
 // An honestly-scoped detector beats a noisy one here because a FALSE POSITIVE has
 // no honest escape: the author is refused an exemption they are entitled to and the
@@ -443,6 +535,20 @@ const TABLE_DELIM_RE = /^\s{0,3}\|?(?:\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?\s*$/
 const TABLE_ROW_RE = /^\s{0,3}\|.*\|\s*$/;
 
 /**
+ * The cells of a markdown table row.
+ *
+ * Split on an UNESCAPED pipe: `\|` inside a cell is GFM's escape and does not end
+ * it. Over-splitting could only ever make the arms that read this fire MORE often,
+ * so getting it right is a false-positive matter, not a cosmetic one.
+ *
+ * @param {string} line
+ * @returns {string[]}
+ */
+function tableCells(line) {
+  return line.trim().replace(/^\|/, '').replace(/\|\s*$/, '').split(/(?<!\\)\|/);
+}
+
+/**
  * Does this table row read as a REWRITE -- an OPERAND in two or more DISTINCT
  * cells?
  *
@@ -451,16 +557,60 @@ const TABLE_ROW_RE = /^\s{0,3}\|.*\|\s*$/;
  * description, a definition or a capability row (`| `getPort?()` | the real bound
  * port after listen(0) |`), and those are not prescriptions.
  *
- * Split on an UNESCAPED pipe: `\|` inside a cell is GFM's escape and does not end
- * it. Over-splitting could only ever make this fire MORE often, so getting it right
- * is a false-positive matter, not a cosmetic one.
- *
  * @param {string} line
  */
 function isRewriteRow(line) {
-  const cells = line.trim().replace(/^\|/, '').replace(/\|\s*$/, '').split(/(?<!\\)\|/);
+  const cells = tableCells(line);
   if (cells.length < 2) return false;
   return cells.filter((c) => OPERAND_RE.test(c)).length >= 2;
+}
+
+/**
+ * The OLD column of a rewrite table -- the cell naming what the author HAD.
+ *
+ * Derived from the stock, not invented (#6559): `| Wrote | …`, `| you wrote | …`,
+ * `| You wrote | …`, `| Wrote in `config` | …`, `| Removed | …`,
+ * `| Removed (never enforced) | …`, `| Retired | …`, `| 原写法 | …`.
+ *
+ * ANCHORED AT THE CELL START, which is the narrow direction and is load-bearing:
+ * the word has to be what the column IS, not a word that happens to occur inside a
+ * longer heading. `| removed page | sections now live on |` (`docs-index-category-keyed.md`)
+ * is exactly why -- its second cell contains `now`, but starts with `sections`, so
+ * anchoring keeps a docs redirect table out of a rewrite-prescription arm.
+ */
+const OLD_COLUMN_RE = /^\**\s*(?:(?:you\s+)?wrote|removed|retired)\b|^\**\s*(?:原|旧)写法/i;
+
+/**
+ * The NEW column -- the cell naming what the author must write INSTEAD.
+ *
+ * From the same stock rows: `… | Write instead |`, `… | Use instead |`,
+ * `… | Live replacement |`, `… | Use |`, `… | now |`, `… | 改写为 |`.
+ *
+ * ⚠️ `was` is deliberately NOT an OLD word even though `| Was | Now |` exists
+ * (`adr-0114-field-error-catalog.md`), and that omission is measured rather than
+ * squeamish -- see the `was`/`now` paragraph in the block comment above.
+ */
+const NEW_COLUMN_RE =
+  /^\**\s*(?:(?:write|use)\s+instead|live\s+replacement|use|now)\b|^\**\s*(?:改写为|改成)/i;
+
+/**
+ * Does this table's HEADER ROW frame the table below it as a rewrite?
+ *
+ * BOTH sides are required, and the NEW column must come AFTER the OLD one. The
+ * pairing is the whole anchor: a lone `Removed` heads a forensic table as often as
+ * a prescription (`| Removed | Built | Why it 404ed |`, `remove-dead-sdk-surface.md`),
+ * and a lone `now` heads a behaviour comparison far more often than a rewrite
+ * (`| route | was | now |`). Two columns that say "what you had" then "what to write"
+ * is the shape no comparison matrix in this stock accidentally has.
+ *
+ * @param {string} line
+ */
+function headerFramesRewrite(line) {
+  const cells = tableCells(line).map((c) => c.trim());
+  if (cells.length < 2) return false;
+  const oldAt = cells.findIndex((c) => OLD_COLUMN_RE.test(c));
+  if (oldAt < 0) return false;
+  return cells.slice(oldAt + 1).some((c) => NEW_COLUMN_RE.test(c));
 }
 
 /**
@@ -500,7 +650,7 @@ const FROM_TO_LABEL_RE =
  * which shapes are deliberately out of reach.
  *
  * @param {string} body
- * @returns {{ branch: 'from-to-label' | 'framed-line' | 'framed-section' | 'framed-table', line: string } | null}
+ * @returns {{ branch: 'from-to-label' | 'framed-line' | 'framed-section' | 'framed-table' | 'header-framed-table', line: string } | null}
  */
 export function findMigrationPrescription(body) {
   const label = FROM_TO_LABEL_RE.exec(body);
@@ -523,24 +673,41 @@ export function findMigrationPrescription(body) {
   // be broken by a future edit that only touches the table arm -- rather than a
   // measurement someone has to remember to repeat.
   let table = null;
+  // The header-framed arm's first hit, held back the same way and consulted only
+  // after `table` (#6559). Same reasoning one level down: the whole function stays
+  // exactly `arrowBranches(body) ?? framedTable(body) ?? headerFramedTable(body)`,
+  // so the superset property remains STRUCTURAL -- no edit confined to this arm can
+  // take a hit away from an older one, and nothing has to be re-measured to know it.
+  let headerTable = null;
+  let headerFramed = false;
+  let prev = '';
   for (const line of body.split(/\r?\n/)) {
     if (/^\s{0,3}#{1,6}\s/.test(line)) {
       framedSection = MIGRATION_FRAMING_RE.test(line);
       inTable = false; // a table cannot span a heading
+      headerFramed = false;
     }
     if (REWRITE_RE.test(line)) {
       if (MIGRATION_FRAMING_RE.test(line)) return { branch: 'framed-line', line: line.trim() };
       if (framedSection) return { branch: 'framed-section', line: line.trim() };
     }
     // Delimiter first: it also matches TABLE_ROW_RE, and it is the row that opens
-    // the data region rather than a row inside it.
-    if (TABLE_DELIM_RE.test(line)) { inTable = true; continue; }
-    if (!TABLE_ROW_RE.test(line)) { inTable = false; continue; }
-    if (inTable && framedSection && table === null && isRewriteRow(line)) {
-      table = { branch: 'framed-table', line: line.trim() };
+    // the data region rather than a row inside it. The line ABOVE it is the header,
+    // which is why the header row is read here and never reported as evidence.
+    if (TABLE_DELIM_RE.test(line)) {
+      inTable = true;
+      headerFramed = TABLE_ROW_RE.test(prev) && headerFramesRewrite(prev);
+      prev = line;
+      continue;
     }
+    if (!TABLE_ROW_RE.test(line)) { inTable = false; headerFramed = false; prev = line; continue; }
+    if (inTable && isRewriteRow(line)) {
+      if (framedSection && table === null) table = { branch: 'framed-table', line: line.trim() };
+      if (headerFramed && headerTable === null) headerTable = { branch: 'header-framed-table', line: line.trim() };
+    }
+    prev = line;
   }
-  return table;
+  return table ?? headerTable;
 }
 
 /**
@@ -1593,6 +1760,36 @@ function selfTest() {
     pkgs: { '@objectstack/runtime': { dir: 'packages/runtime', private: false }, '@objectstack/spec': { dir: 'packages/spec', private: false } },
   })), [/contradicts the changeset's own body/, /Evidence \(framed-table\)/, /HonoHttpServer/]);
 
+  // ---- R13: THE #6559 SHAPE -- the frame is the TABLE'S OWN HEADER ROW ------
+  //
+  // `storage-service-list-retired.md` (#5540), reduced to its shape. Identical to
+  // R12 except for what is MISSING: there is no `## Migration` heading, so #6497's
+  // arm has no framed region to fire in. The author framed the rewrite exactly as
+  // this repo's house convention does it -- `| Wrote | Write instead |` -- and
+  // claimed the catch-all on top. Eleven declared-breaking stock changesets held
+  // the exemption through this gap.
+  //
+  // Reverse verification: delete the header-framed arm and this case reports
+  // "expected RED, got green". It is the ONLY integration case in this file that
+  // can move that way, which is why the arm's other assertions (P33-P38) are
+  // labelled floors rather than counted as coverage.
+  const SIX559 = CS({
+    bumps: [['@objectstack/spec', 'major']],
+    body:
+      '**BREAKING**: `IStorageService.list(prefix)` is retired\n\n' +
+      'Two adapters answered the same call with two different meanings, and neither\n' +
+      'told you. Nothing in the repository called it.\n\n' +
+      '**Migration.**\n\n' +
+      '| Wrote | Write instead |\n' +
+      '| --- | --- |\n' +
+      "| `await storage.list('attachments/task/')` | query the `sys_file` rows, which page deterministically |\n" +
+      '| `list?(prefix) { … }` on your own adapter | delete the method |\n\n' +
+      '<!-- adr-0087: not-required (no-migration-prescription) the method had no caller anywhere, we grepped both repos -->\n',
+  });
+  red('R13 the #6559 shape (the table\'s own header row is the frame)', run(mk({
+    files: { '.changeset/x.md': SIX559 },
+  })), [/contradicts the changeset's own body/, /Evidence \(header-framed-table\)/, /sys_file/]);
+
   // ---- G8: a CAPABILITY table under the same framing stays GREEN ------------
   // The table arm's false-positive floor, and the reason it asks for two coded
   // cells rather than one: this is a real shape from the same changeset -- a member
@@ -1717,9 +1914,16 @@ function selfTest() {
   // ...and the two things that keep it narrow. Both are false-positive floors: they
   // are green with the arm and green without it, so reverse verification cannot
   // move them -- they pin where the arm STOPS, which no deletion can widen.
+  // ⚠️ P25's FIXTURE was replaced by #6559, and the replacement is the point. It
+  // used to re-head TABLE_EN with `## What changed` -- but TABLE_EN's header row is
+  // `| Wrote | Write instead |`, which #6559 taught the detector to read as framing
+  // in its own right, so the old fixture asserted the exact boundary that change
+  // moves and went red on it. The INTENT survives unchanged (a heading with no
+  // migration framing does not frame the table under it); only the table had to
+  // stop supplying framing of its own, so the header here is neutral.
   assert(
-    !hasMigrationPrescription(TABLE_EN.replace('## Migration', '## What changed')),
-    'P25: the SAME table under a heading with no migration framing must NOT match -- the anchor is load-bearing',
+    !hasMigrationPrescription('## What changed\n\n| Member | Behaviour |\n| --- | --- |\n| `a.b` | now resolves through `c.d` |\n'),
+    'P25: an unframed heading over a NEUTRALLY-headed table must NOT match -- the anchor is load-bearing',
   );
   assert(
     !hasMigrationPrescription('## Migration\n\n| Member | What it cost |\n| --- | --- |\n| `getPort?()` | the real bound port after listening |\n'),
@@ -1728,6 +1932,56 @@ function selfTest() {
   assert(
     !hasMigrationPrescription('## Migration\n\nprose about `a.b` and `c.d` with a | pipe in it but no table at all\n'),
     'P27: a pipe in prose is not a table -- the delimiter row is what opens one',
+  );
+
+  // #6559 -- the table framed ONLY BY ITS OWN HEADER CELLS, no migration heading
+  // anywhere. P28-P32 are the arm itself and are the RED set under reverse
+  // verification; P33-P38 are false-positive floors, green with the arm and green
+  // without it, which is said out loud rather than counted as coverage.
+  assert(
+    findMigrationPrescription(TABLE_EN.replace('## Migration\n\n', ''))?.branch === 'header-framed-table',
+    'P28: `| Wrote | Write instead |` frames its own table with no heading in the body at all',
+  );
+  assert(
+    findMigrationPrescription('| Retired | Use instead |\n| --- | --- |\n| `actionType: \'email\'` | a `notify` node |\n')?.branch === 'header-framed-table',
+    'P29: `| Retired | Use instead |` -- the same convention, retirement spelling',
+  );
+  assert(
+    findMigrationPrescription('| Removed (never enforced) | Live replacement |\n| --- | --- |\n| `AuditConfigSchema.enabled` | none — `object.zod` `trackHistory` |\n')?.branch === 'header-framed-table',
+    'P30: the OLD word need only OPEN the cell -- `Removed (never enforced)` still heads a removal column',
+  );
+  assert(
+    findMigrationPrescription('| 原写法 | 改写为 |\n|---|---|\n| `{ $regex: \'acme\' }` | `{ $icontains: \'acme\' }` |\n')?.branch === 'header-framed-table',
+    'P31: the Chinese spelling of the same two columns',
+  );
+  assert(
+    findMigrationPrescription('| You wrote | Where | Write instead |\n|---|---|---|\n| `object` | `form.subforms[]` | `childObject` |\n')?.branch === 'header-framed-table',
+    'P32: a THREE-column table still frames, as long as the new column follows the old one',
+  );
+  // --- the floors: what the new vocabulary must refuse -----------------------
+  assert(
+    !hasMigrationPrescription('| route | was | now |\n|---|---|---|\n| `POST /share-links` | `{ link }` | `{ success: true, data: link }` |\n'),
+    'P33: `| was | now |` is this repo\'s BEHAVIOUR-comparison header, not a rewrite -- `was` is deliberately not an OLD word',
+  );
+  assert(
+    !hasMigrationPrescription('| | `@objectstack/spec/shared` (unchanged) | `@objectstack/spec/integration` (renamed) |\n|:--|:--|:--|\n| window | `windowMs` (ms) | `windowSeconds` (s) |\n'),
+    'P34: the two-TYPE comparison matrix #6558 measured as the header shortcut\'s false positive stays OUT of the new arm',
+  );
+  assert(
+    !hasMigrationPrescription('| Removed | Built | Why it 404ed |\n|---|---|---|\n| `client.ai.nlq` | `POST /api/v1/ai/nlq` | declared in `DEFAULT_AI_ROUTES` |\n'),
+    'P35: a lone `Removed` heads a forensic table as readily as a prescription -- the NEW column is what pairs it',
+  );
+  assert(
+    !hasMigrationPrescription('| removed page | sections now live on |\n| :--- | :--- |\n| `api/core-services` | `api/discovery` |\n'),
+    'P36: cell-START anchoring -- `now` inside `sections now live on` names no column, so a docs redirect table stays out',
+  );
+  assert(
+    !hasMigrationPrescription('| Write instead | Wrote |\n| --- | --- |\n| `a.b` | `a.c` |\n'),
+    'P37: ORDER is load-bearing -- the new column must follow the old one, not precede it',
+  );
+  assert(
+    !hasMigrationPrescription('| Wrote | Write instead |\n| --- | --- |\n| `a.b` | plain prose with no code in it |\n'),
+    'P38: the header frames, but the ROW still has to read as a rewrite -- one coded cell is a description',
   );
 
   // ---- S1-S5: the `--audit-stock` classifier (#6350) ------------------------

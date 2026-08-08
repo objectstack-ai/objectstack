@@ -256,7 +256,7 @@ const result = AIChatWindowProps.parse(data);
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'line' \| 'card' \| 'pill'>` | optional |  |
 | **position** | `Enum<'top' \| 'left'>` | optional |  |
-| **items** | `{ label: string \| Record<string, string>; icon?: string; visibleWhen?: string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }; value?: string; … }[]` | ✅ |  |
+| **items** | `{ label: string \| Record<string, string>; icon?: string; visibleWhen?: string \| object; value?: string; … }[]` | ✅ |  |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 

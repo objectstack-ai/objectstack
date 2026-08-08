@@ -66,7 +66,39 @@ const SCOPE_ROOTS = [
   // (the submit-time snapshot) and `vars`. Declared here so the strict lint
   // env doesn't misread `current.x` as a bare field reference.
   'current',
+  // ADR-0068 D1's CANONICAL user root, and the last one this list was missing
+  // (#6290). `buildScope` mounts the same `EvalUser` object under
+  // `current_user` / `user` / `ctx.user` / `os.user` whenever the evaluation
+  // carries a user, and this package already told the rest of the platform so:
+  // `introspectScope` lists `current_user` among the roots it hands an author,
+  // and `checkRoleCatalog`'s four position-membership regexes all lead with it.
+  // Only this list disagreed — so the one spelling ADR-0068 calls canonical was
+  // the one spelling the strict env read as a BARE FIELD, while its two aliases
+  // (`user`, `ctx`) passed. One package, two accounts of the same root.
+  'current_user',
 ] as const;
+
+/*
+ * Why widening this list is the safe direction, and where the narrow verdict
+ * lives instead (#6290).
+ *
+ * This list is a "never faults" BASELINE, not a per-surface contract — the
+ * doc-comment above says so, and every entry is generous by construction. A
+ * surface that binds a CLOSED set of roots does not express that by hoping the
+ * baseline omits the others; it says so at the surface, through
+ * `collectCelRootIdentifiers` (that helper reads the AST and is completely
+ * independent of this list — see the approval-node approvers in #3447 P2, and
+ * `@objectstack/lint`'s field-level `*When` gate for `current_user`).
+ *
+ * That matters here because field- and section-level `visibleWhen` genuinely do
+ * NOT bind `current_user` (#6146, measured at both ends: `evalFieldPredicate`
+ * binds `record` + `previous` + `parent` and nothing else). Before #6290 that
+ * surface's rejection came out of this list's omission as a SIDE EFFECT, and it
+ * showed: the diagnostic was the generic bare-field one, so it prescribed
+ * "Write `record.current_user`" — a shape that binds on no layer at all. A
+ * verdict that belongs to one surface now reads as that surface's own rule,
+ * with that surface's own prescription.
+ */
 
 /**
  * A `record`-scoped environment (`unlistedVariablesAreDyn: false`) for detecting

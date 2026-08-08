@@ -1244,8 +1244,23 @@ export class AutomationEngine implements IAutomationService {
             try {
                 await this.store.save(run);
             } catch (err) {
+                // #6499 — the cause is the datasource DRIVER's own text, so it
+                // goes to the logger's STRUCTURED slot, never spliced into the
+                // message; see `forgetSuspendedRun`'s catch below for the full
+                // mechanism (#6299) — this seam is its nearest twin, on the
+                // same `SuspendedRunStore` driver.
+                //
+                // #4632 verdict: DURABILITY — the level STAYS `error`, where
+                // #4460 put it: the docblock above argues it (#4420 is this
+                // exact seam's accident). Third argument per the `Logger`
+                // contract (`error(message, error?, meta?)`); the `Error` slot
+                // stays empty on purpose (#5575).
                 this.logger.error(
-                    `[automation] failed to persist suspended run '${run.runId}' to the durable store — it is kept in memory only and will NOT be resumable after a restart: ${(err as Error).message}`,
+                    `[automation] failed to persist suspended run '${run.runId}' to the durable store — it is ` +
+                        `kept in memory only and will NOT be resumable after a restart. Fix the store failure ` +
+                        `in this record's meta.`,
+                    undefined,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -1356,10 +1371,22 @@ export class AutomationEngine implements IAutomationService {
                 reason,
             });
         } catch (err) {
+            // #6499 — the thrown text is PLUGIN-SUPPLIED (the node executor's
+            // own teardown), so it goes to the structured slot; see
+            // `forgetSuspendedRun`'s catch above for the full mechanism
+            // (#6299). The message keeps the correlation handle — that is the
+            // thing an operator cleans up by hand.
+            //
+            // #4632 verdict: FUNCTIONAL — stays `warn`, per the docblock: the
+            // run continued and nothing claimed-persisted failed to land; the
+            // leftover is whatever the node armed on entry (a misleading
+            // `sys_job` row, not a broken run). `warn(message, meta?)` — meta
+            // is the SECOND argument; `warn` has no `Error` slot.
             this.logger.warn(
                 `[automation] run '${run.runId}': '${nodeType}' node '${run.nodeId}' failed to release its suspension ` +
-                    `(reason: ${reason}, correlation: ${run.correlation ?? 'none'}): ${(err as Error)?.message ?? err} — ` +
-                    `the run continued; whatever the node armed on entry may still be scheduled`,
+                    `(reason: ${reason}, correlation: ${run.correlation ?? 'none'}) — the run continued; whatever the ` +
+                    `node armed on entry may still be scheduled. The executor's own failure is in this record's meta.`,
+                describeThrownForLog(err),
             );
         }
     }
@@ -1555,7 +1582,21 @@ export class AutomationEngine implements IAutomationService {
             try {
                 this.triggers.get(type)?.stop(name);
             } catch (err) {
-                this.logger.warn(`Trigger '${type}' stop('${name}') failed: ${(err as Error).message}`);
+                // #6499 — the thrown text is PLUGIN-SUPPLIED (`FlowTrigger.stop`),
+                // so it goes to the structured slot; see `forgetSuspendedRun`'s
+                // catch above for the full mechanism (#6299).
+                //
+                // #4632 verdict: FUNCTIONAL — stays `warn`: nothing
+                // claimed-persisted is involved. The binding bookkeeping is
+                // dropped either way; the worst case is the trigger's own
+                // subscription staying armed, and a fired flow still lands in
+                // run history visibly, behind execute()'s own guards.
+                this.logger.warn(
+                    `Trigger '${type}' stop('${name}') failed while unregistering the trigger — the flow is ` +
+                        `unbound anyway; whatever the trigger armed for it may keep firing until the process ` +
+                        `restarts. The trigger's own failure is in this record's meta.`,
+                    describeThrownForLog(err),
+                );
             }
             this.boundFlowTriggers.delete(name);
         }
@@ -1696,7 +1737,21 @@ export class AutomationEngine implements IAutomationService {
             this.boundFlowTriggers.set(flowName, resolved.triggerType);
             this.logger.info(`Flow '${flowName}' bound to trigger '${resolved.triggerType}'`);
         } catch (err) {
-            this.logger.warn(`Failed to bind flow '${flowName}' to trigger '${resolved.triggerType}': ${(err as Error).message}`);
+            // #6499 — plugin-supplied thrown text (`FlowTrigger.start`) to the
+            // structured slot; see `forgetSuspendedRun`'s catch above for the
+            // full mechanism (#6299).
+            //
+            // #4632 verdict: FUNCTIONAL — stays `warn`: "a trigger is not
+            // armed" is the rule's own canonical `warn` example. The flow is
+            // visibly smaller than declared (its runs never appear), and the
+            // kernel:bootstrapped binding audit re-reports every unbound
+            // triggered flow.
+            this.logger.warn(
+                `Failed to bind flow '${flowName}' to trigger '${resolved.triggerType}' — the flow stays ` +
+                    `registered but will NOT fire on this trigger until the flow or the trigger is ` +
+                    `re-registered. The trigger's own failure is in this record's meta.`,
+                describeThrownForLog(err),
+            );
         }
     }
 
@@ -1707,7 +1762,21 @@ export class AutomationEngine implements IAutomationService {
         try {
             this.triggers.get(boundType)?.stop(flowName);
         } catch (err) {
-            this.logger.warn(`Trigger '${boundType}' stop('${flowName}') failed: ${(err as Error).message}`);
+            // #6499 — plugin-supplied thrown text (`FlowTrigger.stop`) to the
+            // structured slot; see `forgetSuspendedRun`'s catch above for the
+            // full mechanism (#6299).
+            //
+            // #4632 verdict: FUNCTIONAL — stays `warn`, same consequence shape
+            // as `unregisterTrigger`'s stop above: the binding is dropped
+            // either way, and a subscription the trigger failed to tear down
+            // fires into execute()'s own disabled/unregistered-flow guards,
+            // visibly.
+            this.logger.warn(
+                `Trigger '${boundType}' stop('${flowName}') failed while unbinding the flow — the binding is ` +
+                    `dropped anyway; whatever the trigger armed for it may keep firing until the process ` +
+                    `restarts. The trigger's own failure is in this record's meta.`,
+                describeThrownForLog(err),
+            );
         }
         this.boundFlowTriggers.delete(flowName);
     }
@@ -2357,8 +2426,25 @@ export class AutomationEngine implements IAutomationService {
                 const rows = await this.store.listHistory(flowName, limit);
                 durable = rows.map(r => this.runRecordToLogEntry(r));
             } catch (err) {
+                // #6499 — the datasource driver's text to the structured slot;
+                // see `forgetSuspendedRun`'s catch above for the full mechanism
+                // (#6299). `warn(message, meta?)` — meta is the SECOND
+                // argument; `warn` has no `Error` slot.
+                //
+                // #4632 verdict: FUNCTIONAL — stays `warn`, the same reasoning
+                // as `listSuspendedRunsDurable` below: nothing
+                // claimed-persisted failed to land — the history rows are
+                // intact — and this read feeds only the observability Runs
+                // view, which degrades to the in-memory ring buffer. The
+                // record says the shortfall out loud (#5186's invented-answer
+                // shape; its propagation remedy is a return-contract change
+                // outside #6499).
                 this.logger.warn(
-                    `[Automation] run-history read failed for '${flowName}': ${(err as Error)?.message}`,
+                    `[Automation] run-history read failed for '${flowName}' — the Runs listing DEGRADES to the ` +
+                        `in-memory ring buffer alone, so terminal runs from before the last restart (or evicted ` +
+                        `from the buffer) are missing and the caller cannot tell a short list from a complete ` +
+                        `one. The rows themselves are untouched. Fix the store failure in this record's meta.`,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -2412,8 +2498,26 @@ export class AutomationEngine implements IAutomationService {
                 const rec = await this.store.loadTerminal(runId);
                 if (rec) return this.runRecordToLogEntry(rec);
             } catch (err) {
+                // #6499 — driver text to the structured slot; see
+                // `forgetSuspendedRun`'s catch above for the full mechanism
+                // (#6299).
+                //
+                // #4632 verdict: FUNCTIONAL — stays `warn`. Nothing
+                // claimed-persisted failed to land: the terminal row, if one
+                // exists, is intact — this read degrades to `null`. What IS
+                // wrong is #5186's shape: `null` is also this method's honest
+                // "no such run", so a caller cannot tell an unreadable store
+                // from a run that never ran (plugin-approvals'
+                // `inspectStrandedRequests` counts a THROWN getRun as
+                // `undetermined` — a distinction this swallow denies it). The
+                // remedy is propagation, a return-contract change outside
+                // #6499's scope, so the record says the degradation out loud.
                 this.logger.warn(
-                    `[Automation] durable run lookup failed for '${runId}': ${(err as Error)?.message}`,
+                    `[Automation] durable run lookup failed for '${runId}' — this read DEGRADES to null, so ` +
+                        `the caller sees exactly what it would see if the run had never run and cannot tell ` +
+                        `the two apart. The terminal row, if one exists, is untouched. Fix the store failure ` +
+                        `in this record's meta.`,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -2486,10 +2590,19 @@ export class AutomationEngine implements IAutomationService {
                 // the trigger's (unresolved) identity — the data middleware applies
                 // its baseline member fallback, NOT elevation — and we warn loudly
                 // so the degraded authorization is audible rather than silent.
+                //
+                // #6499 — the resolver's thrown text (transitively the
+                // datasource's) goes to the structured slot; see
+                // `forgetSuspendedRun`'s catch above for the full mechanism
+                // (#6299). #4632 verdict: FUNCTIONAL — stays `warn`: the
+                // degradation is fail-safe as argued above, its symptom is the
+                // run's own data-op refusals/strips, and nothing
+                // claimed-persisted failed to land.
                 this.logger.warn(
                     `[runAs] flow '${flow.name}' could not resolve grants for triggering user ` +
-                    `'${runContext.userId}': ${(err as Error)?.message ?? String(err)}. Its data ops fall ` +
-                    `back to baseline member permissions (not elevated).`,
+                    `'${runContext.userId}' — its data ops fall back to baseline member permissions ` +
+                    `(not elevated). The resolver's failure is in this record's meta.`,
+                    describeThrownForLog(err),
                 );
             }
         }
@@ -2559,10 +2672,18 @@ export class AutomationEngine implements IAutomationService {
                 }
             }
         } catch (err) {
+            // #6499 — the expander's thrown text (transitively the
+            // datasource's) goes to the structured slot; see
+            // `forgetSuspendedRun`'s catch above for the full mechanism
+            // (#6299). #4632 verdict: FUNCTIONAL — stays `warn`, per the
+            // docblock: expansion is best-effort enrichment that must never
+            // break the flow it feeds, and the visible symptom is templates
+            // rendering the scalar id.
             this.logger.warn(
                 `[expand] flow '${flow.name}' could not expand lookups [${expandFields.join(', ')}] on ` +
-                `'${object}#${String(id)}': ${(err as Error)?.message ?? String(err)}. Templates referencing ` +
-                `these relations resolve to the scalar id.`,
+                `'${object}#${String(id)}' — templates referencing these relations resolve to the scalar ` +
+                `id. The expander's failure is in this record's meta.`,
+                describeThrownForLog(err),
             );
         }
     }
@@ -3446,10 +3567,22 @@ export class AutomationEngine implements IAutomationService {
             try {
                 return this.evaluateCondition(String(field.visibleWhen), scope);
             } catch (err) {
+                // #6499 — BOTH spliced pieces were uncontrolled: the author's
+                // own `visibleWhen` source (metadata text of any shape) and
+                // the evaluator's thrown message (`evaluateCondition` composes
+                // a deliberately multi-line one). Both go to the structured
+                // slot; see `forgetSuspendedRun`'s catch above for the full
+                // mechanism (#6299).
+                //
+                // #4632 verdict: FUNCTIONAL — stays `warn`: one field's
+                // `required` is not enforced for one submission, the resume
+                // caller reads the outcome directly, and nothing
+                // claimed-persisted is involved.
                 this.logger.warn(
                     `[automation] run '${runId}': screen field '${field.name}' has a visibleWhen that could not be ` +
-                        `evaluated (\`${field.visibleWhen}\`: ${(err as Error)?.message}) — its \`required\` is not ` +
-                        `enforced for this submission`,
+                        `evaluated — its \`required\` is not enforced for this submission. The predicate and the ` +
+                        `evaluator's failure are in this record's meta.`,
+                    { visibleWhen: String(field.visibleWhen), ...describeThrownForLog(err) },
                 );
                 return undefined;
             }
@@ -3520,13 +3653,36 @@ export class AutomationEngine implements IAutomationService {
                 : this.buildSubflowResumeSignal(run.context, output);
             const parentRes = await this.resumeInternal(parentRunId, sig, false, summary);
             if (!parentRes.success) {
+                // #6499 — `parentRes.error` is the envelope field that carries
+                // a failing node's / driver's text VERBATIM (#5912 left it
+                // that way on purpose), so foreign newlines reach this message
+                // second-hand; it goes to the structured slot. See
+                // `forgetSuspendedRun`'s catch above for the full mechanism
+                // (#6299).
+                //
+                // #4632 verdict: FUNCTIONAL — stays `warn`: no false success
+                // is recorded anywhere — the parent either failed terminally
+                // (recorded in run history) or stays visibly parked and
+                // resumable — and the child's own completion, which is what
+                // its resumer was told, is genuine.
                 this.logger.warn(
-                    `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' failed: ${parentRes.error}`,
+                    `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' ` +
+                        `failed — the parent's failure envelope is in this record's meta.`,
+                    { error: parentRes.error ?? 'unknown error' },
                 );
             }
         } catch (err) {
+            // #6499 — thrown text to the structured slot; see
+            // `forgetSuspendedRun`'s catch above for the full mechanism
+            // (#6299). #4632 verdict: FUNCTIONAL — stays `warn`, the same
+            // consequence envelope as the branch above: the parent's
+            // suspension was either consumed with a recorded outcome or
+            // survives parked and resumable; nothing reads as success that
+            // is not.
             this.logger.warn(
-                `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' threw: ${(err as Error).message}`,
+                `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' ` +
+                    `threw — the thrown failure is in this record's meta.`,
+                describeThrownForLog(err),
             );
         }
     }
@@ -3838,8 +3994,39 @@ export class AutomationEngine implements IAutomationService {
                 summary: entry.summary,
             };
             void this.store.recordTerminal(record).catch((err) => {
-                this.logger.warn(
-                    `[Automation] run-history persist failed for '${entry.flowName}': ${(err as Error)?.message}`,
+                // #6499 — driver text to the structured slot; see
+                // `forgetSuspendedRun`'s catch above for the full mechanism
+                // (#6299).
+                //
+                // #4632 verdict: DURABILITY — RAISED from `warn` to `error`.
+                // This is the WRITE half of the run-history claim whose read
+                // halves (`listRuns` / `getRun` above) stay `warn`: a TERMINAL
+                // run's history row failed to land while the run itself
+                // completed and every caller reads healthy — fire-and-forget,
+                // nothing retries it, nothing upstream is told. After the next
+                // restart the run is invisible to the Runs surfaces, and the
+                // approvals sweeps read exactly that hole: `inspectStranded-
+                // Requests` (#3456) treats "no suspension + no terminal row"
+                // as a STRANDED request, so a run that actually completed is
+                // reported as lost, and `releasePendingForTerminalRuns`
+                // (#4469) treats "no terminal row" as still-alive, so a
+                // finished run's leftover pending approvals are never
+                // auto-released. A write that claims to persist did not, while
+                // the system keeps looking healthy — #4632's judgment question
+                // answers YES. `check:durability-log-level` cannot see it
+                // (`SuspendedRunStore.recordTerminal` is not in its callee
+                // vocabulary), so the level is pinned by a test instead.
+                //
+                // THIRD argument per `error(message, error?, meta?)`; the
+                // `Error` slot stays empty on purpose (#5575).
+                this.logger.error(
+                    `[Automation] run-history persist failed for terminal run '${entry.id}' of flow ` +
+                        `'${entry.flowName}' — the run finished and reads healthy everywhere, but its history ` +
+                        `row never landed and nothing retries the write, so after the next restart this run is ` +
+                        `invisible to the Runs surfaces and the approvals sweeps read it as never-finished. ` +
+                        `Fix the store failure in this record's meta.`,
+                    undefined,
+                    describeThrownForLog(err),
                 );
             });
         }
@@ -4241,7 +4428,24 @@ export class AutomationEngine implements IAutomationService {
             if (useSchemaHint && result.errors.length === 0 && schemaHint) {
                 const schemaPass = validateExpression('predicate', raw as string | { dialect?: string; source?: string }, schemaHint);
                 for (const issue of [...schemaPass.errors, ...schemaPass.warnings]) {
-                    this.logger.warn(`[flow '${flowName}'] ${where}: ${issue.message}\n      source: \`${issue.source}\``);
+                    // #6499's separately-argued 14th site — the OPPOSITE cause
+                    // of the thrown-text seams: no foreign thrown value is
+                    // involved; this message simply AUTHORED a second physical
+                    // line (`\n      source: …`) into a one-record-per-call
+                    // logger, and `issue.source` is the flow AUTHOR's
+                    // expression text, whose line count is theirs (CEL is
+                    // newline-tolerant). Same downstream damage as the family
+                    // (see `forgetSuspendedRun`'s catch, #6299), same fix
+                    // shape: the message stays one line (`issue.message`
+                    // embeds at most identifier names, which cannot carry
+                    // newlines), the source moves to the structured slot.
+                    //
+                    // #4632 verdict: FUNCTIONAL — stays `warn` BY CONTRACT:
+                    // #1928 defines this advisory schema pass as logged-never-
+                    // thrown and strictly additive to registration; a finding
+                    // here must not fail or alarm a flow that registers
+                    // cleanly.
+                    this.logger.warn(`[flow '${flowName}'] ${where}: ${issue.message}`, { source: issue.source });
                 }
             }
         };

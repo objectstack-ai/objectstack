@@ -30,6 +30,12 @@ import {
 // so the engine and this driver can never disagree about what may become a
 // physical column DEFAULT.
 import { isNowDefaultToken, isRuntimeDefaultToken } from '@objectstack/spec/data';
+// [#5702] The retired filter operators and the prescription each refusal
+// prints. Read from the spec rather than restated here for the reason the
+// #5701 table itself gives: five refusal sites that each write their own
+// sentence about `$regex` are five sentences that drift apart. This driver
+// prints `why` VERBATIM.
+import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
@@ -716,6 +722,67 @@ function filterArrayReachedDriverError(filters: unknown[]): Error {
 }
 
 /**
+ * [#5702] A RETIRED filter operator reached the compiler.
+ *
+ * Separate from {@link unknownFieldOperatorMessage}'s "this name is not in the
+ * vocabulary" on purpose: `$regex` and `$options` were not typos, they were
+ * spellings this driver ANSWERED until #4706 retired them, and the author who
+ * wrote one needs the replacement rather than a list to search. The
+ * prescription is `RETIRED_FILTER_OPERATORS[op].why`, printed verbatim — the
+ * spec table exists so that the five refusal sites stop each composing their
+ * own sentence about the same retirement.
+ *
+ * `siblings` are the other keys of the SAME field constraint, and every retired
+ * one among them is named too. `{ $regex: '^acme', $options: 'i' }` is ONE
+ * mistake with ONE fix (write `$icontains`), so a message naming only the key
+ * the loop happened to reach first would send its author back for a second
+ * round-trip on the other one.
+ *
+ * Returns `null` when `op` is not retired, so the caller can fall through to
+ * the ordinary unknown-operator refusal with one expression.
+ */
+function retiredFilterOperatorError(op: string, field: string, siblings: readonly string[] = []): Error | null {
+  const guidance = RETIRED_FILTER_OPERATORS[op];
+  if (!guidance) return null;
+  const replacement = guidance.to ? ` Write "${guidance.to}" instead.` : '';
+  const alsoRetired = siblings.filter((key) => key !== op && RETIRED_FILTER_OPERATORS[key]);
+  const also = alsoRetired.length
+    ? ` The same field constraint also carries the retired ` +
+      `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${guidance.to}" replaces the whole ` +
+      `shape, so this is ONE mistake with ONE fix, not one per key.`
+    : '';
+  return unsupportedFilterError(
+    `Filter operator "${op}" on field "${field}" is RETIRED and is no longer evaluated by this ` +
+      `driver.${replacement} ${guidance.why}${also}`,
+  );
+}
+
+/**
+ * [#5702] `$icontains` received a comparand that is not a non-empty string.
+ *
+ * Two rejections, one constructor, because they are one mistake at the
+ * comparand position and the repair is the same sentence:
+ *
+ * - **non-string** — `StringOperatorSchema` declares `$icontains: z.string()`.
+ *   Coercing `42` to `"42"` answers a query nobody wrote (the reading
+ *   `applyLike`'s `String(value)` would otherwise give it).
+ * - **empty string** — every row contains the empty substring, so the predicate
+ *   constrains nothing. A dropped predicate WIDENS a result set, and on an RLS
+ *   read scope that is a permission bypass rather than a degraded filter
+ *   (#3948) — the same reason #5240 refused `{ field: {} }` one level up.
+ */
+function icontainsComparandError(field: string, value: unknown, path: string): Error {
+  const shown = typeof value === 'string' ? `""` : JSON.stringify(value) ?? String(value);
+  return unsupportedFilterError(
+    `Operator "$icontains" on field "${field}" at ${path} requires a NON-EMPTY string comparand, ` +
+      `received ${shown}. "$icontains" is a case-insensitive LITERAL substring search, so its ` +
+      `comparand is the text to look for — an empty one matches every row (a predicate that ` +
+      `constrains nothing), and a non-string one would have to be coerced into text this query ` +
+      `never asked for.`,
+  );
+}
+
+/**
  * [#5041] The referenced field name when `value` is a Filter Protocol FIELD
  * REFERENCE (`{ $field: 'other_column' }` — spec `FieldReferenceSchema` in
  * `data/filter.zod.ts`), else `null`.
@@ -812,7 +879,7 @@ function isBindableComparand(value: unknown): boolean {
  * object.
  */
 const TEXT_PATTERN_OPERATORS: ReadonlySet<string> = new Set([
-  '$contains', '$notContains', '$startsWith', '$endsWith', '$regex',
+  '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
 ]);
 
 /**
@@ -1504,6 +1571,20 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     typeof value.$exists !== 'boolean'
   ) {
     throw nonBooleanExistsComparandError(key, value.$exists, `${here}.$exists`);
+  }
+
+  // [#5702] `$icontains`'s comparand is a NON-EMPTY string by declaration,
+  // refused on this walk for the same evaluation-order reason as the two gates
+  // above: an empty comparand makes the predicate match every row, and a gate
+  // the emitter carries alone is skipped wholesale whenever a boolean identity
+  // settles the enclosing node — so `{ $or: [ {}, { name: { $icontains: '' } } ] }`
+  // would be refused or silently widened depending on its SIBLINGS.
+  if (
+    isFilterNode(value) &&
+    Object.prototype.hasOwnProperty.call(value, '$icontains') &&
+    (typeof value.$icontains !== 'string' || value.$icontains === '')
+  ) {
+    throw icontainsComparandError(key, value.$icontains, `${here}.$icontains`);
   }
 
   // A field key always contributes a predicate.
@@ -7128,12 +7209,29 @@ export class SqlDriver implements IDataDriver {
     value: unknown,
     shape: 'contains' | 'starts' | 'ends',
     negate = false,
+    fold = false,
   ): void {
     const escaped = String(value).replace(/[\\%_]/g, '\\$&');
     const pattern = shape === 'starts' ? `${escaped}%` : shape === 'ends' ? `%${escaped}` : `%${escaped}%`;
     const keyword = negate ? 'NOT LIKE' : 'LIKE';
     const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
-    builder[rawMethod](`?? ${keyword} ? ESCAPE ?`, [field, pattern, '\\']);
+    // [#5702] `fold` wraps BOTH operands in SQL `LOWER()` — the `$icontains`
+    // lowering. It is a parameter of this method rather than a second emitter
+    // so that the escaping above (the `%`/`_`/`\` class and the bound `ESCAPE`)
+    // is literally the same code, not a copy held in sync by a comment: an
+    // unescaped `%` is a filter bypass (P0), and the second `$icontains` face
+    // is exactly where a copy would have skipped it.
+    //
+    // `LOWER()` and not a JS-side fold: the column side has to fold too, and it
+    // can only fold in SQL. SQLite's `lower()` folds ASCII ONLY, which IS the
+    // contract (#4706 Q1 = A) — `É` stays `É`, so `$icontains: 'café'` does not
+    // match `CAFÉ`. Postgres and MySQL fold the wider Unicode range in
+    // `LOWER()`, so on those dialects this over-matches on non-ASCII letters;
+    // that divergence is measured and recorded rather than papered over, and it
+    // is the same dialect axis `$contains`'s case sensitivity sits on.
+    const col = fold ? 'LOWER(??)' : '??';
+    const bound = fold ? 'LOWER(?)' : '?';
+    builder[rawMethod](`${col} ${keyword} ${bound} ESCAPE ?`, [field, pattern, '\\']);
   }
 
   /**
@@ -7361,13 +7459,16 @@ export class SqlDriver implements IDataDriver {
               break;
             }
             case '$contains':
-            // `$regex` reaches SQL only via the better-auth adapter, which emits
-            // it for a `contains` search (a plain substring, not a real regex).
-            // SQL has no portable regex, so compile the intended substring LIKE
-            // — correct for that producer and safe (the value is LIKE-escaped),
-            // where the old equality default silently made it an exact match.
-            case '$regex':
               this.applyContainsLike(builder, method, field, opValue);
+              break;
+            // [#5702] The case-INSENSITIVE twin of `$contains`, and the
+            // replacement `RETIRED_FILTER_OPERATORS` prescribes for `$regex`.
+            // Same `applyLike` — same escaped character class, same bound
+            // `ESCAPE` — with the fold applied to BOTH sides, because folding
+            // only the comparand compares a folded needle against a raw column
+            // and matches just the rows that were already lower-case.
+            case '$icontains':
+              this.applyLike(builder, method, field, opValue, 'contains', false, true);
               break;
             case '$notContains':
               // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
@@ -7413,12 +7514,18 @@ export class SqlDriver implements IDataDriver {
                 ? (logicalOp === 'or' ? 'orWhereNull' : 'whereNull')
                 : (logicalOp === 'or' ? 'orWhereNotNull' : 'whereNotNull')](field);
               break;
-            default:
+            default: {
+              // [#5702] A RETIRED spelling gets the prescription, not the
+              // vocabulary list: the author who wrote `$regex` needs
+              // `$icontains`, and a list of fifteen names does not say so.
+              const retired = retiredFilterOperatorError(op, field, Object.keys(value as object));
+              if (retired) throw retired;
               throw unsupportedFilterError(
                 `Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
                   `$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $between, $contains, $notContains, ` +
-                  `$startsWith, $endsWith, $regex, $null, $exists.`,
+                  `$startsWith, $endsWith, $icontains, $null, $exists.`,
               );
+            }
           }
         }
       } else {
