@@ -434,6 +434,17 @@ export type ParentBinding = Record<string, unknown> | null | undefined;
  * is a row of a DIFFERENT object whose declared fields this function does not
  * have.
  *
+ * [#6457] That last clause is why the header IS materialised — just not here.
+ * A RESOLVED-but-sparse header reproduced this same trap one root over (the
+ * fault is `No such key`, not `Unknown variable`, because `parent` IS bound ⇒
+ * ordinary fail-OPEN ⇒ the declared lock is let through), and the fix went to
+ * the only place holding both the master's schema and the just-read header:
+ * `ObjectQL.resolveMasterDetailParent(s)` (`engine.ts#materializeParentHeader`),
+ * which serves this seam and the `requiredWhen` one below from one resolution.
+ * This function's own contract is unchanged — hand it a sparse header and it
+ * still fails open — and the ABSENT-parent signal above is untouched, because
+ * materialisation is only ever applied to a header row that EXISTS.
+ *
  * ## Consequences, both directions (measured, not asserted)
  *
  * A total record makes a predicate that used to fault evaluate for real, so

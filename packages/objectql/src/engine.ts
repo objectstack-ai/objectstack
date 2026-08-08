@@ -125,6 +125,10 @@ import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, Validat
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
+// [#6457] The master-detail header a `parent`-scoped predicate reads is made
+// total over the MASTER's declared fields before it leaves this engine — the
+// same helper every other server seam materialises with (#1871/#4649/#4953).
+import { materializeDeclaredFields } from './declared-fields.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -3418,6 +3422,10 @@ export class ObjectQL implements IObjectQLEngine {
    * `null` on any failure — no relation, no id, header gone, read threw. It is
    * NOT read as "unlocked": an unresolved binding leaves `parent` unbound, and
    * `isReadonlyWhenLocked` treats a predicate that needs it as LOCKED.
+   *
+   * [#6457] A header that IS resolved is handed over TOTAL over the MASTER
+   * object's declared fields — see {@link materializeParentHeader} for why that
+   * had to happen here and nowhere else, and for the verdict table it moves.
    */
   private async resolveMasterDetailParent(
     schema: any,
@@ -3430,7 +3438,9 @@ export class ObjectQL implements IObjectQLEngine {
     if (parentId == null) return null;
     try {
       const row = await this.findOne(rel.master, { where: { id: parentId }, context: { isSystem: true } } as any);
-      return (row as Record<string, unknown>) ?? null;
+      // `null` stays `null` — the fail-CLOSED signal (#4889) is the ABSENCE of
+      // the binding, and materialising a row we do not have would destroy it.
+      return row == null ? null : this.materializeParentHeader(rel.master, row as Record<string, unknown>);
     } catch (err) {
       this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
         object: rel.master, id: parentId, error: err,
@@ -3451,6 +3461,11 @@ export class ObjectQL implements IObjectQLEngine {
    * passed as `null` and each inserted row supplies its own FK, so
    * `masterIdOf(fk, null, row)` reads `row[fk]` and the batch costs one header
    * read for the whole `insert()` call.
+   *
+   * [#6457] Every header this resolves is materialised over the MASTER's
+   * declared fields, exactly as the single-id twin does — the declared-field
+   * table is read ONCE for the batch, not per row. A row this map has no entry
+   * for still answers `null` (unbound, fail-CLOSED for `readonlyWhen`).
    */
   private async resolveMasterDetailParents(
     schema: any,
@@ -3472,8 +3487,13 @@ export class ObjectQL implements IObjectQLEngine {
         where: { id: { $in: [...ids] } },
         context: { isSystem: true },
       } as any) as Array<Record<string, unknown>>;
+      // [#6457] One declared-field lookup for the whole batch, then one shallow
+      // copy per header. A master the registry does not know leaves `fields`
+      // undefined and every header passes through untouched — see
+      // {@link materializeParentHeader}.
+      const masterFields = this.masterDeclaredFields(rel.master);
       for (const row of Array.isArray(rows) ? rows : []) {
-        if (row?.id != null) byId.set(String(row.id), row);
+        if (row?.id != null) byId.set(String(row.id), materializeDeclaredFields({ ...row }, masterFields));
       }
     } catch (err) {
       this.logger?.warn?.('readonlyWhen parent lookup failed — parent stays unbound', {
@@ -3485,6 +3505,73 @@ export class ObjectQL implements IObjectQLEngine {
       const id = masterIdOf(rel.fk, data, row);
       return id == null ? null : (byId.get(String(id)) ?? null);
     };
+  }
+
+  /**
+   * [#6457] Make a resolved master-detail header TOTAL over the MASTER
+   * object's declared fields, so a `parent.<field>` predicate is evaluable
+   * whatever subset of columns the driver echoed back.
+   *
+   * ## The hole this closes
+   *
+   * #4953 made the `record` / `previous` roots total at every server seam
+   * ({@link ./declared-fields.js#materializeDeclaredFields}); the 2026-08-06
+   * ruling deliberately left `parent` out, because `parent` is a row of ANOTHER
+   * object and its ABSENCE is #4889's fail-closed signal. What that left behind
+   * is the same trap one root over — visible as a THREE-row table, of which
+   * only the middle row moves here:
+   *
+   * | header state | `readonlyWhen: parent.status == null` | before | now |
+   * |---|---|---|---|
+   * | carries `status` | evaluates | locks per verdict | unchanged |
+   * | resolved, no `status` key | `No such key: status` — `parent` IS bound, so `unknownVariableOf` does not match ⇒ ordinary fail-OPEN | **declared lock let through** | evaluates (`status` reads `null`) |
+   * | unresolvable (`null`) | `Unknown variable: parent` | LOCKED (#4889) | LOCKED — unchanged |
+   *
+   * The middle row is the bug: whether a declared lock enforced depended on
+   * which columns a driver happened to return, which is not something an author
+   * can see or control. `requiredWhen` (#4977) shares the binding and had the
+   * mirror of it — fail-open there means the requirement is simply not
+   * enforced. One materialisation serves both consumers.
+   *
+   * ## Why HERE, and not in the strip / the evaluator
+   *
+   * `stripReadonlyWhenFields*` and `evaluateValidationRules` are pure functions
+   * over what they are handed; they hold the DETAIL object's field table and
+   * have no way to reach the MASTER's — threading a second field table through
+   * their signatures would put the master's schema in four call sites' hands to
+   * serve one binding. The engine already holds both the registry and the
+   * just-read header at these two seams, so the header arrives at those
+   * functions already total and their signatures do not move.
+   *
+   * ## The fail-CLOSED line is preserved EXACTLY (#4889)
+   *
+   * This function is only ever reached with a row IN HAND — the persisted-state
+   * precondition `declared-fields.ts` states. An UNRESOLVABLE header still
+   * returns `null` from the resolvers above, still leaves `parent` unbound,
+   * still faults as `Unknown variable: parent`, and is still read as LOCKED. The
+   * two cases stay distinguishable by construction: absence is decided before
+   * this function is called, materialisation only ever applies to a row that
+   * exists.
+   *
+   * A master the registry cannot resolve yields no field table, and the header
+   * passes through unchanged — sparse, i.e. exactly the pre-#6457 behaviour.
+   * That is the honest answer: without the declared shape we cannot know which
+   * absent keys are fields and which would be fabrication.
+   *
+   * COPIED before materialising, like every other caller: the row is what
+   * `findOne`/`find` returned and may be observed elsewhere; it must not gain
+   * materialised nulls behind its reader's back.
+   */
+  private materializeParentHeader(master: string, row: Record<string, unknown>): Record<string, unknown> {
+    return materializeDeclaredFields({ ...row }, this.masterDeclaredFields(master));
+  }
+
+  /** The MASTER object's declared-field table, or `undefined` when the registry
+   *  does not know it (see {@link materializeParentHeader}). */
+  private masterDeclaredFields(master: string): Record<string, unknown> | undefined {
+    const schema = this._registry.getObject(master) as { fields?: Record<string, unknown> } | undefined;
+    const fields = schema?.fields;
+    return fields && typeof fields === 'object' ? fields : undefined;
   }
 
   /**
