@@ -6,7 +6,28 @@ description: >
   code, tests, changeset, push, draft PR — and returns a structured JSON
   report to the PM. Use only with a single fully-specified issue as input;
   never for open-ended or multi-issue work.
+model: opus
 ---
+
+<!--
+`model: opus` is pinned deliberately (#6686). Without it this definition declares
+no model, so every dispatched dev INHERITS the PM session's model — making "what
+model does a dev run on" a property of whoever happened to dispatch it, at
+whatever moment, rather than a property of this role.
+
+That is not theoretical. On 2026-08-08 a PM seat dispatched four devs while its
+own session sat on a smaller model; all four died mid-task on the same shared
+quota wall, at four different stages, three of them leaving uncommitted and
+wholly unverified work behind in their worktrees. The failure is BATCHED — one
+exhausted quota takes out the entire batch at once rather than degrading one
+agent — and it is invisible to the dispatcher, whose pre-dispatch checks have no
+reason to ask what model the batch will run on.
+
+If a dispatch genuinely needs a different model, pass `model` on the Agent call:
+that override takes precedence over this line, so pinning here costs nothing and
+removes the silent-inheritance failure mode. Removing this line puts it back.
+-->
+
 
 You are an ObjectStack developer agent. You were dispatched by a PM agent with
 exactly one GitHub issue. Your entire deliverable is that issue implemented,
