@@ -202,6 +202,60 @@ describe('hookBodyRunnerFactory', () => {
       expect(seen[0]).toEqual({ input: '{}', previous: 'null' });
     });
   });
+
+  // [#6316] `ctx.user` is seeded from `engineCtx.user` and from nothing else.
+  // `buildSandboxContext` used to spell `engineCtx?.user ?? engineCtx?.session?.user`;
+  // the second limb was unreachable, because `HookContext['session']` declares
+  // no `user` key and its sole producer — `buildSession()` in objectql, called
+  // by every HookContext assembly site in the engine — writes none.
+  //
+  // ⚠️ Read these two cases for what they each pin. The POSITIVE one is not a
+  // regression guard for this change: the truth key sat FIRST in the old chain,
+  // so it was green before the deletion and is green after — deleting an
+  // unreachable limb cannot move it, by construction. The NEGATIVE one carries
+  // all the weight, and it is the one that goes RED if the limb is restored.
+  // Its context is deliberately SYNTHETIC — no producer can build a session
+  // carrying `user`, which is the whole finding — so it pins the RULE
+  // ("`session.user` is not a data source") rather than any behaviour a real
+  // path exhibits. That is the point: the rule is what a future edit would
+  // break, and types cannot catch it here (both writers take `any`).
+  describe('seeds ctx.user from the engine key only', () => {
+    const probeUser = (engineCtx: Record<string, unknown>) => {
+      const fn = hookBodyRunnerFactory(runner, { ql: {}, appId: 'crm' })({
+        name: 'probe_user',
+        object: 'contact',
+        events: ['beforeInsert'],
+        body: {
+          language: 'js',
+          source: 'return { seen: JSON.stringify(ctx.user ?? null) };',
+          capabilities: [],
+        },
+      } as any);
+      const ctx = { input: {} as Record<string, unknown>, ...engineCtx } as any;
+      return fn!(ctx).then(() => ctx.input.seen as string);
+    };
+
+    it('reads `user` — the key `buildUser()` produces on every hook dispatch', async () => {
+      expect(await probeUser({ user: { id: 'u_1', name: 'Ada' } })).toBe(
+        '{"id":"u_1","name":"Ada"}',
+      );
+    });
+
+    it('does NOT fall back to `session.user` — no producer writes that key', async () => {
+      // A session shape no producer can build, planted so the removed limb
+      // would have something to find. With the limb gone the body sees no user
+      // at all; `session.userId` is the spelling that carries the caller here.
+      expect(
+        await probeUser({ session: { userId: 'u_1', user: { id: 'u_1', name: 'Ada' } } }),
+      ).toBe('null');
+    });
+
+    it('leaves ctx.user undefined when the context carries neither key', async () => {
+      // ObjectQL's `ScopedRepo.execute()` is the real shape of this case on the
+      // action face; on the hook face it is a context-less programmatic call.
+      expect(await probeUser({})).toBe('null');
+    });
+  });
 });
 
 describe('actionBodyRunnerFactory', () => {
@@ -386,6 +440,58 @@ describe('actionBodyRunnerFactory', () => {
       });
       expect(await fn!({ record: { id: 'deal_1' }, recordId: 'deal_1' })).toEqual({ ok: true });
       expect(updates).toEqual([{ id: 'deal_1', stage: 'won' }]);
+    });
+  });
+
+  // [#6316] The action face of the same removal. `ActionSession` declares
+  // `userId` / `organizationId` / `positions` / `roles` and no `user`, and its
+  // sole producer `buildActionSession()` writes exactly those four — for both
+  // action ctx assembly sites (MCP `run_action` in `action-execution.ts`, REST
+  // `/actions` in `domains/actions.ts`). As on the hook face above, the
+  // negative case is the one that goes red if `?? actionCtx?.session?.user` is
+  // restored; the positive case cannot move either way.
+  describe('seeds ctx.user from the action-context key only', () => {
+    const probeUser = (actionCtx: Record<string, unknown>) =>
+      actionBodyRunnerFactory(runner, { ql: {}, appId: 'crm' })({
+        name: 'whoami',
+        object: 'crm_deal',
+        body: {
+          language: 'js',
+          source: 'return JSON.stringify(ctx.user ?? null);',
+          capabilities: [],
+        },
+      })!(actionCtx);
+
+    it('reads `user` — the ActorUser every dispatch site builds', async () => {
+      expect(await probeUser({ user: { id: 'u_1', displayName: 'Ada' } })).toBe(
+        '{"id":"u_1","displayName":"Ada"}',
+      );
+    });
+
+    it('does NOT fall back to `session.user` — ActionSession has no such key', async () => {
+      // The four keys `buildActionSession()` really writes, plus a planted
+      // `user` the removed limb would have read. Only the planted one is
+      // ignored; a body that needs the caller reads `ctx.session.userId`.
+      expect(
+        await probeUser({
+          session: {
+            userId: 'u_1',
+            organizationId: 'org_1',
+            positions: ['sales'],
+            roles: ['sales'],
+            user: { id: 'u_1', displayName: 'Ada' },
+          },
+        }),
+      ).toBe('null');
+    });
+
+    it("leaves ctx.user undefined on ObjectQL's `ScopedRepo.execute()` shape", async () => {
+      // The engine's `repo.execute(name, params)` reaches `executeAction` with
+      // `{ ...params, userId, tenantId, roles }` — neither `user` nor `session`.
+      // Both limbs missed it before this change and the surviving one misses it
+      // now: `ctx.user` is `undefined` either way, which is the correct
+      // semantics (that path carries no caller identity).
+      expect(await probeUser({ userId: 'u_1', tenantId: 'org_1', roles: ['sales'] })).toBe('null');
     });
   });
 });
