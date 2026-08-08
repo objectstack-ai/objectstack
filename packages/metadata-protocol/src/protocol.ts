@@ -7613,7 +7613,8 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * Heal the in-memory registry after a metadata reset (overlay-row
-     * delete) on control-plane kernels. Two layers:
+     * delete). Walks the layers UNDER the deleted overlay, in order, and
+     * stops at the first one that can serve the name:
      *
      *  1. Drop the plain-key runtime shadow so the packaged artifact
      *     (registered under `<packageId>:<name>`) becomes the visible
@@ -7626,6 +7627,44 @@ export class ObjectStackProtocolImplementation implements
      *     MetadataService baseline (FilesystemLoader-sourced types) and
      *     re-register it, preserving the historical refresh behaviour
      *     for items the SchemaRegistry never held as artifacts.
+     *  3. [#5079] When NEITHER layer has anything, the deleted row was the
+     *     whole item — so the plain-key entry is retired too
+     *     ({@link SchemaRegistry.removeOverlayEntry}).
+     *
+     * ## Why step 3 exists (#5079, the #4432 residual)
+     *
+     * Step 1 declines for a runtime-CREATED item: `removeRuntimeShadow` only
+     * un-shadows a packaged artifact, and there is none. Step 2 then found
+     * nothing either — and the method returned, leaving the plain-key entry
+     * that #4521's write-through had put there. Nothing else ever removed it,
+     * so for the life of the process `GET /meta/<type>` kept enumerating a
+     * deleted item, `GET /meta/<type>/<name>` kept serving its body, and the
+     * ADR-0110 D3 declaration gate kept resolving it — while the row was gone
+     * from `sys_metadata` and the handler registry had already dropped it.
+     * The measured symptom: after `DELETE /meta/action/x`, `POST
+     * /actions/<obj>/x` 404s with the *handler-miss* wording ("not found")
+     * instead of ADR-0110's "has no declaration", because the declaration was
+     * still resolvable from this stale entry. The delete's own receipt already
+     * tells the truth here — #5927 splits it into "reset to artifact default"
+     * (artifact-backed) vs "it no longer exists" (runtime-only); step 3 is the
+     * registry making the same distinction the receipt makes.
+     *
+     * ## Why the layer-2 read is now diagnosed, and runs on every kernel
+     *
+     * [#5840] left this read on plain `get` because it "decides nothing" —
+     * true then, false now: its `undefined` is what licenses step 3 to retire
+     * an entry. So it goes through {@link readItemFromMetadataService}, which
+     * carries the ADR-0110 D3 verdict, and a DEGRADED read stops the walk
+     * without retiring anything. Retiring on an outage would answer "this
+     * item exists in no layer" from a read that never reached one — the exact
+     * miss-vs-outage confusion #5532/#5840 closed on the sibling paths. The
+     * same helper also folds in the singular/plural retry, so a baseline
+     * stored under the twin spelling is found rather than retired.
+     *
+     * RE-REGISTRATION stays control-plane-only (`environmentId === undefined`)
+     * — the historical refresh semantics of the original call sites, unchanged.
+     * Only the READ is now unconditional, because a project kernel needs the
+     * same evidence before retiring an entry.
      *
      * Best-effort: a failure must never block the delete that already
      * succeeded; the next full reload fixes the registry anyway.
@@ -7633,35 +7672,32 @@ export class ObjectStackProtocolImplementation implements
     private async restoreArtifactRegistryView(type: string, name: string): Promise<void> {
         try {
             const registry: any = this.engine.registry;
+            const singular = PLURAL_TO_SINGULAR[type] ?? type;
             let healed = false;
             if (typeof registry.removeRuntimeShadow === 'function') {
-                const singular = PLURAL_TO_SINGULAR[type] ?? type;
                 healed = registry.removeRuntimeShadow(singular, name);
                 if (type !== singular) {
                     healed = registry.removeRuntimeShadow(type, name) || healed;
                 }
             }
             if (healed) return;
-            // MetadataService re-registration is control-plane-only — it
-            // preserves the historical refresh semantics gated on
-            // `environmentId === undefined` at the original call sites.
-            if (this.environmentId !== undefined) return;
-            const services = this.getServicesRegistry?.();
-            const metadataService = services?.get('metadata');
-            if (metadataService && typeof metadataService.get === 'function') {
-                // [#5840] Measured and deliberately left on plain `get`. This
-                // read decides nothing and asserts nothing: it returns void,
-                // its `undefined` produces no answer to any caller, and the
-                // method's own contract above is "best-effort, the next full
-                // reload fixes the registry anyway". Routing it through
-                // `getDiagnosed` could only add a log line to a path that is
-                // already documented as silent — over-applying the rule, which
-                // is how `error`/`warn` become unreadable (AGENTS.md
-                // "Degradation log levels", the do-not-over-apply half).
-                const artifactItem = await metadataService.get(type, name);
-                if (artifactItem !== undefined) {
-                    this.engine.registry.registerItem(type, artifactItem, 'name');
+
+            const baseline = await this.readItemFromMetadataService(type, name);
+            if (baseline.data !== undefined && baseline.data !== null) {
+                if (this.environmentId === undefined) {
+                    this.engine.registry.registerItem(type, baseline.data, 'name');
                 }
+                return;
+            }
+            // ADR-0110 D3 — an outage is not an absence. Leave the entry: it
+            // is stale, which is exactly where this method already was, and a
+            // later delete or reload heals it.
+            if (baseline.degraded) return;
+
+            // [#5079] No artifact, no baseline: the row WAS the item.
+            if (typeof registry.removeOverlayEntry === 'function') {
+                registry.removeOverlayEntry(singular, name);
+                if (type !== singular) registry.removeOverlayEntry(type, name);
             }
         } catch {
             // Best-effort registry refresh; next read fixes it anyway

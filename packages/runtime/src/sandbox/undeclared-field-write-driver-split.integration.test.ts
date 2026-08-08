@@ -46,12 +46,21 @@
  * test consumer of it that #5704 RULED permanent. It is NOT a migration
  * leftover — do not "finish the job" by deleting or replacing it.
  *
- * (This block used to say "the only permanent test consumer in the repository".
- * That census expired without anyone editing it: `#6468`'s
- * `autonumber-seed-cross-side-parity.integration.test.ts`, in this same
- * package, imports the driver too and is not covered by #5704's ruling. Its
- * disposition is filed as #6664. The sentence now claims what it can defend: a
- * RULING about this file, not a count of the repository.)
+ * #6664 census: 2 ruled consumers — this file, and
+ * `../autonumber-seed-cross-side-parity.integration.test.ts` (#6468's
+ * engine-vs-driver autonumber convergence pin, ruled permanent on #6664 by
+ * maintainer 2026-08-08, inheriting the same Q2 = B). That block carries its own
+ * ruling; read it there rather than assuming this one covers it.
+ *
+ * This block used to say "the only permanent test consumer in the repository",
+ * and that census expired without anyone editing it — the autonumber test
+ * arrived after #5704's survey and nothing was watching. So the count stopped
+ * being prose: `pnpm check:driver-memory-census` reads
+ * `scripts/driver-memory-census.ledger.json` and fails on any declaration of the
+ * driver the ledger does not cover, in either direction. A third arrival is now
+ * refused at the gate, and changing the ruled SET makes both files' census
+ * sentences fail until they are rewritten — which is the half a sentence could
+ * never do for itself (#6664, ruling C).
  *
  * Why it has to stay: the whole point of this file is a PRODUCT divergence
  * between two driver families — writing an undeclared field is rejected as a
@@ -67,10 +76,14 @@
  * (defect fixes, feature work). Using it as a reference implementation is not
  * investment, and nothing here fixes or extends it. Ruling: #5704, maintainer
  * 2026-08-06, Q2 = B ("keep, in this one place, with a comment saying so").
- * Consequence, also ruled there: `packages/runtime`'s `driver-memory` devDep
- * stays for the long term. (That devDep now has a second importer in this
- * package as well — #6468's autonumber parity test — so removing this file's
- * import alone would no longer even drop the dependency. See #6664.)
+ * Consequence, also ruled there: 「runtime 的 driver-memory devDep 长期保留(仅
+ * 此一个消费点)」. Two words of that consequence have since moved, and the ledger
+ * records both rather than leaving them to be re-derived: the declaration is in
+ * `packages/runtime`'s `dependencies`, not `devDependencies` (beside `driver-sql`
+ * and `driver-sqlite-wasm`, which this package declares for the same reason — the
+ * datasource factory resolves them by dynamic import), and it now serves TWO
+ * ruled consumers in this package rather than one, so removing this file's import
+ * alone would not drop it.
  *
  * Everything else that used to look like a driver-memory test consumer was a
  * hand-written local stub whose NAME merely said "memory" — in packages that
@@ -103,11 +116,15 @@
  *
  * What a grep for the driver's DECLARATIONS finds in `packages/` after that
  * migration: this file, and #6468's `autonumber-seed-cross-side-parity`
- * integration test (unruled — #6664). Nothing in plugin-auth. The prose
- * MENTIONS that remain there — the identity-lane files explain the history
+ * integration test — both ruled, both ledgered. Nothing in plugin-auth. The
+ * prose MENTIONS that remain there — the identity-lane files explain the history
  * above in their own comments, because a pin has to say what it used to be
- * wrong about — are not consumers: retirement verification greps declarations,
- * not mentions, which is the distinction that makes the grep usable at all.
+ * wrong about — are not consumers: retirement verification counts declarations,
+ * not mentions. That distinction is what made the grep usable at all, and it is
+ * now the gate's rule too: `check:driver-memory-census` classifies by module
+ * position (AST, not text), so a comment naming the package and the bundler
+ * externals entry in `packages/runtime/tsup.config.ts` are reported as mentions
+ * and never as arrivals.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';

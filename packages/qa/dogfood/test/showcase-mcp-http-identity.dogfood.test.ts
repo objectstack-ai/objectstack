@@ -16,6 +16,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { showcaseAppDefaultSecurity } from './showcase-security.js';
 import { MCPServerPlugin } from '@objectstack/mcp';
 
 const OBJ = '/data/showcase_private_note';
@@ -65,7 +66,13 @@ describe('showcase: MCP HTTP surface is identity-admitted (ADR-0096 / #3167)', (
     // needs (in production `os serve`/`dev` auto-load it via isMcpServerEnabled;
     // bootStack's lean harness injects it explicitly). isMcpServerEnabled() is
     // default-on, so the route is live.
-    stack = await bootStack(showcaseStack, { extraPlugins: [new MCPServerPlugin()] });
+    // [#5491] Under the app's OWN declared default profile — the platform
+    // baseline no longer carries a `'*'` grant, so alice and bob need the
+    // showcase's `showcase_private_note` declaration to own a note at all.
+    stack = await bootStack(showcaseStack, {
+      extraPlugins: [new MCPServerPlugin()],
+      security: showcaseAppDefaultSecurity(),
+    });
     await stack.signIn(); // seed dev admin (first user)
     aliceToken = await stack.signUp('mcp-alice@verify.test');
     bobToken = await stack.signUp('mcp-bob@verify.test');

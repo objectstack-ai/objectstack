@@ -264,7 +264,14 @@ import type * as M167 from './ui/view.zod.js';
 import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
-// 717 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 823 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+//
+// That number is machine-checked, not hand-kept. The runtime companion at the
+// bottom of this file recomputes the pin count from the source and asserts that
+// every sentence stating it — this header and that case's own title — agrees
+// (#6605). Before the check existed this line had been left at 717 while the
+// list grew past 800, because the counting assertion reads the `export type
+// Iso...` declarations and never the prose sitting beside them.
 // ---------------------------------------------------------------------------
 
 // ai/agent.zod.ts
@@ -1604,10 +1611,13 @@ export type AFamilyParsedIsParseState = Assert<
 // ---------------------------------------------------------------------------
 
 describe('ADR-0122 type-alias convention', () => {
-  // The title tracks the assertion below; it had been left at 751 when #6037
-  // moved the count to 754, so it is corrected here rather than left two
-  // numbers behind.
-  it('still declares all 755 isomorphic pins', () => {
+  // The title states the count as well, and hand-tracking it did not hold: it
+  // was corrected once, from 751 to 754 (#6037), and had drifted again to sit
+  // 68 behind by the time #6605 looked. Both prose statements of the number —
+  // this title and the section header above the pin list — are now asserted
+  // against the recomputed count below, so neither can go stale without a red
+  // test naming it.
+  it('still declares all 823 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1746,6 +1756,36 @@ describe('ADR-0122 type-alias convention', () => {
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
     expect(pins).toHaveLength(823);
+
+    // The count is stated in PROSE twice as well — this case's title and the
+    // section header above the pin list — and until #6605 nothing read either
+    // one. Both had drifted, by different amounts: the header sat 106 behind,
+    // the title 68. Correcting them is not the fix, because correcting was
+    // already tried on the title once (the receipt at the top of this case)
+    // and it drifted a second time. So the prose is recomputed against the
+    // same operand as the assertion above: the file.
+    //
+    // Matched by PHRASE, deliberately, rather than at two fixed line numbers.
+    // A sentence a later author writes is then covered the moment it is
+    // written — the property a merely-corrected literal does not have, and the
+    // reason this is preferred over deleting the numbers outright: a number
+    // nobody may state cannot be re-stated wrongly, but a number anybody may
+    // state and nobody may state falsely is worth more, and it is the bargain
+    // the pins themselves are built on ("an exemption nobody can state falsely
+    // is the only kind worth having", top of this file).
+    //
+    // Everything else above is HISTORY — `749 -> 822`, `-7`,
+    // `136 - 17 - 40 - 5 - 1` — and is deliberately NOT matched. Those numbers
+    // are true about a past state of the file, and rewriting them to today's
+    // count would destroy the receipts. The phrase caught here is the narrow
+    // one that can only ever mean "how many pins are in this file right now".
+    const stated = [...self.matchAll(/(\d+) isomorphic \w+/g)].map((m) => m[0]);
+    // Guard the guard: if a reword leaves nothing matching, the check below
+    // passes over an empty list and silently stops existing.
+    const phrasingMoved = 'no prose states the pin count any more — has the phrasing moved?';
+    expect(stated.length, phrasingMoved).toBeGreaterThanOrEqual(2);
+    const wrong = stated.filter((s) => !s.startsWith(`${pins.length} `));
+    expect(wrong, `prose disagreeing with the ${pins.length} pins counted above`).toEqual([]);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {

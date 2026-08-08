@@ -2931,8 +2931,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         options: {
           global: "Global",
           tenant: "Tenant",
-          user: "User",
-          runtime: "Runtime"
+          user: "User"
         }
       },
       user_id: {

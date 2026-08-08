@@ -2743,9 +2743,17 @@ export class AutomationEngine implements IAutomationService {
         const guardRecordId = (context?.record as { id?: unknown } | undefined)?.id;
         const reentryKey = guardRecordId != null ? `${flowName}::${String(guardRecordId)}` : undefined;
         if (reentryKey && this.activeRecordFlows.has(reentryKey)) {
+            // #6654 — the record id is CALLER data (nothing schema-constrains
+            // it against newlines), so it rides the logger's structured slot,
+            // never the message; see `forgetSuspendedRun`'s catch for the full
+            // mechanism (#6299). #4632: FUNCTIONAL — stays `warn` (the run is
+            // deliberately skipped and the caller reads the skip envelope).
             this.logger.warn(
-                `[automation] flow '${flowName}' re-entered for the same record '${String(guardRecordId)}' while still running — breaking self-trigger loop. ` +
-                `Its start condition did not suppress the re-fire; if it guards on a boolean field (e.g. \`is_escalated != true\`), note booleans persist as 0/1 on SQLite/libsql and CEL \`1 != true\` is true.`,
+                `[automation] flow '${flowName}' re-entered for the same record while still running — breaking ` +
+                    `self-trigger loop; the triggering record's id is in this record's meta. Its start condition ` +
+                    `did not suppress the re-fire; if it guards on a boolean field (e.g. \`is_escalated != true\`), ` +
+                    `note booleans persist as 0/1 on SQLite/libsql and CEL \`1 != true\` is true.`,
+                { recordId: String(guardRecordId) },
             );
             return { success: true, output: { skipped: true, reason: 'reentrancy_loop_guard' } };
         }
@@ -3455,9 +3463,18 @@ export class AutomationEngine implements IAutomationService {
             const variables = new Map<string, unknown>(Object.entries(run.variables));
             const rejected = applyResumeSignal(variables, signal, run.nodeId);
             if (rejected.length) {
+                // #6654 — the rejected names are the CALLER's resume-signal
+                // keys (nothing constrains them against newlines), so they
+                // ride the structured slot, never the message; see
+                // `forgetSuspendedRun`'s catch for the full mechanism (#6299).
+                // The returned INVALID_SIGNAL envelope below is caller-facing
+                // refusal text, not a log record — it keeps naming the
+                // variables (the envelope class is ruled elsewhere).
+                // #4632: FUNCTIONAL — stays `warn`.
                 this.logger.warn(
                     `[automation] refused resume of run '${runId}': signal writes engine-internal ` +
-                        `variable(s) ${rejected.join(', ')}`,
+                        `variable(s) — the rejected names are in this record's meta.`,
+                    { rejected },
                 );
                 return {
                     success: false,
@@ -3688,9 +3705,19 @@ export class AutomationEngine implements IAutomationService {
 
         const declared = declaredScreenFieldNames(fields);
         const summary = issues.map((i) => i.message).join('; ');
+        // #6654 — the issue messages embed USER-SUBMITTED keys
+        // (`validateScreenInputs`' `Unknown screen field "…"`,
+        // screen-input-contract.ts), which nothing constrains against
+        // newlines, so the findings ride the structured slot, never the
+        // message; see `forgetSuspendedRun`'s catch for the full mechanism
+        // (#6299). The returned INVALID_SCREEN_INPUT envelope below is
+        // caller-facing refusal text, not a log record — it keeps the summary
+        // (the envelope class is ruled elsewhere). #4632: FUNCTIONAL — stays
+        // `warn`.
         this.logger.warn(
             `[automation] refused resume of run '${runId}': screen '${run.nodeId}' input violates its declared ` +
-                `field contract — ${summary}`,
+                `field contract — ${issues.length} issue(s); the field-level findings are in this record's meta.`,
+            { issues },
         );
         return {
             success: false,
@@ -4299,11 +4326,19 @@ export class AutomationEngine implements IAutomationService {
 
     /** One warning per flow, shared by the boot audit and the post-seal path. */
     private warnUnknownNodeTypes(entry: UnknownNodeTypeAuditEntry): void {
+        // #6654 — the unknown type names are FLOW-AUTHOR metadata and the
+        // registered vocabulary is plugin-supplied (neither is
+        // schema-constrained against newlines), so both lists ride the
+        // structured slot, never the message; see `forgetSuspendedRun`'s
+        // catch for the full mechanism (#6299). The "no registered executor
+        // or descriptor" phrase is load-bearing — tests and log filters count
+        // per-flow findings by it. #4632: FUNCTIONAL — stays `warn`.
         this.logger.warn(
-            `Flow '${entry.flowName}' references node type(s) with no registered executor or descriptor: ` +
-            `${entry.unknownTypes.join(', ')}. Every plugin has started, so nothing will register them now — ` +
-            `these nodes fail at execution time with NO_EXECUTOR. Install/enable the plugin that contributes them. ` +
-            `Registered types: ${entry.knownTypes.join(', ') || '(none)'}`,
+            `Flow '${entry.flowName}' references node type(s) with no registered executor or descriptor — ` +
+                `the unknown type names and the registered vocabulary are in this record's meta. Every plugin ` +
+                `has started, so nothing will register them now — these nodes fail at execution time with ` +
+                `NO_EXECUTOR. Install/enable the plugin that contributes them.`,
+            { unknownTypes: entry.unknownTypes, knownTypes: entry.knownTypes },
         );
     }
 
@@ -4986,17 +5021,25 @@ export class AutomationEngine implements IAutomationService {
                 // #4414 — do not fall back silently. The node computed a branch
                 // and no out-edge claims it, so every out-edge is about to be
                 // considered: the guard the author wrote is not guarding.
-                const declared = allOutEdges
-                    .map(e => (e.label ? `'${e.label}'` : `(unlabelled ${e.id})`))
-                    .join(', ');
+                //
+                // #6654 — the computed branch label is potentially
+                // RECORD-DERIVED and the edge labels are FLOW-AUTHOR metadata
+                // (neither is schema-constrained against newlines), so both
+                // ride the structured slot, never the message; see
+                // `forgetSuspendedRun`'s catch for the full mechanism (#6299).
+                // #4632: FUNCTIONAL — stays `warn`.
                 this.logger.warn(
                     // `flow.name` is absent on the synthetic view `runRegion` builds.
-                    `Flow '${flow.name ?? '(region)'}' node '${node.id}' (${node.type}) selected branch ` +
-                    `'${branchLabel}', but no out-edge carries that label — out-edge labels are ` +
-                    `[${declared || 'none'}]. The branch selection is IGNORED and every out-edge is ` +
+                    `Flow '${flow.name ?? '(region)'}' node '${node.id}' (${node.type}) selected a branch, ` +
+                    `but no out-edge carries that label — the computed branch and the out-edge labels are ` +
+                    `in this record's meta. The branch selection is IGNORED and every out-edge is ` +
                     `evaluated instead, so unconditional siblings run regardless of the decision. ` +
                     `Make an out-edge's \`label\` match the branch, or mark the fallback edge ` +
                     `\`isDefault: true\`. (#4414)`,
+                    {
+                        branchLabel,
+                        outEdges: allOutEdges.map(e => ({ id: e.id, label: e.label ?? null })),
+                    },
                 );
             }
         }

@@ -175,7 +175,21 @@ async function captureBoth(fn: () => Promise<void> | void): Promise<{ stdout: st
     return { stdout: split(out), stderr: split(err) };
 }
 
-type Rec = { level: string; msg: string; error?: string; issues?: unknown; source?: string; visibleWhen?: string };
+type Rec = {
+    level: string;
+    msg: string;
+    error?: string;
+    issues?: unknown;
+    source?: string;
+    visibleWhen?: string;
+    // #6654 — the name-splice sweep's structured slots.
+    recordId?: string;
+    rejected?: string[];
+    unknownTypes?: string[];
+    knownTypes?: string[];
+    branchLabel?: string;
+    outEdges?: Array<{ id: string; label: string | null }>;
+};
 
 /**
  * The ONE JSON record on `lines` whose message carries `marker` — asserting
@@ -712,5 +726,299 @@ describe("#6587 — activateFlowTrigger's trigger-fired-run callback: the Automa
         expect(errorSlot).toBeUndefined();
         expect(meta.error).toBe(MULTILINE_DRIVER);
         spy.mockRestore();
+    });
+});
+
+// ═══ #6654 — the five NAME-shaped splices (the weaker class #6499 reported) ═
+
+// Unlike sites 1–14 above, nothing here throws and no envelope is involved:
+// these five sites interpolated NAMES/IDENTIFIERS that originate outside the
+// engine's control — a caller's record id, a resume signal's variable names,
+// user-submitted screen keys, flow-author node type names, a computed branch
+// label plus edge labels — none of which is schema-constrained against
+// newlines. The fixtures below put a newline INTO the identifier to prove the
+// family contract: the message stays one physical line carrying only
+// controlled facts, the foreign identifier rides the structured meta slot,
+// the level is unchanged (option A changes none), and behaviour is unchanged.
+
+describe("#6654 site 1 — the re-entrancy guard: the caller's record id rides meta", () => {
+    /** A record id only a caller could produce — carrying a newline. */
+    const NL_RECORD_ID = 'case-1\nSECOND LINE';
+
+    /** Register a self-retriggering flow; returns the inner skip observation. */
+    function armLoop(engine: AutomationEngine): { sawGuardSkip: () => boolean } {
+        let skipped = false;
+        engine.registerNodeExecutor({
+            type: 'self_retrigger',
+            async execute() {
+                // Re-fire the SAME flow for the SAME record (the loop shape).
+                const r = await engine.execute('looping_flow', {
+                    record: { id: NL_RECORD_ID },
+                    object: 'crm_case',
+                    event: 'record-after-update',
+                } as unknown as AutomationContext);
+                if ((r.output as { reason?: string } | undefined)?.reason === 'reentrancy_loop_guard') skipped = true;
+                return { success: true };
+            },
+        } as NodeExecutor);
+        engine.registerFlow('looping_flow', {
+            name: 'looping_flow',
+            label: 'Looping',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'loop', type: 'self_retrigger', label: 'Loop' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'loop' },
+                { id: 'e2', source: 'loop', target: 'end' },
+            ],
+        });
+        return { sawGuardSkip: () => skipped };
+    }
+
+    it("stays `warn`, one stdout line; the record id never reaches the message", async () => {
+        const engine = new AutomationEngine(jsonLogger());
+        const loop = armLoop(engine);
+
+        let res: { success?: boolean } = {};
+        const streams = await captureBoth(async () => {
+            res = await engine.execute('looping_flow', {
+                record: { id: NL_RECORD_ID },
+                object: 'crm_case',
+                event: 'record-after-update',
+            } as unknown as AutomationContext);
+        });
+
+        // Behaviour unchanged: the outer run completes, the inner re-fire is
+        // skipped with the guard's envelope.
+        expect(res.success).toBe(true);
+        expect(loop.sawGuardSkip()).toBe(true);
+
+        const record = soleRecordWith(streams.stdout, 're-entered for the same record');
+        expect(record.level).toBe('warn');
+        expect(record.msg).not.toContain('\n');
+        expect(record.msg, 'the record id never reaches the message').not.toContain('SECOND LINE');
+        expect(record.msg, 'the flow-name correlation stays').toContain("'looping_flow'");
+        expect(record.recordId, "the caller's id, whole, newline intact").toBe(NL_RECORD_ID);
+        assertSilent(streams.stderr, 're-entered for the same record', 'stderr');
+    });
+
+    it('stays one physical line in `pretty`, with the id escaped onto the greppable line', async () => {
+        const engine = new AutomationEngine(new ObjectLogger({ level: 'warn', format: 'pretty' }));
+        armLoop(engine);
+        // Seal AFTER registering, so the vocabulary-never-sealed warning
+        // (#4792) cannot add a second stdout line to this count.
+        engine.sealNodeTypeVocabulary();
+
+        const streams = await captureBoth(async () => {
+            await engine.execute('looping_flow', {
+                record: { id: NL_RECORD_ID },
+                object: 'crm_case',
+                event: 'record-after-update',
+            } as unknown as AutomationContext);
+        });
+
+        expect(streams.stdout).toHaveLength(1);
+        expect(streams.stdout[0]).toMatch(RECORD_HEAD);
+        expect(streams.stdout[0]).toContain('re-entered for the same record');
+        // JSON.stringify escapes the newline, so the id survives ON this line.
+        expect(streams.stdout[0]).toContain('SECOND LINE');
+    });
+});
+
+describe("#6654 site 2 — refused resume: the signal's rejected variable names ride meta", () => {
+    it("stays `warn`, one stdout line; the caller's names never reach the message; the refusal envelope still names them", async () => {
+        const engine = new AutomationEngine(jsonLogger());
+        engine.registerNodeExecutor(pauser());
+        engine.registerFlow('pause_flow', PAUSE_FLOW);
+        const paused = await engine.execute('pause_flow');
+        expect(paused.status).toBe('paused');
+
+        const evilName = '$evil\nname';
+        let res: { success?: boolean; code?: string; error?: string } = {};
+        const streams = await captureBoth(async () => {
+            res = await engine.resume(paused.runId!, { variables: { [evilName]: 1 } });
+        });
+
+        // Behaviour unchanged: refused as a whole, envelope code intact, and
+        // the ENVELOPE (caller-facing refusal text, not a log record — the
+        // class ruled elsewhere) still names the variables.
+        expect(res.success).toBe(false);
+        expect(res.code).toBe('INVALID_SIGNAL');
+        expect(res.error).toContain('may not set engine-internal variables');
+
+        const record = soleRecordWith(streams.stdout, 'signal writes engine-internal');
+        expect(record.level).toBe('warn');
+        expect(record.msg).not.toContain('\n');
+        expect(record.msg, 'the rejected name never reaches the message').not.toContain('$evil');
+        expect(record.msg, 'the run correlation stays').toContain(`'${paused.runId}'`);
+        expect(record.rejected, 'the rejected names, whole, newline intact').toEqual([evilName]);
+        assertSilent(streams.stderr, 'signal writes engine-internal', 'stderr');
+
+        // The pause stayed live: the legitimate continuation still lands.
+        const retry = await engine.resume(paused.runId!, { variables: { ok: 1 } });
+        expect(retry.success).toBe(true);
+    });
+});
+
+describe('#6654 site 3 — screen-input refusal: the user-submitted keys ride meta', () => {
+    it("stays `warn`, one stdout line; the submitted key never reaches the message; the refusal envelope keeps the summary", async () => {
+        const parked: SuspendedRun = {
+            runId: 'run_scr2',
+            flowName: 'onboard2',
+            nodeId: 'collect',
+            variables: {},
+            steps: [],
+            context: {} as AutomationContext,
+            startedAt: new Date().toISOString(),
+            startTime: Date.now(),
+            screen: {
+                nodeId: 'collect',
+                title: 'Your details',
+                fields: [{ name: 'full_name', label: 'Full name', type: 'text', required: true }],
+            } as SuspendedRun['screen'],
+        };
+        const engine = new AutomationEngine(jsonLogger(), workingStore({
+            async load(runId) { return runId === 'run_scr2' ? parked : null; },
+        }));
+        // The real `screen` executor, for site 11's reason: since #5561 step
+        // two the public gate reads the pause's authority off the suspended
+        // node's descriptor, and with no `screen` registered the resume is
+        // refused fail-closed before this seam is reached.
+        registerScreenNodes(engine, { logger: jsonLogger(), getService() { return undefined; } } as never);
+        engine.registerFlow('onboard2', {
+            name: 'onboard2',
+            label: 'Onboard',
+            type: 'screen',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'collect', type: 'screen', label: 'Your details', config: { title: 'Your details', fields: [] } },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'collect' },
+                { id: 'e2', source: 'collect', target: 'end' },
+            ],
+        });
+
+        const evilKey = 'evil\nkey';
+        let res: { success?: boolean; code?: string; error?: string } = {};
+        const streams = await captureBoth(async () => {
+            res = await engine.resume('run_scr2', { variables: { full_name: 'ok', [evilKey]: 1 } });
+        });
+
+        // Behaviour unchanged: refused with the same code, and the ENVELOPE
+        // (caller-facing refusal text, not a log record — the class ruled
+        // elsewhere) still carries the per-field summary.
+        expect(res.success).toBe(false);
+        expect(res.code).toBe('INVALID_SCREEN_INPUT');
+        expect(res.error).toContain('Unknown screen field');
+
+        const record = soleRecordWith(streams.stdout, 'violates its declared field contract');
+        expect(record.level).toBe('warn');
+        expect(record.msg).not.toContain('\n');
+        expect(record.msg, 'the submitted key never reaches the message').not.toContain('evil');
+        expect(record.msg, 'the controlled count stays in the message').toContain('1 issue(s)');
+        const issues = record.issues as Array<{ field: string; code: string; message: string }>;
+        expect(issues).toHaveLength(1);
+        expect(issues[0].field, "the caller's key, whole, newline intact").toBe(evilKey);
+        expect(issues[0].code).toBe('unknown_field');
+        expect(issues[0].message).toContain('Unknown screen field');
+        assertSilent(streams.stderr, 'violates its declared field contract', 'stderr');
+    });
+});
+
+describe("#6654 site 4 — warnUnknownNodeTypes: the flow's type names ride meta", () => {
+    it("stays `warn`, one stdout line; the counted lead phrase survives; the names ride meta", async () => {
+        const engine = new AutomationEngine(jsonLogger());
+        engine.sealNodeTypeVocabulary(); // close the vocabulary FIRST — registration validates inline
+
+        const nlType = 'mys\ntery';
+        let registered = false;
+        const streams = await captureBoth(() => {
+            engine.registerFlow('typo_flow', {
+                name: 'typo_flow',
+                label: 'Typo',
+                type: 'autolaunched',
+                nodes: [
+                    { id: 'start', type: 'start', label: 'Start' },
+                    { id: 'mid', type: nlType, label: 'Mid' },
+                    { id: 'end', type: 'end', label: 'End' },
+                ],
+                edges: [
+                    { id: 'e1', source: 'start', target: 'mid' },
+                    { id: 'e2', source: 'mid', target: 'end' },
+                ],
+            });
+            registered = true;
+        });
+
+        // Behaviour unchanged: the warning is advisory — the flow registers.
+        expect(registered).toBe(true);
+
+        // The lead phrase is load-bearing: tests and log filters count
+        // per-flow findings by this exact substring.
+        const record = soleRecordWith(streams.stdout, 'no registered executor or descriptor');
+        expect(record.level).toBe('warn');
+        expect(record.msg).not.toContain('\n');
+        expect(record.msg, 'the type name never reaches the message').not.toContain('mys');
+        expect(record.msg, 'the flow-name correlation stays').toContain("'typo_flow'");
+        expect(record.unknownTypes, 'the unknown names, whole, newline intact').toEqual([nlType]);
+        expect(record.knownTypes, 'the vocabulary the audit judged against').toContain('start');
+        assertSilent(streams.stderr, 'no registered executor or descriptor', 'stderr');
+    });
+});
+
+describe('#6654 site 5 — unclaimed branch label: the computed label and the edge labels ride meta', () => {
+    it("stays `warn`, one stdout line; label and edge labels never reach the message; traversal still fans out", async () => {
+        const nlBranch = 'sneaky\nbranch';
+        const engine = new AutomationEngine(jsonLogger());
+        let endReached = false;
+        engine.registerNodeExecutor({
+            type: 'chooser',
+            async execute() { return { success: true, branchLabel: nlBranch }; },
+        } as NodeExecutor);
+        engine.registerNodeExecutor({
+            type: 'probe',
+            async execute() { endReached = true; return { success: true }; },
+        } as NodeExecutor);
+        engine.registerFlow('branchy', {
+            name: 'branchy',
+            label: 'Branchy',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'choose', type: 'chooser', label: 'Choose' },
+                { id: 'after', type: 'probe', label: 'After' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'choose' },
+                { id: 'e2', source: 'choose', target: 'after', label: 'approved' },
+                { id: 'e3', source: 'after', target: 'end' },
+            ],
+        });
+
+        let res: { success?: boolean } = {};
+        const streams = await captureBoth(async () => {
+            res = await engine.execute('branchy');
+        });
+
+        // Behaviour unchanged (#4414): the unclaimed selection is IGNORED,
+        // every out-edge is evaluated, and the run completes.
+        expect(res.success).toBe(true);
+        expect(endReached).toBe(true);
+
+        const record = soleRecordWith(streams.stdout, 'no out-edge carries that label');
+        expect(record.level).toBe('warn');
+        expect(record.msg).not.toContain('\n');
+        expect(record.msg, 'the computed label never reaches the message').not.toContain('sneaky');
+        expect(record.msg, 'the edge labels never reach the message').not.toContain('approved');
+        expect(record.msg, 'the node correlation stays').toContain("'choose'");
+        expect(record.branchLabel, 'the computed label, whole, newline intact').toBe(nlBranch);
+        expect(record.outEdges, 'each out-edge id with its label').toEqual([{ id: 'e2', label: 'approved' }]);
+        assertSilent(streams.stderr, 'no out-edge carries that label', 'stderr');
     });
 });

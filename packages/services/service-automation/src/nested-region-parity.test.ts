@@ -27,11 +27,12 @@ function silentLogger() {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } } as any;
 }
 
-/** A logger that records `warn` lines, for the soft-fail validators. */
-function recordingLogger(sink: string[]) {
+/** A logger that records `warn` calls — message AND structured meta, since
+ *  #6654 moved the soft-fail validators' identifiers into the meta slot. */
+function recordingLogger(sink: Array<{ msg: string; meta?: Record<string, any> }>) {
   const l: any = {
     info() {}, error() {}, debug() {},
-    warn(msg: string) { sink.push(String(msg)); },
+    warn(msg: string, meta?: Record<string, any>) { sink.push({ msg: String(msg), meta }); },
     child() { return l; },
   };
   return l;
@@ -294,7 +295,7 @@ describe('#4389 — registration validators cover region graphs', () => {
     const unknownNode = [{ id: 'x', type: 'no_such_node_type', label: 'X' }];
 
     const warningsFor = (nested: boolean) => {
-      const warnings: string[] = [];
+      const warnings: Array<{ msg: string; meta?: Record<string, any> }> = [];
       const engine = new AutomationEngine(recordingLogger(warnings));
       registerLoopNode(engine, ctx());
       engine.registerFlow('sweep', flowWith(nested, unknownNode));
@@ -303,7 +304,7 @@ describe('#4389 — registration validators cover region graphs', () => {
       // is unchanged: the audit walks ADR-0031 regions exactly as the
       // registration-time check did.
       engine.sealNodeTypeVocabulary();
-      return warnings.filter(w => w.includes('no registered executor'));
+      return warnings.filter(w => w.msg.includes('no registered executor'));
     };
 
     it('warns about an unknown node type at the top level (unchanged)', () => {
@@ -313,7 +314,11 @@ describe('#4389 — registration validators cover region graphs', () => {
     it('warns about the SAME type inside a loop body', () => {
       const warnings = warningsFor(true);
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain('no_such_node_type');
+      // #6654 — the type name is flow-author metadata with no newline
+      // constraint, so it rides the structured slot instead of the message.
+      // The region-coverage fact under test is unchanged: the audit found
+      // THIS type inside the loop body.
+      expect(warnings[0].meta?.unknownTypes).toContain('no_such_node_type');
     });
   });
 
