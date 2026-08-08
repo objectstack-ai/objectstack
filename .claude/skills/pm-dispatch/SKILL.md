@@ -397,6 +397,79 @@ REST 取 `body`(原文 4321 / 5183 / 4181 字符)+ 取 `body_html`(渲染版)—
   `POST /issues/{n}/labels`(真追加),或读-合-写三步;写后照上面 label
   discipline 的「写后回读」核对。
 
+**14. GraphQL 配额欠账要清单化,恢复窗口一次连清 —— `issue_write` 连读半边都吃
+GraphQL。** notes 3 说过读走 REST、写排队;2026-08-08 spec 车道一个上午配额四度
+归零,补上三条实测:
+
+- **`issue_write` 的查找半边也是 GraphQL**:配额红时连「改标签」都失败在
+  `failed to get issue ID` —— 认领(assign+label)因此整体不可用,⛔ 不要以为
+  「只是写慢点」;认领类动作在配额红期就是排队,评论(REST)可先行落地把结论
+  发出去。
+- **欠账列成有序清单挂进巡逻词**,不靠记忆:哪个 PR 欠 ready 切换、哪个欠
+  auto-merge、哪单欠 close/标签,恢复后按序连打 —— ready → auto-merge → 入队
+  可以在同一个恢复窗口内一气完成(实测三个 PR 十分钟内全部入队)。
+- 每轮巡逻**先探一个最便宜的 GraphQL 写**当配额读数,红了立刻回事件流,不逐个
+  试报错。
+
+**15. 并行 spec PR 都动 pin 计数断言时,队列会踢后进者 —— 收据按合并顺序堆叠,
+计数从文件重数。** `type-alias-convention.pin.test.ts` 的计数断言是同一行,两支
+在飞 PR 各自 +N/−N 时文本必冲突:入队合并撞上前车结果树 ⇒ `MERGE_CONFLICT` 踢出
+(#6512 实测,同一分支解了**两轮**:先撞 #6515 的 +1,再撞 #6526 的 −7)。规程:
+
+- 解冲突时**两侧收据都保留**,按合并顺序堆叠,新计数**从合并后源码重数**
+  (`grep -c '^export type Iso'`),⛔ 不从两侧收据做算术 ——「the file, not the
+  history, is the operand」,#6526 的收据注释原文;
+- 双方都占用同一个 Iso 编号是常态(各取当时 max+1),重编号**后进侧**;
+- 预期这种 PR 被踢不是事故:踢出通知到达 ⇒ 按 os-regen 四步再解一轮即可,不必
+  预防性串行化两支 PR。
+
+**16. findings sweep 晋级与 sweep 立卡,前提核查要对「此刻的 main」—— 同族 ADR
+的 phase 提交能整体吸收成员。** #6488(X/XParsed 恢复卡)两成员 #5507/#5975 的
+晋级(00:40)与立卡(01:48)都晚于 ADR-0122 phase 2 的合并(前夜 19:47,#6279 一次
+翻转全仓 1384 个裸别名)却未对其后的 main 重验 —— 派发后 dev 动工前置门才发现
+**零剩余工作**,两成员整体被吸收。晋级/立卡不是免检通道:它们与派发一样要吃
+「前提对此刻 main 成立」这条判据,同族里有在飞或新落的 ADR phase 提交时尤其要查
+其合并时间线。dev 的正确产出是**带证据的零实现停手**(空提交承载报告),PM 抽验
+后关卡 —— 这是流程产出的「好的失败」,勿当返工计。
+
+**17. 裁决明令的动作在实施中测出对向事实 —— 照裁决执行、如实反转 pin、不
+promote、立独立决策卡、扣 auto-merge 留异议窗口。** #6483 裁决①明令 permission
+免测量回滚,实施测量发现 ADR-0094 有 2026-07-14 的方向确认 + 4 处生产写点,回滚
+即打断它。处置形状(全套缺一不可):按裁决字面执行;把被打断行为的功能 pin
+**反转为拒绝 pin**(不是删除);⛔ 不在同 PR 里做任何 promote/回退;PM 把冲突立成
+`needs-user-decision` 卡(A/B/C + 推荐);该 PR **不挂 auto-merge**,合并前留给
+维护者一个显式异议窗口。既不拿新事实推翻已下的裁决(那是维护者的权限),也不让
+新事实被合并流程静默碾过。
+
+**18. 容器重启杀死在飞 dev —— 现场三态判读,四步 regen 中途的可机械续作。**
+2026-08-08 一次重启同时杀死四个容器内 dev(云端工头不受影响 —— 独立容器)。
+恢复前先对每个现场做三态判读:
+
+- **分支已推 + PR 已开**:只欠验收 —— CI 重跑 + step-7,不动代码;
+- **死在四步 regen 中途**(工作树里未提交的全是生成物,merge commit 已在):PM
+  直接续作 —— build → 整链 regen → `check:generated` 10/10 → 提交推送;恢复
+  commit 统一 `Recovery commit:` 前缀留审计;⚠️ 有的现场 regen 一件没跑
+  (#5628 实测:CI 的 check:docs 红了才暴露),推送前先跑一遍 `check:generated`
+  别赌;
+- **死在源码编辑中途**(未提交的是 src):先读 diff 判完整性 —— docblock 把动机
+  /失效模式/判据写全的(#5583 的 TDZ cycle fix 实测),PM 可代跑其终验(eager
+  重现路径 + 定向 + 全量)后提交;写了一半、意图不明的,⛔ 不代提交,记进交接。
+
+  dev 的 `.os-scratch/` 一类临时目录是工作物不是交付物,清掉,⛔ 不进 feature PR。
+
+**19. spec 改动的 fixture triage 必须跑消费包测试 —— B 包的坏 fixture 只有
+消费者面能跑红。** #6287 的映射变更让 metadata-protocol 一条 conformance fixture
+反着断言,spec 范围内任何 sweep 都看不见它(PR #5046 同族:改在 A 包,坏 fixture
+在 B 包)。派发令里「消费者面跑一遍」不是礼貌性复测,是唯一能抓到这类断裂的一步
+—— step 5 的派发模板对动契约面的单,消费包测试清单要点名列出,dev 报告里要有
+各消费包的真实读数。
+
+**20. 硬前置要的仓不可达时 —— 请对应座位代跑并回贴读数,勿派勿硬做。** #4914 的
+裁决硬前置是 cloud/objectui 两仓裸名反查,实测本席凭证 `add_repo` cloud 被拒
+(工头会话同样看不见该仓)。处置:在 issue 上贴出**给对应座位的现成命令**(含
+notes 6 的对照反查),等读数回贴再派;⛔ 不因「查不了」就当「查过了干净」——
+不可达 ≠ 零命中,这是 notes 6「缺失类读数先证伪扫描器坏了」的跨仓版。
+
 The product spans three repos with a fixed dependency direction:
 `objectstack` (backend; `packages/spec` is the single contract) →
 `objectui` (frontend; its build flows back via `pnpm objectui:refresh`) and

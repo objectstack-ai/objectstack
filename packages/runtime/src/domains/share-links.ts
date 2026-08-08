@@ -74,8 +74,25 @@ export async function handleShareLinksRequest(
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
     const m = method.toUpperCase();
     const parts = subPath.replace(/^\/+/, '').split('/').filter(Boolean);
-    const ec: any = context.executionContext;
-    const callerCtx = { userId: ec?.userId as string | undefined, tenantId: ec?.tenantId as string | undefined };
+    // [#6551 / #6206 / #6430] The dispatcher's ALREADY-COMPLETE envelope,
+    // passed through WHOLE to every adjudicating service call below.
+    //
+    // `createLink` / `listLinks` / `revokeLink` are ENFORCEMENT paths — the
+    // `IShareLinkService` contract types their context parameter as the full
+    // `ExecutionContext` and says callers MUST NOT rebuild a subset of it:
+    // `accessible_org_ids` (the `group`-posture Layer 0 wall, ADR-0105 D2 —
+    // absent set DENIES), `positions` / `permissions` / `org_user_ids`
+    // (Layer 1 business RLS + the CRUD gate), `posture` (ADR-0095 D2:
+    // resolved once, carried, never re-derived) and `tabPermissions` are all
+    // read downstream, and this call site cannot know which of them the
+    // deployment's posture makes load-bearing. This used to rebuild a
+    // two-field `{ userId, tenantId }` — structural subtyping keeps that
+    // compiling, so the narrowing was invisible to tsc and every
+    // `group`-posture caller was refused links on records they read fine
+    // elsewhere (the #6206 defect, on the dispatcher face). The routes' own
+    // 401 gate below reads only `ec?.userId` — an authentication decision
+    // needs no authorization envelope.
+    const ec = context.executionContext;
 
     const headerOf = (name: string): string | undefined => {
         const h = context.request?.headers;
@@ -196,7 +213,7 @@ export async function handleShareLinksRequest(
         }
 
         // ── AUTHENTICATED: create / list / revoke ─────────────────────
-        if (!callerCtx.userId) return sendErr(401, 'UNAUTHENTICATED', 'Sign in to manage share links');
+        if (!ec?.userId) return sendErr(401, 'UNAUTHENTICATED', 'Sign in to manage share links');
 
         // POST /share-links → create
         if (parts.length === 0 && m === 'POST') {
@@ -214,7 +231,7 @@ export async function handleShareLinksRequest(
                     redactFields: b.redactFields,
                     label: b.label,
                 },
-                callerCtx,
+                ec,
             );
             // Hand-built rather than `deps.success(...)` for the 201 alone — that
             // helper hardcodes 200. Same shape the `/keys` domain builds for its
@@ -231,17 +248,17 @@ export async function handleShareLinksRequest(
                     recordId: typeof query?.recordId === 'string' ? query.recordId : undefined,
                     // Constrain to links the caller created so a guessed
                     // recordId can never enumerate another user's tokens.
-                    createdBy: callerCtx.userId,
+                    createdBy: ec.userId,
                     includeRevoked: query?.includeRevoked === 'true' || query?.includeRevoked === '1',
                 },
-                callerCtx,
+                ec,
             );
             return { handled: true, response: deps.success(links) };
         }
 
         // DELETE /share-links/:idOrToken → revoke
         if (parts.length === 1 && m === 'DELETE') {
-            await svc.revokeLink(decodeURIComponent(parts[0]), callerCtx);
+            await svc.revokeLink(decodeURIComponent(parts[0]), ec);
             return { handled: true, response: deps.success({ ok: true }) };
         }
 

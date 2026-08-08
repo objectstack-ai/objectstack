@@ -736,7 +736,7 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
   prefix: '/api/v1/meta',
   service: 'metadata',
   category: 'metadata',
-  methods: ['getMetaTypes', 'getMetaItems', 'getMetaItem', 'saveMetaItem'],
+  methods: ['getMetaTypes', 'getMetaItems', 'getMetaItem', 'getMetaItemLayered', 'saveMetaItem'],
   authRequired: true,
   endpoints: [
     {
@@ -782,6 +782,30 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
       responseSchema: 'GetMetaItemResponseSchema',
       cacheable: true,
       cacheTtl: 3600,
+    },
+    {
+      method: 'GET',
+      path: '/:type/:name/layers',
+      handler: 'getMetaItemLayered',
+      category: 'metadata',
+      public: false,
+      summary: 'Get a metadata item as its three layers (code / overlay / effective)',
+      description:
+        'Diagnostic projection powering Studio\'s "code default vs override vs effective" '
+        + 'comparison: the packaged baseline, the tenant customization row, and the merged '
+        + 'result side by side. A DIFFERENT representation from `GET /:type/:name`, which '
+        + 'answers only the merged value under `item` — hence its own path and its own '
+        + 'response schema (#5882). Reached until now only as `GET /:type/:name?layers=true`, '
+        + 'which still works during its deprecation window but is answered with '
+        + '`Deprecation` / `Link` headers pointing here.',
+      tags: ['Metadata'],
+      // No `requestSchema`, for the same reason as `GET /:type/:name` above
+      // (#3899): every input is path/query-bound, so no request body exists to
+      // validate and declaring one would advertise a gate that cannot run.
+      responseSchema: 'GetMetaItemLayeredResponseSchema',
+      // Not cacheable: this is a diagnostic read that deliberately bypasses the
+      // metadata cache so it always reflects the live overlay row.
+      cacheable: false,
     },
     {
       method: 'PUT',

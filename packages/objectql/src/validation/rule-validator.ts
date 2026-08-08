@@ -190,7 +190,7 @@
 
 import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
-import { AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES } from '@objectstack/spec/data';
 import Ajv, { type ValidateFunction } from 'ajv';
 // #5029 — `format` is NOT built into ajv 8; it ships in this separate package.
 // See the `const ajv` note below for why the runtime registers it.
@@ -821,8 +821,15 @@ export function stripReadonlyWhenFieldsMulti(
  *
  * Keep this set to types whose value is (a) persisted, (b) issued by the
  * runtime, and (c) never legitimately supplied by a caller.
+ *
+ * The set itself now lives in `@objectstack/spec` (`RUNTIME_OWNED_FIELD_TYPES`,
+ * #5628) — the protocol's one statement of the ownership — because a SECOND
+ * consumer needs it: the DataProtocol create ingress, whose `readonly` strip
+ * carries a NARROWER exemption set than this module's (no `preserveAudit`), and
+ * which therefore has to recognise these types to stay out of their way. A
+ * literal copied over there is the drift `AUDIT_TIMELINE_FIELDS` below stopped
+ * paying for. This module keeps the reasoning; the membership is imported.
  */
-const RUNTIME_OWNED_FIELD_TYPES: ReadonlySet<string> = new Set(['autonumber']);
 
 /**
  * Whether the runtime owns this field's value outright — i.e. the field is

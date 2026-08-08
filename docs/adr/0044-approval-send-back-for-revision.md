@@ -392,3 +392,49 @@ window. A graph that wanted `revise → notify → window` is refused rather tha
 analysed for "every pause reachable on this branch is service-owned", which is
 unbounded. Send-back already notifies the submitter itself, so the pattern has no
 lost capability behind it.
+
+### Fail-closed descriptor default — landed (2026-08-08, #5561)
+
+The first of the two "directions recorded but deliberately not built here" is now
+built, in two steps, and this section supersedes the paragraph above that says
+`resumeAuthority` "defaults to `'any'`".
+
+- **Step one (#5561, PR #5725, non-breaking).** `ActionDescriptorSchema.resumeAuthority`
+  dropped its Zod `.default('any')` and became `.optional()`. That default was not
+  merely a bad value, it was an *erasure*: `defineActionDescriptor` filled the key
+  before any consumer saw the object, so "the author chose `'any'`" and "the author
+  never considered it" parsed byte-identically and the omission could not be
+  detected at all. With the default gone, absent means absent — which is what made
+  a registration warning (`AutomationEngine.registerNodeExecutor`, once per node
+  type) and a CI gate (`check:resume-authority-declared`, AST over shipped
+  `defineActionDescriptor` literals) expressible. The four pausing built-ins
+  (`screen`, `wait`, `subflow`, `map`) declared `'any'` explicitly in the same
+  step, so the warning named nothing on a stock boot the day it shipped.
+- **Step two (#5561, this change, breaking).** `AutomationEngine.resolveResumeAuthority`
+  resolves an absent value to `'service'` instead of `'any'`. A pausing node type
+  that never declares who may continue its pauses is now closed to the generic
+  resume route: `POST /automation/:name/runs/:runId/resume` answers **403** and
+  names the missing field. The generic door is an **opt-in** a descriptor states
+  with `resumeAuthority: 'any'`, not a default every pausing node inherits.
+
+**Why the amendment's reasoning survives the split.** The direction was always
+about which way to guess when nobody declared. Guessing `'any'` continues a run
+past a decision nothing recorded, and says nothing — that is #3823 exactly, and
+its demonstrated cost was an unaudited resubmit plus a destroyed remote run.
+Guessing `'service'` refuses a resume and hands the author back the one-line
+declaration that fixes it. Only one of the two mistakes is discoverable by the
+person who made it, and for a platform whose node vocabulary is extended by
+plugins and by AI-written metadata, discoverability at authoring time is the whole
+argument.
+
+**Migration.** One line, on the descriptor of any pausing executor that relied on
+the old default: `resumeAuthority: 'any'`. Registered in the ADR-0087 chain as
+`action-descriptor-resume-authority-default-flip` (step 17, semantic — it is a
+posture change with no metadata shape to rewrite, the same category as protocol
+12's `api.requireAuth` flip). In-tree the flip moves nothing: all six shipped
+pausing types already declare their authority, which the resolver tests assert
+alongside the inventory they depend on.
+
+**The second deferred direction is untouched.** *Per-suspension owner claim* stays
+unbuilt and unneeded for the same reason as before — the cases we have are
+resolved by node type plus a fail-closed default, which is now what exists.

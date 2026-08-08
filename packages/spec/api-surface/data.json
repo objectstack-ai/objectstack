@@ -433,6 +433,7 @@
     "REFERENCE_VALUE_TYPES (const)",
     "RETIRED_FILTER_OPERATORS (const)",
     "RPC_QUERY_ALIAS_SLOTS (const)",
+    "RUNTIME_OWNED_FIELD_TYPES (const)",
     "RangeOperatorSchema (const)",
     "RecordFlow (type)",
     "RecordFlowContainer (type)",

@@ -1079,6 +1079,133 @@ describe('QuickJSScriptRunner — ctx.api.transaction', () => {
     expect(r.value).toBe('ok');
     expect(events).toEqual([{ op: 'insert', tx: null }]);
   }, 30000);
+
+  // -------------------------------------------------------------------------
+  // #6406 — `begin` may JOIN a transaction the host already had open
+  // (ADR-0067 D2). `owned: false` in its result says the OUTER caller owns the
+  // one and only commit/rollback, so every close path here abstains.
+  //
+  // `ScopedContext` abstains for a joined handle on its own side too, which is
+  // the guarantee that holds for every caller. These cases use a hand-written
+  // `ctx.api` that does NOT, so what they measure is this file's own wiring:
+  // whether the runner asks at all. The end-to-end behaviour against the real
+  // engine is `transaction-ambient-join.integration.test.ts`.
+  // -------------------------------------------------------------------------
+  /** Like {@link makeTxApi}, but `begin` JOINS a handle the host already holds. */
+  function makeJoinedTxApi() {
+    const events: Array<{ op: string; name?: string; tx: unknown }> = [];
+    const outerHandle = { __outer: true };
+    const repoFor = (tx: unknown) => (name: string) => ({
+      insert: async () => { events.push({ op: 'insert', name, tx }); return { id: 'r' }; },
+      findOne: async () => { events.push({ op: 'findOne', name, tx }); return null; },
+    });
+    const api = {
+      object: repoFor(null),
+      beginTransaction: async () => {
+        events.push({ op: 'begin(joined)', tx: outerHandle });
+        return { ctx: { object: repoFor(outerHandle) }, handle: outerHandle, owned: false };
+      },
+      commitTransaction: async (h: unknown) => { events.push({ op: 'commit', tx: h }); },
+      rollbackTransaction: async (h: unknown) => { events.push({ op: 'rollback', tx: h }); },
+    };
+    return { api, events, outerHandle };
+  }
+
+  it('does NOT commit a JOINED transaction — the outer owner does', async () => {
+    const { api, events, outerHandle } = makeJoinedTxApi();
+    const r = await runner.runScript(
+      {
+        language: 'js',
+        source: `
+          return await ctx.api.transaction(async () => {
+            await ctx.api.object('a').insert({ x: 1 });
+            return 'ok';
+          });
+        `,
+        capabilities: ['api.write', 'api.transaction'],
+        timeoutMs: 30000,
+      },
+      ctx({ api }),
+      actionOpts,
+    );
+
+    expect(r.value).toBe('ok');
+    // The in-tx op still rides the OUTER handle — joining is what puts it on
+    // the one connection — but nothing here closes that transaction.
+    expect(events).toEqual([
+      { op: 'begin(joined)', tx: outerHandle },
+      { op: 'insert', name: 'a', tx: outerHandle },
+    ]);
+  }, 30000);
+
+  it('does NOT roll back a JOINED transaction when the body throws — the error propagates instead', async () => {
+    const { api, events } = makeJoinedTxApi();
+    await expect(
+      runner.runScript(
+        {
+          language: 'js',
+          source: `
+            await ctx.api.transaction(async () => {
+              await ctx.api.object('a').insert({ x: 1 });
+              throw new Error('boom');
+            });
+          `,
+          capabilities: ['api.write', 'api.transaction'],
+          timeoutMs: 30000,
+        },
+        ctx({ api }),
+        actionOpts,
+      ),
+    ).rejects.toThrow(/boom/);
+
+    // The sugar's catch reaches `__txRollback`, which abstains, and re-throws —
+    // so the host owner hears the failure and decides for the whole unit.
+    expect(events.map((e) => e.op)).toEqual(['begin(joined)', 'insert']);
+  }, 30000);
+
+  it('does NOT roll back a JOINED transaction the body leaves open at the wall ceiling', async () => {
+    const events: Array<{ op: string; tx: unknown }> = [];
+    const outerHandle = { __outer: true };
+    const api = {
+      object: () => ({ insert: () => new Promise<never>(() => {}) }),
+      beginTransaction: async () => {
+        events.push({ op: 'begin(joined)', tx: outerHandle });
+        return {
+          ctx: { object: () => ({ insert: () => new Promise<never>(() => {}) }) },
+          handle: outerHandle,
+          owned: false,
+        };
+      },
+      commitTransaction: async (h: unknown) => { events.push({ op: 'commit', tx: h }); },
+      rollbackTransaction: async (h: unknown) => { events.push({ op: 'rollback', tx: h }); },
+    };
+
+    const r = new QuickJSScriptRunner({ wallCeilingMs: 300 });
+    await expect(
+      r.runScript(
+        {
+          language: 'js',
+          source: `
+            await ctx.api.transaction(async () => {
+              await ctx.api.object('a').insert({ x: 1 });
+            });
+          `,
+          capabilities: ['api.write', 'api.transaction'],
+          timeoutMs: 300,
+        },
+        ctx({ api }),
+        actionOpts,
+      ),
+    ).rejects.toThrow(/ceiling/i);
+
+    // The owned case above rolls back here, to avoid leaking a half-applied
+    // transaction on a connection nobody else holds. A JOINED handle is the
+    // host's live transaction on the host's connection: rolling it back from a
+    // VM teardown would discard writes the outer caller has not finished with,
+    // and there is nothing to leak — the timeout error reaches that caller,
+    // which decides.
+    expect(events.map((e) => e.op)).toEqual(['begin(joined)']);
+  }, 10000);
 });
 
 // ---------------------------------------------------------------------------

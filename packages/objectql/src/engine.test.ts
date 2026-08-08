@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { ObjectQL } from './engine';
+import { ExpressionEngine } from '@objectstack/formula';
 import { SchemaRegistry } from './registry';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 
@@ -1929,6 +1930,19 @@ describe('ObjectQL Engine', () => {
         });
 
         it('pins `now` once per find so every row sees the same instant (#1979)', async () => {
+            // Asserted by CONSTRUCTION rather than by value (#5896). The regression
+            // this guards is a per-evaluation `new Date()`, and two such reads
+            // inside the same millisecond are equal in value while being distinct
+            // objects — so a value comparison only fails when the three
+            // evaluations happen to straddle a millisecond boundary. Measured
+            // against that exact regression, the value form passed through it in
+            // 3 of 10 full-file runs (and in 145 of 200 finds within one warm
+            // process): it reported by luck. Spying on the eval context pins the
+            // mechanism instead — ONE clock read, handed to every evaluation by
+            // identity — which fails whatever the millisecond happens to be.
+            const evaluate = vi.spyOn(ExpressionEngine, 'evaluate');
+            onTestFinished(() => { evaluate.mockRestore(); });
+
             vi.mocked(SchemaRegistry.getObject).mockReturnValue({
                 name: 'ping',
                 fields: {
@@ -1946,8 +1960,17 @@ describe('ObjectQL Engine', () => {
 
             const result = await engine.find('ping', { fields: ['id', 'ts'] } as any);
 
-            // Determinism: a single operation snapshots one `now`, shared across
-            // every row — not a fresh wall-clock read per evaluation.
+            // 1 formula field × 3 rows: the evaluations the identity claim is over.
+            // Without this count the claim below could pass vacuously on an empty
+            // call list.
+            expect(evaluate).toHaveBeenCalledTimes(3);
+            const nows = (evaluate.mock.calls as unknown as Array<[unknown, { now?: Date }]>)
+                .map(([, ctx]) => ctx.now);
+            expect(nows[0]).toBeInstanceOf(Date);
+            expect(nows.every((n) => n === nows[0])).toBe(true);
+
+            // …and the consequence a caller can see. Kept as the caller-visible
+            // symptom, but it is no longer what makes this test report.
             expect(result[0].ts).toEqual(result[1].ts);
             expect(result[1].ts).toEqual(result[2].ts);
         });

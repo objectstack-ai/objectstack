@@ -37,6 +37,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-shared-stash.sh\""
+          },
+          {
+            "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-main-checkout-bash.sh\""
           }
         ]

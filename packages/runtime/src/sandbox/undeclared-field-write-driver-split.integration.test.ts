@@ -43,8 +43,15 @@
 
 /**
  * ⚠️ `@objectstack/driver-memory` is imported here ON PURPOSE, and this is the
- * only PERMANENT test consumer of it in the repository. It is NOT a migration
+ * test consumer of it that #5704 RULED permanent. It is NOT a migration
  * leftover — do not "finish the job" by deleting or replacing it.
+ *
+ * (This block used to say "the only permanent test consumer in the repository".
+ * That census expired without anyone editing it: `#6468`'s
+ * `autonumber-seed-cross-side-parity.integration.test.ts`, in this same
+ * package, imports the driver too and is not covered by #5704's ruling. Its
+ * disposition is filed as #6664. The sentence now claims what it can defend: a
+ * RULING about this file, not a count of the repository.)
  *
  * Why it has to stay: the whole point of this file is a PRODUCT divergence
  * between two driver families — writing an undeclared field is rejected as a
@@ -61,32 +68,46 @@
  * investment, and nothing here fixes or extends it. Ruling: #5704, maintainer
  * 2026-08-06, Q2 = B ("keep, in this one place, with a comment saying so").
  * Consequence, also ruled there: `packages/runtime`'s `driver-memory` devDep
- * stays for the long term — this import is its one and only consumer.
+ * stays for the long term. (That devDep now has a second importer in this
+ * package as well — #6468's autonumber parity test — so removing this file's
+ * import alone would no longer even drop the dependency. See #6664.)
  *
  * Everything else that used to look like a driver-memory test consumer was a
  * hand-written local stub whose NAME merely said "memory" — in packages that
  * do not even depend on the driver. #5704/#5784 renamed them all to
- * `makeStubDriver`, precisely so that grepping for the driver lands here, and
- * only here.
+ * `makeStubDriver`, precisely so that grepping for the driver lands on real
+ * consumers only.
  *
- * [#5830] "Only here" was briefly untrue and is being restored in two steps,
- * so the grep is honest about what it finds today. Two consumers arrived in
- * plugin-auth AFTER #5704's survey (#5812 and #5844, the identity lane):
+ * [#5830 / #5893] The identity lane's two arrivals are gone. Two consumers
+ * appeared in plugin-auth AFTER #5704's survey (#5812 and #5844); both have
+ * since been migrated to sqlite `:memory:`, and plugin-auth's
+ * `@objectstack/driver-memory` devDep is gone with them:
  *
- *   - `plugin-auth/src/auth-where-operator-coverage.test.ts` — migrated to
- *     sqlite `:memory:` by #5830. Its defect (#5813) was a DROPPED predicate,
- *     which any backend that really executes the filter witnesses.
- *   - `plugin-auth/src/auth-contains-filter.test.ts` — still on driver-memory,
- *     pending a maintainer ruling, and NOT an oversight. Its pin is #5710's
- *     `contains` → `$regex` flip, and driver-sql routes `$regex` through the
- *     same `applyContainsLike` as `$contains` (the `case '$regex':`
- *     fallthrough in `sql-driver.ts`), so a SQL witness answers identically
- *     either way. Measured in #5830: with the defect restored, the memory
- *     backend fails 3 behavioural pins and a sqlite backend passes all 4.
- *     Migrating it would leave assertions that pass because nothing
- *     distinguishes them. Its disposition rides on #5702 (the driver-side
- *     `$regex` refusal) — once `$regex` is refused rather than aliased, the
- *     SQL arm can witness it and the file can move.
+ *   - `plugin-auth/src/auth-where-operator-coverage.test.ts` — migrated by
+ *     #5830 (PR #5880). Its defect (#5813) was a DROPPED predicate, which any
+ *     backend that really executes the filter witnesses.
+ *   - `plugin-auth/src/auth-contains-filter.test.ts` — migrated by #5893, on
+ *     the expiry condition #5830 wrote for it rather than on a second opinion.
+ *     Its pin is #5710's `contains` → `$regex` flip, and while driver-sql still
+ *     routed `$regex` through the same `applyContainsLike` as `$contains` (the
+ *     `case '$regex':` fallthrough) a SQL witness answered identically either
+ *     way — measured in #5830: with the defect restored, memory failed 3
+ *     behavioural pins and sqlite passed all 4, so migrating then would have
+ *     produced pins that are green because nothing distinguishes them. #5702
+ *     (PR #6549) deleted that fallthrough and RETIRED the spelling: driver-sql
+ *     now refuses `$regex` by name in the ADR-0112 envelope
+ *     (`INVALID_FILTER` / 400), so the SQL arm witnesses the defect again — as
+ *     a refusal rather than a different row set, which is the better reason
+ *     #5830's expiry clause predicted. The migrated file carries its own guard
+ *     for that property, so it cannot silently revert to an always-green pin.
+ *
+ * What a grep for the driver's DECLARATIONS finds in `packages/` after that
+ * migration: this file, and #6468's `autonumber-seed-cross-side-parity`
+ * integration test (unruled — #6664). Nothing in plugin-auth. The prose
+ * MENTIONS that remain there — the identity-lane files explain the history
+ * above in their own comments, because a pin has to say what it used to be
+ * wrong about — are not consumers: retirement verification greps declarations,
+ * not mentions, which is the distinction that makes the grep usable at all.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
