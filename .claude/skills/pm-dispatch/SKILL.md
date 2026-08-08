@@ -1820,9 +1820,10 @@ attached.
 静默杀掉 —— 2026-08-05 实测,五个「在飞」dev 里三个(#5050/#5515/#5483)
 已死数小时,批次视图仍显示 5/5,实际吞吐 2/5,零信号。规程五条:
 
-- 每次巡检(定时器唤醒、轮间隙)对**每个已派发且尚无远程分支/PR** 的
+- 每次巡检(定时器唤醒、轮间隙)对**每个已派发且报告未达**的
   dev 发一次状态询问(SendMessage,措辞「回一段简报后继续干活」,不改变
-  任务);派发后 ~45 分钟无任何远程产出即到探活门槛。
+  任务);派发后 ~45 分钟无任何远程产出即到探活门槛。⛔ 已有远程分支/PR
+  不豁免 —— 触发面为什么这么宽,见下面「探活是常设兜底」。
 - 两种回包都有价值:活着 → 拿到进度与阻塞点;**「no active task; resumed
   from transcript」→ agent 生前已死,这次询问本身就是复活** —— 从其
   transcript 带全部上下文恢复,比 worktree 接手协议(step 5)便宜得多,
@@ -1844,6 +1845,29 @@ attached.
   一个派发后即死的 agent 要等到下一轮巡检才被发现,静默窗口 = 巡检间隔,
   而非门槛值。在飞清零的待命期可放宽到 60-70 分钟;有任何 dev 在飞即收紧
   回 ≤45,灭批频发期(如宿主重启风暴)进一步压到 20-30 分钟。
+
+**探活是常设兜底,不是异常通道 —— 而「PR 已经开出来了」不是豁免,那恰恰是失败
+发生的那一格。** 上面第一条的触发面曾挂在「已派发且**尚无**远程分支/PR」上;
+2026-08-08 的实测把那个口径证伪了:当天 **7 / 7** 个派发都是**在开出正确的 PR
+之后**没能干净交回(#6586 / #6747)。失败的那一批**全都有远程分支、有 PR、有提交**
+—— 按旧口径,它们一个也不会被探到。所以触发判据是现在这个写法:**探的是「报告
+未达」,不是「分支未出现」**;远程产出只把一个 dev 从「可能还没开始」挪到「可能死在
+收尾上」,它从来不是活着的证据(这就是上面第三条「判据永远取正向证据」里,PR 的存在
+算哪一种正向证据的答案:它证明工作发生过,不证明 agent 还在)。
+
+- **生产侧的条款不能替代它。** 那批里有 4 个的派发词逐字带着终止条款,其中 **3 个
+  照样死了**(3/4)。成因在文档够不着的地方,所以兜底必须常设在消费侧,⛔ 不能写成
+  「派发词写全了就可以不探」。
+- **代价是延迟,不是正确性 —— 这既是它便宜的原因,也是回应只能是探针的原因。**
+  至今每一例都能从 transcript 完整复活,**零工作丢失**:PR 在、分支在、提交在,缺的
+  只有那段 JSON。所以 ⛔ 永远不要拿「重新派发」回应它 —— 往一个**可能还活着**的
+  worktree 里塞第二个 agent,是用一个只花时间的问题去换一个会毁东西的问题
+  (step 5「Handing off an interrupted dev」的碰撞面)。先探,拿到「no active task;
+  resumed from transcript」这类回包再谈恢复。
+- 与判死门槛的关系一字不变:本条只把**探针**的适用面铺满,⛔ 不降低判死的三类正当
+  依据(见下一段)。已有 PR 的那一格尤其要守住这个分界 —— PR 全绿会让人很想直接跳到
+  「报告丢失 ≠ 验收停摆」那条兜底验收,而那条的三个条件里第二条正是**探活确认已死或
+  ≥2h 无推送**,不是「PR 看着能收了」。
 
 **45 分钟是发探针的门槛,⛔ 不是判死的门槛 —— 两者必须分开。** 上面五条回答
 「什么时候去问」;这一条回答 PM 真正面对的另一个问题:「多久之后我才可以下
@@ -1902,6 +1926,30 @@ The **producer-side** half of this rule lives in `.claude/agents/os-dev.md`'s
 resource discipline — fixing it at the producer beats patching it at the PM
 (Prime Directive #12's instinct, applied to agent protocol); these three are the
 backstop, not the primary fix.
+
+**通知到达 ≠ 有新东西发生 —— 第一眼读它是谁,不是读它带的 JSON。** 上一条处理
+「通知带着任务中状态」;这一条处理另一半:通知**形态完全正常**、报告**完整且正确**,
+而它只是同一份东西的第 N 次重放。#5330 一张卡发出 **6** 条通知,其中 **5 条是同一份
+完整 JSON 报告的重放**(PR #6703;有一条来自一个盯着 agent 自己早已 `TaskStop` 掉的
+运行的 monitor)。它们在到达那一刻与真完成**完全同形** —— 同结构、同载荷 —— 于是每
+一条都被从头验收了一遍才发现是重复。**这个成本按到达次数计,由读的人付**:N 条通知
+= N 次全套复核,除非第一眼读的是身份而不是内容。PM 侧的处置:
+
+- **先算身份,再决定读不读内容。** 去重三元组:`(issue, 分支, PR head sha)` + 通知
+  **自报**的守护对象。与本轮已验收过的那份逐项相同 ⇒ 在轮次台账上记一行「重放,
+  首达时间 T」就结束,⛔ 不重新验收、⛔ 不重读 diff、⛔ 不重复留 ACCEPT 评论(重复的
+  ACCEPT 评论会把审计线变成两条互相印证的假象)。
+- ⛔ **不把它的到达读成「还活着」。** 重放来自一个按**自己的 deadline** 触发的
+  monitor,与它的主体是否还在跑无关 —— #5330 那条守的正是一个已被取消的运行。活着
+  的判据只有一个:探针回包。
+- ⛔ **也不把它的不到达读成「已经死了」。** 这是同一枚硬币的另一面,与上面「绝不把
+  『还没收到失败通知』读作『还在跑』」同源:重放一多,「最近有动静」这种读数就彻底
+  失效,两个方向都不能再从通知节奏里读出状态。判死照旧只认那三类正当依据。
+- **生产侧的自报是「变便宜」,不是前提。** dev 侧的对账写在
+  `.claude/agents/os-dev.md` 的终止契约里(#6586):monitor 若仍触发,首行先自报它守
+  的是什么、那东西还活不活着,再给 JSON。⛔ 但不要把去重建立在「对面会自报」上 ——
+  同一批实测里,逐字携带终止条款的 4 个派发死了 3 个,携带率打不穿的成因同样打不穿
+  这条。对面自报了就省一步,没自报就用上面那个三元组自己算。
 
 **Cloud mode:** there is no direct return channel — collect through GitHub.
 Arm a `send_later` check-in (~15 min); on each wake, sweep the dispatched
@@ -2042,8 +2090,9 @@ Verdict per issue:
 
 - **ACCEPT** — comment on the issue (English) linking the PR and summarizing
   what shipped. Then drive it to landing (maintainer policy: review passed +
-  CI green ⇒ merge): once every check on the PR is green, mark it ready for
-  review and **add it to the merge queue** — the queue rebuilds the PR
+  CI green ⇒ merge): once every check on the PR is green, **先按下面那段读一次
+  PR 的路径面**(⛔ 碰 ADR 的 PR 在这里就到头了,不走这条路);路径面干净,才
+  mark it ready for review and **add it to the merge queue** — the queue rebuilds the PR
   against current `main` and lands it only if that result is green, which is
   the repo's sanctioned path. Never `--auto`-merge outside the queue; where
   no queue exists, merge serially per AGENTS.md §7 only after remote CI is
@@ -2051,6 +2100,30 @@ Verdict per issue:
   only** — the PM's own tooling PRs stay with the maintainer(唯一例外见
   Guardrails:维护者明示授权的 `.claude/` 工具 PR,授权引用于 PR 正文 +
   walkthrough 复核,不得自审自合)。
+
+  **⛔ ACCEPT 在动手之前先按路径分叉 —— 碰 ADR 的 PR,终局动作不是入队。**
+  上一段那条一般规则**没有错,而正是它正确执行的结果触发了被禁止的动作** ——
+  #6732 不是谁「决定要合 ADR」,是 ACCEPT 照章办事,把一份已复核、全绿的 dev PR
+  推进了合并队列。所以这个判据必须落在**手动之前**,而不是只写在 Guardrails 里
+  等人事后对照:一个先读 Guardrails、再读 ACCEPT 的 PM,做的是 ACCEPT 说的事,
+  因为手在这里。维护者裁决原文见 Guardrails 那条(引用、未翻译)。
+
+  翻 ready / 挂 auto-merge / 入队之前,先取一次 PR 的路径面
+  (`pull_request_read` 的 `get_files`,⛔ 不看报告的自述)。**只要路径面里有一条
+  命中** `docs/adr/**`,ACCEPT 换一套终局状态,三件缺一不可:
+
+  1. **复核结论照常写在 issue 上** —— 不能合不等于不复核,ACCEPT 的复核部分一字
+     不减;
+  2. **PR 留给维护者** —— ⛔ 不合并、⛔ 不入队、⛔ 不挂 auto-merge。ready 或 draft
+     都行,判据是**它必须看得见地悬着**,不是被悄悄停在一边;
+  3. **轮次报告里单列一行「awaiting a human merge」** —— 这是它不会烂成静默积压
+     的唯一读数:在 GitHub 上,「等着人来合」与「被忘了」长得一模一样,区别只存在
+     于有没有人每轮把它念一遍。
+
+  混合 diff(既动 `docs/adr/**` 也动别的)走同一分叉 —— **一条命中就够**,⛔ 不按
+  比例判、⛔ 不用「主要改的是别的」放行;要拆就让 dev 把 ADR 那部分单独开一个 PR。
+  已经入队之后才读到这一条?撤回动作见 Guardrails 那条的 ⚠️:**只有转 draft 才真
+  的踢出队列**,`disable_pr_auto_merge` 单独调用不解除成员资格。
 
   **`Fixes` 还是 `Part of` 是 PM 的判断,而且必须在入队之前核。** dev 的默认模板
   写的是 `Fixes`;当这一单只落地了**可实施的那一半**(另一半 `needs_decision` 还在
@@ -2466,6 +2539,29 @@ Stop the loop and report when any of these hits:
   rc.4 —— release.yml 的 on-push 自动通道在无人指令下完整发出了 rc.4
   (#6169/#6170);机械通道的存在不构成授权 —— 读到这条的座位遇到那类通道,
   当缺陷上报,不当工具使用。
+- **ADR 由维护者确认、由维护者人工合并(维护者 2026-08-08 拍板,#6741)。**
+  原文引用、未翻译:
+
+  > **adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。**
+
+  任何 AI 座位(PM / dev / Routine / 队列管家)对一个**改动了** `docs/adr/**`
+  **的 PR**,⛔ 不得执行以下任一动作:合并、加入合并队列、调
+  `enable_pr_auto_merge`。起草
+  ADR、推分支、开 PR 都可以;**确认它、让它落地,是维护者亲手的动作**。
+  **「已复核 + 已批准 + 全绿」不构成例外** —— 本条与上面那条版本发布同形:一类
+  改动的落地是人的行为,绿灯只说明机器没意见。为什么偏偏是 ADR:按 AGENTS.md
+  PD #13,accepted ADR **就是**那个决定本身,合并它等于采纳一个治理立场 ——
+  正好是「CI 绿」零信息量的那一类。worked example **#6668**:一份彻底、全绿、
+  测量无误的 ADR 草案,维护者以**没人要这个能力**为由关掉,那是任何门禁都评不
+  出来的判据;反方向的代价见 #6191 / #6483(一次没有 ADR 的 ADR 级反转,至今
+  还在拆)。PM 侧的终局动作见 step 7 ACCEPT 里的路径分叉 —— 那一段才是手真正
+  会动的地方。本条的仓级权威落点按 #6741 要求 1 是 AGENTS.md(PD #13 旁;截至
+  本条写入时那一半尚未落地,落地后照本节末行的既有优先序以 AGENTS.md 为准,
+  这里是 PM 循环侧的执行拷贝)。
+  ⚠️ **撤回机制,反着记会以为自己合规了:已入队的 PR 只有转回 draft 才真的被
+  踢出队列**,`disable_pr_auto_merge` 单独调用**不解除队列成员资格**,PR 照样
+  落地。实测 #6732:13:47Z 挂上 auto-merge 并入队,读到本条后当场反转 ——
+  disable **加转 draft**,再以远程读数确认它已离队且不在 `origin/main` 上。
 - Never force-push, never push `main`, never reassign an issue claimed by
   someone else, never dispatch a `needs-user-decision` issue.
 - Every dev agent works in its **own worktree per repo** (enforced by
