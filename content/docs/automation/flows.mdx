@@ -973,9 +973,12 @@ errorHandling: {
 }
 ```
 
-The retry knobs are the **one** retry policy the platform has (`RetryPolicySchema`),
-shared with `job.retryPolicy`, a `try_catch` node's `retry` and an ETL pipeline's
-`retry`. A spelling learned on any one of them is correct on all of them.
+The retry knobs are the converged `RetryPolicySchema` contract — one declaration,
+shared by exactly **three** surfaces: this block, `job.retryPolicy` and a
+`try_catch` node's `retry`. A spelling learned on any one of those three is
+correct on the other two. An ETL pipeline's `retry` was a fourth until 17.0.0
+retired the whole ETL layer (#6414); there is no longer a pipeline to author it
+on, and every removed `ETL*` name fails at `tsc`.
 
 <Callout type="warn">
   **17.0.0 breaking:** the base delay here was `retryDelayMs` and is now
@@ -994,6 +997,16 @@ shared with `job.retryPolicy`, a `try_catch` node's `retry` and an ETL pipeline'
 
 `maxRetries` counts the **re-runs**, not the total attempts: `maxRetries: 2`
 runs the flow up to three times.
+
+Retry blocks *outside* those three surfaces are separate contracts, and they
+differ in the numbers more than in the words. A hook's `retryPolicy` carries two
+keys only (`maxRetries`, `backoffMs` — no `backoffMultiplier`, `maxRetryDelayMs`
+or `jitter`) and defaults `maxRetries` to `3`, where this block defaults it to
+`0`. A connector's `retryConfig` counts attempts the other way round: its
+`maxAttempts` **includes** the first attempt, so `maxAttempts: 3` is
+`maxRetries: 2` here, and it spells the delays `initialDelayMs` / `maxDelayMs`.
+Carry values between them by meaning — renaming the key alone changes how many
+times the work runs.
 
 ### `strategy: 'retry'` has to say how many times
 
