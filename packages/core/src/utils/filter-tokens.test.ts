@@ -232,6 +232,83 @@ describe('resolveFilterTokens — tree walk', () => {
   });
 });
 
+/**
+ * #5586 — a placeholder carrying a NON-WORD character used to bypass the
+ * diagnostic entirely.
+ *
+ * Recognition was the token-NAME grammar, so `{TODAY()}` classified as "not a
+ * placeholder", was handed to the driver verbatim and compared as a literal
+ * string. Measured on 17.0.0-rc.2 against a four-row fixture: `due_date <
+ * '{today}'` returned the 2 genuinely overdue rows, `due_date < '{TODAY()}'`
+ * returned all 4 — lexicographic string order puts every `'2026-…'` before
+ * `'{'`, so the window silently swallowed a row due a week later.
+ *
+ * The refusal is asserted on the ADR-0112 envelope (`code` + `status`) plus the
+ * offending token, never on the bare fact of a throw: the resolver already
+ * throws for other reasons, so a throw-only assertion cannot tell "refused with
+ * the right identity" from "blew up somewhere else".
+ */
+describe('resolveFilterTokens — non-word placeholder shapes refuse loudly (#5586)', () => {
+  const ctx = { now: NOW, userId: 'usr_1', orgId: 'org_9' };
+
+  const shapes: Array<[label: string, value: string, token: string]> = [
+    ['call syntax (Salesforce/Excel migrants)', '{TODAY()}', 'TODAY()'],
+    ['kebab-case', '{current-user-id}', 'current-user-id'],
+    ['natural language', '{30 days ago}', '30 days ago'],
+    ['dotted path', '{user.id}', 'user.id'],
+    ['the `${…}` prefix variant', '${TODAY()}', 'TODAY()'],
+  ];
+
+  it.each(shapes)('%s — %s refuses with the full error identity', (_label, value, token) => {
+    let err: unknown;
+    try {
+      resolveFilterTokens({ due_date: { $lt: value } }, ctx);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(UnknownFilterTokenError);
+    const e = err as UnknownFilterTokenError;
+    expect(e.name).toBe('UnknownFilterTokenError');
+    // ADR-0112 envelope: the caller's filter is malformed, the server is fine.
+    expect(e.code).toBe('FILTER_TOKEN_UNKNOWN');
+    expect(e.status).toBe(400);
+    // The author has to see what THEY wrote, not a normalised paraphrase.
+    expect(e.token).toBe(token);
+    expect(e.message).toContain(`{${token}}`);
+  });
+
+  it('still resolves the canonical spelling — the widening did not eat `{today}`', () => {
+    expect(resolveFilterTokens({ due_date: { $lt: '{today}' } }, ctx))
+      .toEqual({ due_date: { $lt: '2026-07-15' } });
+  });
+
+  it('still refuses the word-character near miss `{TODAY}`', () => {
+    // The shape that ALREADY worked. It is the control: if this ever goes
+    // quiet, the widening has replaced the diagnostic instead of extending it.
+    let err: unknown;
+    try {
+      resolveFilterTokens({ due_date: { $lt: '{TODAY}' } }, ctx);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(UnknownFilterTokenError);
+    expect((err as UnknownFilterTokenError).token).toBe('TODAY');
+    expect((err as UnknownFilterTokenError).code).toBe('FILTER_TOKEN_UNKNOWN');
+  });
+
+  // Decided, not emergent: recognition is ONE brace pair around the WHOLE
+  // value. Anything else is ordinary text and reaches the driver untouched —
+  // that is what keeps `titleFormat`-style strings and human prose out of the
+  // rule, and it is the property that holds false positives at zero.
+  it.each(['acme {x} deal', '{a}{b}', '{{x}}', '{}', '{a}b', 'x{a}'])(
+    '%s is a literal and passes through unchanged',
+    (value) => {
+      const filter = { title: value };
+      expect(resolveFilterTokens(filter, ctx)).toBe(filter);
+    },
+  );
+});
+
 describe('filterTokenContextFrom', () => {
   it('maps ExecutionContext onto the resolver inputs', () => {
     expect(

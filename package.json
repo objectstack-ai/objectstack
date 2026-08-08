@@ -73,6 +73,7 @@
     "check:type-check-coverage": "node scripts/check-type-check-coverage.mjs --self-test && node scripts/check-type-check-coverage.mjs",
     "check:type-check-debt": "node scripts/check-type-check-coverage.mjs --self-test && node scripts/check-type-check-coverage.mjs --re-measure",
     "check:driver-conformance": "node scripts/check-driver-conformance.mjs --self-test && node scripts/check-driver-conformance.mjs",
+    "check:driver-memory-census": "node scripts/check-driver-memory-census.mjs --self-test && node scripts/check-driver-memory-census.mjs",
     "check:engine-double-contract": "node scripts/check-engine-double-contract.mjs --self-test && node scripts/check-engine-double-contract.mjs",
     "check:resume-authority-declared": "node scripts/check-resume-authority-declared.mjs --self-test && node scripts/check-resume-authority-declared.mjs",
     "check:spec-parsed-alias": "node scripts/check-spec-parsed-alias.mjs --self-test && node scripts/check-spec-parsed-alias.mjs",

@@ -8451,6 +8451,7 @@ export class RestServer {
                     await svc.unscheduleReport(req.params.scheduleId, context ?? {});
                     res.status(204).end();
                 } catch (error: any) {
+                    if (handleValidation(res, error)) return; // REPORT_NOT_FOUND → 404 (deny-as-404, anti-enumeration)
                     logError('[REST] Unschedule report error:', error);
                     res.status(500).json({ code: 'SCHEDULE_DELETE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
                 }

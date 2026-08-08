@@ -1,0 +1,144 @@
+{
+  "$comment": [
+    "The @objectstack/driver-memory census — the ledger scripts/check-driver-memory-census.mjs gates (#6664).",
+    "",
+    "WHAT THIS IS. #5499 froze INVESTMENT in this driver; #5704 migrated the project's test backends to",
+    "sqlite `:memory:` and ruled (Q2 = B, maintainer 2026-08-06) that one test file keeps it on purpose. The",
+    "programme's enforcement was a PROSE CENSUS — a sentence in that file claiming it was the only permanent",
+    "test consumer in the repository — backed by #5704/#5784 renaming every look-alike local stub to",
+    "`makeStubDriver` so a grep would land on real consumers only. The grep is a good handle; the sentence",
+    "was not. It expired silently the first time the hand-edit step was skipped: #6468 (PR #6553) added the",
+    "autonumber parity test with no ruling block and no mention in the census it invalidated. This file is",
+    "that census, moved from prose to a ledger with a gate reading it.",
+    "",
+    "HOW TO CHANGE IT. Hand-edited under review; deliberately no `--fix` / `--update` flag, for the reason",
+    "engine-double-contract.baseline.json states for itself — a generator would let a new arrival be admitted",
+    "by 'just run the update command', which is how a ledger stops meaning anything. An unledgered arrival is",
+    "NOT a bookkeeping chore to silence: take the disposition through the process (#5704 Q2, #6664 A/B/C —",
+    "rule it, migrate it, or file it), then write down what was decided.",
+    "",
+    "AXES. `ruled-permanent` is a maintainer ruling and lives in `ruledConsumers`; nothing else may claim it.",
+    "`product-consumer` is shipped code that resolves the driver at run time — #5704 carved these out of the",
+    "migration surface BY NAME ('⛔ 明确不在本单范围'), because their fate belongs to the package-retirement",
+    "decision (#5499, maintainer 2026-08-06: A — 维持冻结、暂不退役), not to the test-backend programme.",
+    "`published-example` is an example whose SUBJECT is the driver. `mock-replacement` is a vi.mock factory",
+    "that replaces the module. `ruled-consequence` is a manifest declaration that exists because of a ruling",
+    "above it.",
+    "",
+    "`rulingMarkers` are strings the gate requires to still be present in the ruled file. The ruling block IS",
+    "the disposition record — a ruled consumer whose block was deleted is a frozen driver in a test file with",
+    "nothing saying why, which is the state #6664 was filed about.",
+    "",
+    "NOT A JUDGEMENT ON WHETHER A CONSUMER SHOULD EXIST. The gate forbids exactly one thing: a declaration",
+    "nobody has written a disposition for."
+  ],
+
+  "ruledConsumers": [
+    {
+      "file": "packages/runtime/src/sandbox/undeclared-field-write-driver-split.integration.test.ts",
+      "kind": "import",
+      "axis": "ruled-permanent",
+      "ruling": "#5704 Q2 = B, maintainer 2026-08-06",
+      "rulingMarkers": ["#5704", "#6664"],
+      "why": "the schemaless arm of the #4271 divergence pin: writing an undeclared field is refused as a WHOLE statement by the SQL family and persisted verbatim by the schemaless family, and pinning a divergence needs both arms. Delete this arm and the guardrail silently becomes a one-sided assertion about SQL."
+    },
+    {
+      "file": "packages/runtime/src/autonumber-seed-cross-side-parity.integration.test.ts",
+      "kind": "import",
+      "axis": "ruled-permanent",
+      "ruling": "#6664 A, maintainer 2026-08-08 — inherits #5704 Q2 = B",
+      "rulingMarkers": ["#5704", "#6664"],
+      "why": "the engine-fallback arm of the #6468 convergence pin: InMemoryDriver declares `supports = {}`, so the ENGINE's autonumber seeding owns the counter. No SQL backend can stand in — SqlDriver advertises the capability and its own sequence bootstrap answers instead, which is the arm this file already runs on the other side of the same `toBe()`."
+    }
+  ],
+
+  "otherDeclarations": [
+    {
+      "file": "examples/embed-objectql/src/index.ts",
+      "kind": "import",
+      "axis": "published-example",
+      "why": "the example's whole subject is embedding ObjectQL on the in-memory driver. #5704 excluded it from the migration surface by name: demonstrating a shipped package is not a test consumer of it."
+    },
+    {
+      "file": "packages/plugins/plugin-dev/src/dev-plugin.ts",
+      "kind": "dynamic-import",
+      "axis": "product-consumer",
+      "why": "DevPlugin's zero-install dev stack registers an ephemeral InMemoryDriver alongside its in-memory cache/queue/job/i18n/storage/search stubs. #5704 carved out 'plugin-dev 的开发默认后端' explicitly — it is a shipped default, not a test backend."
+    },
+    {
+      "file": "packages/services/service-datasource/src/default-datasource-driver-factory.ts",
+      "kind": "dynamic-import",
+      "axis": "product-consumer",
+      "why": "the `memory` arm of the datasource driver factory — the registry face that turns a declared datasource `driver: 'memory'` into a driver instance. #5704 excluded the factory registry面 from the migration surface (批次 1)."
+    },
+    {
+      "file": "packages/services/service-datasource/src/sqlite-driver-fallback.ts",
+      "kind": "dynamic-import",
+      "axis": "product-consumer",
+      "why": "rung 3 of the native-sqlite → wasm → in-memory step-down (#2229). A dev-only last resort that must not persist, which is why it passes `persistence: false` explicitly (#4065/#4083)."
+    },
+    {
+      "file": "packages/services/service-datasource/src/sqlite-driver-fallback.test.ts",
+      "kind": "mock",
+      "axis": "mock-replacement",
+      "why": "the step-down test replaces all three rungs with counting stubs, so the real driver is never loaded. #5704 classified this file as 降级链 vi.mock and excluded it from the migration surface (批次 1)."
+    },
+    {
+      "file": "packages/plugins/plugin-dev/src/dev-plugin.test.ts",
+      "kind": "mock",
+      "axis": "mock-replacement",
+      "why": "the mock makes the module resolve as ERR_MODULE_NOT_FOUND, so this file pins DevPlugin's behaviour when the driver is ABSENT. It is the opposite of a consumer."
+    },
+    {
+      "file": "packages/plugins/plugin-dev/src/dev-plugin-tenancy-failfast.test.ts",
+      "kind": "mock",
+      "axis": "mock-replacement",
+      "why": "same absent-module mock as dev-plugin.test.ts — the optional stack is forced unavailable so the tenancy fail-fast path is the only thing under test."
+    },
+    {
+      "file": "packages/plugins/plugin-dev/src/dev-plugin-tenancy-mount-refusal.test.ts",
+      "kind": "mock",
+      "axis": "mock-replacement",
+      "why": "same absent-module mock as dev-plugin.test.ts — the optional stack is forced unavailable so the mount refusal is the only thing under test."
+    },
+    {
+      "file": "packages/plugins/plugin-dev/src/dev-plugin-tenancy-posture.test.ts",
+      "kind": "mock",
+      "axis": "mock-replacement",
+      "why": "same absent-module mock as dev-plugin.test.ts — the optional stack is forced unavailable so the tenancy posture is the only thing under test."
+    }
+  ],
+
+  "manifests": [
+    {
+      "file": "packages/runtime/package.json",
+      "field": "dependencies",
+      "axis": "ruled-consequence",
+      "why": "#5704 Q2 = B ruled it stays long-term ('runtime 的 driver-memory devDep 长期保留(仅此一个消费点)'). Two corrections the gate can defend and that sentence could not: the field is `dependencies`, not devDependencies (alongside driver-sql / driver-sqlite-wasm, which runtime also declares for the datasource factory to resolve by dynamic import), and there are now TWO consumers in this package, not one — #6664 ruled the second."
+    },
+    {
+      "file": "packages/cli/package.json",
+      "field": "dependencies",
+      "axis": "product-consumer",
+      "why": "the CLI imports the driver nowhere; it declares it so a CLI-installed app can RESOLVE it when `--database-driver memory` / `OS_DATABASE_DRIVER=memory` / a `memory://` URL routes to driverId `memory` and service-datasource's factory reaches for it by dynamic import."
+    },
+    {
+      "file": "packages/plugins/plugin-dev/package.json",
+      "field": "dependencies",
+      "axis": "product-consumer",
+      "why": "backs the dynamic import in dev-plugin.ts — the zero-install dev stack's default data backend."
+    },
+    {
+      "file": "packages/services/service-datasource/package.json",
+      "field": "devDependencies",
+      "axis": "product-consumer",
+      "why": "all five drivers are devDependencies here by design: the factory reaches every backend by dynamic import and the HOST supplies the one it uses, so declaring them as runtime dependencies would install five databases' worth of driver for whichever one a deployment picked."
+    },
+    {
+      "file": "examples/embed-objectql/package.json",
+      "field": "dependencies",
+      "axis": "published-example",
+      "why": "backs the example's own import — the example exists to demonstrate this driver."
+    }
+  ]
+}
