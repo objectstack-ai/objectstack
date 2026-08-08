@@ -59,6 +59,95 @@ describe('ComparisonOperatorSchema', () => {
     expect(() => ComparisonOperatorSchema.parse({ $lt: date })).not.toThrow();
     expect(() => ComparisonOperatorSchema.parse({ $lte: date })).not.toThrow();
   });
+
+  // ==========================================================================
+  // #5685 — the four slots accept the STRING the platform itself produces.
+  //
+  // Before this was pinned the union was `number | Date | FieldReference`, so
+  // every shape below threw — including the date-macro resolver's own
+  // documented output. These are the exact spellings the producers emit; see
+  // `ComparisonOperatorSchema`'s docblock for why the union is a bare `string`
+  // rather than an ISO refinement.
+  // ==========================================================================
+
+  describe('string comparands (#5685)', () => {
+    const OPS = ['$gt', '$gte', '$lt', '$lte'] as const;
+
+    /** `resolveFilterTokens` returns `asYmd(...)` for every calendar-day token. */
+    it('accepts the calendar-day string a date macro resolves to', () => {
+      for (const op of OPS) {
+        expect(() => ComparisonOperatorSchema.parse({ [op]: '2026-01-01' })).not.toThrow();
+      }
+    });
+
+    /**
+     * The sub-day tokens (`{now}`, `{N_hours_ago}`) and all three first-party
+     * callers — `lifecycle-service`, `plugin-email`'s outbox sweep — emit a
+     * full `.toISOString()`.
+     */
+    it('accepts the full ISO instant the sub-day tokens and the sweeps emit', () => {
+      const cutoff = new Date('2026-08-08T04:32:56.000Z').toISOString();
+      for (const op of OPS) {
+        expect(() => ComparisonOperatorSchema.parse({ [op]: cutoff })).not.toThrow();
+      }
+    });
+
+    /**
+     * A `Field.time` comparand is `HH:MM[:SS[.fff]]` and is declared
+     * NOT `Date.parse`-able (`field-value.zod.ts`, CLOCK_TIME_TYPES); the SQL
+     * driver canonicalises exactly this in the comparand position (#3979).
+     * This case is why the union is not narrowed to an ISO date/date-time shape.
+     */
+    it('accepts a wall-clock time-of-day, which an ISO refinement would reject', () => {
+      for (const op of OPS) {
+        expect(() => ComparisonOperatorSchema.parse({ [op]: '09:00' })).not.toThrow();
+        expect(() => ComparisonOperatorSchema.parse({ [op]: '14:30:00.500' })).not.toThrow();
+      }
+    });
+
+    /**
+     * Non-temporal text ordering rides along with the widening. Pinned as an
+     * ADMITTED shape rather than a promised ordering — the docblock says the
+     * ORDER is the backend collation's, and this schema is field-agnostic so it
+     * cannot tell a code column from a date one.
+     */
+    it('admits non-temporal text (order is the backend collation\'s, not this contract\'s)', () => {
+      for (const op of OPS) {
+        expect(() => ComparisonOperatorSchema.parse({ [op]: 'M' })).not.toThrow();
+      }
+    });
+
+    it('still accepts numbers, Dates and field references — widening is additive', () => {
+      for (const op of OPS) {
+        expect(() => ComparisonOperatorSchema.parse({ [op]: 42 })).not.toThrow();
+        expect(() => ComparisonOperatorSchema.parse({ [op]: new Date('2026-01-01') })).not.toThrow();
+        expect(() => ComparisonOperatorSchema.parse({ [op]: { $field: 'other.col' } })).not.toThrow();
+      }
+    });
+
+    it('still rejects a comparand that is orderable at no backend', () => {
+      for (const op of OPS) {
+        expect(() => ComparisonOperatorSchema.parse({ [op]: true })).toThrow();
+        expect(() => ComparisonOperatorSchema.parse({ [op]: { nope: 1 } })).toThrow();
+      }
+    });
+
+    /**
+     * The documentation copy above and the ENFORCED copy must not drift: it is
+     * `FieldOperatorsSchema` that `NormalizedFilterSchema` validates against and
+     * that the exported `FieldOperators` type is inferred from, so widening only
+     * the documented one would have left the reachable surface still rejecting
+     * the platform's own output.
+     */
+    it('is matched by the enforced copy — FieldOperatorsSchema and the normalized AST', () => {
+      for (const op of OPS) {
+        expect(() => FieldOperatorsSchema.parse({ [op]: '2026-01-01' })).not.toThrow();
+      }
+      expect(() => NormalizedFilterSchema.parse({
+        $and: [{ close_date: { $gte: '2026-01-01' } }, { created_at: { $lt: '2026-08-08T04:32:56.000Z' } }],
+      })).not.toThrow();
+    });
+  });
 });
 
 // ============================================================================
@@ -437,6 +526,34 @@ describe('TypeScript Type System', () => {
     };
 
     expect(filter).toBeDefined();
+  });
+
+  /**
+   * #5685 — the TYPED half of the same contract. `Filter<T>` knows `T`, so it
+   * stays type-precise where `ComparisonOperatorSchema` cannot; what it must
+   * NOT do is reject the string the platform's own date-macro resolver hands
+   * the author. These assignments are checked by `pnpm typecheck`, not by the
+   * runtime expectation below — vitest never typechecks, so reverting
+   * `filter.zod.ts` leaves this test GREEN under vitest and RED under `tsc`.
+   * Measured on the reverted schema, both errors land in this block:
+   *   `$gte: '2026-01-01'` -> TS2322 Type 'string' is not assignable to type 'Date'
+   *   `$gte: '09:00'`      -> TS2322 Type 'string' is not assignable to type 'undefined'
+   * (the second reads `undefined`, not `never`: the old guard's `never` meets
+   * the slot's own `?`, and an optional `never` IS `undefined`.)
+   */
+  it('accepts an ISO string on a Date field and orders string fields (#5685)', () => {
+    interface Deal {
+      close_date: Date;      // resolved date macro arrives as 'YYYY-MM-DD'
+      shift_start: string;   // Field.time — 'HH:MM[:SS[.fff]]'
+      amount: number;
+    }
+
+    const resolvedMacro: Filter<Deal> = { close_date: { $gte: '2026-01-01' } };
+    const stillTakesDate: Filter<Deal> = { close_date: { $lt: new Date('2026-01-01') } };
+    const clockTime: Filter<Deal> = { shift_start: { $gte: '09:00' } };
+    const numeric: Filter<Deal> = { amount: { $gt: 1000 } };
+
+    expect([resolvedMacro, stillTakesDate, clockTime, numeric]).toHaveLength(4);
   });
 
   it('should support logical operators', () => {

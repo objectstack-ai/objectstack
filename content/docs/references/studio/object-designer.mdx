@@ -190,10 +190,10 @@ ER diagram layout algorithm
 | :--- | :--- | :--- | :--- |
 | **defaultView** | `Enum<'field-editor' \| 'relationship-mapper' \| 'er-diagram' \| 'object-manager'>` | ✅ | Default view |
 | **fieldEditor** | `{ inlineEditing: boolean; dragReorder: boolean; showFieldGroups: boolean; showPropertyPanel: boolean; … }` | ✅ | Field editor configuration |
-| **relationshipMapper** | `{ visualCreation: boolean; showReverseRelationships: boolean; showCascadeWarnings: boolean; displayConfig: { type: Enum<'lookup' \| 'master_detail' \| 'tree'>; lineStyle: Enum<'solid' \| 'dashed' \| 'dotted'>; color: string; highlightColor: string; … }[] }` | ✅ | Relationship mapper configuration |
+| **relationshipMapper** | `{ visualCreation: boolean; showReverseRelationships: boolean; showCascadeWarnings: boolean; displayConfig: object[] }` | ✅ | Relationship mapper configuration |
 | **erDiagram** | `{ enabled: boolean; layout: Enum<'force' \| 'hierarchy' \| 'grid' \| 'circular'>; nodeDisplay: object; showMinimap: boolean; … }` | ✅ | ER diagram configuration |
 | **objectManager** | `{ defaultDisplayMode: Enum<'table' \| 'cards' \| 'tree'>; defaultSortField: Enum<'name' \| 'label' \| 'fieldCount' \| 'updatedAt'>; defaultSortDirection: Enum<'asc' \| 'desc'>; defaultFilter: object; … }` | ✅ | Object manager configuration |
-| **objectPreview** | `{ tabs: { key: string; label: string; icon?: string; enabled: boolean; … }[]; defaultTab: string; showHeader: boolean; showBreadcrumbs: boolean }` | ✅ | Object preview configuration |
+| **objectPreview** | `{ tabs: object[]; defaultTab: string; showHeader: boolean; showBreadcrumbs: boolean }` | ✅ | Object preview configuration |
 
 
 ---

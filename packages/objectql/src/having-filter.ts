@@ -42,16 +42,50 @@
 //    the ruling.
 
 import type { FilterCondition } from '@objectstack/spec/data';
+// [#5702] The retired operators and the prescription a refusal prints. HAVING is
+// the fifth of the five refusal sites `RETIRED_FILTER_OPERATORS`' own doc names,
+// and reads the table for the same reason the four driver sites do: one
+// retirement, one sentence.
+import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 
 const LOGICAL_OPERATORS = ['$and', '$or', '$not'] as const;
 
+// [#5702] `$regex` is GONE from this vocabulary. Its arm below ran a real
+// `RegExp` over the aggregated value and answered an ILLEGAL pattern with
+// `return false` — "no rows", silently — which is the pair of defects #4706
+// retired the operator over, on the one evaluation face no conformance table
+// covers. `$icontains` is not added in its place: this face would need its own
+// ASCII-only fold, which is the same "semantic completion" investment #5499
+// freezes for the other JS faces, so HAVING refuses it fail-closed for now.
 const CONDITION_OPERATORS = [
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$between',
   '$in', '$nin', '$exists', '$null',
-  '$contains', '$notContains', '$startsWith', '$endsWith', '$regex',
+  '$contains', '$notContains', '$startsWith', '$endsWith',
 ] as const;
 
-function unknownOperator(op: string, where: 'logical' | 'condition'): Error {
+function unknownOperator(
+  op: string,
+  where: 'logical' | 'condition',
+  siblings: readonly string[] = [],
+): Error {
+  // [#5702] A RETIRED spelling gets the spec's prescription rather than the
+  // vocabulary list — its author wrote a name this face ANSWERED until #4706,
+  // and needs to know what replaces it, not what else exists. Retired siblings
+  // are named too: `{ $regex, $options }` is one mistake with one fix.
+  const retired = RETIRED_FILTER_OPERATORS[op];
+  if (retired && where === 'condition') {
+    const replacement = retired.to ? ` Write "${retired.to}" instead.` : '';
+    const alsoRetired = siblings.filter((key) => key !== op && RETIRED_FILTER_OPERATORS[key]);
+    const also = alsoRetired.length
+      ? ` The same condition also carries the retired `
+        + `${alsoRetired.map((key) => `'${key}'`).join(', ')} — one '${retired.to}' replaces the `
+        + `whole shape, so this is ONE mistake with ONE fix, not one per key.`
+      : '';
+    return new Error(
+      `Filter operator '${op}' in \`having\` is RETIRED and is no longer evaluated.${replacement} `
+      + `${retired.why}${also}`,
+    );
+  }
   const supported = where === 'logical'
     ? `${LOGICAL_OPERATORS.join(', ')} (or a column condition)`
     : CONDITION_OPERATORS.join(', ');
@@ -142,7 +176,12 @@ function checkCondition(value: any, condition: any): boolean {
   }
 
   for (const op of keys) {
-    if (op === '$options') continue; // consumed by $regex below
+    // [#5702] The `if (op === '$options') continue` that stood here is GONE. It
+    // skipped the key because `$regex` consumed it as its flags; with `$regex`
+    // retired, `$options` is a key nothing consumes, and skipping it would mean
+    // silently ignoring a constraint the author wrote — the exact widening this
+    // file refuses unknown operators to avoid. It now falls to `default:` and is
+    // refused with the spec's prescription.
     const target = (condition as Record<string, any>)[op];
     if (value === undefined && !NO_VALUE_ANSWERED_BY_OPERATOR.has(op)) return false;
     switch (op) {
@@ -181,18 +220,12 @@ function checkCondition(value: any, condition: any): boolean {
       case '$notContains': if (typeof value === 'string' && value.includes(target)) return false; break;
       case '$startsWith': if (typeof value !== 'string' || !value.startsWith(target)) return false; break;
       case '$endsWith': if (typeof value !== 'string' || !value.endsWith(target)) return false; break;
-      case '$regex': {
-        let re: RegExp;
-        try {
-          re = new RegExp(target, (condition as Record<string, any>).$options || '');
-        } catch {
-          return false;
-        }
-        if (!re.test(String(value))) return false;
-        break;
-      }
+      // [#5702] The `$regex` arm is GONE. It built `new RegExp(target, $options)`
+      // and, on an illegal pattern, `return false` — an unrunnable filter
+      // answered as "this row does not match", i.e. a silent empty result rather
+      // than an error. Retired by #4706; refused by `default:` below.
       default:
-        throw unknownOperator(op, 'condition');
+        throw unknownOperator(op, 'condition', keys);
     }
   }
   return true;

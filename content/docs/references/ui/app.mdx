@@ -120,7 +120,7 @@ const result = ActionNavItemSchema.parse(data);
 | **id** | `string` | ✅ | Selector id; selected value is exposed as the nav template var `{<id>}` |
 | **label** | `string \| Record<string, string>` | ✅ | Dropdown label |
 | **icon** | `string` | optional | Icon name |
-| **optionsSource** | `{ endpoint: string; valueKey: string; labelKey: string; filter?: { key: string; op: Enum<'eq' \| 'ne' \| 'in' \| 'nin'>; value: string \| string[] }[] }` | ✅ | Option data source |
+| **optionsSource** | `{ endpoint: string; valueKey: string; labelKey: string; filter?: object[] }` | ✅ | Option data source |
 | **allValue** | `string` | ✅ | Sentinel value meaning "no concrete selection yet" (empty string is almost always right) |
 | **persist** | `Enum<'query' \| 'session' \| 'none'>` | ✅ | Persist selection via URL query, sessionStorage, or not at all |
 

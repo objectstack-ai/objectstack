@@ -14,7 +14,7 @@
 
 import type { Client, InStatement, ResultSet } from '@libsql/client';
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { FILTER_OPERATORS, LOGICAL_OPERATORS } from '@objectstack/spec/data';
+import { FILTER_OPERATORS, LOGICAL_OPERATORS, RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907) — read from the spec so this
 // transport's "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` admits, nor from the local driver's twin.
@@ -45,8 +45,14 @@ const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
  *
  * It is the spec's `FieldOperatorsSchema` list minus `$between`, which the
  * driver lowers before the filter gets here (see {@link unsupportedOperator}),
- * plus `$regex`, which is not spec-declared but is what better-auth's adapter
- * emits for a substring search and what `SqlDriver` therefore compiles.
+ * plus `$icontains`, which `StringOperatorSchema` declares (#5701) and this
+ * transport compiles (#5702).
+ *
+ * `$regex` was here until #5702 and is now RETIRED: it is not a member, so it
+ * reaches {@link unsupportedOperator} and is refused with the spec's
+ * prescription. Its last live producer — plugin-auth's ObjectQL adapter — was
+ * flipped to `$contains` by #5710 first, which is why the refusal can land at
+ * all.
  */
 const SUPPORTED_FILTER_OPERATORS = [
   '$eq',
@@ -61,7 +67,7 @@ const SUPPORTED_FILTER_OPERATORS = [
   '$notContains',
   '$startsWith',
   '$endsWith',
-  '$regex',
+  '$icontains',
   '$null',
   '$exists',
 ] as const;
@@ -87,16 +93,23 @@ const NODE_COMBINATORS: ReadonlySet<string> = new Set<string>(LOGICAL_OPERATORS)
  * it cannot — both branches of {@link RemoteTransport.undeclaredCombinator}
  * throw `INVALID_FILTER`, they differ only in the repair they suggest.
  *
- * `$regex` is added for the same reason {@link SUPPORTED_FILTER_OPERATORS}
- * carries it: it is not spec-declared but is what better-auth's adapter emits,
- * so a caller really can misplace it. `$between` comes in with the spec list
- * even though this transport never compiles it (TursoDriver lowers it first) —
- * a misplaced `$between` is still a misplaced FIELD operator, and telling its
- * author "unknown combinator" would send them looking for the wrong mistake.
+ * `$icontains` is added for the same reason {@link SUPPORTED_FILTER_OPERATORS}
+ * carries it: `FILTER_OPERATORS` deliberately does not list it yet (#5701
+ * staged the declaration ahead of the implementations), but this transport
+ * compiles it, so a caller really can misplace it. `$between` comes in with the
+ * spec list even though this transport never compiles it (TursoDriver lowers it
+ * first) — a misplaced `$between` is still a misplaced FIELD operator, and
+ * telling its author "unknown combinator" would send them looking for the wrong
+ * mistake.
+ *
+ * The RETIRED spellings are deliberately NOT here (#5702). A node-position
+ * `$regex` is not a misplaced field operator — it is not a field operator at
+ * any level any more — so it takes the "names nothing this protocol declares"
+ * tail, which is the true one.
  */
 const MISPLACED_FIELD_OPERATORS: ReadonlySet<string> = new Set<string>([
   ...FILTER_OPERATORS,
-  '$regex',
+  '$icontains',
 ]);
 
 /**
@@ -247,7 +260,7 @@ type NullGuard = 'none' | 'requireValue' | 'allowNull';
  * `match`, `formula` `matchesFilterCondition`) give a value that is not there?
  *
  * The default is the large positive-comparison family (`$gt`, `$in`,
- * `$contains`, `$startsWith`, `$endsWith`, `$regex`, and any operator this
+ * `$contains`, `$icontains`, `$startsWith`, `$endsWith`, and any operator this
  * transport refuses outright), every member of which answers `false` for a value
  * that is not there.
  */
@@ -1852,13 +1865,26 @@ export class RemoteTransport {
             // and refusing it in one family while tolerating it in the other
             // would leave the failure mode alive at a different spelling.
             case '$contains':
-            // `$regex` is not spec-declared: it reaches SQL only via the
-            // better-auth adapter, which emits it for a `contains` search (a
-            // plain substring, not a real regex). SqlDriver compiles it as
-            // that substring LIKE, so remote mode must too — otherwise a
-            // Turso-backed auth store answers differently from a local one.
-            case '$regex':
               this.pushLike(clauses, args, column, this.serializeComparand(object, key, op, opValue), 'contains');
+              break;
+            // [#5702] `$icontains` — the case-insensitive twin, and what
+            // `RETIRED_FILTER_OPERATORS` prescribes in place of `$regex`. Same
+            // `pushLike`, so the escape rule cannot fork between the two; the
+            // fold is applied to BOTH operands (see {@link pushLike}).
+            case '$icontains':
+              if (typeof opValue !== 'string' || opValue === '') {
+                throw this.icontainsComparand(object, key, opValue);
+              }
+              this.pushLike(
+                clauses,
+                args,
+                column,
+                this.serializeComparand(object, key, op, opValue),
+                'contains',
+                false,
+                false,
+                true,
+              );
               break;
             case '$notContains':
               // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
@@ -1950,7 +1976,7 @@ export class RemoteTransport {
               // reads exactly like "no rows matched" (#1004). An operator this
               // transport cannot compile is a programming error and must say
               // so.
-              throw this.unsupportedOperator(object, key, op);
+              throw this.unsupportedOperator(object, key, op, Object.keys(value as object));
           }
         }
         if (clauses.length === clausesBefore) {
@@ -2025,10 +2051,23 @@ export class RemoteTransport {
     shape: LikeShape,
     negate = false,
     nullSafe = false,
+    fold = false,
   ): void {
     const escaped = String(value).replace(/[\\%_]/g, '\\$&');
     const pattern = shape === 'starts' ? `${escaped}%` : shape === 'ends' ? `%${escaped}` : `%${escaped}%`;
-    const predicate = `${column} ${negate ? 'NOT LIKE' : 'LIKE'} ? ESCAPE '\\'`;
+    // [#5702] `fold` wraps BOTH operands in `LOWER()` — the `$icontains`
+    // lowering, and a parameter of THIS method rather than a sixth text arm for
+    // the reason the paragraph above gives: one escape rule, one place. Folding
+    // only the comparand would compare a folded needle against a raw column and
+    // silently match only the rows that were already lower-case.
+    //
+    // libSQL is SQLite, whose `lower()` folds ASCII ONLY — which is the
+    // contract (#4706 Q1 = A), not a limitation to work around: `É` does not
+    // fold, so `$icontains: 'café'` must not match `CAFÉ`. The local transport
+    // reaches the same answer through `SqlDriver.applyLike`'s `LOWER()`.
+    const lhs = fold ? `LOWER(${column})` : column;
+    const rhs = fold ? 'LOWER(?)' : '?';
+    const predicate = `${lhs} ${negate ? 'NOT LIKE' : 'LIKE'} ${rhs} ESCAPE '\\'`;
     clauses.push(nullSafe ? this.nullSafeNegative(column, predicate) : predicate);
     args.push(pattern);
   }
@@ -2128,6 +2167,38 @@ export class RemoteTransport {
   }
 
   /**
+   * [#5702] The error for an `$icontains` whose comparand is not a NON-EMPTY
+   * string.
+   *
+   * The remote twin of `driver-sql`'s `icontainsComparandError`, and the two
+   * rejections it covers are one mistake at one position:
+   *
+   * - **empty string** — `LOWER(col) LIKE '%%'` is TRUE of every row with a
+   *   value, i.e. a predicate that constrains nothing. A dropped constraint
+   *   WIDENS a result set, and on an RLS read scope that is a permission bypass
+   *   rather than a degraded filter (#3948) — the widening class this file has
+   *   already paid for from three other directions (#1004, #1058, #1073).
+   * - **non-string** — `StringOperatorSchema` declares `$icontains: z.string()`.
+   *   `pushLike` reaches its comparand through `String(value)`, so a number
+   *   would compile to a text search nobody wrote.
+   *
+   * Guarded in the ARM rather than inside `pushLike`, because `pushLike` serves
+   * the four operators whose comparand rules #1058 already settled; adding a
+   * fifth rule inside it would make one method answer two different questions.
+   */
+  private icontainsComparand(object: string, field: string, value: unknown): Error {
+    const shown = typeof value === 'string' ? 'the empty string' : describeValue(value);
+    return invalidFilterError(
+      `[RemoteTransport] Operator "$icontains" on '${object}.${field}' requires a NON-EMPTY string ` +
+        `comparand. Received ${shown} (${preview(value)}). "$icontains" is a case-insensitive ` +
+        `LITERAL substring search, so its comparand is the text to look for: an empty one matches ` +
+        `every row that has a value (a predicate that constrains nothing), and a non-string one ` +
+        `would be coerced into text this query never asked for. @objectstack/spec ` +
+        `StringOperatorSchema declares $icontains as a string.`,
+    );
+  }
+
+  /**
    * The error for an `$exists` whose comparand is not a boolean (#5369, landed
    * on this face by #5903).
    *
@@ -2177,8 +2248,34 @@ export class RemoteTransport {
    * the rule — so reaching this point means the lowering step was bypassed, and
    * saying which step it was is the whole value of the message.
    */
-  private unsupportedOperator(object: string, field: string, op: string): Error {
+  private unsupportedOperator(
+    object: string,
+    field: string,
+    op: string,
+    siblings: readonly string[] = [],
+  ): Error {
     const target = `'${object}.${field}'`;
+    // [#5702] A RETIRED spelling is not an unknown name — it is one this
+    // transport ANSWERED until #4706 retired it, so its author needs the
+    // replacement rather than the vocabulary list. The prescription is the
+    // spec's `RETIRED_FILTER_OPERATORS[op].why`, printed verbatim so that this
+    // transport, `SqlDriver`, `driver-memory` and `driver-mongodb` say ONE
+    // thing about the same retirement. Every retired SIBLING is named too:
+    // `{ $regex, $options }` is one mistake with one fix.
+    const retired = RETIRED_FILTER_OPERATORS[op];
+    if (retired) {
+      const replacement = retired.to ? ` Write "${retired.to}" instead.` : '';
+      const alsoRetired = siblings.filter((key) => key !== op && RETIRED_FILTER_OPERATORS[key]);
+      const also = alsoRetired.length
+        ? ` The same field constraint also carries the retired ` +
+          `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${retired.to}" replaces the ` +
+          `whole shape, so this is ONE mistake with ONE fix, not one per key.`
+        : '';
+      return invalidFilterError(
+        `[RemoteTransport] Filter operator "${op}" on ${target} is RETIRED and is no longer ` +
+          `compiled in remote mode.${replacement} ${retired.why}${also}`,
+      );
+    }
     if (op === '$between') {
       return invalidFilterError(
         `[RemoteTransport] $between on ${target} must be lowered to $gte/$lte before it reaches the ` +

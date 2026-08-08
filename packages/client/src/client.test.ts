@@ -1337,6 +1337,40 @@ describe('data.find() — canonical/legacy transport parameters (both copies)', 
         // change that fixes one vocabulary by breaking the other goes red.
         'legacy single key: { top }': { options: { top: 20 }, wire: 'top=20' },
         'legacy single key: { skip }': { options: { skip: 5 }, wire: 'skip=5' },
+
+        // ── #6485: ZERO IS A VALUE, NOT AN ABSENCE ──────────────────────────
+        //
+        // The two pagination params were emitted on TRUTHINESS
+        // (`if (normalizedOptions.top)`) while the canonical branch ten lines
+        // above already normalized them on PRESENCE (`if (v2.limit != null)`).
+        // So `0` survived the normalizer and was then discarded by the
+        // emitter, in both copies.
+        //
+        // `limit: 0` is the half that changes the answer, and the direction is
+        // measured, not assumed. Through the REST list route
+        // (`ObjectStackProtocolImplementation.findData`) `top=0` is neither
+        // rejected nor ignored: it folds to `limit: 0` and reaches the engine,
+        // and `SqlDriver.find` — the driver behind the default file-backed
+        // SQLite datasource — applies pagination on presence
+        // (`if (query.limit !== undefined) b.limit(query.limit)`), so the
+        // statement carries `LIMIT 0` and answers with zero rows. Dropping the
+        // param instead did NOT mean "the server's default page": this route
+        // has no default page size, so an absent `top` returns the ENTIRE
+        // match set. `find('task', { limit: 0 })` therefore answered with every
+        // record when it asked for none — HTTP 200, no warning.
+        //
+        // `offset: 0` / `skip: 0` are the consistency half: `skip=0` is already
+        // the server's default, so sending it or omitting it means the same
+        // thing. They are pinned here because the emitter must not have two
+        // rules for one pair, not because the wire meaning changed.
+        'canonical zero: { limit: 0 }': { options: { limit: 0 }, wire: 'top=0' },
+        'canonical zero: { offset: 0 }': { options: { offset: 0 }, wire: 'skip=0' },
+        'legacy zero: { top: 0 }': { options: { top: 0 }, wire: 'top=0' },
+        'legacy zero: { skip: 0 }': { options: { skip: 0 }, wire: 'skip=0' },
+        'canonical zero pair: { limit: 0, offset: 0 }': {
+            options: { limit: 0, offset: 0 },
+            wire: 'top=0&skip=0',
+        },
         'canonical: where + limit': {
             options: { where: { contact_id: 'c1' }, limit: 20 },
             wire: 'top=20&contact_id=c1',
@@ -1374,6 +1408,28 @@ describe('data.find() — canonical/legacy transport parameters (both copies)', 
         const legacy = await driveBoth(LEGACY_FULL);
         expect(canonical.direct).toBe(legacy.direct);
         expect(canonical.scoped).toBe(legacy.scoped);
+    });
+
+    /**
+     * [#6485] `{ limit: 0 }` and `{}` are DIFFERENT REQUESTS, and the wire has
+     * to be able to tell them apart.
+     *
+     * The table rows above pin each spelling's exact query string. This asserts
+     * the property those rows exist for: the two bags must not collapse onto
+     * one wire. Stated as an inequality rather than as two more literals
+     * because the defect was precisely a collapse — `top` absent in both cases,
+     * so the caller who asked for no records and the caller who asked for
+     * everything sent byte-identical requests and got byte-identical answers.
+     *
+     * Both copies, one property: a fix landing on only one of them leaves the
+     * other's pair equal and this goes red.
+     */
+    it('`{ limit: 0 }` is distinguishable from `{}` on the wire, on both copies', async () => {
+        const zero = await driveBoth({ limit: 0 });
+        const absent = await driveBoth({});
+
+        expect(zero.direct).not.toBe(absent.direct);
+        expect(zero.scoped).not.toBe(absent.scoped);
     });
 
     /**
