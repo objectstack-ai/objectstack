@@ -127,8 +127,8 @@ describe('findOne executes what it declares and refuses an empty predicate (#441
         reads = mem.reads;
         engine.registerDriver(mem.driver, true);
         await engine.init();
-        engine.registry.registerObject(account as any);
-        engine.registry.registerObject(person as any);
+        engine.registry.registerObject(account);
+        engine.registry.registerObject(person);
         // The issue's own repro set.
         one = await engine.insert('crm_account', { name: 'One', industry: 'Retail', annual_revenue: 100 });
         two = await engine.insert('crm_account', { name: 'Two', industry: 'Metals', annual_revenue: 200 });

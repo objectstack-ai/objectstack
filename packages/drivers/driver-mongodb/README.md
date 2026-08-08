@@ -158,14 +158,20 @@ try {
 
 Schema sync creates collections and indexes:
 
+Field-level `unique` and lookup fields index themselves; everything else is
+declared in the object's `indexes[]` — the one surface an index is declared on
+(a field-level `indexed` flag is not a `FieldSchema` key and never built an
+index, #2377 / #6810).
+
 ```typescript
 await driver.syncSchema('account', {
   name: 'account',
   fields: {
     name: { type: 'string', unique: true },
-    email: { type: 'email', indexed: true },
+    email: { type: 'email' },
     company_id: { type: 'lookup', reference_to: 'company' },
   },
+  indexes: [{ fields: ['email'] }],
 });
 // Creates: idx_id_unique, idx_name_unique, idx_email, idx_company_id_lookup
 ```

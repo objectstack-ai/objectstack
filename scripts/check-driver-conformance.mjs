@@ -152,6 +152,11 @@ const CASE_SETS = [
     what: 'an UNSORTED paged read is a partition too — #4363',
   },
   {
+    file: 'pagination-conformance.ts',
+    marker: 'PAGINATION_ZERO_LIMIT_CASES',
+    what: '`limit: 0` returns no records, on presence not truthiness — #6485/#6577',
+  },
+  {
     file: 'filter-text-conformance.ts',
     marker: 'FILTER_TEXT_CASES',
     what: 'text operators: ASCII-only case folding, literal comparands, `$regex` refused — #4706/#5701',

@@ -82,7 +82,7 @@ describe('lifecycle-class datasource separation (ADR-0057 §3.6)', () => {
     primary = stubDriver('memory');
     engine.registerDriver(primary, true);
     await engine.init();
-    for (const o of OBJECTS) engine.registry.registerObject(o as any);
+    for (const o of OBJECTS) engine.registry.registerObject(o);
   });
 
   it('without a telemetry datasource, every object resolves exactly as before', () => {

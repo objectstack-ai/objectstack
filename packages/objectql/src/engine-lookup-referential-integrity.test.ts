@@ -154,9 +154,9 @@ describe('[#4441] a lookup id that resolves to nothing is refused', () => {
     stores = stub.stores;
     engine.registerDriver(stub.driver, true);
     await engine.init();
-    engine.registry.registerObject(permissionSet as any);
-    engine.registry.registerObject(binding as any);
-    engine.registry.registerObject(task as any);
+    engine.registry.registerObject(permissionSet);
+    engine.registry.registerObject(binding);
+    engine.registry.registerObject(task);
     await engine.insert('ref_permission_set', { id: 'ps_real', name: 'Real' }, { context: { isSystem: true } } as any);
   });
 

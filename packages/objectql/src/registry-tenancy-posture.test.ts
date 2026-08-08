@@ -18,6 +18,16 @@
 // deployment. That is the fact these tests pin, deliberately and narrowly,
 // rather than the broader "columns go missing" reading.
 //
+// [#6810] WHERE that index is declared moved, and these assertions moved with
+// it: from a field-level `organization_id.indexed` boolean to an entry in the
+// object's `indexes[]`. The boolean was never a `FieldSchema` key (#2377 /
+// ADR-0049) and only `driver-mongodb` ever read it, so what #5262 pinned as
+// "the index" was in truth a flag that built nothing on the SQL drivers every
+// walled deployment runs. Reading `indexes[]` is the first spelling of this
+// fact a driver actually materializes — and `multiTenant: false` now says
+// "no index declared" rather than "an index declared false". The posture logic
+// under test is untouched; only the surface the answer is read off.
+//
 // Driven through the REAL `SchemaRegistry` constructor + `registerObject`
 // pipeline, reading the stored definition back out — the same path the kernel
 // takes at boot. Nothing about the resolver is stubbed: the tests set the real
@@ -49,9 +59,19 @@ const registerUnder = (env: { posture?: string; legacy?: string }) => {
     'crm',
     'own',
   );
-  const stored = (registry as any).objectContributors.get('lead')[0].definition;
-  return stored.fields.organization_id;
+  return (registry as any).objectContributors.get('lead')[0].definition;
 };
+
+/**
+ * [#6810] Is the tenant index declared on the object this posture produced?
+ *
+ * The `indexes[]` entry the drivers materialize — the successor to the
+ * field-level `indexed` boolean these tests used to read.
+ */
+const indexesTenantColumn = (stored: any): boolean =>
+  (stored.indexes ?? []).some(
+    (i: any) => Array.isArray(i?.fields) && i.fields.length === 1 && i.fields[0] === 'organization_id',
+  );
 
 beforeEach(() => {
   delete process.env.OS_TENANCY_POSTURE;
@@ -69,11 +89,11 @@ describe('#5262 — SchemaRegistry keys its multi-tenant default off OS_TENANCY_
     // THE regression. Configured exactly as the v17 docs say: the authoritative
     // knob and nothing else. Before the fix `resolveMultiOrgEnabled()` returned
     // false here and the column landed UNINDEXED on a fully walled deployment.
-    const field = registerUnder({ posture: 'isolated' });
+    const stored = registerUnder({ posture: 'isolated' });
 
-    expect(field).toBeDefined();
-    expect(field.reference).toBe('sys_organization');
-    expect(field.indexed).toBe(true);
+    expect(stored.fields.organization_id).toBeDefined();
+    expect(stored.fields.organization_id.reference).toBe('sys_organization');
+    expect(indexesTenantColumn(stored)).toBe(true);
   });
 
   it('`group` is a walled posture too — not just `isolated`', () => {
@@ -82,29 +102,29 @@ describe('#5262 — SchemaRegistry keys its multi-tenant default off OS_TENANCY_
     // just as much (ADR-0105 D1); it only widens READ scope to the membership
     // set, and `organization_id IN (...)` needs the index every bit as much as
     // `organization_id = ?` does.
-    expect(registerUnder({ posture: 'group' }).indexed).toBe(true);
+    expect(indexesTenantColumn(registerUnder({ posture: 'group' }))).toBe(true);
   });
 
   it('legacy-boolean-only deployment keeps working — back-compat via the posture resolver', () => {
     // Nothing already deployed changes behaviour: `resolveTenancyPosture()`
     // falls back to `OS_MULTI_ORG_ENABLED` when the posture knob is unset, so
     // the pre-ADR-0105 configuration still resolves to `isolated`.
-    expect(registerUnder({ legacy: 'true' }).indexed).toBe(true);
+    expect(indexesTenantColumn(registerUnder({ legacy: 'true' }))).toBe(true);
   });
 
   it('single-org deployments still leave the column unindexed', () => {
     // Intent unchanged — only the knob is corrected. Nothing filters by
     // organization on an unwalled stack, so the index would be dead weight.
-    expect(registerUnder({ posture: 'single' }).indexed).toBe(false);
-    expect(registerUnder({ legacy: 'false' }).indexed).toBe(false);
-    expect(registerUnder({}).indexed).toBe(false);
+    expect(indexesTenantColumn(registerUnder({ posture: 'single' }))).toBe(false);
+    expect(indexesTenantColumn(registerUnder({ legacy: 'false' }))).toBe(false);
+    expect(indexesTenantColumn(registerUnder({}))).toBe(false);
   });
 
   it('an explicit legacy `false` does not veto the authoritative posture', () => {
     // The precise inversion the demotion created: the canonical knob asks for a
     // wall, the superseded one says "no multi-org". The canonical knob wins —
     // otherwise the legacy flag would still be authoritative in disguise.
-    expect(registerUnder({ posture: 'isolated', legacy: 'false' }).indexed).toBe(true);
+    expect(indexesTenantColumn(registerUnder({ posture: 'isolated', legacy: 'false' }))).toBe(true);
   });
 
   it('an explicit `multiTenant` option still overrides the env entirely', () => {
@@ -112,16 +132,17 @@ describe('#5262 — SchemaRegistry keys its multi-tenant default off OS_TENANCY_
     // a mode; the posture read is only the DEFAULT when they say nothing.
     process.env.OS_TENANCY_POSTURE = 'isolated';
     const registry = new SchemaRegistry({ multiTenant: false });
-    registry.registerObject({ name: 'lead', fields: {} } as any, 'crm', 'crm', 'own');
+    registry.registerObject({ name: 'lead', fields: {} }, 'crm', 'crm', 'own');
     const stored = (registry as any).objectContributors.get('lead')[0].definition;
-    expect(stored.fields.organization_id.indexed).toBe(false);
+    expect(indexesTenantColumn(stored)).toBe(false);
+    expect(stored.fields.organization_id).toBeDefined();
   });
 
   it('the column itself is provisioned either way — only the index moves', () => {
     // Guards the claim this file is scoped on. If a future change makes the
     // COLUMN conditional again, the blast radius of a posture misread grows
     // from "slow" to "the wall has nothing to filter on", and this fails.
-    expect(registerUnder({ posture: 'isolated' })).toBeDefined();
-    expect(registerUnder({ posture: 'single' })).toBeDefined();
+    expect(registerUnder({ posture: 'isolated' }).fields.organization_id).toBeDefined();
+    expect(registerUnder({ posture: 'single' }).fields.organization_id).toBeDefined();
   });
 });

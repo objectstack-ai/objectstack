@@ -21,19 +21,23 @@
  * non-empty. That is the direction it must never drift back to.
  */
 import { describe, it, expect } from 'vitest';
+import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SaveMetaItemResponseSchema } from '@objectstack/spec/api';
 import { ObjectQL } from './engine.js';
 
-const sysMetadataObject = {
+const sysMetadataObject: ServiceObject = {
     name: 'sys_metadata',
     label: 'System Metadata',
     fields: {
-        id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+        // `primaryKey` was declared here behind an `as any` and is not a spec
+        // Field key at all (it exists only on external-catalog remote columns) —
+        // inert metadata nothing ever read. `id` is the primary key by convention.
+        id: { name: 'id', label: 'ID', type: 'text' as const },
         type: { name: 'type', label: 'Type', type: 'text' as const, required: true },
         name: { name: 'name', label: 'Name', type: 'text' as const, required: true },
         organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
-        metadata: { name: 'metadata', label: 'Body', type: 'longtext' as const },
+        metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
         checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
         state: { name: 'state', label: 'State', type: 'text' as const },
         version: { name: 'version', label: 'Version', type: 'number' as const },
@@ -112,7 +116,7 @@ async function makeProtocol() {
     const { driver } = makeMemoryDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(sysMetadataObject as any, 'test-package');
+    engine.registry.registerObject(sysMetadataObject, 'test-package');
     return new ObjectStackProtocolImplementation(engine);
 }
 

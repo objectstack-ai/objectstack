@@ -21,6 +21,17 @@ import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 function makeFakeEngine(seedCommits: any[] = []) {
   const commits: any[] = [...seedCommits];
   const engine: any = {
+    // [#6621] `revertCommit` now touches `engine.registry` on BOTH limbs (the
+    // restore write-through and the soft-remove heal), so the double carries
+    // the real registry rather than nothing. A bare `{}` engine would make
+    // every plan assertion below fail for a reason that has nothing to do with
+    // the plan — which is exactly the false red a stubbed double is supposed
+    // to avoid.
+    registry: (() => {
+      const r = new SchemaRegistry({ multiTenant: false });
+      (r as any).logLevel = 'silent';
+      return r;
+    })(),
     insert: vi.fn(async (table: string, data: any) => {
       if (table === 'sys_metadata_commit') commits.push(data);
     }),
@@ -97,7 +108,15 @@ describe('ADR-0067 — revertCommit', () => {
     const { engine } = makeFakeEngine([
       applyCommit({ id: 'cmt_2', items: [{ type: 'object', name: 'course', existedBefore: true, prevVersion: 3 }], created_at: '2026-06-24T00:00:00.000Z' }),
     ]);
-    const restoreVersion = vi.fn(async () => ({}));
+    // [#6621] `{}` was not what `SysMetadataRepository.restoreVersion` returns:
+    // its declared `PutResult` carries the committed item, and the restore limb
+    // now writes that body through to the registry. A double that answers less
+    // than the contract makes the caller look broken.
+    const restoreVersion = vi.fn(async () => ({
+      version: 'h3',
+      seq: 2,
+      item: { body: { name: 'course', label: 'Course', fields: { name: { name: 'name', type: 'text' } } } },
+    }));
     const repo = { get: vi.fn(async () => ({ hash: 'h2' })), delete: vi.fn(), restoreVersion };
     const p = makeProtocol(engine, repo);
 
@@ -245,7 +264,14 @@ const rowKey = (w: Record<string, unknown>) =>
  * at all), `sys_metadata_history`, `sys_metadata_commit`. Both write verbs are
  * pinned to ObjectQL's own dispatch predicates.
  */
-function makeRealRepoHarness(seedCommits: any[] = []) {
+function makeRealRepoHarness(seedCommits: any[] = [], opts: { controlPlane?: boolean } = {}) {
+  // [#6621] The kernel scope is a FLAG, never an `environmentId` parameter with
+  // an `'env_test'` default: passing `undefined` explicitly to a defaulted
+  // parameter re-applies the default, so a "control-plane" harness would have
+  // silently stayed project-scoped and the overlay-type write-through — which
+  // is gated on `environmentId === undefined` — would have been measured as
+  // "never registers anything at all".
+  const environmentId: string | undefined = opts.controlPlane === true ? undefined : 'env_test';
   const registry = new SchemaRegistry({ multiTenant: false });
   (registry as any).logLevel = 'silent';
   const rows = new Map<string, any>();
@@ -305,7 +331,7 @@ function makeRealRepoHarness(seedCommits: any[] = []) {
     async syncObjectSchema() { /* no physical storage in this double */ },
   };
 
-  const protocol = new ObjectStackProtocolImplementation(engine, undefined, 'env_test');
+  const protocol = new ObjectStackProtocolImplementation(engine, undefined, environmentId);
   return { protocol, engine, rows, historyRows, commits, registry };
 }
 
@@ -831,6 +857,338 @@ describe('#6620 — revertCommit soft-removes a runtime-CREATED `object`', () =>
  * while the created object was never removed. The line that goes red pre-fix is
  * the STORED ROW.
  */
+/**
+ * #6621 — a successful `revertCommit` REFRESHES the SchemaRegistry.
+ *
+ * Everything above pins what `revertCommit` writes to `sys_metadata`. Nothing
+ * above looks at what the RUNTIME then dispatches on, and that is where this
+ * defect lived: the restore limb awaited `repo.restoreVersion(...)`, pushed
+ * `{ action: 'restored' }` and moved on, while the sibling single-item revert
+ * `rollbackMetaItem` had ended the same repository call with a registry
+ * write-through since #4521 ("a rollback is a live write like any other"). One
+ * seam over, the rule was simply missing.
+ *
+ * Measured on `origin/main` (this file's own harness, real
+ * `SysMetadataRepository`), an `object` saved twice then reverted:
+ *
+ *   revertCommit                         -> { success: true, revertedCount: 1, failed: [] }
+ *   stored sys_metadata row fields       -> ["name","amount"]                  # reverted
+ *   SchemaRegistry.getObject(...) fields -> [..., "name","amount","due_date"]  # NOT reverted
+ *
+ * `success: true` while CRUD keeps dispatching the body the operator just
+ * reverted away, healing only at the next restart — and
+ * `rollbackToPackageCommit` reverts through the same loop, so a whole-package
+ * rollback could report success and change nothing the running process sees.
+ *
+ * Type-agnostic and older than #6563: an overlay `view` on a control-plane
+ * kernel showed the same split (stored `Cases`, registry still `Renamed`).
+ * `object` merely makes it loud, because the registry copy is what data CRUD
+ * dispatches on.
+ */
+
+/** The registry copy — the thing the runtime dispatches on, not the row. */
+const registryObjectFields = (registry: SchemaRegistry, name: string) =>
+  Object.keys(((registry.getObject(name) as any)?.fields ?? {}));
+
+const registryViewLabel = (registry: SchemaRegistry, name: string) =>
+  (registry.getItem('view', name) as any)?.label ?? null;
+
+describe('#6621 — revertCommit RESTORE limb refreshes the registry', () => {
+  it('an object revert moves the registry copy too, not just the stored row', async () => {
+    const { protocol, rows, registry } = makeRealRepoHarness([objectCommit({
+      id: 'cmt_reg_obj',
+      items: [{ type: 'object', name: 'myapp_invoice', existedBefore: true, prevVersion: 1 }],
+    })]);
+    await seedObjectEdit(protocol, 'myapp_invoice', APP_PKG);
+    // The edit really is live in the registry before the revert — otherwise
+    // "reverted" below could be true for the empty reason.
+    expect(registryObjectFields(registry, 'myapp_invoice')).toContain('due_date');
+
+    const res = await protocol.revertCommit({ commitId: 'cmt_reg_obj' });
+
+    expect(res.failed).toEqual([]);
+    expect(res.revertedCount).toBe(1);
+    expect(storedFields(rows, 'myapp_invoice').fields).not.toContain('due_date');
+    // THE LINE THAT WAS RED: pre-fix this still contained `due_date`.
+    expect(registryObjectFields(registry, 'myapp_invoice')).not.toContain('due_date');
+    expect(registryObjectFields(registry, 'myapp_invoice')).toEqual(
+      expect.arrayContaining(['name', 'amount']),
+    );
+  });
+
+  /**
+   * #4636 — the write-through re-registers under the ROW'S OWN ownership key.
+   * Stated as the `'sys_metadata'` sentinel instead, `registerObject` throws
+   * `already owned by package "app.myapp"` into a best-effort `console.warn`
+   * and the registry keeps the pre-revert body — a revert that reports success
+   * and changed nothing, which is the very failure this block exists to close.
+   * So ownership is asserted as a SURVIVING fact, not a changed one.
+   */
+  it('ownership survives the refresh: same owner package, still org-provenanced, no clash', async () => {
+    const { protocol, registry } = makeRealRepoHarness([objectCommit({
+      id: 'cmt_reg_owner',
+      items: [{ type: 'object', name: 'myapp_invoice', existedBefore: true, prevVersion: 1 }],
+    })]);
+    await seedObjectEdit(protocol, 'myapp_invoice', APP_PKG);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const res = await protocol.revertCommit({ commitId: 'cmt_reg_owner' });
+      expect(res.failed).toEqual([]);
+      expect(registry.getObjectOwner('myapp_invoice')?.packageId).toBe(APP_PKG);
+      expect((registry.getObject('myapp_invoice') as any)?._provenance).toBe('org');
+      expect(
+        warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('already owned by package')),
+      ).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  /**
+   * The overlay half. `applyRegistryWriteThrough`'s non-object branch is gated
+   * on `environmentId === undefined`, so this one needs a control-plane kernel
+   * — which is also the kernel on which an overlay type could ALWAYS reach this
+   * limb, long before #6563 let `object` in. The defect is older than the issue
+   * that made it visible.
+   */
+  it('an overlay-type revert moves the registry copy too (control-plane kernel)', async () => {
+    const { protocol, rows, registry } = makeRealRepoHarness([applyCommit({
+      id: 'cmt_reg_view',
+      package_id: APP_PKG,
+      items: [{ type: 'view', name: 'myapp_case_grid', existedBefore: true, prevVersion: 1 }],
+      created_at: '2026-08-08T00:00:02.000Z',
+    })], { controlPlane: true });
+    await seedPackageBoundEdit(protocol);
+    expect(registryViewLabel(registry, 'myapp_case_grid')).toBe('Renamed');
+
+    const res = await protocol.revertCommit({ commitId: 'cmt_reg_view' });
+
+    expect(res.failed).toEqual([]);
+    const stored = Array.from(rows.values()).filter((r) => r.name === 'myapp_case_grid');
+    expect(JSON.parse(stored[0].metadata).label).toBe('Cases');
+    // THE LINE THAT WAS RED: pre-fix the registry still served 'Renamed'.
+    expect(registryViewLabel(registry, 'myapp_case_grid')).toBe('Cases');
+  });
+
+  /**
+   * [#6602] The org dimension, INHERITED rather than re-decided here. ADR-0005:
+   * only env-wide rows enter the process-wide SchemaRegistry, and PR #6779 made
+   * `organizationId` a REQUIRED argument of the write-through so no caller can
+   * forget to say which it is. This limb passes the row's own org, so an
+   * org-scoped revert persists and stays out of the shared registry.
+   *
+   * Direction note (measured, not assumed): this case is green BEFORE the fix
+   * as well — pre-fix nothing was written through at all, so "the shared
+   * registry is untouched" was true for the wrong reason. It cannot go red by
+   * removing the write-through; what it goes red on is the write-through
+   * passing anything other than the row's own org, which is the mistake the
+   * required parameter exists to prevent.
+   */
+  it('an ORG-scoped revert persists and still never reaches the process-wide registry', async () => {
+    const { protocol, rows, registry } = makeRealRepoHarness([applyCommit({
+      id: 'cmt_reg_org',
+      package_id: APP_PKG,
+      organization_id: 'org_a',
+      items: [{ type: 'view', name: 'myapp_case_grid', existedBefore: true, prevVersion: 1 }],
+      created_at: '2026-08-08T00:00:02.000Z',
+    })], { controlPlane: true });
+    await protocol.saveMetaItem({
+      type: 'view', name: 'myapp_case_grid', organizationId: 'org_a', packageId: APP_PKG, item: gridBody('Cases'),
+    });
+    await protocol.saveMetaItem({
+      type: 'view', name: 'myapp_case_grid', organizationId: 'org_a', packageId: APP_PKG, item: gridBody('Renamed'),
+    });
+    expect(registryViewLabel(registry, 'myapp_case_grid')).toBeNull();
+
+    const res = await protocol.revertCommit({ commitId: 'cmt_reg_org', organizationId: 'org_a' });
+
+    expect(res.failed).toEqual([]);
+    expect(res.revertedCount).toBe(1);
+    const stored = Array.from(rows.values()).filter((r) => r.name === 'myapp_case_grid');
+    expect(stored[0].organization_id).toBe('org_a');
+    expect(JSON.parse(stored[0].metadata).label).toBe('Cases');
+    expect(registryViewLabel(registry, 'myapp_case_grid')).toBeNull();
+  });
+});
+
+/**
+ * #6621 — the SOFT-REMOVE limb's symmetric decision, and why it is `reuse the
+ * heal` rather than `nothing` or `unregister`.
+ *
+ * Measured on `origin/main`: a first-build undo of a created `object` answered
+ * `success: true`, left zero `sys_metadata` rows for the name, and the registry
+ * kept serving it. Same for a created overlay `view` on a control-plane kernel.
+ * So "do nothing" was not a neutral option — it is the measured defect.
+ *
+ * The heal reused is the one the sibling DELETE caller `deleteMetaItem` runs
+ * after its own `repo.delete` (`restoreArtifactRegistryView`, the #6687
+ * three-tier walk), and the tiers are the reason a flat unregister was
+ * rejected: an overlay that shadows a packaged artifact must fall BACK to the
+ * artifact (tier 1), and only a name no layer serves is retired (tier 3,
+ * #5079). Both cases are pinned below.
+ *
+ * These assert PARITY with `deleteMetaItem` rather than a literal registry
+ * state, deliberately. The two callers perform the same repository delete and
+ * should leave the same runtime view; stating it as parity also keeps the pin
+ * honest about a gap it does NOT close — `restoreArtifactRegistryView` reaches
+ * the `metadata` map but not `objectContributors`, so `getObject` still serves
+ * a soft-removed runtime object. That gap is `deleteMetaItem`'s too (there is
+ * no per-name object unregister in `SchemaRegistry` at all, only
+ * `unregisterObjectsByPackage`), it is not introduced here, and a parity
+ * assertion stays green when it is fixed for both.
+ */
+
+/** The registry facts a soft-remove is allowed to change, as one comparable value. */
+const registryShapeFor = (registry: SchemaRegistry, type: string, name: string) => ({
+  plainKeyEntry: Array.from(
+    ((registry as any).metadata as Map<string, Map<string, unknown>>).get(type)?.keys() ?? [],
+  ).includes(name),
+  itemLabel: (registry.getItem(type, name) as any)?.label ?? null,
+  objectServed: registry.getObject(name) !== undefined,
+});
+
+describe('#6621 — revertCommit SOFT-REMOVE limb heals the registry, like deleteMetaItem', () => {
+  it('a created overlay item stops being served — and matches what deleteMetaItem leaves', async () => {
+    const viaRevert = makeRealRepoHarness([applyCommit({
+      id: 'cmt_reg_new_view',
+      package_id: APP_PKG,
+      items: [{ type: 'view', name: 'myapp_case_grid', existedBefore: false, prevVersion: null }],
+      created_at: '2026-08-08T00:00:02.000Z',
+    })], { controlPlane: true });
+    await viaRevert.protocol.saveMetaItem({
+      type: 'view', name: 'myapp_case_grid', packageId: APP_PKG, item: gridBody('Cases'),
+    });
+    expect(registryViewLabel(viaRevert.registry, 'myapp_case_grid')).toBe('Cases');
+
+    const res = await viaRevert.protocol.revertCommit({ commitId: 'cmt_reg_new_view' });
+    expect(res.failed).toEqual([]);
+    expect(storedRows(viaRevert.rows, 'myapp_case_grid')).toHaveLength(0);
+    // THE LINE THAT WAS RED: pre-fix the registry still served 'Cases'.
+    expect(registryViewLabel(viaRevert.registry, 'myapp_case_grid')).toBeNull();
+
+    // …and it is the SAME view the single-item delete leaves behind.
+    const viaDelete = makeRealRepoHarness([], { controlPlane: true });
+    await viaDelete.protocol.saveMetaItem({
+      type: 'view', name: 'myapp_case_grid', packageId: APP_PKG, item: gridBody('Cases'),
+    });
+    await viaDelete.protocol.deleteMetaItem({ type: 'view', name: 'myapp_case_grid' });
+    expect(registryShapeFor(viaRevert.registry, 'view', 'myapp_case_grid'))
+      .toEqual(registryShapeFor(viaDelete.registry, 'view', 'myapp_case_grid'));
+  });
+
+  /**
+   * Tier 1, and the reason a flat `removeOverlayEntry` was the WRONG answer: a
+   * packaged artifact sits under the reverted overlay, so the revert must leave
+   * the artifact serving the name — not leave the name unresolvable.
+   */
+  it('falls BACK to the packaged artifact when one is underneath, never retiring the name', async () => {
+    const { protocol, registry } = makeRealRepoHarness([applyCommit({
+      id: 'cmt_reg_new_shadow',
+      package_id: APP_PKG,
+      items: [{ type: 'view', name: 'myapp_case_grid', existedBefore: false, prevVersion: null }],
+      created_at: '2026-08-08T00:00:02.000Z',
+    })], { controlPlane: true });
+    // The code package's own artifact, registered under its composite key.
+    (registry as any).registerItem('view', gridBody('Packaged'), 'name', APP_PKG);
+    await protocol.saveMetaItem({
+      type: 'view', name: 'myapp_case_grid', packageId: APP_PKG, item: gridBody('Overlay'),
+    });
+    expect(registryViewLabel(registry, 'myapp_case_grid')).toBe('Overlay');
+
+    await protocol.revertCommit({ commitId: 'cmt_reg_new_shadow' });
+
+    // Not `null` — the artifact default is back (ADR-0005 reset semantics).
+    expect(registryViewLabel(registry, 'myapp_case_grid')).toBe('Packaged');
+  });
+
+  it('an object soft-remove leaves exactly the registry view deleteMetaItem leaves', async () => {
+    const viaRevert = makeRealRepoHarness([objectCommit({
+      id: 'cmt_reg_new_obj',
+      items: [createdItem('myapp_invoice')],
+    })], { controlPlane: true });
+    await seedCreatedObject(viaRevert.protocol, 'myapp_invoice', APP_PKG);
+    expect(registryShapeFor(viaRevert.registry, 'object', 'myapp_invoice').plainKeyEntry).toBe(true);
+
+    const res = await viaRevert.protocol.revertCommit({ commitId: 'cmt_reg_new_obj' });
+    expect(res.failed).toEqual([]);
+    expect(storedRows(viaRevert.rows, 'myapp_invoice')).toHaveLength(0);
+    // THE LINE THAT WAS RED: pre-fix the plain-key entry stayed for the life of
+    // the process, so `GET /meta/object` kept enumerating a reverted-away item.
+    expect(registryShapeFor(viaRevert.registry, 'object', 'myapp_invoice').plainKeyEntry).toBe(false);
+
+    const viaDelete = makeRealRepoHarness([], { controlPlane: true });
+    await seedCreatedObject(viaDelete.protocol, 'myapp_invoice', APP_PKG);
+    await viaDelete.protocol.deleteMetaItem({ type: 'object', name: 'myapp_invoice' });
+    expect(registryShapeFor(viaRevert.registry, 'object', 'myapp_invoice'))
+      .toEqual(registryShapeFor(viaDelete.registry, 'object', 'myapp_invoice'));
+  });
+
+  /**
+   * [#6602] The org gate on this limb is ASYMMETRIC with the write-through's
+   * object branch, on purpose: only an env-wide revert may mutate the registry
+   * every org in this process shares. An org-scoped row never entered it, so
+   * healing on its behalf would retire or un-shadow the ENV-WIDE row's entry —
+   * a per-org undo breaking every other org. Register wide, retire narrow.
+   */
+  it('an ORG-scoped soft-remove leaves the env-wide registry entry alone', async () => {
+    const { protocol, rows, registry } = makeRealRepoHarness([applyCommit({
+      id: 'cmt_reg_new_org',
+      package_id: APP_PKG,
+      organization_id: 'org_a',
+      items: [{ type: 'view', name: 'myapp_case_grid', existedBefore: false, prevVersion: null }],
+      created_at: '2026-08-08T00:00:02.000Z',
+    })], { controlPlane: true });
+    // The env-wide row is what the shared registry holds (ADR-0005).
+    await protocol.saveMetaItem({
+      type: 'view', name: 'myapp_case_grid', packageId: APP_PKG, item: gridBody('EnvWide'),
+    });
+    // …and org A authored its own overlay of the same name.
+    await protocol.saveMetaItem({
+      type: 'view', name: 'myapp_case_grid', organizationId: 'org_a', packageId: APP_PKG, item: gridBody('OrgA'),
+    });
+    expect(registryViewLabel(registry, 'myapp_case_grid')).toBe('EnvWide');
+
+    const res = await protocol.revertCommit({ commitId: 'cmt_reg_new_org', organizationId: 'org_a' });
+
+    expect(res.failed).toEqual([]);
+    // Org A's row really went away…
+    expect(Array.from(rows.values()).filter((r) => r.name === 'myapp_case_grid' && r.organization_id === 'org_a'))
+      .toHaveLength(0);
+    // …and the env-wide entry every other org reads is untouched.
+    expect(registryViewLabel(registry, 'myapp_case_grid')).toBe('EnvWide');
+  });
+});
+
+/**
+ * #6621 — the inheritance. `rollbackToPackageCommit` reverts through the SAME
+ * loop, so a whole-package rollback answered `success: true` while the running
+ * process kept dispatching every reverted-away body. As in #6563's and #6620's
+ * inheritance pins, the status cannot show it: the line that was red is the
+ * REGISTRY copy, not the result shape.
+ */
+describe('#6621 — rollbackToPackageCommit inherits the registry refresh', () => {
+  it('rolls an object edit back through the loop — and the registry copy really moved', async () => {
+    const { protocol, rows, registry } = makeRealRepoHarness([
+      objectCommit({ id: 'cmt_base', items: [], created_at: '2026-08-08T00:00:01.000Z' }),
+      objectCommit({
+        id: 'cmt_edit',
+        items: [{ type: 'object', name: 'myapp_invoice', existedBefore: true, prevVersion: 1 }],
+        created_at: '2026-08-08T00:00:02.000Z',
+      }),
+    ]);
+    await seedObjectEdit(protocol, 'myapp_invoice', APP_PKG);
+    expect(registryObjectFields(registry, 'myapp_invoice')).toContain('due_date');
+
+    const res = await protocol.rollbackToPackageCommit({ commitId: 'cmt_base' });
+
+    expect(res.revertedCommits).toEqual(['cmt_edit']);
+    expect(res.failed).toEqual([]);
+    expect(storedFields(rows, 'myapp_invoice').fields).not.toContain('due_date');
+    // `success: true` was ALREADY true pre-fix — this is the line that was not.
+    expect(registryObjectFields(registry, 'myapp_invoice')).not.toContain('due_date');
+  });
+});
+
 describe('#6620 — rollbackToPackageCommit inherits the per-item soft-remove intent', () => {
   it('rolls a first build back through the loop — and the created row really went away', async () => {
     const { protocol, rows } = makeRealRepoHarness([

@@ -167,18 +167,21 @@ describe('posture reading, with a red control for each', () => {
     // The fixture used to be `security/permission.zod.ts`, whose four sites
     // were the campaign's canonical `z.object(shape, { error }).strict()`
     // wiring; #5593 migrated all four to `strictObject`, so the file no longer
-    // exercises the branch under test. `data/object.zod.ts` carries the
-    // spelling deliberately and is expected to keep carrying it: its two
-    // remaining `{ error: … }` maps are HAND-WRITTEN `$ZodErrorMap`s
-    // (`strictCapabilitiesError`, `strictTenancyError`) that emit a standing
-    // explainer the shared template cannot express, which #6416 recorded as
-    // out of #5593's reach. If they are ever converted, move this fixture
-    // rather than deleting the assertion — the AST reader still has to make
-    // the reading, and `packages/spec` is not the only tree it reads.
+    // exercised the branch under test, and the fixture moved to
+    // `TenancyConfigSchema` — until #6619 folded ITS hand-written map into the
+    // shared template (the set-keyed `guidance` form gave the template the
+    // vocabulary #6416 had recorded as out of reach) and the site became
+    // `strictObject` like the rest. `ObjectCapabilities`, same file, is the
+    // spelling's remaining deliberate carrier: its map
+    // (`strictCapabilitiesError`) emits NO trailing history sentence, which
+    // the shared template still cannot express. If it is ever converted, move
+    // this fixture rather than deleting the assertion — the AST reader still
+    // has to make the reading, and `packages/spec` is not the only tree it
+    // reads.
     const objectSites = analyzeSites(at('data/object.zod.ts'));
-    const tenancy = objectSites.find((s) => s.name === 'TenancyConfigSchema');
-    expect(tenancy?.posture, 'a plain `.strict()` chain is still strict').toBe('strict');
-    expect(tenancy?.idiom).toBe('z.object');
+    const capabilities = objectSites.find((s) => s.name === 'ObjectCapabilities');
+    expect(capabilities?.posture, 'a plain `.strict()` chain is still strict').toBe('strict');
+    expect(capabilities?.idiom).toBe('z.object');
 
     // The permission file's four are now the helper, and still strict — the
     // control that keeps this test a statement about the READER rather than

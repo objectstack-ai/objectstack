@@ -121,7 +121,7 @@ describe('#4626 — engine writes publish true DataEvents', () => {
     const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(task as any);
+    engine.registry.registerObject(task);
     engine.setRealtimeService(realtime);
     warn = vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
   });
@@ -219,7 +219,7 @@ describe('#4626 — engine writes publish true DataEvents', () => {
     const { driver } = makeStubDriver();
     bare.registerDriver(driver, true);
     await bare.init();
-    bare.registry.registerObject(task as any);
+    bare.registry.registerObject(task);
 
     await expect(bare.insert('task', { title: 'no realtime' })).resolves.toBeTruthy();
     expect(published).toHaveLength(0);
@@ -256,7 +256,7 @@ describe('#4639 — predicate writes publish aggregate BulkDataEvents', () => {
     const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(task as any);
+    engine.registry.registerObject(task);
     engine.setRealtimeService(realtime);
     warn = vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
   });
@@ -358,7 +358,7 @@ describe('#4639 — predicate writes publish aggregate BulkDataEvents', () => {
     driver.updateMany = async () => ({ acknowledged: true } as any);
     offContract.registerDriver(driver, true);
     await offContract.init();
-    offContract.registry.registerObject(task as any);
+    offContract.registry.registerObject(task);
     offContract.setRealtimeService(realtime);
     const offWarn = vi.spyOn((offContract as any).logger, 'warn').mockImplementation(() => undefined);
     await offContract.insert('task', [{ title: 'a', status: 'open' }]);
