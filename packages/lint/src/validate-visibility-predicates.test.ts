@@ -7,7 +7,7 @@ import {
   VISIBILITY_ROOT_MISLAYERED,
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_SYNTAX,
-} from './validate-visibility-predicates';
+} from './validate-visibility-predicates.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
 
 describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
