@@ -50,8 +50,28 @@ function buildEnv(now: () => Date, timezone = 'UTC'): Environment {
  * an *undeclared* top-level identifier, i.e. a bare field reference. Generous on
  * purpose: an unknown root is a missed catch, a missing root is a false positive
  * that would break the build, so we err toward declaring more.
+ *
+ * ## Why this list is PUBLISHED (#6713)
+ *
+ * Exported for the same reason as {@link collectCelRootIdentifiers} and
+ * {@link firstUndeclaredReference}: a surface that binds a CLOSED set of roots
+ * has to name the roots it does NOT bind, and that complement is
+ * `SCOPE_ROOTS` minus its own allowlist. `@objectstack/lint`'s field-level
+ * `*When` gate is exactly such a surface — it binds `record` / `previous` /
+ * `parent` and nothing else — and it used to carry a hand-written DENYLIST of
+ * three roots instead. A denylist structurally cannot track this list: every
+ * root added here (`current_user` arrived in #6290) is silently unreported at
+ * that surface until somebody remembers to copy it over, and #6713 measured 21
+ * roots sitting in that gap.
+ *
+ * Consuming the list is NOT the same as consuming {@link firstUndeclaredReference}
+ * and the difference is load-bearing. The strict env also declares CEL's own
+ * TYPE names (`int`, `string`, `bool`, `type`, `map`, …), so
+ * `type(record.x) == string` reports `string` as a root that "resolves" —
+ * legitimate CEL a declaredness oracle cannot tell apart from an unbound
+ * namespace. Membership of THIS list can.
  */
-const SCOPE_ROOTS = [
+export const SCOPE_ROOTS = [
   'record', 'previous', 'input', 'output', 'os', 'vars', 'variables',
   'automation', 'context', 'args', 'item', 'env', 'user', 'step', 'result',
   'trigger', 'event', 'payload', 'data', 'params', 'config', 'settings',

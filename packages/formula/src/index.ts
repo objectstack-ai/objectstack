@@ -25,6 +25,16 @@ export { collectCelRootIdentifiers } from './cel-engine';
 // #4812 removed from that very package. One oracle, one answer to "what
 // resolves", whichever surface is asking.
 export { firstUndeclaredReference } from './cel-engine';
+// #6713 — the namespace-root baseline itself. A surface binding a CLOSED set of
+// roots must name the ones it does NOT bind, and that complement is this list
+// minus the surface's own allowlist; a hand-copied denylist in the consumer
+// cannot track additions here (21 roots were sitting in that gap when
+// `@objectstack/lint`'s field-level `*When` gate was measured). Note the
+// declaredness oracle above cannot substitute: it also declares CEL's TYPE
+// names, so `type(record.x) == string` resolves `string` — legal CEL that
+// membership of this list separates from an unbound namespace and the oracle
+// does not.
+export { SCOPE_ROOTS } from './cel-engine';
 // #4812 — the canonical parse-to-AST entry. Any consumer that needs the AST of
 // an authored CEL source takes it from here, so "what parses" has exactly ONE
 // answer across build, lint and runtime. Building a private `new Environment()`
