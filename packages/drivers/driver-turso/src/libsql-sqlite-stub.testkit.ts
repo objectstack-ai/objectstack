@@ -20,6 +20,7 @@
  * of the transport suites that already mock `execute`.
  */
 
+import type { Client } from '@libsql/client';
 import { createRequire } from 'node:module';
 
 // better-sqlite3 is a knex PEER here and is never imported directly outside
@@ -85,3 +86,22 @@ export function makeLibsqlSqliteStub(filename = ':memory:'): LibsqlSqliteStub {
 
 const normalize = (args: unknown[] | undefined) =>
   (args ?? []).map((a) => (a === undefined ? null : a));
+
+/**
+ * The stub, typed as the `@libsql/client` `Client` that `TursoDriverConfig`
+ * declares — the one place that impedance mismatch is spelled out.
+ *
+ * `LibsqlSqliteStub` implements the three members the driver actually calls
+ * (`execute` / `batch` / `close`), not the whole `Client` interface, so handing
+ * it to the config needs a cast. Suites in this package have each written that
+ * cast themselves as `client: stub as never`, which erases the argument to the
+ * BOTTOM type: `never` is assignable to anything, so it would go on compiling
+ * even if `client` were re-typed to something this stub cannot model at all.
+ * This names the TARGET type instead (the #6204 spelling), so the cast still
+ * asserts something, and it lives once in the testkit rather than once per
+ * suite. Existing `as never` call sites can migrate here; nothing forces them
+ * to do it in the same change.
+ */
+export function asLibsqlClient(stub: LibsqlSqliteStub): Client {
+  return stub as unknown as Client;
+}

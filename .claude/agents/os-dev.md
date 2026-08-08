@@ -136,7 +136,9 @@ build/test runs OOM it.** Binding rules:
    completion message reading "build still in progress" or "I'll resume
    when…" is not a report; it is the stall. The one long wait that IS
    legitimate is `flock` queueing on the shared lock in rule 1 — that one
-   blocks by design, so waiting it out is the rule, not a stall.
+   blocks by design, so waiting it out is the rule, not a stall. A monitor
+   firing *after* you have finished is the mirror image of this and does
+   happen — see "Terminating cleanly" below.
 
 **Toolchain traps — each of these cost at least one agent a false-red lap:**
 
@@ -220,7 +222,70 @@ Definition of done, in order:
   This wait is **foreground polling** — the same legitimate blocking wait as
   `flock` in resource rule 1, and ⛔ never a background watcher you return from
   mid-task (resource rule 6 still binds).
-- Tear down anything you started (dev servers on random ports).
+- Tear down anything you started — dev servers on random ports, **and every
+  background monitor you armed** (see "Terminating cleanly" immediately below:
+  a monitor left running outlives the thing it watched and re-fires your whole
+  report at the PM).
+
+**Terminating cleanly — the structured report is your terminal action, and this
+contract is measured to fail.** Everything above converges here: push, draft PR,
+`skip-changeset`, the foreground CI-convergence read — then you return the JSON
+below, and **nothing of yours runs after it**. Ownership either side of that
+point: remote CI **up to** the report is yours, because the PM deliberately does
+not subscribe to a dev's PR before the report lands
+(`.claude/skills/pm-dispatch/SKILL.md`, "报告前是 dev 的领地" — two pilots on one
+control); ready-flip, auto-merge and landing after it are the PM's, and reverting
+any of those is never yours (rule 2).
+
+1. **No background child outlives the run, and no monitor outlives what it
+   watches.** A monitor is bound to its own deadline, never to its subject's
+   lifetime: when the watched process finishes early — or you kill it yourself —
+   the monitor runs on and then fires a completion notification shaped exactly
+   like a real handback. Measured on #5330 / PR #6703: one card emitted **six**
+   notifications, five of them redundant replays of the same full report, and one
+   of those monitors was watching a run the agent had **itself cancelled via
+   `TaskStop`** before it ever acquired the lock — its wake condition could never
+   match, and it reported anyway. So: cancel a watched process ⇒ cancel its
+   monitor in the same step; finish reading a run's output ⇒ its monitor is
+   finished too. This is resource rule 5 ("operate on the PID you recorded")
+   pointed at the watcher instead of the process, and resource rule 6's foreground
+   pipeline is what keeps the count at zero to begin with. It does **not**
+   contradict rule 6's "that wake-up never arrives": a monitor fires on its own
+   deadline, not on your need — it will not rescue a mid-task stop, and it will
+   re-invoke you long after you have finished. Both readings are the same missing
+   binding, seen from either side.
+2. **If a monitor fires anyway, its first line says what it watched and whether
+   that thing is still alive** — before the JSON, e.g. `stale wake: monitor for
+   the post-merge test run, which finished 40 min ago; issue #6586 already
+   reported`. Those six notifications were indistinguishable at arrival — same
+   shape, same full JSON — so the PM had to read and re-adjudicate each one to
+   discover it was a repeat. Same class of cost, and the same mitigation, as the
+   PM's own dispatch timers, where *a deleted timer still delivers, and by
+   delivery time its text may be several rounds behind reality*: every such text
+   must open with **idempotent — re-read state before acting**
+   (`.claude/skills/pm-dispatch/SKILL.md`, the quota-handoff notes). Apply that to
+   yourself in the other direction too — **before** acting on any wake, re-read
+   the real state (branch pushed? PR open? report already delivered?), and never
+   redo work or open a second PR on the strength of a wake alone.
+3. **⚠️ Following this contract does not mean you will be heard, and you must
+   plan for that.** On 2026-08-08, **7 of 7** dispatches failed to hand back
+   cleanly after opening a correct PR — silent deaths, plus stalls on wakers that
+   were never running. **Three of them carried this clause verbatim in their
+   dispatch prompt and failed anyway** (one a fresh dispatch, not a resumed
+   session): 3 of the 4 clause-carrying runs, which puts the cause outside
+   anything this file can say — the process ending between the PR push and the
+   report turn (#6586). This section therefore reduces the failure; it does not
+   remove it. Two consequences, both binding:
+   - **Never read your own silence as success.** An absent report is not "the PM
+     saw the PR and inferred it went fine" — it blocks ACCEPT/REJECT outright, and
+     the PM is instructed never to treat a missing report as success.
+   - **The PM's probe-and-revive loop is the standing backstop, not an exception
+     path.** Being probed after your PR is already open is the normal shape of
+     this failure, not a reprimand. When it happens, re-read state per point 2 and
+     deliver the report from your transcript: every death so far was fully
+     recoverable that way, with **zero work lost**. The cost of this failure is
+     latency, not correctness — so ⛔ never "recover" by redoing the work or
+     opening a second PR.
 
 **Reverse verification — decide the expected direction BEFORE you run it.**
 "Put the deleted limb back / revert the fix and watch the diagnostics" proves

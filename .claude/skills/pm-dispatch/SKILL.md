@@ -74,6 +74,10 @@ write state only through these signals:
   line is what selection skips on and what the unlock sweep greps for: when
   an issue or PR closes, sweep open `pm:blocked` issues naming it and return
   the unblocked ones to the queue — unlocking is a sweep duty, not a memory.
+  That one reverse index feeds **three** duties, not one: returning the
+  unblocked, **ordering selection by unlock fan-out**, and **re-verifying each
+  returned card's file face at the merged ref** — 都在 step 3「解锁扇出优先」
+  与「解锁那一刻」两段,⛔ 别只做第一件。
 - **A label exists iff something reads it.** Every label above is consumed
   by a named query or gate (selection filters, the unlock sweep, the
   maintainer's inbox filter, the findings-triage round). Do not invent
@@ -121,7 +125,9 @@ protocol is identical.)
 
 ## Operational notes(实测坑位)
 
-队列与平台层的十三条实测结论。共同点:**判据取命令的输出,不取 API 字段的字面值,
+队列与平台层的实测结论,**按发生顺序编号、只在尾部追加**(⛔ 这里不写条数 ——
+它已经烂过一次:标题长期停在「十三条」而正文早已二十条出头,#6492 那份路径清单
+同病。要数量,数编号)。共同点:**判据取命令的输出,不取 API 字段的字面值,
 也不取本地工作树的现状,更不取「看起来相邻」的两行日志** —— 每一条都是在这一步上
 咬过人之后写下来的。
 
@@ -470,6 +476,25 @@ promote、立独立决策卡、扣 auto-merge 留异议窗口。** #6483 裁决�
 notes 6 的对照反查),等读数回贴再派;⛔ 不因「查不了」就当「查过了干净」——
 不可达 ≠ 零命中,这是 notes 6「缺失类读数先证伪扫描器坏了」的跨仓版。
 
+**21. `enable_pr_auto_merge` 对已全绿(`clean`)的 PR 只武装、不入队,且返回空字段
+—— 认签名,翻转一次。** identity 车道 2026-08-06/07 三例一手实测(#6207)。对
+**checks 已全绿、`mergeable_state: clean`** 的 PR 调这个工具:
+
+- **签名**:返回值是**空字段形态**(`method: , enabled at `,对照正常形态
+  `method: MERGE, enabled at <时间戳>`);auto-merge **确实被武装了**(随后
+  `disable` 能成功返回,反证武装生效),但 PR **不会自动入队** —— 无
+  `added_to_merge_queue` 事件,无限期停在「绿后等待入队」。
+- **处方**:`disable_pr_auto_merge` → `enable_pr_auto_merge` **翻转一次**,随后
+  **以队列分支出现为准**验证(notes 1 的两读数照旧,注意 `max_entries_to_build`
+  截断 —— 分支缺席单独不充分)。三例三中:#6034(武装未入队约 1 小时,翻转后
+  入队→队首→落地)、#6092、#6197(两例当场翻转、`pr-6092` / `pr-6197` 队列分支
+  确认后落地)。
+- **对照组**:对 checks 还在跑(`blocked`)的 PR 调同一工具,返回完整字段、行为
+  正常(绿后自动入队)—— #6086 / #6067 / #6107。所以**别把这条读成「这个工具坏
+  了」**:它只在「PR 已经全绿」这一支上退化。
+- 代价参照:#6034 首例在识别出签名之前静默停摆约 1 小时。工具行为在平台侧,仓内
+  能做的就是把签名与处方钉在这里,免得每个新 PM 会话重踩一遍。
+
 The product spans three repos with a fixed dependency direction:
 `objectstack` (backend; `packages/spec` is the single contract) →
 `objectui` (frontend; its build flows back via `pnpm objectui:refresh`) and
@@ -623,12 +648,20 @@ issues that collide on shared files — and「谁来分诊」原本是每个 PM 
   自查一贴的成本是零;发现不符,当场改正文 + 审计评论,不等冲突发生。这与
   「从 labels 重建状态」同源:贴正文也是状态,读它、修它,不靠记忆。Routine
   座位的**收尾简报**也落自己的座位贴(它是下一轮自退守卫的读数)。
+- **热文件串行队 —— 正文里给它一个具名段。** 批次独立性(step 3)是**每轮**现算的,
+  但一个热文件的**排队顺序**是**常设事实**:它跨轮、跨班次存在,接任者必须能直接
+  读到,而不是从一堆认领评论里重新推。段内三列:**文件 → 有序卡片清单 → 每张卡认领
+  的是哪个区域**。实测:`domain:metadata` 席一个任期里,
+  `packages/metadata-protocol/src/protocol.ts` 一个文件背了**五**张卡
+  (#6215 → #6190 → #6563 → #6479 → #5079),另有别的座位的 #5839 认领压在第三个区域上;
+  该席临时用了这么一段,正是它让**连续三次同文件派发零碰撞**(#6644)。区域列是关键
+  —— 同一文件的不相交区域可以并行,写清楚才敢并行,写不清楚就只能整文件串行。
 - **交接收尾清单(座位退场序列,漏一步就是给接任者留残缺现场)**:
   1. ⛔ 立即停止新派发(交接令生效即冻结);
   2. 在手工件清零 —— 在飞 dev 收单、已 ACCEPT 的 PR 跟到 MERGED 或明确移交;
   3. 全量枚举本车道队列 + 决策箱 + findings,形成接任台账;
   4. 本座位贴正文改写为「⏳ 待认领」+ 完整台账(前任会话 ID、注销时间、账面、
-     队列快照、跨车道备忘);
+     队列快照、**热文件串行队**、跨车道备忘);
   5. 审计评论存档(session ID + 接任指引:`/pm-dispatch 接手` + 先读座位贴);
   6. `list_triggers` 清理**或随移交物转交**本会话全部自设定时器(⛔ 不再重挂;
      守夜随座位移交 —— 绑着移交中 PR 的定时器随该 PR 转交,不清);
@@ -657,8 +690,8 @@ issue 的子任务)需要另一个座位范围内的改动 —— 姊妹仓座�
 - **Shared contract surfaces have one owner**: anything touching
   `packages/spec` transfers to the **`domain:spec` 座位** regardless of who
   needs it — only that seat sees the spec queue's in-flight batch and the
-  generated-baseline collisions(`.gitattributes` 的 `merge=os-regen` 那八条
-  路径,见「入队与落地 A」)。
+  generated-baseline collisions(`.gitattributes` 里路由到 `merge=os-regen` 的
+  那组路径,**条数以 `grep os-regen .gitattributes` 当场为准**,见「入队与落地 A」)。
 - 跨仓 parent/sub-issue 链的**拆分与排序**由**分诊座位**一次做完(rule 2 的
   contract-first 拆分 + `Blocked-by:` 行),各段的落地由各自座位按依赖顺序
   自然接续 —— 没有第二个协调者,也不需要有。
@@ -1202,9 +1235,49 @@ an issue to a later round, record the known trap on it before the round ends.
 (assign + claim comment + race check 一步不少)。此前协议通篇没有这个标签的
 消费者,违反「a label exists iff something reads it」—— 本段就是它的读取方。
 
-**发版板优先。** 批次选择时 `target:<major>` 板上项排在普通队列项之前(仅次于
-`priority:p0` 插队;两者叠加 = 最高优先)。板上项照常受同文件串行与认领协议
-约束 —— 优先是排序,不是豁免。
+**解锁扇出优先 —— 队列视图看不见「谁挡着谁」。** 阻塞关系只写在**被挡那一侧**的
+正文里(`Blocked-by: #N`),上游单身上没有任何痕迹:在队列视图里,一条链的链头
+与一张孤立的 p3 长得一模一样。2026-08-07 解锁扫描实测:**#5702** 自 08-06T06:47Z
+起可派发、压了约两天没人扫,身后排着 #5814 / #5893 / #6337 三张;**#6428** 更尖锐
+—— 它不带任何优先级标签,却挡着 #5491 + #5492(维护者当日裁定必须同批落地的
+v17 安全批的两半),#5492 自己又挡着 #5493。
+
+- **扇出是算出来的,不是声明的**:对开着的 `pm:blocked` issue 建一次 `Blocked-by: #N`
+  的**反向索引** —— 解锁扫描本来就要做这一遍读,增量成本为零。
+- **选择优先级**:`priority:p0` 插队 > **扇出 ≥ 2 的上游单** > `target:` 板上项 >
+  普通队列项。
+- ⛔ **优先是排序,不是豁免**:同文件串行、认领协议、批次独立性一条不减。
+- ⛔ **不要为此发明新标签**。`pm:blocking` 之类需要一个生产者,而没有读者的标签
+  必然烂(「a label exists iff something reads it」)。扇出可以从协议已经在维护的
+  数据里推出来,推它就只有一个真相源,也就不会漂移;顺带把激励摆正了 —— 解别人
+  锁的活先做,吞吐是复利。
+
+**解锁那一刻,两类断言同时最不可信 —— 反向索引的同一遍读要连带查这两件事。**
+`Blocked-by:` 卡描述的是**立单时**的缺陷,在阻塞期间被冻住;而按构造,**关掉上游的
+那个合并,正是最可能已经顺手把你这张卡也修掉的提交** —— 由 advisory 立的卡尤其如此
+(advisory 描述的是那个 PR 分支自己的状态,PR 落地前就可能自愈)。两条连带动作:
+
+- **卡内文件面要在合并后的 ref 上重验**(`git grep` / `git show <合并 sha> -- <路径>`),
+  ⛔ 「上游已关/已合」不等于「卡还成立」。#6413 是标本:#5055 的 PR #6385 于
+  17:39:30Z 合入,分诊席 17:54:18Z(**15 分钟后**)贴出「前提已核」并援引
+  `widget-contract.mdx:14/:181/:184`、`quick-reference.mdx:55` —— 那些行号**只**匹配
+  `f7bd4e235^`(合并前的父提交),#6385 本身已经重写了其中一页(+62/−156)、改指了
+  另一页的行、删掉了该行链接的生成页。车道席 23:17:06Z 的解锁裁决又把这份未经复核的
+  说法原样带了下去。两处旧条款(step 1 陈旧前提检查、解锁扫描)**字面上都被满足了**
+  —— 它们查的是**上游的状态**,不是**卡在上游 ref 上的前提**。最后是 dev 用
+  premise-first 纪律顶回来的:`premise_still_valid: false`、零字节改动。根因同
+  Operational notes 4(读 `origin/main`,不读工作树)。
+- **PM 自己「这条裁决收窄/关掉了那张卡」的判断,是假设不是前提**。它必须以
+  「**PM 机制假设(须实测,鼓励证伪)**」的身份进派发令(step 5 的分区块措辞),
+  ⛔ 不许写成既成事实。实测:`domain:metadata` 席在 #6190 的解锁评论里断言该卡已被
+  PR #6478「实质收窄」,dev 验证**证伪**了它 —— #6478 只关掉了 overlay 那一层,
+  `allowRuntimeCreate` 那层仍在铸 org-scoped 行,原症状完好。被证伪就**在同一张卡上
+  公开更正**,再重新分诊(#6644;这是 step 7「dev 纠正 PM 要当众认」那条用在 PM
+  的判断上,而不是用在诊断上)。
+
+**发版板优先。** 批次选择时 `target:<major>` 板上项排在普通队列项之前(位次见上面
+那条选择优先级;与 `priority:p0` 叠加 = 最高优先)。板上项照常受同文件串行与认领
+协议约束 —— 优先是排序,不是豁免。
 
 ### 4. Claim
 
@@ -1324,7 +1397,9 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
 - The issue is already claimed; do not touch its assignee.
 - Deliver: implementation + tests + changeset, pushed, as a DRAFT PR in
   {target_repo} whose body starts with "Fixes {backlog_repo}#{n}".
-  Never merge anything.
+  Never merge anything. 如果你只实现了这张卡的一半(另一半 needs_decision 待裁,
+  或按范围被有意排除),首行改写成 "Part of {backlog_repo}#{n}" 并在正文说明留下
+  的是哪一半 —— ⛔ 不要用 `Fixes` 关掉一张还在决策箱里的卡。
 - If the issue underspecifies a decision that changes the public contract
   (spec schema, API shape, naming), STOP and return status "needs_decision"
   with your open questions — do not guess.
@@ -1339,6 +1414,17 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
   六个门却漏掉不在记忆清单里的 `check:engine-double-contract`;改为「从 lint.yml
   逐个列门跑全」后被后续四个 dev 继承,再无门红。门禁族跑在 ESLint / TypeScript
   Type Check 两个 job 里(Operational notes 10)。
+- 新 worktree 里的**第一条验证命令是 build,不是 typecheck / test**:`pnpm install`
+  之后先把被改包的**依赖闭包**建起来(`pnpm --filter '@objectstack/你的包^...' build`,
+  后缀 `^...` = 它依赖的包)。跳过这步,tsc 读到的是别人留下的陈旧 `dist/*.d.ts`,
+  假红假绿两个方向都会骗人(#6371)。
+- 「消费半径清扫」的过滤器**方向是前缀**:`pnpm --filter '...@objectstack/你的包'`
+  才是**下游消费者**;`'@objectstack/你的包...'`(后缀)扫的是上游依赖,方向反了。
+  签名收窄 / 导出类型变更 / 契约收紧打到的永远是下游。报告里写「N 个包全绿」时
+  **必须同时写清用的哪个方向**,否则这句话无法复核(#6218)。
+- 跨包类型改动(签名收窄、导出类型变更)光贴一个绿**不构成**清扫证据:附一次
+  反向验证 —— 临时塞一个新类型不认的键、确认它会红、再还原 —— 证明你确实读到了
+  新的 `.d.ts`。
 - If your change touches `packages/spec`: spec build(`gen:schema`)会**重写锚点**
   `authorable-surface.base.json` —— 那是预期产物,⛔ 不要 revert、不要手改;
   何时写/往哪写见 #5358/#5370,字节门见 #4650。
@@ -1347,6 +1433,29 @@ Follow your operating procedure (you are the os-dev agent). Non-negotiables:
   2026-08-06). Quote existing Chinese rulings verbatim without translating.
 Return ONLY the JSON report defined in your agent definition.
 ```
+
+**上面三条验证条款治的是同一个病:验证动作看起来做了,实际对被测风险失明。**
+两种失明,成因不同、处方不同,一个 PR 可以同时踩中(#6210 就是),而且叠加之后
+症状互相掩盖 —— 方向扫反 + 产物陈旧,得到的「25 个包全绿」既不相关也不新鲜:
+
+- **时序错(#6371)** —— 包集合对,但读的是过期事实。新 worktree `pnpm install`
+  之后直接 `typecheck` / `test`,跨包依赖的 `dist/*.d.ts` 要么不存在要么陈旧。
+  它**两个方向都骗人,且骗法不对称**:*假红*只烧时间(dev 去修一个不存在的问题
+  —— #6203 烧了三个来回,#5962 报了 15 个包的红);*假绿*更危险 —— 收窄了导出
+  类型,下游读的还是**旧** `.d.ts`,于是下游 typecheck 报绿,而那个绿**什么也没
+  证明**,dev 会把它当作「消费半径已清扫」写进 PR,复核方从报告里看不出区别。
+  同一天连咬三个 dev(#5962 / #6210 / #6203)。正面样本是 #6212 的 A+E 批:PR 里
+  点名「driver-sqlite-wasm 读的是 driver-sql 重建后的 `dist/*.d.ts`」,先 build 再
+  typecheck,**并且**用一次故意的反向验证坐实自己确实读到了新 `.d.ts`。
+- **方向错(#6218)** —— 扫的包集合本身就不相关。pnpm 的省略号**有方向**:
+  后缀 `'pkg...'` = 该包 + **它依赖的**(上游闭包),前缀 `'...pkg'` = 该包 +
+  **依赖它的**(下游消费者)。#6210 收窄五个驱动的方法签名后按后缀扫,报告
+  「25 个包全绿」,CI 全仓 typecheck 随即红在 `@objectstack/dogfood`(120 个任务
+  118 绿)—— 那句「全绿」在方法论上与被测风险完全无关,却读起来像一次充分的清扫。
+
+**破坏性 / 契约收紧类改动以全仓门禁为准**;局部闭包只能用来加速迭代,⛔ 不能
+用来下结论。这一族的第三个成员是拒收用例的恒绿(#6142,见 step 7 复核清单)——
+三者的共同形状是「绿色输出 ≠ 该绿证明了被测风险」。
 
 **派发令里的机制性指导分两个区块,措辞决定 dev 敢不敢证伪。** 一班三次前提证伪
 (#5885)都发生在 PM 附带的机制说明上:#5561(「注册告警无需动 spec」—— 实测
@@ -1828,8 +1937,9 @@ Routine 的取舍是:凡验证管线可能超过一个 fire 的活,**一开始�
 You are the reviewer of record. For each report, verify against GitHub — not
 against the report's own claims:
 
-- The PR exists, is a draft, targets `main`, and its body references
-  `Fixes #{n}`.
+- The PR exists, is a draft, targets `main`, and its body's first line
+  references the card — **`Fixes #{n}` only if merging it should close the
+  card**;否则 `Part of #{n}`(见下面「`Fixes` 还是 `Part of` 是 PM 的判断」)。
 - Fetch the PR's changed files. Scope check: no `content/docs/releases/`
   edits, a `.changeset/*.md` is present for anything user-visible, no files
   plainly unrelated to the issue.
@@ -1866,6 +1976,13 @@ against the report's own claims:
   实测:`driver-sql` 删闸后 22 红中多数是裸 knex Error,`code` / `status` 均
   `undefined`),于是「28 例全绿」这种报告读起来是覆盖、实际证不了拒收。缺断言判
   REWORK 补齐,而不是接受绿色输出。本条是 step 5 那条标准条款在复核侧的对账。
+- **报告里的「N 个包全绿」,问清方向与时序,否则不算清扫证据。** 判据:本单含跨包
+  签名收窄 / 导出类型变更 / 契约收紧。两问 ——(1)过滤器用的是**前缀** `'...pkg'`
+  (下游消费者)还是后缀 `'pkg...'`(上游依赖)?方向没写就无法复核,#6210 的
+  「25 个包全绿」用的是后缀,CI 全仓随即红在 `@objectstack/dogfood`;(2)跑
+  typecheck 之前**建过依赖闭包**吗?没建则读的是陈旧 `dist/*.d.ts`,那个绿可能是
+  假绿(#6371)。两问都没答案 ⇒ 以全仓门禁结论为准,或判 REWORK 要证据。本条是
+  step 5 那两条验证条款在复核侧的对账。
 - **Did the dev verify the issue's premise?** The report's
   `premise_still_valid` field makes the answer explicit — a `false` there
   reopens triage rather than failing review. A report that falsifies the
@@ -1934,6 +2051,25 @@ Verdict per issue:
   only** — the PM's own tooling PRs stay with the maintainer(唯一例外见
   Guardrails:维护者明示授权的 `.claude/` 工具 PR,授权引用于 PR 正文 +
   walkthrough 复核,不得自审自合)。
+
+  **`Fixes` 还是 `Part of` 是 PM 的判断,而且必须在入队之前核。** dev 的默认模板
+  写的是 `Fixes`;当这一单只落地了**可实施的那一半**(另一半 `needs_decision` 还在
+  维护者决策箱里,或按范围被有意排除),PR 首行必须是 **`Part of #N`** —— 否则合并
+  会**静默关掉一张正躺在决策箱里的卡**,而 `needs-user-decision` 的收件箱过滤只看
+  **开着的** issue:卡一关,那个待裁问题就此无人可见,且没有任何读者会知道它消失过。
+  实测:#6190 的 dev 把 loud-log 那一半开成 PR #6600 时带的是 `Fixes`,复核时抓到、
+  入队前改掉(dev 改后回读:`Fixes objectstack` 命中 0 次);若照原样合了,那个
+  两问的契约裁决就从收件箱里蒸发了。**翻 ready 之前亲核首行**,别只信报告(#6644)。
+
+  **卡的交付物里含系统性 sweep 时,ACCEPT 评论把 sweep 的产物成组列出。** 判据:
+  这一单做的是 D5 式退场审计、消费半径 grep、语料扫描一类的**系统性排查**。此时
+  「范围外发现照旧单开」(PD #10)会一次性吐出一**批**卡:#3682(ADR-0106,L,
+  `mode:cloud`)一次派发就产出 3 张退场审计 finding(#6599 / #6601 / #6603)+ 1 张
+  跨座位转席卡(#6622)+ 1 条决策箱上报,另有 3 处 ADR 自己没点名的退场在 PR 内修掉。
+  这个量级下,分诊席需要它们**作为一个集合**到达,并且要知道**这次 sweep 的判据是
+  什么** —— 否则就是一小时内飘来五张互不相干的卡,只能一张张重新推断关系。所以
+  ACCEPT 评论里列成一块,并写明 sweep 判据,让分诊能一致地给整批定级,而不是逐张
+  各判各的(#6644)。
 - **REWORK** — concrete, itemized feedback; re-dispatch the same issue with
   the feedback block filled (same claim, new dev agent). **Max 2 rework
   rounds** per issue; a third failure escalates instead.
@@ -1949,27 +2085,29 @@ Verdict per issue:
 
 **A. 碰生成物的 PR,入队前必须先同步 + 整体重生成。** 第 3 步只保证**同一批内**
 file-disjoint;它管不到**先后两单都碰 `packages/spec` 生成物**的情形 —— 而协议变更
-几乎必然如此。`.gitattributes` 把这八条路径路由到 `merge=os-regen`(⛔ 别只记住前
-五条 —— 后三条是文档产物,同样会被静默吞):
+几乎必然如此。被路由到 `merge=os-regen` 的路径清单**当场读、不照抄**:
 
-```
-packages/spec/spec-changes.json
-packages/spec/authorable-surface/**
-packages/spec/authorable-surface.base.json
-packages/spec/json-schema.manifest/**
-packages/spec/api-surface/**
-packages/spec/api-surface-signatures.json
-docs/protocol-upgrade-guide.md
-docs/audits/2026-07-unknown-key-strictness-ledger.counts.md
-content/docs/references/**
+```bash
+grep os-regen .gitattributes   # 唯一权威清单;⛔ 别把结果抄进派发令当常量
 ```
 
-最后那条是 #5107 加的:strictness 台账的**数字**转成了生成物(`gen:strictness-ledger`),
+⛔ **别只记住 `packages/spec/` 那几条** —— 清单里同时有**文档产物**
+(`docs/` 与 `content/docs/references/**`),它们同样会被静默吞。
+
+**这份清单不能有第二份拷贝 —— 本节曾亲自示范为什么(#6492)。** 协议此处一度
+内嵌一份路径拷贝,于是同一件事有了三个互相矛盾的读数:散文说「八条」、紧随其下的
+代码块列**九**条、`.gitattributes` 实际路由**十**条(缺的是
+`packages/spec/authorable-defaults/**`)。更要命的是漂移**还在加速**:#6492 分诊
+两次测量之间(同一天,相隔约一小时)清单本身又动过,两次读数就不一样。一份「读起来
+完整、实际不完整」的清单比没有清单更贵 —— 派发令照它枚举,dev 拿到的是一张自称
+齐全的漏项检查表,而 os-regen 的失败是**静默**的(见下)。所以本节只留取数命令:
+散文没法被类型检查,唯一不会烂的拷贝是不存在的那份。同源条款见 step 5 的编译面
+清单(#5905)与 `Record` 反烂模式(#6322)。
+
+清单里有一条需要额外分辨:`docs/audits/2026-07-unknown-key-strictness-ledger.counts.md`
+是 #5107 加的 —— strictness 台账的**数字**转成了生成物(`gen:strictness-ledger`),
 散文仍手写在同名的 `.md` 里。派 #4001 后续批次时要分清 —— **台账正文照常文本合并
 (它一直合得很干净),只有 `.counts.md` 走驱动**。
-
-权威清单是 `.gitattributes` 本身(`grep os-regen .gitattributes`),不是这份拷贝 ——
-它增删过,以文件为准。
 
 该驱动会让 merge **exit 0、零冲突标记**,却**静默丢掉一侧的改动** —— 只有重新生成
 才暴露。2026-08-03 一天内在 #4809 / #4846 / #4841 三个 PR 上各复现一次。要求 dev
@@ -2298,7 +2436,8 @@ Stop the loop and report when any of these hits:
 有任何 dev 在飞即收紧回 ≤45),待命职责五项 ——
 
 1. findings 分诊配合(执行座位侧:补实测证据、上报异议;分诊本身归分诊座位);
-2. `pm:blocked` 解锁扫描(上游 issue/PR 关闭即回队);
+2. `pm:blocked` 解锁扫描(上游 issue/PR 关闭即回队;回队前在合并后的 ref 上重验
+   卡内文件面,并顺手更新扇出反向索引 —— 见 step 3 那两段);
 3. 在飞/已入队 PR 跟到 MERGED(入队与落地 B 的车道半边);
 4. 决策箱提醒 —— 仅在轮次报告中列出待决清单,⛔ 不 nag 维护者;
 5. 跨车道备忘跟进(转席单、`Blocked-by:` 链的对侧动静)。

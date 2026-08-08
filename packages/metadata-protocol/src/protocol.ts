@@ -5883,7 +5883,55 @@ export class ObjectStackProtocolImplementation implements
         // listener never breaks the write (the engine catches + logs).
         const dropped: DroppedFieldsEvent[] = [];
         opts.onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push(e); };
-        const result = await this.engine.update(request.object, request.data, opts);
+        // [#6479] At THIS ingress the row is the one the caller named — `request.id`,
+        // the path `:id` — and nothing in the payload gets to move it.
+        //
+        // The engine's dispatch reads the PAYLOAD first: a truthy scalar `data.id`
+        // outranks `options.where.id` (`engine-update-dispatch.ts`, case *"a SCALAR
+        // data.id still wins over a scalar where.id"* — `expectId: 'rec_1'`). That
+        // rule is correct and deliberate for a caller who hands ObjectQL a payload
+        // and nothing else (#5748 / PR #5919, ruling A); it is a HOLE here, because
+        // this caller has already named the row twice — in the URL and in `where` —
+        // and the three gates around this line all judge THAT row:
+        //
+        //   probe   → `probeRecord(object, request.id)`      (existence, #4435)
+        //   OCC     → `assertVersionOf(…, request.id, …)`    (If-Match / expectedVersion)
+        //   receipt → `{ id: request.id, record: result }`
+        //
+        // Passing `request.data` verbatim let a body `{"id":"rec_2"}` on
+        // `PATCH /data/task/rec_1` bind rec_2: probed rec_1, OCC-checked rec_1,
+        // WROTE rec_2, and answered `id: rec_1` beside rec_2's readback. rec_2 was
+        // never probed and never version-checked, so a client that GETs a record,
+        // edits it and PUTs the whole body back — with the wrong row's id picked up
+        // from a mis-clicked list or a stale refresh — performed a silent cross-row
+        // write past its own `If-Match`.
+        //
+        // The fix is the shape the BULK ingress has always used for the same
+        // question (`rest-server.ts`, batch `update`: `ql.update(op.object,
+        // { ...data, id }, …)` — the operation's id after the spread, so it wins).
+        // Two ingresses, one answer (#4550 / #4434). It changes no engine verdict:
+        // the call still dispatches `by-id`, on the id `where` already carried.
+        //
+        // Deliberately NOT route B (400 on mismatch) or route C (ban `id` in
+        // `UpdateDataRequestSchema`) — both were rejected by the 2026-08-08 triage
+        // ruling on #6479; B installs a new rejection on a shipped API and C
+        // changes the accepted request shape.
+        //
+        // A non-record payload is passed through UNTOUCHED (`undefined`, `null`, an
+        // array): the engine reads `data.id` unguarded on purpose, so `undefined`
+        // is its `TypeError`, and an ingress that answered a non-record payload
+        // more kindly than the producer would be the very looseness
+        // `engine-update-dispatch.ts` exists to prevent. Those shapes carry no
+        // scalar `id` to outrank `where.id` either, so the invariant holds for them
+        // through `opts.where` alone.
+        const writeData = (
+            request.data !== null
+            && typeof request.data === 'object'
+            && !Array.isArray(request.data)
+        )
+            ? { ...(request.data as Record<string, unknown>), id: request.id }
+            : request.data;
+        const result = await this.engine.update(request.object, writeData, opts);
         return {
             object: request.object,
             id: request.id,
