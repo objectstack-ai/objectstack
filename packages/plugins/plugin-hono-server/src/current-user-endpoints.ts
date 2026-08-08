@@ -517,10 +517,17 @@ export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
             // construction: a missing engine or an absent table yields an
             // empty-but-valid envelope rather than an exception, so no read
             // here needs its own guard.
-            const grants = await resolveUserAuthzGrants(getObjectQL(), userId, {
-                tenantId,
-                seedEmail: session.user.email ? String(session.user.email) : undefined,
-            });
+            //
+            // No `seedEmail`: that option exists for a caller holding an email
+            // the resolver cannot read back (the API-key path, which has no
+            // session). Here the resolver's own `sys_user` read — the row it
+            // loads anyway for the `ai_seat` synthesis — answers it, and
+            // `sys_user.email` is unique by the auth invariant, so the two
+            // sources cannot disagree. `AuthSessionApi.getSession` declares
+            // `user: { id?: string }` and nothing more; reading an undeclared
+            // `email` off it through `any` is the #4127 shape, and widening
+            // that contract needs a call site that actually requires it.
+            const grants = await resolveUserAuthzGrants(getObjectQL(), userId, { tenantId });
             // [#2408 / #3361] Open the per-request `Server-Timing` disclosure
             // gate for an admin/service principal — the standalone-surface analog
             // of the runtime dispatcher's `timedResolveExecutionContext`. The rung
