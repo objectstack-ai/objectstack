@@ -393,10 +393,14 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
 
   /**
    * A FIELD-level conditional rule (`visibleWhen` / `readonlyWhen` /
-   * `requiredWhen`) that reaches for `current_user` — the one root the field
-   * level does not bind (#6146, measured at both ends: `evalFieldPredicate` /
-   * `resolveFieldRuleState` bind `record` + `previous` + `parent` and nothing
-   * else, and objectui#1582's authoring autocomplete pins the same three).
+   * `requiredWhen`) that reaches for the signed-in user — under its canonical
+   * spelling `current_user` or either of its ADR-0068 D1 aliases, `user` and
+   * `ctx.user` — the one thing the field level does not bind (#6146, measured
+   * at both ends: `evalFieldPredicate` / `resolveFieldRuleState` bind `record`
+   * + `previous` + `parent` and nothing else, and objectui#1582's authoring
+   * autocomplete pins the same three). The third root is matched WHOLE (any
+   * `ctx` read, not only `ctx.user`) — see "Why THREE roots" below for the
+   * measurement that decides it.
    *
    * ## Why this is a rule of its own rather than a missing root
    *
@@ -430,18 +434,58 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
    * options resolve against the host's predicate scope, which binds
    * `current_user` (ADR-0068 / objectui#2284) — that surface is where such a
    * predicate belongs, which is why it is also the first prescription below.
+   *
+   * ## Why THREE roots, and why `ctx` is judged whole-root (#6585)
+   *
+   * ADR-0068 D1 makes `user` and `ctx.user` ALIASES of `current_user` — one
+   * `EvalUser` object under every spelling (`buildScope` in
+   * `formula/stdlib.ts` hangs the same reference on `current_user` / `user` /
+   * `ctx.user` / `os.user`). Matching only the canonical spelling meant the
+   * identical semantic error got a diagnostic under `current_user` and total
+   * silence under the aliases — which spelling the author picked decided
+   * whether they got the diagnostic, the exact fork AI authors cannot
+   * self-check. All three roots now share one verdict and one prescription;
+   * the message names the spelling found, nothing else varies.
+   *
+   * `ctx` is judged as a WHOLE root, not only in `ctx.user` form, because at
+   * this surface that is simply what is true: `buildScope` creates the `ctx`
+   * root ONLY when the evaluation carries a user (`scope.ctx = { user }`
+   * inside `if (ctx.user !== undefined)`), and no field-level site passes one
+   * — the server binds `record`+`previous`(+`parent`) (`rule-validator.ts`
+   * `readonlyWhenBindings` / the `requiredWhen` block) and the client's
+   * `evalFieldPredicate` binds `record`+`previous`+caller `scope` (only ever
+   * `{ parent }`). So `ctx.locale` faults exactly like `ctx.user.id` here.
+   * `ctx` IS ActionEngine's predicate root elsewhere — the platform's real
+   * `ctx.user` predicates all sit on action `visible` (`sys-user.object.ts`,
+   * `sys-invitation.object.ts`), a surface this helper never reads — and
+   * measured usage of field-level `*When` with ANY user root is zero across
+   * examples/, packages/ and objectui (#6585's sweep).
+   *
+   * The rejected alternative was matching `ctx` only in its `ctx.user` form.
+   * `collectCelRootIdentifiers` reports ROOTS and drops member names by
+   * design, so that reading needs a source-level spelling match — and a
+   * spelling match is precisely the defect this rule exists to remove: it
+   * would re-open the same fork one level down (`ctx["user"].id` silent,
+   * `ctx.user.id` rejected), while leaving a real fail-open fault (`ctx.locale`)
+   * unreported for the sake of a narrower rule NAME.
    */
+  const FIELD_UNBOUND_USER_ROOTS = ['current_user', 'user', 'ctx'] as const;
   const checkFieldRuleUserRoot = (where: string, slot: string, raw: unknown): void => {
     const source = celSourceOf(raw);
     if (!source) return;
     const roots = collectCelRootIdentifiers(source);
-    if (!roots.ok || !roots.roots.includes('current_user')) return;
+    if (!roots.ok) return;
+    // One issue per slot even when a predicate reaches for two of them; the
+    // tie-break is this list's order (canonical spelling first), so the message
+    // is stable rather than dependent on AST walk order.
+    const root = FIELD_UNBOUND_USER_ROOTS.find((r) => roots.roots.includes(r));
+    if (root === undefined) return;
     issues.push({
       where,
       message:
-        `\`${slot}\` reads \`current_user\`, but a field-level conditional rule binds only ` +
+        `\`${slot}\` reads \`${root}\`, but a field-level conditional rule binds only ` +
         `\`record\` (plus \`previous\`, and \`parent\` on a master-detail line item) — ` +
-        `\`current_user\` is unbound here, so the predicate faults and falls back to VISIBLE, ` +
+        `\`${root}\` is unbound here, so the predicate faults and falls back to VISIBLE, ` +
         `leaving the field the test was meant to hide showing for everyone (#6146). ` +
         `To gate the CHOICES of a select by user, move the predicate to the option's own ` +
         `\`visibleWhen\` (\`options: [{ …, visibleWhen: … }]\`) — per-option is the one \`*When\` ` +

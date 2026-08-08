@@ -752,6 +752,170 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     });
 
     /**
+     * ── The ADR-0068 aliases get the SAME field-level verdict (#6585) ────────
+     *
+     * D1 makes `user` and `ctx.user` aliases of `current_user` — `buildScope`
+     * hangs one `EvalUser` reference on all three spellings — so the semantic
+     * error above is the same error under any of them. #6584's first cut
+     * matched only the canonical spelling: `'admin' in user.positions` and
+     * `'admin' in ctx.user.positions` sailed through in silence (both roots
+     * have always been in `SCOPE_ROOTS`, so the bare-ref check never fired
+     * either), and which spelling the author picked decided whether they got a
+     * diagnostic. These tests close that fork and pin its edges.
+     *
+     * `ctx` is pinned WHOLE-ROOT deliberately: at field level `buildScope`
+     * never creates `ctx` at all (it exists only when the evaluation carries a
+     * user, which no field-level site passes), so `ctx.locale` faults exactly
+     * like `ctx.user.id`. The other side of that decision is pinned too —
+     * `ctx.user` on an ACTION `visible` (ActionEngine's surface, where `ctx`
+     * genuinely binds — the platform's own `sys_user` actions ship it) must
+     * stay accepted.
+     */
+    describe('`user` / `ctx.user` aliases at field level (#6585)', () => {
+      const slots = ['visibleWhen', 'readonlyWhen', 'requiredWhen'] as const;
+
+      it.each(slots)('rejects `user` on %s — same object as `current_user`, same unbound surface', (slot) => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { amount: { type: 'number', [slot]: "'admin' in user.positions" } },
+          }],
+        });
+        const hit = issues.filter((i) => i.where === `object 'showcase_deal' · field 'amount' ${slot}`);
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.severity).toBe('error');
+        // The message names the spelling the author WROTE — a diagnostic that
+        // talks about `current_user` to an author who typed `user` sends them
+        // hunting for text that is not in their file.
+        expect(hit[0]!.message).toMatch(/`\w+` reads `user`/);
+      });
+
+      it.each(slots)('rejects `ctx.user` on %s', (slot) => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { amount: { type: 'number', [slot]: "'admin' in ctx.user.positions" } },
+          }],
+        });
+        const hit = issues.filter((i) => i.where === `object 'showcase_deal' · field 'amount' ${slot}`);
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.severity).toBe('error');
+        expect(hit[0]!.message).toMatch(/`\w+` reads `ctx`/);
+      });
+
+      /**
+       * The whole-root half of the `ctx` decision: a `ctx` read that never
+       * touches `.user` is just as unbound at field level — `buildScope` only
+       * creates the root when a user is carried, and no field-level site
+       * carries one — so it must not slip through a `.user`-form-only match.
+       */
+      it('rejects a bare-`ctx` NON-user read too — the root itself is unbound at field level', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: { amount: { type: 'number', visibleWhen: "ctx.locale == 'en'" } },
+          }],
+        });
+        const hit = issues.filter((i) => i.where.includes("field 'amount' visibleWhen"));
+        expect(hit).toHaveLength(1);
+        expect(hit[0]!.message).toMatch(/`visibleWhen` reads `ctx`/);
+      });
+
+      it.each(["'admin' in user.positions", "'admin' in ctx.user.positions"])(
+        'gives %s the SAME prescriptions as the canonical spelling — no per-spelling fork',
+        (predicate) => {
+          const [issue] = validateStackExpressions({
+            objects: [{
+              name: 'showcase_deal',
+              fields: { amount: { type: 'number', visibleWhen: predicate } },
+            }],
+          }).filter((i) => i.where.includes('visibleWhen'));
+          // Same three prescriptions the #6290 message test pins for
+          // `current_user`, plus the same direction-of-failure sentence.
+          expect(issue!.message).toMatch(/falls back to VISIBLE/);
+          expect(issue!.message).toMatch(/option's own `visibleWhen`/);
+          expect(issue!.message).toMatch(/readable: false/);
+          expect(issue!.message).not.toContain('record.current_user');
+        },
+      );
+
+      /**
+       * The whole-root widening makes root-vs-MEMBER discrimination newly
+       * load-bearing: `record.user_id` and `record.ctx_key` name the very
+       * strings this rule now rejects, but as MEMBERS of `record` — and
+       * `collectCelRootIdentifiers` drops member names by design. A rule that
+       * confused the two would reject the single most ordinary predicate an
+       * author writes (an owner check), which is the failure mode that would
+       * make this widening worse than the hole it closes.
+       */
+      it('does NOT trip on a `record` MEMBER merely spelled like one of the roots', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_deal',
+            fields: {
+              user_id: { type: 'text' },
+              ctx_key: { type: 'text' },
+              amount: {
+                type: 'number',
+                visibleWhen: "record.user_id != '' && record.ctx_key == 'x'",
+              },
+            },
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+
+      /**
+       * The widening is FIELD-level only. Option-level `visibleWhen` resolves
+       * against the host predicate scope, where `buildScope` mounts the SAME
+       * user object under every ADR-0068 spelling — so an option predicate is
+       * legal under the aliases exactly as it is under `current_user`.
+       */
+      it('still ACCEPTS an option-level `visibleWhen` spelling the `user` alias', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'showcase_cascading_select',
+            fields: {
+              tier: {
+                type: 'select',
+                options: [
+                  { label: 'Standard', value: 'standard', default: true },
+                  { label: 'Restricted', value: 'restricted', visibleWhen: "'admin' in user.positions" },
+                ],
+              },
+            },
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+
+      /**
+       * The blast-radius pin the #6585 measurement was for: `ctx` IS
+       * ActionEngine's predicate root, and the platform's own metadata ships
+       * `ctx.user` action predicates (`sys-user.object.ts` "visible:
+       * record.id == ctx.user.id", `sys-invitation.object.ts`). The field-level
+       * rejection must not leak onto the action surface.
+       */
+      it('still ACCEPTS `ctx.user` on an action `visible` — ActionEngine binds `ctx`', () => {
+        const issues = validateStackExpressions({
+          objects: [{
+            name: 'sys_user',
+            fields: { email: { type: 'text' } },
+            actions: [{
+              // The exact shape `packages/platform-objects/src/identity/
+              // sys-user.object.ts:291` ships (`id` is a registry-injected
+              // column, so the field-existence pass resolves it too).
+              name: 'change_password',
+              type: 'script',
+              visible: 'record.id == ctx.user.id',
+            }],
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+    });
+
+    /**
      * ── The option-level traversal itself (#6290 half 3) ────────────────────
      *
      * Accepting `current_user` at the option level cannot be the only evidence

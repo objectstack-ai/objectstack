@@ -1,0 +1,190 @@
+{
+  "$comment": "Capability-coverage ratchet for the platform test checklist. The universe of governed metadata kinds is DERIVED at check time from packages/spec/liveness/*.json (the ADR-0049 ledger set) — this file must map EVERY kind to at least one checklist item, or waive it with a reason. scripts/check-platform-checklist.mjs flags both directions: an unmapped kind (the platform grew a capability the checklist doesn't test) and an entry for a kind with no liveness ledger (orphan, mirrors the liveness ORPHAN discipline). NOTE: this check runs on a MANUAL/periodic cadence (`pnpm check:platform-checklist`), not in per-PR CI — see docs/qa/platform-checklist/README.md 'Operating cadence'. Pattern copied from examples/app-showcase/src/coverage.ts (demonstrated-or-waived, ADR-0060 house ledger style).",
+  "metadataKinds": {
+    "action": {
+      "items": [
+        "records-forms.action-param-widgets",
+        "ai.mcp-run-action-exposure-gate",
+        "records-forms.action-location-matrix"
+      ]
+    },
+    "agent": {
+      "items": [
+        "ai.agent-tool-skill-metadata-roundtrip",
+        "ai.open-edition-honest-degradation"
+      ]
+    },
+    "api": {
+      "items": [
+        "api-backend.declarative-endpoint-execution"
+      ]
+    },
+    "app": {
+      "items": [
+        "platform-core.boot-health",
+        "platform-core.nav-surfaces-render"
+      ]
+    },
+    "book": {
+      "waived": "docs-shaped content kind (display-only, ADR-0033 exemption class). The console DOES ship a docs/book reader (objectui apps/console DocPage/BookPage) — but the kind is authored-content-as-data with no independent runtime behavior to gate beyond serving; parse coverage exists via the spec's own tests. Waived for behavior, not for lack of a surface."
+    },
+    "dashboard": {
+      "items": [
+        "dashboards.strict-widget-rejects-stray-keys",
+        "dashboards.chart-type-matrix",
+        "dashboards.global-filters-rescope",
+        "dashboards.chart-first-paint",
+        "dashboards.empty-null-bucket-boundaries"
+      ]
+    },
+    "dataset": {
+      "items": [
+        "dashboards.dataset-report-authoring"
+      ]
+    },
+    "datasource": {
+      "items": [
+        "integration-system.external-datasource-federated-read"
+      ]
+    },
+    "doc": {
+      "waived": "docs-shaped content kind (display-only, ADR-0033 exemption class) — same posture as `book`: a reader surface exists in the console, but there is no runtime behavior to assert beyond serving."
+    },
+    "email_template": {
+      "items": [
+        "integration-system.email-template-render"
+      ]
+    },
+    "field": {
+      "items": [
+        "records-forms.field-type-matrix",
+        "records-forms.conditional-rules-header",
+        "records-forms.cascading-options",
+        "records-forms.lookup-picker-create-new"
+      ]
+    },
+    "flow": {
+      "items": [
+        "automation.flow-node-type-matrix",
+        "automation.trigger-type-matrix",
+        "automation.flow-error-handling",
+        "automation.screen-flow-roundtrip",
+        "automation.durable-suspend-restart",
+        "automation.flow-runs-page-test-trigger",
+        "automation.flow-toggle-kill-switch"
+      ]
+    },
+    "hook": {
+      "items": [
+        "records-forms.object-hook-lifecycle"
+      ]
+    },
+    "job": {
+      "items": [
+        "integration-system.job-scheduled-run"
+      ]
+    },
+    "mapping": {
+      "items": [
+        "records-forms.named-import-mapping"
+      ]
+    },
+    "object": {
+      "items": [
+        "records-forms.crud-roundtrip",
+        "platform-core.metadata-authoring-roundtrip",
+        "studio-authoring.object-designer-roundtrip"
+      ]
+    },
+    "page": {
+      "items": [
+        "studio-authoring.record-page-roundtrip",
+        "platform-core.nav-surfaces-render"
+      ]
+    },
+    "permission": {
+      "items": [
+        "access-security.crud-permission-matrix",
+        "access-security.owd-sharing-matrix",
+        "access-security.fls-mask-and-strip",
+        "access-security.rls-both-sides",
+        "access-security.sharing-rules-widen",
+        "access-security.record-share-grant-revoke",
+        "access-security.permission-matrix-edit-loop",
+        "access-security.sharing-rule-authoring-ui",
+        "access-security.owd-save-gate",
+        "access-security.share-link-capability-tokens"
+      ]
+    },
+    "position": {
+      "items": [
+        "access-security.scope-depth-asymmetry",
+        "approvals.per-group-signoff",
+        "approvals.dynamic-approver-routing",
+        "identity-auth.teams-bu-membership"
+      ]
+    },
+    "query": {
+      "items": [
+        "api-backend.query-contract-matrix"
+      ]
+    },
+    "report": {
+      "items": [
+        "dashboards.dataset-report-authoring",
+        "dashboards.drill-through-range",
+        "dashboards.saved-report-ownership"
+      ]
+    },
+    "seed": {
+      "items": [
+        "platform-core.seed-integrity"
+      ]
+    },
+    "skill": {
+      "items": [
+        "ai.agent-tool-skill-metadata-roundtrip",
+        "ai.skill-instructions-mcp-prompts"
+      ]
+    },
+    "tool": {
+      "items": [
+        "ai.agent-tool-skill-metadata-roundtrip"
+      ]
+    },
+    "translation": {
+      "items": [
+        "i18n.surface-matrix",
+        "i18n.strict-translation-key-rejection",
+        "i18n.build-gates-hold"
+      ]
+    },
+    "validation": {
+      "items": [
+        "access-security.write-path-guards",
+        "records-forms.conditional-rules-header",
+        "records-forms.validation-rule-type-matrix"
+      ]
+    },
+    "view": {
+      "items": [
+        "records-forms.view-type-gallery",
+        "records-forms.form-view-gallery",
+        "records-forms.list-view-capabilities",
+        "studio-authoring.view-authoring-live",
+        "records-forms.gantt-interactions",
+        "records-forms.saved-view-management"
+      ]
+    },
+    "webhook": {
+      "items": [
+        "integration-system.webhook-lifecycle"
+      ]
+    },
+    "capability": {
+      "items": [
+        "access-security.capability-declaration-lifecycle"
+      ]
+    }
+  }
+}

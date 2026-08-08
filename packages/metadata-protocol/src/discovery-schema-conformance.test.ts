@@ -125,6 +125,41 @@ describe('[#4828] getDiscovery() conforms to DiscoverySchema', () => {
   });
 
   // ═════════════════════════════════════════════════════════════════════════
+  // [#6633] The direct-mount surface keys: `packages` flows, `datasources`
+  // deliberately does not
+  // ═════════════════════════════════════════════════════════════════════════
+  describe('[#6633] direct-mount surface keys', () => {
+    it('advertises `routes.packages` iff the `package` service is registered', async () => {
+      // Registered — the same predicate that gates the @objectstack/rest
+      // direct-mount registrar (`direct-mount-composition.ts`), so on the host
+      // that serves this builder's shape, advertised ⇔ mounted.
+      const withPackage: any = await makeImpl(new Map([['package', {}]])).getDiscovery();
+      expect(withPackage.routes.packages).toBe('/api/v1/packages');
+
+      // Absent — nothing mounts the surface for this boot, so the key is
+      // absent, never a promise of a 404 (ADR-0076 D12).
+      const without: any = await makeImpl().getDiscovery();
+      expect(Object.prototype.hasOwnProperty.call(without.routes, 'packages')).toBe(false);
+    });
+
+    it('does NOT advertise `datasources` — this builder knows nothing about the federation mount', async () => {
+      // Same disposition as `mcp` above: the `datasources/:name/external/*`
+      // family is mounted by the REST host (unconditionally, 503-degrading),
+      // which this builder cannot see — and the runtime dispatcher serves no
+      // /datasources domain at all. Even a registered `external-datasource`
+      // service says nothing about an HTTP mount, so advertising here would be
+      // the advertise-the-unmounted half of D12. The REST discovery endpoint
+      // advertises it from its recorded direct mounts.
+      const discovery: any = await makeImpl(
+        new Map([['external-datasource', {}]]),
+      ).getDiscovery();
+
+      expect(Object.prototype.hasOwnProperty.call(discovery.routes, 'datasources')).toBe(false);
+      expect(declaredRouteKeys().has('datasources')).toBe(true);
+    });
+  });
+
+  // ═════════════════════════════════════════════════════════════════════════
   // [#5672] Fullness: the vocabulary, whole, from every producer
   // ═════════════════════════════════════════════════════════════════════════
   //
