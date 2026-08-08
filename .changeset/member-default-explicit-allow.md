@@ -2,6 +2,8 @@
 "@objectstack/plugin-security": major
 ---
 
+<!-- adr-0087: not-required (no-migration-prescription) what this change removes is a VALUE in one platform-seeded sys_permission_set row, not an authorable key. No spec schema key is retired: object_permissions['*'] stays fully authorable, and admin_full_access / organization_admin / viewer_readonly still ship one. Nothing an app authored becomes invalid, nothing stored fails to parse, and the seeded row itself is rewritten by the boot seeder, so there is no stored shape for `objectstack migrate meta` to rewrite and nothing for the ledger to carry. The Migration section below prescribes a DEPLOYMENT action -- declare the object access you were relying on -- not a consumer code or metadata rewrite. -->
+
 fix(plugin-security)!: `member_default` no longer grants a `*` wildcard — the platform baseline is explicit-allow (#5491)
 
 **This is a deliberate, breaking narrowing of the default security posture.
