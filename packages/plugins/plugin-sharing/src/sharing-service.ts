@@ -7,6 +7,7 @@ import type {
   GrantShareInput,
   SharingExecutionContext,
   ShareAccessLevel,
+  SharingWriteVerdict,
 } from '@objectstack/spec/contracts';
 import {
   normalizeTenancyPosture,
@@ -416,52 +417,184 @@ export class SharingService implements ISharingService {
   }
 
   /**
+   * [#6428] The two reasons {@link shouldBypass} answers `true` are NOT the
+   * same verdict, and merging them is what the tri-state exists to undo.
+   *
+   * - `context.isSystem` → **`allow`**. A platform-internal writer (audit,
+   *   migrations, this plugin's own reconciliation) is positively permitted;
+   *   the contract calls it a complete bypass, and a composing caller must not
+   *   re-gate it behind somebody else's floor.
+   * - a bypass-LISTED object → **`abstain`**. Record sharing simply does not
+   *   enforce on `sys_user` / `sys_record_share` / … — it is not a statement
+   *   that the write is permitted, and whatever else guards those tables
+   *   (RLS, the platform ownership floor) still decides.
+   *
+   * `null` = "no bypass applies, keep evaluating".
+   */
+  private bypassVerdict(
+    object: string,
+    context: SharingExecutionContext,
+  ): SharingWriteVerdict | null {
+    if (context?.isSystem) return 'allow';
+    if (this.bypassObjects.has(object)) return 'abstain';
+    return null;
+  }
+
+  /**
+   * [#6428] The one place an unresolvable write gate becomes a verdict.
+   *
+   * **`deny`, never `abstain`** — the two are opposite instructions to a
+   * composing caller (`abstain` hands the row to another authority, `deny`
+   * ends it), and reading a failed lookup as "no opinion" is exactly the
+   * confusion that produced #5492's measured fail-open. Logged rather than
+   * swallowed: a silently-denied write is indistinguishable from a legitimate
+   * refusal, which is how a broken engine looks like a permissions problem.
+   */
+  private writeGateFailClosed(
+    verb: 'update' | 'delete',
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+    err: unknown,
+  ): SharingWriteVerdict {
+    this.logger?.error?.(
+      `[sharing] the ${verb} gate could not resolve a verdict for '${object}' record `
+      + `'${recordId}' (user ${context?.userId ?? 'unknown'}) — DENYING (fail-closed, #6428): `
+      + 'a failed lookup is a refusal, never an abstention',
+      err instanceof Error ? err : new Error(String(err)),
+    );
+    return 'deny';
+  }
+
+  /**
+   * [#6428] Tri-state UPDATE verdict — the single place the update gate is
+   * decided, and the primary form of {@link canEdit}.
+   *
+   * `allow` when a POSITIVE basis exists: ownership (widened by write DEPTH),
+   * an explicit write-level share, or — [#4647] — the `modifyAllRecords`
+   * super-user bypass. That bypass branch is what makes "Modify All Data" mean
+   * what it says (an admin edits any record regardless of ownership — #1883's
+   * Salesforce reference frame) on rows the DEPTH fast-path cannot reach: an
+   * OWNERLESS row (`owner_id` NULL, which system-context seeds routinely
+   * produce) matches no owner set at any depth, so ownership alone refused it.
+   *
+   * `abstain` when record sharing does not enforce on the row at all — a
+   * public object, an object with no `owner_id` field, a bypass-listed
+   * internal, an object with no resolvable schema. Historically these returned
+   * the same `true` as a real grant, and #5492's E2 experiment measured what
+   * that costs a caller which lets the answer OVERRIDE the platform's
+   * `created_by` ownership floor: an ordinary member's cross-creator UPDATE
+   * succeeded on owner-less objects, where the floor alone had been refusing it.
+   *
+   * `deny` for everything else, including a lookup that throws.
+   */
+  async checkEdit(
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+  ): Promise<SharingWriteVerdict> {
+    const bypass = this.bypassVerdict(object, context);
+    if (bypass) return bypass;
+
+    try {
+      const schema = this.engine.getSchema?.(object);
+      if (!schema) return 'abstain';
+      const model = effectiveSharingModel(schema);
+      if (model === 'public') return 'abstain';
+      if (!hasOwnerField(schema)) return 'abstain';
+      if (!context.userId) return 'deny';
+
+      // 1) Ownership (write DEPTH widens the owner-set) — fast path.
+      if (await this.matchesOwnerScope(object, recordId, context)) return 'allow';
+
+      // 2) Explicit write-level share (`edit`, plus not-yet-normalised `full`).
+      const editGrants = await this.engine.find('sys_record_share', {
+        where: {
+          object_name: object,
+          record_id: recordId,
+          recipient_type: 'user',
+          recipient_id: context.userId,
+          access_level: { $in: [...WRITE_ACCESS_LEVELS] },
+        },
+        fields: ['id'],
+        limit: 1,
+        context: SYSTEM_CTX,
+      });
+      if (Array.isArray(editGrants) && editGrants.length > 0) return 'allow';
+
+      // 3) [#4647] Modify All Data — the explicit bypass, asked LAST and
+      // answered by the same predicate `security/explain` reports.
+      return (await this.hasModifyAllBypass(object, context)) ? 'allow' : 'deny';
+    } catch (err) {
+      return this.writeGateFailClosed('update', object, recordId, context, err);
+    }
+  }
+
+  /**
    * Return `true` if the caller may UPDATE `(object, recordId)`: ownership
    * (widened by write DEPTH), an explicit write-level share, or — [#4647] —
    * the `modifyAllRecords` super-user bypass. Always `true` for system context,
    * public objects, and objects without an owner field.
    *
-   * The bypass branch is what makes "Modify All Data" mean what it says
-   * (an admin edits any record regardless of ownership — #1883's Salesforce
-   * reference frame) on rows the DEPTH fast-path cannot reach: an OWNERLESS
-   * row (`owner_id` NULL, which system-context seeds routinely produce) matches
-   * no owner set at any depth, so ownership alone refused it.
+   * [#6428] The two-state PROJECTION of {@link checkEdit}: `true` for every
+   * verdict that is not `deny`. The truth table is byte-for-byte the historical
+   * one — `abstain` is where the old `true` for public / owner-less / bypassed
+   * objects went — so every existing caller (the sharing middleware, the
+   * `sys_attachment` parent gate, the ADR-0055 master check) keeps its exact
+   * semantics. A caller that would let this answer OVERRIDE another authority
+   * must read {@link checkEdit} instead, because only there is "I permit this"
+   * distinguishable from "I do not enforce here".
    */
   async canEdit(
     object: string,
     recordId: string,
     context: SharingExecutionContext,
   ): Promise<boolean> {
-    if (this.shouldBypass(object, context)) return true;
+    return (await this.checkEdit(object, recordId, context)) !== 'deny';
+  }
 
-    const schema = this.engine.getSchema?.(object);
-    if (!schema) return true;
-    const model = effectiveSharingModel(schema);
-    if (model === 'public') return true;
-    if (!hasOwnerField(schema)) return true;
-    if (!context.userId) return false;
+  /**
+   * [#6428 / ADR-0111 D3] Tri-state DELETE verdict — the primary form of
+   * {@link canDelete}.
+   *
+   * Deliberately NARROWER than {@link checkEdit}: `allow` is ownership (widened
+   * by write DEPTH) or the `modifyAllRecords` super-user bypass — and NOTHING
+   * ELSE. An `edit` (or legacy `full`) share opens update but not delete
+   * (sharing widens rows, never verbs), so a share holder gets `deny` here
+   * while `checkEdit` answers `allow` on the same row. The `abstain` set is
+   * IDENTICAL to `checkEdit`'s: both gates agree about which objects sharing
+   * enforces on, and differ only about the verb.
+   *
+   * [#4647] The bypass is asked EXPLICITLY (`hasWriteBypass`) instead of only
+   * riding in as `__writeScope === 'org'`. The scope proxy was silently
+   * partial: `matchesOwnerScope` refuses an OWNERLESS row before it ever looks
+   * at the scope, so a Modify All Data holder could not delete a row with a
+   * NULL `owner_id` — while `security/explain` said the bypass applied.
+   */
+  async checkDelete(
+    object: string,
+    recordId: string,
+    context: SharingExecutionContext,
+  ): Promise<SharingWriteVerdict> {
+    const bypass = this.bypassVerdict(object, context);
+    if (bypass) return bypass;
 
-    // 1) Ownership (write DEPTH widens the owner-set) — fast path.
-    if (await this.matchesOwnerScope(object, recordId, context)) return true;
+    try {
+      const schema = this.engine.getSchema?.(object);
+      if (!schema) return 'abstain';
+      if (effectiveSharingModel(schema) === 'public') return 'abstain';
+      if (!hasOwnerField(schema)) return 'abstain';
+      if (!context.userId) return 'deny';
 
-    // 2) Explicit write-level share (`edit`, plus not-yet-normalised `full`).
-    const editGrants = await this.engine.find('sys_record_share', {
-      where: {
-        object_name: object,
-        record_id: recordId,
-        recipient_type: 'user',
-        recipient_id: context.userId,
-        access_level: { $in: [...WRITE_ACCESS_LEVELS] },
-      },
-      fields: ['id'],
-      limit: 1,
-      context: SYSTEM_CTX,
-    });
-    if (Array.isArray(editGrants) && editGrants.length > 0) return true;
+      // Ownership / write DEPTH only — no share branch. This is the whole
+      // difference from checkEdit.
+      if (await this.matchesOwnerScope(object, recordId, context)) return 'allow';
 
-    // 3) [#4647] Modify All Data — the explicit bypass, asked LAST and answered
-    // by the same predicate `security/explain` reports.
-    return this.hasModifyAllBypass(object, context);
+      // [#4647] Modify All Data — the same explicit bypass checkEdit consults.
+      return (await this.hasModifyAllBypass(object, context)) ? 'allow' : 'deny';
+    } catch (err) {
+      return this.writeGateFailClosed('delete', object, recordId, context, err);
+    }
   }
 
   /**
@@ -473,31 +606,15 @@ export class SharingService implements ISharingService {
    * rows, never verbs. Always `true` for system context, public objects, and
    * objects without an owner field, matching {@link canEdit}.
    *
-   * [#4647] The bypass is now asked EXPLICITLY (`hasWriteBypass`) instead of
-   * only riding in as `__writeScope === 'org'`. The scope proxy was silently
-   * partial: `matchesOwnerScope` refuses an OWNERLESS row before it ever looks
-   * at the scope, so a Modify All Data holder could not delete a row with a
-   * NULL `owner_id` — while `security/explain` said the bypass applied.
+   * [#6428] The two-state PROJECTION of {@link checkDelete}, on the same rule
+   * as {@link canEdit}: `true` for everything that is not a `deny`.
    */
   async canDelete(
     object: string,
     recordId: string,
     context: SharingExecutionContext,
   ): Promise<boolean> {
-    if (this.shouldBypass(object, context)) return true;
-
-    const schema = this.engine.getSchema?.(object);
-    if (!schema) return true;
-    if (effectiveSharingModel(schema) === 'public') return true;
-    if (!hasOwnerField(schema)) return true;
-    if (!context.userId) return false;
-
-    // Ownership / write DEPTH only — no share branch. This is the whole
-    // difference from canEdit.
-    if (await this.matchesOwnerScope(object, recordId, context)) return true;
-
-    // [#4647] Modify All Data — the same explicit bypass canEdit consults.
-    return this.hasModifyAllBypass(object, context);
+    return (await this.checkDelete(object, recordId, context)) !== 'deny';
   }
 
   /**

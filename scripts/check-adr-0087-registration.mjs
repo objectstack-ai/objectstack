@@ -116,12 +116,17 @@
 // breaking changesets carry such a prescription, and it covers 4 of the 5 that did
 // register -- a genuine forcing function, not a blanket demand.
 //
-// #6419 repaired the detector behind it. It had been matching the literal
-// PLACEHOLDER words `FROM`/`TO` -- so `迁移:FROM → TO` (the template) was caught
-// while `迁移:`aggregate:` → `aggregations:`` (a real prescription) was not, and
-// the better the prescription the more invisible it was. It now also reads
-// framing-anchored rewrites in both languages. The full argument, the measured
-// numbers and the deliberate residual blind spot are at hasMigrationPrescription.
+// #6419 and #6497 repaired the detector behind it, twice, for one recurring
+// reason: the more carefully an author writes a prescription, the less it looks
+// like the shape the detector was pattern-matching. #6419 -- it had been matching
+// the literal PLACEHOLDER words `FROM`/`TO`, so `迁移:FROM → TO` (the template)
+// was caught while `迁移:`aggregate:` → `aggregations:`` (a real prescription) was
+// not. #6497 -- both branches then required an ARROW, so a rewrite written as a
+// two-column table under `## Migration` read as no prescription at all, and four
+// declared-breaking changesets were holding the exemption on that gap. It now
+// reads framing-anchored rewrites in both languages, in arrow form and in table
+// form. The full argument, the measured numbers and the deliberate residual blind
+// spot are at hasMigrationPrescription.
 //
 // ## Absence is never a pass (#4690)
 //
@@ -250,10 +255,10 @@ export function breakingDeclaration(parsed) {
 //
 // ## What replaced it
 //
-// Two branches, unioned. The first is the OLD pattern, kept verbatim, so the new
-// detector is a strict SUPERSET of the old one: nothing that used to be refused
-// can now slip through, and the `no-migration-prescription` exemption can only
-// have got harder to claim, never easier.
+// Three branches, unioned, each ADDED without touching the ones before it, so the
+// detector is a strict SUPERSET at every step: nothing that used to be refused can
+// now slip through, and the `no-migration-prescription` exemption can only have got
+// harder to claim, never easier.
 //
 //   1. THE LABEL CONVENTION -- `FROM`/`TO` used as a section label, table header
 //      or code comment. Measured: this is a genuine house convention, not one
@@ -267,19 +272,58 @@ export function breakingDeclaration(parsed) {
 //      `**迁移**:`aggregate:` → `aggregations:`` and every other honestly-written
 //      prescription in either language.
 //
-// ## What it moved (measured on the stock, both versions run over it)
+//   3. A FRAMED REWRITE TABLE -- a markdown table row inside a heading-framed
+//      region, carrying an OPERAND in two or more DISTINCT cells (#6497). Branches
+//      1 and 2 both require an ARROW, and a large class of this repo's changesets
+//      writes its rewrite instructions as a two-column table under `## Migration`
+//      with no arrow anywhere:
 //
-// 1342 changesets, 235 of them declared-breaking (the only population this gate
-// judges). Old detector: 113 hits, 87 of them breaking. New detector: 122 hits,
-// 92 breaking. NINE newly flagged, ZERO no longer flagged -- the superset property
-// is a measurement, not a claim. Seven of the nine are prescriptions the old
-// pattern missed (`r.deleted` → `r.success`; `改名 HttpMethodSchema →
-// HttpMethodSubsetSchema`; `rename `group` → `team``; a `OLD.x` → `previous.x`
-// migration table; ...). Two are false positives, both on changesets that declare
-// NO breaking change and are therefore never judged -- an error-message template
-// diagram (`[ Did you mean `k1` → `canonical`? ]`) and a docs-only changeset
-// describing a theme engine's internal token mapping. Verdict impact of the false
-// positives on the current tree: zero.
+//          ## Migration
+//
+//          | Wrote                                   | Write instead                 |
+//          | ---                                     | ---                           |
+//          | `new HttpServer(new HonoHttpServer(p))` | register the `HonoHttpServer` |
+//
+//      That is `runtime-httpserver-wrapper-retired.md` (#5122), verbatim shape. The
+//      arrowless table was read as "no prescription at all", so the changeset
+//      landed in the exempt bucket -- and the lesson from #6419 applies word for
+//      word one spelling over: a table that spells out "what you wrote / what to
+//      write instead" carries MORE information than one arrow line, and was
+//      precisely the shape the detector could not read. In a table the CELL
+//      BOUNDARY does the arrow's job, which is why the arm asks for the same thing
+//      the arrow arm asks for -- code-ish operands on two sides -- and reads the
+//      `|` instead of the `→`.
+//
+// ## What it moved (measured on the stock, every version run over it)
+//
+// #6419, branch 2 added. 1342 changesets, 235 of them declared-breaking (the only
+// population this gate judges). Old detector: 113 hits, 87 of them breaking. New
+// detector: 122 hits, 92 breaking. NINE newly flagged, ZERO no longer flagged --
+// the superset property is a measurement, not a claim. Seven of the nine are
+// prescriptions the old pattern missed (`r.deleted` → `r.success`; `改名
+// HttpMethodSchema → HttpMethodSubsetSchema`; `rename `group` → `team``; a `OLD.x`
+// → `previous.x` migration table; ...). Two are false positives, both on changesets
+// that declare NO breaking change and are therefore never judged -- an error-message
+// template diagram (`[ Did you mean `k1` → `canonical`? ]`) and a docs-only
+// changeset describing a theme engine's internal token mapping. Verdict impact of
+// the false positives on the current tree: zero.
+//
+// #6497, branch 3 added. 1384 changesets, 241 declared-breaking. Before: 129 hits,
+// 97 breaking. After: 133 hits, 101 breaking. FOUR newly flagged, ZERO no longer
+// flagged, and the superset property is STRUCTURAL here rather than measured --
+// branches 1 and 2 are evaluated first and return on the spot, so the table hit is
+// only ever consulted when they found nothing (it is `old(body) ?? table(body)`,
+// written as one pass).
+//
+// The table arm's FALSE-POSITIVE surface was measured before it was written, on the
+// whole stock rather than on the four changesets that motivated it: it fires on 7
+// changesets in 1384, ALL SEVEN declared-breaking, and all seven are genuine rewrite
+// prescriptions on inspection -- three were already refused via branch 1, and the
+// four new ones are `runtime-httpserver-wrapper-retired.md`,
+// `etl-author-shape-aliases.md`, `retire-three-deprecated-aliases.md`,
+// `unknown-key-strictness-ui-batch15.md`. Zero false positives, breaking or not.
+// That is not luck; it is what the framing anchor buys, and the two wider rules
+// measured alongside it (below) show what the same table rule costs without it.
 //
 // ## Why anchored on framing rather than on the arrow alone (measured)
 //
@@ -293,25 +337,69 @@ export function breakingDeclaration(parsed) {
 // NODE_ENV normalizer). Framing is what separates "here is what you must rewrite"
 // from "here is what the code does".
 //
-// ## The residual blind spot, stated rather than hidden (measured)
+// ## The residual blind spot, stated rather than hidden (measured, re-measured)
 //
-// Framing-anchored means an UNFRAMED rename table is still missed. Measured over
-// the same stock: 128 changesets carry a code-to-code rewrite that this detector
-// does not flag, 21 of them declared-breaking -- typically the
-// `unknown-key-strictness-*` and `adr-0112-*` batches, whose bodies list
-// `old` → `new` pairs under a plain heading with no migration word anywhere near
-// them. Anyone widening this later should start there, with these numbers to
-// beat.
+// ⚠️ The version of this paragraph that shipped with #6419 was WRONG, and #6497 is
+// what it cost. It said the residue was the UNFRAMED rewrite table -- which read as
+// "everything an author frames is seen". It was not: a table framed by a textbook
+// `## Migration` heading was missed too, because both branches required an arrow
+// and a table has none. Four declared-breaking changesets were holding the
+// `no-migration-prescription` exemption on exactly that gap. A self-description
+// that under-states a gate's blind spot is worse than none, because it is what the
+// next reader trusts instead of measuring; so the number below is what remains
+// AFTER branch 3, and it says which shapes, not just how many.
 //
-// Two wider rules were measured and REJECTED as noisier than they are useful:
-// firing on any line carrying >=2 rewrites takes the declared-breaking hit count
-// 92 -> 102 but adds 35 changesets to hand-check, of which a clear minority are
-// prescriptions; firing on ANY code-to-code arrow takes it to 250 hits / 113
-// breaking and is plainly a different check (it flags behaviour tables and worked
-// examples). An honestly-scoped detector beats a noisy one here because a FALSE
-// POSITIVE has no honest escape: the author is refused an exemption they are
-// entitled to and the closed vocabulary offers them nothing else -- which is the
-// #6419 shape itself, one category over.
+// What is still missed, measured over the 1384-changeset stock after branch 3
+// (each number is "changesets / of those, declared-breaking"):
+//
+//   * NO FRAMING AT ALL -- an `old` → `new` list or table under a plain heading
+//     with no migration word anywhere near it: 132 / 21. Typically the
+//     `unknown-key-strictness-*` and `adr-0112-*` batches. This is the honest
+//     residue of anchoring on framing, and it is deliberate.
+//   * FRAMED BY A LABEL, NOT A HEADING -- `**Migration.**` on its own line, then
+//     the table: 4 / 2 (`data-driver-find-stream-retired.md`,
+//     `storage-service-list-retired.md`). A framing LABEL does not open a framed
+//     region today; only a HEADING does.
+//   * FRAMED ONLY BY THE TABLE'S OWN HEADER CELLS in a vocabulary
+//     MIGRATION_FRAMING_RE does not carry -- `| Wrote | Write instead |`,
+//     `| Removed | Live replacement |`, `| you wrote | write instead |`,
+//     `| Was | Now |`: 14 / 11. This is a real house convention (four spellings,
+//     11 declared-breaking changesets) and reading it needs a NEW closed
+//     vocabulary of old/new column words, which is its own measurement job and its
+//     own false-positive surface. Not done here on purpose.
+//
+// Anyone widening this later should start with the last two, with these numbers to
+// beat, and should re-measure the false-positive surface FIRST -- as #6419 and
+// #6497 both did, and as the four rules below were rejected for failing.
+//
+// FOUR wider rules were measured and REJECTED as noisier than they are useful.
+//
+//   * (#6419) firing on any line carrying >=2 rewrites takes the declared-breaking
+//     hit count 92 -> 102 but adds 35 changesets to hand-check, of which a clear
+//     minority are prescriptions.
+//   * (#6419) firing on ANY code-to-code arrow takes it to 250 hits / 113 breaking
+//     and is plainly a different check (it flags behaviour tables and worked
+//     examples).
+//   * (#6497) firing on any coded table row with NO framing anchor -- the table
+//     analogue of the arrow-alone rule -- newly flags 114 changesets, 33 of them
+//     declared-breaking. Changeset bodies use tables for capability matrices,
+//     behaviour comparisons and version comparisons far more often than for
+//     rewrites, and this rule cannot tell those apart.
+//   * (#6497) taking the framing from the TABLE'S OWN HEADER ROW via the existing
+//     MIGRATION_FRAMING_RE -- tempting, since it needs no new vocabulary and reads
+//     `| 原写法 | 改写为 |` correctly. Measured, it buys ONE true positive with no
+//     verdict impact (`filter-icontains-and-regex-retirement.md`, which declares no
+//     breaking change and is therefore never judged) and costs ONE false positive:
+//     `rate-limit-config-dual-source-c9.md`, whose table is a two-TYPE comparison
+//     matrix -- `| | @objectstack/spec/shared (unchanged) | .../integration
+//     (renamed) |` -- caught only because the word `renamed` sits in a header cell
+//     naming a column, not framing a rewrite. Rejected on that trade alone: nothing
+//     gained on the judged population, a new way to be wrong on it.
+//
+// An honestly-scoped detector beats a noisy one here because a FALSE POSITIVE has
+// no honest escape: the author is refused an exemption they are entitled to and the
+// closed vocabulary offers them nothing else -- which is the #6419 shape itself,
+// one category over.
 //
 // Consequence to keep in mind when reading a green run: this branch answers
 // "did the author FRAME a rewrite as a migration", not "is a rewrite required".
@@ -332,6 +420,48 @@ const OPERAND = '(?:`[^`\\n]+`|[A-Za-z_$][A-Za-z0-9_$]*(?:[./][A-Za-z0-9_$]+)+)'
 
 /** `X → Y`, both sides code-ish. Stateless (no `g`): it is used inside a loop. */
 export const REWRITE_RE = new RegExp(`${OPERAND}\\s*${ARROW}\\s*${OPERAND}`);
+
+/** One operand anywhere in the text -- the per-CELL half of the table arm (#6497). */
+const OPERAND_RE = new RegExp(OPERAND);
+
+/**
+ * A markdown table's delimiter row (`| --- | :---: |`) -- the line that turns the
+ * row above it into a header and everything below it into data. Requiring it is
+ * what keeps ordinary prose containing a pipe out of the table arm, and it is why
+ * the HEADER row is never reported as evidence: it is scanned before the delimiter
+ * has been seen. Two columns minimum, which the arm needs anyway.
+ */
+const TABLE_DELIM_RE = /^\s{0,3}\|?(?:\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?\s*$/;
+
+/**
+ * A markdown table row. The outer pipes are REQUIRED, which is the narrow
+ * direction: GFM permits `a | b` without them, and a rule that accepted it would
+ * read every prose line containing a pipe as a table row. Missing a borderless
+ * table is a false negative; reading prose as a table is a false positive, and only
+ * one of those refuses an author an exemption they are entitled to.
+ */
+const TABLE_ROW_RE = /^\s{0,3}\|.*\|\s*$/;
+
+/**
+ * Does this table row read as a REWRITE -- an OPERAND in two or more DISTINCT
+ * cells?
+ *
+ * The cell boundary is doing the arrow's job, so the arm asks for exactly what the
+ * arrow arm asks for: code-ish operands on two sides. One coded cell is a
+ * description, a definition or a capability row (`| `getPort?()` | the real bound
+ * port after listen(0) |`), and those are not prescriptions.
+ *
+ * Split on an UNESCAPED pipe: `\|` inside a cell is GFM's escape and does not end
+ * it. Over-splitting could only ever make this fire MORE often, so getting it right
+ * is a false-positive matter, not a cosmetic one.
+ *
+ * @param {string} line
+ */
+function isRewriteRow(line) {
+  const cells = line.trim().replace(/^\|/, '').replace(/\|\s*$/, '').split(/(?<!\\)\|/);
+  if (cells.length < 2) return false;
+  return cells.filter((c) => OPERAND_RE.test(c)).length >= 2;
+}
 
 /**
  * Migration framing, in the spellings THIS repo's changesets actually use.
@@ -370,7 +500,7 @@ const FROM_TO_LABEL_RE =
  * which shapes are deliberately out of reach.
  *
  * @param {string} body
- * @returns {{ branch: 'from-to-label' | 'framed-line' | 'framed-section', line: string } | null}
+ * @returns {{ branch: 'from-to-label' | 'framed-line' | 'framed-section' | 'framed-table', line: string } | null}
  */
 export function findMigrationPrescription(body) {
   const label = FROM_TO_LABEL_RE.exec(body);
@@ -384,13 +514,33 @@ export function findMigrationPrescription(body) {
   // `## 迁移` followed by a list of `old` → `new` lines -- would be invisible,
   // which is the #6419 defect in a second spelling.
   let framedSection = false;
+  let inTable = false;
+  // The table arm's first hit, held back rather than returned (#6497). The arrow
+  // branches above `return` the moment they match, so holding this until the loop
+  // ends makes the whole function exactly `arrowBranches(body) ?? tableArm(body)`:
+  // every body the old detector flagged is still flagged, on the same branch, with
+  // the same evidence line. The superset property is then structural -- it cannot
+  // be broken by a future edit that only touches the table arm -- rather than a
+  // measurement someone has to remember to repeat.
+  let table = null;
   for (const line of body.split(/\r?\n/)) {
-    if (/^\s{0,3}#{1,6}\s/.test(line)) framedSection = MIGRATION_FRAMING_RE.test(line);
-    if (!REWRITE_RE.test(line)) continue;
-    if (MIGRATION_FRAMING_RE.test(line)) return { branch: 'framed-line', line: line.trim() };
-    if (framedSection) return { branch: 'framed-section', line: line.trim() };
+    if (/^\s{0,3}#{1,6}\s/.test(line)) {
+      framedSection = MIGRATION_FRAMING_RE.test(line);
+      inTable = false; // a table cannot span a heading
+    }
+    if (REWRITE_RE.test(line)) {
+      if (MIGRATION_FRAMING_RE.test(line)) return { branch: 'framed-line', line: line.trim() };
+      if (framedSection) return { branch: 'framed-section', line: line.trim() };
+    }
+    // Delimiter first: it also matches TABLE_ROW_RE, and it is the row that opens
+    // the data region rather than a row inside it.
+    if (TABLE_DELIM_RE.test(line)) { inTable = true; continue; }
+    if (!TABLE_ROW_RE.test(line)) { inTable = false; continue; }
+    if (inTable && framedSection && table === null && isRewriteRow(line)) {
+      table = { branch: 'framed-table', line: line.trim() };
+    }
   }
-  return null;
+  return table;
 }
 
 /**
@@ -1419,6 +1569,55 @@ function selfTest() {
     },
   })));
 
+  // ---- R12: THE #6497 SHAPE -- a rewrite TABLE with no arrow in it ----------
+  //
+  // `runtime-httpserver-wrapper-retired.md` (#5122), reduced to its shape: a
+  // textbook `## Migration` heading, a two-column "what you wrote / what to write
+  // instead" table, not one arrow in the body, and the catch-all exemption claimed
+  // on top. Both pre-#6497 branches required an arrow, so this was read as "no
+  // prescription at all" and the exemption was granted. Reverse-verified: delete
+  // the table arm and this case reports "expected RED, got green".
+  const SIX497 = CS({
+    bumps: [['@objectstack/runtime', 'major']],
+    body:
+      '**BREAKING**: the `HttpServer` delegating wrapper is retired\n\n' +
+      '## Migration\n\n' +
+      '| Wrote | Write instead |\n' +
+      '| --- | --- |\n' +
+      '| `new HttpServer(new HonoHttpServer(port))` | register the `HonoHttpServer` directly |\n' +
+      '| `import { HttpServer }` | remove it — `tsc` reports this one |\n\n' +
+      '<!-- adr-0087: not-required (no-migration-prescription) the wrapper had zero constructions anywhere, we grepped -->\n',
+  });
+  red('R12 the #6497 shape (an arrowless rewrite table under the catch-all)', run(mk({
+    files: { '.changeset/x.md': SIX497 },
+    pkgs: { '@objectstack/runtime': { dir: 'packages/runtime', private: false }, '@objectstack/spec': { dir: 'packages/spec', private: false } },
+  })), [/contradicts the changeset's own body/, /Evidence \(framed-table\)/, /HonoHttpServer/]);
+
+  // ---- G8: a CAPABILITY table under the same framing stays GREEN ------------
+  // The table arm's false-positive floor, and the reason it asks for two coded
+  // cells rather than one: this is a real shape from the same changeset -- a member
+  // named in column 1, prose about it in column 2. One coded cell is a description,
+  // not a prescription, and refusing it would take an exemption from an author who
+  // is entitled to it with nothing else in the vocabulary to offer them.
+  //
+  // NOTE, honestly: this case is green with the table arm and green without it.
+  // Deleting an arm can only make a detector match LESS, so no false-positive floor
+  // can move under reverse verification. It pins the boundary, not the capability.
+  green('G8 a one-coded-cell capability table is not a prescription', run(mk({
+    files: {
+      '.changeset/x.md': CS({
+        body:
+          '**BREAKING** the delegating wrapper is gone\n\n' +
+          '## Migration\n\n' +
+          '| Optional member | What wrapping it cost |\n' +
+          '| --- | --- |\n' +
+          '| `getPort?()` | the real bound port after listening on an ephemeral port |\n' +
+          '| `getRawApp?()` | the framework-native escape hatch four consumers feature-detect |\n\n' +
+          '<!-- adr-0087: not-required (no-migration-prescription) an internal error string changed; no key, symbol or stored value moves -->\n',
+      }),
+    },
+  })));
+
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
   {
     const r = mk({ files: {} });
@@ -1509,6 +1708,28 @@ function selfTest() {
   assert(findMigrationPrescription('### 迁移:FROM → TO\n')?.branch === 'from-to-label', 'P20: the placeholder label reports the label branch');
   assert(findMigrationPrescription('nothing here\n') === null, 'P21: a body with no prescription reports null, not a shrug');
 
+  // #6497 -- the REWRITE TABLE, which has no arrow for either arrow branch to read.
+  const TABLE_EN = '## Migration\n\n| Wrote | Write instead |\n| --- | --- |\n| `new HttpServer(port)` | register the `HonoHttpServer` directly |\n';
+  const TABLE_ZH = '## 破坏性变更 · 迁移\n\n| 旧写法 | 改成 |\n|---|---|\n| `typography.fontWeight: { base }` | `normal` |\n';
+  assert(hasMigrationPrescription(TABLE_EN), 'P22: an arrowless rewrite table under `## Migration` must match');
+  assert(hasMigrationPrescription(TABLE_ZH), 'P23: the same, in Chinese, with the `|---|---|` delimiter spelling');
+  assert(findMigrationPrescription(TABLE_EN)?.branch === 'framed-table', 'P24: a framed table reports the framed-table branch');
+  // ...and the two things that keep it narrow. Both are false-positive floors: they
+  // are green with the arm and green without it, so reverse verification cannot
+  // move them -- they pin where the arm STOPS, which no deletion can widen.
+  assert(
+    !hasMigrationPrescription(TABLE_EN.replace('## Migration', '## What changed')),
+    'P25: the SAME table under a heading with no migration framing must NOT match -- the anchor is load-bearing',
+  );
+  assert(
+    !hasMigrationPrescription('## Migration\n\n| Member | What it cost |\n| --- | --- |\n| `getPort?()` | the real bound port after listening |\n'),
+    'P26: one coded cell is a description, not a rewrite -- two DISTINCT cells are required',
+  );
+  assert(
+    !hasMigrationPrescription('## Migration\n\nprose about `a.b` and `c.d` with a | pipe in it but no table at all\n'),
+    'P27: a pipe in prose is not a table -- the delimiter row is what opens one',
+  );
+
   // ---- S1-S5: the `--audit-stock` classifier (#6350) ------------------------
   //
   // The stock audit's classifier decides which rows a human ever reads, so a
@@ -1545,6 +1766,12 @@ function selfTest() {
       cls(CS({ bumps: [['@objectstack/spec', 'major'], ['@objectstack/example-showcase', 'major']], body: PRESCRIPTION })) === 'residue',
       'S6: ONE published package among the bumps is enough to close the unpublished exemption',
     );
+    // S7 (#6497): the four stock changesets this arm moves are moved HERE -- out of
+    // `exempt-no-prescription` and into the residue a human reads. Without the table
+    // arm this returns `exempt-no-prescription`, which is the audit's half of the
+    // same bypass: the worklist silently omitted them.
+    const TABLE_PRESCRIPTION = '**BREAKING** x\n\n## Migration\n\n| Wrote | Write instead |\n| --- | --- |\n| `new HttpServer(p)` | register the `HonoHttpServer` |\n';
+    assert(cls(CS({ body: TABLE_PRESCRIPTION })) === 'residue', 'S7: THE #6497 SHAPE -- published break + arrowless rewrite TABLE -- is RESIDUE');
   }
 
   assert(breakingDeclaration(parseChangeset(CS({ body: 'feat(spec)!: x\n' }))).breaking, 'P6: a conventional-commit bang is a declaration');

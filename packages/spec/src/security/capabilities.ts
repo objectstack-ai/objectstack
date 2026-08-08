@@ -2,6 +2,8 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * [ADR-0066 D1] Canonical platform capability registry.
@@ -85,8 +87,56 @@ export const PLATFORM_CAPABILITY_NAMES: ReadonlySet<string> = new Set(
  * here (the declaration side); permission sets GRANT one via `systemPermissions`
  * (the assignment side). There is no `inputs` shape — see ADR-0066's three-way
  * separation (capability / assignment / requirement).
+ *
+ * ## [#5961] This is also the REGISTERED schema for the `capability` metadata
+ * kind
+ *
+ * `capability` joined `MetadataTypeSchema` / `BUILTIN_METADATA_TYPE_SCHEMAS` /
+ * `DEFAULT_METADATA_TYPE_REGISTRY` under the template #5271 set for `api`, so
+ * this shape is what `PUT /api/v1/meta/capability/:name` is judged against and
+ * what `/meta/types` publishes as the kind's JSON Schema. Two consequences the
+ * declaration side did not have before:
+ *
+ *  - **The ADR-0010 protection envelope is declared.** `MetadataPlugin`'s
+ *    loader calls `applyProtection` on every registered type, so a stored
+ *    capability carries `_packageId` / `_provenance` / `_lock*`. A registered
+ *    schema that cannot represent them either 422s the loader's own output or
+ *    drops it on round-trip (`metadata-type-schemas.test.ts` asserts both).
+ *  - **The shape is `.strict()`.** Unlike `api` (which is on that suite's
+ *    `STILL_STRIP` list because `ApiEndpointSchema` doubles as the parser for
+ *    STORED rows carrying `packageId` / `state`), nothing re-parses a stored
+ *    `sys_capability` row through this schema — `bootstrapDeclaredCapabilities`
+ *    reads named fields off the body (`capabilityRowFields`). So closing it
+ *    costs nothing and buys the declared = enforced posture an AUTHORIZATION
+ *    surface should have had from the start.
  */
-export const CapabilityDeclarationSchema = lazySchema(() => z.object({
+export const CapabilityDeclarationSchema = lazySchema(() => strictObject({
+  surface: 'this capability declaration',
+  // No `CAPABILITY_KEYS` array: `strictObject` derives the known-key list from
+  // the shape below, so there is no second copy to drift and no probe test
+  // needed to catch the drift (#5483, and the ratchet in
+  // `alias-integrity.test.ts` that keeps hand-transcribed tables shrinking).
+  aliases: { key: 'name', title: 'label' },
+  guidance: {
+    permissionSets:
+      '`permissionSets` is not a capability field — a capability is only the ' +
+      'DECLARATION (ADR-0066 D1). Permission sets GRANT it from their side via ' +
+      '`systemPermissions`, which is the assignment edge; a capability never ' +
+      'names its own holders.',
+    requiredPermissions:
+      '`requiredPermissions` is not a capability field — that is the REQUIREMENT ' +
+      'side, authored on the resource (action / view / api) that needs the ' +
+      'capability. Declaring it here would invert ADR-0066\'s three-way separation.',
+    inputs:
+      '`inputs` is not a capability field — a capability is a name, not a ' +
+      'contract (ADR-0066: capability / assignment / requirement are three ' +
+      'separate shapes, and only the requirement side carries arguments).',
+  },
+  history:
+    'Until #5961 `capability` resolved no registered schema at all, so `PUT ' +
+    '/api/v1/meta/capability/:name` stored ANY JSON under an AUTHORIZATION type ' +
+    'and stray keys on a declaration were dropped in silence.',
+}, {
   /**
    * Stable capability key referenced by `systemPermissions` / `requiredPermissions`.
    * Lowercase, dot/underscore separable (e.g. `export_data`, `billing.refund`).
@@ -110,6 +160,15 @@ export const CapabilityDeclarationSchema = lazySchema(() => z.object({
    */
   packageId: z.string().optional()
     .describe('[ADR-0086 D3] Owning package id (author-declared fallback; absent = registry-stamped)'),
+
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  //
+  // [#5961] Declared when `capability` became a registered metadata kind: the
+  // artifact loader's `applyProtection` stamps these on EVERY registered type,
+  // and this schema is now strict, so without the spread the loader's own
+  // output fails to parse (a hard 422 on the write path). Same gap #4001 closed
+  // for `permission` and `position` — the two sibling security kinds.
+  ...MetadataProtectionFields,
 }));
 
 /** A validated package-level capability declaration (output of {@link defineCapability}). */

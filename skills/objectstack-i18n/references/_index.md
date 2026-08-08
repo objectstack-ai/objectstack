@@ -10,7 +10,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 ## Core schemas
 
 - `node_modules/@objectstack/spec/src/system/translation.zod.ts` — Shared history sentence for every shape in this file (#4001).
-- `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — I18n Label Schema
+- `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — Display-label and ARIA-label primitives shared by every `ui/` shape.
 
 ## Transitive dependencies
 

@@ -1487,6 +1487,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
+  capability: {
+    label: "Capability",
+    description: "Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)"
+  },
   agent: {
     label: "Agente de IA",
     sections: {

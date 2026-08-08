@@ -1278,6 +1278,12 @@ export type Iso684 = Assert<Eq< z.input< typeof M160.DatasetSchema >, z.infer< t
 // ui/i18n.zod.ts
 export type Iso686 = Assert<Eq< z.input< typeof M161.I18nLabelSchema >, z.infer< typeof M161.I18nLabelSchema > >>;
 export type Iso687 = Assert<Eq< z.input< typeof M161.AriaPropsSchema >, z.infer< typeof M161.AriaPropsSchema > >>;
+// #5728 — the second arm of the widened `I18nLabelSchema`. A record of plain
+// strings under a key-format constraint: the regex narrows which keys PARSE, it
+// does not transform one, so the two shapes coincide and an `InlineLocaleMapParsed`
+// would be a permanent synonym. Give any entry a `.default()` and this line goes
+// red with the alias named — which is the point.
+export type Iso759 = Assert<Eq< z.input< typeof M161.InlineLocaleMapSchema >, z.infer< typeof M161.InlineLocaleMapSchema > >>;
 
 // ui/notification.zod.ts
 export type Iso690 = Assert<Eq< z.input< typeof M162.NotificationTypeSchema >, z.infer< typeof M162.NotificationTypeSchema > >>;
@@ -1438,7 +1444,10 @@ export type AFamilyParsedIsParseState = Assert<
 // ---------------------------------------------------------------------------
 
 describe('ADR-0122 type-alias convention', () => {
-  it('still declares all 751 isomorphic pins', () => {
+  // The title tracks the assertion below; it had been left at 751 when #6037
+  // moved the count to 754, so it is corrected here rather than left two
+  // numbers behind.
+  it('still declares all 755 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1518,9 +1527,18 @@ describe('ADR-0122 type-alias convention', () => {
     // from `AggregationFunction`, and an enum VALUE narrowing is invisible
     // here, exactly as it is to the four surface ratchets. Recompute from the
     // file; never from the changelog.
+    //
+    // 748 -> 749 is #5728's `InlineLocaleMapSchema`, the second arm of the
+    // widened `I18nLabelSchema`. Same RISE case: a `z.record` of plain strings
+    // whose KEY carries a format constraint. A regex narrows which keys parse;
+    // it never rewrites one, so nothing in the tree produces an output shape
+    // the input does not already have. (Its receipt was written twice before
+    // landing — as 755 -> 756 against the pre-sweep count — and recomputed
+    // here after the sweep's -7 merged in; the file, not the history, is the
+    // operand.)
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(748);
+    expect(pins).toHaveLength(749);
   });
 
   it('leaves the A-family parse behaviour untouched', () => {

@@ -24,11 +24,16 @@ export interface ExportFieldMeta {
   displayField?: string;
   /** Field holds multiple values (an array), e.g. a `multiple: true` lookup. */
   multiple?: boolean;
-  // The following four drive the import path's required-field pre-check
-  // (import-runner.ts). They mirror the engine's insert-time validation
-  // (objectql record-validator.ts) so a dry run can predict a NOT NULL /
-  // required failure instead of green-lighting a row the real insert rejects.
-  // Unused by the export path (formatting only reads type/options/reference).
+  // ── constraint metadata, no longer read by the import path ──────────
+  //
+  // The eight keys below were added for the import dry run's hand-copied
+  // pre-check mirror (`firstMissingRequiredField` / `firstConstraintViolation`,
+  // framework#3956). That mirror is retired: the dry run now asks the engine
+  // for its verdict through `DataProtocol.validateData` (#4633 ruling D), which
+  // reads the object's own schema — so nothing in this repo consults these any
+  // more. Kept for now rather than removed in the same PR: `ExportFieldMeta` is
+  // exported from `@objectstack/rest`, and their retirement is a separable
+  // change with its own sweep.
   /** Field is required — a value (or default) must exist on insert. */
   required?: boolean;
   /** Engine-owned column the client never supplies (never required of import). */
@@ -37,10 +42,6 @@ export interface ExportFieldMeta {
   readonly?: boolean;
   /** Field declares a `defaultValue` the engine applies on insert (satisfies required). */
   hasDefault?: boolean;
-  // The bounds below drive the import path's field-constraint pre-check
-  // (import-coerce.ts `firstConstraintViolation`), mirroring the engine's
-  // `validateRecord` so a dry run predicts a range/length rejection instead of
-  // green-lighting a row the real write then fails (framework#3956).
   /** Lower bound for numeric fields. */
   min?: number;
   /** Upper bound for numeric fields. */
