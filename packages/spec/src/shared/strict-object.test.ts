@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { execFileSync } from 'node:child_process';
+
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 
@@ -349,4 +351,48 @@ describe('strictObject — the error map is lazy, so cycles cannot break it', ()
     Schema.safeParse({ a: 'x', bogus: 1 });
     expect(aliasesRead).toBe(1);
   });
+});
+
+// ============================================================================
+// #5593 — this module survives being entered FIRST in its own import cycle.
+//
+// `strictObject` is called at MODULE SCOPE by schemas that sit inside the
+// `field.zod` ↔ `suggestions.zod` ↔ `strict-object` cycle, so under
+// `OS_EAGER_SCHEMAS=1` it can run while this module is still initializing.
+// Everything it touches on the way in must therefore be reachable from the
+// first instruction of module evaluation — which rules out a module-level
+// `const` for the declaration registry, and is why `declarationStore()` is a
+// hoisted `function` declaration.
+//
+// ⚠️ Why this needs its own subprocess rather than an ordinary assertion:
+// `lazySchema` defers construction behind a Proxy, so a normal `vitest run`
+// never evaluates a schema at import time and the hazard is invisible. #5593
+// shipped the regression and the ordinary suite stayed green — what caught it
+// was CI's `check-test-completeness` gate noticing that
+// `automation/flow-region-cycle.test.ts` was counted and never reported,
+// because ITS subprocess died at import with `ReferenceError: Cannot access
+// 'DECLARATIONS' before initialization` and vitest could not even format the
+// stack. Two guards, one hazard: that file states the cycle it protects
+// (#4415), this one states the rule this module has to keep.
+//
+// The entry point is deliberately `data/field.zod.ts` — the module whose
+// own module-scope `strictObject(…)` call is the one that lands here
+// mid-initialization — reached through a module that pulls THIS file first.
+// ============================================================================
+describe('#5593 — eager construction with this module entered first', () => {
+  it('does not throw at import time under OS_EAGER_SCHEMAS=1', () => {
+    const barrel = new URL('../automation/index.ts', import.meta.url).href;
+    const run = (): string =>
+      execFileSync(
+        process.execPath,
+        ['--import', 'tsx', '--input-type=module', '-e',
+          `import ${JSON.stringify(barrel)};
+           console.log('ok');`],
+        { env: { ...process.env, OS_EAGER_SCHEMAS: '1' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+      ).trim();
+    expect(
+      run(),
+      'a module-level `const` in strict-object.ts is in its TDZ here — use a hoisted function',
+    ).toBe('ok');
+  }, 60_000);
 });

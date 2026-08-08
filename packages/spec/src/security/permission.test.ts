@@ -622,24 +622,6 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
         expect(message, `\`${key}\` should carry guidance`).toContain(`\`${key}\` is not a PermissionSet field`);
       }
     });
-
-    it('accepts every key the schema declares (guards PERMISSION_SET_KEYS drift)', () => {
-      const probes: Record<string, unknown> = {
-        name: 'p', label: 'P', description: 'd', packageId: 'pkg', managedBy: 'user',
-        isDefault: true,
-        objects: { task: { allowRead: true } }, fields: { 'task.secret': { readable: false } },
-        systemPermissions: ['manage_users'], tabPermissions: { app_crm: 'visible' },
-        rowLevelSecurity: [], adminScope: { businessUnit: 'east' },
-        protection: { lock: 'none' },
-      };
-      for (const [key, value] of Object.entries(probes)) {
-        const result = PermissionSetSchema.safeParse({ name: 'p', objects: {}, [key]: value });
-        const unknown = result.success
-          ? undefined
-          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-        expect(unknown, `\`${key}\` should be a declared PermissionSet key`).toBeUndefined();
-      }
-    });
   });
 
   describe('ObjectPermissionSchema', () => {
@@ -652,21 +634,6 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
         .toContain('`export` → `allowExport`');
       expect(unknownKeyIssue(ObjectPermissionSchema, { viewAll: true })!.message)
         .toContain('`viewAll` → `viewAllRecords`');
-    });
-
-    it('accepts every key the schema declares (guards OBJECT_PERMISSION_KEYS drift)', () => {
-      const probes: Record<string, unknown> = {
-        allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true,
-        allowExport: true, allowTransfer: true, allowRestore: true, allowPurge: true,
-        viewAllRecords: true, modifyAllRecords: true, readScope: 'org', writeScope: 'own',
-      };
-      for (const [key, value] of Object.entries(probes)) {
-        const result = ObjectPermissionSchema.safeParse({ [key]: value });
-        const unknown = result.success
-          ? undefined
-          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-        expect(unknown, `\`${key}\` should be a declared ObjectPermission key`).toBeUndefined();
-      }
     });
   });
 
@@ -688,20 +655,6 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
     it('rejects an undeclared key with a typo suggestion', () => {
       expect(unknownKeyIssue(AdminScopeSchema, { businessUnit: 'east', business_unit: 'x' })!.message)
         .toContain('`business_unit` → `businessUnit`');
-    });
-
-    it('accepts every key the schema declares (guards ADMIN_SCOPE_KEYS drift)', () => {
-      const probes: Record<string, unknown> = {
-        businessUnit: 'east', includeSubtree: false, manageAssignments: true,
-        manageBindings: true, authorEnvironmentSets: true, assignablePermissionSets: ['a'],
-      };
-      for (const [key, value] of Object.entries(probes)) {
-        const result = AdminScopeSchema.safeParse({ businessUnit: 'east', [key]: value });
-        const unknown = result.success
-          ? undefined
-          : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-        expect(unknown, `\`${key}\` should be a declared AdminScope key`).toBeUndefined();
-      }
     });
   });
 });

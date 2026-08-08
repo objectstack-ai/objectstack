@@ -542,18 +542,4 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
     expect(messages).toContain('#3896');
     expect(messages).toContain('Delete the key');
   });
-
-  it('accepts every key the schema declares (guards RLS_POLICY_KEYS drift)', () => {
-    const probes: Record<string, unknown> = {
-      label: 'L', description: 'D', check: 'owner_id = current_user.id',
-      positions: ['manager'], enabled: false, tags: ['compliance'],
-    };
-    for (const [key, value] of Object.entries(probes)) {
-      const result = RowLevelSecurityPolicySchema.safeParse({ ...policy, [key]: value });
-      const unknown = result.success
-        ? undefined
-        : result.error.issues.find((i) => i.code === 'unrecognized_keys');
-      expect(unknown, `\`${key}\` should be a declared RLS policy key`).toBeUndefined();
-    }
-  });
 });

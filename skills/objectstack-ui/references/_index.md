@@ -23,6 +23,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Transitive dependencies
 
+- `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
 - `node_modules/@objectstack/spec/src/data/feed.zod.ts` — Activity-timeline UI config enums.
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Field Type Enum
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification

@@ -1523,7 +1523,7 @@ export class AutomationServicePlugin implements Plugin {
      * producer's annotation is the producer's to remove. Widening the schema
      * would make our own read shape a second, permanent contract. Note the
      * strip removes only the read decorations, never the ADR-0010 protection
-     * envelope (`_lock`, `_packageId`, …) — `FLOW_KEYS` allowlists those, and
+     * envelope (`_lock`, `_packageId`, …) — `FlowSchema` DECLARES those, and
      * dropping them would strip a packaged flow's provenance on every rebind.
      */
     private async readFlowDefsFromProtocol(

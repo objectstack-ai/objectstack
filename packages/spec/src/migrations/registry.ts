@@ -1128,7 +1128,17 @@ const step17: MigrationStep = {
     + 'such a measure never produced a number. `QueryAST.aggregations[].function` is a request '
     + 'surface with no stored source — one semantic TODO below. The mongodb and in-memory '
     + 'backends that implemented these two are inside the #5499 freeze and are untouched; their '
-    + 'code is simply no longer reachable through a spec-valid request.',
+    + 'code is simply no longer reachable through a spec-valid request.\n\n'
+    + 'One entry in this step is not a removal at all but a SECURE-DEFAULT FLIP, the shape '
+    + "protocol 12 last used for `api.requireAuth`: an omitted `ActionDescriptor.resumeAuthority` "
+    + "resolves to `'service'` instead of `'any'`, so a pausing node type that never states who "
+    + 'may continue its pauses is refused on the generic resume route rather than open to it '
+    + '(#5561, ADR-0044\'s 2026-07-28 amendment). Nothing is removed and no metadata shape '
+    + 'changes — the field has been optional since step one of the same issue — so tsc reports '
+    + 'nothing and only the MEANING of silence moved. That is exactly why it needs a ledger '
+    + 'entry: a third-party plugin author has no compile error to discover it with, and the '
+    + 'one-line prescription (declare `resumeAuthority` on the descriptor) has to arrive before '
+    + 'a user meets a run that will not continue.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -2678,6 +2688,64 @@ const step17: MigrationStep = {
         + 'table. The surviving layers still parse unchanged — a connector declaring '
         + '`syncConfig` and an import declaring `mapping.transform` both behave exactly as they '
         + 'did in 16.x.',
+    },
+    {
+      id: 'action-descriptor-resume-authority-default-flip',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
+      surface:
+        'automation.ActionDescriptor.resumeAuthority — an OMITTED value on a pausing '
+        + 'node descriptor (supportsPause: true, or any executor whose execute() returns '
+        + 'suspend: true)',
+      replacement:
+        "an explicit resumeAuthority: 'any' on the descriptor, for a pausing node whose "
+        + 'pauses really are meant to be continued through the generic resume route '
+        + '(POST /automation/:name/runs/:runId/resume) — a screen-style collected-input '
+        + "pause, or a signal wait an external producer resumes. Declare 'service' instead "
+        + 'if continuing is the tail of a decision your own service must authorize and '
+        + 'record first. Either value is a one-line addition; only the silence changed '
+        + 'meaning',
+      reason:
+        'A SECURE-DEFAULT FLIP with no metadata shape to rewrite — the same category as '
+        + "protocol 12's `rest-requireauth-default-flip`, and it is registered here for the "
+        + 'same reason: whether a given pause is genuinely open to the generic route is a '
+        + 'trust judgment no transform can make. The #3801 resume gate keys on the SUSPENDED '
+        + "NODE, and `ActionDescriptor.resumeAuthority` used to default to `'any'`, so a "
+        + 'pausing node type shipped raw-resumable unless its author remembered the field. '
+        + "It now resolves to `'service'` when absent: an unclaimed pause is refused on the "
+        + 'generic route with `PERMISSION_DENIED` / 403 until its descriptor states who may '
+        + 'continue it. #3823 is the incident that decided the direction — ADR-0044 pointed '
+        + "an approval's revise edge at a generic `wait`, `wait` is legitimately `'any'`, and "
+        + 'the pause standing in a service-owned position inherited a fail-open value nobody '
+        + 'chose; the demonstrated cost was an unaudited resubmit plus a destroyed remote '
+        + 'run. The two possible mistakes are asymmetric, which is the whole argument: '
+        + "guessing `'any'` walks past a decision nothing recorded and is silent, while "
+        + "guessing `'service'` returns a refusal naming the missing field. ⚠️ The surface "
+        + 'is a DESCRIPTOR FIELD set in plugin CODE, never stack metadata, so there is no '
+        + 'source for a D2 conversion to rewrite and deliberately no schema tombstone — the '
+        + 'disposition `data-driver-find-stream-retired` (#4484), `storage-service-list-retired` '
+        + '(#5540) and `actor-user-roles-to-positions` (#6011) already carry. It differs from '
+        + 'those in one way a reader should not have to infer: nothing is REMOVED, so tsc '
+        + 'reports nothing at all — the field was already optional after step one and an '
+        + 'omission still compiles. The enforced channels are all run-time: a registration '
+        + 'warning naming the node type (once per type per engine), the refusal message on '
+        + 'the resume itself, and `check:resume-authority-declared` for executors living in '
+        + 'this repo. For a third-party plugin the generated upgrade guide is the only '
+        + 'channel that arrives BEFORE a user hits a run that will not continue. In-tree the '
+        + 'flip moves nothing: all six shipped pausing types (screen, wait, subflow, map, '
+        + 'approval, approval_revise) declare their authority explicitly. ADR-0044 amendment '
+        + '(2026-07-28) and its 2026-08-08 landing section, ADR-0019 #3801 addendum, #5561.',
+      acceptanceCriteria:
+        'Every action descriptor your plugin registers for a node type that can suspend '
+        + 'declares `resumeAuthority`. Booting the stack logs no `declares supportsPause but '
+        + 'never declares resumeAuthority` warning naming one of your types, and a run parked '
+        + 'on each of your pausing nodes can still be continued the way you intend: a resume '
+        + "through the generic route succeeds for the ones you declared `'any'`, and answers "
+        + "403 (`PERMISSION_DENIED`) for the ones you declared `'service'`, which continue "
+        + 'through your own service API instead. ⚠️ `supportsPause` is a declaration nothing '
+        + 'enforces (#5703), so an executor whose `execute()` returns `suspend: true` while '
+        + 'leaving `supportsPause` false is warned about by NEITHER channel — check those by '
+        + 'hand against the same rule.',
     },
   ],
 };

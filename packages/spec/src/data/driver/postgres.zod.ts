@@ -16,7 +16,7 @@
 import { z } from 'zod';
 
 import { lazySchema } from '../../shared/lazy-schema';
-import { strictUnknownKeyError } from '../../shared/suggestions.zod';
+import { strictObject } from '../../shared/strict-object';
 import {
   driverConfigJsonSchema,
   DriverSslToggleSchema,
@@ -26,61 +26,55 @@ import {
   SSL_DETAIL_BELONGS_ON_DATASOURCE,
 } from './common.zod';
 
-const POSTGRES_CONFIG_KEYS = [
-  'url', 'host', 'port', 'database', 'username', 'password', 'ssl',
-  'schema', 'applicationName', 'statementTimeout', 'autoMigrate',
-] as const;
-
 /** Prescription for a pool knob written inside `config` instead of `pool`. */
 const poolBelongsOnDatasource = (key: string, canonical: string) =>
   `\`${key}\` is not driver config — connection pooling is configured once for every driver in `
   + `the datasource's own \`pool\` block. Move it to \`pool: { ${canonical}: … }\`. `
   + `(It was declared here and read by nothing until #4410.)`;
 
-const postgresConfigUnknownKeyError = strictUnknownKeyError({
-  surface: "this postgres datasource's config",
-  knownKeys: POSTGRES_CONFIG_KEYS,
-  aliases: {
-    hostname: 'host',
-    server: 'host',
-    dbname: 'database',
-    db: 'database',
-    user: 'username',
-    passwd: 'password',
-    pwd: 'password',
-    connectionstring: 'url',
-    dsn: 'url',
-    uri: 'url',
-    searchpath: 'schema',
-    applicationname: 'applicationName',
-    statementtimeout: 'statementTimeout',
-    sslmode: 'ssl',
-    tls: 'ssl',
-    usessl: 'ssl',
+export const PostgresConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: "this postgres datasource's config",
+    aliases: {
+      hostname: 'host',
+      server: 'host',
+      dbname: 'database',
+      db: 'database',
+      user: 'username',
+      passwd: 'password',
+      pwd: 'password',
+      connectionstring: 'url',
+      dsn: 'url',
+      uri: 'url',
+      searchpath: 'schema',
+      applicationname: 'applicationName',
+      statementtimeout: 'statementTimeout',
+      sslmode: 'ssl',
+      tls: 'ssl',
+      usessl: 'ssl',
+    },
+    guidance: {
+      pool: poolBelongsOnDatasource('pool', 'max'),
+      min: poolBelongsOnDatasource('min', 'min'),
+      max: poolBelongsOnDatasource('max', 'max'),
+      idleTimeoutMillis: poolBelongsOnDatasource('idleTimeoutMillis', 'idleTimeoutMillis'),
+      connectionTimeoutMillis: poolBelongsOnDatasource(
+        'connectionTimeoutMillis',
+        'connectionTimeoutMillis',
+      ),
+      schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
+      readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
+      ca: SSL_DETAIL_BELONGS_ON_DATASOURCE,
+      cert: SSL_DETAIL_BELONGS_ON_DATASOURCE,
+      key: SSL_DETAIL_BELONGS_ON_DATASOURCE,
+      rejectUnauthorized: SSL_DETAIL_BELONGS_ON_DATASOURCE,
+    },
+    history:
+      'Until #4410 nothing validated `datasource.config` at all — an unrecognised connection key '
+      + 'was accepted in silence and the datasource then connected on the client defaults '
+      + "(localhost:5432), which is #4001's original bug one level down.",
   },
-  guidance: {
-    pool: poolBelongsOnDatasource('pool', 'max'),
-    min: poolBelongsOnDatasource('min', 'min'),
-    max: poolBelongsOnDatasource('max', 'max'),
-    idleTimeoutMillis: poolBelongsOnDatasource('idleTimeoutMillis', 'idleTimeoutMillis'),
-    connectionTimeoutMillis: poolBelongsOnDatasource(
-      'connectionTimeoutMillis',
-      'connectionTimeoutMillis',
-    ),
-    schemaMode: SCHEMA_MODE_BELONGS_ON_DATASOURCE,
-    readOnly: READ_ONLY_BELONGS_ON_DATASOURCE,
-    ca: SSL_DETAIL_BELONGS_ON_DATASOURCE,
-    cert: SSL_DETAIL_BELONGS_ON_DATASOURCE,
-    key: SSL_DETAIL_BELONGS_ON_DATASOURCE,
-    rejectUnauthorized: SSL_DETAIL_BELONGS_ON_DATASOURCE,
-  },
-  history:
-    'Until #4410 nothing validated `datasource.config` at all — an unrecognised connection key '
-    + 'was accepted in silence and the datasource then connected on the client defaults '
-    + "(localhost:5432), which is #4001's original bug one level down.",
-});
-
-export const PostgresConfigSchema = lazySchema(() => z.object({
+  {
   /**
    * Connection URI. When present it supersedes `host`/`port`/`database`/
    * `username`, and a datasource secret (`external.credentialsRef`) still
@@ -129,7 +123,7 @@ export const PostgresConfigSchema = lazySchema(() => z.object({
 
   /** Dev-only, loosen-only schema self-heal (#2186). */
   autoMigrate: SqlAutoMigrateSchema.optional(),
-}, { error: postgresConfigUnknownKeyError }).strict()
+})
   .describe('PostgreSQL connection configuration')
   .superRefine((cfg, ctx) => {
     if (!cfg.url && !cfg.database) {

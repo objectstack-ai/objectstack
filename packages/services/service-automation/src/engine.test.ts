@@ -8,6 +8,22 @@ import { registerScreenNodes } from './builtin/screen-nodes.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import type { NodeExecutor } from './engine.js';
 import type { IAutomationService } from '@objectstack/spec/contracts';
+import { defineActionDescriptor } from '@objectstack/spec/automation';
+
+/**
+ * A pausing fixture's `resumeAuthority: 'any'` declaration (#5561).
+ *
+ * These tests continue their pause through the public `AutomationEngine.resume`
+ * door, and since #5561 step two a node type opts into that door rather than
+ * inheriting it — one that declares nothing is refused. Nothing in this file is
+ * about the resume gate itself (`resume-authority-gate.test.ts` owns it), so each
+ * pausing fixture states the posture it relies on, exactly as the four pausing
+ * built-ins do.
+ */
+const openPauser = (type: string) => defineActionDescriptor({
+    type, version: '1.0.0', name: type,
+    supportsPause: true, resumeAuthority: 'any',
+});
 
 // ─── Helper: Create a minimal logger for unit tests ─────────────────
 
@@ -463,6 +479,7 @@ describe('AutomationEngine', () => {
         function registerPausingNode(captured: { runId?: unknown }) {
             engine.registerNodeExecutor({
                 type: 'pause_node',
+                descriptor: openPauser('pause_node'),
                 async execute(_node, variables) {
                     captured.runId = variables.get('$runId');
                     return { success: true, suspend: true, correlation: 'req_1' };
@@ -690,6 +707,7 @@ describe('AutomationEngine', () => {
                 const e = new AutomationEngine(createTestLogger(), store);
                 e.registerNodeExecutor({
                     type: 'pause_node',
+                    descriptor: openPauser('pause_node'),
                     async execute() {
                         // Snapshot a nested object + array so we can assert the
                         // variable map round-trips through the store.
@@ -791,6 +809,7 @@ describe('AutomationEngine', () => {
                 const e = new AutomationEngine(createTestLogger()); // no store
                 e.registerNodeExecutor({
                     type: 'pause_node',
+                    descriptor: openPauser('pause_node'),
                     async execute() { return { success: true, suspend: true, correlation: 'req_1' }; },
                 });
                 e.registerFlow('p', {
@@ -1756,6 +1775,7 @@ describe('AutomationEngine - Back-edge re-entry (ADR-0044)', () => {
     it('cancelRun consumes a suspended run and records a terminal cancelled log', async () => {
         engine.registerNodeExecutor({
             type: 'pause',
+            descriptor: openPauser('pause'),
             async execute() { return { success: true, suspend: true, correlation: 'test-pause' }; },
         });
         engine.registerFlow('pausing_flow', {

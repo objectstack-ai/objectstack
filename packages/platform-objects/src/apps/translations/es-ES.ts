@@ -32,6 +32,9 @@ export const esES: TranslationData = {
       navigation: {
         group_overview: { label: 'Resumen' },
         group_apps: { label: 'Aplicaciones' },
+        // Setup's own `nav_packages` — distinct from the same id under
+        // `apps.studio.navigation`, which does not answer for this app (#5750).
+        nav_packages: { label: 'Paquetes' },
         nav_marketplace_browse: { label: 'Explorar Marketplace' },
         nav_marketplace_installed: { label: 'Aplicaciones instaladas' },
         nav_cloud_connection: { label: 'Conexión a la nube' },
@@ -53,6 +56,7 @@ export const esES: TranslationData = {
         nav_invitations: { label: 'Invitaciones' },
 
         nav_positions: { label: 'Posiciones' },
+        nav_capabilities: { label: 'Capacidades' },
         nav_permission_sets: { label: 'Conjuntos de Permisos' },
         nav_sharing_rules: { label: 'Reglas de Compartición' },
         nav_record_shares: { label: 'Registros Compartidos' },
@@ -62,8 +66,11 @@ export const esES: TranslationData = {
         nav_approval_processes: { label: 'Procesos' },
         nav_approval_requests: { label: 'Solicitudes' },
         nav_approval_actions: { label: 'Historial de Acciones' },
+        nav_approval_delegations: { label: 'Delegaciones (ausencia)' },
 
         nav_settings_hub: { label: 'Todos los Ajustes' },
+        nav_settings_localization: { label: 'Localización' },
+        nav_settings_company: { label: 'Empresa' },
         nav_settings_mail: { label: 'Correo' },
         nav_settings_branding: { label: 'Marca' },
         nav_settings_auth: { label: 'Autenticación' },
@@ -78,6 +85,12 @@ export const esES: TranslationData = {
         nav_sessions: { label: 'Sesiones' },
         nav_audit_logs: { label: 'Registros de Auditoría' },
         nav_notifications: { label: 'Notificaciones' },
+
+        // Integrations — contributed at RUNTIME by the owning capability
+        // plugins (ADR-0029 K2); gated by `pnpm check:app-nav-i18n` (#5750).
+        nav_webhooks: { label: 'Webhooks' },
+        nav_http_deliveries: { label: 'Entregas HTTP' },
+        nav_datasources: { label: 'Fuentes de datos' },
 
         nav_oauth_apps: { label: 'Aplicaciones OAuth' },
         nav_jwks: { label: 'Claves de Firma (JWKS)' },

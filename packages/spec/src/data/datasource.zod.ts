@@ -7,7 +7,7 @@ import { z } from 'zod';
  * Can be a built-in driver or a plugin-contributed driver (e.g., "com.vendor.snowflake").
  */
 import { lazySchema } from '../shared/lazy-schema';
-import { strictUnknownKeyError } from '../shared/suggestions.zod';
+import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { validateDriverConfig } from './driver/config-registry.zod';
 
@@ -38,31 +38,6 @@ import { validateDriverConfig } from './driver/config-registry.zod';
  * boundary, not a leftover hole — see the registry's own note on why inventing
  * a verdict against a shape we do not have would be worse than the silence.
  */
-
-/** Keys {@link DriverDefinitionSchema} declares (drift-guarded by datasource.test.ts). */
-const DRIVER_DEFINITION_KEYS = ['id', 'label', 'description', 'icon', 'configSchema'] as const;
-
-/** Keys {@link ExternalDatasourceSettingsSchema} declares (drift-guarded by datasource.test.ts). */
-const EXTERNAL_SETTINGS_KEYS = [
-  'allowedSchemas', 'allowWrites', 'validation',
-  'credentialsRef', 'queryTimeoutMs',
-] as const;
-
-/** Keys the external `validation` block declares (drift-guarded by datasource.test.ts). */
-const EXTERNAL_VALIDATION_KEYS = ['onMismatch', 'checkOnBoot', 'checkIntervalMs'] as const;
-
-/** Keys {@link DatasourceSchema} declares (drift-guarded by datasource.test.ts). */
-const DATASOURCE_KEYS = [
-  'name', 'label', 'driver', 'config', 'pool',
-  'ssl', 'description', 'active', 'autoConnect',
-  'schemaMode', 'external', 'origin',
-] as const;
-
-/** Keys the datasource `pool` block declares (drift-guarded by datasource.test.ts). */
-const POOL_KEYS = ['min', 'max', 'idleTimeoutMillis', 'connectionTimeoutMillis'] as const;
-
-/** Keys the datasource `ssl` block declares (drift-guarded by datasource.test.ts). */
-const SSL_KEYS = ['enabled', 'rejectUnauthorized', 'ca', 'cert', 'key'] as const;
 
 const CAPABILITIES_REMOVED_PREFIX =
   '`datasource.capabilities` was removed in @objectstack/spec 17.0.0 (#4583, ADR-0049) — '
@@ -162,75 +137,6 @@ const belongsInConfig = (key: string, canonical: string = key) =>
   + `config contract (\`PostgresConfigSchema\` / \`MysqlConfigSchema\` / \`SqliteConfigSchema\` / `
   + `\`MongoConfigSchema\` / \`MemoryConfigSchema\`, exported from \`@objectstack/spec/data\`).`;
 
-const driverDefinitionUnknownKeyError = strictUnknownKeyError({
-  surface: 'this driver definition',
-  knownKeys: DRIVER_DEFINITION_KEYS,
-  aliases: {
-    name: 'id',
-    driver: 'id',
-    title: 'label',
-    config: 'configSchema',
-    schema: 'configSchema',
-  },
-  guidance: {
-    capabilities: RETIRED_CAPABILITIES.capabilities,
-    capability: RETIRED_CAPABILITIES.capabilities,
-  },
-  history: 'Until #4001 these were dropped silently — the driver still registered.',
-});
-
-const externalSettingsUnknownKeyError = strictUnknownKeyError({
-  surface: "this datasource's external settings",
-  knownKeys: EXTERNAL_SETTINGS_KEYS,
-  aliases: {
-    schemas: 'allowedSchemas',
-    allowedschema: 'allowedSchemas',
-    writable: 'allowWrites',
-    allowwrite: 'allowWrites',
-    credentials: 'credentialsRef',
-    secretref: 'credentialsRef',
-    timeoutms: 'queryTimeoutMs',
-    querytimeout: 'queryTimeoutMs',
-  },
-  guidance: {
-    label: RETIRED_DATASOURCE_BLOCKS.externalLabel,
-    requirePermission: RETIRED_DATASOURCE_BLOCKS.externalRequirePermission,
-    permission: RETIRED_DATASOURCE_BLOCKS.externalRequirePermission,
-    password:
-      '`password` must never be inlined. Put the secret in the secrets store and reference '
-      + 'it with `credentialsRef` (e.g. `credentialsRef: "secret:warehouse/password"`).',
-    // #4487 corrected the second half of this line. It used to offer
-    // `capabilities.readOnly` as the place to "describe the driver" — a key the
-    // liveness audit found has NO reader (liveness/datasource.json), so an
-    // author who took the advice believed they had marked a datasource
-    // non-writable and had not. Same defect as the pre-#4410 `belongsInConfig`
-    // line documented above, on a property whose whole point is safety: a
-    // prescription must land somewhere enforced, and `allowWrites` is the only
-    // write gate there is.
-    readOnly:
-      '`readOnly` is not an external-settings key. Use `allowWrites: false` here — it is the '
-      + 'enforced datasource-wide write gate (checked by the ObjectQL engine before any write '
-      + 'to a federated datasource).',
-  },
-  history: 'Until #4001 these were dropped silently — federation ran on the defaults instead.',
-});
-
-const externalValidationUnknownKeyError = strictUnknownKeyError({
-  surface: "this datasource's external validation policy",
-  knownKeys: EXTERNAL_VALIDATION_KEYS,
-  aliases: {
-    onmismatch: 'onMismatch',
-    mismatch: 'onMismatch',
-    checkonboot: 'checkOnBoot',
-    validateonboot: 'checkOnBoot',
-    interval: 'checkIntervalMs',
-    checkinterval: 'checkIntervalMs',
-  },
-  history:
-    'Until #4001 these were dropped silently — drift checking ran on the defaults '
-    + '(fail on mismatch, check at boot) regardless of what was written.',
-});
-
 /**
  * `datasource.readReplicas` — retired (#4468, ADR-0049 enforce-or-remove).
  *
@@ -259,91 +165,6 @@ const RETIRED_READ_REPLICAS =
   + '`config` at that endpoint, which is the only read-scaling path that works today. '
   + 'Run `os migrate meta --from 16` to rewrite it automatically.';
 
-const datasourceUnknownKeyError = strictUnknownKeyError({
-  surface: 'this datasource',
-  knownKeys: DATASOURCE_KEYS,
-  aliases: {
-    type: 'driver',
-    connection: 'config',
-    connectionconfig: 'config',
-    options: 'config',
-    enabled: 'active',
-    pooling: 'pool',
-    mode: 'schemaMode',
-    schema_mode: 'schemaMode',
-    federation: 'external',
-    tls: 'ssl',
-  },
-  guidance: {
-    host: belongsInConfig('host'),
-    port: belongsInConfig('port'),
-    database: belongsInConfig('database'),
-    user: belongsInConfig('user', 'username'),
-    username: belongsInConfig('username'),
-    filename: belongsInConfig('filename'),
-    url: belongsInConfig('url'),
-    connectionString: belongsInConfig('connectionString', 'url'),
-    password:
-      '`password` must never be inlined on a datasource. Interpolate it from the environment '
-      + 'inside `config`, or for an external datasource reference the secrets store via '
-      + '`external.credentialsRef`.',
-    readReplicas: RETIRED_READ_REPLICAS,
-    replicas: RETIRED_READ_REPLICAS,
-    capabilities: RETIRED_CAPABILITIES.capabilities,
-    readOnly: RETIRED_CAPABILITIES.readOnly,
-    retryPolicy: RETIRED_DATASOURCE_BLOCKS.retryPolicy,
-    retry: RETIRED_DATASOURCE_BLOCKS.retryPolicy,
-    healthCheck: RETIRED_DATASOURCE_BLOCKS.healthCheck,
-    healthcheck: RETIRED_DATASOURCE_BLOCKS.healthCheck,
-  },
-  history:
-    'Until #4001 these were dropped silently — a connection key written one level too high '
-    + 'left the datasource connecting on driver defaults rather than failing.',
-});
-
-const poolUnknownKeyError = strictUnknownKeyError({
-  surface: "this datasource's pool config",
-  knownKeys: POOL_KEYS,
-  aliases: {
-    minimum: 'min',
-    maximum: 'max',
-    minconnections: 'min',
-    maxconnections: 'max',
-    idletimeout: 'idleTimeoutMillis',
-    idletimeoutms: 'idleTimeoutMillis',
-    connectiontimeout: 'connectionTimeoutMillis',
-    connectiontimeoutms: 'connectionTimeoutMillis',
-    acquiretimeoutmillis: 'connectionTimeoutMillis',
-  },
-  history:
-    'Until #4001 these were dropped silently — the pool ran on its defaults (min 0, max 10) '
-    + 'no matter what was written. Note both timeouts end in `Millis`, not `Ms`.',
-});
-
-const sslUnknownKeyError = strictUnknownKeyError({
-  surface: "this datasource's ssl config",
-  knownKeys: SSL_KEYS,
-  aliases: {
-    active: 'enabled',
-    ssl: 'enabled',
-    tls: 'enabled',
-    rejectunauthorised: 'rejectUnauthorized',
-    cacert: 'ca',
-    certificate: 'cert',
-    clientcert: 'cert',
-    privatekey: 'key',
-    clientkey: 'key',
-  },
-  guidance: {
-    insecure:
-      '`insecure` is not an ssl key. To accept a self-signed certificate set '
-      + '`rejectUnauthorized: false` — deliberately, and never against a production database.',
-  },
-  history:
-    'Until #4001 these were dropped silently — which meant a TLS setting that never took '
-    + 'effect looked identical to one that did.',
-});
-
 export const DriverType = z.string().describe('Underlying driver identifier');
 export type DriverType = z.input<typeof DriverType>;
 
@@ -352,7 +173,23 @@ export type DriverType = z.input<typeof DriverType>;
  * Metadata describing a Database Driver.
  * Plugins use this to register new connectivity options.
  */
-export const DriverDefinitionSchema = lazySchema(() => z.object({
+export const DriverDefinitionSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this driver definition',
+    aliases: {
+      name: 'id',
+      driver: 'id',
+      title: 'label',
+      config: 'configSchema',
+      schema: 'configSchema',
+    },
+    guidance: {
+      capabilities: RETIRED_CAPABILITIES.capabilities,
+      capability: RETIRED_CAPABILITIES.capabilities,
+    },
+    history: 'Until #4001 these were dropped silently — the driver still registered.',
+  },
+  {
   id: z.string().describe('Unique driver identifier (e.g. "postgres")'),
   label: z.string().describe('Display label (e.g. "PostgreSQL")'),
   description: z.string().optional(),
@@ -375,7 +212,7 @@ export const DriverDefinitionSchema = lazySchema(() => z.object({
    */
   configSchema: z.record(z.string(), z.unknown()).describe('JSON Schema for connection configuration'),
 
-}, { error: driverDefinitionUnknownKeyError }).strict());
+}));
 
 /** A driver definition — {@link DriverDefinitionSchema}'s parsed shape. */
 export type DriverDefinition = z.input<typeof DriverDefinitionSchema>;
@@ -404,25 +241,75 @@ export type SchemaMode = z.input<typeof SchemaModeSchema>;
  * policy for a mature external database: write gating, schema whitelist,
  * boot/drift validation behaviour, credentials reference, and query caps.
  */
-export const ExternalDatasourceSettingsSchema = z.object({
+export const ExternalDatasourceSettingsSchema = strictObject(
+  {
+    surface: "this datasource's external settings",
+    aliases: {
+      schemas: 'allowedSchemas',
+      allowedschema: 'allowedSchemas',
+      writable: 'allowWrites',
+      allowwrite: 'allowWrites',
+      credentials: 'credentialsRef',
+      secretref: 'credentialsRef',
+      timeoutms: 'queryTimeoutMs',
+      querytimeout: 'queryTimeoutMs',
+    },
+    guidance: {
+      label: RETIRED_DATASOURCE_BLOCKS.externalLabel,
+      requirePermission: RETIRED_DATASOURCE_BLOCKS.externalRequirePermission,
+      permission: RETIRED_DATASOURCE_BLOCKS.externalRequirePermission,
+      password:
+        '`password` must never be inlined. Put the secret in the secrets store and reference '
+        + 'it with `credentialsRef` (e.g. `credentialsRef: "secret:warehouse/password"`).',
+      // #4487 corrected the second half of this line. It used to offer
+      // `capabilities.readOnly` as the place to "describe the driver" — a key the
+      // liveness audit found has NO reader (liveness/datasource.json), so an
+      // author who took the advice believed they had marked a datasource
+      // non-writable and had not. Same defect as the pre-#4410 `belongsInConfig`
+      // line documented above, on a property whose whole point is safety: a
+      // prescription must land somewhere enforced, and `allowWrites` is the only
+      // write gate there is.
+      readOnly:
+        '`readOnly` is not an external-settings key. Use `allowWrites: false` here — it is the '
+        + 'enforced datasource-wide write gate (checked by the ObjectQL engine before any write '
+        + 'to a federated datasource).',
+    },
+    history: 'Until #4001 these were dropped silently — federation ran on the defaults instead.',
+  },
+  {
   allowedSchemas: z.array(z.string()).optional()
     .describe('Whitelist of remote schemas/databases that may be exposed.'),
   allowWrites: z.boolean().default(false)
     .describe('Global write gate. Individual objects must also opt in via object.external.writable.'),
-  validation: z.object({
+  validation: strictObject(
+  {
+    surface: "this datasource's external validation policy",
+    aliases: {
+      onmismatch: 'onMismatch',
+      mismatch: 'onMismatch',
+      checkonboot: 'checkOnBoot',
+      validateonboot: 'checkOnBoot',
+      interval: 'checkIntervalMs',
+      checkinterval: 'checkIntervalMs',
+    },
+    history:
+      'Until #4001 these were dropped silently — drift checking ran on the defaults '
+      + '(fail on mismatch, check at boot) regardless of what was written.',
+  },
+  {
     onMismatch: z.enum(['fail', 'warn', 'ignore']).default('fail')
       .describe('What to do when a federated object diverges from the remote table.'),
     checkOnBoot: z.boolean().default(true)
       .describe('Validate federated objects against the remote schema at boot.'),
     checkIntervalMs: z.number().optional()
       .describe('Optional background drift-check interval in milliseconds.'),
-  }, { error: externalValidationUnknownKeyError }).strict()
+  })
     .default({ onMismatch: 'fail', checkOnBoot: true }).describe('Boot/drift validation policy'),
   credentialsRef: z.string().optional()
     .describe('Reference into the secrets store; never inline credentials.'),
   queryTimeoutMs: z.number().default(30_000)
     .describe('Hard cap on per-query execution time.'),
-}, { error: externalSettingsUnknownKeyError }).strict()
+})
   .describe('External datasource federation settings (schemaMode != "managed")');
 
 export type ExternalDatasourceSettings = z.input<typeof ExternalDatasourceSettingsSchema>;
@@ -457,7 +344,48 @@ function reportDriverConfigIssues(
  * Datasource Schema
  * Represents a connection to an external data store.
  */
-export const DatasourceSchema = lazySchema(() => z.object({
+export const DatasourceSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this datasource',
+    aliases: {
+      type: 'driver',
+      connection: 'config',
+      connectionconfig: 'config',
+      options: 'config',
+      enabled: 'active',
+      pooling: 'pool',
+      mode: 'schemaMode',
+      schema_mode: 'schemaMode',
+      federation: 'external',
+      tls: 'ssl',
+    },
+    guidance: {
+      host: belongsInConfig('host'),
+      port: belongsInConfig('port'),
+      database: belongsInConfig('database'),
+      user: belongsInConfig('user', 'username'),
+      username: belongsInConfig('username'),
+      filename: belongsInConfig('filename'),
+      url: belongsInConfig('url'),
+      connectionString: belongsInConfig('connectionString', 'url'),
+      password:
+        '`password` must never be inlined on a datasource. Interpolate it from the environment '
+        + 'inside `config`, or for an external datasource reference the secrets store via '
+        + '`external.credentialsRef`.',
+      readReplicas: RETIRED_READ_REPLICAS,
+      replicas: RETIRED_READ_REPLICAS,
+      capabilities: RETIRED_CAPABILITIES.capabilities,
+      readOnly: RETIRED_CAPABILITIES.readOnly,
+      retryPolicy: RETIRED_DATASOURCE_BLOCKS.retryPolicy,
+      retry: RETIRED_DATASOURCE_BLOCKS.retryPolicy,
+      healthCheck: RETIRED_DATASOURCE_BLOCKS.healthCheck,
+      healthcheck: RETIRED_DATASOURCE_BLOCKS.healthCheck,
+    },
+    history:
+      'Until #4001 these were dropped silently — a connection key written one level too high '
+      + 'left the datasource connecting on driver defaults rather than failing.',
+  },
+  {
   /** Machine Name */
   name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique datasource identifier'),
   
@@ -478,12 +406,30 @@ export const DatasourceSchema = lazySchema(() => z.object({
    * Connection Pool Configuration
    * Standard connection pooling settings.
    */
-  pool: z.object({
+  pool: strictObject(
+  {
+    surface: "this datasource's pool config",
+    aliases: {
+      minimum: 'min',
+      maximum: 'max',
+      minconnections: 'min',
+      maxconnections: 'max',
+      idletimeout: 'idleTimeoutMillis',
+      idletimeoutms: 'idleTimeoutMillis',
+      connectiontimeout: 'connectionTimeoutMillis',
+      connectiontimeoutms: 'connectionTimeoutMillis',
+      acquiretimeoutmillis: 'connectionTimeoutMillis',
+    },
+    history:
+      'Until #4001 these were dropped silently — the pool ran on its defaults (min 0, max 10) '
+      + 'no matter what was written. Note both timeouts end in `Millis`, not `Ms`.',
+  },
+  {
     min: z.number().default(0).describe('Minimum connections'),
     max: z.number().default(10).describe('Maximum connections'),
     idleTimeoutMillis: z.number().default(30000).describe('Idle timeout'),
     connectionTimeoutMillis: z.number().default(3000).describe('Connection establishment timeout'),
-  }, { error: poolUnknownKeyError }).strict().optional().describe('Connection pool settings'),
+  }).optional().describe('Connection pool settings'),
 
   // `readReplicas` was removed here (#4468) — see RETIRED_READ_REPLICAS. It
   // declared replica connections nothing opened; read/write splitting does not
@@ -496,13 +442,36 @@ export const DatasourceSchema = lazySchema(() => z.object({
   
 
   /** SSL/TLS Configuration */
-  ssl: z.object({
+  ssl: strictObject(
+  {
+    surface: "this datasource's ssl config",
+    aliases: {
+      active: 'enabled',
+      ssl: 'enabled',
+      tls: 'enabled',
+      rejectunauthorised: 'rejectUnauthorized',
+      cacert: 'ca',
+      certificate: 'cert',
+      clientcert: 'cert',
+      privatekey: 'key',
+      clientkey: 'key',
+    },
+    guidance: {
+      insecure:
+        '`insecure` is not an ssl key. To accept a self-signed certificate set '
+        + '`rejectUnauthorized: false` — deliberately, and never against a production database.',
+    },
+    history:
+      'Until #4001 these were dropped silently — which meant a TLS setting that never took '
+      + 'effect looked identical to one that did.',
+  },
+  {
     enabled: z.boolean().default(false).describe('Enable SSL/TLS for database connection'),
     rejectUnauthorized: z.boolean().default(true).describe('Reject connections with invalid/self-signed certificates'),
     ca: z.string().optional().describe('CA certificate (PEM format or path to file)'),
     cert: z.string().optional().describe('Client certificate (PEM format or path to file)'),
     key: z.string().optional().describe('Client private key (PEM format or path to file)'),
-  }, { error: sslUnknownKeyError }).strict().optional().describe('SSL/TLS configuration for secure database connections'),
+  }).optional().describe('SSL/TLS configuration for secure database connections'),
 
   /** Description */
   description: z.string().optional().describe('Internal description'),
@@ -558,7 +527,7 @@ export const DatasourceSchema = lazySchema(() => z.object({
   // same one `permission` hit as a 422 on the ADR-0094 overlay path before
   // Tier-A declared them (#4001 findings log, entries 2/8).
   ...MetadataProtectionFields,
-}, { error: datasourceUnknownKeyError }).strict().superRefine((ds, ctx) => {
+}).superRefine((ds, ctx) => {
   // The `config` gate (#4410). `config` is parsed against the contract for the
   // declared driver and every issue is re-pathed under the slot it came from —
   // the author sees `config.hostname`, not a detached message.

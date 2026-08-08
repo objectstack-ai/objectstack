@@ -77,10 +77,12 @@
  *
  * Scope: `views` — every form view reachable from a `views[]` entry (the entry
  * itself when it IS a form view, plus the container's `form` and each
- * `formViews.<key>`; see {@link formViewSites} for why reading only the first
- * shape left this rule reporting clean on real metadata) — and `pages`, through
- * the shared `walkPageComponents` traversal. Data-field `visibleWhen` is already
- * covered by `validate-expressions` and is not re-checked here.
+ * `formViews.<key>`), through the shared `view-walk.ts` ladder (#6381; see
+ * {@link formViewSites} for why reading only the first shape left this rule
+ * reporting clean on real metadata, and why `listViews.<key>` is filtered out
+ * rather than absent) — and `pages`, through the shared `walkPageComponents`
+ * traversal. Data-field `visibleWhen` is already covered by
+ * `validate-expressions` and is not re-checked here.
  *
  * The predicate family is read off the schema, not guessed: `visibleWhen` is the
  * canonical key on all three carriers (`FormFieldBaseSchema` `view.zod.ts:1416`,
@@ -226,6 +228,7 @@ import { collectCelRootIdentifiers, firstUndeclaredReference, parseCelToAst } fr
 import type { CelAstNode } from '@objectstack/formula';
 
 import { walkPageComponents } from './page-walk.js';
+import { formViewSites } from './view-walk.js';
 
 export const VISIBILITY_ROOT_MISLAYERED = 'visibility-root-mislayered';
 export const VISIBILITY_BARE_IDENTIFIER = 'visibility-bare-identifier';
@@ -651,58 +654,6 @@ function isFieldObject(entry: unknown): entry is AnyRec {
 }
 
 /**
- * Every FORM VIEW reachable from one `views[]` entry, with the path each sits at.
- *
- * Two shapes, and reading only the first is how this rule was dead on real
- * metadata until #6128 measured it. `os build` on `examples/app-showcase` emits
- * its one form predicate at
- * `views[0].formViews.edit.sections[0].fields[6].visibleWhen` — the traversal
- * read `views[0].sections`, found nothing, and reported clean on a stack that
- * DOES carry a view-form predicate:
- *
- *  - **View CONTAINER** (the runtime app shape). `ViewSchema` declares exactly
- *    `name` / `label` / `object` / `list` / `form` / `listViews` / `formViews`
- *    (`view.zod.ts:1890-1903` — the strict error map spells the container's own
- *    keys out in prose). Form sections therefore live one level down, under
- *    `form` and each `formViews.<key>`; `list` / `listViews.<key>` are
- *    `ObjectListViewSchema` and carry no `sections`, so they are not walked.
- *  - **A bare FORM VIEW** (`FormViewSchema`, `view.zod.ts:1623-1624`), whose
- *    `sections` / `groups` sit at the top. This is the `defineForm` shape the
- *    `*.form.ts` metadata-editing forms use, i.e. the `layer: 'metadata'` caller.
- *
- * `objects[].views` is deliberately absent: `object.zod.ts:1833` tombstones the
- * key ("`views` is not an ObjectSchema field"), so a branch keyed on it could
- * only ever fire for stacks the schema already rejects by name — the phantom
- * check #4984 / #5017 removed from two neighbouring rules. Object-level
- * `listViews` (`object.zod.ts:1616`) is a list view, so it carries none of this
- * either.
- */
-function formViewSites(
-  view: AnyRec,
-  basePath: string,
-): Array<{ form: AnyRec; path: string; surface: string }> {
-  // `surface` names the sub-container in the human-readable `where`. It earns
-  // its place on exactly the shape this traversal was extended for: a runtime
-  // container carries neither `name` nor `object` in the emitted artifact, so
-  // without it every finding under one view reads `view "views[0]"` and the
-  // author cannot tell the `edit` form from the `tabbed` one.
-  const sites = [{ form: view, path: basePath, surface: '' }];
-  const dflt = view.form;
-  if (dflt && typeof dflt === 'object' && !Array.isArray(dflt)) {
-    sites.push({ form: dflt as AnyRec, path: `${basePath}.form`, surface: 'form' });
-  }
-  const named = view.formViews;
-  if (named && typeof named === 'object' && !Array.isArray(named)) {
-    for (const [key, sub] of Object.entries(named as AnyRec)) {
-      if (sub && typeof sub === 'object' && !Array.isArray(sub)) {
-        sites.push({ form: sub as AnyRec, path: `${basePath}.formViews.${key}`, surface: `formViews.${key}` });
-      }
-    }
-  }
-  return sites;
-}
-
-/**
  * Validate conditional-visibility predicates across authored views and pages.
  *
  * Every rule here judges the predicate's **VALUE**, which survives both the
@@ -743,7 +694,7 @@ export function validateVisibilityPredicates(
       // `sections` (canonical) and `groups` (legacy alias → sections) both hold
       // FormSection objects with an optional visibility predicate + `fields`.
       for (const bucket of ['sections', 'groups'] as const) {
-        const sections = Array.isArray(site.form[bucket]) ? (site.form[bucket] as unknown[]) : [];
+        const sections = Array.isArray(site.view[bucket]) ? (site.view[bucket] as unknown[]) : [];
         for (let s = 0; s < sections.length; s++) {
           const sec = sections[s];
           if (!sec || typeof sec !== 'object') continue;
