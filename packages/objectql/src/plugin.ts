@@ -917,11 +917,26 @@ export class ObjectQLPlugin implements Plugin {
       // This change removes one and makes the engine's the single producer;
       // `captureBefore`'s now-redundant read is the identity lane's follow-up.
       //
-      // `sys_fetch_previous_delete` below is NOT retired by the same argument
-      // and must not be removed as a rider: `delete()` binds `previous` only
-      // when its own demand gate is true, so the builtin's guard is still
-      // reachable — see #5929, which is about that gate's `object: '*'`
-      // breadth, not about this ordering.
+      // ⚠️ `sys_fetch_previous_delete` below is in the SAME position now, and is
+      // deliberately left standing because retiring it is #5929's card, not a
+      // rider on this one. Recording the measurement so that card does not have
+      // to rediscover it:
+      //
+      // `delete()` reads its pre-image when `wantsPreImage` is true, and that
+      // gate is `hasHooksFor('beforeDelete', object) || hasHooksFor(
+      // 'afterDelete', object) || summaries`. The builtin is itself a
+      // `beforeDelete` hook on `'*'`, so it makes the FIRST term true for every
+      // object — and then the engine's read binds `previous` before the builtin
+      // runs, so the builtin's own `!ctx.previous` guard is false and it issues
+      // no `findOne`. It is circular: the builtin's only remaining effect is to
+      // hold open the gate that makes it redundant. That circularity IS #5929
+      // ("the delete-side per-object gate is always true"), and after this
+      // change its resolution is the same retirement performed above, with the
+      // same argument.
+      //
+      // The one shape where the guard can still be true — the engine read found
+      // nothing (the row is already gone) — is one where the builtin's read
+      // finds nothing either, so it changes no binding.
       {
         name: 'sys_fetch_previous_delete',
         object: '*',
