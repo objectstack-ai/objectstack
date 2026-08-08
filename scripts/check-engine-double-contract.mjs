@@ -46,8 +46,39 @@
 //
 // A slice is exactly two facts: which member of the double to look at, and
 // which producer-side predicate that member must reach. Everything else --
-// engine-vs-driver attribution, the one-helper-deep indirection, the ledger,
+// the shape attribution below, the one-helper-deep indirection, the ledger,
 // the both-directions reconciliation -- is one implementation serving both.
+//
+// ## Three data-access shapes, not two (#6327, from #5945)
+//
+// A discovered literal is attributed to one of THREE contracts, because the
+// repo has three. The write verbs side by side are the whole taxonomy:
+//
+//   IDataEngine            update(objectName, data, options?)   object name FIRST
+//   IDataDriver            update(objectName, id, data, …)      primary key SECOND
+//   IScopedObjectRepository update(data, options?)              NO object name
+//
+// Only the first is this gate's subject. The driver is vetoed by
+// DRIVER_ONLY_MEMBERS and the primary-key parameter test; the scoped repository
+// -- added by #5945 as `packages/spec/src/contracts/scoped-context.ts`, and
+// implemented by objectql's `ObjectRepository` -- is vetoed by
+// REPOSITORY_ONLY_MEMBERS. Both vetoes put their shape OUT OF SCAN SCOPE rather
+// than into the ledger, because neither is a looser copy of `ObjectQL.<verb>`:
+// it is a different function with a different arity, so there is no dispatch
+// contract for it to be looser THAN.
+//
+// Why the third arm had to be built rather than baselined: a scoped repository
+// binds to one object, so its literal reads as engine-shaped to a scan that can
+// only see member names (`find`/`findOne`/`count`/`insert`, and `insert` is in
+// ENGINE_ONLY_MEMBERS). Accurate for what the scan can see, wrong about what the
+// object is. `@objectstack/spec` -- where the contract and both of its
+// conformance witnesses live -- cannot import `assertEngineUpdateDispatch` even
+// in principle, since the predicate's two homes both DEPEND ON spec, so every
+// witness of this interface could only ever leave the gate through a
+// hand-written EXEMPT. A gate that reddens correct code and can only be digested
+// through its ledger grows the ledger into noise, and the ledger's readability
+// is this gate's whole value (see the baseline's `$comment`: shrink-only, hand
+// reviewed).
 //
 // Deliberately NOT covered, and why (each wants its own slice, not a vaguer
 // version of these -- a gate whose scope is fuzzy is indistinguishable from
@@ -64,6 +95,16 @@
 //     unknown-option rejection). Same family, but each needs its own
 //     producer-side predicate extracted first -- the two write verbs have one
 //     because #4434 and #5480 paid for them.
+//   - a scoped repository that declares NO repository-only member. Measured on
+//     the corpus this landed against: `packages/runtime/src/action-body-identity
+//     .test.ts:71` is a real scoped facade (`createContext().object(name)`)
+//     spelling only `find`/`count`/`insert`/`update`/`delete`, and it stays in
+//     the ledger. Seeing it would mean reading its parameter NAMES, and `o` is
+//     ambiguous in exactly this repo: `o: string` is the object name in twelve
+//     discovered doubles and `o?: any` is the options bag in that facade. A
+//     criterion that guessed would trade a ledger row for the risk of putting a
+//     genuine engine double out of scan scope, which is the one error this gate
+//     cannot report. One ledger row is the cheaper half.
 //
 // ## Invariants
 //
@@ -242,6 +283,44 @@ const DRIVER_ONLY_MEMBERS = new Set([
  */
 const ENGINE_ONLY_MEMBERS = new Set(['insert', 'insertMany', 'aggregate', 'getSchema', 'registry']);
 
+/**
+ * The third arm of the same evidence architecture (#6327, from #5945): members
+ * present on the SCOPED REPOSITORY — `IScopedObjectRepository`
+ * (`packages/spec/src/contracts/scoped-context.ts`) and the `ObjectRepository`
+ * class that declares `implements` it — and on NEITHER `IDataEngine` NOR
+ * `IDataDriver` NOR the ObjectQL class. Declaring one is positive evidence of
+ * an object-BOUND repository, which is not this gate's subject.
+ *
+ * Verified member by member rather than assumed, on the tree this landed
+ * against: `IDataEngine` declares find/findOne/insert/update/delete/count/
+ * aggregate/vectorFind/execute and no by-id form; `IDataDriver` reaches for
+ * records by `id` in a PARAMETER (`update(object, id, data)`) and spells its
+ * bulk forms `bulkUpdate`/`updateMany`/`bulkDelete`/`deleteMany`; and inside
+ * `packages/objectql/src/engine.ts` the only declarations of these two names
+ * are on `class ObjectRepository implements IScopedObjectRepository`.
+ *
+ * Kept to the names that answer, exactly as DRIVER_ONLY_MEMBERS is. The
+ * repository's `create` / `upsert` / `delete` / `aggregate` / `execute` are
+ * real members and are deliberately absent: every one of them is also on the
+ * driver or the engine, so it separates nothing. (`create` already sits in
+ * DRIVER_ONLY_MEMBERS, so a repository double spelling it leaves scan scope
+ * through that veto instead — the right outcome by the wrong name, recorded
+ * here so the next reader does not read it as a gap.)
+ */
+const REPOSITORY_ONLY_MEMBERS = new Set(['updateById', 'deleteById']);
+
+/**
+ * Parameter names that mean "this position holds an OBJECT NAME" — the
+ * complement of ID_PARAM, and the first position rather than the second.
+ *
+ * Both contracts this gate DOES judge take the object name first, so positive
+ * evidence of one is positive evidence that the literal is NOT an object-bound
+ * repository. `t` and `table` are here because this repo's fakes use them
+ * (`_t: string` is the commonest spelling in the discovered corpus after
+ * `object: string`).
+ */
+const OBJECT_NAME_PARAM = /^_*(o|obj|object|objectName|objectname|name|table|tableName|t)$/i;
+
 // ── Discovery ───────────────────────────────────────────────────────────────
 
 function walk(dir, out = []) {
@@ -329,6 +408,25 @@ function memberName(member) {
  * the native-aggregate driver above, and "no driver members" alone admits any
  * `{ find, findOne, update, delete }` store mock that is neither contract.
  */
+/**
+ * Does this verb take an OBJECT NAME in first position? Positive evidence only
+ * — an unreadable or absent first parameter answers `false`, never `true`.
+ *
+ * The asymmetry is deliberate and is the whole safety property of the scoped-
+ * repository veto below: this function's `true` KEEPS a literal in scan scope,
+ * so being generous with it can only cost a ledger row, while being generous
+ * with `false` would put a genuine engine double out of scan scope — the one
+ * error a gate cannot report about itself.
+ */
+function takesObjectNameFirst(fn) {
+  const first = (fn.parameters ?? [])[0];
+  if (!first) return false;
+  const name = ts.isIdentifier(first.name) ? first.name.text : '';
+  if (OBJECT_NAME_PARAM.test(name)) return true;
+  const t = first.type ? first.type.getText().trim() : '';
+  return /^(string|string \| number)$/.test(t);
+}
+
 function isEngineVerbShape(fn, memberNames = new Set()) {
   const params = fn.parameters ?? [];
   // The DRIVER veto outranks everything, at every arity (#5480).
@@ -347,6 +445,30 @@ function isEngineVerbShape(fn, memberNames = new Set()) {
   // of them), so it decides first. Same precedence the arity path always used,
   // now applied uniformly.
   for (const n of memberNames) if (DRIVER_ONLY_MEMBERS.has(n)) return false;
+  // The SCOPED-REPOSITORY veto (#6327), same precedence and the same shape as
+  // the driver veto above: a name only the third contract has, decided at ANY
+  // arity, before ENGINE_ONLY_MEMBERS gets to read `insert` as engine evidence
+  // — which is precisely how #5945's two conformance witnesses were attributed
+  // to the engine and could only leave through a hand-written EXEMPT.
+  //
+  // BOTH halves are required, and each has a job. The member is the evidence
+  // that this is a repository; the parameter test is what stops the member from
+  // silencing a fake that is ALSO engine-shaped — a double spelling
+  // `update(objectName, data, opts)` takes the object name the engine takes, so
+  // it stays in scope and stays pinnable however many convenience members it
+  // hangs off the side. Requiring the member is the other half: object-lessness
+  // alone would have to be inferred from parameter names, and `o` means the
+  // object in twelve discovered doubles and the options bag in one scoped
+  // facade, so a member-free reading would be guessing on a corpus that
+  // genuinely disagrees with itself.
+  //
+  // Measured before it was written, over the 250 doubles this gate discovers:
+  // the pair moves exactly 2, both of them #5945's witnesses, and 0 of the 82
+  // PINNED doubles. Widening it is a measurement, not an opinion — re-run that
+  // count before adding a name here.
+  if (!takesObjectNameFirst(fn)) {
+    for (const n of memberNames) if (REPOSITORY_ONLY_MEMBERS.has(n)) return false;
+  }
   if (params.length < 2) {
     let engineEvidence = false;
     for (const n of memberNames) {
@@ -977,6 +1099,106 @@ const driver = {
   expect("objectql's relative import of the update producer counts",
     d.length === 1 && d[0].pinned === true);
 
+  // ── The SCOPED REPOSITORY, the third shape (#6327, from #5945).
+  //
+  // Driven as an A/B on ONE literal, because every assertion here is a negative
+  // ("not reported") and a negative passes vacuously the day the scan stops
+  // discovering anything. The two fixtures below differ by a single member, so
+  // the control does not merely accompany the claim — it is the same object
+  // with the evidence removed, which is the only version that can distinguish
+  // "the veto fired" from "discovery died".
+  const repoBody = `
+  find: async (query?: any) => [],
+  findOne: async (query?: any) => null,
+  count: async (query?: any) => 0,
+  insert: async (data: any) => data,
+  update: async (data: any, options?: any) => data,`;
+  const scopedRepo = `const repo = {${repoBody}
+  updateById: async (id: string | number, data: any) => ({ id, ...data }),
+};
+`;
+  const sameRepoWithoutMarker = `const repo = {${repoBody}
+};
+`;
+  expect('a scoped-repository witness is out of scope for the update slice',
+    scanSource('sr.test.ts', scopedRepo, U).length === 0);
+  expect('…and the SAME literal without updateById is still discovered',
+    scanSource('sr.test.ts', sameRepoWithoutMarker, U).length === 1);
+
+  // The second spelling #5945 actually wrote, and the one direction-2 ("look
+  // for a `: IScopedObjectRepository` annotation") cannot see: the repository
+  // handed back by `object(name)`, which carries no annotation anywhere.
+  const returnedRepo = `
+const liveApi = {
+  object: (_name: string) => ({
+    find: async () => [],
+    findOne: async () => null,
+    count: async () => 0,
+    insert: async (data: unknown) => data,
+    update: async (data: unknown) => data,
+    updateById: async (id: string | number, data: object) => ({ id, ...data }),
+  }),
+};
+`;
+  expect('an UNANNOTATED repository handed back by object(name) is out of scope',
+    scanSource('rr.test.ts', returnedRepo, U).length === 0);
+
+  // The veto must not be a licence the member alone grants. A fake that takes
+  // the object name where the ENGINE takes it is an engine double no matter
+  // what convenience members hang off it — otherwise adding one `updateById`
+  // to any fake would silently retire it from this gate.
+  const engineWithByIdHelper = `
+const engine = {
+  async find(objectName: string, q?: any) { return []; },
+  async insert(objectName: string, data: any) { return data; },
+  async delete(objectName: string, opts?: any) { return true; },
+  async update(objectName: string, data: any, opts?: any) { return data; },
+  async updateById(id: string, data: any) { return data; },
+};
+`;
+  d = scanSource('eb.test.ts', engineWithByIdHelper, U);
+  expect('an engine double that ALSO declares updateById stays in scope',
+    d.length === 1 && d[0].pinned === false);
+
+  // The delete slice needs its own arm exercised, and its own marker: the
+  // repository's delete is `delete(options)` — no object name, no id.
+  const scopedRepoDelete = `
+const repo = {
+  find: async (query?: any) => [],
+  findOne: async (query?: any) => null,
+  count: async (query?: any) => 0,
+  insert: async (data: any) => data,
+  delete: async (options?: any) => ({ ok: true }),
+  deleteById: async (id: string | number) => true,
+};
+`;
+  expect("a scoped repository's delete is out of scope when the literal declares deleteById",
+    scanSource('srd.test.ts', scopedRepoDelete).length === 0);
+
+  // The sharpest form of the same guard, and the one the negative-assertion
+  // asymmetry actually demands: one fixture holding BOTH shapes, asserted on
+  // the EXACT reported set rather than on a count of zero. A criterion that
+  // silenced everything would pass every assertion above and fail this one.
+  const mixed = `${UIMPORT}
+const repo = {
+  find: async (query?: any) => [],
+  findOne: async (query?: any) => null,
+  count: async (query?: any) => 0,
+  insert: async (data: any) => data,
+  update: async (data: any, options?: any) => data,
+  updateById: async (id: string | number, data: any) => ({ id, ...data }),
+};
+const engine = {
+  async find(o: string, opts?: any) { return []; },
+  async insert(o: string, data: any) { return data; },
+  async delete(o: string, opts?: any) { return true; },
+  async update(o: string, data: any, opts?: any) { return data; },
+};
+`;
+  const mixedFound = scanSource('mx.test.ts', mixed, U);
+  expect('a mixed fixture reports EXACTLY the engine double, not the repository',
+    mixedFound.length === 1 && mixedFound[0].line === 11 && mixedFound[0].pinned === false);
+
   // Discovery must reach the real tree, for EVERY slice, and specifically must
   // reach the fake #4434 was shipped past. Everything above is synthetic; this
   // is the wiring.
@@ -1002,10 +1224,12 @@ const driver = {
     process.exit(1);
   }
   console.log(
-    'OK  self-test: separates engine doubles from driver doubles on BOTH write verbs, admits a '
-      + 'verb that declares fewer than two parameters only on engine-vs-driver sibling evidence, '
-      + "accepts only that slice's producer predicate (direct or one helper deep) and never the "
-      + 'other slice\'s, rejects unused imports, hand-mirrored guards and look-alikes, and proves '
+    'OK  self-test: separates engine doubles from driver doubles AND from scoped repositories on '
+      + 'BOTH write verbs, admits a verb that declares fewer than two parameters only on '
+      + "engine-vs-driver sibling evidence, accepts only that slice's producer predicate (direct or "
+      + "one helper deep) and never the other slice's, rejects unused imports, hand-mirrored guards "
+      + 'and look-alikes, keeps an engine double in scope however many by-id helpers it declares, '
+      + 'reports EXACTLY the engine double out of a fixture holding both shapes, and proves '
       + 'discovery reaches the real tree for every slice.',
   );
 }
