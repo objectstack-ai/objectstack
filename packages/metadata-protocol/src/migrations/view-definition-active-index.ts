@@ -117,6 +117,14 @@
  * points at `os migrate plan`, and the boot continues.
  */
 
+import {
+    logProblem,
+    probeThenReplaceIndex,
+    type IndexExec,
+    type IndexMigrationLogger,
+    type PartialIndexStatus,
+} from './partial-index-probe.js';
+
 /** The one table this migration touches. */
 export const VIEW_DEFINITION_TABLE = 'sys_view_definition';
 
@@ -176,53 +184,22 @@ export function viewActiveIndexKeyParts(): string[] {
     });
 }
 
-/** Raw-SQL seam. Mirrors `ensureOverlayIndex`: `raw()` first, `execute()` second. */
-export type IndexExec = (sql: string) => Promise<unknown>;
-
 /**
- * Minimal logger surface, structurally compatible with `@objectstack/spec`'s
- * `Logger` (every method optional so a bare console or a test double fits).
- * Signatures mirror that contract exactly — notably `error(msg, Error, meta)`
- * versus `warn(msg, meta)` — so a host `Logger` is assignable as-is.
+ * The raw-SQL seam, the logger surface, the status vocabulary and the failure
+ * classifier all live in `partial-index-probe.ts` since #6418, when
+ * `ensureOverlayIndex` adopted this module's probe-first order and the two
+ * migrations stopped being able to afford separate copies of them. Re-exported
+ * under this module's original names so its callers and `index.ts` see no
+ * change.
  */
-export interface EnsureViewIndexLogger {
-    info?(message: string, meta?: Record<string, any>): void;
-    warn?(message: string, meta?: Record<string, any>): void;
-    error?(message: string, error?: Error, meta?: Record<string, any>): void;
-}
+export type { IndexExec } from './partial-index-probe.js';
+export { classifyIndexFailure } from './partial-index-probe.js';
 
-/**
- * Report a problem at the loudest level the host offers, bridging the two
- * different shapes (`error` takes an Error, `warn` takes metadata) so callers
- * never have to care which one exists.
- */
-function logProblem(
-    logger: EnsureViewIndexLogger | undefined,
-    message: string,
-    detail: string,
-): void {
-    if (logger?.error) {
-        logger.error(message, new Error(detail));
-        return;
-    }
-    logger?.warn?.(message, { detail });
-}
+/** @see IndexMigrationLogger */
+export type EnsureViewIndexLogger = IndexMigrationLogger;
 
-export type EnsureViewIndexStatus =
-    /** The partial UNIQUE index is in place under the declared name. */
-    | 'created'
-    /**
-     * The dialect rejects the form — `CREATE INDEX … WHERE` (no dialect of
-     * MySQL has partial indexes) or the `COALESCE` functional key parts
-     * (MySQL < 8.0.13 / MariaDB). Legacy index kept.
-     */
-    | 'unsupported'
-    /** Existing rows violate the key. Legacy index kept, operator told. */
-    | 'conflict'
-    /** No raw-SQL-capable driver reachable (memory/mock hosts). No-op. */
-    | 'no-driver'
-    /** Anything else, best-effort. Legacy index kept. */
-    | 'failed';
+/** @see PartialIndexStatus */
+export type EnsureViewIndexStatus = PartialIndexStatus;
 
 export interface EnsureViewIndexResult {
     status: EnsureViewIndexStatus;
@@ -257,32 +234,6 @@ export function buildDuplicateProbeSql(): string {
         `FROM ${VIEW_DEFINITION_TABLE} WHERE state = 'active' ` +
         `GROUP BY ${viewActiveIndexKeyParts().join(', ')} HAVING COUNT(*) > 1`
     );
-}
-
-/**
- * Classify a failed `CREATE UNIQUE INDEX … WHERE`.
- *
- * Duplicate-row wording is checked BEFORE dialect wording: MySQL's duplicate
- * error mentions the key, and some drivers wrap both facts in one string, so
- * the more specific verdict has to win or a real data conflict would be
- * misreported as "this dialect cannot build this index". That ordering matters
- * more since #6417 — the tightening makes a data conflict a LIVE path, not the
- * near-unreachable corner it was under #5839 alone.
- *
- * The dialect arm covers both refusals a single `unsupported` verdict has to
- * stand for, because MySQL hits them together and one error string cannot be
- * split: no partial indexes at all, and (before 8.0.13 / on MariaDB) no
- * functional key parts for the `COALESCE` parts. Both leave the same outcome —
- * the declared bare composite stays — so one verdict is enough.
- */
-export function classifyIndexFailure(message: string): EnsureViewIndexStatus {
-    if (/unique constraint failed|duplicate entry|duplicate key value|violates unique/i.test(message)) {
-        return 'conflict';
-    }
-    if (/partial|where clause|near "where"|near 'where'|functional|syntax/i.test(message)) {
-        return 'unsupported';
-    }
-    return 'failed';
 }
 
 /**
@@ -350,39 +301,24 @@ export async function ensureViewDefinitionActiveIndex(
 ): Promise<EnsureViewIndexResult> {
     if (!exec) return { status: 'no-driver' };
 
-    const drop = async (indexName: string): Promise<void> => {
-        try {
-            await exec(`DROP INDEX IF EXISTS ${indexName}`);
-        } catch {
-            // Best-effort. MySQL has no `DROP INDEX IF EXISTS <name>` form at
-            // all; on that path the probe below has already bailed out.
-        }
-    };
+    // The probe-first order — prove the partial form is possible under a
+    // throwaway name, and only THEN drop the declared name and rebuild it —
+    // lives in `partial-index-probe.ts` since #6418, when `ensureOverlayIndex`
+    // adopted it. Claiming the DECLARED name is what stops `syncDeclaredIndexes`
+    // (which skips by name) from re-imposing the unrestricted form next boot.
+    const outcome = await probeThenReplaceIndex(exec, {
+        indexName: VIEW_ACTIVE_INDEX_NAME,
+        probeIndexName: VIEW_ACTIVE_PROBE_INDEX_NAME,
+        buildSql: buildActiveIndexSql,
+    });
 
-    // ── Step 1: prove the partial form is possible WITHOUT touching the
-    // constraint that is currently protecting the table. ──────────────────
-    await drop(VIEW_ACTIVE_PROBE_INDEX_NAME);
-    try {
-        await exec(buildActiveIndexSql(VIEW_ACTIVE_PROBE_INDEX_NAME));
-    } catch (err: unknown) {
-        const detail = err instanceof Error ? err.message : String(err);
-        const status = classifyIndexFailure(detail);
-        await drop(VIEW_ACTIVE_PROBE_INDEX_NAME);
-        reportDegradation(status, detail, logger);
-        return { status, detail };
-    }
-    await drop(VIEW_ACTIVE_PROBE_INDEX_NAME);
+    if (outcome.status === 'created') return { status: 'created' };
 
-    // ── Step 2: the partial index is known-buildable here. Claim the
-    // DECLARED name so `syncDeclaredIndexes` never re-imposes the full one. ─
-    await drop(VIEW_ACTIVE_INDEX_NAME);
-    try {
-        await exec(buildActiveIndexSql(VIEW_ACTIVE_INDEX_NAME));
-    } catch (err: unknown) {
+    const detail = outcome.detail ?? '';
+    if (outcome.failedAt === 'replace') {
         // Only reachable on a race with another process between the drop and
         // the create — the probe already cleared dialect and data. Say so
         // rather than leaving a table that now has no unique index at all.
-        const detail = err instanceof Error ? err.message : String(err);
         logProblem(
             logger,
             `[metadata-protocol] could not create '${VIEW_ACTIVE_INDEX_NAME}' on ` +
@@ -392,7 +328,9 @@ export async function ensureViewDefinitionActiveIndex(
         );
         return { status: 'failed', detail };
     }
-    return { status: 'created' };
+
+    reportDegradation(outcome.status, detail, logger);
+    return { status: outcome.status, detail };
 }
 
 /**

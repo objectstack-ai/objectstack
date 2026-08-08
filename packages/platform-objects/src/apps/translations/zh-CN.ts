@@ -63,10 +63,14 @@ export const zhCN: TranslationData = {
         nav_permission_sets: { label: '权限集' },
         nav_sharing_rules: { label: '共享规则' },
         nav_record_shares: { label: '记录共享' },
+        // Conditionally contributed by `@objectstack/plugin-auth` (only when an
+        // external IdP is wired), so `check:app-nav-i18n` cannot see it — see
+        // the rationale in `en.ts` (#6659). Wording matches this locale's
+        // `sys_sso_provider.pluralLabel`.
+        nav_sso_providers: { label: 'SSO 提供方' },
         nav_api_keys: { label: 'API 密钥' },
         nav_connect_agent: { label: '连接智能体' },
 
-        nav_approval_processes: { label: '审批流程' },
         nav_approval_requests: { label: '审批申请' },
         nav_approval_actions: { label: '审批历史' },
         // `审批委派` matches sys_approval_delegation's object label; `(外出)`
@@ -104,7 +108,6 @@ export const zhCN: TranslationData = {
         nav_jwks: { label: '签名密钥 (JWKS)' },
         nav_accounts: { label: '身份链接' },
         nav_user_preferences: { label: '用户偏好' },
-        nav_metadata: { label: '全部元数据' },
       },
     },
     studio: {

@@ -82,11 +82,23 @@ export const en: TranslationData = {
         nav_permission_sets: { label: 'Permission Sets' },
         nav_sharing_rules: { label: 'Sharing Rules' },
         nav_record_shares: { label: 'Record Shares' },
+        // `nav_sso_providers` is contributed by `@objectstack/plugin-auth` only
+        // when the external-IdP RP is wired (`OS_SSO_ENABLED`, or the cloud
+        // per-env `planAllowsSso`), so it is the one Setup entry
+        // `pnpm check:app-nav-i18n` structurally cannot judge: that gate boots
+        // ONE composition, and a contribution gated off in it is never merged
+        // and therefore never checked (see the gate header's bound #1). Its
+        // absence here was invisible for exactly that reason (#6659) — a
+        // deployment with SSO wired showed `SSO Providers` in English inside an
+        // otherwise translated menu. The pin that keeps this row honest lives
+        // in `setup-nav-dead-key-tombstone.test.ts`. Wording follows the
+        // object's own `pluralLabel` per locale (`sys_sso_provider`), since the
+        // entry opens that object's list view.
+        nav_sso_providers: { label: 'SSO Providers' },
         nav_api_keys: { label: 'API Keys' },
         nav_connect_agent: { label: 'Connect an Agent' },
 
         // Approvals
-        nav_approval_processes: { label: 'Processes' },
         nav_approval_requests: { label: 'Requests' },
         nav_approval_actions: { label: 'Action History' },
         nav_approval_delegations: { label: 'Delegations (OOO)' },
@@ -121,13 +133,18 @@ export const en: TranslationData = {
         nav_datasources: { label: 'Datasources' },
 
         // Advanced
+        //
+        // No `nav_verifications` / `nav_device_codes` here on purpose:
+        // `sys_verification` and `sys_device_code` omit `list` from their
+        // `apiMethods`, so `setup-nav.contributions.ts` deliberately declares
+        // no browse entry for them (#2266). Nor `nav_metadata` — that entry
+        // moved to Studio as `nav_metadata_directory`. Re-adding a label here
+        // means re-adding the nav item first; the tombstone in
+        // `setup-nav-dead-key-tombstone.test.ts` states the whole rule (#6660).
         nav_oauth_apps: { label: 'OAuth Applications' },
         nav_jwks: { label: 'Signing Keys (JWKS)' },
-        nav_verifications: { label: 'Verifications' },
-        nav_device_codes: { label: 'Device Codes' },
         nav_accounts: { label: 'Identity Links' },
         nav_user_preferences: { label: 'User Preferences' },
-        nav_metadata: { label: 'All Metadata' },
       },
     },
     studio: {

@@ -637,13 +637,14 @@ export const FlowSchema = lazySchema(() => strictObject(
    * Error Handling Strategy.
    *
    * The retry knobs are the converged `RetryPolicySchema` contract, shared with
-   * `job.retryPolicy`, a `try_catch` node's `retry` and an ETL pipeline's
-   * `retry` (#4661 + #4964 — see `shared/retry-policy.zod.ts`). Until 17 this
-   * block spelled the base delay `retryDelayMs` while the converged policy
-   * spelled it `backoffMs`, so an author who read the newer file and brought
-   * the word here had it silently stripped (pre-批 11) or rejected (post-批 11)
-   * — being punished for learning the canonical spelling. `strategy` stays
-   * here: it selects *whether* the policy runs, it is not part of the policy.
+   * `job.retryPolicy` and a `try_catch` node's `retry` (#4661 + #4964 — see
+   * `shared/retry-policy.zod.ts`; `ETLPipeline.retry` did the same until #6414
+   * retired the L2 ETL layer). Until 17 this block spelled the base delay
+   * `retryDelayMs` while the converged policy spelled it `backoffMs`, so an
+   * author who read the newer file and brought the word here had it silently
+   * stripped (pre-批 11) or rejected (post-批 11) — being punished for learning
+   * the canonical spelling. `strategy` stays here: it selects *whether* the
+   * policy runs, it is not part of the policy.
    *
    * **These defaults are the only defaults** (#4247). The engine reads the
    * parsed block field-by-field with no fallback of its own — `retryExecution`
@@ -717,14 +718,14 @@ export const FlowSchema = lazySchema(() => strictObject(
     // is what made the divergence so durable: it looked reviewed.
     //
     // The spread is what keeps that from happening again. A key added to the
-    // policy lands on all four surfaces at once, instead of on the ones
+    // policy lands on all three surfaces at once, instead of on the ones
     // whoever added it happened to grep for.
     ...retryPolicyShape(),
 
     // The ONE site-specific override, and it is prose only — same type, same
     // bounds, same default, all still single-sourced above. `.describe()`
     // lands in `content/docs/references/`, and the flow surface has a reading
-    // the other three do not: the count is read only under `strategy:
+    // the other two do not: the count is read only under `strategy:
     // 'retry'`, where the `superRefine` below then requires >= 1 (#4247).
     // Default 0 = "no retries" is the right reading for the two strategies
     // that never retry; under `'retry'` it would mean "retry, zero times",

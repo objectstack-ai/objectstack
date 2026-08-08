@@ -60,10 +60,14 @@ export const jaJP: TranslationData = {
         nav_permission_sets: { label: '権限セット' },
         nav_sharing_rules: { label: '共有ルール' },
         nav_record_shares: { label: 'レコード共有' },
+        // Conditionally contributed by `@objectstack/plugin-auth` (only when an
+        // external IdP is wired), so `check:app-nav-i18n` cannot see it — see
+        // the rationale in `en.ts` (#6659). Wording matches this locale's
+        // `sys_sso_provider.pluralLabel`.
+        nav_sso_providers: { label: 'SSO プロバイダー' },
         nav_api_keys: { label: 'API キー' },
         nav_connect_agent: { label: 'エージェントを接続' },
 
-        nav_approval_processes: { label: 'プロセス' },
         nav_approval_requests: { label: 'リクエスト' },
         nav_approval_actions: { label: 'アクション履歴' },
         nav_approval_delegations: { label: '委任 (不在時)' },
@@ -94,11 +98,8 @@ export const jaJP: TranslationData = {
 
         nav_oauth_apps: { label: 'OAuth アプリケーション' },
         nav_jwks: { label: '署名キー (JWKS)' },
-        nav_verifications: { label: '検証' },
-        nav_device_codes: { label: 'デバイスコード' },
         nav_accounts: { label: 'ID 連携' },
         nav_user_preferences: { label: 'ユーザー設定' },
-        nav_metadata: { label: 'すべてのメタデータ' },
       },
     },
     studio: {

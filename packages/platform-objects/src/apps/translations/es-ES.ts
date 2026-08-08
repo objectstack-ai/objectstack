@@ -60,10 +60,14 @@ export const esES: TranslationData = {
         nav_permission_sets: { label: 'Conjuntos de Permisos' },
         nav_sharing_rules: { label: 'Reglas de Compartición' },
         nav_record_shares: { label: 'Registros Compartidos' },
+        // Conditionally contributed by `@objectstack/plugin-auth` (only when an
+        // external IdP is wired), so `check:app-nav-i18n` cannot see it — see
+        // the rationale in `en.ts` (#6659). Wording matches this locale's
+        // `sys_sso_provider.pluralLabel`.
+        nav_sso_providers: { label: 'Proveedores SSO' },
         nav_api_keys: { label: 'Claves API' },
         nav_connect_agent: { label: 'Conectar un agente' },
 
-        nav_approval_processes: { label: 'Procesos' },
         nav_approval_requests: { label: 'Solicitudes' },
         nav_approval_actions: { label: 'Historial de Acciones' },
         nav_approval_delegations: { label: 'Delegaciones (ausencia)' },
@@ -94,11 +98,8 @@ export const esES: TranslationData = {
 
         nav_oauth_apps: { label: 'Aplicaciones OAuth' },
         nav_jwks: { label: 'Claves de Firma (JWKS)' },
-        nav_verifications: { label: 'Verificaciones' },
-        nav_device_codes: { label: 'Códigos de Dispositivo' },
         nav_accounts: { label: 'Enlaces de Identidad' },
         nav_user_preferences: { label: 'Preferencias de Usuario' },
-        nav_metadata: { label: 'Todos los Metadatos' },
       },
     },
     studio: {
