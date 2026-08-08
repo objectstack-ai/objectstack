@@ -174,8 +174,8 @@ describe('registry shadow — control-plane PUT → GET → DELETE keeps the art
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        engine.registry.registerObject(sysMetadataObject as any);
-        engine.registry.registerObject(sysMetadataHistoryObject as any);
+        engine.registry.registerObject(sysMetadataObject);
+        engine.registry.registerObject(sysMetadataHistoryObject);
         engine.registry.registerItem('app', artifactApp(), 'name', PKG);
         // No environmentId — single-kernel / control-plane mode, where the
         // L3 lock gate is bypassed and the GET list hydrates overlay rows

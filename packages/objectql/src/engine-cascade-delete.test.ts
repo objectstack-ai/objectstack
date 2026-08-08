@@ -99,7 +99,7 @@ describe('cascadeDeleteRelations — required FK escalates set_null → restrict
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        for (const o of [acct, oppRequired, noteOptional, taskCascade]) engine.registry.registerObject(o as any);
+        for (const o of [acct, oppRequired, noteOptional, taskCascade]) engine.registry.registerObject(o);
     });
 
     it('refuses to delete a parent with a REQUIRED-FK child (DELETE_RESTRICTED, 409) and leaves both rows', async () => {

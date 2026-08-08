@@ -156,7 +156,7 @@ async function makeEngine(opts: { nativeAutonumber?: boolean } = {}) {
   const rig = makeStubDriver(opts);
   engine.registerDriver(rig.driver, true);
   await engine.init();
-  engine.registry.registerObject(ACCOUNT as any);
+  engine.registry.registerObject(ACCOUNT);
   const protocol = new ObjectStackProtocolImplementation(engine);
   return { engine, protocol, ...rig };
 }
@@ -581,7 +581,7 @@ describe('#5628 — a `readonly: true` autonumber keeps the #5503 exemption set'
   let rig: Awaited<ReturnType<typeof makeEngine>>;
   beforeEach(async () => {
     rig = await makeEngine();
-    rig.engine.registry.registerObject(INVOICE as any, 'test');
+    rig.engine.registry.registerObject(INVOICE, 'test');
   });
 
   it('still strips an ordinary caller-supplied number and issues the sequence value', async () => {

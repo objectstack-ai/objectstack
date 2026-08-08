@@ -215,8 +215,8 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         stores = made.stores;
         engine.registerDriver(driver, true);
         await engine.init();
-        engine.registry.registerObject(projectObject as any, 'test-package');
-        engine.registry.registerObject(taskObject as any, 'test-package');
+        engine.registry.registerObject(projectObject, 'test-package');
+        engine.registry.registerObject(taskObject, 'test-package');
         protocol = new ObjectStackProtocolImplementation(engine);
 
         stores.set('showcase_project', new Map([
@@ -805,9 +805,9 @@ describe('#4254 — searchFields / groupBy / aggregations on the list path (real
         delete (driver as any).aggregate;
         engine.registerDriver(driver, true);
         await engine.init();
-        engine.registry.registerObject(projectObject as any, 'test-package');
-        engine.registry.registerObject(taskObject as any, 'test-package');
-        engine.registry.registerObject(memoObject as any, 'test-package');
+        engine.registry.registerObject(projectObject, 'test-package');
+        engine.registry.registerObject(taskObject, 'test-package');
+        engine.registry.registerObject(memoObject, 'test-package');
         protocol = new ObjectStackProtocolImplementation(engine);
 
         const tasks = new Map<string, Record<string, unknown>>();

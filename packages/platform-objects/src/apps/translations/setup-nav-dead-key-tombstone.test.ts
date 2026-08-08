@@ -1,6 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// Tombstone for four dead `apps.setup.navigation` translation keys (#6660).
+// Tombstone for four dead `apps.setup.navigation` translation keys (#6660), and
+// its converse: the labels of conditionally-contributed entries, which must
+// STAY (#6659).
 //
 // ---------------------------------------------------------------------------
 // Why a hard-coded id list instead of the general reverse direction
@@ -14,8 +16,10 @@
 // something", and why `pnpm check:app-nav-i18n` (which does boot) still refuses
 // the reverse direction: from one composition a dead key and a
 // conditionally-contributed key are indistinguishable (`nav_sso_providers` is
-// contributed only when an external IdP is wired). Making that gate
-// union-aware is tracked as #6659.
+// contributed only when an external IdP is wired). Teaching that gate to
+// enumerate conditional contributions — a union-aware gate — was considered and
+// deliberately NOT built (#6659's triage): it is a separate maintainer-facing
+// call, not a prerequisite for labelling the ids it cannot see.
 //
 // This file makes no general claim. It pins exactly four ids that were checked
 // ONE BY ONE against a repo-wide grep — `id: '<key>'` returned zero hits for
@@ -91,4 +95,54 @@ describe('removed Setup nav ids stay removed (#6660)', () => {
     expect(declared.has('nav_users'), 'nav_users is contributed here').toBe(true);
     expect(DEAD_SETUP_NAV_IDS.filter((id) => declared.has(id))).toEqual([]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// The converse case (#6659): a label that must STAY although no boot sees it
+// ---------------------------------------------------------------------------
+// `pnpm check:app-nav-i18n` boots the real composition and asserts every MERGED
+// Setup nav id carries a label in every locale. That is the right shape for the
+// eleven contributors whose entries always merge — and it is structurally blind
+// to the ones that do not. `@objectstack/plugin-auth` spreads its
+// `navigationContributions` in only when `authManager.isSsoWired()` is true
+// (`OS_SSO_ENABLED` self-host, or the cloud per-env `planAllowsSso`), so in the
+// composition that gate boots, `nav_sso_providers` is never contributed, never
+// merged, and therefore never judged. It had no label in ANY of the four
+// locales while that gate reported OK, and a deployment with an external IdP
+// wired rendered `SSO Providers` in English inside an otherwise translated menu.
+//
+// So this case is a hand-kept list, exactly like `DEAD_SETUP_NAV_IDS` above and
+// for the same reason: one composition cannot decide the question, so a human
+// decided it per id. It is deliberately NOT a general union-aware gate — that
+// was ruled a separate maintainer-facing call (#6659's triage) and is not built.
+//
+// Bound worth stating: this file asserts only the LABEL half. The declaring
+// contribution lives in `@objectstack/plugin-auth`, which depends on this
+// package and so cannot be imported from here — the same import direction that
+// puts `check:app-nav-i18n` in `packages/cli`. A grep is what confirms the
+// declaring side; on `ea1d9165d` it sits at `auth-plugin.ts:552`.
+//
+// What to do when this test goes red: it goes red when a label is dropped, or
+// when a locale is added to the bundle without translating this id. Both are
+// bugs. If the CONTRIBUTION is ever retired, this list loses its entry in the
+// same commit that removes the nav item, and the id moves up to
+// `DEAD_SETUP_NAV_IDS` — the two lists are the two halves of one ledger.
+const CONDITIONAL_SETUP_NAV_IDS = ['nav_sso_providers'] as const;
+
+describe('conditionally-contributed Setup nav ids stay labelled (#6659)', () => {
+  for (const [locale, data] of Object.entries(LOCALES)) {
+    it(`${locale} carries a label for every conditionally-contributed Setup nav id`, () => {
+      const nav = (data.apps?.setup?.navigation ?? {}) as Record<string, { label?: string }>;
+
+      // Control: the subtree really resolved, so a missing/renamed
+      // `apps.setup.navigation` cannot make the assertion below pass by vacuity
+      // (it would instead report every id as unlabelled — which is the point).
+      expect(nav.nav_api_keys?.label, 'nav_api_keys anchors this subtree').toBeTruthy();
+
+      expect(
+        CONDITIONAL_SETUP_NAV_IDS.filter((id) => !nav[id]?.label),
+        'Setup nav ids with no label — no boot-time gate can see these; see this file header',
+      ).toEqual([]);
+    });
+  }
 });

@@ -600,7 +600,8 @@ export type ObjectRequiredPermissions = z.input<typeof ObjectRequiredPermissions
  * Declares how long an object's data lives and how its space is reclaimed —
  * the axis validation/permissions never covered. Enforced at runtime by the
  * platform-owned LifecycleService (`@objectstack/objectql`): Reaper (TTL/age
- * batch delete), Rotator (time-shard + DROP oldest), Archiver (cold-store
+ * batch delete), Rotator (time-shard + DROP oldest on SQLite, an age-based
+ * reap of the same window elsewhere), Archiver (cold-store
  * copy then delete). A declared policy with no runtime consumer is a spec
  * defect (ADR-0049 enforce-or-remove); the liveness gate requires every
  * non-`record` class to declare `retention`, `ttl`, or rotation `storage`.
@@ -732,12 +733,17 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     aliases: { count: 'shards', interval: 'unit', period: 'unit', granularity: 'unit' },
     guidance: {
       maxAge:
-        '`maxAge` is a `retention` key. Rotation does not reap by age — it retains ' +
-        '`shards` × `unit` of history and DROPs the oldest shard whole. Set the window ' +
+        '`maxAge` is a `retention` key. Rotation takes its window from `shards` × `unit`, ' +
+        'not from an age you name — reclaimed by DROPping the oldest shard whole on SQLite, ' +
+        'by an equivalent age-based reap elsewhere. Set the window ' +
         'with `shards`/`unit`, or use `retention` instead of rotation.',
     },
   }, {
-    strategy: z.literal('rotation').describe('Time-shard the table; rotate by DROPping the oldest shard (O(1) reclaim).'),
+    strategy: z.literal('rotation').describe(
+      'Time-shard the table. The retained window (`shards` × `unit`) is the same on every ' +
+      'dialect; the reclamation is not — SQLite DROPs the oldest shard whole (O(1) reclaim), ' +
+      'other dialects reap that same window by age from `created_at`.',
+    ),
     shards: z.number().int().min(2).describe('Number of shards retained; total window = shards × unit.'),
     unit: z.enum(['day', 'week', 'month']).describe('Time width of one shard.'),
   }).optional().describe('Physical storage strategy for high-frequency telemetry (LifecycleService Rotator).'),

@@ -40,6 +40,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from './registry.js';
 // [#4550 / #5480] The producer's OWN write-verb dispatch decisions, so this
@@ -154,7 +155,7 @@ function makeHarness() {
     return { registry, protocol, rows, historyRows, synced, engine };
 }
 
-function objectBody(name: string, extra?: Record<string, unknown>) {
+function objectBody(name: string, extra?: Record<string, unknown>): ServiceObject {
     return {
         name,
         label: 'Invoice',
@@ -301,7 +302,7 @@ describe('#4636 — cloud#970 counter-example: a freshly created app stays edita
         // Exactly what `applyObjectRegistryMutation` would do if it moved the
         // ownership key and left the provenance stamp out — the shape measured
         // as "B-minimal" on this issue. Nothing else about the run differs.
-        registry.registerObject(objectBody('myapp_invoice') as any, APP_PKG);
+        registry.registerObject(objectBody('myapp_invoice'), APP_PKG);
 
         await expect(protocol.saveMetaItem({
             type: 'object',
