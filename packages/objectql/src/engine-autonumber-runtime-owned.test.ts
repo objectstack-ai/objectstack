@@ -581,7 +581,7 @@ describe('#5628 — a `readonly: true` autonumber keeps the #5503 exemption set'
   let rig: Awaited<ReturnType<typeof makeEngine>>;
   beforeEach(async () => {
     rig = await makeEngine();
-    rig.engine.registry.registerObject(INVOICE as any);
+    rig.engine.registry.registerObject(INVOICE as any, 'test');
   });
 
   it('still strips an ordinary caller-supplied number and issues the sequence value', async () => {
@@ -590,7 +590,7 @@ describe('#5628 — a `readonly: true` autonumber keeps the #5503 exemption set'
       data: { name: 'forge', invoice_number: 'INV-9999' },
     });
     expect(created.record.invoice_number).toBe('INV-0001');
-    expect(rig.createdRows.at(-1)?.invoice_number).toBe('INV-0001');
+    expect(rig.createdRows[rig.createdRows.length - 1]?.invoice_number).toBe('INV-0001');
   });
 
   it('still REPORTS the strip to the caller (#3407 / #3431)', async () => {
@@ -639,7 +639,7 @@ describe('#5628 — a `readonly: true` autonumber keeps the #5503 exemption set'
           defaultValue: 'draft',
         },
       },
-    } as any);
+    } as any, 'test');
     const created = await rig.protocol.createData({
       object: 'an_case',
       data: { title: 'forged', approval_status: 'approved' },
