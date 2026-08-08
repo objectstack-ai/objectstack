@@ -2775,6 +2775,34 @@ export class ObjectStackProtocolImplementation implements
             ai: 'ai',
             i18n: 'i18n',
             'file-storage': 'storage',
+            // [#6633] The package-management surface. `package` is NOT a
+            // CoreServiceName slot, so it must not enter SERVICE_CONFIG — a
+            // non-slot row there is the shape of the retired `graphql` defect,
+            // and it would also fabricate a `services` availability entry whose
+            // remedy line lies. Its route flows through the
+            // NON_SLOT_SERVICE_ROUTES loop below instead: same gate
+            // (registered service), same mapping table, one hop over.
+            package: 'packages',
+        };
+
+        // [#6633] Routes advertised for registered services that are not
+        // CoreServiceName slots. Advertised iff the service is registered —
+        // the same convention every SERVICE_CONFIG row uses, and for `package`
+        // it is exactly the predicate that decides the mount on both real host
+        // types: the @objectstack/rest direct-mount registrar is gated on this
+        // same service (`direct-mount-composition.ts`), and the runtime
+        // dispatcher — whose `/packages` domain is unconditional — answers
+        // discovery from its own `getDiscoveryInfo()`, never from this
+        // builder.
+        //
+        // `datasources` is deliberately NOT here (same reasoning as `mcp`,
+        // #5679): the federation mount belongs to the REST host, which this
+        // builder cannot see, and the runtime dispatcher serves no
+        // `/datasources` domain at all — advertising it from here would be the
+        // advertise-the-unmounted half of ADR-0076 D12. The REST discovery
+        // endpoint advertises it from its recorded direct mounts.
+        const NON_SLOT_SERVICE_ROUTES: Record<string, string> = {
+            package: '/api/v1/packages',
         };
 
         const optionalRoutes: Partial<ApiRoutes> = {};
@@ -2784,6 +2812,16 @@ export class ObjectStackProtocolImplementation implements
         for (const [serviceName, config] of Object.entries(SERVICE_CONFIG)) {
             const route = advertisedRoute(serviceName, config.route);
             if (registeredServices.has(serviceName) && route) {
+                const routeKey = serviceToRouteKey[serviceName];
+                if (routeKey) {
+                    optionalRoutes[routeKey] = route;
+                }
+            }
+        }
+
+        // [#6633] Same flow for the non-slot routed services declared above.
+        for (const [serviceName, route] of Object.entries(NON_SLOT_SERVICE_ROUTES)) {
+            if (registeredServices.has(serviceName)) {
                 const routeKey = serviceToRouteKey[serviceName];
                 if (routeKey) {
                     optionalRoutes[routeKey] = route;
