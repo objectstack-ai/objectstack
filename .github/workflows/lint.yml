@@ -94,6 +94,29 @@ jobs:
       - name: Engine query-options erasure ratchet
         run: pnpm check:query-options-erasure
 
+      # @objectstack/verify stand-in erasure guard (#6399). The third and
+      # narrowest member of the two above. `checkReadCoercion` /
+      # `checkDateBucketParity` take their driver STRUCTURALLY
+      # (`CoercibleDriver` / `BucketableDriver`) so an out-of-tree driver —
+      # cloud's driver-turso in remote mode — runs the identical contract
+      # without importing a concrete driver type; that parameter type IS the
+      # compile-time half of the conformance, and an assertion on the argument
+      # deletes it for that call site while looking like a call that has it.
+      # #6354 / PR #6396 is the bill: ten `as never` casts, every call site of
+      # both helpers, all of them dead, sitting over a check that was provably
+      # alive — and no gate rang for either fact.
+      #
+      # The ESLint rule (`verify-stand-in/no-asserted-driver-argument`) blocks
+      # the assertion. This step is the half that stops the rule going dead: it
+      # reconciles the guarded set against what packages/verify actually exports
+      # in BOTH directions — so a third stand-in check cannot arrive unguarded
+      # and a stale entry cannot rot — and COUNTS the call sites it reached, so
+      # a rename or a moved import surfaces as a census that fell instead of as
+      # a green run over nothing. `pnpm lint` alone cannot tell "clean tree"
+      # from "matched nothing". Runs its own --self-test first.
+      - name: "@objectstack/verify stand-in erasure guard"
+        run: pnpm check:verify-stand-in
+
       # Raw control-byte guard (#3127 / #4890 / #5157 / #5460). Scans every
       # tracked TEXT file for a raw ASCII control byte and fails on any hit.
       # WHICH bytes are in the set and WHY each is rejected are stated and argued

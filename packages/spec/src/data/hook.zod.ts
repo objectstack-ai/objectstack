@@ -362,6 +362,20 @@ export const HookContextSchema = lazySchema(() => z.object({
    * there — binding it is precisely the test the engine dispatches on, so a
    * `before*` handler that sets it REROUTES the write onto the single-id path.
    *
+   * ⚠️ CONTRACTED TO CHANGE — the two `before` rows above and the paragraph
+   * just above them describe the engine as it is TODAY, which is what this
+   * table is for. #5574's maintainer ruling (2026-08-06, option B) extends the
+   * per-row bulk-write contract from the `after*` phase to the `before*` phase:
+   * a predicate write will dispatch `beforeUpdate`/`beforeDelete` once per
+   * matched row, each carrying that row's `previous` and `id`, over a payload
+   * that stays BATCH-scoped. The contract is stated — with its budget ceiling
+   * and its `delivered` flags — in `data/bulk-write-hook-conformance.ts`
+   * (ADR-0058 Addendum II); the engine half is #5574's engine card, and it
+   * moves these rows in the same PR that makes them false. Until then, a
+   * `before*` handler on a bulk write has NO `previous`: a guard written as
+   * `previous?.x` passes silently on every batch, which is the measured harm
+   * the ruling is about.
+   *
    * The row-scoping predicate a bulk write EXECUTES is not reachable from
    * `input` at all. It is the composed `ast`, which lives on the
    * engine-internal `OperationContext.ast` (#2982) so that the filters

@@ -31,8 +31,8 @@ Resolution order (handled by `SettingsService.get`):
 ## TypeScript Usage
 
 ```typescript
-import { ResolvedSettingValueSchema, SettingsActionResultSchema, SettingsManifestSchema, SettingsNamespacePayloadSchema, SpecifierSchema, SpecifierHandlerSchema, SpecifierOptionSchema, SpecifierScopeSchema, SpecifierType } from '@objectstack/spec/system';
-import type { ResolvedSettingValue, SettingsActionResult, SettingsManifest, SettingsNamespacePayload, Specifier, SpecifierHandler, SpecifierOption, SpecifierScope, SpecifierType } from '@objectstack/spec/system';
+import { ResolvedSettingValueSchema, SettingsActionResultSchema, SettingsManifestSchema, SettingsNamespacePayloadSchema, SpecifierSchema, SpecifierHandlerSchema, SpecifierOptionSchema, SpecifierScopeSchema, SpecifierType, SpecifierValueDomainSchema } from '@objectstack/spec/system';
+import type { ResolvedSettingValue, SettingsActionResult, SettingsManifest, SettingsNamespacePayload, Specifier, SpecifierHandler, SpecifierOption, SpecifierScope, SpecifierType, SpecifierValueDomain } from '@objectstack/spec/system';
 
 // Validate data
 const result = ResolvedSettingValueSchema.parse(data);
@@ -130,6 +130,7 @@ const result = ResolvedSettingValueSchema.parse(data);
 | **deprecated** | `boolean` | optional | Mark deprecated |
 | **replacedBy** | `string` | optional | Replacement key (used when deprecated=true) |
 | **options** | `{ value: string \| number \| boolean; label: string; description?: string; icon?: string }[]` | optional | Options for select/radio/multiselect |
+| **valueDomain** | `Enum<'iana_time_zone' \| 'iso_4217_currency' \| 'iso_3166_alpha2'>` | optional | Standard value domain enforced on write (options degrade to a UI suggestion list) |
 | **min** | `number` | optional |  |
 | **max** | `number` | optional |  |
 | **step** | `number` | optional |  |
@@ -263,6 +264,17 @@ This schema accepts one of the following structures:
 * `color`
 * `json`
 * `action_button`
+
+
+---
+
+## SpecifierValueDomain
+
+### Allowed Values
+
+* `iana_time_zone`
+* `iso_4217_currency`
+* `iso_3166_alpha2`
 
 
 ---

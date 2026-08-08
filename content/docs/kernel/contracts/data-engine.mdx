@@ -354,8 +354,7 @@ interface EngineAggregateOptions {
 }
 
 interface AggregationNode {
-  function: 'count' | 'sum' | 'avg' | 'min' | 'max'
-          | 'count_distinct' | 'array_agg' | 'string_agg';
+  function: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct';
   field?: string;           // Field to aggregate (optional for COUNT(*))
   alias: string;            // Result column alias
   distinct?: boolean;       // Apply DISTINCT before aggregation
