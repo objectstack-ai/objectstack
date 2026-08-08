@@ -35,7 +35,7 @@ export const BpmnElementMappingSchema = lazySchema(() => z.object({
   notes: z.string().optional().describe('Notes about mapping limitations'),
 }).describe('Mapping between BPMN XML element and ObjectStack FlowNodeAction'));
 
-export type BpmnElementMapping = z.infer<typeof BpmnElementMappingSchema>;
+export type BpmnElementMapping = z.input<typeof BpmnElementMappingSchema>;
 /** Post-parse shape of {@link BpmnElementMapping} — defaults applied, transforms run (ADR-0122). */
 export type BpmnElementMappingParsed = z.infer<typeof BpmnElementMappingSchema>;
 
@@ -51,7 +51,7 @@ export const BpmnUnmappedStrategySchema = lazySchema(() => z.enum([
   'comment',  // Import as annotation/comment nodes
 ]).describe('Strategy for unmapped BPMN elements during import'));
 
-export type BpmnUnmappedStrategy = z.infer<typeof BpmnUnmappedStrategySchema>;
+export type BpmnUnmappedStrategy = z.input<typeof BpmnUnmappedStrategySchema>;
 
 /**
  * Options for importing a BPMN 2.0 XML process definition into an ObjectStack flow.
@@ -82,7 +82,7 @@ export const BpmnImportOptionsSchema = lazySchema(() => z.object({
     .describe('Validate imported flow against FlowSchema after import'),
 }).describe('Options for importing BPMN 2.0 XML into an ObjectStack flow'));
 
-export type BpmnImportOptions = z.infer<typeof BpmnImportOptionsSchema>;
+export type BpmnImportOptions = z.input<typeof BpmnImportOptionsSchema>;
 /** Post-parse shape of {@link BpmnImportOptions} — defaults applied, transforms run (ADR-0122). */
 export type BpmnImportOptionsParsed = z.infer<typeof BpmnImportOptionsSchema>;
 
@@ -96,7 +96,7 @@ export const BpmnVersionSchema = lazySchema(() => z.enum([
   '2.0.2',     // BPMN 2.0.2 (latest revision)
 ]).describe('BPMN specification version for export'));
 
-export type BpmnVersion = z.infer<typeof BpmnVersionSchema>;
+export type BpmnVersion = z.input<typeof BpmnVersionSchema>;
 
 /**
  * Options for exporting an ObjectStack flow as BPMN 2.0 XML.
@@ -127,7 +127,7 @@ export const BpmnExportOptionsSchema = lazySchema(() => z.object({
     .describe('XML namespace prefix for BPMN elements'),
 }).describe('Options for exporting an ObjectStack flow as BPMN 2.0 XML'));
 
-export type BpmnExportOptions = z.infer<typeof BpmnExportOptionsSchema>;
+export type BpmnExportOptions = z.input<typeof BpmnExportOptionsSchema>;
 /** Post-parse shape of {@link BpmnExportOptions} — defaults applied, transforms run (ADR-0122). */
 export type BpmnExportOptionsParsed = z.infer<typeof BpmnExportOptionsSchema>;
 
@@ -150,7 +150,7 @@ export const BpmnDiagnosticSchema = lazySchema(() => z.object({
   nodeId: z.string().optional().describe('ObjectStack node ID related to this diagnostic'),
 }).describe('Diagnostic message from BPMN import/export'));
 
-export type BpmnDiagnostic = z.infer<typeof BpmnDiagnosticSchema>;
+export type BpmnDiagnostic = z.input<typeof BpmnDiagnosticSchema>;
 
 /**
  * Result of a BPMN import or export operation.
@@ -172,7 +172,7 @@ export const BpmnInteropResultSchema = lazySchema(() => z.object({
     .describe('Number of elements that could not be mapped'),
 }).describe('Result of a BPMN import/export operation'));
 
-export type BpmnInteropResult = z.infer<typeof BpmnInteropResultSchema>;
+export type BpmnInteropResult = z.input<typeof BpmnInteropResultSchema>;
 /** Post-parse shape of {@link BpmnInteropResult} — defaults applied, transforms run (ADR-0122). */
 export type BpmnInteropResultParsed = z.infer<typeof BpmnInteropResultSchema>;
 

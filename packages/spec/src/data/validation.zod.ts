@@ -521,22 +521,22 @@ export const ConditionalValidationSchema = lazySchema(() => strictObject({
   otherwise: ValidationRuleSchema.optional().describe('Validation rule to apply when condition is false'),
 }));
 
-export type ValidationRule = z.infer<typeof ValidationRuleSchema>;
-export type ScriptValidation = z.infer<typeof ScriptValidationSchema>;
+export type ValidationRule = z.input<typeof ValidationRuleSchema>;
+export type ScriptValidation = z.input<typeof ScriptValidationSchema>;
 /** Post-parse shape of {@link ScriptValidation} — defaults applied, transforms run (ADR-0122). */
 export type ScriptValidationParsed = z.infer<typeof ScriptValidationSchema>;
-export type StateMachineValidation = z.infer<typeof StateMachineValidationSchema>;
+export type StateMachineValidation = z.input<typeof StateMachineValidationSchema>;
 /** Post-parse shape of {@link StateMachineValidation} — defaults applied, transforms run (ADR-0122). */
 export type StateMachineValidationParsed = z.infer<typeof StateMachineValidationSchema>;
-export type FormatValidation = z.infer<typeof FormatValidationSchema>;
+export type FormatValidation = z.input<typeof FormatValidationSchema>;
 /** Post-parse shape of {@link FormatValidation} — defaults applied, transforms run (ADR-0122). */
 export type FormatValidationParsed = z.infer<typeof FormatValidationSchema>;
-export type CrossFieldValidation = z.infer<typeof CrossFieldValidationSchema>;
+export type CrossFieldValidation = z.input<typeof CrossFieldValidationSchema>;
 /** Post-parse shape of {@link CrossFieldValidation} — defaults applied, transforms run (ADR-0122). */
 export type CrossFieldValidationParsed = z.infer<typeof CrossFieldValidationSchema>;
-export type JSONValidation = z.infer<typeof JSONValidationSchema>;
+export type JSONValidation = z.input<typeof JSONValidationSchema>;
 /** Post-parse shape of {@link JSONValidation} — defaults applied, transforms run (ADR-0122). */
 export type JSONValidationParsed = z.infer<typeof JSONValidationSchema>;
-export type ConditionalValidation = z.infer<typeof ConditionalValidationSchema>;
+export type ConditionalValidation = z.input<typeof ConditionalValidationSchema>;
 /** Post-parse shape of {@link ConditionalValidation} — defaults applied, transforms run (ADR-0122). */
 export type ConditionalValidationParsed = z.infer<typeof ConditionalValidationSchema>;

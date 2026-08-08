@@ -4,10 +4,12 @@
  * HAVING evaluator (#4286 step 3) — semantics over AGGREGATED rows.
  *
  * The namespace is the aggregated row's own columns (aggregation aliases +
- * groupBy projections); operator semantics mirror the Filter Protocol's
- * memory evaluation, EXCEPT that an unknown operator throws — ignoring one
- * would silently return unfiltered aggregates, the exact silently-inert
- * failure (#4286, ADR-0078) enforcement exists to end.
+ * groupBy projections); operator semantics follow the Filter Protocol, with two
+ * deliberate divergences from driver-memory's matcher: an unknown operator
+ * throws — ignoring one would silently return unfiltered aggregates, the exact
+ * silently-inert failure (#4286, ADR-0078) enforcement exists to end — and the
+ * negation-carrying operators are NULL-safe per #5298 (see the grid at the
+ * bottom of this file, #5905).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -76,5 +78,115 @@ describe('matchesHaving — the unknown-operator refusal', () => {
 
   it('accepts $regex with $options as its sibling, not an operator', () => {
     expect(matchesHaving({ k: 'Alpha' }, { k: { $regex: '^alp', $options: 'i' } })).toBe(true);
+  });
+});
+
+/**
+ * [#5905] The no-value grid for the negation-carrying operators.
+ *
+ * #5298 ruled (option A, 2026-08-06) that "the column has no value" SATISFIES a
+ * test for "not this value", and PR #5962 landed it on driver-sql, formula,
+ * service-analytics and the `FILTER_LOGIC_*` conformance table. HAVING is the
+ * fifth evaluation face of the same vocabulary and was not in that PR's
+ * inventory, so it stayed the lone holdout — and no conformance table would
+ * have caught it, because `FILTER_LOGIC_CASES` does not drive the HAVING path
+ * (verified: `packages/objectql` imports it nowhere). This grid IS that
+ * coverage.
+ *
+ * Two no-value shapes, deliberately separated, because on this face they did
+ * NOT arrive at the old answer by the same route:
+ *
+ * - NULLED — the key is present with `null`. The early-exit guard tests
+ *   `=== undefined`, so it never fired here; `$nin` was already NULL-safe and
+ *   `$notContains` was not (`typeof null !== 'string'` ⇒ judged false).
+ * - MISSING — the key is absent, so the aggregated row reads `undefined`. The
+ *   early-exit guard fired first and answered false for BOTH operators, before
+ *   either arm was reached.
+ *
+ * The positive-operator rows are the control: `$in` / `$contains` must keep
+ * REJECTING both no-value shapes. Widening the exemption list too far would
+ * turn them green, which is the failure this pair is here to catch.
+ */
+describe('no-value rows and the negation-carrying operators (#5905 / #5298 option A)', () => {
+  const NULLED = { customer_id: 'nulled', tag: null, total: 100 };
+  const MISSING = { customer_id: 'missing', total: 100 };
+  const VALUED_OUT = { customer_id: 'valued_out', tag: 'gamma', total: 100 };
+  const VALUED_IN = { customer_id: 'valued_in', tag: 'alpha', total: 100 };
+  const GRID = [NULLED, MISSING, VALUED_OUT, VALUED_IN];
+
+  describe('$nin', () => {
+    it('a NULLED column satisfies $nin', () => {
+      expect(matchesHaving(NULLED, { tag: { $nin: ['alpha', 'beta'] } })).toBe(true);
+    });
+
+    it('a MISSING column satisfies $nin', () => {
+      expect(matchesHaving(MISSING, { tag: { $nin: ['alpha', 'beta'] } })).toBe(true);
+    });
+
+    it('a present value OUTSIDE the list still satisfies $nin (unchanged)', () => {
+      expect(matchesHaving(VALUED_OUT, { tag: { $nin: ['alpha', 'beta'] } })).toBe(true);
+    });
+
+    it('a present value INSIDE the list still fails $nin (unchanged)', () => {
+      expect(matchesHaving(VALUED_IN, { tag: { $nin: ['alpha', 'beta'] } })).toBe(false);
+    });
+
+    it('applyHaving keeps both no-value rows and drops only the listed value', () => {
+      expect(applyHaving(GRID, { tag: { $nin: ['alpha', 'beta'] } }).map((r) => r.customer_id))
+        .toEqual(['nulled', 'missing', 'valued_out']);
+    });
+  });
+
+  describe('$notContains', () => {
+    it('a NULLED column satisfies $notContains', () => {
+      expect(matchesHaving(NULLED, { tag: { $notContains: 'lph' } })).toBe(true);
+    });
+
+    it('a MISSING column satisfies $notContains', () => {
+      expect(matchesHaving(MISSING, { tag: { $notContains: 'lph' } })).toBe(true);
+    });
+
+    it('a present value WITHOUT the substring still satisfies $notContains (unchanged)', () => {
+      expect(matchesHaving(VALUED_OUT, { tag: { $notContains: 'lph' } })).toBe(true);
+    });
+
+    it('a present value WITH the substring still fails $notContains (unchanged)', () => {
+      expect(matchesHaving(VALUED_IN, { tag: { $notContains: 'lph' } })).toBe(false);
+    });
+
+    it('applyHaving keeps both no-value rows and drops only the containing value', () => {
+      expect(applyHaving(GRID, { tag: { $notContains: 'lph' } }).map((r) => r.customer_id))
+        .toEqual(['nulled', 'missing', 'valued_out']);
+    });
+  });
+
+  describe('the control: positive operators still reject a no-value column', () => {
+    it('$in rejects NULLED and MISSING', () => {
+      expect(matchesHaving(NULLED, { tag: { $in: ['alpha', 'beta'] } })).toBe(false);
+      expect(matchesHaving(MISSING, { tag: { $in: ['alpha', 'beta'] } })).toBe(false);
+    });
+
+    it('$contains rejects NULLED and MISSING', () => {
+      expect(matchesHaving(NULLED, { tag: { $contains: 'lph' } })).toBe(false);
+      expect(matchesHaving(MISSING, { tag: { $contains: 'lph' } })).toBe(false);
+    });
+
+    it('$ne — already exempt before #5905 — is unchanged for both shapes', () => {
+      expect(matchesHaving(NULLED, { tag: { $ne: 'alpha' } })).toBe(true);
+      expect(matchesHaving(MISSING, { tag: { $ne: 'alpha' } })).toBe(true);
+      expect(matchesHaving(VALUED_IN, { tag: { $ne: 'alpha' } })).toBe(false);
+    });
+  });
+
+  /**
+   * The NULL-safety lives at the LEAF, so `$not` inverts it rather than
+   * inheriting it — the same design driver-sql writes down for its own
+   * `$not` rewrite (a nested negation totalises its own operand). A no-value
+   * row satisfies `$nin`, therefore it does NOT satisfy `$not: { $nin }`.
+   */
+  it('$not inverts the leaf answer instead of re-applying the guard', () => {
+    expect(matchesHaving(MISSING, { $not: { tag: { $nin: ['alpha'] } } })).toBe(false);
+    expect(matchesHaving(NULLED, { $not: { tag: { $notContains: 'lph' } } })).toBe(false);
+    expect(matchesHaving(VALUED_IN, { $not: { tag: { $nin: ['alpha'] } } })).toBe(true);
   });
 });

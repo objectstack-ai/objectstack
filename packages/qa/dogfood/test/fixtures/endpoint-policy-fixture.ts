@@ -32,7 +32,7 @@
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
-import type { ApiEndpoint, ApiEndpointInput } from '@objectstack/spec/api';
+import type { ApiEndpoint } from '@objectstack/spec/api';
 
 /** One object, so the `object_operation` endpoints have something real to read. */
 export const PolicyNote = ObjectSchema.create({
@@ -63,7 +63,7 @@ export const AnonymousMeteredEndpoint: ApiEndpoint = {
 };
 
 /** The control: same object, same operation, session-gated, unmetered. */
-export const SessionGatedEndpoint: ApiEndpointInput = {
+export const SessionGatedEndpoint: ApiEndpoint = {
   name: 'e8policy_private_notes',
   path: '/api/v1/apps/e8policy/private-notes',
   method: 'GET',
@@ -76,7 +76,7 @@ export const SessionGatedEndpoint: ApiEndpointInput = {
   // upgrade guide's central claim is that an omission is safe. This endpoint is
   // what makes that claim testable rather than asserted.
   //
-  // Typed `ApiEndpointInput` rather than `ApiEndpoint` for exactly that reason:
+  // Typed `ApiEndpoint` rather than `ApiEndpoint` for exactly that reason:
   // `ApiEndpoint` is the schema's OUTPUT type, where `.default(true)` has
   // already been materialised and `authRequired` is therefore REQUIRED. A TS
   // author who annotates `: ApiEndpoint` cannot express the omission at all —

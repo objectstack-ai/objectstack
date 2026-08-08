@@ -11,13 +11,13 @@ import { Plugin } from './plugin-validator.js';
 import type {
     HealthStatus,
     PluginStartupResult,
-    StartupOptionsInput,
+    StartupOptions,
 } from '../kernel/startup-orchestrator.zod';
 export type {
     HealthStatus,
     PluginStartupResult,
     StartupOptions,
-    StartupOptionsInput,
+    StartupOptionsParsed,
 } from '../kernel/startup-orchestrator.zod';
 
 /**
@@ -46,7 +46,7 @@ export interface IStartupOrchestrator {
      */
     orchestrateStartup(
         plugins: Plugin[],
-        options: StartupOptionsInput
+        options: StartupOptions
     ): Promise<PluginStartupResult[]>;
     
     /**

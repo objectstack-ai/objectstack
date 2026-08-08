@@ -9,6 +9,7 @@ import {
   stripReadonlyWhenFieldsMulti,
   hasReadonlyWhenInPayload,
   hasParentScopedReadonlyWhenInPayload,
+  hasParentScopedRequiredWhen,
   stripReadonlyFields,
   stripRuntimeOwnedFields,
   isRuntimeOwnedField,
@@ -275,6 +276,368 @@ describe('hasParentScopedReadonlyWhenInPayload (#4889 gate)', () => {
       },
     };
     expect(hasParentScopedReadonlyWhenInPayload(decoys, { a: 'x', b: 'y' })).toBe(false);
+  });
+});
+
+// #4977 — PARENT-scoped `requiredWhen`, the mirror of the block above on the
+// same field. `readonlyWhen` failing open WROTE a field that should have been
+// frozen; `requiredWhen` failing open ACCEPTS a record that should have been
+// rejected. Ruling (2026-08-06): bind the scope, keep fail-OPEN, gate the
+// unbindable declaration at build time (option B — 422 — was NOT taken).
+const sentLineFields = {
+  fields: {
+    invoice: { type: 'master_detail', reference: 'showcase_invoice', required: true },
+    // THE SUBJECT.
+    description: { type: 'text', requiredWhen: "parent.status == 'sent'" },
+    // Row-scoped — unaffected by the parent binding, and here to prove it.
+    note: { type: 'text', requiredWhen: 'record.quantity >= 100' },
+    quantity: { type: 'number' },
+  },
+};
+
+/** Collect the ValidationError field codes, or `null` when the write is accepted. */
+function violations(
+  schema: unknown,
+  data: Record<string, unknown>,
+  mode: 'insert' | 'update',
+  opts: Record<string, unknown> = {},
+): string[] | null {
+  try {
+    evaluateValidationRules(schema as never, data, mode, opts as never);
+    return null;
+  } catch (err) {
+    if (err instanceof ValidationError) return err.fields.map((f) => f.field);
+    throw err;
+  }
+}
+
+describe('parent-scoped requiredWhen (#4977)', () => {
+  it('REQUIRES the field when the master-detail header says so', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 1 }, 'insert', {
+      parent: { id: 'inv1', status: 'sent' },
+    })).toEqual(['description']);
+  });
+
+  it('does NOT require it when the header does not match', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 1 }, 'insert', {
+      parent: { id: 'inv1', status: 'draft' },
+    })).toBeNull();
+  });
+
+  it('accepts the write once the field is supplied', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', description: 'seat' }, 'insert', {
+      parent: { id: 'inv1', status: 'sent' },
+    })).toBeNull();
+  });
+
+  it('is FAIL-OPEN when `parent` could not be bound — the #4889 asymmetry', () => {
+    // The twin above resolves an unbound root to LOCKED. Here the ruling
+    // deliberately kept the historical fail-open exit: the requirement is
+    // skipped and the write is ACCEPTED. Do not "restore symmetry" — that is
+    // option B, reserved for the next review of ADR-0058 D5.
+    const warnings: string[] = [];
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 1 }, 'insert', {
+      logger: { warn: (m: string) => warnings.push(m) },
+    })).toBeNull();
+    expect(warnings.some((w) => w.includes("reads 'parent'") && w.includes('NOT enforced'))).toBe(true);
+  });
+
+  it('keeps the plain fail-open message for a predicate that is simply broken', () => {
+    // Not an unbound root — `record` IS bound, the key under it is undeclared.
+    const warnings: string[] = [];
+    expect(violations(
+      { fields: { amount: { type: 'currency', requiredWhen: "record.no_such_field == 'x'" } } },
+      { amount: 1 },
+      'insert',
+      { logger: { warn: (m: string) => warnings.push(m) } },
+    )).toBeNull();
+    expect(warnings.some((w) => w.includes('failed to evaluate — skipped'))).toBe(true);
+    expect(warnings.some((w) => w.includes("reads 'parent'"))).toBe(false);
+  });
+
+  it('leaves the ROW-scoped requiredWhen on the same object working unchanged', () => {
+    expect(violations(sentLineFields, { invoice: 'inv1', quantity: 500 }, 'insert', {
+      parent: { id: 'inv1', status: 'draft' },
+    })).toEqual(['note']);
+  });
+
+  // ── ADR-0113 non-regression, with a parent in scope ──────────────────────
+
+  it('lets a legacy row rest: the header ALREADY required it and it was already empty', () => {
+    expect(violations(sentLineFields, { quantity: 7 }, 'update', {
+      previous: { id: 'l1', invoice: 'inv1', description: '', quantity: 1 },
+      parent: { id: 'inv1', status: 'sent' },
+    })).toBeNull();
+  });
+
+  it('rejects a write that NULLS the field while the header requires it', () => {
+    expect(violations(sentLineFields, { description: '' }, 'update', {
+      previous: { id: 'l1', invoice: 'inv1', description: 'seat', quantity: 1 },
+      parent: { id: 'inv1', status: 'sent' },
+    })).toEqual(['description']);
+  });
+
+  it('judges a REPOINT by the header the write LANDS on, not the one it leaves', () => {
+    // The reason `previousParent` exists. The row complied under its draft
+    // header; the write moves it under a sent one. Binding the LANDING header
+    // to the pre-check too would read this as a pre-existing violation and let
+    // it rest — the acceptance hole this issue exists to close, one case in.
+    expect(violations(sentLineFields, { invoice: 'sent_inv' }, 'update', {
+      previous: { id: 'l1', invoice: 'draft_inv', description: '', quantity: 1 },
+      parent: { id: 'sent_inv', status: 'sent' },
+      previousParent: { id: 'draft_inv', status: 'draft' },
+    })).toEqual(['description']);
+  });
+
+  it('`previousParent` defaults to `parent` when the write does not repoint', () => {
+    // No repoint ⇒ the engine does not pay a second header read, and the
+    // legacy-row exemption must still apply.
+    expect(violations(sentLineFields, { quantity: 7 }, 'update', {
+      previous: { id: 'l1', invoice: 'inv1', description: '', quantity: 1 },
+      parent: { id: 'inv1', status: 'sent' },
+    })).toBeNull();
+  });
+
+  // ── blast radius: object-level rules at the SAME evaluation site ─────────
+
+  it('does NOT bind `parent` for object-level rules — still fail-CLOSED (#4649)', () => {
+    const withScriptRule = {
+      fields: { ...sentLineFields.fields },
+      validations: [{
+        type: 'script',
+        name: 'parent_in_object_rule',
+        message: 'nope',
+        condition: "parent.status == 'sent'",
+      }],
+    };
+    // A parent IS supplied, and the field predicate below evaluates with it —
+    // yet the object-level rule still faults on `parent` and still REJECTS.
+    expect(() => evaluateValidationRules(
+      withScriptRule as never,
+      { invoice: 'inv1', description: 'seat' },
+      'insert',
+      { parent: { id: 'inv1', status: 'sent' } } as never,
+    )).toThrow(/could not be evaluated/);
+  });
+});
+
+describe('hasParentScopedRequiredWhen (#4977 gate)', () => {
+  it('is TRUE when a field declares a parent-scoped requiredWhen', () => {
+    expect(hasParentScopedRequiredWhen(sentLineFields)).toBe(true);
+  });
+
+  it('is FALSE for record-scoped requiredWhen only (no needless header read)', () => {
+    expect(hasParentScopedRequiredWhen(invoiceFields)).toBe(false);
+  });
+
+  it('is FALSE for a parent-scoped READONLYWhen — that is the other gate', () => {
+    expect(hasParentScopedRequiredWhen(invoiceLineFields)).toBe(false);
+  });
+
+  it('does not mistake a field NAMED parent_id, or a string literal, for the binding', () => {
+    expect(hasParentScopedRequiredWhen({
+      fields: {
+        a: { type: 'text', requiredWhen: "record.parent_id != ''" },
+        b: { type: 'text', requiredWhen: "record.kind == 'parent'" },
+      },
+    })).toBe(false);
+  });
+
+  it('is NOT payload-filtered, unlike its readonlyWhen twin', () => {
+    // The whole failure `requiredWhen` catches is a field the payload OMITS, so
+    // filtering by `name in data` would skip exactly the writes it is for.
+    // (The twin takes a payload argument; this one deliberately does not.)
+    expect(hasParentScopedRequiredWhen(sentLineFields)).toBe(true);
+    expect(hasParentScopedReadonlyWhenInPayload(invoiceLineFields, { description: 'x' })).toBe(false);
+  });
+});
+
+// #4953 — the record a `readonlyWhen` predicate sees is TOTAL over the object's
+// DECLARED fields, like the two seams that were materialised in #4649/#4770.
+// Before this, `stripReadonlyWhenFields` merged `{...previous, ...data}` raw, so
+// a predicate reading a declared column the DRIVER did not echo back faulted —
+// and a faulting `readonlyWhen` fails open, i.e. WROTE the field the author
+// declared frozen. Which columns come back is a storage property no author can
+// see, so the same declaration was enforced or not depending on the driver.
+const sparseLockFields = {
+  fields: {
+    notes: { type: 'text' },
+    approved_at: { type: 'datetime' },
+    // "while nothing has been approved, the amount is frozen" — the `== null`
+    // spelling #4649 made the supported one (and the null-guard gate prescribes).
+    amount: { type: 'currency', readonlyWhen: 'record.approved_at == null' },
+  },
+};
+
+/** A prior row from a driver that stores only the columns a write touched. */
+const sparsePrior = () => ({ id: 'r1', amount: 100 });
+/** The same row from a driver that returns every declared column. */
+const totalPrior = (approvedAt: unknown) => ({ id: 'r1', amount: 100, notes: null, approved_at: approvedAt });
+
+describe('readonlyWhen binds a TOTAL record (#4953)', () => {
+  it('evaluates `record.<declared> == null` on a SPARSE prior instead of faulting through', () => {
+    // THE bug. Pre-#4953: `No such key: approved_at` ⇒ fail-open ⇒ amount written.
+    const warnings: string[] = [];
+    const out = stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, sparsePrior(), {
+      warn: (m: string) => warnings.push(m),
+    } as never);
+    expect(out).toEqual({});
+    expect(warnings.some((w) => w.includes('failed to evaluate'))).toBe(false);
+    expect(warnings.some((w) => w.includes('is read-only (readonlyWhen)'))).toBe(true);
+  });
+
+  it('still KEEPS the change when the materialised value makes the predicate FALSE', () => {
+    // Materialising is not "lock everything": the row HAS an approval date, so
+    // the lock is off and the legitimate edit lands.
+    expect(
+      stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, { id: 'r1', amount: 100, approved_at: '2026-01-01' }),
+    ).toEqual({ amount: 999 });
+  });
+
+  it('reads the same verdict on a sparse prior as on a total one (the point)', () => {
+    // One declaration, two drivers, one answer. This equality is the guarantee;
+    // before #4953 the left side kept the change and the right side stripped it.
+    const sparse = stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, sparsePrior());
+    const total = stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, totalPrior(null));
+    expect(sparse).toEqual(total);
+    expect(sparse).toEqual({});
+  });
+
+  it('materialises the `previous` root too, not just `record`', () => {
+    const schema = { fields: { ...sparseLockFields.fields, amount: { type: 'currency', readonlyWhen: 'previous.approved_at == null' } } };
+    expect(stripReadonlyWhenFields(schema, { amount: 999 }, sparsePrior())).toEqual({});
+    expect(stripReadonlyWhenFields(schema, { amount: 999 }, { id: 'r1', amount: 100, approved_at: '2026-01-01' })).toEqual({ amount: 999 });
+  });
+
+  it('applies on the BULK path identically — one payload, N sparse rows', () => {
+    // A bulk write must not judge the same predicate by a different record
+    // shape than a single-id write does.
+    expect(stripReadonlyWhenFieldsMulti(sparseLockFields, { amount: 999 }, [sparsePrior()])).toEqual({});
+    // ≥1 locked row still drops it for the batch; no locked row still writes.
+    expect(stripReadonlyWhenFieldsMulti(sparseLockFields, { amount: 999 }, [
+      { id: 'r1', amount: 1, approved_at: '2026-01-01' },
+      sparsePrior(),
+    ])).toEqual({});
+    expect(stripReadonlyWhenFieldsMulti(sparseLockFields, { amount: 999 }, [
+      { id: 'r1', amount: 1, approved_at: '2026-01-01' },
+      { id: 'r2', amount: 2, approved_at: '2026-02-02' },
+    ])).toEqual({ amount: 999 });
+  });
+
+  it('does NOT materialise when the prior row is not in hand (no fabrication)', () => {
+    // `declared-fields.ts`'s standing rule: without the persisted state,
+    // defaulting a declared field to null would FABRICATE a value that
+    // contradicts the stored row. So this case keeps the historical fault →
+    // fail-open exit, and the engine avoids it by fetching the prior row
+    // whenever the object declares a readonlyWhen field (`needsPriorRecord`).
+    const warnings: string[] = [];
+    const out = stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, null, {
+      warn: (m: string) => warnings.push(m),
+    } as never);
+    expect(out).toEqual({ amount: 999 });
+    expect(warnings.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+  });
+
+  it('never mutates the caller\'s prior record (it is the engine\'s hookContext.previous)', () => {
+    const prior = sparsePrior();
+    stripReadonlyWhenFields(sparseLockFields, { amount: 999 }, prior);
+    expect('approved_at' in prior).toBe(false);
+    expect('notes' in prior).toBe(false);
+    const rows = [sparsePrior()];
+    stripReadonlyWhenFieldsMulti(sparseLockFields, { amount: 999 }, rows);
+    expect('approved_at' in rows[0]!).toBe(false);
+  });
+
+  it('leaves the fail-open branch ALIVE — an ordering comparison still faults over a total record', () => {
+    // `null < null` is `no such overload`, so materialising does not make every
+    // predicate evaluable. This is exactly why the null-guard gate exists.
+    const warnings: string[] = [];
+    const out = stripReadonlyWhenFields(
+      { fields: { ...sparseLockFields.fields, amount: { type: 'currency', readonlyWhen: 'record.notes < record.approved_at' } } },
+      { amount: 999 },
+      sparsePrior(),
+      { warn: (m: string) => warnings.push(m) } as never,
+    );
+    expect(out).toEqual({ amount: 999 });
+    expect(warnings.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+  });
+
+  it('keeps fail-OPEN for an UNDECLARED key — materialising covers declared fields only', () => {
+    // The #4649 line, unmoved: a typo must stay unevaluable so it is reported,
+    // not silently read as null.
+    const warnings: string[] = [];
+    expect(stripReadonlyWhenFields(
+      { fields: { amount: { type: 'currency', readonlyWhen: 'record.stauts == null' } } },
+      { amount: 999 },
+      { id: 'r1', amount: 100 },
+      { warn: (m: string) => warnings.push(m) } as never,
+    )).toEqual({ amount: 999 });
+    expect(warnings.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
+  });
+
+  // ── the consequence that moves the OTHER way, pinned rather than discovered ──
+  it('`has(record.<declared>)` is uniformly TRUE — so it locks even on a sparse prior', () => {
+    // CEL's own rule: a materialised `null` is a PRESENT key holding null.
+    // `has()` therefore guards against an UNDECLARED key, not an empty value.
+    expect(stripReadonlyWhenFields(
+      { fields: { ...sparseLockFields.fields, amount: { type: 'currency', readonlyWhen: 'has(record.approved_at)' } } },
+      { amount: 999 },
+      sparsePrior(),
+    )).toEqual({});
+  });
+
+  it('`!has(record.<declared>)` is uniformly FALSE — a lock spelled that way STOPS locking', () => {
+    // The one verdict this change moves toward "allowed": pre-#4953 the sparse
+    // binding made `!has(...)` true and the field was stripped. It was never a
+    // guarantee — on a driver returning all columns the same declaration never
+    // locked anything — so the flip replaces a storage-dependent verdict with a
+    // deterministic one, and the deterministic answer is FALSE. An author who
+    // means "while the field is empty" writes `== null` (the spelling
+    // @objectstack/lint's null-guard gate prescribes).
+    expect(stripReadonlyWhenFields(
+      { fields: { ...sparseLockFields.fields, amount: { type: 'currency', readonlyWhen: '!has(record.approved_at)' } } },
+      { amount: 999 },
+      sparsePrior(),
+    )).toEqual({ amount: 999 });
+  });
+
+  // ── blast radius: nothing else at this write gate moves ─────────────────
+  it('does not touch the object-level rules — `script` / `cross_field` stay fail-CLOSED (#4649)', () => {
+    const withRules = {
+      fields: { ...sparseLockFields.fields },
+      validations: [
+        { type: 'script', name: 'typo_rule', message: 'nope', condition: 'record.stauts == null' },
+      ],
+    };
+    expect(() => evaluateValidationRules(withRules as never, { amount: 1 }, 'update', {
+      previous: { id: 'r1', amount: 100 },
+    } as never)).toThrow(/could not be evaluated/);
+    const crossField = {
+      fields: { ...sparseLockFields.fields },
+      validations: [
+        { type: 'cross_field', name: 'typo_cross', message: 'nope', condition: 'record.stauts == null' },
+      ],
+    };
+    expect(() => evaluateValidationRules(crossField as never, { amount: 1 }, 'update', {
+      previous: { id: 'r1', amount: 100 },
+    } as never)).toThrow(/could not be evaluated/);
+  });
+
+  it('does not disturb the #4889 parent binding: unbound root still LOCKS, parent stays unmaterialised', () => {
+    // `parent` is a row of ANOTHER object — this function has no declared-field
+    // list for it — and an ABSENT parent is the signal #4889 depends on.
+    const warnings: string[] = [];
+    expect(stripReadonlyWhenFields(invoiceLineFields, { quantity: 9999 }, { id: 'l1', invoice: 'inv1' }, {
+      warn: (m: string) => warnings.push(m),
+    } as never)).toEqual({});
+    expect(warnings.some((w) => w.includes("reads 'parent'") && w.includes('LOCKED'))).toBe(true);
+    // A parent that IS bound but does not carry the key stays a fault (no
+    // materialisation of the header): fail-open, the change goes through.
+    const warnings2: string[] = [];
+    expect(stripReadonlyWhenFields(invoiceLineFields, { quantity: 9999 }, { id: 'l1', invoice: 'inv1' }, {
+      warn: (m: string) => warnings2.push(m),
+    } as never, { id: 'inv1' })).toEqual({ quantity: 9999 });
+    expect(warnings2.some((w) => w.includes('failed to evaluate — change allowed through'))).toBe(true);
   });
 });
 

@@ -68,4 +68,4 @@ export const NotificationChannelSchema = lazySchema(() => z.enum([
 // `@objectstack/spec/contracts` and consumed by `service-messaging`.
 
 // Type exports
-export type NotificationChannel = z.infer<typeof NotificationChannelSchema>;
+export type NotificationChannel = z.input<typeof NotificationChannelSchema>;

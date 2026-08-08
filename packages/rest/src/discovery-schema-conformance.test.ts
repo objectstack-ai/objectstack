@@ -22,8 +22,10 @@ import {
   GetDiscoveryResponseSchema,
   WELL_KNOWN_CAPABILITY_KEYS,
 } from '@objectstack/spec/api';
+import * as specApi from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
+import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
 
 /** The keys the protocol declares for a discovery response (canonical + declared alias). */
 function declaredResponseKeys(): Set<string> {
@@ -261,5 +263,59 @@ describe('[#4828] the REST /discovery live shape conforms to DiscoverySchema', (
     // still lands inside `capabilities` (#3298) — pinned so the retirement
     // cannot take the composed capability with it.
     expect(body.capabilities.transactionalBatch).toBeDefined();
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // [#5791] The ledger row points AT this suite
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // `rest-route-ledger.ts`'s `GET /api/v1/discovery` row is one of the two
+  // first-ever filled `responseSchema` values. The field may only be written
+  // where the double assertion above already runs; that rule lives in a JSDoc,
+  // which cannot fail a build, so the loop is closed here in the file the row
+  // names. `packages/client/src/route-ledger-response-schema.test.ts` carries
+  // the other half (every name across all five ledgers resolves).
+  describe('[#5791] the ledger declares the schema this suite parses with', () => {
+    it('names `DiscoverySchema`, resolving to the very object asserted above', () => {
+      const row = REST_ROUTE_LEDGER.find(e => e.route === 'GET /api/v1/discovery');
+      expect(row, 'the REST discovery row must exist in REST_ROUTE_LEDGER').toBeDefined();
+      expect(row!.responseSchema).toBe('DiscoverySchema');
+
+      // Identity, not just resolvability: a name resolving to some OTHER schema
+      // would satisfy the client-side resolver and still describe the wrong
+      // contract.
+      expect((specApi as unknown as Record<string, unknown>)[row!.responseSchema!])
+        .toBe(DiscoverySchema);
+    });
+
+    it('describes the WHOLE BODY here — this mount answers bare, no envelope', async () => {
+      // The counterpart of the dispatcher's pin. `responseSchema` is defined
+      // against the response PAYLOAD, which lands at two different depths for
+      // the two discovery routes: `res.json(discovery)` here, so the named
+      // schema is a claim about the entire body; `{ success, data }` on the
+      // dispatcher, where the same name claims only `data`.
+      const body = await invoke(discoveryHandler());
+
+      expect(DiscoverySchema.safeParse(body).success).toBe(true);
+      expect(body).not.toHaveProperty('success');
+      expect(body).not.toHaveProperty('data');
+    });
+
+    it('leaves the bare-base alias UNFILLED — it shares the handler but not the coverage', () => {
+      // `GET /api/v1` is registered with this very `discoveryHandler` closure,
+      // so "same handler, therefore same shape" is tempting. It is also an
+      // argument about the code rather than a measurement of it, which is the
+      // substitution #3877 was opened about — and this suite resolves the
+      // handler at `/api/v1/discovery`, so the alias has no coverage of its own.
+      // Fill it in the PR that drives it; changing this expectation without
+      // adding that drive is the mistake.
+      const alias = REST_ROUTE_LEDGER.find(e => e.route === 'GET /api/v1');
+      expect(alias, 'the bare-base discovery alias row must exist').toBeDefined();
+      expect(
+        alias!.responseSchema,
+        'GET /api/v1 must not declare a responseSchema until this suite (or another) '
+          + 'drives that mount — no coverage, no fill (#5791).',
+      ).toBeUndefined();
+    });
   });
 });

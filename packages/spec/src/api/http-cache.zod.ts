@@ -53,7 +53,7 @@ export const CacheDirective = z.enum([
   'max-age',          // Maximum cache age in seconds
 ]);
 
-export type CacheDirective = z.infer<typeof CacheDirective>;
+export type CacheDirective = z.input<typeof CacheDirective>;
 
 /**
  * Cache Control Schema
@@ -73,7 +73,7 @@ export const CacheControlSchema = lazySchema(() => z.object({
   staleIfError: z.number().optional().describe('Allow serving stale content on error (seconds)'),
 }));
 
-export type CacheControl = z.infer<typeof CacheControlSchema>;
+export type CacheControl = z.input<typeof CacheControlSchema>;
 
 // ==========================================
 // ETag Support
@@ -92,7 +92,7 @@ export const ETagSchema = lazySchema(() => z.object({
   weak: z.boolean().optional().default(false).describe('Whether this is a weak ETag'),
 }));
 
-export type ETag = z.infer<typeof ETagSchema>;
+export type ETag = z.input<typeof ETagSchema>;
 /** Post-parse shape of {@link ETag} — defaults applied, transforms run (ADR-0122). */
 export type ETagParsed = z.infer<typeof ETagSchema>;
 
@@ -116,7 +116,7 @@ export const MetadataCacheRequestSchema = lazySchema(() => z.object({
   cacheControl: CacheControlSchema.optional().describe('Client cache control preferences'),
 }));
 
-export type MetadataCacheRequest = z.infer<typeof MetadataCacheRequestSchema>;
+export type MetadataCacheRequest = z.input<typeof MetadataCacheRequestSchema>;
 
 // ==========================================
 // Metadata Cache Response
@@ -157,7 +157,7 @@ export const MetadataCacheResponseSchema = lazySchema(() => z.object({
   version: z.string().optional().describe('Metadata version identifier'),
 }));
 
-export type MetadataCacheResponse = z.infer<typeof MetadataCacheResponseSchema>;
+export type MetadataCacheResponse = z.input<typeof MetadataCacheResponseSchema>;
 /** Post-parse shape of {@link MetadataCacheResponse} — defaults applied, transforms run (ADR-0122). */
 export type MetadataCacheResponseParsed = z.infer<typeof MetadataCacheResponseSchema>;
 
@@ -178,7 +178,7 @@ export const CacheInvalidationTarget = z.enum([
   'custom',           // Custom invalidation pattern
 ]);
 
-export type CacheInvalidationTarget = z.infer<typeof CacheInvalidationTarget>;
+export type CacheInvalidationTarget = z.input<typeof CacheInvalidationTarget>;
 
 /**
  * Cache Invalidation Request Schema
@@ -199,7 +199,7 @@ export const CacheInvalidationRequestSchema = lazySchema(() => z.object({
   pattern: z.string().optional().describe('Pattern for custom invalidation (supports wildcards)'),
 }));
 
-export type CacheInvalidationRequest = z.infer<typeof CacheInvalidationRequestSchema>;
+export type CacheInvalidationRequest = z.input<typeof CacheInvalidationRequestSchema>;
 /** Post-parse shape of {@link CacheInvalidationRequest} — defaults applied, transforms run (ADR-0122). */
 export type CacheInvalidationRequestParsed = z.infer<typeof CacheInvalidationRequestSchema>;
 
@@ -220,7 +220,7 @@ export const CacheInvalidationResponseSchema = lazySchema(() => z.object({
   targets: z.array(z.string()).optional().describe('List of invalidated resources'),
 }));
 
-export type CacheInvalidationResponse = z.infer<typeof CacheInvalidationResponseSchema>;
+export type CacheInvalidationResponse = z.input<typeof CacheInvalidationResponseSchema>;
 
 // ==========================================
 // Metadata Cache API Methods

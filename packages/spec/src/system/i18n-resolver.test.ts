@@ -989,6 +989,147 @@ describe('translatePage', () => {
     const out = translatePage(page, bundle, { locale: 'zh' });
     expect(out.label).toBe('连接智能体');
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // #6080 — per-component copy, keyed by component id
+  //
+  // Modelled on the reported downstream case: hotcrm's `sales_home_page`
+  // rendered a translated header above English cards and English KPI blocks,
+  // because `pages` had four keys and none of them could reach a component.
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('per-component copy (#6080)', () => {
+    const homeBundle: TranslationBundle = {
+      'zh-CN': {
+        pages: {
+          sales_home_page: {
+            label: '销售看板',
+            subtitle: '欢迎回来',
+            components: {
+              quick_create: { title: '快速新建' },
+              kpi_revenue_won: { label: '已赢收入' },
+              ai_briefing: { title: '询问 AI 助手', description: '从右侧边缘打开助手面板。' },
+              lead_picker: { placeholder: '搜索线索…', emptyText: '暂无记录' },
+              new_lead_form: { submitLabel: '创建' },
+            },
+          },
+        },
+      },
+      en: {
+        pages: {
+          sales_home_page: {
+            components: { ai_briefing: { title: 'Ask the AI Assistant', description: 'Open the assistant panel.' } },
+          },
+        },
+      },
+    };
+
+    const homePage = () => ({
+      name: 'sales_home_page',
+      label: 'Sales Home',
+      regions: [{
+        name: 'main',
+        components: [
+          { type: 'page:header', properties: { title: 'Sales Home', subtitle: 'Welcome back' } },
+          { type: 'page:card', id: 'quick_create', properties: { title: 'Quick Create', icon: 'plus' } },
+          { type: 'element:kpi', id: 'kpi_revenue_won', properties: { label: 'Revenue (Won)', value: 42 } },
+          { type: 'page:card', id: 'ai_briefing', properties: { title: 'Ask the AI Assistant', description: 'Open the assistant panel from the right edge…' } },
+          { type: 'element:record_picker', id: 'lead_picker', properties: { object: 'lead', placeholder: 'Search leads…', emptyText: 'No records' } },
+          { type: 'element:form', id: 'new_lead_form', properties: { object: 'lead', submitLabel: 'Create' } },
+          { type: 'page:card', id: 'untranslated_card', properties: { title: 'Still English' } },
+        ],
+      }],
+    });
+
+    const byId = (doc: any, id: string) =>
+      doc.regions[0].components.find((c: any) => c.id === id);
+
+    it('translates card title, KPI label, and description by component id', () => {
+      const out = translatePage(homePage(), homeBundle, { locale: 'zh-CN' });
+      expect(byId(out, 'quick_create').properties.title).toBe('快速新建');
+      expect(byId(out, 'kpi_revenue_won').properties.label).toBe('已赢收入');
+      expect(byId(out, 'ai_briefing').properties.title).toBe('询问 AI 助手');
+      expect(byId(out, 'ai_briefing').properties.description).toBe('从右侧边缘打开助手面板。');
+    });
+
+    it('covers the whole measured key face, not just title/description', () => {
+      const out = translatePage(homePage(), homeBundle, { locale: 'zh-CN' });
+      expect(byId(out, 'lead_picker').properties.placeholder).toBe('搜索线索…');
+      expect(byId(out, 'lead_picker').properties.emptyText).toBe('暂无记录');
+      expect(byId(out, 'new_lead_form').properties.submitLabel).toBe('创建');
+    });
+
+    it('preserves non-copy properties alongside the overlay', () => {
+      const out = translatePage(homePage(), homeBundle, { locale: 'zh-CN' });
+      expect(byId(out, 'quick_create').properties.icon).toBe('plus');
+      expect(byId(out, 'kpi_revenue_won').properties.value).toBe(42);
+      expect(byId(out, 'lead_picker').properties.object).toBe('lead');
+    });
+
+    it('leaves a component with no entry — and one with no id — untouched', () => {
+      const out = translatePage(homePage(), homeBundle, { locale: 'zh-CN' });
+      expect(byId(out, 'untranslated_card').properties.title).toBe('Still English');
+      // The header carries no id, so only the page-name route applies to it.
+      expect(out.regions[0].components[0].properties.title).toBe('销售看板');
+      expect(out.regions[0].components[0].properties.subtitle).toBe('欢迎回来');
+    });
+
+    it("lands `label` on the component's own label slot when it declares one", () => {
+      // `PageComponentSchema` has BOTH a top-level `label` and an open
+      // `properties` bag; copy must land where the author actually wrote it.
+      const doc = {
+        name: 'sales_home_page',
+        regions: [{
+          name: 'main',
+          components: [{ type: 'element:button', id: 'kpi_revenue_won', label: 'Revenue (Won)', properties: {} }],
+        }],
+      };
+      const out = translatePage(doc, homeBundle, { locale: 'zh-CN' });
+      expect(out.regions[0].components[0].label).toBe('已赢收入');
+      // …and does not invent a second spelling in the props bag.
+      expect(out.regions[0].components[0].properties).not.toHaveProperty('label');
+    });
+
+    it('resolves key by key across the locale chain, not entry by entry', () => {
+      // `zh-CN` translates only `title` for this id; `description` must still
+      // fall back to `en` rather than being dropped because the zh entry won.
+      const partial: TranslationBundle = {
+        'zh-CN': { pages: { sales_home_page: { components: { ai_briefing: { title: '询问 AI 助手' } } } } },
+        en: { pages: { sales_home_page: { components: { ai_briefing: { description: 'Open the assistant panel.' } } } } },
+      };
+      const out = translatePage(homePage(), partial, { locale: 'zh-CN' });
+      expect(byId(out, 'ai_briefing').properties.title).toBe('询问 AI 助手');
+      expect(byId(out, 'ai_briefing').properties.description).toBe('Open the assistant panel.');
+    });
+
+    it('lets the id-addressed route win over the page-name route on a header that has an id', () => {
+      const doc = {
+        name: 'sales_home_page',
+        regions: [{
+          name: 'header',
+          // `properties` widened to the open bag it is: the overlay adds keys
+          // the literal does not spell out, and inferring it as `{title}` alone
+          // would make reading the result a type error.
+          components: [{
+            type: 'page:header',
+            id: 'quick_create',
+            properties: { title: 'Sales Home' } as Record<string, string>,
+          }],
+        }],
+      };
+      const out = translatePage(doc, homeBundle, { locale: 'zh-CN' });
+      // `components.quick_create.title` is more specific than `pages.<name>.label`.
+      expect(out.regions[0].components[0].properties.title).toBe('快速新建');
+      // The page-name route still supplies what the id route did not.
+      expect(out.regions[0].components[0].properties.subtitle).toBe('欢迎回来');
+    });
+
+    it('does not mutate the input page', () => {
+      const doc = homePage();
+      const snapshot = JSON.parse(JSON.stringify(doc));
+      translatePage(doc, homeBundle, { locale: 'zh-CN' });
+      expect(doc).toEqual(snapshot);
+    });
+  });
 });
 
 describe('TranslationDataSchema pages', () => {

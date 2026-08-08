@@ -15,7 +15,7 @@ export const NotificationTypeSchema = lazySchema(() => z.enum([
   'inline',
 ]).describe('Notification presentation style'));
 
-export type NotificationType = z.infer<typeof NotificationTypeSchema>;
+export type NotificationType = z.input<typeof NotificationTypeSchema>;
 
 /**
  * Notification Severity Schema
@@ -28,7 +28,7 @@ export const NotificationSeveritySchema = lazySchema(() => z.enum([
   'error',
 ]).describe('Notification severity level'));
 
-export type NotificationSeverity = z.infer<typeof NotificationSeveritySchema>;
+export type NotificationSeverity = z.input<typeof NotificationSeveritySchema>;
 
 /**
  * Notification Position Schema
@@ -43,7 +43,7 @@ export const NotificationPositionSchema = lazySchema(() => z.enum([
   'bottom_right',
 ]).describe('Screen position for notification placement'));
 
-export type NotificationPosition = z.infer<typeof NotificationPositionSchema>;
+export type NotificationPosition = z.input<typeof NotificationPositionSchema>;
 
 // [#5015] `NotificationActionSchema` / `NotificationAction` were REMOVED per
 // ADR-0049 enforce-or-remove, ruled REMOVE on 2026-08-04.

@@ -183,6 +183,34 @@ flaky 连踢五个互不相关的 PR,核对失败签名一致后原样重投,五
 - REST core(15000/时)在共享身份下**同样会打满** —— 本条的三份判据(rate_limit
   读数、整点重置、独立计费)对它一体适用,别把「走 REST」读成「不限量」。
 
+**定点文本的写法纪律 —— 已删除的定时器仍会投递,且投递时文本可能已落后现实数轮。**
+上面第一条让定点文本**完整**(带全待执行状态),这一条让它**过期时仍然安全**;两条
+是同一枪的两面,都成立才够用。2026-08-07 跨两个座位三次实测,两种形态、同一个后果:
+
+- `domain:spec-surface` 席**两枪已 `delete_trigger`**(回包确认 `deleted trigger …`)
+  的定时器**照样投递**,文本都落后现实两轮。其中一枪写着「#5783 …… 判为不可靠、
+  交接、**重新派发一个 fresh os-dev**,worktree `objectstack-issue-5783` 已存在」;
+  投递时 #5783 的 PR #6389 早已交付并通过复核 —— 照文本执行就是把一个重复 agent
+  塞进一个活着且已完工的 worktree,正是认领协议要防的碰撞类,只不过这次是**从
+  自动化里**来的,而不是从抢跑的 PM 那里。
+- `domain:devx` 席的一枪**没被删,是被现实追上**:21:3x 挂、22:1x 投递,文本写的
+  「两个 dev 静默结束、未开 PR、未交报告 ⇒ 判定失效 ⇒ 重新派发一个新 dev」在投递
+  时前提已被推翻(两个 dev 都已回话正常推进,其中一个的 PR 已合并)。照做会向两个
+  活着且已有成果的任务各塞一个重复 dev。删与没删是两条路径,终点是同一个。
+
+两条硬规则:
+
+- **每一枪定点文本必须以「幂等 —— 动手前先重读状态」开头**,⛔ 不得包含未经重读
+  即可执行的祈使句。三次都没出事的唯一原因就是这句在文本里、且重读**真的被执行**;
+  定时器一旦投递,平台侧没有任何东西会替你复核它的前提 —— 把重读写进文本是**唯一**
+  能让过期指令失效的机制。
+- 文本只许描述**判据**(「若 X 则 Y」),⛔ 不许描述**结论**(「现在去做 Y」)。
+  「⇒ 重新派发」「⇒ 判为不可靠」「⇒ 打回不 arm」这类祈使句正是要禁的形态:它们在
+  写下的那一刻可能是对的,投递时未必还是,而祈使句把「判据可能已变」这件事从文本里
+  抹掉了 —— 判据句自带复核,结论句把复核外包给了一个已经不在场的自己。
+
+本条的落点在 step 6(巡检定点)与 step 7(flip 定点)各有一条同款约束,写法一致。
+
 **4. 核验 main 的事实用 `origin/main`,不用共享检出的工作树。** 共享检出的 HEAD 由
 别的 agent 摆布,可能落后 origin/main 数十提交(今天 PM 与一名 dev 都在落后 63 提交的
 树上 grep 出假阴性,据此差点判了错误的结论)。一律先 `git fetch origin main`,再:
@@ -331,6 +359,31 @@ REST 取 `body`(原文 4321 / 5183 / 4181 字符)+ 取 `body_html`(渲染版)—
   其它分类更硬:误判一次的代价是一条可入队缺陷躺一天,外加一条打给作者的假工单。
   已发出的重贴指令若事后证伪,**要在同一处公开作废**(同 notes 7:诊断结论一旦
   公开发出又被推翻,更正要发在同样公开的位置)。
+- **同一个 sanitizer 的第二种形状 —— 写侧的「就地删除」,上面两条的判据抓不到它,
+  反引号也不保护。** 上面两条管的是**读侧**误判(把读取端截断当成 issue 端截断),
+  ⚠️ 一字不改、依旧成立;这一条是新增的**另一种失效形态**,不是对它的修正:短的
+  `<…>` 片段在**写入时**被就地删掉,正文其余部分完好无损 —— 没有「断掉的位置」,
+  所以「两者在同一处断掉」这个判据在它身上恒假,双读取会一致地告诉你「正文完整」,
+  而它确实完整,只是少了几个片段。2026-08-07 `domain:spec-surface` 席在座位贴的
+  交接台账上写后回读实测三例,三例都在反引号里、三例都被吃掉:
+
+  | 写入 | 存回 |
+  |---|---|
+  | `<!-- os-dev-report -->` | (整段变成空) |
+  | `expected <n> to be 19` | `expected  to be 19` |
+  | `git log -- <path>` | `git log -- ` |
+
+  第一例是有代价的:那个标记是一次座位交接中在飞 dev 报告的**全部收集路径**
+  (step 6 `mode:cloud` 的收集判据),台账因此让接班人去扫一个**已经从台账里被删掉
+  的**标记 —— 只有写后回读抓到了它。两条动作:
+
+  - 正文里凡要保留字面尖括号,一律写 HTML 实体 `&lt;` / `&gt;`,⛔ 不靠反引号或
+    围栏 —— 实测它们不提供保护;
+  - 含 HTML 注释标记(如 `<!-- os-dev-report -->`)、`<n>` / `<branch>` / `<repo>`
+    一类占位符、泛型参数的正文,**写后回读逐个确认这些片段仍在**,这是动作不是提醒。
+    label discipline 的「写后回读」是同一条纪律的上位(#5885 那两次「sanitizer 吞
+    内容」即本形态),本条给的是它的**具体形状与判据**:失效完全静默 —— API 返回
+    成功,渲染页看不出缺口,只有把存回的正文与你写的原文逐段对比才看得见。
 
 **13. MCP 工具的两个参数语义陷阱 —— 过滤是 OR、labels 是整组替换。** spec 车道
 一任内两次实测(#5925),都是 notes 6「命令没在回答你以为的问题」的 API 参数版:
@@ -790,8 +843,48 @@ in-scope,验收依据 …」),维护者可否决。
 
 (**分诊座位的活** —— 执行座位跳过本步,rule 4。)
 The maintainer does not pre-sort the backlog. On every round (and every
-idle check-in), sweep issues that carry no `pm:*` / `needs-user-decision`
-label and classify each:
+idle check-in), sweep every issue matching **任一**析取,并逐张分类:
+
+1. **无 `pm:*`、无 `needs-user-decision`、也无 `domain:*`** —— 全裸卡。今天的
+   规则,判据不变;`domain:*` 一项此前只活在实践里(带车道标签的单被读作
+   「已路由」而跳过),析取 3 出现后必须写明,否则两条互相吞掉。
+2. **有 `pm:queue` 但无 `domain:*`** —— ⚠️ **仅限 `objectstack-ai/objectstack`**。
+3. **有 `domain:*` 但无 pm-state**(`pm:queue` / `pm:dispatched` / `pm:blocked` /
+   `pm:on-hold` / `finding` / `needs-user-decision`)。
+
+⏳ **析取 2、3 只取 `updated_at` 早于 ~2 分钟前的卡**(析取 1 无此限)。
+
+**为什么 2、3 不是可选项。** `domain:*` 是**路由**、pm-state 是**状态机**,只带
+其一的单对两个视图**同时**不可见 —— 队列按 pm-state 取,车道认领按 `domain:*`
+取,而旧判据「带了 `pm:*` 就跳过」把补票的最后一道也关上了。这不是假想:同形
+已四次实测(两次各停滞整日,一次同日六张 11:00–13:55Z 立、16:47Z 才被两个 PM
+会话**手工**报回来才捞起)。
+
+- 析取 2 的生产者是**协议本身**,不是某个车道的坏习惯:跨座位转移卡(转出方
+  按转移协议自带 `pm:queue`)与队列管家 Routine 的队列健康卡,**按设计**预先
+  带队列标签,又**按单一生产者规则不准自打 `domain:*`**(管家原话:「no
+  `domain:*` / `repo:*` label applied — routing labels are the triage seat's
+  single-producer territory. Only `pm:queue` is set here.」)。于是它们在看板上
+  显示可派、实际**谁都不能认领**。
+- 析取 3 那张实测卡是**分诊自己写的纪律的反例**:同一条「立单方别自打
+  `domain:*`、留给分诊」当天早上刚写在另一张卡上,几小时后 PM 立单时照犯,
+  卡片对队列与扫描同时隐身 ~69 分钟。⇒ **纪律写在别处不够,判据本身必须兜
+  住** —— 这是本节存在的理由,不是修辞。
+
+⚠️ **析取 2 必须 repo-scoped,否则它自己就是噪声源。** 兄弟仓(objectui /
+cloud)是**整仓座位**,车道标签在那里**根本不存在**(实测 2026-08-07:objectui
+的 `domain:devx` 查无此标签),所以「有 `pm:queue`、无 `domain:*`」是它们**每一
+张**队列卡的正常形状 —— 不限定就一次扫进 objectui 38 + cloud 19 张(同日实测
+open 计数),把分诊轮淹掉。
+
+⏳ **年龄下限键在 `updated_at`,不是 `created_at`。** 部分标注状态有两个来源:
+刚立还没打完标签的新卡,以及**一次标签写入**把老卡打成半标注 —— 分诊自己打
+标签就是分开的两次写(`domain:*` 与 `pm:queue` 各一次),中间那几秒正好落在
+析取 2 / 3 里。按 `created_at` 判会漏掉后一种,按 `updated_at` 两种都兜住;代价
+是一条评论也会把卡推迟一轮,可接受(下一轮即取到)。
+
+**分类动作**(对上面选中的每一张;析取 2 选中的卡只欠 `domain:*`,补它即可,
+⛔ 不重打已在位的 `pm:queue`):
 
 - **Auto-queue (`pm:queue`)**: a concrete defect with a named location or
   repro; a scoped tooling/gate fix; a restore-invariant finding; a
@@ -816,6 +909,9 @@ label and classify each:
 `tracking` 与 `status:parked` 的 issue(它们的状态由别的机制管,分诊不重判)、
 以及 **#4604 与全部 `pm:seat` 座位贴**(协议载体,不是待分诊的工作)。存量大时**每轮
 限量、优先最新**(试点用 ~15 条/轮),防一轮吃光存量把轮次拖过一个调度周期。
+⚠️ 排除项在析取 3 下更吃重:parked 单**正常形状**就是「带 `domain:*`、无
+pm-state」(2026-08-07 实测:3 张 `status:parked` 全部长这样),漏判排除就是每轮
+把它们重新扫回来一次。
 
 #### 发现分诊轮 —— 队列的出水口(objectstack#4949)
 
@@ -1287,6 +1383,56 @@ prompt:
 
 一句话:**一个在缺信封的实现上无法转红的拒收用例,读起来是覆盖,实际不是。**
 
+**过滤 / 谓词语义裁决:派发令枚举完整的编译面清单,PR 逐面申报 —— 派发令的标准
+条款(#5930 裁决的流程半边)。** 适用判据:本单会**改变一条过滤 / 谓词语义**(算子
+的 NULL 处理、组合子恒等、比较数形状、算子词表……)。满足时派发令**把下面那张表逐面
+抄进去**,并带这一句(原话):
+
+> 本单改的这条语义由**多个互相独立的编译器 / 求值器**各自实现。派发令列出的**每一
+> 面**都必须在你的 PR 正文里有一个结论:**已改** / **本就合规**(给出证据)/
+> **明确不在范围**(给出理由)。⛔ 不许静默略过 —— 评审把「没提到的面」一律读作
+> 「漏掉的面」,不读作「不需要改」。
+
+**这条防的不是「做错」,是「做对了一部分然后以为做完了」。** 一个 `FilterCondition`
+语义由 **5 个互相独立的实现**承载(下表)⇒ 每条语义裁决的成本 ×5,而漏面**反复
+复发**,三次都留在代码注释里:
+
+- **#5146 → #5903**:裁决只落到面 1,面 2 是**不继承面 1 的独立编译器**,于是同一个
+  驱动的两种连接模式对同一条过滤给出两种答案。现场记录在
+  `driver-turso/src/remote-transport.ts:1731`:「LOCAL mode inherits that fix
+  (`TursoDriver extends SqlDriver`), this independent compiler inherited none of
+  it」。
+- **#5326 / #5335**:面 3 与面 4 各**又花一圈**才对齐,记录在
+  `spec/src/data/filter.zod.ts:370`。
+- **#5905**:#5298 的裁决由 PR #5962 落到 driver-sql / formula / service-analytics
+  与 conformance 表,**唯独漏了 HAVING 面** —— `objectql/src/having-filter.ts:37` 的
+  原话是「was not in that PR's inventory, which left this file as the lone
+  holdout」。**「inventory」这个词本身就是本条款的缺席证明**:那次派发确实有一份清
+  单,只是它不完整,而没有任何机制要求它完整。
+
+三次都不是难度问题,是**没有一份清单在问「还有几面」**。
+
+编译面清单(逐面实测 @ `main` `48f98b0`,2026-08-07):
+
+| # | 面 | 落点(file:line) | 备注 |
+| --- | --- | --- | --- |
+| 1 | `driver-sql` | `packages/drivers/driver-sql/src/sql-driver.ts:7083`(`applyFilterCondition`) | `driver-sqlite-wasm`(`sqlite-wasm-driver.ts:67`)与 **local 模式**的 `driver-turso`(`turso-driver.ts:174`)都 `extends SqlDriver`,**靠继承共用这一面**,不单独算面 |
+| 2 | turso RemoteTransport | `packages/drivers/driver-turso/src/remote-transport.ts:1526`(`private buildWhereSQL`) | **独立编译器,不继承面 1** —— 一个驱动的两面,由连接模式选中哪面 |
+| 3 | service-analytics read-scope-sql | `packages/services/service-analytics/src/read-scope-sql.ts:259`(`compileScopedFilterToSql`) | RLS 读侧 |
+| 4 | service-analytics filter-normalizer | `packages/services/service-analytics/src/strategies/filter-normalizer.ts:1235`(`lowerAnalyticsWhere`) | analytics / cube 侧 |
+| 5 | `formula` | `packages/formula/src/matches-filter.ts:73`(`matchesFilterCondition`) | RLS 写侧 `check` 与公式求值;JS 两值语义的基准面 |
+| 半面 | objectql `having-filter` | `packages/objectql/src/having-filter.ts:92` / `:98`(`applyHaving` / `matchesHaving`) | 聚合**后**过滤。算半面是因为词表是子集,**但申报义务不打折** —— 它是**唯一没有 conformance 表覆盖的面**(`FILTER_LOGIC_CASES` 不驱动 HAVING 路径),所以漏了它连门禁都不会红 |
+| 冻结 | `driver-memory` / `driver-mongodb` | — | #5499 冻结投入:**pin-annotate,不翻转**。冻结面仍要申报,结论是「不在范围 + #5499」。现场注释见 `read-scope-sql.ts:176`、`having-filter.ts:41` |
+
+**这张表本身由 PR 维护 —— 与域表同一纪律。** 增删一面(新驱动、新求值器、某面被合并
+或退役、冻结状态变化)的那个 PR 顺手改这里,不留给下一次裁决重新数。清单**会**过期是
+必然的,清单**没有维护者**才是缺陷。
+
+⚠️ 派发前复核一遍再抄,⛔ 不要凭这张表的记忆填派发令:本仓的包路径搬过家(驱动进
+`packages/drivers/`、服务进 `packages/services/`),行号更是每天在动。一条够用的复核
+串:`grep -rn 'matchesFilterCondition\|buildWhereSQL\|compileScopedFilterToSql'
+packages --include=*.ts | grep -v node_modules`。
+
 **Issue 正文是线索,不是规格 —— and the dispatch wording is what makes an
 honest "the premise is dead" cheap to return.** Step 1's stale-premise check
 is the PM's sample; the dev's verification is the real thing, so the prompt
@@ -1506,12 +1652,50 @@ attached.
   末尾的重挂会整个丢失,守夜链就此断裂 —— 2026-08-06 实测:一次漏挂让
   四连灭批静默了 ~100 分钟而不是探活门槛设计的 ≤45 分钟。先挂后查,链条
   对中断免疫;挂错了间隔可以在本轮末尾用 delete_trigger + 重挂修正,但
-  「没挂」无法被本轮以外的任何机制补救。
+  「没挂」无法被本轮以外的任何机制补救。重挂的那一枪按 **notes 3 的定点
+  文本写法纪律**写:以「幂等 —— 动手前先重读状态」开头、只写判据不写结论。
+  巡检定点是最容易写成祈使句的一类(「⇒ 判为不可靠 ⇒ 重新派发」),也是
+  投递时最可能已经过期的一类 —— 在飞的 dev 在两次唤醒之间会推分支、开 PR、
+  交报告,而已 `delete_trigger` 的定时器仍会投递(notes 3 实测两次)。
 - **批量在飞期间,主巡检间隔不得长于 45 分钟**(同一授权)。探活门槛是
   45 分钟,巡检间隔一旦超过它,门槛就成了写在纸上的数字 —— 最坏情形下
   一个派发后即死的 agent 要等到下一轮巡检才被发现,静默窗口 = 巡检间隔,
   而非门槛值。在飞清零的待命期可放宽到 60-70 分钟;有任何 dev 在飞即收紧
   回 ≤45,灭批频发期(如宿主重启风暴)进一步压到 20-30 分钟。
+
+**45 分钟是发探针的门槛,⛔ 不是判死的门槛 —— 两者必须分开。** 上面五条回答
+「什么时候去问」;这一条回答 PM 真正面对的另一个问题:「多久之后我才可以下
+『它死了』的结论」。分开的理由是**后果不同** —— 探针的代价是一次 SendMessage,
+判死的代价是**重新派发**,即往一个可能还活着的 worktree 里塞第二个 agent
+(step 5「Handing off an interrupted dev」的碰撞面)。
+
+- 判死的正当依据只有三类:**探针回包表明已死**(「no active task; resumed from
+  transcript」一类)、**宿主明确回报 stopped**、或**超过本车道基线且连续静默**。
+  ⛔ 「探针门槛过了两次」不在其中 —— 它只说明它还在跑。
+- 「超过基线」里的基线是**你自己车道实测的完工耗时**,⛔ 不是本文里的任何常数。
+  没有基线就先建基线再判:同形态卡片各记一个「派发 → 推分支 / 开 PR」的端到端
+  耗时,三五单即可用。**在基线之内的沉默不是证据。**
+- 两条实测基线**只是出处样例,⛔ 不是全车队常数** —— 卡片形态不同,区间没有理由
+  相同,driver 或 engine-core 的重活不适用下表:
+
+  | 出处(车道 / 日期) | 卡片形态 | 实测端到端 |
+  |---|---|---|
+  | `domain:spec-surface` 席,2026-08-07(#6393) | 文本面卡:#5767 / #5622 / #5955 / #5783 | 93 / 96 / ~95 / ~110 分钟 |
+  | `domain:devx` 席,2026-08-07(#6393 认领评论) | 混合:#6251 / #6038 / #6405 / #6359 | ~67 / ~64 / ~160 / ~170 分钟(后两单含长 CI 等待) |
+
+  合两席九单:同一天、同一套工具下,端到端跨越 **~64 分钟到近 3 小时**。凡把单一
+  数字当判死线的读法,都会在这个跨度里翻车 —— 所以要建的是**你那一栏**的基线。
+- 两个座位当天各误判一次,都栽在这条线上:`domain:spec-surface` 席在 92 分钟处
+  写下「#5783 将判为不可靠」,而它在基线之内、几分钟后就推了分支;`domain:devx`
+  席在派发 2 小时处判两个 dev「静默结束」并把「重新派发」写进了下一枪定点,而两个
+  都在做深度取证。后者靠**先 SendMessage 问状态、而不是直接重派**救回 —— 那正是
+  上面五条的第一条。
+- 与既有两个数字的关系,一句话讲清:**45 分钟 = 探活门槛**(去问);**`mode:cloud`
+  的 ~2h 静默 = 本轮收集边界**(记 `blocked`、本轮不再等,下一轮从 GitHub 重收);
+  ⛔ 两者都不是判死。下面「报告丢失 ≠ 验收停摆」把 ≥2h 与**探活确认已死**并列成
+  两个条件而不是一个,正是这个区分的既有写法。
+- 这与 Operational notes 11(⛔ 不得据症状推断维护者中止)是同一个失效类换了个
+  变量:在你知道基线之前,「正常但慢」与「已死」的读数完全相同。
 
 **A stalled subagent is this half's most common failure, and it never
 self-heals.** When a dev stops mid-task reasoning that "a background watcher will
@@ -1776,6 +1960,10 @@ flip 定点**,到点核对门禁 job 结论(notes 10)、绿即转 ready + 挂 au
 未绿再阶梯重挂。CI success webhook 不可靠是环境明示的前提 —— 一班 13 次转 ready
 全部由定点驱动、零漏接(#5885);定点文本按 notes 3 的配额交接纪律携带完整待执行
 状态(哪个 PR、什么判据),抗上下文丢失。⛔ 不要坐等 webhook,也不要忙轮询。
+notes 3 的**写法纪律**在这里同样是硬要求:文本以「幂等 —— 动手前先重读状态」开头、
+只写判据(「若 #N 的门禁 job 结论全绿 ⇒ 转 ready 并挂 auto-merge」),⛔ 不写结论
+(「转 ready」)。flip 定点尤其容易过期:那 6–9 分钟里 PR 可能已被队列管家处置、
+被踢出、转成 `dirty`、或被别人先入了队,而已删除的定时器仍会投递。
 
 **落地窗口给关键 PR 挂事件订阅(`subscribe_pr_activity`,维护者 2026-08-07
 拍板)。** 适用面:会话型座位、且 PR 已进入 PM 的落地窗口 —— ACCEPT 后,以及被

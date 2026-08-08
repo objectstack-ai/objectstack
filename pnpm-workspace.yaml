@@ -192,3 +192,21 @@ overrides:
   #     compatibility. check-override-consistency.mjs covers both forms.
   'fast-uri@<4.0.0': '^3.1.5'
   'hono@<5.0.0': '^4.12.34'
+  # OSV 2026-08-07 (#6407) — transitive-only, and the same "it has a fix, so
+  # take the fix" disposition as the batch above:
+  #   dompurify GHSA-55q2-fjhq-7xh7 (5.1 medium) — an IN_PLACE hook removal
+  #     leaves a detached subtree executable (XSS). Advisory range is
+  #     introduced:0 → fixed:3.4.13, i.e. every version up to and including
+  #     3.4.12 is affected, so the selector's floor is the package floor and
+  #     only the upper bound needs stating. Transitive-only via mermaid
+  #     (apps/docs declares mermaid ^11.16.0; mermaid@11.16.1 declares
+  #     dompurify ^3.3.3). Nothing in this workspace declares dompurify
+  #     directly, so there is no publishable manifest to keep in lockstep —
+  #     check-override-consistency.mjs will list this as an override it cannot
+  #     cross-check against a declared range, which is correct for this shape.
+  #     ^3.4.13 sits INSIDE mermaid's own ^3.3.3 range, so this is a dedupe onto
+  #     the patched line rather than a forced upgrade past what mermaid supports.
+  #     Bound at the 4.0.0 major boundary per this block's header rule — never
+  #     `<3.4.13`, which would self-invalidate the day 3.4.13 is itself flagged
+  #     (the undici 7.28.0 / brace-expansion 5.0.8 specimens, #4961 / #5032).
+  'dompurify@<4.0.0': '^3.4.13'

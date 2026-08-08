@@ -1,10 +1,5 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { z } from 'zod';
-import { lazySchema } from '../shared/lazy-schema';
-import { strictObject } from '../shared/strict-object';
-import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-
 /**
  * Package Documentation Metadata Protocol (ADR-0046)
  *
@@ -27,6 +22,12 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  * resolve relative links between docs (`[guide](./crm_lead_guide.md)`)
  * by stripping `./` and `.md` to obtain the target doc name.
  */
+
+import { z } from 'zod';
+import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+
 export const DocSchema = lazySchema(() => strictObject({
   surface: 'this doc',
   history:
@@ -151,7 +152,7 @@ export const DocSchema = lazySchema(() => strictObject({
   // strict (#4001 findings log, entry 2).
   ...MetadataProtectionFields,
 }));
-export type Doc = z.infer<typeof DocSchema>;
+export type Doc = z.input<typeof DocSchema>;
 export type DocTranslation = NonNullable<Doc['translations']>[string];
 
 /**

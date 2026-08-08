@@ -49,13 +49,15 @@ import {
 //
 // The first three are the example teaching keys and values the schema turns
 // down; they are fixed in the document. The fourth is an ANNOTATION fact —
-// `Connector` is `z.infer` here, so it is the shape a `.parse()` RETURNS, in
-// which `syncConfig.schedule` is the post-transform `{ dialect, source }`
-// envelope and a bare cron string is correctly rejected. The document now
-// annotates with `ConnectorInput` (`z.input`), which is what an author writes.
-// Flipping this file's 20 bare `z.infer` aliases to the house `X` / `XParsed`
-// convention the way #4963 did for `etl.zod.ts` is a real but separate
-// appetite (this file's migration surface is not empty) and is NOT done here.
+// the annotation named the PARSED state, in which `syncConfig.schedule` is the
+// post-transform `{ dialect, source }` envelope and a bare cron string is
+// correctly rejected. When this gate was written that state sat on the bare
+// `Connector` and the author state on `ConnectorInput`, and this comment called
+// flipping them "a real but separate appetite". ADR-0122 phase 2 (#6083) did it:
+// the bare `Connector` is now `z.input` — the shape the document annotates with
+// — and `ConnectorParsed` carries the parse result. The pinned FACT is
+// unchanged; the two names swapped sides, which is what the last describe block
+// in this file now measures.
 
 const SPEC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const SYNC_ARCHITECTURE = resolve(SPEC_DIR, 'docs/SYNC_ARCHITECTURE.md');
@@ -170,8 +172,8 @@ describe('[#5515] SYNC_ARCHITECTURE.md L3 connector example compiles', () => {
     // resolution failure (paths mapping wrong, host overlay not applied) would
     // report zero diagnostics and read as a green example.
     probes['harness-self-test'] = [
-      "import type { ConnectorInput } from '@objectstack/spec/integration';",
-      "const broken: ConnectorInput = { label: 'no name, no type' };",
+      "import type { Connector } from '@objectstack/spec/integration';",
+      "const broken: Connector = { label: 'no name, no type' };",
     ].join('\n');
 
     const results = compileProbes(probes);
@@ -188,15 +190,15 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
   // would still pass if the probe broke for an unrelated reason, which is
   // precisely the failure mode a documentation gate is prone to.
   //
-  // Each probe is a whole `ConnectorInput` rather than a bare mapping or
+  // Each probe is a whole `Connector` rather than a bare mapping or
   // webhook literal, because that is the shape the document actually teaches —
-  // and because this file publishes no `*Input` alias for the nested schemas,
+  // and because the nested schemas publish no author-state name of their own,
   // so reaching them any other way would mean measuring something the barrel
   // does not export.
-  const HEAD = "import type { ConnectorInput } from '@objectstack/spec/integration';";
+  const HEAD = "import type { Connector } from '@objectstack/spec/integration';";
   const probes = {
     'alias-source-field': `${HEAD}
-      const c: ConnectorInput = {
+      const c: Connector = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
         fieldMappings: [{ sourceField: 'customer_number', targetField: 'customer_id' }],
       };
@@ -208,7 +210,7 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
     // alike. The probe body is unchanged on purpose — it is the same wrong
     // snippet an author copies out of the L3 document.
     'transform-retired': `${HEAD}
-      const c: ConnectorInput = {
+      const c: Connector = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
         fieldMappings: [{
           source: 'order_value', target: 'order_total',
@@ -223,7 +225,7 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
     // ("custom is not a member") and nothing would notice the retirement had
     // been undone.
     'transform-retired-valid-member': `${HEAD}
-      const c: ConnectorInput = {
+      const c: Connector = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
         fieldMappings: [{
           source: 'order_value', target: 'order_total',
@@ -233,7 +235,7 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
       void c;
     `,
     'webhook-retry-policy': `${HEAD}
-      const c: ConnectorInput = {
+      const c: Connector = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
         webhooks: [{
           name: 'order_created_webhook',
@@ -246,7 +248,7 @@ describe('[#5515] the four spellings the example used to carry are rejected', ()
     // The canonical spellings of all three, as one control: if this were red
     // the three reds above would say nothing about the SPELLING.
     'canonical-control': `${HEAD}
-      const c: ConnectorInput = {
+      const c: Connector = {
         name: 'sap_erp_connector', label: 'SAP ERP Integration', type: 'saas',
         fieldMappings: [{
           source: 'order_value', target: 'order_total',
@@ -393,12 +395,15 @@ describe('[#5515] the schema rejects them at RUNTIME too, and how it says so', (
   });
 });
 
-describe('[#5515] `ConnectorInput` is the author shape; `Connector` is the parse result', () => {
+describe('[#5515] the bare `Connector` is the author shape; `ConnectorParsed` is the parse result', () => {
   // The fourth diagnostic, pinned as an ANNOTATION fact rather than fixed by
   // renaming this file's aliases. Direction stated before running: the SAME
-  // literal is green under `ConnectorInput` and red under `Connector`, because
-  // `z.infer` is the post-parse shape — `syncConfig.schedule` becomes the
+  // literal is green under the bare `Connector` and red under `ConnectorParsed`,
+  // because `z.infer` is the post-parse shape — `syncConfig.schedule` becomes the
   // `{ dialect, source }` envelope and every `.default()` key becomes required.
+  // Before ADR-0122 phase 2 these two probes read `ConnectorInput` and
+  // `Connector`. The literal and both verdicts are unchanged; only which name
+  // sits on which side moved, which is the whole claim of the flip as a test.
   const literal = `{
     name: 'sap_erp_connector',
     label: 'SAP ERP Integration',
@@ -407,24 +412,24 @@ describe('[#5515] `ConnectorInput` is the author shape; `Connector` is the parse
   }`;
   const probes = {
     'author-connector': `
-      import type { ConnectorInput } from '@objectstack/spec/integration';
-      const c: ConnectorInput = ${literal};
+      import type { Connector } from '@objectstack/spec/integration';
+      const c: Connector = ${literal};
       void c;
     `,
     'parsed-connector': `
-      import type { Connector } from '@objectstack/spec/integration';
-      const c: Connector = ${literal};
+      import type { ConnectorParsed } from '@objectstack/spec/integration';
+      const c: ConnectorParsed = ${literal};
       void c;
     `,
   } as const;
 
   const results = compileProbes(probes);
 
-  it('accepts the bare cron string and the omitted defaults under `ConnectorInput`', () => {
+  it('accepts the bare cron string and the omitted defaults under the bare `Connector`', () => {
     expect(render(results.get('author-connector')!)).toBe('');
   });
 
-  it('rejects the same literal under `Connector`, on the cron envelope and the defaults', () => {
+  it('rejects the same literal under `ConnectorParsed`, on the cron envelope and the defaults', () => {
     const message = render(results.get('parsed-connector')!);
     expect(message).toContain("Type 'string' is not assignable");
     expect(message).toContain('dialect');

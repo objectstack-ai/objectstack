@@ -173,7 +173,6 @@ const actionParamUnknownKeyError = strictUnknownKeyError({
     'config shipped as a control that quietly ignored it.',
 });
 
-
 export const ActionParamSchema = lazySchema(() => z.object({
   /** Request-body key. Defaults to `field` when `field` is set. */
   name: z.string().optional(),
@@ -479,7 +478,7 @@ export const ACTION_LOCATIONS = [
 ] as const;
 
 export const ActionLocationSchema = z.enum(ACTION_LOCATIONS);
-export type ActionLocation = z.infer<typeof ActionLocationSchema>;
+export type ActionLocation = z.input<typeof ActionLocationSchema>;
 
 /**
  * Tool category values for {@link ActionAiSchema.category}.
@@ -609,9 +608,36 @@ export const ActionAiSchema = strictObject({
   requiresConfirmation: z.boolean().optional().describe('Override HITL confirmation for AI invocations.'),
 });
 
-export type ActionAi = z.infer<typeof ActionAiSchema>;
+export type ActionAi = z.input<typeof ActionAiSchema>;
 /** Post-parse shape of {@link ActionAi} — defaults applied, transforms run (ADR-0122). */
 export type ActionAiParsed = z.infer<typeof ActionAiSchema>;
+
+/**
+ * The shape both action-level condition keys speak — `visible` and `disabled`.
+ *
+ * Three arms for one meaning, cheapest first:
+ *
+ * | arm | example | meaning |
+ * |:---|:---|:---|
+ * | `boolean` | `visible: false` | the degenerate literal — a condition that is settled at authoring time |
+ * | `string` | `disabled: "record.status == 'closed'"` | CEL shorthand, normalized to the envelope at parse time |
+ * | `{ dialect, source }` | `{ dialect: 'cel', source: '…', meta: { rationale } }` | the full envelope, for authorship metadata or a non-default dialect |
+ *
+ * The two keys were asymmetric until #5970 — `visible` had no `boolean` arm, so
+ * the very common `visible: true` was a parse error on the spec side while
+ * objectui's `ActionDef` accepted it and stored metadata was already written
+ * that way. An asymmetry between two keys that mean the same *kind* of thing is
+ * a dialect nursery: it teaches each consumer to keep its own widening (the
+ * `(action as any).disabled` cast in console's `DeclaredActionsBar` was exactly
+ * that), and every one of those is a second de-facto contract (Prime Directive
+ * #12). Unifying here is what lets #4075 step 3 derive `ActionDef` from this
+ * schema and delete the casts.
+ *
+ * The boolean arm is deliberately NOT normalized into `{dialect:'cel',
+ * source:'true'}`: a literal survives as a literal, so a renderer can branch on
+ * it without standing up an evaluator, and `false` stays statically greppable.
+ */
+const ActionConditionInputSchema = z.union([z.boolean(), ExpressionInputSchema]);
 
 /**
  * The object half of {@link ActionSchema}, before its refinements.
@@ -895,7 +921,16 @@ const actionObject = () => strictObject({
   }).optional().describe('Render API response in a one-shot reveal dialog (suppresses successMessage when set).'),
   
   /** Access */
-  visible: ExpressionInputSchema.optional().describe('Visibility predicate (CEL).'),
+  /**
+   * Whether the action is offered at all. Three arms, one meaning — see
+   * {@link ActionConditionInputSchema}: `false` parks the action, `true` is the
+   * explicit default, and a predicate gates it per record/user/app/features.
+   *
+   * ⚠️ Client-side hiding is UX, not authorization — the button is gone, the
+   * route is not. An action gated for access-control reasons must also be
+   * refused server-side (`requiredPermissions`, or the action's own body).
+   */
+  visible: ActionConditionInputSchema.optional().describe('Visibility predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is offered when it evaluates TRUE. Omit = always visible.'),
   /**
    * Declarative capability gate (#2874) — action-level twin of the param
    * `requiresFeature`. Lowered at parse time into `visible` (`== true` for
@@ -904,7 +939,13 @@ const actionObject = () => strictObject({
    * `@objectstack/spec/kernel`.
    */
   requiresFeature: z.enum(PUBLIC_AUTH_FEATURE_NAMES).optional().describe('Public auth feature flag gating this action; lowered into `visible` at parse time.'),
-  disabled: z.union([z.boolean(), ExpressionInputSchema]).optional().describe('Boolean or predicate (CEL) — action is disabled when TRUE.'),
+  /**
+   * Whether the action is offered but refused. Same three arms as `visible`
+   * ({@link ActionConditionInputSchema}) — a disabled action stays on screen
+   * (usually greyed, with the reason in a tooltip) where a non-visible one is
+   * gone entirely.
+   */
+  disabled: ActionConditionInputSchema.optional().describe('Disabled predicate — `true`/`false` literal, CEL string, or `{dialect, source}` envelope. The action is shown but refused when it evaluates TRUE. Omit = never disabled.'),
 
   /**
    * [ADR-0066 D4] System capabilities required to INVOKE this action — a
@@ -1099,13 +1140,12 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   path: ['ai', 'paramHints'],
 }).transform((data, ctx) => lowerRequiresFeature(data, ctx)));
 
-export type Action = z.infer<typeof ActionSchema>;
+export type Action = z.input<typeof ActionSchema>;
 /** Post-parse shape of {@link Action} — defaults applied, transforms run (ADR-0122). */
 export type ActionParsed = z.infer<typeof ActionSchema>;
-export type ActionParam = z.infer<typeof ActionParamSchema>;
+export type ActionParam = z.input<typeof ActionParamSchema>;
 /** Post-parse shape of {@link ActionParam} — defaults applied, transforms run (ADR-0122). */
 export type ActionParamParsed = z.infer<typeof ActionParamSchema>;
-export type ActionInput = z.input<typeof ActionSchema>;
 
 /**
  * Legacy spellings an inline action may carry, folded to canonical on parse.
@@ -1194,10 +1234,9 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
   }),
 ));
 
-export type InlineAction = z.infer<typeof InlineActionSchema>;
+export type InlineAction = z.input<typeof InlineActionSchema>;
 /** Post-parse shape of {@link InlineAction} — defaults applied, transforms run (ADR-0122). */
 export type InlineActionParsed = z.infer<typeof InlineActionSchema>;
-export type InlineActionInput = z.input<typeof InlineActionSchema>;
 
 /**
  * Action Factory Helper
@@ -1211,6 +1250,6 @@ export const Action = {
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: Action` literal.
  */
-export function defineAction(config: z.input<typeof ActionSchema>): Action {
+export function defineAction(config: z.input<typeof ActionSchema>): ActionParsed {
   return ActionSchema.parse(config);
 }

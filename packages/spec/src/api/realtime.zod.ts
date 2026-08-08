@@ -18,7 +18,7 @@ export const TransportProtocol = z.enum([
   'polling',    // Short polling, best compatibility
 ]);
 
-export type TransportProtocol = z.infer<typeof TransportProtocol>;
+export type TransportProtocol = z.input<typeof TransportProtocol>;
 
 /**
  * Event Type Enum
@@ -37,7 +37,7 @@ export const RealtimeEventType = z.enum([
   'field.changed',
 ]).describe('Realtime event type (not yet enforced — the runtime emits data.record.* event names instead, and field.changed is never emitted; see #3197)');
 
-export type RealtimeEventType = z.infer<typeof RealtimeEventType>;
+export type RealtimeEventType = z.input<typeof RealtimeEventType>;
 
 /**
  * Subscription Event Configuration
@@ -60,7 +60,7 @@ export const SubscriptionSchema = lazySchema(() => z.object({
   channel: z.string().optional().describe('Optional channel name for grouping subscriptions'),
 }));
 
-export type Subscription = z.infer<typeof SubscriptionSchema>;
+export type Subscription = z.input<typeof SubscriptionSchema>;
 
 /**
  * Presence Schema
@@ -69,7 +69,7 @@ export type Subscription = z.infer<typeof SubscriptionSchema>;
  */
 export const RealtimePresenceSchema = lazySchema(() => BasePresenceSchema);
 
-export type RealtimePresence = z.infer<typeof RealtimePresenceSchema>;
+export type RealtimePresence = z.input<typeof RealtimePresenceSchema>;
 
 /**
  * Realtime Event Schema
@@ -86,7 +86,7 @@ export const RealtimeEventSchema = lazySchema(() => z.object({
   sessionId: z.string().optional().describe('Session identifier'),
 }));
 
-export type RealtimeEvent = z.infer<typeof RealtimeEventSchema>;
+export type RealtimeEvent = z.input<typeof RealtimeEventSchema>;
 
 /**
  * Realtime Configuration Schema
@@ -104,6 +104,6 @@ export const RealtimeConfigSchema = lazySchema(() => z.object({
   subscriptions: z.array(SubscriptionSchema).optional().describe('Default subscriptions'),
 }).passthrough()); // Allow additional properties
 
-export type RealtimeConfig = z.infer<typeof RealtimeConfigSchema>;
+export type RealtimeConfig = z.input<typeof RealtimeConfigSchema>;
 /** Post-parse shape of {@link RealtimeConfig} — defaults applied, transforms run (ADR-0122). */
 export type RealtimeConfigParsed = z.infer<typeof RealtimeConfigSchema>;

@@ -37,7 +37,7 @@ export const EnvironmentPackageStatusSchema = lazySchema(() => z
   ])
   .describe('Package installation status within an environment'));
 
-export type EnvironmentPackageStatus = z.infer<typeof EnvironmentPackageStatusSchema>;
+export type EnvironmentPackageStatus = z.input<typeof EnvironmentPackageStatusSchema>;
 
 // ---------------------------------------------------------------------------
 // sys_package_installation — Environment ↔ version pairing
@@ -110,7 +110,7 @@ export const EnvironmentPackageInstallationSchema = lazySchema(() => z.object({
   errorMessage: z.string().optional().describe('Error message when status is error'),
 }).describe('Package installation record in an environment (sys_package_installation)'));
 
-export type EnvironmentPackageInstallation = z.infer<typeof EnvironmentPackageInstallationSchema>;
+export type EnvironmentPackageInstallation = z.input<typeof EnvironmentPackageInstallationSchema>;
 /** Post-parse shape of {@link EnvironmentPackageInstallation} — defaults applied, transforms run (ADR-0122). */
 export type EnvironmentPackageInstallationParsed = z.infer<typeof EnvironmentPackageInstallationSchema>;
 
@@ -143,7 +143,7 @@ export const InstallPackageToEnvironmentRequestSchema = lazySchema(() => z.objec
     { message: 'Either packageVersionId or packageManifestId must be provided' }
   ));
 
-export type InstallPackageToEnvironmentRequest = z.infer<typeof InstallPackageToEnvironmentRequestSchema>;
+export type InstallPackageToEnvironmentRequest = z.input<typeof InstallPackageToEnvironmentRequestSchema>;
 /** Post-parse shape of {@link InstallPackageToEnvironmentRequest} — defaults applied, transforms run (ADR-0122). */
 export type InstallPackageToEnvironmentRequestParsed = z.infer<typeof InstallPackageToEnvironmentRequestSchema>;
 
@@ -160,7 +160,7 @@ export const UpgradeEnvironmentPackageRequestSchema = lazySchema(() => z.object(
   upgradedBy: z.string().optional().describe('User ID performing the upgrade'),
 }).describe('Upgrade a package installation to a newer version'));
 
-export type UpgradeEnvironmentPackageRequest = z.infer<typeof UpgradeEnvironmentPackageRequestSchema>;
+export type UpgradeEnvironmentPackageRequest = z.input<typeof UpgradeEnvironmentPackageRequestSchema>;
 /** Post-parse shape of {@link UpgradeEnvironmentPackageRequest} — defaults applied, transforms run (ADR-0122). */
 export type UpgradeEnvironmentPackageRequestParsed = z.infer<typeof UpgradeEnvironmentPackageRequestSchema>;
 
@@ -173,7 +173,7 @@ export const RollbackEnvironmentPackageRequestSchema = lazySchema(() => z.object
   rolledBackBy: z.string().optional().describe('User ID performing the rollback'),
 }).describe('Roll back a package installation to a specific older version'));
 
-export type RollbackEnvironmentPackageRequest = z.infer<typeof RollbackEnvironmentPackageRequestSchema>;
+export type RollbackEnvironmentPackageRequest = z.input<typeof RollbackEnvironmentPackageRequestSchema>;
 
 // ---------------------------------------------------------------------------
 // Response schemas
@@ -188,6 +188,6 @@ export const ListEnvironmentPackagesResponseSchema = lazySchema(() => z.object({
   total: z.number().describe('Total count'),
 }).describe('List of packages installed in an environment'));
 
-export type ListEnvironmentPackagesResponse = z.infer<typeof ListEnvironmentPackagesResponseSchema>;
+export type ListEnvironmentPackagesResponse = z.input<typeof ListEnvironmentPackagesResponseSchema>;
 /** Post-parse shape of {@link ListEnvironmentPackagesResponse} — defaults applied, transforms run (ADR-0122). */
 export type ListEnvironmentPackagesResponseParsed = z.infer<typeof ListEnvironmentPackagesResponseSchema>;

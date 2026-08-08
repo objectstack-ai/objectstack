@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PluginHealthMonitor } from './health-monitor.js';
 import { createLogger } from './logger.js';
 import type { Plugin } from './types.js';
-import type { PluginHealthCheck } from '@objectstack/spec/kernel';
+import type { PluginHealthCheckParsed } from '@objectstack/spec/kernel';
 
 describe('PluginHealthMonitor', () => {
   let monitor: PluginHealthMonitor;
@@ -14,7 +14,7 @@ describe('PluginHealthMonitor', () => {
   });
 
   it('should register plugin for health monitoring', () => {
-    const config: PluginHealthCheck = {
+    const config: PluginHealthCheckParsed = {
       interval: 5000,
       timeout: 1000,
       failureThreshold: 3,
@@ -29,7 +29,7 @@ describe('PluginHealthMonitor', () => {
   });
 
   it('should report healthy status initially', () => {
-    const config: PluginHealthCheck = {
+    const config: PluginHealthCheckParsed = {
       interval: 5000,
       timeout: 1000,
       failureThreshold: 3,
@@ -44,7 +44,7 @@ describe('PluginHealthMonitor', () => {
   });
 
   it('should get all health statuses', () => {
-    const config: PluginHealthCheck = {
+    const config: PluginHealthCheckParsed = {
       interval: 5000,
       timeout: 1000,
       failureThreshold: 3,
@@ -64,7 +64,7 @@ describe('PluginHealthMonitor', () => {
   });
 
   it('should shutdown cleanly', () => {
-    const config: PluginHealthCheck = {
+    const config: PluginHealthCheckParsed = {
       interval: 5000,
       timeout: 1000,
       failureThreshold: 3,
@@ -92,7 +92,7 @@ describe('PluginHealthMonitor', () => {
   // satisfy while still leaving the loop pinned.
   describe('Health-check timeout guard does not outlive the race (#4875)', () => {
     /** A guard long enough that a single orphan is unmistakable. */
-    const guardedConfig = (overrides: Partial<PluginHealthCheck> = {}): PluginHealthCheck => ({
+    const guardedConfig = (overrides: Partial<PluginHealthCheckParsed> = {}): PluginHealthCheckParsed => ({
       interval: 30_000,
       timeout: 120_000,
       failureThreshold: 3,

@@ -122,6 +122,6 @@ export const OpsPluginStructureSchema = lazySchema(() => z.object({
   });
 }));
 
-export type OpsFilePath = z.infer<typeof OpsFilePathSchema>;
-export type OpsDomainModule = z.infer<typeof OpsDomainModuleSchema>;
-export type OpsPluginStructure = z.infer<typeof OpsPluginStructureSchema>;
+export type OpsFilePath = z.input<typeof OpsFilePathSchema>;
+export type OpsDomainModule = z.input<typeof OpsDomainModuleSchema>;
+export type OpsPluginStructure = z.input<typeof OpsPluginStructureSchema>;

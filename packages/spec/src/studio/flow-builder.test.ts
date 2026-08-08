@@ -10,7 +10,7 @@ import {
   FlowBuilderConfigSchema,
   BUILT_IN_NODE_DESCRIPTORS,
   defineFlowBuilderConfig,
-  type FlowBuilderConfig,
+  type FlowBuilderConfigParsed,
   type FlowNodeRenderDescriptor,
   type FlowCanvasNode,
   type FlowCanvasEdge,
@@ -175,7 +175,7 @@ describe('FlowLayoutDirectionSchema', () => {
 // ---------------------------------------------------------------------------
 describe('FlowBuilderConfigSchema', () => {
   it('should accept empty config with defaults', () => {
-    const config: FlowBuilderConfig = FlowBuilderConfigSchema.parse({});
+    const config: FlowBuilderConfigParsed = FlowBuilderConfigSchema.parse({});
     expect(config.snap.enabled).toBe(true);
     expect(config.snap.gridSize).toBe(16);
     expect(config.zoom.min).toBe(0.25);

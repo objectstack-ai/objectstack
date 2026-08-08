@@ -110,9 +110,9 @@ export const StructuredOutputConfigSchema = lazySchema(() => strictObject({
   transformPipeline: z.array(TransformPipelineStepSchema).optional().describe('Post-processing steps applied to output'),
 }).describe('Structured output configuration for agent responses'));
 
-export type StructuredOutputFormat = z.infer<typeof StructuredOutputFormatSchema>;
-export type TransformPipelineStep = z.infer<typeof TransformPipelineStepSchema>;
-export type StructuredOutputConfig = z.infer<typeof StructuredOutputConfigSchema>;
+export type StructuredOutputFormat = z.input<typeof StructuredOutputFormatSchema>;
+export type TransformPipelineStep = z.input<typeof TransformPipelineStepSchema>;
+export type StructuredOutputConfig = z.input<typeof StructuredOutputConfigSchema>;
 /** Post-parse shape of {@link StructuredOutputConfig} — defaults applied, transforms run (ADR-0122). */
 export type StructuredOutputConfigParsed = z.infer<typeof StructuredOutputConfigSchema>;
 
@@ -389,10 +389,10 @@ export const AgentSchema = lazySchema(() => strictObject({
  * });
  * ```
  */
-export function defineAgent(config: z.input<typeof AgentSchema>): Agent {
+export function defineAgent(config: z.input<typeof AgentSchema>): AgentParsed {
   return AgentSchema.parse(config);
 }
 
-export type Agent = z.infer<typeof AgentSchema>;
+export type Agent = z.input<typeof AgentSchema>;
 /** Post-parse shape of {@link Agent} — defaults applied, transforms run (ADR-0122). */
 export type AgentParsed = z.infer<typeof AgentSchema>;

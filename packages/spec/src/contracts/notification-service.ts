@@ -96,10 +96,34 @@ export interface InboxNotification {
     createdAt: string;
 }
 
-/** Result of {@link INotificationService.listInbox}. */
+/**
+ * Result of {@link INotificationService.listInbox}.
+ *
+ * Its two members carry deliberately DIFFERENT bounds (#6363): `notifications`
+ * is the requested page, `unreadCount` is the whole matching inbox.
+ */
 export interface InboxListResult {
+    /**
+     * The `limit`-bounded window — at most {@link InboxQuery.limit} rows
+     * (implementations may clamp), newest first. One page of the inbox, not
+     * the whole of it.
+     */
     notifications: InboxNotification[];
-    /** Unread count over the returned window. */
+    /**
+     * Total unread across the user's whole matching inbox — NOT the window
+     * above (#6363). The same quantity the wire contract publishes as
+     * `ListNotificationsResponseSchema.unreadCount` ("Total number of unread
+     * notifications", `api/protocol.zod.ts`).
+     *
+     * This is the number a bell badge shows, so it must not saturate at the
+     * page size: do not re-derive it by counting `notifications`, and do not
+     * clamp it to `notifications.length`. Counting over the window is exactly
+     * the defect #6363 fixed — a user with 60 unread was told 50, and
+     * `?limit=10` told them 10.
+     *
+     * {@link InboxQuery.read} does not zero it either: asking for the READ half
+     * of an inbox is not a claim that nothing is unread.
+     */
     unreadCount: number;
 }
 

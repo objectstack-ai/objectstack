@@ -722,9 +722,34 @@ describe('[#5325] analytics `where` — NULL-safe `$not` and the boolean identit
       expect(sql).toContain('"account"."region" = $1');
     });
 
-    it('an undefined value is still skipped, as it always was', async () => {
-      expect(await ids({ stage: undefined, owner: 'u1' })).toEqual(['1', '3']);
-      expect(await ids({ $not: undefined, owner: 'u1' })).toEqual(['1', '3']);
+    it('an undefined value is REFUSED at this seam (#6386), not skipped', async () => {
+      // ⚠️ REPLACED, not re-spelled. This case read "an undefined value is still
+      // skipped, as it always was" and asserted `ids({stage: undefined, owner:
+      // 'u1'}) === ['1','3']` — i.e. it PINNED the skip as a guarantee. #6386
+      // measured what the skip actually bought: `{stage: undefined}` alone
+      // normalised to `null`, so a single-key `where` ran with NO filter and the
+      // chart was drawn over every row — the #3650 widening this file's own
+      // subject (`$not`) exists to prevent, arriving through the entry gate
+      // instead. The two-key spelling above hid that: `owner: 'u1'` survived, so
+      // the row set still looked filtered.
+      //
+      // Kept at THIS seam deliberately — `ids` executes end to end through
+      // `NativeSQLStrategy`, which is where a compiled-to-nothing filter turns
+      // into a statement with no `WHERE` (#5297's lesson, one call above the
+      // compiler). So this asserts the refusal reaches the executing seam, not
+      // merely that the normalizer throws in isolation.
+      await expect(ids({ stage: undefined, owner: 'u1' })).rejects.toThrowError(
+        /comparand at "stage" is undefined/,
+      );
+      // `$not: undefined` is NOT the same condition and must not borrow the same
+      // message: it is a combinator with a missing operand, and the branch that
+      // already owned that shape gives the truer diagnosis.
+      await expect(ids({ $not: undefined, owner: 'u1' })).rejects.toThrowError(
+        /"\$not" requires a filter object/,
+      );
+      // The row set the old assertion recorded is still reachable — by writing
+      // the filter the author meant, with the unknowable key simply omitted.
+      expect(await ids({ owner: 'u1' })).toEqual(['1', '3']);
     });
 
     it('an ordinary filter compiles to exactly the SQL it always did', async () => {

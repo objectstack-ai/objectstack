@@ -21,7 +21,9 @@ import {
   GetDiscoveryResponseSchema,
   WELL_KNOWN_CAPABILITY_KEYS,
 } from '@objectstack/spec/api';
+import * as specApi from '@objectstack/spec/api';
 import { HttpDispatcher } from './http-dispatcher.js';
+import { ROUTE_LEDGER } from './route-ledger.js';
 
 /** The keys the protocol declares for a discovery response (canonical + declared alias). */
 function declaredResponseKeys(): Set<string> {
@@ -316,6 +318,51 @@ describe('[#4828] getDiscoveryInfo() conforms to DiscoverySchema', () => {
         expect(info.environment).toBe('development');
       },
     );
+  });
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // [#5791] The ledger row points AT this suite
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // `route-ledger.ts`'s `GET /discovery` row is one of the two first-ever
+  // filled `responseSchema` values, and the field's rule is that a name may
+  // only be written where the double assertion above already runs. That rule
+  // lives in a JSDoc, which cannot fail a build — so the closing of the loop is
+  // asserted here, in the file the row names: the schema the ledger advertises
+  // is required to be the same object this suite parses with, not merely a name
+  // that resolves. `packages/client/src/route-ledger-response-schema.test.ts`
+  // carries the other half (every name across all five ledgers resolves).
+  describe('[#5791] the ledger declares the schema this suite parses with', () => {
+    it('names `DiscoverySchema`, resolving to the very object asserted above', async () => {
+      const row = ROUTE_LEDGER.find(e => e.route === 'GET /discovery');
+      expect(row, 'the dispatcher discovery row must exist in ROUTE_LEDGER').toBeDefined();
+      expect(row!.responseSchema).toBe('DiscoverySchema');
+
+      // Identity, not just resolvability: a name that resolved to some OTHER
+      // schema would pass the client-side resolver and still describe the wrong
+      // contract.
+      expect((specApi as unknown as Record<string, unknown>)[row!.responseSchema!])
+        .toBe(DiscoverySchema);
+    });
+
+    it('describes the ENVELOPE PAYLOAD — this producer wraps, the REST one does not', async () => {
+      // The whole reason `responseSchema` is defined against the payload rather
+      // than the wire body: these two discovery routes serve the same object at
+      // two different depths. Here `dispatch()` returns `{ success, data }`, so
+      // the ledger's `DiscoverySchema` is a claim about `body.data`; the REST
+      // row's identical value is a claim about the whole body (`res.json`, no
+      // envelope). Measured on both sides rather than asserted once.
+      const result = await dispatcher.dispatch('GET', '/discovery', undefined, {}, { request: {} } as any);
+
+      expect(result.handled).toBe(true);
+      expect(result.response?.body?.success).toBe(true);
+
+      // The envelope itself is NOT this field's business (check:route-envelope
+      // owns that); what matters here is that the thing the ledger names is the
+      // `data`, and that the whole body is NOT it.
+      expect(DiscoverySchema.safeParse(result.response?.body?.data).success).toBe(true);
+      expect(DiscoverySchema.safeParse(result.response?.body).success).toBe(false);
+    });
   });
 
   it('emits the canonical `name`, never the deprecated `apiName` alias', async () => {

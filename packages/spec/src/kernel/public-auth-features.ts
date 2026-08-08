@@ -281,8 +281,12 @@ export function featureGatePredicate(name: PublicAuthFeatureName): string {
 /** Object shape the lowering transform operates on (post field-level parse). */
 type WithRequiresFeature = {
   requiresFeature?: PublicAuthFeatureName;
-  /** Already normalized by ExpressionInputSchema to the `{dialect, source}` envelope. */
-  visible?: { dialect?: unknown; source?: unknown } & Record<string, unknown>;
+  /**
+   * Already normalized by ExpressionInputSchema to the `{dialect, source}`
+   * envelope — except for the literal arm, which surfaces here verbatim on the
+   * surfaces that declare one (`ActionSchema.visible`, #5970).
+   */
+  visible?: boolean | ({ dialect?: unknown; source?: unknown } & Record<string, unknown>);
 };
 
 /**
@@ -296,6 +300,14 @@ type WithRequiresFeature = {
  * - Existing CEL `visible` with a `source` → composed as
  *   `(<existing>) && <gate>` (existing predicate first, gate last — the
  *   hand-written convention).
+ * - Existing `visible: true` → the gate alone. `true && <gate>` IS `<gate>`, so
+ *   an author who spelled the default out explicitly gets the same lowering as
+ *   one who omitted the key (the literal arm arrived with #5970).
+ * - Existing `visible: false` → loud parse error. Here the boolean algebra runs
+ *   the other way: `false && <gate>` is `false` whatever the flag says, so the
+ *   gate could never take effect and the declaration is inert on arrival —
+ *   precisely the parses-clean-changes-nothing key ADR-0078 exists to reject.
+ *   Drop one of the two rather than shipping a gate that reads as load-bearing.
  * - Existing `visible` that is non-CEL or AST-only → loud parse error
  *   (ADR-0078 no-silently-inert); write the combined predicate by hand.
  *
@@ -310,9 +322,26 @@ export function lowerRequiresFeature<T extends WithRequiresFeature>(
   if (requiresFeature === undefined) return rest as Omit<T, 'requiresFeature'>;
 
   const gate = featureGatePredicate(requiresFeature);
-  const existing = rest.visible;
-  if (existing === undefined) {
+  // Annotated rather than inferred: `rest` is a generic `Omit<T, …>`, so
+  // `rest.visible` is a deferred indexed access that control flow cannot narrow
+  // — the `=== true` / `=== false` guards below would not strip the boolean arm
+  // off it, and the envelope spread at the end would not compile.
+  const existing: WithRequiresFeature['visible'] = rest.visible;
+  // `true` is the explicit spelling of "no gate of my own" — same lowering as an
+  // absent key. `false` can never be gated into visibility, so it is refused.
+  if (existing === undefined || existing === true) {
     return { ...rest, visible: { dialect: 'cel', source: gate } } as Omit<T, 'requiresFeature'>;
+  }
+  if (existing === false) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['requiresFeature'],
+      message:
+        '`requiresFeature` cannot compose with `visible: false` — the literal already hides this ' +
+        'unconditionally, so the feature gate can never take effect. Drop `requiresFeature` to keep it ' +
+        'hidden, or drop `visible: false` to let the flag decide.',
+    });
+    return rest as Omit<T, 'requiresFeature'>;
   }
   if (existing.dialect !== 'cel' || typeof existing.source !== 'string') {
     ctx.addIssue({

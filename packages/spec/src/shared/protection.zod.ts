@@ -103,7 +103,7 @@ export const ProtectionSchema = z.object({
     ),
 }).strict();
 
-export type Protection = z.infer<typeof ProtectionSchema>;
+export type Protection = z.input<typeof ProtectionSchema>;
 
 // ─────────────────────────────────────────────────────────────────────
 // Loader-side translation

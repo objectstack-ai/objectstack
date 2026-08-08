@@ -19,13 +19,27 @@
 // item's `alias` for structured entries — after date bucketing). It is an
 // ordinary FilterCondition over those columns: implicit equality, the
 // comparison / set / null / existence / string operators, and `$and` / `$or` /
-// `$not` composition. Operator semantics mirror the Filter Protocol as
-// driver-memory's matcher implements it, with ONE deliberate divergence:
+// `$not` composition. Operator semantics follow the Filter Protocol, with TWO
+// deliberate divergences from driver-memory's matcher — the face this module
+// was originally written against:
 //
-// AN UNKNOWN OPERATOR THROWS. The memory matcher ignores operators it does not
-// know; here an ignored operator would silently return UNFILTERED aggregates —
-// the precise failure mode (#4286, ADR-0078) this module exists to end. The
-// rejection names the operator and the supported set.
+// 1. AN UNKNOWN OPERATOR THROWS. The memory matcher ignores operators it does
+//    not know; here an ignored operator would silently return UNFILTERED
+//    aggregates — the precise failure mode (#4286, ADR-0078) this module exists
+//    to end. The rejection names the operator and the supported set.
+//
+// 2. [#5905] THE NEGATION-CARRYING OPERATORS ARE NULL-SAFE. `$ne` / `$nin` /
+//    `$notContains` are satisfied by a row whose column HAS NO VALUE — "the
+//    column has no value" satisfies a test for "not this value". That is the
+//    ruling the maintainer took on #5298 (option A, 2026-08-06), landed by
+//    PR #5962 across driver-sql, formula, service-analytics and the
+//    `FILTER_LOGIC_*` conformance table. HAVING is the FIFTH evaluation face of
+//    the same vocabulary and was not in that PR's inventory, which left this
+//    file as the lone holdout (#5905) — and the only face no conformance table
+//    covers, since `FILTER_LOGIC_CASES` does not drive the HAVING path.
+//    driver-memory / driver-mongodb still answer the old way only because
+//    #5499 freezes them; the divergence is against a frozen face, not against
+//    the ruling.
 
 import type { FilterCondition } from '@objectstack/spec/data';
 
@@ -48,6 +62,27 @@ function unknownOperator(op: string, where: 'logical' | 'condition'): Error {
     + `return unfiltered aggregates (#4286, ADR-0078).`,
   );
 }
+
+/**
+ * [#5905] Operators whose answer for a column with NO VALUE is decided by the
+ * operator's own arm below, not by the early exit in {@link checkCondition}.
+ *
+ * That exit exists so a POSITIVE test (`$gt`, `$in`, `$contains`, …) can never
+ * be accidentally satisfied by a column the aggregated row does not carry. The
+ * operators listed here are the ones for which "no value" is a real answer
+ * rather than an accident:
+ *
+ * - `$exists` / `$null` — answering about absence IS their whole job;
+ * - `$ne` / `$nin` / `$notContains` — they carry their own negation, and #5298
+ *   ruled (option A) that a value-less column satisfies them, on every backend.
+ *
+ * `$nin` and `$notContains` were missing from this list, which is the defect
+ * #5905 records: the exit fired first and answered FALSE for them, so the arms
+ * below — which would have answered TRUE — were never reached.
+ */
+const NO_VALUE_ANSWERED_BY_OPERATOR: ReadonlySet<string> = new Set([
+  '$exists', '$ne', '$null', '$nin', '$notContains',
+]);
 
 /**
  * Filter aggregated rows by the query's `having` condition. An absent or empty
@@ -109,7 +144,7 @@ function checkCondition(value: any, condition: any): boolean {
   for (const op of keys) {
     if (op === '$options') continue; // consumed by $regex below
     const target = (condition as Record<string, any>)[op];
-    if (value === undefined && op !== '$exists' && op !== '$ne' && op !== '$null') return false;
+    if (value === undefined && !NO_VALUE_ANSWERED_BY_OPERATOR.has(op)) return false;
     switch (op) {
       // eslint-disable-next-line eqeqeq
       case '$eq': if (value != target) return false; break;
@@ -134,7 +169,16 @@ function checkCondition(value: any, condition: any): boolean {
         if (target === false && value == null) return false;
         break;
       case '$contains': if (typeof value !== 'string' || !value.includes(target)) return false; break;
-      case '$notContains': if (typeof value !== 'string' || value.includes(target)) return false; break;
+      // [#5905] The mirror of `$contains`, NOT its copy-with-a-negated-test.
+      // `$contains` fails a non-string value because "contains" cannot hold for
+      // something that is not text; `$notContains` SUCCEEDS for the same value
+      // for the same reason — it cannot contain the substring. Reusing the
+      // `typeof value !== 'string' ⇒ false` guard here (what this line used to
+      // do) made a value-less column fail BOTH an operator and its negation,
+      // the two-valued reading #5298 ruled out. This is `formula`'s shape
+      // (`matches-filter.ts`: `!(typeof actual === 'string' && …)`), which
+      // driver-sql's polarity table already follows for the same operator.
+      case '$notContains': if (typeof value === 'string' && value.includes(target)) return false; break;
       case '$startsWith': if (typeof value !== 'string' || !value.startsWith(target)) return false; break;
       case '$endsWith': if (typeof value !== 'string' || !value.endsWith(target)) return false; break;
       case '$regex': {

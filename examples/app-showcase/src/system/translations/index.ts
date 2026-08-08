@@ -540,5 +540,26 @@ export const ShowcaseTranslationBundle = {
         },
       },
     },
+    // Page component copy became declared surface with `pages.<name>.components`
+    // (#6080), so these keys are born under the ratchet: leaving any of them
+    // untranslated widens the frozen baseline and fails `check-i18n-coverage`.
+    // The pages' own label/title/subtitle predate the ratchet and stay in the
+    // frozen baseline, same as Revenue Pulse's older widget titles above.
+    pages: {
+      showcase_contact_form: {
+        components: {
+          field_name: { label: '姓名', placeholder: '艾达·洛夫莱斯' },
+          field_email: { label: '邮箱', placeholder: 'ada@example.com' },
+          field_company: { label: '公司', placeholder: '分析机有限公司' },
+          field_message: { label: '留言', placeholder: '我们能帮您什么?' },
+          submit_inquiry: { label: '提交咨询' },
+        },
+      },
+      showcase_page_variables: {
+        components: {
+          project_picker: { label: '项目', placeholder: '选择项目…' },
+        },
+      },
+    },
   },
 };

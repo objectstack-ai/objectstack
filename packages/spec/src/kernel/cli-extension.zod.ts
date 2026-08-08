@@ -125,5 +125,5 @@ export const OclifPluginConfigSchema = lazySchema(() => z.object({
 
 // ─── Types ───────────────────────────────────────────────────────────
 
-export type CLICommandContribution = z.infer<typeof CLICommandContributionSchema>;
-export type OclifPluginConfig = z.infer<typeof OclifPluginConfigSchema>;
+export type CLICommandContribution = z.input<typeof CLICommandContributionSchema>;
+export type OclifPluginConfig = z.input<typeof OclifPluginConfigSchema>;

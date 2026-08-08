@@ -180,37 +180,22 @@ export const AnalyticsQuerySchema = lazySchema(() => z.object({
   timezone: z.string().optional(),
 }));
 
-export type Metric = z.infer<typeof MetricSchema>;
-export type Dimension = z.infer<typeof DimensionSchema>;
-export type CubeJoin = z.infer<typeof CubeJoinSchema>;
+export type Metric = z.input<typeof MetricSchema>;
+export type Dimension = z.input<typeof DimensionSchema>;
+export type CubeJoin = z.input<typeof CubeJoinSchema>;
 /** Post-parse shape of {@link CubeJoin} — defaults applied, transforms run (ADR-0122). */
 export type CubeJoinParsed = z.infer<typeof CubeJoinSchema>;
-export type Cube = z.infer<typeof CubeSchema>;
+export type Cube = z.input<typeof CubeSchema>;
 /** Post-parse shape of {@link Cube} — defaults applied, transforms run (ADR-0122). */
 export type CubeParsed = z.infer<typeof CubeSchema>;
-/** Authoring input for {@link Cube} — defaulted fields are optional. */
-export type CubeInput = z.input<typeof CubeSchema>;
 
 /**
  * Type-safe factory for an analytics semantic-layer cube. Validates at authoring time via
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: Cube` literal.
  */
-export function defineCube(config: z.input<typeof CubeSchema>): Cube {
+export function defineCube(config: z.input<typeof CubeSchema>): CubeParsed {
   return CubeSchema.parse(config);
 }
-export type AnalyticsQuery = z.infer<typeof AnalyticsQuerySchema>;
+export type AnalyticsQuery = z.input<typeof AnalyticsQuerySchema>;
 
-/**
- * Input-tier alias of {@link AnalyticsQuery}.
- *
- * [#4538] The two tiers COLLAPSED when `timezone` lost its `.default('UTC')`
- * (see the field's own note): the schema now carries no `.default()` or
- * `.transform()` anywhere — `FilterCondition` is declared transform-free —
- * so what a caller writes is exactly what an executor receives, and this
- * name survives only for source compatibility. `IAnalyticsService.query`,
- * the analytics strategies, and the `/analytics` entry all traffic in the
- * single {@link AnalyticsQuery} shape (validated at the entry by
- * `AnalyticsQueryRequestSchema`, forwarded unmodified).
- */
-export type AnalyticsQueryInput = z.input<typeof AnalyticsQuerySchema>;

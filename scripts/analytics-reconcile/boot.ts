@@ -11,7 +11,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 import { DatasetSchema } from '@objectstack/spec/ui';
-import type { Dataset, DatasetInput, Dashboard, Report } from '@objectstack/spec/ui';
+import type { Dataset, Dashboard, Report } from '@objectstack/spec/ui';
 import type { IAnalyticsService, DatasetSelection } from '@objectstack/spec/contracts';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { reconcileDashboard, reconcileReports, type ReconcileExecutors, type WidgetReconcileResult } from './reconcile.js';
@@ -34,8 +34,8 @@ export interface ReconcileAppOptions {
   dashboards: Dashboard[];
   /** Reports to reconcile (each dual-form report is checked). */
   reports?: Report[];
-  /** Authored datasets (DatasetInput) the dashboards/reports reference by name. */
-  datasets: DatasetInput[];
+  /** Authored datasets (Dataset) the dashboards/reports reference by name. */
+  datasets: Dataset[];
 }
 
 /** Boot, reconcile every dashboard, print a report, and return the mismatch count. */

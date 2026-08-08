@@ -1,10 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type {
-  SeedLoaderRequest,
-  SeedLoaderResult,
-  SeedLoaderConfigInput,
-  ObjectDependencyGraph,
+  SeedLoaderRequestParsed,
+  SeedLoaderResultParsed,
+  SeedLoaderConfig,
+  ObjectDependencyGraphParsed,
 } from '../data/seed-loader.zod.js';
 
 import type { Seed } from '../data/seed.zod.js';
@@ -39,7 +39,7 @@ export interface ISeedLoaderService {
    * @param request - Parsed SeedLoaderRequest (datasets + config)
    * @returns Structured result with per-object stats, errors, and summary
    */
-  load(request: SeedLoaderRequest): Promise<SeedLoaderResult>;
+  load(request: SeedLoaderRequestParsed): Promise<SeedLoaderResultParsed>;
 
   /**
    * Build the object dependency graph from metadata for the given object names.
@@ -48,7 +48,7 @@ export interface ISeedLoaderService {
    * @param objectNames - Object names to include in the graph
    * @returns Dependency graph with topological insert order and circular dependency detection
    */
-  buildDependencyGraph(objectNames: string[]): Promise<ObjectDependencyGraph>;
+  buildDependencyGraph(objectNames: string[]): Promise<ObjectDependencyGraphParsed>;
 
   /**
    * Validate datasets without writing any data (equivalent to config.dryRun = true).
@@ -58,5 +58,5 @@ export interface ISeedLoaderService {
    * @param config - Optional loader config overrides
    * @returns Structured result with validation errors (no data written)
    */
-  validate(datasets: Seed[], config?: SeedLoaderConfigInput): Promise<SeedLoaderResult>;
+  validate(datasets: Seed[], config?: SeedLoaderConfig): Promise<SeedLoaderResultParsed>;
 }

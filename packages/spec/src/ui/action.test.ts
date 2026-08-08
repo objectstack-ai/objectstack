@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import { ActionSchema, ActionParamSchema, Action, type Action as ActionType, ACTION_LOCATIONS, ActionLocationSchema, type ActionLocation } from './action.zod';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { ObjectSchema } from '../data/object.zod';
@@ -251,6 +252,126 @@ describe('requiresFeature lowering', () => {
     const bare = ActionParamSchema.parse({ name: 'y' });
     expect(bare.visible).toBeUndefined();
     expect(bare).not.toHaveProperty('requiresFeature');
+  });
+
+  // #5970 gave `visible` a boolean arm, so the lowering now meets two literals
+  // it never could before. Boolean algebra decides both, in opposite directions.
+  it('treats `visible: true` as the explicit default — lowers to the gate alone', () => {
+    const result = ActionSchema.parse({
+      name: 'invite_user',
+      label: 'Invite',
+      type: 'api',
+      target: '/api/v1/auth/organization/invite-member',
+      visible: true,
+      requiresFeature: 'organization',
+    } satisfies z.input<typeof ActionSchema>);
+    // Identical to the sugar-only case above: `true && <gate>` IS `<gate>`.
+    expect(result.visible).toEqual({ dialect: 'cel', source: 'features.organization != false' });
+    expect(result).not.toHaveProperty('requiresFeature');
+  });
+
+  it('rejects composition with `visible: false` loudly — the gate could never fire (ADR-0078)', () => {
+    const result = ActionSchema.safeParse({
+      name: 'invite_user',
+      label: 'Invite',
+      type: 'api',
+      target: '/api/v1/auth/organization/invite-member',
+      visible: false,
+      requiresFeature: 'organization',
+    } satisfies z.input<typeof ActionSchema>);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path.includes('requiresFeature'));
+      expect(issue).toBeDefined();
+      // The message must name BOTH exits, not just the diagnosis.
+      expect(issue!.message).toContain('`visible: false`');
+      expect(issue!.message).toContain('Drop `requiresFeature`');
+    }
+  });
+});
+
+// ── #5970 — `visible` / `disabled` speak ONE shape ────────────────────────────
+// Ruled 2026-08-06: both keys are `boolean | string(CEL) | {dialect, source}`.
+// Before this, `visible` had no boolean arm while `disabled` did, so the very
+// common `visible: true` was a spec-side parse error that objectui's `ActionDef`
+// accepted anyway — see the `ActionConditionInputSchema` comment in
+// `action.zod.ts` for why an asymmetry between two keys of the same kind is a
+// dialect nursery rather than a cosmetic gap.
+describe('ActionSchema — visible/disabled unified condition shape', () => {
+  const base = {
+    name: 'transfer_ownership',
+    label: 'Transfer Ownership',
+    type: 'api',
+    target: '/api/v1/auth/organization/update-member-role',
+  } as const satisfies Partial<z.input<typeof ActionSchema>>;
+
+  const parse = (key: 'visible' | 'disabled', value: unknown) =>
+    ActionSchema.safeParse({ ...base, [key]: value });
+
+  for (const key of ['visible', 'disabled'] as const) {
+    describe(`\`${key}\``, () => {
+      it('accepts the boolean arm and keeps the literal a literal', () => {
+        // NOT normalized into `{dialect:'cel', source:'true'}`: a renderer must
+        // be able to branch on the constant without standing up an evaluator.
+        for (const literal of [true, false]) {
+          const result = parse(key, literal);
+          expect(result.success, `${key}: ${literal}`).toBe(true);
+          if (result.success) expect(result.data[key]).toBe(literal);
+        }
+      });
+
+      it('accepts the CEL string arm and normalizes it to the envelope', () => {
+        const result = parse(key, "record.status == 'open'");
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data[key]).toEqual({ dialect: 'cel', source: "record.status == 'open'" });
+        }
+      });
+
+      it('accepts the full envelope arm verbatim, authorship metadata included', () => {
+        const envelope = {
+          dialect: 'cel' as const,
+          source: "record.status == 'open'",
+          meta: { rationale: 'only open records can transfer', generatedBy: 'agent:spec' },
+        };
+        const result = parse(key, envelope);
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.data[key]).toEqual(envelope);
+      });
+
+      // The widening must not shrink the rejection surface by one shape. Each
+      // of these was rejected before #5970 and is asserted to still be.
+      it.each([
+        ['an empty CEL string', ''],
+        ['a number', 1],
+        ['null', null],
+        ['an envelope with neither `source` nor `ast`', { dialect: 'cel' }],
+        ['an envelope missing `dialect`', { source: "record.status == 'open'" }],
+        ['an envelope with an unknown dialect', { dialect: 'sql', source: 'SELECT 1' }],
+        ['a bare empty object', {}],
+        ['an array of predicates', ["record.a == 1", "record.b == 2"]],
+      ])('still rejects %s', (_label, value) => {
+        expect(parse(key, value).success).toBe(false);
+      });
+    });
+  }
+
+  it('accepts both keys on one action, each on a different arm', () => {
+    const result = ActionSchema.parse({
+      ...base,
+      visible: true,
+      disabled: "record.status == 'closed'",
+    } satisfies z.input<typeof ActionSchema>);
+    expect(result.visible).toBe(true);
+    expect(result.disabled).toEqual({ dialect: 'cel', source: "record.status == 'closed'" });
+  });
+
+  it('reaches the same shape through the registered `action` metadata schema', () => {
+    // The authoring door the Studio form and `GET /api/v1/meta` go through —
+    // a widening that stopped at the bare export would not reach an author.
+    const schema = getMetadataTypeSchema('action');
+    expect(schema, "the 'action' metadata type must resolve to a schema").toBeDefined();
+    expect(schema!.safeParse({ ...base, visible: true, disabled: false }).success).toBe(true);
   });
 });
 

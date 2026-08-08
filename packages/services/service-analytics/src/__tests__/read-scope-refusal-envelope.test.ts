@@ -53,6 +53,18 @@
  * `null` control group that must NOT move) is pinned in
  * `read-scope-undefined-comparand.test.ts`; only its ENVELOPE is asserted here.
  *
+ * ## [#6387] A twelfth site — TWO rows, because it has two triggers
+ *
+ * Rows ⑦ and ⑧ (non-boolean `$null` / `$exists`) were added on 2026-08-07 by
+ * #6387, pushing #5347 / #5369's boolean-domain refusal down from `driver-sql`.
+ * They are the second instance of the `quoteIdent` shape the note below
+ * describes: ONE gate, reached by two genuinely different triggers, both listed
+ * so the pair is asserted to answer the SAME envelope. They deliberately share
+ * one wording (#5240 — one condition, one wording; only the operator name and
+ * the path vary), and that "only those vary" is pinned in
+ * `read-scope-boolean-flag-comparand.test.ts` along with the behaviour itself.
+ * Here, as always, only the ENVELOPE is asserted.
+ *
  * The end-to-end consequence — that the REST face answers
  * `500 ANALYTICS_QUERY_FAILED` with the policy content WITHHELD from the body and
  * intact in `logError` — is `packages/rest`'s
@@ -81,14 +93,20 @@ function refusalFor(filter: unknown, alias = 'crm_opportunity'): Refusal | undef
 /**
  * Every refusing site in `read-scope-sql.ts`, in source order.
  *
- * TWELVE rows over ELEVEN throw sites: `quoteIdent` is one site reached with two
- * `kind` values, and both are listed on purpose. That alias-vs-field split was
- * option C on #5367's decision card — the one place where the two triggers are
- * genuinely different (a bad alias is OUR generator, a bad field is the admin's
- * policy) and where a per-branch verdict was on the table. Option B collapsed it:
- * both answer the same 500, so the two rows must produce the same envelope, and
- * asserting that is what makes the collapse a tested decision rather than an
- * omission.
+ * FOURTEEN rows over TWELVE throw sites: TWO sites are each reached by two
+ * triggers, and every trigger is listed on purpose.
+ *
+ *   - `quoteIdent`, with two `kind` values. That alias-vs-field split was option
+ *     C on #5367's decision card — the one place where the two triggers are
+ *     genuinely different (a bad alias is OUR generator, a bad field is the
+ *     admin's policy) and where a per-branch verdict was on the table. Option B
+ *     collapsed it: both answer the same 500, so the two rows must produce the
+ *     same envelope, and asserting that is what makes the collapse a tested
+ *     decision rather than an omission.
+ *   - [#6387] `assertBooleanFlagComparands`, with two operators. Same shape,
+ *     same reason it is not collapsed to one row: `$null` and `$exists` are
+ *     different triggers whose messages differ (by operator name and path) and
+ *     whose envelope must not.
  *
  * `site` names the `throw readScopeCompileError(...)` the row reaches, so the
  * table can be checked against the source without guessing. `sensitive` records
@@ -148,42 +166,56 @@ const REFUSALS: Array<{
     sensitive: 'owner_id',
   },
   {
-    name: '⑦ bare array value',
+    name: '⑦ non-boolean $null comparand',
+    site: 'compileField: non-boolean $null/$exists comparand',
+    filter: { owner_id: { $null: 'false' } },
+    message: /comparand for "\$null" at "owner_id"\.\$null is not a boolean — refusing to build read scope \(fail-closed\)/,
+    sensitive: 'owner_id',
+  },
+  {
+    name: '⑧ non-boolean $exists comparand',
+    site: 'compileField: non-boolean $null/$exists comparand',
+    filter: { owner_id: { $exists: 'false' } },
+    message: /comparand for "\$exists" at "owner_id"\.\$exists is not a boolean — refusing to build read scope \(fail-closed\)/,
+    sensitive: 'owner_id',
+  },
+  {
+    name: '⑨ bare array value',
     site: 'compileField: bare array value',
     filter: { region_code: ['emea', 'apac'] },
     message: /bare array value for "region_code" — use \{ \$in: \[\.\.\.\] \} \(fail-closed\)/,
     sensitive: 'region_code',
   },
   {
-    name: '⑧ nested / relation value',
+    name: '⑩ nested / relation value',
     site: 'compileField: nested/relation value',
     filter: { owner: { manager_id: 'u1' } },
     message: /"owner" has a nested\/relation value which is not supported in a read scope \(fail-closed\)/,
     sensitive: 'owner',
   },
   {
-    name: '⑨ $in without an array',
+    name: '⑪ $in without an array',
     site: 'compileOperator: $in needs an array',
     filter: { region_code: { $in: 'emea' } },
     message: /\$in for "region_code" needs an array \(fail-closed\)/,
     sensitive: 'region_code',
   },
   {
-    name: '⑩ $nin without an array',
+    name: '⑫ $nin without an array',
     site: 'compileOperator: $nin needs an array',
     filter: { region_code: { $nin: 'emea' } },
     message: /\$nin for "region_code" needs an array \(fail-closed\)/,
     sensitive: 'region_code',
   },
   {
-    name: '⑪ $between without [min,max]',
+    name: '⑬ $between without [min,max]',
     site: 'compileOperator: $between needs [min,max]',
     filter: { credit_limit: { $between: [10] } },
     message: /\$between for "credit_limit" needs \[min,max\] \(fail-closed\)/,
     sensitive: 'credit_limit',
   },
   {
-    name: '⑫ unsupported operator',
+    name: '⑭ unsupported operator',
     site: 'compileOperator: unsupported operator',
     filter: { owner_email: { $regex: 'admin@' } },
     message: /unsupported operator "\$regex" on "owner_email" \(fail-closed\)/,
@@ -274,12 +306,13 @@ describe('[#5367] every read-scope refusal carries the ADR-0112 envelope (READ_S
     // #5352's lesson, stated as a guard: seven of `filter-normalizer.ts`'s nine
     // sites carrying an envelope was indistinguishable from none of them at the
     // HTTP boundary, because the commonest input hit one of the two bare ones.
-    // Twelve inputs over the module's ELEVEN throw sites (see the table's note
-    // on `quoteIdent`), and every one of them enveloped. [#6125] added the
-    // eleventh site; these two numbers are the ratchet that makes a future
-    // unenveloped `throw` fail HERE instead of at an HTTP boundary.
-    expect(REFUSALS).toHaveLength(12);
-    expect(new Set(REFUSALS.map((c) => c.site)).size).toBe(11);
+    // Fourteen inputs over the module's TWELVE throw sites (see the table's note
+    // on the two sites with two triggers each), and every one of them enveloped.
+    // [#6125] added the eleventh site, [#6387] the twelfth; these two numbers
+    // are the ratchet that makes a future unenveloped `throw` fail HERE instead
+    // of at an HTTP boundary.
+    expect(REFUSALS).toHaveLength(14);
+    expect(new Set(REFUSALS.map((c) => c.site)).size).toBe(12);
     for (const c of REFUSALS) {
       expect(refusalFor(c.filter, c.alias)?.code, `${c.site} is still bare`).toBe('READ_SCOPE_COMPILE_FAILED');
     }

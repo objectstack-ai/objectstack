@@ -6,7 +6,7 @@ import { ISchemaDriver } from '@objectstack/spec/contracts';
 export class MigrationExecutor {
   constructor(private driver: ISchemaDriver) {}
 
-  async executeChangeSet(changeSet: System.ChangeSet): Promise<void> {
+  async executeChangeSet(changeSet: System.ChangeSetParsed): Promise<void> {
     console.log(`Executing ChangeSet: ${changeSet.name} (${changeSet.id})`);
     
     for (const op of changeSet.operations) {
@@ -19,7 +19,7 @@ export class MigrationExecutor {
     }
   }
 
-  private async executeOperation(op: System.MigrationOperation): Promise<void> {
+  private async executeOperation(op: System.MigrationOperationParsed): Promise<void> {
     switch (op.type) {
       case 'create_object':
         console.log(`  > Create Object: ${op.object.name}`);

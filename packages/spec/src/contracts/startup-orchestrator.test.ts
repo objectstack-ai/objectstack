@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type {
   StartupOptions,
-  StartupOptionsInput,
+  StartupOptionsParsed,
   PluginStartupResult,
   HealthStatus,
   IStartupOrchestrator,
@@ -14,7 +14,7 @@ import type { Plugin } from './plugin-validator';
 describe('Startup Orchestrator Contract', () => {
   describe('StartupOptions tiers (re-exported kernel zod types, #4538)', () => {
     it('should allow an empty INPUT-tier options object (all optional)', () => {
-      const options: StartupOptionsInput = {};
+      const options: StartupOptions = {};
 
       expect(options).toBeDefined();
       expect(options.timeout).toBeUndefined();
@@ -22,7 +22,7 @@ describe('Startup Orchestrator Contract', () => {
     });
 
     it('parses the input tier into the defaulted StartupOptions tier', () => {
-      const parsed: StartupOptions = StartupOptionsSchema.parse({});
+      const parsed: StartupOptionsParsed = StartupOptionsSchema.parse({});
 
       expect(parsed.timeout).toBe(30000);
       expect(parsed.rollbackOnFailure).toBe(true);
@@ -31,7 +31,7 @@ describe('Startup Orchestrator Contract', () => {
     });
 
     it('should allow full options', () => {
-      const options: StartupOptionsInput = {
+      const options: StartupOptions = {
         timeout: 30000,
         rollbackOnFailure: true,
         healthCheck: true,

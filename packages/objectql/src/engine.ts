@@ -3,7 +3,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { QueryAST, HookContext, ServiceObject } from '@objectstack/spec/data';
 import {
-  EngineQueryOptions,
+  EngineQueryOptionsParsed,
   DataEngineInsertOptions,
   EngineUpdateOptions,
   EngineDeleteOptions,
@@ -17,18 +17,26 @@ import {
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
+// The validate-only result IS the protocol's response shape (#6037): the
+// engine is what `metadata-protocol.validateData` returns, so letting the two
+// drift would put a translation layer between a verdict and its contract.
+import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/api';
 import { parseAutonumberFormat, renderAutonumber, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
 import { assertListComparandShapes } from './filter-comparand-shape.js';
+// Seek pagination for the walks that must read EVERY row — the autonumber seed
+// scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
+// the cursor merge is the part that is easy to get subtly wrong.
+import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
 import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
   VALUE_SHAPES_MIGRATION_ID,
   isDataMigrationFlagVerified,
 } from '@objectstack/spec/system';
-import { ExecutionContext, ExecutionContextInput, ExecutionContextSchema } from '@objectstack/spec/kernel';
+import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // Imported from spec directly rather than through `@objectstack/core`'s
 // re-export block: that block is labelled backward-compatibility, and this
@@ -108,9 +116,9 @@ import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
 import { bindHooksToEngine } from './hook-binder.js';
-import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField } from './validation/record-validator.js';
+import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
+import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
@@ -285,6 +293,15 @@ const ENGINE_COUNT_OPTION_KEYS: ReadonlySet<string> = new Set(['context', 'where
 const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
 ]);
+
+/**
+ * Rows per page for the autonumber seeding scan (#6249). This is a PAGE size,
+ * not a cap: the walk pages until the scope is exhausted. The number is the one
+ * the old single-shot `limit: 5000` used, kept so the per-read cost against a
+ * driver is unchanged — what changed is that reaching it no longer ends the
+ * scan and truncates the max.
+ */
+const AUTONUMBER_SEED_PAGE_SIZE = 5000;
 
 /** Tombstoned option keys: rejected with the spec's own removal notice. */
 const ENGINE_RETIRED_OPTION_MESSAGES: Record<string, string> = {
@@ -606,7 +623,7 @@ function planFormulaProjection(
 function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
-  execCtx?: ExecutionContextInput,
+  execCtx?: ExecutionContext,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -662,7 +679,7 @@ function applyFormulaPlan(
 function hydrateWriteFormulas(
   schema: any,
   results: unknown[],
-  execCtx?: ExecutionContextInput,
+  execCtx?: ExecutionContext,
 ): void {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
@@ -732,7 +749,7 @@ export interface OperationContext {
   ast?: QueryAST;
   data?: any;
   options?: any;
-  context?: ExecutionContextInput;
+  context?: ExecutionContext;
   result?: any;
 }
 
@@ -751,14 +768,14 @@ export interface OperationContext {
  * are given, `options.context` wins (it is the explicit channel).
  */
 export interface EngineReadOptions {
-  context?: ExecutionContextInput;
+  context?: ExecutionContext;
 }
 
 /** Merge read-path execution context from the query and the trailing options. */
 function mergeReadContext(
-  fromQuery?: ExecutionContextInput,
-  fromOptions?: ExecutionContextInput,
-): ExecutionContextInput | undefined {
+  fromQuery?: ExecutionContext,
+  fromOptions?: ExecutionContext,
+): ExecutionContext | undefined {
   if (fromOptions == null) return fromQuery;
   if (fromQuery == null) return fromOptions;
   return { ...fromQuery, ...fromOptions };
@@ -772,7 +789,7 @@ function mergeReadContext(
  * for a "historical" import) turns it off. Both are server-set, never
  * client-supplied.
  */
-function shouldSkipStateMachine(ctx?: ExecutionContextInput): boolean {
+function shouldSkipStateMachine(ctx?: ExecutionContext): boolean {
   return ctx?.seedReplay === true || ctx?.skipStateMachine === true;
 }
 
@@ -908,7 +925,7 @@ function eventRecordBody(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** `DataEvent.userId` — the acting user, when the execution context names one. */
-function eventUserId(execCtx?: ExecutionContextInput): string | undefined {
+function eventUserId(execCtx?: ExecutionContext): string | undefined {
   const userId = execCtx?.userId;
   if (userId == null) return undefined;
   const asString = String(userId);
@@ -1648,7 +1665,7 @@ export class ObjectQL implements IObjectQLEngine {
    * `positions` into the context, so an anonymous HTTP request still yields a
    * session and stays gated.
    */
-  private buildSession(execCtx?: ExecutionContextInput): HookContext['session'] {
+  private buildSession(execCtx?: ExecutionContext): HookContext['session'] {
     if (!execCtx) return undefined;
     const session = {
       userId: execCtx.userId,
@@ -1708,7 +1725,7 @@ export class ObjectQL implements IObjectQLEngine {
    * where every caller-gating hook would read them as the caller. Attribution
    * here, authorization in `session`/`isSystem`, never the two mixed.
    */
-  private buildProvenance(execCtx?: ExecutionContextInput): HookContext['provenance'] {
+  private buildProvenance(execCtx?: ExecutionContext): HookContext['provenance'] {
     const flowRunId = (execCtx as any)?.flowRunId;
     const attributedUserId = (execCtx as any)?.attributedUserId;
     if (!flowRunId && !attributedUserId) return undefined;
@@ -1725,7 +1742,7 @@ export class ObjectQL implements IObjectQLEngine {
    * system / unauthenticated writes, where membership predicates then fail-open.
    */
   private buildEvalUser(
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): { id: string; positions: string[]; organizationId: string | null } | undefined {
     if (!execCtx || execCtx.userId == null) return undefined;
     return {
@@ -1746,7 +1763,7 @@ export class ObjectQL implements IObjectQLEngine {
    * hooks that need an org regardless of a resolved user read
    * `ctx.session.organizationId`, which is populated whenever a session is.
    */
-  private buildUser(execCtx?: ExecutionContextInput): HookContext['user'] {
+  private buildUser(execCtx?: ExecutionContext): HookContext['user'] {
     if (!execCtx || execCtx.userId == null) return undefined;
     return {
       id: String(execCtx.userId),
@@ -1778,7 +1795,7 @@ export class ObjectQL implements IObjectQLEngine {
    * `tenantId` themselves on the resulting object; this helper does not
    * mask the system path.
    */
-  private buildDriverOptions(object: string, execCtx?: ExecutionContextInput, base?: any): any {
+  private buildDriverOptions(object: string, execCtx?: ExecutionContext, base?: any): any {
     // The open transaction may arrive explicitly via the context, or ambiently
     // via txStore when an internal query runs during a transactional write
     // (ADR-0034). Explicit wins; ambient is the safety net.
@@ -1932,8 +1949,8 @@ export class ObjectQL implements IObjectQLEngine {
    * Falls back to a system-elevated empty context when no execCtx
    * is supplied (e.g. system-triggered hooks).
    */
-  private buildHookApi(execCtx?: ExecutionContextInput): ScopedContext {
-    const safeCtx: ExecutionContextInput = execCtx ?? ({ isSystem: true } as any);
+  private buildHookApi(execCtx?: ExecutionContext): ScopedContext {
+    const safeCtx: ExecutionContext = execCtx ?? ({ isSystem: true } as any);
     return new ScopedContext(safeCtx, this as unknown as IDataEngine);
   }
 
@@ -1963,7 +1980,7 @@ export class ObjectQL implements IObjectQLEngine {
   private applyFieldDefaults(
     object: string,
     record: Record<string, unknown>,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
     nowSnapshot?: Date,
   ): Record<string, unknown> {
     const schema = this.getSchema(object);
@@ -2077,7 +2094,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async applyAutonumbers(
     object: string,
     record: Record<string, unknown>,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
     driverOwnsAutonumber?: boolean,
   ): Promise<void> {
     if (driverOwnsAutonumber) return; // driver generates persistently in create()
@@ -2126,12 +2143,47 @@ export class ObjectQL implements IObjectQLEngine {
    * same scope count, and the counter is the digit-run immediately after the
    * prefix; with an empty prefix (legacy fixed-prefix formats) the last digit
    * run of the whole value is used, preserving the original behaviour.
+   *
+   * # Why this walks every row in the scope (#6249)
+   *
+   * The seed used to be one `find` with `limit: 5000`, no `orderBy` and no
+   * filter: the max of an ARBITRARY 5000-row window (on SQL, typically the
+   * oldest 5000 rows), which for any object past that size — or any scope
+   * whose rows sit outside the window because other scopes filled it — seeds
+   * BELOW the real MAX. The counter then issues numbers from an already-taken
+   * band, and on a `unique` record-number field that is a duplicate business
+   * identifier: a value written wrong, which no retry and no restart repairs
+   * (the same class of harm as the read-outage half fixed in #5979/#6114).
+   *
+   * The scan is therefore complete rather than windowed, in the shape the
+   * SQL driver's own seeding already uses (`scanMaxNumericTail` pushes
+   * `like 'prefix%'` down with NO limit). Two deliberate choices:
+   *
+   *   - **The numeric max is computed here, never delegated to an ORDER BY or
+   *     an aggregate `max`.** Both of those rank the stored value as TEXT, and
+   *     lexicographic order equals numeric order only when every value in the
+   *     scope is zero-padded to one fixed width — which the format language
+   *     does not guarantee (`{0}` pads to nothing, and any width OVERFLOWS
+   *     once the counter passes it, putting `CASE-99999` above `CASE-100000`).
+   *     The empty-prefix legacy path, which reads the LAST digit run of the
+   *     whole value, has no lexicographic reading at all. Parsing every value
+   *     keeps one code path correct for every format instead of a fast path
+   *     guarded by assumptions a format author can silently break.
+   *   - **Seek pagination, not `offset`** — `keysetWalk`'s own rationale
+   *     (#4363): an offset walk cannot promise it visited every row, and a
+   *     row it skips is exactly a number this seed must not miss.
+   *
+   * `prefix` is pushed down as `$startsWith` so a date/`{field}` scope reads
+   * its own rows instead of paging through every other scope's. The JS-side
+   * `startsWith` re-check below is kept as the authority: a driver whose
+   * matching is LOOSER (a case-insensitive `LIKE`) must not be able to inflate
+   * the max with another scope's rows.
    */
   private async seedAutonumber(
     object: string,
     field: string,
     prefix: string,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<number> {
     try {
       // Canonical `fields`, not the wire spelling `select` — this call sat on
@@ -2139,31 +2191,54 @@ export class ObjectQL implements IObjectQLEngine {
       // worked only because an unprojected row still carries `field`), and the
       // catch below would have swallowed the guard's rejection into "seed
       // from 0", i.e. duplicate autonumbers.
-      const rows = await this.find(object, {
-        fields: ['id', field],
-        limit: 5000,
-        context: execCtx,
-      } as any);
+      const walk = keysetWalk<Record<string, unknown>>(
+        (q: KeysetPageQuery) => this.find(object, {
+          ...q,
+          fields: ['id', field],
+          context: execCtx,
+        } as any),
+        {
+          where: prefix ? { [field]: { $startsWith: prefix } } : undefined,
+          pageSize: AUTONUMBER_SEED_PAGE_SIZE,
+        },
+      );
       let max = 0;
-      for (const r of rows || []) {
-        const v = r?.[field];
-        if (v == null) continue;
-        const s = String(v);
-        if (prefix && !s.startsWith(prefix)) continue;
-        const tail = prefix ? s.slice(prefix.length) : s;
-        // With a prefix the counter is the digit run right after it; without one
-        // (legacy fixed-prefix formats) it is the LAST digit run. Both use the
-        // linear /\d+/g — a backtracking lookahead here is a polynomial-ReDoS
-        // sink on stored values full of zeros (CodeQL js/polynomial-redos).
-        let digits: string | undefined;
-        if (prefix) {
-          const head = tail.match(/^\d+/);
-          digits = head ? head[0] : undefined;
-        } else {
-          const runs = tail.match(/\d+/g);
-          digits = runs ? runs[runs.length - 1] : undefined;
+      for await (const page of walk.pages()) {
+        for (const r of page) {
+          const v = r?.[field];
+          if (v == null) continue;
+          const s = String(v);
+          if (prefix && !s.startsWith(prefix)) continue;
+          const tail = prefix ? s.slice(prefix.length) : s;
+          // With a prefix the counter is the digit run right after it; without one
+          // (legacy fixed-prefix formats) it is the LAST digit run. Both use the
+          // linear /\d+/g — a backtracking lookahead here is a polynomial-ReDoS
+          // sink on stored values full of zeros (CodeQL js/polynomial-redos).
+          let digits: string | undefined;
+          if (prefix) {
+            const head = tail.match(/^\d+/);
+            digits = head ? head[0] : undefined;
+          } else {
+            const runs = tail.match(/\d+/g);
+            digits = runs ? runs[runs.length - 1] : undefined;
+          }
+          if (digits) max = Math.max(max, parseInt(digits, 10) || 0);
         }
-        if (digits) max = Math.max(max, parseInt(digits, 10) || 0);
+      }
+      // The walk is unbounded (no `max`), so truncation here means the scan
+      // could not COMPLETE: a row carried no `id` to seek past, or the reader
+      // never applied the seek predicate. Either way rows were left unread, and
+      // the max over what was read is a floor, not the max. Answering with it
+      // is the "seed below the real MAX" defect this method was fixed for, so
+      // it fails loudly instead — the same disposition #6114 gave the read
+      // outage: allocate nothing, write nothing.
+      if (walk.truncated) {
+        throw new Error(
+          `Cannot seed the autonumber counter for "${object}.${field}": the seeding scan ` +
+            `could not visit every stored row (it stopped after ${walk.scanned} rows without ` +
+            `reaching the end). Seeding from a partial scan would issue record numbers that ` +
+            `collide with existing ones, so no number was allocated.`,
+        );
       }
       return max;
     } catch (error) {
@@ -2717,7 +2792,7 @@ export class ObjectQL implements IObjectQLEngine {
       recordId: unknown;
       changes?: unknown;
       after?: unknown;
-      context?: ExecutionContextInput;
+      context?: ExecutionContext;
     },
   ): Promise<void> {
     if (!this.realtimeService) return;
@@ -2793,7 +2868,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async publishBulkDataEvent(
     action: 'updated' | 'deleted',
     object: string,
-    input: { matched: unknown; context?: ExecutionContextInput },
+    input: { matched: unknown; context?: ExecutionContext },
   ): Promise<void> {
     if (!this.realtimeService) return;
 
@@ -3087,6 +3162,12 @@ export class ObjectQL implements IObjectQLEngine {
    * `stripReadonlyWhenFieldsMulti`. A bulk update of N details under M masters
    * costs ONE extra query, not N — the same "read the match set once" discipline
    * the #3106 prior-row fetch follows.
+   *
+   * [#4977] Serves three callers now, unchanged: the bulk `readonlyWhen` strip,
+   * the bulk `requiredWhen` evaluation, and the INSERT path — where `data` is
+   * passed as `null` and each inserted row supplies its own FK, so
+   * `masterIdOf(fk, null, row)` reads `row[fk]` and the batch costs one header
+   * read for the whole `insert()` call.
    */
   private async resolveMasterDetailParents(
     schema: any,
@@ -3223,7 +3304,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async encryptSecretFields(
     object: string,
     row: Record<string, unknown>,
-    context: ExecutionContextInput | undefined,
+    context: ExecutionContext | undefined,
     driverOptions: unknown,
   ): Promise<void> {
     if (!row || typeof row !== 'object') return;
@@ -3956,7 +4037,7 @@ export class ObjectQL implements IObjectQLEngine {
       const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
         where: { id: migrationId },
         limit: 1,
-        context: { isSystem: true } as ExecutionContextInput,
+        context: { isSystem: true } as ExecutionContext,
       });
       const row: any = rows?.[0];
       if (!row || row.id !== migrationId) return { verified: false, conclusive: true };
@@ -4094,7 +4175,7 @@ export class ObjectQL implements IObjectQLEngine {
         const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
           where: { id: migrationId },
           limit: 1,
-          context: { isSystem: true } as ExecutionContextInput,
+          context: { isSystem: true } as ExecutionContext,
         });
         const row: any = rows?.[0];
         if (!row || row.id !== migrationId) return; // nothing certified — nothing to revoke
@@ -4124,7 +4205,7 @@ export class ObjectQL implements IObjectQLEngine {
             }),
             updated_at: now,
           },
-          { context: { isSystem: true } as ExecutionContextInput },
+          { context: { isSystem: true } as ExecutionContext },
         );
         this.invalidateDataMigrationFlags();
         this.logger.warn(
@@ -4492,7 +4573,7 @@ export class ObjectQL implements IObjectQLEngine {
     childObject: string,
     records: any,
     previous: any,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<SummaryRecomputeFailure[]> {
     const descriptors = this.getSummaryDescriptors(childObject);
     if (descriptors.length === 0) return [];
@@ -4549,7 +4630,7 @@ export class ObjectQL implements IObjectQLEngine {
     records: any[],
     expand: Record<string, QueryAST>,
     depth: number = 0,
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<any[]> {
     if (!records || records.length === 0) return records;
     if (depth >= ObjectQL.MAX_EXPAND_DEPTH) return records;
@@ -4667,7 +4748,7 @@ export class ObjectQL implements IObjectQLEngine {
             where,
             ...(nestedAST.fields ? { fields: nestedAST.fields as any } : {}),
             ...(nestedAST.orderBy ? { orderBy: nestedAST.orderBy as any } : {}),
-            context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContextInput,
+            context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContext,
           },
         ) ?? [];
 
@@ -4739,7 +4820,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async resolveFileReferences(
     objectName: string,
     records: any[],
-    execCtx?: ExecutionContextInput,
+    execCtx?: ExecutionContext,
   ): Promise<any[]> {
     if (!records || records.length === 0) return records;
     // A caller whose subject is the STORED form — the ADR-0104 backfill /
@@ -4788,10 +4869,44 @@ export class ObjectQL implements IObjectQLEngine {
     try {
       fileRows = (await this.find(
         'sys_file',
-        { where: { id: { $in: uniqueIds } }, context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContextInput },
+        { where: { id: { $in: uniqueIds } }, context: { ...(execCtx ?? {}), __expandRead: true } as ExecutionContext },
       )) ?? [];
-    } catch {
-      return records; // sys_file unregistered / unreadable — leave ids as-is
+    } catch (error) {
+      // [#6116] Fail-open is deliberate and UNCHANGED — a file-metadata read
+      // that fails must not take down the record read that asked for it, so the
+      // ids pass through un-hydrated on BOTH branches below. What changes is
+      // that the two reasons stop being the same silence.
+      //
+      // Benign: `sys_file` is registered but its TABLE was never provisioned
+      // (storage plugin present, schema sync not run yet). There are genuinely
+      // no committed rows, so "leave the ids as-is" IS the truth and there is
+      // nothing to report. Discriminated through the shared `isMissingTableError`
+      // predicate (`@objectstack/metadata/errors`, #4825) — never a hand-rolled
+      // `code === '42P01'` copy — the same call `seedAutonumber` makes above.
+      //
+      // Everything else (connection drop, timeout, permission denial, query
+      // error) means the rows may well exist and simply were not seen. The
+      // consumer then receives a bare id where `{ id, name, size, mimeType,
+      // url }` was due, and UI/export renders it as "this record has no
+      // attachment": a fault wearing the appearance of legitimate absent data,
+      // indistinguishable from a record that truly holds no file (ADR-0110 D3).
+      // One `warn`, not `error`, per AGENTS "Degradation log levels" — the loss
+      // is FUNCTIONAL and scoped to this response (the answer is visibly
+      // smaller, and the next read repairs it); nothing on this path claims to
+      // have persisted anything.
+      if (!isMissingTableError(error)) {
+        this.logger.warn(
+          'sys_file lookup failed; file fields keep their raw ids and will render as "no file" for this read — '
+            + 'check storage/database availability, then re-read to hydrate',
+          {
+            object: objectName,
+            fields: fileFields,
+            unresolvedIds: uniqueIds.length,
+            error: (error as Error)?.message,
+          },
+        );
+      }
+      return records; // fail-open: leave ids as-is
     }
 
     const fileMap = new Map<string, any>();
@@ -4850,7 +4965,7 @@ export class ObjectQL implements IObjectQLEngine {
    * An unresolvable placeholder throws (see the resolver's module doc) — the one
    * outcome an author can act on.
    */
-  private resolveWhereTokens(ast: QueryAST | undefined, execCtx?: ExecutionContextInput): void {
+  private resolveWhereTokens(ast: QueryAST | undefined, execCtx?: ExecutionContext): void {
     if (!ast || ast.where == null) return;
     ast.where = resolveFilterTokens(ast.where, filterTokenContextFrom(execCtx));
   }
@@ -4866,7 +4981,7 @@ export class ObjectQL implements IObjectQLEngine {
    * writing back would bake one request's user id into a filter object the
    * caller may reuse (view metadata and flow node config both get reused).
    */
-  private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContextInput } | undefined>(
+  private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContext } | undefined>(
     options: T,
   ): T {
     if (!options || options.where == null) return options;
@@ -4974,7 +5089,7 @@ export class ObjectQL implements IObjectQLEngine {
     );
   }
 
-  async find(object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
+  async find(object: string, query?: EngineQueryOptionsParsed, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     // Normalize the alias spellings (`filter`→`where`, `top`→`limit`) by the
     // spec's slot table — the driver AST only understands the canonical keys,
@@ -4993,9 +5108,12 @@ export class ObjectQL implements IObjectQLEngine {
     // stray `query.object` overwrite it, splitting the AST's object from the
     // table actually queried (#4371 option-2 survey) — every middleware and
     // hook reading `ast.object` would have been lied to.
-    const ast: QueryAST = { ...query, object };
-    // Remove context from the AST — it's not a driver concern
-    delete (ast as any).context;
+    // `context` is dropped HERE rather than `delete`d from the built AST: since
+    // ADR-0122 the caller-supplied `context` is the AUTHOR state (every key
+    // optional) while `QueryAST` carries the parsed one, so spreading it in and
+    // removing it a line later would type the AST with a context it never holds.
+    const { context: _findContext, ...findQuery } = query ?? {};
+    const ast: QueryAST = { ...findQuery, object };
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
     // names and inject their dependencies, so the driver returns the raw
@@ -5121,7 +5239,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Fires the same `beforeFind`/`afterFind` hooks as `find` (#3195).
    */
-  async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any> {
+  async findOne(objectName: string, query?: EngineQueryOptionsParsed, options?: EngineReadOptions): Promise<any> {
     objectName = this.resolveObjectName(objectName);
     // Same alias fold as find() (#4346). Without it, `findOne({ filter })`
     // matched the first row of the WHOLE table rather than the predicate.
@@ -5136,9 +5254,10 @@ export class ObjectQL implements IObjectQLEngine {
     const driver = this.getDriver(objectName);
     // `object` after the spread for the same reason as find(); `limit: 1`
     // last — findOne is single-row by contract.
-    const ast: QueryAST = { ...query, object: objectName, limit: 1 };
-    // Remove context from the AST — it's not a driver concern
-    delete (ast as any).context;
+    // Same reason as find(): the caller's `context` is the author state and the
+    // AST carries the parsed one, so it leaves before the AST is typed.
+    const { context: _findOneContext, ...findOneQuery } = query ?? {};
+    const ast: QueryAST = { ...findOneQuery, object: objectName, limit: 1 };
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
     // returns the raw dependency fields, then evaluate formulas after fetch.
@@ -5250,6 +5369,132 @@ export class ObjectQL implements IObjectQLEngine {
   // FLS write gate throws rather than stripping. So neither member reports on
   // those here — only on what this path actually strips. Any FURTHER strip added
   // here must wire both members at its own site too.
+  /**
+   * Validate-only (#6037, #4633 ruling D) — run the write path's own verdict
+   * over candidate rows and report it, WITHOUT persisting anything.
+   *
+   * ## Why this exists
+   *
+   * `import`'s dry run used to predict the write's verdict with a hand-copied
+   * mirror of the engine's rules (`rest/src/import-coerce.ts`). A copy cannot
+   * structurally keep up with the family it mirrors — value shapes and their
+   * ADR-0104 posture, `format` checks, object-level `validations`, the state
+   * machine — so the ruling replaced prediction with the verdict itself. The
+   * point is that agreement is guaranteed **by construction**: this method
+   * calls the same `validateRecord` and `evaluateValidationRules`, with the
+   * same options, that `insert()` calls a few hundred lines below.
+   *
+   * ## ADR-0104 posture — the whole reason B was rejected
+   *
+   * The verdict is resolved against the TARGET DEPLOYMENT'S REAL POSTURE via
+   * the same `valueShapeStrictFor` / `mediaValueShapeStrictFor` the write path
+   * uses. On a self-certified (strict) deployment a bad value shape is an
+   * error here exactly as it would be on write; on a warn-first deployment it
+   * is admitted here exactly as it would be on write, and reported as a
+   * WARNING rather than an error. An unconditionally-strict dry run (option B)
+   * was rejected precisely because it would fail rows on every un-migrated
+   * deployment that the write would have accepted — a false alarm that teaches
+   * authors to distrust the one gate in front of a bulk import.
+   *
+   * The warn-first admissions are deliberately NOT routed to
+   * `admittedViolationSink`: that sink records "this boot has written data
+   * against the old contract" so the deployment cannot then certify itself
+   * (#4769). A dry run writes nothing, so recording an admission would make a
+   * *preview* block a later migration — a side effect on a call whose whole
+   * contract is to have none.
+   *
+   * ## What it deliberately does NOT simulate
+   *
+   * No hooks run. `beforeInsert` fires BEFORE validation on the real path, so
+   * a hook that derives a business field could in principle change a verdict
+   * this method reports. Running arbitrary user-authored hooks to close that
+   * gap is the worse trade by a wide margin — a "validate without persisting"
+   * call that fires side-effecting hooks (mail, outbound calls, writes to
+   * other objects) is the #4052 defect in a new spelling, where a preview
+   * quietly executes. So the gap is documented rather than closed: audit and
+   * ownership stamps are `system`/`readonly` and are skipped by validation
+   * anyway, so what remains is the narrow case of a hook deriving a
+   * *business* field that its object also validates.
+   *
+   * Nothing is written, no sequence is consumed, and no driver is touched —
+   * validation is in-process, which is what makes row-by-row dry run of a
+   * large import affordable.
+   */
+  async validate(
+    object: string,
+    data: Record<string, unknown> | Record<string, unknown>[],
+    options?: { mode?: 'insert' | 'update'; context?: ExecutionContext },
+  ): Promise<ValidateDataResponse> {
+    object = this.resolveObjectName(object);
+    const mode = options?.mode ?? 'insert';
+    const rows = Array.isArray(data) ? data : [data];
+    const schemaForValidation = this._registry.getObject(object);
+
+    // Resolved once for the whole set, exactly as the write path resolves them
+    // once per batch — this is the "same posture as the real write" guarantee.
+    const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(schemaForValidation);
+    const valueShapeStrict = await this.valueShapeStrictFor(schemaForValidation);
+    const messages = this.validationMessageContext(object, options?.context);
+    const currentUser = this.buildEvalUser(options?.context);
+    const skipStateMachine = shouldSkipStateMachine(options?.context);
+
+    const results: NonNullable<ValidateDataResponse['results']> = rows.map((row) => {
+      const warnings: ValidateDataIssue[] = [];
+      // Warn-first admissions are the posture signal the caller came for, so
+      // they are reported — into this row's own bucket, never into the
+      // certification sink (see the note above).
+      //
+      // Carried under the code the STRICT path would have FAILED with
+      // (`invalid_type`) rather than a warning-specific one: the same bad
+      // value is one finding that changed buckets when the posture changed,
+      // and a caller diffing a preview against a write should see that, not
+      // two vocabularies. The sink's payload is `{gate, field, type, detail}`,
+      // so the message is composed the way the warn-first log line composes it.
+      const onAdmittedValueShapeViolation = (violation: any) => {
+        const field = String(violation?.field ?? '');
+        const type = String(violation?.type ?? '');
+        const detail = String(violation?.detail ?? 'invalid value shape');
+        warnings.push({
+          field,
+          code: 'invalid_type',
+          message: `${field} has an invalid ${type} value: ${detail}`,
+        });
+      };
+      try {
+        validateRecord(schemaForValidation, row, mode, {
+          mediaValueShapeStrict, valueShapeStrict, messages, onAdmittedValueShapeViolation,
+        });
+        evaluateValidationRules(schemaForValidation as any, row, mode, {
+          logger: this.logger, currentUser, skipStateMachine, messages,
+        });
+      } catch (e) {
+        if (e instanceof ValidationError) {
+          return { valid: false, errors: e.fields.map((f) => ({ ...f })), warnings };
+        }
+        throw e;
+      }
+      return { valid: true, errors: [], warnings };
+    });
+
+    return {
+      object,
+      mode,
+      valid: results.every((r) => r.valid),
+      results,
+      // The EFFECTIVE posture, not the raw deployment flag. `validateRecord`
+      // runs the flag through `valueShapeStrictEffective`, where the ADR-0104
+      // env switches take precedence over it, so reporting the flag would
+      // describe a different posture than the one that just decided the
+      // verdict — on a deployment holding the flag but running with
+      // `OS_ALLOW_LAX_VALUE_SHAPES`, exactly backwards. Reporting what decided
+      // is the whole point of returning it.
+      posture: {
+        valueShapeStrict: valueShapeStrictEffective(valueShapeStrict),
+        mediaValueShapeStrict: mediaStrictEffective(mediaValueShapeStrict),
+      },
+    };
+  }
+
   async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
@@ -5447,12 +5692,22 @@ export class ObjectQL implements IObjectQLEngine {
             }
           }
         }
+        // [#4977] A `parent`-scoped `requiredWhen` ("once the header is Sent,
+        // every line must carry a description") is a SERVER guarantee, and the
+        // insert is where a line is first written empty — so unlike the
+        // `readonlyWhen` strip, which is an update-path concept, this binding
+        // has to exist here too. Gated on the schema actually declaring such a
+        // predicate, so an object with only `record`-scoped requirements pays
+        // nothing; batched, so N rows under M masters cost ONE header read.
+        const insertParentForRow = hasParentScopedRequiredWhen(schemaForValidation as any)
+          ? await this.resolveMasterDetailParents(schemaForValidation, null, rows)
+          : undefined;
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
             normalizeMultiValueFields(schemaForValidation, rows[i]);
             validateRecord(schemaForValidation, rows[i], 'insert', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation });
-            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx });
+            evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]) });
             await this.assertReferencesResolve(
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
@@ -5845,6 +6100,81 @@ export class ObjectQL implements IObjectQLEngine {
            // terms, so it owes the same counterexample.
            const onAdmittedValueShapeViolation = this.admittedViolationSink(object);
            if (hookContext.input.id) {
+               // [#6435] The by-id half of #6262's strip — same defect, other
+               // arm. Reaching this branch means the dispatch found a truthy
+               // scalar id, but NOT necessarily in the payload: when `data.id`
+               // is a non-scalar (an operator object, an array, `null`) or a
+               // falsy scalar, `resolveEngineUpdateDispatch` rules it is not a
+               // primary key and falls through to `options.where.id`, binding
+               // THAT (#5748 / PR #5919 — `ENGINE_UPDATE_DISPATCH_CASES` states
+               // it: `operator object in data.id, scalar where.id` ⇒ `by-id`,
+               // `expectId: 'rec_1'`). The dispatch is right; the PAYLOAD was
+               // never cleaned. Measured on origin/main, this very branch:
+               //
+               //   driver.update('task', 'rec_1', { id: { $in: ['a','b'] }, title: 'x' })
+               //                                     ^^^^^^^^^^^^^^^^^^^^^^ the SET clause
+               //
+               // `driver-sql`'s `update()` formats the WHOLE payload
+               // (`sql-driver.ts`, `applyWriteColumnMap(formatInput(object,
+               // data))` — `id` is on no skip list), so the row is written as
+               // `UPDATE task SET id = '{"$in":["a","b"]}', title = 'x' WHERE
+               // id = 'rec_1'`: rec_1's identity is overwritten with a
+               // serialized operator object, irreversibly, on any backend that
+               // accepts it.
+               //
+               // The rule is #6262's, unchanged and asked of the payload rather
+               // than of the branch: a value the engine has ALREADY RULED is
+               // not a primary key does not get to sit in the primary-key
+               // column. It is asked by CALLING the dispatch — "would this
+               // payload, on its own, identify a row?" — never by re-deriving
+               // the scalar test here: `asScalarId` is deliberately unexported
+               // (`engine-update-dispatch.ts`: "adding a third public spelling
+               // of the same question is how a rule with one definition grows a
+               // second one"), and a hand-mirrored copy is the #4434 / #4550
+               // failure this family exists to prevent.
+               //
+               // Deliberately NARROW, and the narrowness is the whole scope:
+               //
+               //  - A TRUTHY SCALAR `data.id` is left exactly as it is. There
+               //    the payload's `id` IS the bound key (it outranks `where` —
+               //    same case-set), so the write is `SET id = 'rec_1' WHERE id
+               //    = 'rec_1'`: a same-value no-op, redundant rather than
+               //    damaging, and long-standing behaviour. Widening the strip
+               //    to cover it is a separate decision, not a rider here.
+               //  - Rejecting the call instead (#6435's route B) would reverse
+               //    the `expect: 'by-id'` verdict the case-set states today —
+               //    a partial rollback of #5748's ruling A, i.e. a maintainer
+               //    decision. This change alters NO verdict: the same call
+               //    still dispatches by-id and still binds `rec_1`.
+               //  - Per-driver skip lists (route C) are the #5240 / #4434 shape
+               //    of five backends answering one question five ways.
+               //
+               // Same choice as #6262 on the reporting seam: NOT routed through
+               // `reportDroppedFields`, because `DroppedFieldsEvent.reason` is a
+               // closed enum over the two READ-ONLY strips (`readonly` /
+               // `readonly_when`, #3407/#3042) and this drop is neither;
+               // widening that vocabulary is a `packages/spec` change with its
+               // own consumers (filed separately as #6437). The `warn` is the
+               // #4632 duty meanwhile — the caller is told the write succeeded.
+               const preIdById = hookContext.input.data as Record<string, unknown> | null | undefined;
+               if (
+                   preIdById &&
+                   typeof preIdById === 'object' &&
+                   Object.prototype.hasOwnProperty.call(preIdById, 'id') &&
+                   resolveEngineUpdateDispatch(preIdById as EngineUpdateDispatchData, undefined).kind !== 'by-id'
+               ) {
+                   const { id: notAnId, ...withoutId } = preIdById;
+                   hookContext.input.data = withoutId as any;
+                   this.logger.warn(
+                     `Update on '${object}' of record ${String(hookContext.input.id)}: dropped 'id' from the ` +
+                       `write payload. The row is identified by the id argument, and the engine has already ruled ` +
+                       `this payload value is not a primary key (${JSON.stringify(notAnId) ?? String(notAnId)}) — ` +
+                       `writing it would have overwritten that row's primary-key column. To update ONE row by id, ` +
+                       `pass a SCALAR id (\`update(object, { id, ...fields })\` or \`{ where: { id } }\`); to ` +
+                       `SELECT rows by an id set, put it in \`where\` ` +
+                       `(\`{ where: { id: { $in: [...] } }, multi: true }\`).`,
+                   );
+               }
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
                validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
@@ -5932,8 +6262,34 @@ export class ObjectQL implements IObjectQLEngine {
                // is a pure function of what we hand it — resolve here, gated on
                // the payload actually touching such a predicate so a detail
                // object with only `record`-scoped locks pays no extra read.
-               const roWhenParent = hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhen)
+               //
+               // [#4977] `requiredWhen` reads the same root at the same write,
+               // so the two slots share ONE resolution rather than each buying
+               // a header read — and, more importantly, so a single write can
+               // never judge its lock and its requirement against two different
+               // headers. Payload-FK-first for both (#4889's rule: a repoint is
+               // judged against the master it lands on).
+               const schemaHasParentRequiredWhen = hasParentScopedRequiredWhen(updateSchema as any);
+               const wantsParentBinding =
+                   hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhen) ||
+                   schemaHasParentRequiredWhen;
+               const roWhenParent = wantsParentBinding
                    ? await this.resolveMasterDetailParent(updateSchema, preRoWhen, priorRecord)
+                   : undefined;
+               // [#4977] The ADR-0113 non-regression pre-check asks whether the
+               // STORED row already violated, so for a REPOINT it must read the
+               // header the row hung off BEFORE the write — not the one it is
+               // landing on. Resolved only when the payload actually moves the
+               // detail to another master; otherwise the two are the same row
+               // and `evaluateValidationRules` reuses `parent` for both.
+               const mdRel = schemaHasParentRequiredWhen ? resolveMasterDetailRelation(updateSchema as any) : null;
+               const priorMasterId = mdRel ? masterIdOf(mdRel.fk, null, priorRecord) : undefined;
+               const repointsMaster =
+                   mdRel != null &&
+                   priorMasterId != null &&
+                   masterIdOf(mdRel.fk, preRoWhen, priorRecord) !== priorMasterId;
+               const roWhenPreviousParent = repointsMaster
+                   ? await this.resolveMasterDetailParent(updateSchema, null, priorRecord)
                    : undefined;
                hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, roWhenParent) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
@@ -5955,7 +6311,7 @@ export class ObjectQL implements IObjectQLEngine {
                // "you sent a read-only field" should not depend on whether some
                // other field also failed a business rule.
                assertNoStrictDrops();
-               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
+               evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent });
                // [#4441] A repoint is as capable of dangling as an initial link.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
@@ -5963,6 +6319,57 @@ export class ObjectQL implements IObjectQLEngine {
                );
                result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
            } else if (options?.multi && driver.updateMany) {
+               // [#6262] A bulk SET clause must not carry `id`. Reaching this
+               // branch AT ALL means `resolveEngineUpdateDispatch` returned
+               // `multi`, i.e. it found no scalar truthy id in EITHER source —
+               // so whatever sits in `data.id` here (an operator object, an
+               // array, `null`, a falsy scalar) is a value the engine has
+               // already RULED is not a primary key. Leaving it in the payload
+               // then asks the driver to write that ruled-not-an-id value into
+               // the primary-key column of every matched row: the measured
+               // probe was `updateMany({object}, { id: { $in: ['a','b'] },
+               // title: 'x' })`, i.e. a serialized operator object as the new
+               // primary key of N rows. Five backends would each answer that
+               // differently (#5240 / #4434), and on the ones that accept it
+               // the matched rows lose their identity irreversibly.
+               //
+               // This is the SAME answer to the SAME question, applied one
+               // layer on — not a second opinion. #5748 / PR #5919 ruled that a
+               // non-scalar `data.id` is not an id and therefore stops
+               // shadowing the dispatch ladder; the declared bulk intent is
+               // honoured (`ENGINE_UPDATE_DISPATCH_CASES` says `'multi'`, and
+               // this change leaves every verdict in that set untouched). The
+               // strip is that ruling's other half: a value that is not the
+               // primary key does not get to sit in the primary-key column
+               // either. Rejecting the call instead (#6262's route B) would
+               // reverse a verdict the case-set states today, which is a fresh
+               // maintainer decision rather than this fix.
+               //
+               // No reachable shape loses a legitimate write: a truthy scalar
+               // `data.id` outranks both `where` and `multi` and never gets
+               // here, and N rows cannot share one primary key anyway.
+               //
+               // Deliberately NOT reported through `reportDroppedFields`:
+               // `DroppedFieldsEvent.reason` is a closed enum over the two
+               // READ-ONLY strips (`readonly` / `readonly_when`, #3407/#3042),
+               // and this drop is neither. Widening that vocabulary is a
+               // `packages/spec` change with its own consumers (batch + REST
+               // protocol responses), not a rider on an engine fix. The `warn`
+               // is the #4632 duty in the meantime: name the consequence and
+               // the remedy, since the caller is told the write succeeded.
+               const preIdMulti = hookContext.input.data as Record<string, unknown> | null | undefined;
+               if (preIdMulti && typeof preIdMulti === 'object' && Object.prototype.hasOwnProperty.call(preIdMulti, 'id')) {
+                   const { id: notAnId, ...withoutId } = preIdMulti;
+                   hookContext.input.data = withoutId as any;
+                   this.logger.warn(
+                     `Bulk update on '${object}': dropped 'id' from the write payload. A multi:true update ` +
+                       `targets rows through its predicate, and the engine has already ruled this value is not a ` +
+                       `primary key (${JSON.stringify(notAnId) ?? String(notAnId)}) — writing it would have ` +
+                       `overwritten the primary-key column of every matched row. To update ONE row by id, pass a ` +
+                       `scalar id (\`update(object, { id, ...fields })\` or \`{ where: { id } }\`) instead of ` +
+                       `options.multi; to SELECT rows by an id set, put it in \`where\` (\`{ where: { id: { $in: [...] } }, multi: true }\`).`,
+                   );
+               }
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
                validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
@@ -6019,16 +6426,35 @@ export class ObjectQL implements IObjectQLEngine {
                // locked in any target row is fail-safe-dropped for all (narrow
                // `where` to reach the unlocked rows). Symmetric with the
                // single-id `stripReadonlyWhenFields`; INSERT stays exempt.
-               if (payloadHasReadonlyWhen) {
-                   const preRoWhenMulti = hookContext.input.data as Record<string, unknown>;
-                   // [#4889] N matched rows can hang off N different masters, so
-                   // the `parent` binding is per row here. Batch-read the
-                   // distinct headers ONCE (the same shape as the single-id
-                   // resolution, one query instead of one per row) and hand the
-                   // strip a lookup.
-                   const parentForRow = hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti)
+               //
+               // [#4889] N matched rows can hang off N different masters, so the
+               // `parent` binding is per row here. Batch-read the distinct
+               // headers ONCE (the same shape as the single-id resolution, one
+               // query instead of one per row) and hand out a lookup.
+               //
+               // [#4977] Hoisted out of the `readonlyWhen` block because the
+               // per-row `evaluateValidationRules` below needs the same lookup
+               // for `requiredWhen` — including on a batch whose payload writes
+               // no `readonlyWhen` field at all. One resolution, both consumers,
+               // so a bulk write cannot judge its lock and its requirement
+               // against different headers.
+               const preRoWhenMulti = hookContext.input.data as Record<string, unknown>;
+               const schemaHasParentRequiredWhenMulti = hasParentScopedRequiredWhen(updateSchema as any);
+               const parentForRow =
+                   hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti) ||
+                   schemaHasParentRequiredWhenMulti
                        ? await this.resolveMasterDetailParents(updateSchema, preRoWhenMulti, priorRows)
                        : undefined;
+               // [#4977] Pre-check headers for the ADR-0113 non-regression test,
+               // resolved only when the payload REPOINTS the matched rows at
+               // another master (see the single-id branch for why the stored
+               // row's own header is the one that question needs).
+               const mdRelMulti = schemaHasParentRequiredWhenMulti ? resolveMasterDetailRelation(updateSchema as any) : null;
+               const previousParentForRow =
+                   mdRelMulti != null && masterIdOf(mdRelMulti.fk, preRoWhenMulti, undefined) != null
+                       ? await this.resolveMasterDetailParents(updateSchema, null, priorRows)
+                       : undefined;
+               if (payloadHasReadonlyWhen) {
                    hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, parentForRow) as any;
                    reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
@@ -6059,7 +6485,7 @@ export class ObjectQL implements IObjectQLEngine {
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
-                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
+                           evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row) });
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -6068,6 +6494,13 @@ export class ObjectQL implements IObjectQLEngine {
                        }
                    }
                } else {
+                   // [#4977] No `parent` here, and it is not a hole: this branch
+                   // is unreachable for an object that has a `requiredWhen` at
+                   // all. `needsPriorRecord` is TRUE as soon as any field
+                   // declares one (`fieldsNeedPrior`), so `rulesNeedRows` sends
+                   // every such object down the per-row branch above, where the
+                   // binding is supplied. This branch only ever runs for the
+                   // rule families that never read a header.
                    evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx });
                }
                // [#4441] The bulk call site too — a guard wired into single-id
@@ -6195,7 +6628,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async cascadeDeleteRelations(
     object: string,
     id: string | number,
-    context?: ExecutionContextInput,
+    context?: ExecutionContext,
     depth = 0,
   ): Promise<void> {
     if (id == null || depth >= ObjectQL.MAX_CASCADE_DEPTH) return;
@@ -6280,7 +6713,7 @@ export class ObjectQL implements IObjectQLEngine {
             // rides a server-DERIVED context (set here, never from client input
             // — same trust model as `__expandRead`), so it cannot be forged from
             // a request to bypass the guard on an ordinary write.
-            const referentialCtx = { ...(context ?? {}), __referentialFieldClear: true } as ExecutionContextInput;
+            const referentialCtx = { ...(context ?? {}), __referentialFieldClear: true } as ExecutionContext;
             await this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx } as any);
           }
         }
@@ -7358,7 +7791,7 @@ export class ObjectQL implements IObjectQLEngine {
 export class ObjectRepository implements IScopedObjectRepository {
   constructor(
     private objectName: string,
-    private context: ExecutionContextInput,
+    private context: ExecutionContext,
     private engine: IDataEngine & { executeAction?: (o: string, a: string, c: any) => Promise<any> }
   ) {}
 
@@ -7461,7 +7894,7 @@ export class ObjectRepository implements IScopedObjectRepository {
  */
 export class ScopedContext implements IScopedContext {
   constructor(
-    private executionContext: ExecutionContextInput,
+    private executionContext: ExecutionContext,
     private engine: IDataEngine
   ) {}
 

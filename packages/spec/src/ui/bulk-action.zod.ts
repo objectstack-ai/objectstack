@@ -98,11 +98,11 @@ import { FieldType } from '../data/field.zod';
 
 /** How the executor mutates the selected records. */
 export const BulkActionOperationSchema = z.enum(['update', 'delete', 'custom']);
-export type BulkActionOperation = z.infer<typeof BulkActionOperationSchema>;
+export type BulkActionOperation = z.input<typeof BulkActionOperationSchema>;
 
 /** How many dispatches a `custom` def makes for a selection of N records. */
 export const BulkActionExecutionSchema = z.enum(['perRecord', 'aggregate']);
-export type BulkActionExecution = z.infer<typeof BulkActionExecutionSchema>;
+export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
 
 /**
  * One input collected ONCE by the bulk dialog before the run (never re-prompted
@@ -131,7 +131,7 @@ export const BulkActionParamSchema = lazySchema(() => z.object({
   multiple: z.boolean().optional().describe('Allow picking multiple values — the param value becomes an array and is written to the patch as-is.'),
   placeholder: z.string().optional().describe('Placeholder text.'),
 }).passthrough());
-export type BulkActionParam = z.infer<typeof BulkActionParamSchema>;
+export type BulkActionParam = z.input<typeof BulkActionParamSchema>;
 
 /** Declared keys of a bulk-action def — the "did you mean" pool. */
 const BULK_ACTION_DEF_KEYS = [
@@ -214,7 +214,7 @@ export const BulkActionDefSchema = lazySchema(() => z.object({
   params: z.array(BulkActionParamSchema).optional().describe('Inputs collected once before the run. Omit to skip the params step and go straight to confirm.'),
   confirmText: z.string().optional().describe('Confirmation text shown above the affected-record summary.'),
   confirmLabel: z.string().optional().describe('Custom Confirm button label (default: "Run").'),
-  visible: ExpressionInputSchema.optional().describe('Eligibility predicate (CEL), same shape as `action.visible`. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record.'),
+  visible: ExpressionInputSchema.optional().describe('Eligibility predicate (CEL) — a string or a `{dialect, source}` envelope, i.e. `action.visible` without its boolean-literal arm (#5970): a per-record predicate has nothing to say as a constant. Evaluated once PER SELECTED RECORD with that record bound: the button is offered when at least one passes, the run covers only those, and the rest are reported as skipped. A record-free predicate (`features.x`, `current_user.y`) therefore behaves as a plain button-level gate. Fail-closed — a predicate that faults excludes the record.'),
   requiredPermissions: z.array(z.string()).optional().describe("[ADR-0066 D4] Capability gate on the button, `action.requiredPermissions` semantics verbatim: absent or empty always passes, several are AND-ed, and a client that cannot resolve the caller's capabilities fails OPEN (the server stays the authority). This key exists for INLINE defs — notably the `update`/`delete` data-plane forms, which dispatch no action and so have nothing to inherit a gate from; a def promoted from `bulkActions: ['<name>']` (or an aggregate def naming a declared action) inherits the action's own declaration instead. On a data-plane def the gate governs visibility only — the write itself is still authorized by the data API's object permissions and server hooks."),
   maxRecords: z.number().int().positive().optional().describe('Selection size above which the run is blocked. Set it on defs whose server work is expensive — an aggregate def carries every selected id in one request.'),
   batchSize: z.number().int().positive().optional().describe('Records per executor batch (default 200). Data-plane operations only — an aggregate run is a single call by definition.'),
@@ -283,6 +283,6 @@ export const BulkActionDefSchema = lazySchema(() => z.object({
       });
     }
   }));
-export type BulkActionDef = z.infer<typeof BulkActionDefSchema>;
+export type BulkActionDef = z.input<typeof BulkActionDefSchema>;
 /** Post-parse shape of {@link BulkActionDef} — defaults applied, transforms run (ADR-0122). */
 export type BulkActionDefParsed = z.infer<typeof BulkActionDefSchema>;

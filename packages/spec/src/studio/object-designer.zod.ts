@@ -102,7 +102,7 @@ export const FieldPropertySectionSchema = lazySchema(() => strictObject({
   order: z.number().default(0).describe('Sort order (lower = higher)'),
 }));
 
-export type FieldPropertySection = z.infer<typeof FieldPropertySectionSchema>;
+export type FieldPropertySection = z.input<typeof FieldPropertySectionSchema>;
 /** Post-parse shape of {@link FieldPropertySection} — defaults applied, transforms run (ADR-0122). */
 export type FieldPropertySectionParsed = z.infer<typeof FieldPropertySectionSchema>;
 
@@ -130,7 +130,7 @@ export const FieldGroupSchema = lazySchema(() => strictObject({
   order: z.number().default(0).describe('Sort order (lower = higher)'),
 }));
 
-export type FieldGroup = z.infer<typeof FieldGroupSchema>;
+export type FieldGroup = z.input<typeof FieldGroupSchema>;
 /** Post-parse shape of {@link FieldGroup} — defaults applied, transforms run (ADR-0122). */
 export type FieldGroupParsed = z.infer<typeof FieldGroupSchema>;
 
@@ -176,7 +176,7 @@ export const FieldEditorConfigSchema = lazySchema(() => strictObject({
   showUsageStats: z.boolean().default(false).describe('Show field usage statistics'),
 }));
 
-export type FieldEditorConfig = z.infer<typeof FieldEditorConfigSchema>;
+export type FieldEditorConfig = z.input<typeof FieldEditorConfigSchema>;
 /** Post-parse shape of {@link FieldEditorConfig} — defaults applied, transforms run (ADR-0122). */
 export type FieldEditorConfigParsed = z.infer<typeof FieldEditorConfigSchema>;
 
@@ -206,7 +206,7 @@ export const RelationshipDisplaySchema = lazySchema(() => strictObject({
   cardinalityLabel: z.string().default('1:N').describe('Cardinality label (e.g., "1:N", "1:1", "N:M")'),
 }));
 
-export type RelationshipDisplay = z.infer<typeof RelationshipDisplaySchema>;
+export type RelationshipDisplay = z.input<typeof RelationshipDisplaySchema>;
 /** Post-parse shape of {@link RelationshipDisplay} — defaults applied, transforms run (ADR-0122). */
 export type RelationshipDisplayParsed = z.infer<typeof RelationshipDisplaySchema>;
 
@@ -235,7 +235,7 @@ export const RelationshipMapperConfigSchema = lazySchema(() => strictObject({
   ]).describe('Visual config per relationship type'),
 }));
 
-export type RelationshipMapperConfig = z.infer<typeof RelationshipMapperConfigSchema>;
+export type RelationshipMapperConfig = z.input<typeof RelationshipMapperConfigSchema>;
 /** Post-parse shape of {@link RelationshipMapperConfig} — defaults applied, transforms run (ADR-0122). */
 export type RelationshipMapperConfigParsed = z.infer<typeof RelationshipMapperConfigSchema>;
 
@@ -249,7 +249,7 @@ export const ERLayoutAlgorithmSchema = lazySchema(() => z.enum([
   'circular',   // Circular arrangement
 ]).describe('ER diagram layout algorithm'));
 
-export type ERLayoutAlgorithm = z.infer<typeof ERLayoutAlgorithmSchema>;
+export type ERLayoutAlgorithm = z.input<typeof ERLayoutAlgorithmSchema>;
 
 /**
  * Node display options — controls what information is shown
@@ -281,7 +281,7 @@ export const ERNodeDisplaySchema = lazySchema(() => strictObject({
   showDescription: z.boolean().default(true).describe('Show description tooltip on hover'),
 }));
 
-export type ERNodeDisplay = z.infer<typeof ERNodeDisplaySchema>;
+export type ERNodeDisplay = z.input<typeof ERNodeDisplaySchema>;
 /** Post-parse shape of {@link ERNodeDisplay} — defaults applied, transforms run (ADR-0122). */
 export type ERNodeDisplayParsed = z.infer<typeof ERNodeDisplaySchema>;
 
@@ -344,7 +344,7 @@ export const ERDiagramConfigSchema = lazySchema(() => strictObject({
   exportFormats: z.array(z.enum(['png', 'svg', 'json'])).default(['png', 'svg']).describe('Available export formats for diagram'),
 }));
 
-export type ERDiagramConfig = z.infer<typeof ERDiagramConfigSchema>;
+export type ERDiagramConfig = z.input<typeof ERDiagramConfigSchema>;
 /** Post-parse shape of {@link ERDiagramConfig} — defaults applied, transforms run (ADR-0122). */
 export type ERDiagramConfigParsed = z.infer<typeof ERDiagramConfigSchema>;
 
@@ -357,7 +357,7 @@ export const ObjectListDisplayModeSchema = lazySchema(() => z.enum([
   'tree',       // Hierarchical tree (grouped by package/namespace)
 ]).describe('Object list display mode'));
 
-export type ObjectListDisplayMode = z.infer<typeof ObjectListDisplayModeSchema>;
+export type ObjectListDisplayMode = z.input<typeof ObjectListDisplayModeSchema>;
 
 /** Object list sort field */
 export const ObjectSortFieldSchema = lazySchema(() => z.enum([
@@ -367,7 +367,7 @@ export const ObjectSortFieldSchema = lazySchema(() => z.enum([
   'updatedAt',  // Sort by last modified
 ]).describe('Object list sort field'));
 
-export type ObjectSortField = z.infer<typeof ObjectSortFieldSchema>;
+export type ObjectSortField = z.input<typeof ObjectSortFieldSchema>;
 
 /** Object filter criteria */
 export const ObjectFilterSchema = lazySchema(() => strictObject({
@@ -396,7 +396,7 @@ export const ObjectFilterSchema = lazySchema(() => strictObject({
   searchQuery: z.string().optional().describe('Free-text search across name, label, and description'),
 }));
 
-export type ObjectFilter = z.infer<typeof ObjectFilterSchema>;
+export type ObjectFilter = z.input<typeof ObjectFilterSchema>;
 /** Post-parse shape of {@link ObjectFilter} — defaults applied, transforms run (ADR-0122). */
 export type ObjectFilterParsed = z.infer<typeof ObjectFilterSchema>;
 
@@ -445,7 +445,7 @@ export const ObjectManagerConfigSchema = lazySchema(() => strictObject({
   showStatsSummary: z.boolean().default(true).describe('Show statistics summary bar'),
 }));
 
-export type ObjectManagerConfig = z.infer<typeof ObjectManagerConfigSchema>;
+export type ObjectManagerConfig = z.input<typeof ObjectManagerConfigSchema>;
 /** Post-parse shape of {@link ObjectManagerConfig} — defaults applied, transforms run (ADR-0122). */
 export type ObjectManagerConfigParsed = z.infer<typeof ObjectManagerConfigSchema>;
 
@@ -475,7 +475,7 @@ export const ObjectPreviewTabSchema = lazySchema(() => strictObject({
   order: z.number().default(0).describe('Sort order (lower = higher)'),
 }));
 
-export type ObjectPreviewTab = z.infer<typeof ObjectPreviewTabSchema>;
+export type ObjectPreviewTab = z.input<typeof ObjectPreviewTabSchema>;
 /** Post-parse shape of {@link ObjectPreviewTab} — defaults applied, transforms run (ADR-0122). */
 export type ObjectPreviewTabParsed = z.infer<typeof ObjectPreviewTabSchema>;
 
@@ -509,7 +509,7 @@ export const ObjectPreviewConfigSchema = lazySchema(() => strictObject({
   showBreadcrumbs: z.boolean().default(true).describe('Show navigation breadcrumbs'),
 }));
 
-export type ObjectPreviewConfig = z.infer<typeof ObjectPreviewConfigSchema>;
+export type ObjectPreviewConfig = z.input<typeof ObjectPreviewConfigSchema>;
 /** Post-parse shape of {@link ObjectPreviewConfig} — defaults applied, transforms run (ADR-0122). */
 export type ObjectPreviewConfigParsed = z.infer<typeof ObjectPreviewConfigSchema>;
 
@@ -523,7 +523,7 @@ export const ObjectDesignerDefaultViewSchema = lazySchema(() => z.enum([
   'object-manager',     // Object list/manager
 ]).describe('Default view when entering the Object Designer'));
 
-export type ObjectDesignerDefaultView = z.infer<typeof ObjectDesignerDefaultViewSchema>;
+export type ObjectDesignerDefaultView = z.input<typeof ObjectDesignerDefaultViewSchema>;
 
 /**
  * Object Designer configuration — top-level config that composes
@@ -650,7 +650,7 @@ export const ObjectDesignerConfigSchema = lazySchema(() => strictObject({
   }).describe('Object preview configuration'),
 }));
 
-export type ObjectDesignerConfig = z.infer<typeof ObjectDesignerConfigSchema>;
+export type ObjectDesignerConfig = z.input<typeof ObjectDesignerConfigSchema>;
 /** Post-parse shape of {@link ObjectDesignerConfig} — defaults applied, transforms run (ADR-0122). */
 export type ObjectDesignerConfigParsed = z.infer<typeof ObjectDesignerConfigSchema>;
 
@@ -675,6 +675,6 @@ export type ObjectDesignerConfigParsed = z.infer<typeof ObjectDesignerConfigSche
  */
 export function defineObjectDesignerConfig(
   input: z.input<typeof ObjectDesignerConfigSchema>,
-): ObjectDesignerConfig {
+): ObjectDesignerConfigParsed {
   return ObjectDesignerConfigSchema.parse(input);
 }

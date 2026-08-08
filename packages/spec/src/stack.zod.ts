@@ -124,7 +124,7 @@ export const DatasourceMappingRuleSchema = lazySchema(() => z.object({
   priority: z.number().optional().describe('Rule priority (lower = higher priority)'),
 }).describe('Datasource routing rule'));
 
-export type DatasourceMappingRule = z.infer<typeof DatasourceMappingRuleSchema>;
+export type DatasourceMappingRule = z.input<typeof DatasourceMappingRuleSchema>;
 
 /**
  * Raise every `apis:` publish-gate failure as a Zod issue (#5040 E7).
@@ -606,7 +606,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
   runtimeModule: z.string().optional().describe('Path (relative to the artifact JSON) of the compiled runtime ESM bundle. Set by `objectstack build`; do not author by hand.'),
 }).superRefine(applyApiEndpointGates));
 
-export type ObjectStackDefinition = z.infer<typeof ObjectStackDefinitionSchema>;
+export type ObjectStackDefinition = z.input<typeof ObjectStackDefinitionSchema>;
 /** Post-parse shape of {@link ObjectStackDefinition} — defaults applied, transforms run (ADR-0122). */
 export type ObjectStackDefinitionParsed = z.infer<typeof ObjectStackDefinitionSchema>;
 
@@ -1314,7 +1314,7 @@ export function defineStack(
  * - `'merge'`    — Shallow-merge items with the same name (later fields win).
  */
 export const ConflictStrategySchema = lazySchema(() => z.enum(['error', 'override', 'merge']));
-export type ConflictStrategy = z.infer<typeof ConflictStrategySchema>;
+export type ConflictStrategy = z.input<typeof ConflictStrategySchema>;
 
 /**
  * Options for {@link composeStacks}.
@@ -1343,6 +1343,8 @@ export const ComposeStacksOptionsSchema = lazySchema(() => z.object({
 }));
 
 export type ComposeStacksOptions = z.input<typeof ComposeStacksOptionsSchema>;
+/** Post-parse shape of {@link ComposeStacksOptions} — defaults applied, transforms run (ADR-0122). */
+export type ComposeStacksOptionsParsed = z.infer<typeof ComposeStacksOptionsSchema>;
 
 /**
  * How {@link composeStacks} treats one top-level key (#5005).

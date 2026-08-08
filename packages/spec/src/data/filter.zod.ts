@@ -67,7 +67,7 @@ export const FieldReferenceSchema = lazySchema(() => z.object({
   $field: z.string().describe('Field Reference/Column Name')
 }));
 
-export type FieldReference = z.infer<typeof FieldReferenceSchema>;
+export type FieldReference = z.input<typeof FieldReferenceSchema>;
 
 // ============================================================================
 // 3.1 Comparison Operators
@@ -493,8 +493,8 @@ export type Filter<T = any> = {
 export type Scalar = string | number | boolean | Date | null;
 
 // Export inferred types
-export type FieldOperators = z.infer<typeof FieldOperatorsSchema>;
-export type QueryFilter = z.infer<typeof QueryFilterSchema>;
+export type FieldOperators = z.input<typeof FieldOperatorsSchema>;
+export type QueryFilter = z.input<typeof QueryFilterSchema>;
 
 // ============================================================================
 // Normalization Utilities (Internal Representation)

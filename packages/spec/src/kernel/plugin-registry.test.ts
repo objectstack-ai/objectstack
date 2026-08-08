@@ -7,7 +7,7 @@ import {
   PluginSearchFiltersSchema,
   PluginInstallConfigSchema,
   type PluginVendor,
-  type PluginVendorInput,
+  type PluginVendorParsed,
   type PluginQualityMetrics,
   type PluginStatistics,
   type PluginRegistryEntry,
@@ -81,8 +81,8 @@ describe('Plugin Registry Schemas', () => {
     });
 
     it('should satisfy type constraints', () => {
-      const input: PluginVendorInput = { id: 'com.test', name: 'Test' };
-      const vendor: PluginVendor = PluginVendorSchema.parse(input);
+      const input: PluginVendor = { id: 'com.test', name: 'Test' };
+      const vendor: PluginVendorParsed = PluginVendorSchema.parse(input);
       expect(vendor.id).toBe('com.test');
     });
   });

@@ -404,8 +404,7 @@ export const ReportSchema = lazySchema(() => strictObject({
   }
 }));
 
-export type JoinedReportBlock = z.infer<typeof JoinedReportBlockSchema>;
-export type JoinedReportBlockInput = z.input<typeof JoinedReportBlockSchema>;
+export type JoinedReportBlock = z.input<typeof JoinedReportBlockSchema>;
 
 /**
  * Report Types
@@ -413,29 +412,21 @@ export type JoinedReportBlockInput = z.input<typeof JoinedReportBlockSchema>;
  * Note: For configuration/definition contexts, use the Input types (e.g., ReportInput)
  * which allow optional fields with defaults to be omitted.
  */
-export type Report = z.infer<typeof ReportSchema>;
+export type Report = z.input<typeof ReportSchema>;
 /** Post-parse shape of {@link Report} — defaults applied, transforms run (ADR-0122). */
 export type ReportParsed = z.infer<typeof ReportSchema>;
-export type ReportChart = z.infer<typeof ReportChartSchema>;
+export type ReportChart = z.input<typeof ReportChartSchema>;
 /** Post-parse shape of {@link ReportChart} — defaults applied, transforms run (ADR-0122). */
 export type ReportChartParsed = z.infer<typeof ReportChartSchema>;
-export type ReportSort = z.infer<typeof ReportSortSchema>;
+export type ReportSort = z.input<typeof ReportSortSchema>;
 /** Post-parse shape of {@link ReportSort} — defaults applied, transforms run (ADR-0122). */
 export type ReportSortParsed = z.infer<typeof ReportSortSchema>;
-
-/**
- * Input Types for Report Configuration
- * Use these when defining reports in configuration files.
- */
-export type ReportInput = z.input<typeof ReportSchema>;
-export type ReportChartInput = z.input<typeof ReportChartSchema>;
-export type ReportSortInput = z.input<typeof ReportSortSchema>;
 
 /**
  * Report Factory Helper
  */
 export const Report = {
-  create: (config: ReportInput): Report => ReportSchema.parse(config),
+  create: (config: Report): ReportParsed => ReportSchema.parse(config),
 } as const;
 
 /**
@@ -443,6 +434,6 @@ export const Report = {
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: Report` literal.
  */
-export function defineReport(config: z.input<typeof ReportSchema>): Report {
+export function defineReport(config: z.input<typeof ReportSchema>): ReportParsed {
   return ReportSchema.parse(config);
 }

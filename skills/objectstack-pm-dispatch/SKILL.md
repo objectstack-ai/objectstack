@@ -173,8 +173,56 @@ invariant is what makes the loop resumable and the board honest.
 ### 0. Backlog sweep — classification is a standing duty, not a request
 
 The maintainer does not pre-sort the backlog. On every round (and every idle
-check-in), sweep issues carrying no `pm:*` / `needs-user-decision` label and
+check-in), sweep every issue matching **any one** of these three disjuncts, and
 classify each:
+
+1. **No `pm:*` / `needs-user-decision` label, and no classification label**
+   either — none of the labels your project reads as "already routed" (area,
+   component, owning team, lane). The plain rule.
+2. **`pm:queue` present, classification label absent** — scoped to the
+   repositories that actually use classification labels (see the caution).
+3. **A classification label present, but no queue state** (`pm:queue`,
+   `pm:dispatched`, any other `pm:*` state your setup defines, or
+   `needs-user-decision`).
+
+Disjuncts 2 and 3 take only cards whose `updated_at` is more than a minute or
+two old; disjunct 1 needs no such floor.
+
+**Why the sweep is a disjunction and not one "unlabeled" filter.** Routing and
+queue state are two independent axes, and a card carrying exactly one of them
+is invisible on **both** views at once: the queue lists by queue state, while
+claimants filter by classification — and a predicate that skips anything
+already carrying a `pm:*` label shuts the last door. Neither half is one
+filer's bad habit; both have standing producers:
+
+- A card can arrive **pre-queued by the protocol itself**. Cross-seat transfer
+  tickets (the handing-off side applies the queue label as part of the
+  transfer) and tickets filed mechanically by a steward automation both carry
+  `pm:queue` on arrival, while a single-producer discipline for classification
+  labels forbids those same producers from applying one. The card then reads as
+  dispatchable on the board and is claimable by nobody.
+- The mirror shape — classified but stateless — comes from anyone who files
+  with an area label out of habit. Writing the discipline down elsewhere does
+  not fix it: a project that had published exactly that rule hours earlier
+  still produced such a card the same day. **The predicate itself has to
+  absorb it.**
+
+⚠️ **Any disjunct keyed on a label's absence must be scoped to the
+repositories where that label exists.** Where it does not exist, its absence is
+universal, so the disjunct matches every open queue card in that repository and
+the sweep becomes its own noise source — the check is whether the label exists
+there at all, not whether some card happens to carry it. Whatever your project
+already excludes from the sweep (parked work, tracking issues, protocol posts)
+stays excluded, and disjunct 3 makes that exclusion list load-bearing: a parked
+card's normal shape is precisely "classified, no queue state".
+
+⏳ **Give the partial-labeling disjuncts an age floor keyed on `updated_at`,
+not `created_at`.** A half-labeled card has two sources: one just filed, and an
+older one that a **label write** has just put into that state — and since
+labels are applied one write at a time, the sweep's own labeling passes through
+the half-labeled shape for a few seconds. `created_at` misses the second
+source; `updated_at` covers both, at the cost of a freshly commented card
+waiting one more round.
 
 - **Auto-queue (`pm:queue`)** — a concrete defect with a named location or
   repro; a scoped tooling or gate fix; a restore-invariant finding; a test-only
@@ -295,6 +343,27 @@ each selected issue, before dispatching, execute in order:
    name exists, you lost — touch nothing of theirs, reply that you are yielding,
    and pick another issue. **First comment wins.**
 
+**Read the claim comment back — GitHub's body sanitizer deletes short `<…>`
+spans in place, and backticks do not protect them.** The shape above is built
+out of placeholders, and the branch name inside it is the key that both the race
+check and the stale-claim reclaim below read. Measured on this loop, writing
+then reading the stored body back: `<!-- dev-report -->` came back as *nothing at
+all*, `expected <n> to be 19` came back as `expected  to be 19`, `git log --
+<path>` came back as `git log -- `. All three were inside code spans. This is
+**not** the truncation shape that step 0's *Repair first* handles: the rest of
+the body survives intact, so there is no truncation point to find, the rendered
+page looks correct, and the API returned success. The first of those spans cost
+the most — it was a report-collection marker, so the instruction to sweep for it
+had been deleted from the very text that carried it.
+
+- Write literal angle brackets as HTML entities (`&lt;` / `&gt;`), or put a
+  space after the `<`. A code span is not protection.
+- After writing any body whose content is load-bearing — a claim comment, a
+  cloud-mode dispatch prompt carrying a report marker, a handover note —
+  **read it back and confirm each such span is still present**. The write side
+  needs this read-back for the same reason the read side needs two readings:
+  "the API returned 200" is not "the stored content is correct".
+
 Developer agents push their branch early — a remote branch is the hardest
 evidence of work in flight, and it closes the gap between "claimed" and "a PR
 exists".
@@ -345,6 +414,43 @@ Non-negotiables for this dispatch:
 Return ONLY the JSON report defined in the operating procedure.
 ```
 
+#### One semantics, N independent implementations — enumerate them in the prompt
+
+**Applicability:** the issue changes a *semantic rule* — how an operator, a
+predicate, a comparison, or an absent/empty value is interpreted — and that rule
+is implemented **more than once**, by compilers or evaluators that share no code.
+Query filters, expression languages, permission predicates and serialization
+formats all tend to grow this shape as a project adds backends.
+
+When it applies, the dispatch prompt carries an **explicit inventory of every
+implementing surface**, and requires the agent to give a verdict **for each one**
+in its PR body: **changed** / **already conformant** (with evidence) /
+**explicitly out of scope** (with a reason). A surface the PR never mentions is
+reviewed as one that was *missed*, not as one that needed no change.
+
+Why this is worth a standing clause instead of case-by-case judgment: the failure
+it prevents is not "implemented it wrong", it is **"implemented part of it and
+believed the work was finished"**. That failure is invisible at review time — the
+diff is correct and the tests are green, while the untouched surfaces keep
+answering the old way until a user hits the divergence. The cost scales with the
+count: a semantics carried by N implementations makes every ruling an N-part
+task, and the parts that get skipped are exactly the ones nobody wrote down.
+
+Two disciplines keep the inventory trustworthy:
+
+- **The inventory is maintained by PR.** Whichever change adds, retires or merges
+  an implementing surface updates the list in that same PR. An inventory going
+  stale is inevitable; an inventory with **no owner** is the defect.
+- **Re-verify before pasting.** Paths move and surfaces get added between
+  rulings, so re-derive the list from the code at dispatch time rather than
+  copying the previous prompt. An inventory that was right last month and is
+  pasted unchecked reintroduces the very miss it exists to prevent.
+
+Surfaces that are **deliberately frozen** (deprecated backends, formats kept only
+for compatibility) stay in the inventory. Their verdict is "out of scope —
+frozen", recorded rather than silently absent: a reader cannot otherwise tell a
+frozen surface from a forgotten one.
+
 #### Dispatch backends
 
 **`mode:subagent` (default).** Sub-agents inside the PM's own session. Reports
@@ -376,6 +482,50 @@ has reported, or a dispatch has been silent for over ~2 h (count it as
 `blocked` and move on).
 
 **Never treat the absence of a report as success.**
+
+**Write every check-in as criteria, never as a conclusion — scheduled text
+arrives in a future you cannot see.** A check-in armed now is read by a session
+that has lost your context, against a world that has moved on. Measured three
+times in one day on this loop: a scheduled message **still delivered after its
+timer had been cancelled**, carrying text two rounds out of date. One of them
+read "no branch and no report ⇒ judge the agent unreliable and dispatch a fresh
+one"; by delivery time that agent had opened a PR which was already reviewed and
+accepted, so executing the text verbatim would have pushed a duplicate agent
+into a live, finished worktree — the exact collision the claim protocol exists to
+prevent, arriving through the automation instead of through a racing PM. Two
+rules make stale text harmless:
+
+- **Open every check-in with "idempotent — re-read the state before acting"**,
+  and include no imperative that can be executed without that re-read. Once a
+  timer fires nothing on the platform side re-checks its premise for you;
+  putting the re-read into the text is the only mechanism that can expire an
+  obsolete instruction.
+- **State criteria ("if X then Y"), never conclusions ("now do Y").** A
+  criterion re-derives itself on arrival; a conclusion has already discarded the
+  reading it came from. "⇒ re-dispatch", "⇒ judge it unreliable" are the shape to
+  avoid — correct when written, not necessarily correct when delivered. This
+  holds for timers you believe you cancelled too: cancellation is not a guarantee
+  of non-delivery.
+
+**A silence threshold is a collection boundary, not a verdict of death.** The
+~2 h above means "stop waiting this round"; it does not mean the agent is gone,
+and the two must not be swapped, because their costs differ by an order of
+magnitude — waiting one more round costs a round, while concluding death costs a
+**duplicate dispatch into a worktree that may still be live**. Before concluding
+that a dispatched agent is dead, require one of: a direct status query answered
+in a way that shows it is dead, the host reporting the session stopped, or
+**silence past a completion-time baseline you have actually measured**.
+
+Measure that baseline for your own project — dispatch to first pushed branch or
+PR, over a handful of comparable cards — and treat it as local. Two same-day
+samples from this repo's loop show why no single number can be inherited: four
+text-only documentation cards landed at 93 / 96 / ~95 / ~110 min, while four
+mixed cards from the same day spanned ~64 min to ~2 h 50 min (the two long ones
+waiting on CI). Nine cards, one day, one toolchain, a spread from about an hour
+to nearly three. **Silence inside the baseline is not evidence**, and a check-in
+threshold having passed twice is evidence only that time passed. This is the
+same failure as inferring an abort from symptoms: until you know the baseline,
+"working normally, slowly" and "dead" produce identical readings.
 
 ### 7. Review each report
 

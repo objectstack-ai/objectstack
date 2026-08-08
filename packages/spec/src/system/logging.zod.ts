@@ -32,7 +32,7 @@ export const LogLevel = z.enum([
   'silent'
 ]).describe('Log severity level');
 
-export type LogLevel = z.infer<typeof LogLevel>;
+export type LogLevel = z.input<typeof LogLevel>;
 
 /**
  * Log Format Enum
@@ -43,7 +43,7 @@ export const LogFormat = z.enum([
   'pretty'  // Colored human-readable output for CLI/console
 ]).describe('Log output format');
 
-export type LogFormat = z.infer<typeof LogFormat>;
+export type LogFormat = z.input<typeof LogFormat>;
 
 /**
  * Logger Configuration Schema
@@ -91,7 +91,7 @@ export const LoggerConfigSchema = lazySchema(() => z.object({
   }).optional()
 }));
 
-export type LoggerConfig = z.infer<typeof LoggerConfigSchema>;
+export type LoggerConfig = z.input<typeof LoggerConfigSchema>;
 /** Post-parse shape of {@link LoggerConfig} — defaults applied, transforms run (ADR-0122). */
 export type LoggerConfigParsed = z.infer<typeof LoggerConfigSchema>;
 
@@ -115,7 +115,7 @@ export const LogEntrySchema = lazySchema(() => z.object({
   component: z.string().optional().describe('Component name (e.g. plugin id)'),
 }));
 
-export type LogEntry = z.infer<typeof LogEntrySchema>;
+export type LogEntry = z.input<typeof LogEntrySchema>;
 
 // ============================================================================
 // Extended Logging Protocol (enterprise features)
@@ -134,7 +134,7 @@ export const ExtendedLogLevel = z.enum([
   'fatal',    // Fatal errors causing shutdown
 ]).describe('Extended log severity level');
 
-export type ExtendedLogLevel = z.infer<typeof ExtendedLogLevel>;
+export type ExtendedLogLevel = z.input<typeof ExtendedLogLevel>;
 
 /**
  * Log Destination Type Enum
@@ -157,7 +157,7 @@ export const LogDestinationType = z.enum([
   'custom',         // Custom implementation
 ]).describe('Log destination type');
 
-export type LogDestinationType = z.infer<typeof LogDestinationType>;
+export type LogDestinationType = z.input<typeof LogDestinationType>;
 
 /**
  * Console Destination Configuration
@@ -179,7 +179,7 @@ export const ConsoleDestinationConfigSchema = lazySchema(() => z.object({
   prettyPrint: z.boolean().optional().default(false),
 }).describe('Console destination configuration'));
 
-export type ConsoleDestinationConfig = z.infer<typeof ConsoleDestinationConfigSchema>;
+export type ConsoleDestinationConfig = z.input<typeof ConsoleDestinationConfigSchema>;
 /** Post-parse shape of {@link ConsoleDestinationConfig} — defaults applied, transforms run (ADR-0122). */
 export type ConsoleDestinationConfigParsed = z.infer<typeof ConsoleDestinationConfigSchema>;
 
@@ -228,7 +228,7 @@ export const FileDestinationConfigSchema = lazySchema(() => z.object({
   append: z.boolean().optional().default(true),
 }).describe('File destination configuration'));
 
-export type FileDestinationConfig = z.infer<typeof FileDestinationConfigSchema>;
+export type FileDestinationConfig = z.input<typeof FileDestinationConfigSchema>;
 /** Post-parse shape of {@link FileDestinationConfig} — defaults applied, transforms run (ADR-0122). */
 export type FileDestinationConfigParsed = z.infer<typeof FileDestinationConfigSchema>;
 
@@ -304,7 +304,7 @@ export const HttpDestinationConfigSchema = lazySchema(() => z.object({
   timeout: z.number().int().positive().optional().default(30000),
 }).describe('HTTP destination configuration'));
 
-export type HttpDestinationConfig = z.infer<typeof HttpDestinationConfigSchema>;
+export type HttpDestinationConfig = z.input<typeof HttpDestinationConfigSchema>;
 /** Post-parse shape of {@link HttpDestinationConfig} — defaults applied, transforms run (ADR-0122). */
 export type HttpDestinationConfigParsed = z.infer<typeof HttpDestinationConfigSchema>;
 
@@ -346,7 +346,7 @@ export const ExternalServiceDestinationConfigSchema = lazySchema(() => z.object(
   config: z.record(z.string(), z.unknown()).optional(),
 }).describe('External service destination configuration'));
 
-export type ExternalServiceDestinationConfig = z.infer<typeof ExternalServiceDestinationConfigSchema>;
+export type ExternalServiceDestinationConfig = z.input<typeof ExternalServiceDestinationConfigSchema>;
 
 /**
  * Log Destination Schema
@@ -406,7 +406,7 @@ export const LogDestinationSchema = lazySchema(() => z.object({
   filterId: z.string().optional().describe('Filter function identifier'),
 }).describe('Log destination configuration'));
 
-export type LogDestination = z.infer<typeof LogDestinationSchema>;
+export type LogDestination = z.input<typeof LogDestinationSchema>;
 /** Post-parse shape of {@link LogDestination} — defaults applied, transforms run (ADR-0122). */
 export type LogDestinationParsed = z.infer<typeof LogDestinationSchema>;
 
@@ -460,7 +460,7 @@ export const LogEnrichmentConfigSchema = lazySchema(() => z.object({
   addCorrelationIds: z.boolean().optional().default(true),
 }).describe('Log enrichment configuration'));
 
-export type LogEnrichmentConfig = z.infer<typeof LogEnrichmentConfigSchema>;
+export type LogEnrichmentConfig = z.input<typeof LogEnrichmentConfigSchema>;
 /** Post-parse shape of {@link LogEnrichmentConfig} — defaults applied, transforms run (ADR-0122). */
 export type LogEnrichmentConfigParsed = z.infer<typeof LogEnrichmentConfigSchema>;
 
@@ -566,7 +566,7 @@ export const StructuredLogEntrySchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Additional metadata'),
 }).describe('Structured log entry'));
 
-export type StructuredLogEntry = z.infer<typeof StructuredLogEntrySchema>;
+export type StructuredLogEntry = z.input<typeof StructuredLogEntrySchema>;
 
 /**
  * Logging Configuration Schema
@@ -693,6 +693,6 @@ export const LoggingConfigSchema = lazySchema(() => z.object({
   }).optional(),
 }).describe('Logging configuration'));
 
-export type LoggingConfig = z.infer<typeof LoggingConfigSchema>;
+export type LoggingConfig = z.input<typeof LoggingConfigSchema>;
 /** Post-parse shape of {@link LoggingConfig} — defaults applied, transforms run (ADR-0122). */
 export type LoggingConfigParsed = z.infer<typeof LoggingConfigSchema>;

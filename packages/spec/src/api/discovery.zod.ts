@@ -26,7 +26,7 @@ export const ServiceStatus = z.enum([
   + 'unavailable = not installed, degraded = partial, stub = placeholder that returns 501'
 );
 
-export type ServiceStatus = z.infer<typeof ServiceStatus>;
+export type ServiceStatus = z.input<typeof ServiceStatus>;
 
 /**
  * Service Status in Discovery Response
@@ -107,7 +107,7 @@ export const ServiceSelfInfoSchema = lazySchema(() => z.object({
   message: z.string().optional().describe('Human-readable explanation, e.g. what to install for the full implementation'),
 }));
 
-export type ServiceSelfInfo = z.infer<typeof ServiceSelfInfoSchema>;
+export type ServiceSelfInfo = z.input<typeof ServiceSelfInfoSchema>;
 
 /**
  * Reads the standardized self-description marker off a registered service
@@ -281,7 +281,7 @@ export const DiscoveryEnvironmentSchema = lazySchema(() => z
     + 'environment (that is `sys_environment` / EnvironmentTypeSchema, a richer 7-member taxonomy).'
   ));
 
-export type DiscoveryEnvironment = z.infer<typeof DiscoveryEnvironmentSchema>;
+export type DiscoveryEnvironment = z.input<typeof DiscoveryEnvironmentSchema>;
 
 /**
  * `NODE_ENV` spellings accepted for each declared discovery environment (#4828).
@@ -462,7 +462,7 @@ export const WellKnownCapabilitiesSchema = lazySchema(() => z.object({
   i18n: z.boolean().describe('Whether the backend serves the i18n surface (translations, locale negotiation)'),
 }).describe('Well-known capability flags for frontend intelligent adaptation'));
 
-export type WellKnownCapabilities = z.infer<typeof WellKnownCapabilitiesSchema>;
+export type WellKnownCapabilities = z.input<typeof WellKnownCapabilitiesSchema>;
 
 /**
  * The capability vocabulary as a key list, derived from
@@ -494,7 +494,7 @@ export const CapabilityDescriptorSchema = lazySchema(() => z.object({
     .describe('Human-readable capability description'),
 }));
 
-export type CapabilityDescriptor = z.infer<typeof CapabilityDescriptorSchema>;
+export type CapabilityDescriptor = z.input<typeof CapabilityDescriptorSchema>;
 
 /**
  * `capabilities` as a CLOSED object over the vocabulary — one required entry
@@ -612,9 +612,9 @@ export const DiscoverySchema = lazySchema(() => z.object({
   metadata: z.record(z.string(), z.unknown()).optional().describe('Custom metadata key-value pairs for extensibility'),
 }));
 
-export type DiscoveryResponse = z.infer<typeof DiscoverySchema>;
-export type ApiRoutes = z.infer<typeof ApiRoutesSchema>;
-export type ServiceInfo = z.infer<typeof ServiceInfoSchema>;
+export type DiscoveryResponse = z.input<typeof DiscoverySchema>;
+export type ApiRoutes = z.input<typeof ApiRoutesSchema>;
+export type ServiceInfo = z.input<typeof ServiceInfoSchema>;
 
 // ============================================================================
 // Route Health Report
@@ -648,7 +648,7 @@ export const RouteHealthEntrySchema = lazySchema(() => z.object({
   message: z.string().optional().describe('Diagnostic message'),
 }));
 
-export type RouteHealthEntry = z.infer<typeof RouteHealthEntrySchema>;
+export type RouteHealthEntry = z.input<typeof RouteHealthEntrySchema>;
 
 /**
  * Route Health Report Schema
@@ -672,4 +672,4 @@ export const RouteHealthReportSchema = lazySchema(() => z.object({
   routes: z.array(RouteHealthEntrySchema).describe('Per-route health entries'),
 }));
 
-export type RouteHealthReport = z.infer<typeof RouteHealthReportSchema>;
+export type RouteHealthReport = z.input<typeof RouteHealthReportSchema>;

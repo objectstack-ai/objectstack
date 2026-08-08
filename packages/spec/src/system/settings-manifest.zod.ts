@@ -57,7 +57,7 @@ export const SpecifierType = z.enum([
   // Actions
   'action_button',  // calls handler (test connection / rotate / etc.)
 ]);
-export type SpecifierType = z.infer<typeof SpecifierType>;
+export type SpecifierType = z.input<typeof SpecifierType>;
 
 const SPECIFIERS_REQUIRING_KEY: ReadonlySet<SpecifierType> = new Set([
   'text', 'textarea', 'password', 'email', 'url', 'phone',
@@ -75,7 +75,7 @@ export const SpecifierOptionSchema = lazySchema(() => z.object({
   description: z.string().optional().describe('Optional helper text'),
   icon: z.string().optional().describe('Optional Lucide icon name'),
 }));
-export type SpecifierOption = z.infer<typeof SpecifierOptionSchema>;
+export type SpecifierOption = z.input<typeof SpecifierOptionSchema>;
 
 /**
  * Action handler descriptor for `action_button` specifiers.
@@ -107,7 +107,7 @@ export const SpecifierHandlerSchema = lazySchema(() => z.discriminatedUnion('kin
     target: z.enum(['_self', '_blank']).default('_self'),
   }),
 ]));
-export type SpecifierHandler = z.infer<typeof SpecifierHandlerSchema>;
+export type SpecifierHandler = z.input<typeof SpecifierHandlerSchema>;
 /** Post-parse shape of {@link SpecifierHandler} — defaults applied, transforms run (ADR-0122). */
 export type SpecifierHandlerParsed = z.infer<typeof SpecifierHandlerSchema>;
 
@@ -132,7 +132,7 @@ export type SpecifierHandlerParsed = z.infer<typeof SpecifierHandlerSchema>;
  *               to ctx.user_id.
  */
 export const SpecifierScopeSchema = z.enum(['global', 'tenant', 'user']);
-export type SpecifierScope = z.infer<typeof SpecifierScopeSchema>;
+export type SpecifierScope = z.input<typeof SpecifierScopeSchema>;
 
 // ---------------------------------------------------------------------------
 // Specifier schema (the unit of UI in a manifest)
@@ -329,7 +329,7 @@ export const SpecifierSchema = lazySchema(() => z.object({
     });
   }
 }));
-export type Specifier = z.infer<typeof SpecifierSchema>;
+export type Specifier = z.input<typeof SpecifierSchema>;
 /** Post-parse shape of {@link Specifier} — defaults applied, transforms run (ADR-0122). */
 export type SpecifierParsed = z.infer<typeof SpecifierSchema>;
 
@@ -445,7 +445,7 @@ export const SettingsManifestSchema = lazySchema(() => z.object({
     }
   });
 }));
-export type SettingsManifest = z.infer<typeof SettingsManifestSchema>;
+export type SettingsManifest = z.input<typeof SettingsManifestSchema>;
 /** Post-parse shape of {@link SettingsManifest} — defaults applied, transforms run (ADR-0122). */
 export type SettingsManifestParsed = z.infer<typeof SettingsManifestSchema>;
 
@@ -513,7 +513,7 @@ export const SettingsNamespacePayloadSchema = lazySchema(() => z.object({
   manifest: SettingsManifestSchema,
   values: z.record(z.string(), ResolvedSettingValueSchema).describe('Effective values keyed by specifier.key'),
 }));
-export type SettingsNamespacePayload = z.infer<typeof SettingsNamespacePayloadSchema>;
+export type SettingsNamespacePayload = z.input<typeof SettingsNamespacePayloadSchema>;
 /** Post-parse shape of {@link SettingsNamespacePayload} — defaults applied, transforms run (ADR-0122). */
 export type SettingsNamespacePayloadParsed = z.infer<typeof SettingsNamespacePayloadSchema>;
 
@@ -527,4 +527,4 @@ export const SettingsActionResultSchema = lazySchema(() => z.object({
   severity: z.enum(['info', 'success', 'warning', 'error']).optional(),
   details: z.unknown().optional().describe('Optional structured detail (renderer-defined)'),
 }));
-export type SettingsActionResult = z.infer<typeof SettingsActionResultSchema>;
+export type SettingsActionResult = z.input<typeof SettingsActionResultSchema>;

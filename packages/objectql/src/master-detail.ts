@@ -26,7 +26,15 @@
  * a data-integrity lock depend on field ordering — PD #12's "declared, not
  * guessed". Such an object simply has no `parent` binding, which the build-time
  * gate in `@objectstack/lint` (`validate-expressions`) rejects at authoring
- * time and the write path treats as LOCKED rather than allowed.
+ * time — for `readonlyWhen` since #4889 and for `requiredWhen` since #4977.
+ *
+ * The two runtimes then part ways on the unbindable case, deliberately: an
+ * unbound `parent` leaves a `readonlyWhen` field LOCKED (#4889 — refusing to
+ * wave a declared lock through), while a `requiredWhen` stays fail-OPEN
+ * (#4977 — a 422 on a write whose header is merely unreadable was ruled too
+ * loud, and left to the next review of ADR-0058 D5). That asymmetry is why the
+ * build-time gate covers BOTH slots: it is the only thing standing between an
+ * unbindable `requiredWhen` and a requirement that enforces nothing in silence.
  */
 
 /** The child→master link: the FK field on the detail, and the master object. */

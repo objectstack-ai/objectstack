@@ -217,13 +217,39 @@ describe('[#5526] the SQL bind form converts only what a driver cannot bind', ()
     expect(toSqlBindValue([1, 'x'])).toBe('[1,"x"]');
   });
 
-  it('`undefined` in a comparand position is normalised to null at the leaf', () => {
-    // JSON has no `undefined`, so this is not an authorable shape (#5332's
-    // reading). It must not reach a driver as `undefined` — that is a bind error,
-    // not a predicate — and `null` is the fail-closed reading. Note the operator
-    // is still `equals`: only `=== null` is the null PREDICATE.
-    const node = normalizeAnalyticsFilterTree({ where: { code: { $eq: undefined } } });
-    expect(node).toEqual({ kind: 'leaf', member: 'code', operator: 'equals', values: [null] });
+  it('`undefined` in a comparand position is REFUSED at this door (#6386)', () => {
+    // ⚠️ RE-JUDGED, and the distinction matters because two rulings sit one line
+    // apart here. This case used to assert the leaf `{code equals [null]}`,
+    // reading `comparand()`'s `undefined` → `null` normalisation (#5526) through
+    // the door. #6386 pushed #6050's ruling B — an `undefined` where a comparand
+    // belongs is REFUSED — down to this door, so the observable answer moved.
+    //
+    // ⛔ What did NOT move: `comparand()` itself, byte for byte, and with it both
+    // rulings it carries — #5526's normalisation and #5332's "only `=== null` is
+    // the null PREDICATE". #6386 refuses an INPUT; it re-decides neither. The
+    // consequence is that the normalisation is now unreachable FROM THIS DOOR,
+    // which is a fact worth recording rather than a licence to delete it:
+    // retiring it is #5526's call on its own terms.
+    //
+    // The `null` half of the same position is untouched and asserted below, in
+    // the SQL/engine consumer blocks — that is the pair this file exists to keep
+    // apart, and they live one `===` apart in every polarity table in the module.
+    const refusal = (): unknown => normalizeAnalyticsFilterTree({ where: { code: { $eq: undefined } } });
+    expect(refusal).toThrowError(/comparand at "code"\.\$eq is undefined/);
+    // Still the module's one envelope (#5352), so the REST face answers 400.
+    try {
+      refusal();
+      expect.unreachable('an undefined comparand must not compile');
+    } catch (e) {
+      expect((e as { code?: unknown }).code).toBe('INVALID_FILTER');
+      expect((e as { status?: unknown }).status).toBe(400);
+    }
+    // The neighbouring `null` comparand keeps compiling, and to the null
+    // PREDICATE rather than a value comparison (#5332) — the row that proves the
+    // refusal did not widen to `== null`.
+    expect(normalizeAnalyticsFilterTree({ where: { code: { $eq: null } } })).toEqual({
+      kind: 'leaf', member: 'code', operator: 'notSet', values: [],
+    });
   });
 });
 
