@@ -156,14 +156,14 @@ describe('driver-sql — `limit: 0` returns no records on every door (#6577)', (
 
     it('agrees with `find()` on the same query — one driver, one answer', async () => {
       const viaWindow = await driver.findWithWindowFunctions(TABLE, { ...WINDOW, limit: 0 } as any, READ);
-      const viaFind = await driver.find(TABLE, { limit: 0 } as any, READ);
+      const viaFind = await driver.find(TABLE, { limit: 0 }, READ);
       expect(viaWindow).toHaveLength(viaFind.length);
     });
   });
 
   describe('analyzeQuery — the plan door explains the statement `find()` runs', () => {
     it('carries the same LIMIT `find()` emitted for `limit: 0`', async () => {
-      const emitted = await driver.statementFor(() => driver.find(TABLE, { limit: 0 } as any, READ));
+      const emitted = await driver.statementFor(() => driver.find(TABLE, { limit: 0 }, READ));
       const analyzed = await driver.analyzeQuery(TABLE, { limit: 0 } as any, READ);
 
       // `find()` adds its own ORDER BY tie-breaker, so the whole statements are

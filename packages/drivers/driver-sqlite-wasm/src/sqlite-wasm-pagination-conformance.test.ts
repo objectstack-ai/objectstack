@@ -30,6 +30,9 @@ import {
 } from '@objectstack/spec/data';
 import { SqliteWasmDriver } from './index.js';
 
+/** Shared read options — a named const so no call site casts its own (#4674). */
+const READ_OPTIONS = { bypassTenantAudit: true } as unknown as Parameters<SqliteWasmDriver['find']>[2];
+
 describe('driver-sqlite-wasm — paged reads are a partition of the result set', () => {
   let driver: SqliteWasmDriver;
 
@@ -117,7 +120,7 @@ describe('driver-sqlite-wasm — paged reads are a partition of the result set',
   describe('`limit: 0` returns no records', () => {
     for (const testCase of PAGINATION_ZERO_LIMIT_CASES) {
       it(testCase.name, async () => {
-        const rows = await driver.find('ticket', { ...testCase.query } as any, { bypassTenantAudit: true } as any);
+        const rows = await driver.find('ticket', { ...testCase.query }, READ_OPTIONS);
         expect(rows).toHaveLength(testCase.expectedRowCount);
       });
     }

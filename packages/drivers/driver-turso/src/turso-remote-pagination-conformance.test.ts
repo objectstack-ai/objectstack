@@ -64,7 +64,6 @@ import {
   PAGINATION_ZERO_LIMIT_CASES,
 } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
-import { RemoteTransport } from './remote-transport.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 
 const TICKET_OBJECT = {
@@ -230,6 +229,39 @@ describe('TursoDriver remote — paged reads are a partition of the result set',
    * 12, got a thrown error" — which reads as a pagination fault rather than as
    * a statement that never parsed.
    */
+  /**
+   * The SELECT this transport puts on the wire for `query`, read off a
+   * recording client rather than recompiled here — the same instrument
+   * `remote-pagination-tiebreaker.test.ts` uses, and for the same reason: a
+   * test that rebuilds the expected statement asserts only that the builder
+   * works, and stays green on the day `find()` stops calling it.
+   */
+  async function statementFor(query: Record<string, unknown>): Promise<{ sql: string; args: unknown[] }> {
+    const sent: Array<{ sql: string; args: unknown[] }> = [];
+    const recorder = makeLibsqlSqliteStub();
+    const client = {
+      execute: async (stmt: { sql: string; args?: unknown[] }) => {
+        sent.push({ sql: stmt.sql, args: stmt.args ?? [] });
+        return recorder.execute(stmt);
+      },
+      batch: async (stmts: Array<{ sql: string; args?: unknown[] }>) => {
+        for (const s of stmts) sent.push({ sql: s.sql, args: s.args ?? [] });
+        return Promise.all(stmts.map((s) => recorder.execute(s)));
+      },
+      close: () => recorder.close(),
+    };
+    const recording = new TursoDriver({ url: 'libsql://recorder.turso.io', client: client as never });
+    await recording.connect();
+    await recording.syncSchema(TICKET_OBJECT.name, TICKET_OBJECT);
+    sent.length = 0; // drop the DDL round-trip; only the read is under test
+    await recording.find('ticket', query);
+    await recording.disconnect();
+    recorder.close();
+    const reads = sent.filter((s) => /^\s*SELECT/i.test(s.sql));
+    expect(reads).toHaveLength(1);
+    return reads[0]!;
+  }
+
   describe('an offset with no limit still assembles a legal statement', () => {
     for (const offset of [0, 1, 5]) {
       it(`offset ${offset} alone does not throw a syntax error`, async () => {
@@ -238,15 +270,21 @@ describe('TursoDriver remote — paged reads are a partition of the result set',
       });
     }
 
-    it('agrees with what knex builds for the local transport — `LIMIT -1 OFFSET ?`', () => {
-      const built = new RemoteTransport().buildSelectSQL('ticket', { offset: 3 } as never);
-      expect(built.sql.toUpperCase()).toContain('LIMIT ? OFFSET ?');
-      expect(built.args).toEqual([-1, 3]);
+    it('sends what knex builds for the local transport — `LIMIT ? OFFSET ?` bound `[-1, 3]`', async () => {
+      const sent = await statementFor({ offset: 3 });
+      expect(sent.sql.toUpperCase()).toContain('LIMIT ? OFFSET ?');
+      expect(sent.args).toEqual([-1, 3]);
     });
 
-    it('still emits the caller\'s own limit when one was given — the sentinel is not a default', () => {
-      const built = new RemoteTransport().buildSelectSQL('ticket', { limit: 0, offset: 3 } as never);
-      expect(built.args).toEqual([0, 3]);
+    it("still sends the caller's own limit when one was given — the sentinel is not a default", async () => {
+      const sent = await statementFor({ limit: 0, offset: 3 });
+      expect(sent.args).toEqual([0, 3]);
+    });
+
+    it('adds no LIMIT at all when neither was given — the sentinel is not unconditional', async () => {
+      const sent = await statementFor({});
+      expect(sent.sql.toUpperCase()).not.toContain('LIMIT');
+      expect(sent.args).toEqual([]);
     });
   });
 });
