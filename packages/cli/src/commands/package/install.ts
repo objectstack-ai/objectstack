@@ -215,6 +215,41 @@ export default class PackageInstall extends Command {
       printKV('  Runtime',   runtime);
       if (data.installedAt) printKV('  Installed', String(data.installedAt));
       console.log('');
+      // ⚠️ This path is a DESCRIPTION OF THE DEFAULT CONVENTION, deliberately
+      // left as a literal — not a consumer restating a value it could have read
+      // (#6643, the sibling half of #5996). Do not "fix" it into a reference to
+      // `DEFAULT_INSTALLED_PACKAGES_DIR`. Four measured reasons, in order:
+      //
+      //   1. **The directory is on the REMOTE host.** Everything above this
+      //      line came back over HTTP from `runtime`; this command never
+      //      touches the target's disk. A constant resolved HERE describes the
+      //      machine typing the command, not the one that stored the manifest.
+      //   2. **The remote's directory is configurable, so the constant is only
+      //      its default.** `MarketplaceInstallLocalPlugin` builds its ledger as
+      //      `new LocalManifestSource(config.storageDir)` — the export is the
+      //      fallback that ctor applies when the host configured nothing.
+      //      Interpolating it would state a default as an observed fact.
+      //   3. **The response we just read does not carry the real answer.** The
+      //      POST returns `{ manifestId, version, versionId, installedAt,
+      //      hotLoaded, upgradedFrom, translationsLoaded, seeded, note }` — no
+      //      `storageDir`. The GET listing endpoint does carry one; this one
+      //      does not, and asking for it would be an extra round-trip (and a
+      //      new failure mode) bolted onto a success hint.
+      //   4. **Importing it would cost this command its independence.** Every
+      //      CLI reference to `@objectstack/cloud-connection` is a DYNAMIC load
+      //      behind `loadOptionalPackage()` (doctor.ts) or a guarded `import()`
+      //      (serve.ts), because the CLI must keep working where that package
+      //      is absent or unbuilt. A static import for one hint line would make
+      //      a pure-HTTP command fail at module load; a dynamic one needs a
+      //      literal fallback — the exact `??` Prime Directive #12 forbids and
+      //      #5996 deleted.
+      //
+      // So the divergence surface is accepted here, knowingly: if the constant
+      // ever changes value, this sentence goes stale and no gate will say so.
+      // The honest fix is upstream — the POST response carrying `storageDir`
+      // like its GET sibling — which would let this line quote the real remote
+      // directory. Tracked separately; `@objectstack/cloud-connection` is out
+      // of scope for #6643.
       console.log('  The manifest is cached under .objectstack/installed-packages/ on the');
       console.log('  runtime host and re-registers on every boot (survives restarts).');
     } catch (error) {
