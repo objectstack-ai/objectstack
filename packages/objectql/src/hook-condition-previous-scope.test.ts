@@ -367,7 +367,7 @@ describe('[#4784] transition condition over a real engine', () => {
     reads = stub.reads;
     engine.registerDriver(stub.driver, true);
     await engine.init();
-    engine.registry.registerObject(taskObject as any);
+    engine.registry.registerObject(taskObject);
 
     audited = [];
     warn = vi.fn();
@@ -470,7 +470,7 @@ describe('[#4784] a condition that never mentions `previous` costs zero extra fe
     const stub = makeStubDriver();
     engine.registerDriver(stub.driver, true);
     await engine.init();
-    engine.registry.registerObject(taskObject as any);
+    engine.registry.registerObject(taskObject);
     bindHooksToEngine(engine, hooks, {
       packageId: 'app:pin',
       logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
@@ -571,7 +571,7 @@ describe('[#5272] a single-record delete binds `previous` through the real engin
     const stub = makeStubDriver();
     engine.registerDriver(stub.driver, true);
     await engine.init();
-    engine.registry.registerObject(taskObject as any);
+    engine.registry.registerObject(taskObject);
     const warn = vi.fn();
     bindHooksToEngine(engine, hooks, {
       packageId: 'app:showcase',
