@@ -305,7 +305,7 @@ describe('os login --json — the declared NDJSON stream (#6531)', () => {
       expect(ok.stdout).not.toContain('ObjectStack Login');
       // The spinner's carriage returns and the `\x1b[K` erase would corrupt a
       // line-oriented reader even though they carry no visible text.
-      expect(ok.stdout).not.toMatch(/[\r]/);
+      expect(ok.stdout).not.toMatch(/[\r\u001b]/);
     });
   });
 
