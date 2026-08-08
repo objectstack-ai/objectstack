@@ -509,6 +509,55 @@ describe('Data actions, email, dataset query, external datasources (#3587 gap cl
         );
         for (let i = 1; i <= 4; i++) expect(fetchMock.mock.calls[i][1].method).toBe('POST');
     });
+
+    // [#6633] The three probe cases from the issue. Case A is the pin test
+    // above (unconnected ⇒ the `/api/v1` convention, byte-identical to the
+    // pre-#6633 hardcode). B and C cover the discovery-following half.
+    it('[#6633] discovery WITHOUT packages/datasources keys leaves the convention untouched (case B)', async () => {
+        const { client, fetchMock } = createMockClient({ tables: [] });
+        // A server rebased to /backend/api/v9 that does not advertise the two
+        // direct-mount keys — exactly what a pre-#6633 rest surface answers.
+        (client as any)['discoveryInfo'] = {
+            routes: { data: '/backend/api/v9/data', metadata: '/backend/api/v9/meta', ui: '/backend/api/v9/ui' },
+        };
+        await client.packages.list();
+        expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/api/v1/packages');
+        await client.datasources.external.listTables('pg_main');
+        expect(String(fetchMock.mock.calls[1][0])).toBe(
+            'http://localhost:3000/api/v1/datasources/pg_main/external/tables',
+        );
+    });
+
+    it('[#6633] BOTH packages.* and all five external.* follow advertised rebased routes (case C)', async () => {
+        const { client, fetchMock } = createMockClient({ tables: [] });
+        (client as any)['discoveryInfo'] = {
+            routes: {
+                data: '/backend/api/v9/data',
+                metadata: '/backend/api/v9/meta',
+                packages: '/backend/api/v9/packages',
+                datasources: '/backend/api/v9/datasources',
+            },
+        };
+
+        // packages.* — the mechanism that already existed, kept following.
+        await client.packages.list();
+        expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:3000/backend/api/v9/packages');
+
+        // external.* — the half that ignored discovery entirely before #6633.
+        // All five in ONE case so a half-fix (some methods still hard-coded)
+        // cannot stay green.
+        const base = 'http://localhost:3000/backend/api/v9/datasources/pg_main/external';
+        await client.datasources.external.listTables('pg_main', { schema: 'public' });
+        expect(String(fetchMock.mock.calls[1][0])).toBe(`${base}/tables?schema=public`);
+        await client.datasources.external.draft('pg_main', 'customers');
+        expect(String(fetchMock.mock.calls[2][0])).toBe(`${base}/tables/customers/draft`);
+        await client.datasources.external.import('pg_main', 'customers');
+        expect(String(fetchMock.mock.calls[3][0])).toBe(`${base}/tables/customers/import`);
+        await client.datasources.external.refreshCatalog('pg_main');
+        expect(String(fetchMock.mock.calls[4][0])).toBe(`${base}/refresh-catalog`);
+        await client.datasources.external.validate('pg_main');
+        expect(String(fetchMock.mock.calls[5][0])).toBe(`${base}/validate`);
+    });
 });
 
 describe('Approvals namespace (ADR-0019)', () => {
