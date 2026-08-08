@@ -987,6 +987,194 @@ function list(cwd, head) {
 }
 
 // ---------------------------------------------------------------------------
+// `--audit-stock` -- the ONE-OFF backfill audit (#6350)
+//
+// ## What this is, and what it is deliberately NOT
+//
+// The gate above is FORWARD-ONLY: it judges the PR's own diff, for the #6129
+// reason its sibling `check-empty-changeset.mjs` documents at length. That
+// direction is correct and this mode does not overturn it -- judging the stock on
+// every PR would turn the whole repo red on adoption day and would hold the
+// current author answerable for changesets that landed on main months before their
+// branch existed.
+//
+// The cost of forward-only is that the STOCK was never compared even once. At the
+// time #6350 was filed the v17 train carried 227 declared-breaking changesets, none
+// of which any version of this logic had ever looked at, and hand-sampling had
+// already turned up 2 suspected ledger misses of exactly the #6011 shape. This mode
+// runs the gate's OWN judging functions -- `breakingDeclaration`, `readDisposition`,
+// `findMigrationPrescription`, `workspacePackagesAt` -- once over that stock, so the
+// audit cannot drift from the gate: there is no second copy of the logic here, only
+// a different population fed to it.
+//
+// It is NOT wired into CI, and must not be. `package.json`'s
+// `check:adr-0087-registration` and the Check Changeset workflow both invoke the
+// gate with no flag; this mode is reachable only by typing it. It is `--list`'s
+// neighbour -- a standing audit surface an operator runs on purpose -- not a
+// second gate.
+//
+// ## How it narrows 238 rows to a hand-checkable residue
+//
+// A stock changeset carries no disposition marker (nothing ever asked it for one),
+// so replaying the gate verbatim would report every one of them and say nothing.
+// What is informative is which disposition the changeset WOULD have been ENTITLED
+// to, judged mechanically:
+//
+//   answered              -- it already carries a marker (landed after the gate).
+//   exempt-unpublished    -- every package it bumps is `private: true`, so nothing
+//                            it breaks reaches a consumer. Fully mechanical.
+//   exempt-no-prescription-- its body frames no rewrite, so the catch-all is open
+//                            to it. This is the gate's own contradiction check,
+//                            run in the direction that grants rather than refuses.
+//   RESIDUE               -- a published break whose body ships instructions for
+//                            rewriting a consumer's code. Both mechanical
+//                            exemptions are closed to it, so the only honest
+//                            dispositions left are `registered` /
+//                            `already-registered` -- and BOTH require a ledger
+//                            entry that covers the surface. Whether one does is a
+//                            judgment about meaning, which no script makes.
+//
+// For each residue row the audit adds the one further MECHANICAL fact that
+// separates "the author registered it" from "nobody ever asked": did any commit
+// that touched this changeset also touch an ADR-0087 registry source? That is the
+// signal #6350's hand-sampling used, computed for the whole population instead of
+// three spot checks.
+//
+// The output is a worklist for a human, not a verdict. It exits 0 whatever it
+// finds -- a non-zero exit here would be a gate, and this is not one.
+// ---------------------------------------------------------------------------
+
+/**
+ * Did any commit that touched `path` also touch an ADR-0087 registry source?
+ *
+ * Every commit in the changeset's history is considered, not just the one that
+ * added it: a changeset can be edited into breaking after the fact, and the
+ * registration may ride either commit. Cheap because it only runs on the residue.
+ *
+ * ⚠️ Unusable in a SHALLOW clone, and the failure is silent-and-plausible rather
+ * than loud, so it is refused rather than approximated. In a graft-truncated
+ * history every pre-graft file reads as "added by the graft commit", and that
+ * commit contains the whole tree -- including both ledger sources. Measured on the
+ * default CI-shaped checkout of this repo (104 commits, grafted at 2bc187641,
+ * 5978 files in that one commit): 91 of 92 residue rows came back "the author
+ * registered something", every one of them wrong, and the answer looks entirely
+ * reasonable on the page. `git fetch --unshallow` (a `--filter=blob:none` partial
+ * fetch is enough -- this reads trees, never blobs) is the fix.
+ *
+ * @returns {{ available: boolean, shas: string[] }}
+ */
+function ledgerTouchingCommits(path, head, cwd) {
+  let shas;
+  try {
+    shas = git(['log', '--format=%h', head, '--', path], cwd).split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch { return { available: true, shas: [] }; }
+  const hits = [];
+  for (const sha of shas) {
+    let names;
+    try { names = git(['show', '--name-only', '--format=', sha], cwd); } catch { continue; }
+    if (LEDGER_SOURCES.some((src) => names.includes(src))) hits.push(sha);
+  }
+  return { available: true, shas: hits };
+}
+
+/** Is this checkout shallow? A shallow history makes the ledger-touch signal a lie. */
+function isShallow(cwd) {
+  try { return git(['rev-parse', '--is-shallow-repository'], cwd).trim() === 'true'; } catch { return false; }
+}
+
+/**
+ * Classify one stock changeset by which disposition it would be ENTITLED to.
+ *
+ * Exported so the self-test can pin it: this classifier decides which rows a human
+ * ever looks at, so a silent widening of `exempt-*` would shrink the worklist
+ * invisibly -- the #4690 failure mode wearing an audit's clothes.
+ *
+ * @param {ReturnType<typeof parseChangeset>} parsed
+ * @param {Map<string, {private: boolean, file: string}>} pkgs
+ * @returns {{ klass: 'answered'|'exempt-unpublished'|'exempt-no-prescription'|'residue', detail?: string, prescription?: ReturnType<typeof findMigrationPrescription> }}
+ */
+export function classifyStockChangeset(parsed, pkgs) {
+  const d = readDisposition(parsed.body);
+  if (d.ok) {
+    return { klass: 'answered', detail: d.verdict === 'registered' ? `registered ${d.ids.join(',')}` : `not-required (${d.category})` };
+  }
+  // `unpublished` first: a private package ships nothing, so the prescription in
+  // its body reaches no consumer of a published artifact and the question the
+  // ledger answers does not arise. A changeset declaring NO package cannot claim
+  // it -- the gate refuses that too ("nothing to verify").
+  if (parsed.bumps.length > 0 && parsed.bumps.every((b) => pkgs.get(b.pkg)?.private === true)) {
+    return { klass: 'exempt-unpublished', detail: parsed.bumps.map((b) => b.pkg).join(', ') };
+  }
+  const prescription = findMigrationPrescription(parsed.body);
+  if (!prescription) return { klass: 'exempt-no-prescription' };
+  return { klass: 'residue', prescription };
+}
+
+/** `--audit-stock`: run the gate's judging logic once over the whole stock (#6350). */
+function auditStock(cwd, head) {
+  const stock = changesetsAt(head, cwd);
+  const texts = showManyOrNull(head, stock, cwd);
+  const pkgs = workspacePackagesAt(head, cwd);
+
+  const buckets = { answered: [], 'exempt-unpublished': [], 'exempt-no-prescription': [], residue: [] };
+  let breaking = 0;
+  for (const path of stock) {
+    const text = texts.get(path);
+    if (text === undefined) continue;
+    const parsed = parseChangeset(text);
+    const decl = breakingDeclaration(parsed);
+    if (!decl.breaking) continue;
+    breaking++;
+    const c = classifyStockChangeset(parsed, pkgs);
+    buckets[c.klass].push({ path, signals: decl.signals.join('+'), ...c });
+  }
+
+  console.log(`ADR-0087 stock backfill audit (#6350) -- ${stock.length} changeset(s) in stock, ${breaking} declared breaking.\n`);
+  for (const [klass, label] of [
+    ['answered', 'ALREADY ANSWERED -- carries an adr-0087 marker (landed after the gate)'],
+    ['exempt-unpublished', 'EXEMPT (unpublished) -- every bumped package is private; nothing ships'],
+    ['exempt-no-prescription', 'EXEMPT (no-migration-prescription) -- the body frames no rewrite'],
+  ]) {
+    console.log(`${label}: ${buckets[klass].length}`);
+    for (const r of buckets[klass]) {
+      if (klass !== 'exempt-no-prescription') console.log(`    ${r.path}${r.detail ? `  [${r.detail}]` : ''}`);
+    }
+    console.log('');
+  }
+
+  console.log(`RESIDUE -- published break + migration prescription, so only \`registered\` /`);
+  console.log(`\`already-registered\` remain, and both need a ledger entry: ${buckets.residue.length}\n`);
+  const shallow = isShallow(cwd);
+  if (shallow) {
+    console.log(
+      '  ⚠️  SHALLOW CLONE -- the ledger-touch signal is SUPPRESSED, not approximated. Every pre-graft\n' +
+      '      file reads as "added by the graft commit", which carries the whole tree including both\n' +
+      '      ledger sources, so the signal would report a plausible-looking "registered" for almost\n' +
+      '      every row and be wrong on almost every row. Run `git fetch --unshallow --filter=blob:none`\n' +
+      '      (trees are enough; no blobs are read) and re-run.\n',
+    );
+  }
+  for (const r of buckets.residue) {
+    const touching = shallow ? null : ledgerTouchingCommits(r.path, head, cwd);
+    const mark = touching === null ? '?' : touching.shas.length ? '~' : '!';
+    console.log(`  ${mark} ${r.path}  [${r.signals}]`);
+    console.log(`      prescription (${r.prescription.branch}): ${r.prescription.line.slice(0, 120)}`);
+    if (touching === null) {
+      console.log('      ledger-touch: UNAVAILABLE (shallow clone)');
+    } else if (touching.shas.length) {
+      console.log(`      ledger touched by: ${touching.shas.join(', ')} -- the author did register something; check it COVERS this surface`);
+    } else {
+      console.log('      ledger NEVER touched by any commit that touched this changeset -- the #6011 shape');
+    }
+  }
+  console.log(
+    '\nThis is a WORKLIST, not a verdict: `!` rows are candidates for a missing registration, and only a\n' +
+    'reader deciding what the surface means can say whether one is owed. This mode exits 0 whatever it\n' +
+    'finds -- it audits stock, which the gate deliberately never does (#6129).',
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Self-test -- pins the RED paths so the gate cannot rot into a no-op.
 //
 // Real temp git repositories driven through the SAME exported scan()/assertInputs(),
@@ -1321,6 +1509,44 @@ function selfTest() {
   assert(findMigrationPrescription('### 迁移:FROM → TO\n')?.branch === 'from-to-label', 'P20: the placeholder label reports the label branch');
   assert(findMigrationPrescription('nothing here\n') === null, 'P21: a body with no prescription reports null, not a shrug');
 
+  // ---- S1-S5: the `--audit-stock` classifier (#6350) ------------------------
+  //
+  // The stock audit's classifier decides which rows a human ever reads, so a
+  // silent widening of either `exempt-*` arm shrinks the worklist invisibly --
+  // #4690's failure mode wearing an audit's clothes. These pin all four arms plus
+  // the one precedence rule between them. They live in the self-test (which CI
+  // runs) even though the audit itself is operator-invoked, because the classifier
+  // reuses the gate's judging functions and would rot with them.
+  {
+    const PKGS = new Map([
+      ['@objectstack/spec', { private: false, file: 'packages/spec/package.json' }],
+      ['@objectstack/example-showcase', { private: true, file: 'examples/showcase/package.json' }],
+    ]);
+    const cls = (text) => classifyStockChangeset(parseChangeset(text), PKGS).klass;
+    const PRESCRIPTION = '**BREAKING** x\n\n## 迁移\n\n- `a.b` → `a.c`\n';
+    assert(
+      cls(CS({ body: `${PRESCRIPTION}\n<!-- adr-0087: not-required (unpublished) whatever it says, a marker means the question was answered -->\n` })) === 'answered',
+      'S1: a changeset carrying a parseable marker is ANSWERED, whatever else it contains',
+    );
+    assert(
+      cls(CS({ bumps: [['@objectstack/example-showcase', 'major']], body: PRESCRIPTION })) === 'exempt-unpublished',
+      'S2: an all-private bump is exempt even carrying a prescription -- nothing it breaks ships',
+    );
+    assert(
+      cls(CS({ body: '**BREAKING** an internal error string changed; no key or symbol moves\n' })) === 'exempt-no-prescription',
+      'S3: a published break that frames no rewrite is exempt',
+    );
+    assert(cls(CS({ body: PRESCRIPTION })) === 'residue', 'S4: THE #6011 SHAPE -- published break + prescription -- is RESIDUE');
+    assert(
+      cls(`---\n---\n\n${PRESCRIPTION}`) === 'residue',
+      'S5: a changeset declaring NO package cannot buy the unpublished exemption (the gate refuses it too)',
+    );
+    assert(
+      cls(CS({ bumps: [['@objectstack/spec', 'major'], ['@objectstack/example-showcase', 'major']], body: PRESCRIPTION })) === 'residue',
+      'S6: ONE published package among the bumps is enough to close the unpublished exemption',
+    );
+  }
+
   assert(breakingDeclaration(parseChangeset(CS({ body: 'feat(spec)!: x\n' }))).breaking, 'P6: a conventional-commit bang is a declaration');
   assert(!breakingDeclaration(parseChangeset(CS({ bumps: [['a', 'patch']], body: 'plain\n' }))).breaking, 'P7: a plain patch is not');
   assert(extractIds("  id: 'object-titleFormat-to-nameField',\n").length === 1, 'P8: an id with a capital letter must be extracted');
@@ -1349,6 +1575,8 @@ if (argv.includes('--self-test')) {
   selfTest();
 } else if (argv.includes('--list')) {
   list(REPO_ROOT, 'HEAD');
+} else if (argv.includes('--audit-stock')) {
+  auditStock(REPO_ROOT, readFlag('--head') ?? 'HEAD');
 } else {
   const head = readFlag('--head') ?? 'HEAD';
   const requested = readFlag('--base');
