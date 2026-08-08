@@ -3056,9 +3056,39 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Bootstrap helper: scan the data table for the highest numeric suffix
-   * matching `prefix` (optionally scoped to a tenant). Used the first time
-   * a sequence row is created so legacy/seeded data continues monotonically.
+   * Bootstrap helper: scan the data table for the highest counter value among
+   * the values matching `prefix` (optionally scoped to a tenant). Used the first
+   * time a sequence row is created so legacy/seeded data continues monotonically.
+   *
+   * # Where the counter sits in a stored value (#6468)
+   *
+   * `renderAutonumber` composes `prefix + zero-padded(seq) + suffix`, so a format
+   * with tokens AFTER the `{0..0}` slot (`{000}-{YYYY}` → `001-2026`) does not
+   * end in the counter. Concatenating every digit of the tail read that as
+   * `12026` against a true counter of `1`, and the engine's own fallback seeding
+   * read the same row as `2026` — two different wrong answers for one dataset,
+   * so the issued band depended on which driver ran.
+   *
+   * `prefix` and `suffix` are `renderAutonumber`'s own output, computed by the
+   * caller and passed down: this driver derives no format understanding of its
+   * own, and the engine's `seedAutonumber` applies the identical rule to the
+   * identical two strings.
+   *
+   *   - **Either declared ⇒ ANCHORED**: the counter is the digit run at the
+   *     START of what follows the prefix, after removing the declared suffix
+   *     when the row carries it.
+   *   - **Neither declared ⇒ UNANCHORED**: the legacy reading (every digit in
+   *     the value, concatenated) is kept byte-for-byte.
+   *
+   * ## Why the suffix is NOT pushed into the LIKE
+   *
+   * `like 'prefix%suffix'` looks tempting and is wrong: the counter scope is the
+   * rendered PREFIX, so `{000}-{YYYY}` keeps ONE counter across years while its
+   * suffix renders `-2025` on last year's rows. Filtering on the current
+   * suffix would drop exactly those rows and seed BELOW the real max — the
+   * duplicate-record-number harm, self-inflicted. The predicate therefore stays
+   * `prefix%` and the suffix is applied per row, where a non-match simply means
+   * "different suffix, same counter".
    */
   protected async scanMaxNumericTail(
     queryRunner: Knex | Knex.Transaction,
@@ -3067,6 +3097,7 @@ export class SqlDriver implements IDataDriver {
     prefix: string,
     tenantField: string | null,
     tenantId: string | null,
+    suffix = '',
   ): Promise<number> {
     const escapedPrefix = prefix.replace(/([\\%_])/g, '\\$1');
     let builder = queryRunner(tableName).select(field).where(field, 'like', `${escapedPrefix}%`).whereNotNull(field);
@@ -3075,11 +3106,25 @@ export class SqlDriver implements IDataDriver {
     }
     const rows = await builder;
     let maxN = 0;
+    const anchored = prefix !== '' || suffix !== '';
     for (const r of rows as any[]) {
       const v: string = (r as any)[field];
       if (typeof v !== 'string') continue;
-      const tail = v.slice(prefix.length);
-      const n = parseInt(tail.replace(/[^0-9]/g, ''), 10);
+      let n: number;
+      if (anchored) {
+        // A driver-side `LIKE` can match looser than JS `startsWith` (collation,
+        // case-insensitive columns); re-check so another scope cannot inflate
+        // this counter, mirroring the engine's own JS-side re-check.
+        if (prefix && !v.startsWith(prefix)) continue;
+        let core = v.slice(prefix.length);
+        if (suffix && core.endsWith(suffix)) core = core.slice(0, core.length - suffix.length);
+        const head = core.match(/^\d+/);
+        if (!head) continue;
+        n = parseInt(head[0], 10);
+      } else {
+        // Unanchored: `prefix` is '' here, so this is the whole value.
+        n = parseInt(v.replace(/[^0-9]/g, ''), 10);
+      }
       if (Number.isFinite(n) && n > maxN) maxN = n;
     }
     return maxN;
@@ -3109,6 +3154,10 @@ export class SqlDriver implements IDataDriver {
     tenantId: string | null,
     parentTrx?: Knex.Transaction,
     scope = '',
+    // Rendered text AFTER the sequence slot — forwarded verbatim to the
+    // bootstrap scan so it can find the counter in values that do not end in it
+    // (#6468). Purely positional plumbing; no sequencing logic reads it.
+    suffix = '',
   ): Promise<number> {
     // Pass the caller's transaction so a cold-cache first write inside a batch
     // transaction ensures the table on the right connection instead of dead-
@@ -3161,6 +3210,7 @@ export class SqlDriver implements IDataDriver {
           prefix,
           tenantField,
           resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
+          suffix,
         );
         const initial = seedMax + 1;
         try {
@@ -3237,6 +3287,7 @@ export class SqlDriver implements IDataDriver {
         tenantId,
         parentTrx,
         probe.scope,
+        probe.suffix,
       );
       row[cfg.name] = renderAutonumber({ tokens: cfg.tokens, seq: next, record: row, now, timezone }).value;
     }

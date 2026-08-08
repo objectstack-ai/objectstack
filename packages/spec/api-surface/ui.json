@@ -175,6 +175,8 @@
     "InlineAction (type)",
     "InlineActionParsed (type)",
     "InlineActionSchema (const)",
+    "InlineLocaleMap (type)",
+    "InlineLocaleMapSchema (const)",
     "InterfacePageConfig (type)",
     "InterfacePageConfigParsed (type)",
     "InterfacePageConfigSchema (const)",

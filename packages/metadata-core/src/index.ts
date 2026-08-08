@@ -26,3 +26,12 @@ export * from './objects/index.js';
 // See `scripts/check-engine-double-contract.mjs` — the gate over the doubles.
 export * from './engine-delete-dispatch.js';
 export * from './engine-update-dispatch.js';
+
+// [#4513] The audit-family GOVERNANCE table (#4447) and its normalizer, sunk
+// here for the same reason and by the same criterion as the two dispatch
+// predicates above: the `/meta` READ path lives in
+// `@objectstack/metadata-protocol`, which `@objectstack/objectql` depends on,
+// so it cannot import the table from the registry that enforces it. The read
+// surface and the write path now derive one answer from one table instead of
+// reporting two.
+export * from './audit-field-governance.js';
