@@ -3,6 +3,7 @@
 import type { Cube, Metric, Dimension as CubeDimension, CubeJoin } from '@objectstack/spec/data';
 import { AggregationFunction } from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
+import { resolveI18nLabel } from '@objectstack/spec/ui';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { datasetInvalidError } from './dataset-refusal.js';
 
@@ -202,6 +203,38 @@ const MAX_JOIN_HOPS = 3;
  *  so single-hop joins stay byte-for-byte identical. */
 const joinAlias = (path: string): string => path.replace(/\./g, '__');
 
+/**
+ * [#6761] The locale this compiler resolves an inline-locale-map label at:
+ * **none**, i.e. the platform source language `en` per `resolveI18nLabel`'s
+ * documented nullish-tolerance.
+ *
+ * This is a decision, not an omission, and it is spelled as a named constant so
+ * it stays visible and greppable rather than reading as a forgotten argument
+ * (the resolver takes `locale` positionally for exactly that reason).
+ *
+ * **A compiled Cube is a REGISTRY artifact, not a response.** `registerDataset`
+ * writes it into `CubeRegistry` under the dataset's name, `queryDataset`
+ * re-registers on every call, and `getMeta()` — the `/analytics/meta` face —
+ * reads it back with **no execution context at all** (`IAnalyticsService.getMeta`
+ * takes `cubeName?` and nothing else, and the route calls it without one). So
+ * the request locale must NOT be baked in here: one `zh-CN` query would leave a
+ * Chinese-labelled cube in a registry every later reader shares, and
+ * `/analytics/meta` would answer whoever queried last. Request-scoped
+ * resolution belongs where a request is in hand — `queryDataset`'s two field
+ * enrichment sites, which read `context.locale`.
+ *
+ * **The fallback stays `d.name`, and that is safe against the `f.label == null`
+ * guard** (#5199 route A / #6761). `Metric.label` and `Dimension.label` are
+ * REQUIRED strings in `analytics.zod.ts`, so an unresolvable label must still
+ * produce one, and the machine name is what this compiler already wrote. It
+ * cannot pre-empt the document-sourced label downstream because a cube label
+ * never reaches `AnalyticsResult.fields[]`: both strategies' `buildFieldMeta`,
+ * the draft preview evaluator, and `DatasetExecutor`'s #5537 descriptor
+ * adoption all emit `{ name, type }` only. The enrichment sites therefore still
+ * see `f.label == null` and write the locale-resolved label over nothing.
+ */
+const REGISTRY_LOCALE: string | undefined = undefined;
+
 export function compileDataset(
   dataset: Dataset,
   resolver?: RelationshipResolver,
@@ -373,7 +406,11 @@ export function compileDataset(
     assertDeclared(d.field, 'dimension', d.name);
     const dim: CubeDimension = {
       name: d.name,
-      label: typeof d.label === 'string' ? d.label : d.name,
+      // [#6761] An inline locale map is a label, not a missing one. Before this,
+      // the `typeof === 'string'` test dropped the map and substituted the
+      // machine name, which `/analytics/meta` then published as a display title
+      // (`title: 'owner'` for a dimension labelled `{ en: 'Owner', … }`).
+      label: resolveI18nLabel(d.label, REGISTRY_LOCALE) ?? d.name,
       type: dimensionType(d),
       sql: d.field,
     };
@@ -398,7 +435,8 @@ export function compileDataset(
     if (m.field) assertDeclared(m.field, 'measure', m.name);
     const metric: Metric = {
       name: m.name,
-      label: typeof m.label === 'string' ? m.label : m.name,
+      // [#6761] Same as the dimension label above — see {@link REGISTRY_LOCALE}.
+      label: resolveI18nLabel(m.label, REGISTRY_LOCALE) ?? m.name,
       type: aggregateToMetricType(m),
       // `count` with no field aggregates over rows (*).
       sql: m.field ?? '*',
@@ -410,7 +448,10 @@ export function compileDataset(
 
   const cube: Cube = {
     name: dataset.name,
-    title: typeof dataset.label === 'string' ? dataset.label : dataset.name,
+    // [#6761] The cube's own display title, same rule. `Cube.title` is optional
+    // in the schema, but an absent dataset label already produced the machine
+    // name here and that is not what this card changes — only the map case moves.
+    title: resolveI18nLabel(dataset.label, REGISTRY_LOCALE) ?? dataset.name,
     sql: dataset.object,
     measures,
     dimensions,
