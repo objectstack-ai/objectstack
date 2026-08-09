@@ -236,6 +236,92 @@ describe('[#5495] autonumber sequence re-seed on a provable collision', () => {
     ).toBeUndefined();
   });
 
+  /**
+   * The three-state routing, held against the shapes Postgres and MySQL
+   * actually hand knex.
+   *
+   * This package's unit suite boots SQLite only, so the other two dialects'
+   * errors are INJECTED rather than driven through a live server — the same
+   * method, and the same reason, as `sql-driver-unique-violation-predicate`.
+   * What it buys: the routing is what decides whether a caller's 409 survives,
+   * and on MySQL — where `uniqueViolationColumn` can never answer, by contract
+   * — state 3 is the only state that exists. Reasoning about that limb is not
+   * the same as pinning it.
+   */
+  describe('three-state routing on the dialects this package ships', () => {
+    const reservation = {
+      field: 'case_number',
+      tableName: 'crm_case',
+      prefix: 'CASE-',
+      scope: '',
+      suffix: '',
+      tenantField: 'organization_id',
+      tenantId: 'orgA',
+      value: 'CASE-00001',
+    };
+
+    /** Route one injected error, against a table where `CASE-00001` DOES exist. */
+    const route = async (error: unknown) => {
+      const colliding = await (driver as any).collidingAutoNumberReservations(error, [reservation]);
+      return colliding.map((r: any) => r.field);
+    };
+
+    beforeEach(async () => {
+      await driver.initObjects([CRM_CASE]);
+      await knex()('crm_case').insert({ id: 'taken', organization_id: 'orgA', case_number: 'CASE-00001', title: 'taken' });
+    });
+
+    it('state 1 — Postgres names our column in its DETAIL line', async () => {
+      const err: any = new Error('insert into "crm_case" … - duplicate key value violates unique constraint "uniq_crm_case_case_number"');
+      err.code = '23505';
+      err.detail = 'Key (case_number)=(CASE-00001) already exists.';
+      expect(uniqueViolationColumn(err)).toBe('case_number');
+      expect(await route(err)).toEqual(['case_number']);
+    });
+
+    it('state 2 — Postgres names a column the CALLER supplied, so nothing is retried', async () => {
+      const err: any = new Error('insert into "crm_case" … - duplicate key value violates unique constraint "uniq_crm_case_email"');
+      err.code = '23505';
+      err.detail = 'Key (email)=(dup@example.com) already exists.';
+      expect(uniqueViolationColumn(err)).toBe('email');
+      // Decided WITHOUT probing the data — and the data would have said yes,
+      // since CASE-00001 is present. That is the whole point: a named column
+      // that is not ours ends the matter.
+      expect(await route(err)).toEqual([]);
+    });
+
+    it('state 3 — Postgres composite DETAIL names no single column, so the DATA decides', async () => {
+      const err: any = new Error('insert into "crm_case" … - duplicate key value violates unique constraint "uniq_crm_case_org_case"');
+      err.code = '23505';
+      err.detail = 'Key (organization_id, case_number)=(orgA, CASE-00001) already exists.';
+      expect(uniqueViolationColumn(err)).toBeUndefined();
+      expect(await route(err)).toEqual(['case_number']);
+    });
+
+    it('state 3 — MySQL can only ever name an index, so the DATA decides there always', async () => {
+      const err: any = new Error("insert into `crm_case` … - ER_DUP_ENTRY: Duplicate entry 'orgA-CASE-00001' for key 'uniq_crm_case_org_case'");
+      err.errno = 1062;
+      err.code = 'ER_DUP_ENTRY';
+      expect(isUniqueViolationError(err)).toBe(true);
+      expect(uniqueViolationColumn(err)).toBeUndefined();
+      expect(await route(err)).toEqual(['case_number']);
+    });
+
+    it('state 3 — but an undeterminable violation on someone ELSE’s value is still not ours', async () => {
+      const err: any = new Error("insert into `crm_case` … - ER_DUP_ENTRY: Duplicate entry 'x' for key 'uniq_crm_case_email'");
+      err.errno = 1062;
+      const other = { ...reservation, value: 'CASE-99999' }; // never written
+      const colliding = await (driver as any).collidingAutoNumberReservations(err, [other]);
+      expect(colliding).toEqual([]);
+    });
+
+    it('a failure that is not a unique violation at all is never routed here', async () => {
+      const err: any = new Error('insert into `crm_case` … - NOT NULL constraint failed: crm_case.title');
+      expect(isUniqueViolationError(err)).toBe(false);
+      expect(await route(err)).toEqual([]);
+    });
+  });
+
   it('gives the caller the original error when the collision is not the counter’s', async () => {
     // A value the caller supplies explicitly is not a reservation, so no probe
     // and no retry can apply to it even though it IS the autonumber column.
