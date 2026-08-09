@@ -506,22 +506,37 @@ describe('HttpDispatcher extracted domains (PR-5: packages)', () => {
         };
     }
 
+    // [#7033 / #7023] `/packages` now carries an anonymous-deny floor plus
+    // per-route capability predicates. These cases are about ROUTING and the
+    // registry pre-check (which status a duplicate / missing-id / no-registry
+    // answer returns), so the caller must clear the gate; `dispatch()` re-resolves
+    // identity off the mock kernel, which has no capability source, so it is
+    // stubbed to a caller holding both the read and write capability. (The 503
+    // pre-check runs before the capability gates, so it needs only a session —
+    // this caller provides that too.)
+    const withPkgCaller = (d: HttpDispatcher) => {
+        (d as any).timedResolveExecutionContext = async () => ({
+            userId: 'u_pkg', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+        });
+        return d;
+    };
+
     it('GET /packages lists packages from the ObjectQL registry', async () => {
         const objectql = qlWithRegistry();
-        const result = await makeDispatcher({ objectql }).dispatch('GET', '/packages', undefined, {}, {} as any);
+        const result = await withPkgCaller(makeDispatcher({ objectql })).dispatch('GET', '/packages', undefined, {}, {} as any);
         expect(result.response?.status).toBe(200);
         expect(result.response?.body?.data?.total).toBe(1);
     });
 
     it('responds 503 when no ObjectQL registry is available', async () => {
         const objectql = { find: vi.fn(), getObjects: vi.fn() }; // no .registry → getObjectQL returns null
-        const result = await makeDispatcher({ objectql }).dispatch('GET', '/packages', undefined, {}, {} as any);
+        const result = await withPkgCaller(makeDispatcher({ objectql })).dispatch('GET', '/packages', undefined, {}, {} as any);
         expect(result.response?.status).toBe(503);
     });
 
     it('POST /packages rejects a duplicate id with 409 unless ?overwrite=true (data-loss footgun guard)', async () => {
         const objectql = qlWithRegistry({ getPackage: vi.fn().mockReturnValue({ id: 'pkg-a' }) });
-        const dispatcher = makeDispatcher({ objectql });
+        const dispatcher = withPkgCaller(makeDispatcher({ objectql }));
         const dup = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, {}, {} as any);
         expect(dup.response?.status).toBe(409);
         const forced = await dispatcher.dispatch('POST', '/packages', { id: 'pkg-a', name: 'A' }, { overwrite: 'true' }, {} as any);
@@ -530,7 +545,7 @@ describe('HttpDispatcher extracted domains (PR-5: packages)', () => {
 
     it('POST /packages without an id is rejected with 400', async () => {
         const objectql = qlWithRegistry();
-        const result = await makeDispatcher({ objectql }).dispatch('POST', '/packages', { name: 'no-id' }, {}, {} as any);
+        const result = await withPkgCaller(makeDispatcher({ objectql })).dispatch('POST', '/packages', { name: 'no-id' }, {}, {} as any);
         expect(result.response?.status).toBe(400);
     });
 });
