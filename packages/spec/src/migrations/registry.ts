@@ -2753,10 +2753,15 @@ const step17: MigrationStep = {
         + 'on each of your pausing nodes can still be continued the way you intend: a resume '
         + "through the generic route succeeds for the ones you declared `'any'`, and answers "
         + "403 (`PERMISSION_DENIED`) for the ones you declared `'service'`, which continue "
-        + 'through your own service API instead. ⚠️ `supportsPause` is a declaration nothing '
-        + 'enforces (#5703), so an executor whose `execute()` returns `suspend: true` while '
-        + 'leaving `supportsPause` false is warned about by NEITHER channel — check those by '
-        + 'hand against the same rule.',
+        + 'through your own service API instead. ⚠️ `supportsPause` is no longer the '
+        + 'declaration nothing enforced (#5703, closed by #6667): an executor whose '
+        + '`execute()` returns `suspend: true` while leaving `supportsPause` false is still '
+        + 'warned about by neither warning channel, but '
+        + '`AutomationEngine.refuseUndeclaredSuspension` now refuses that suspension at the '
+        + 'one seam every suspension passes through — a guard-class failure no `fault` edge '
+        + 'routes — so it needs no hand-check. The residue that does: an executor registering '
+        + 'NO descriptor declares nothing for either warning or the refusal to read, so its '
+        + 'pauses are still created and refused only later, on the resume route (#5561).',
     },
     {
       id: 'export-field-meta-constraints-retired',
