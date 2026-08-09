@@ -193,6 +193,9 @@ async function diagnosedGet(
  *   object that is genuinely absent. That is the conservative direction — it
  *   withholds, it never admits — and no such host exists today
  *   (`MetadataManager` is the only `getDiagnosed` implementation on `main`).
+ *   Since PR #6723 the contract also rules such a host out by declaration, so
+ *   this reads as residual risk against a contract violation, not as a live
+ *   divergence anyone can point at.
  */
 async function diagnoseEmptyRead(
   metadataService: IMetadataService,
