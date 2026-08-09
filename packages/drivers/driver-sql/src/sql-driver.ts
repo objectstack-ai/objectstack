@@ -70,6 +70,7 @@ import {
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { currentPerfTiming, perfNow, type PerfTiming } from '@objectstack/observability';
 
 /**
@@ -2243,6 +2244,52 @@ export type ReadPresentationKind = 'datetime' | 'date' | 'time' | 'boolean' | 'n
  */
 export type SqliteJournalMode = 'wal' | 'delete';
 
+/**
+ * What to do when a **file-backed** SQLite datasource points at a path that
+ * does not exist yet (#6743).
+ *
+ * - `'create'` — SQLite's own behaviour, and the default: the file is brought
+ *   into existence by the first statement on the connection.
+ * - `'empty-in-memory'` — do NOT create it. Open an ephemeral `:memory:`
+ *   database instead, which introspects as a database with zero tables — the
+ *   same thing a freshly-created empty file introspects as. For a read-only
+ *   caller (`os migrate plan`) the report is therefore identical while the
+ *   filesystem is left untouched.
+ *
+ * `'empty-in-memory'` is for callers that only ever READ. A caller that may
+ * write MUST leave it at `'create'`: writes land in the ephemeral database and
+ * are lost at disconnect. `os migrate apply` is exactly that caller — it boots
+ * with `deferSchemaDdl` too, but flushes the deferred DDL after confirmation,
+ * so it must keep `'create'`. Deferring the DDL and never opening the file are
+ * different promises; #3917 made the first, this makes the second.
+ */
+export type SqliteAbsentFileMode = 'create' | 'empty-in-memory';
+
+/**
+ * Resolve the filename a SQLite connection should actually open, given the
+ * declared target and the {@link SqliteAbsentFileMode} the host asked for.
+ *
+ * The ONE place the "does the target exist?" judgement is made (#6743). It is
+ * exported so the service layer's native→wasm step-down can resolve the same
+ * answer for its fallback rung rather than open-coding a second `existsSync`
+ * that is free to drift — the two-places objection that ruled out doing this
+ * check up in the CLI.
+ *
+ * Pseudo-filenames (`:memory:` and anything else `:`-prefixed) and non-file
+ * dialects are already fileless, so they are returned untouched.
+ */
+export function resolveSqliteAbsentFileTarget(
+  filename: string,
+  mode: SqliteAbsentFileMode | undefined,
+): { filename: string; openedEmptyInMemory: boolean } {
+  if (mode !== 'empty-in-memory') return { filename, openedEmptyInMemory: false };
+  if (typeof filename !== 'string' || filename === '' || filename.startsWith(':')) {
+    return { filename, openedEmptyInMemory: false };
+  }
+  if (existsSync(filename)) return { filename, openedEmptyInMemory: false };
+  return { filename: ':memory:', openedEmptyInMemory: true };
+}
+
 export type SqlDriverConfig = Knex.Config & {
   schemaMode?: SchemaMode;
   /**
@@ -2265,6 +2312,18 @@ export type SqlDriverConfig = Knex.Config & {
    * @see {@link SqlDriver.applySqliteJournalMode}
    */
   sqliteJournalMode?: SqliteJournalMode;
+  /**
+   * What to do when the **file-backed** SQLite target does not exist (#6743).
+   * Defaults to `'create'` — SQLite's own behaviour, and what every existing
+   * caller gets, since this option changes nothing unless it is passed.
+   *
+   * Ignored for `:memory:` and for non-SQLite dialects, neither of which can
+   * bring a database file into existence.
+   *
+   * @see {@link SqliteAbsentFileMode}
+   * @see {@link SqlDriver.sqliteOpenedEmptyInMemory}
+   */
+  sqliteAbsentFile?: SqliteAbsentFileMode;
 };
 
 // ── SQL Driver ───────────────────────────────────────────────────────────────
@@ -2595,16 +2654,65 @@ export class SqlDriver implements IDataDriver {
   /** Object defs `initObjects` registered but did not physically sync while {@link deferredDdl}. */
   protected deferredSchemaObjects = new Map<string, { name: string; fields?: Record<string, any> }>();
 
+  /** Backing field for {@link sqliteOpenedEmptyInMemory} (#6743). */
+  private openedEmptyInMemory = false;
+
   constructor(config: SqlDriverConfig) {
-    // `schemaMode` / `autoMigrate` / `sqliteJournalMode` are ObjectStack
-    // concerns, not Knex options — strip them before handing the config to Knex.
-    const { schemaMode, autoMigrate, sqliteJournalMode, ...knexConfig } = config;
+    // `schemaMode` / `autoMigrate` / `sqliteJournalMode` / `sqliteAbsentFile`
+    // are ObjectStack concerns, not Knex options — strip them before handing
+    // the config to Knex.
+    const { schemaMode, autoMigrate, sqliteJournalMode, sqliteAbsentFile, ...knexConfig } = config;
     this.schemaMode = schemaMode ?? 'managed';
     this.autoMigrate = autoMigrate ?? 'off';
     this.declaredJournalMode = sqliteJournalMode;
+    // `this.config` keeps the DECLARED target, deliberately: it is what
+    // `describeDriverConnection` renders, so `os migrate plan` still names the
+    // database the plan is about rather than the `:memory:` stand-in it read
+    // (#6743 — the ruling's "same report as today, byte for byte"). Only the
+    // Knex instance below is redirected.
     this.config = knexConfig;
-    this.knex = knex(SqlDriver.withConnectBound(knexConfig));
+    this.knex = knex(SqlDriver.withConnectBound(this.knexConfigFor(knexConfig, sqliteAbsentFile)));
     this.installQueryTiming();
+  }
+
+  /**
+   * Whether this driver opened an ephemeral `:memory:` database because its
+   * declared SQLite file did not exist and the host asked for
+   * `sqliteAbsentFile: 'empty-in-memory'` (#6743).
+   *
+   * `false` for every driver that did not ask for that mode — which is every
+   * driver that existed before it.
+   */
+  public get sqliteOpenedEmptyInMemory(): boolean {
+    return this.openedEmptyInMemory;
+  }
+
+  /**
+   * Apply {@link SqliteAbsentFileMode} to the Knex config, redirecting a
+   * missing SQLite file to `:memory:` before Knex ever opens it.
+   *
+   * Has to happen HERE rather than in `connect()`: the filename is baked into
+   * the Knex instance at construction, and better-sqlite3 opens (and therefore
+   * creates) the file on the first statement — which for this driver is the
+   * `PRAGMA auto_vacuum` in {@link connect}.
+   */
+  private knexConfigFor(
+    knexConfig: Knex.Config,
+    mode: SqliteAbsentFileMode | undefined,
+  ): Knex.Config {
+    if (mode !== 'empty-in-memory') return knexConfig;
+    const conn = (knexConfig as { connection?: unknown }).connection;
+    const declared = typeof conn === 'string' ? conn : (conn as { filename?: unknown })?.filename;
+    if (typeof declared !== 'string') return knexConfig;
+    const resolved = resolveSqliteAbsentFileTarget(declared, mode);
+    if (!resolved.openedEmptyInMemory) return knexConfig;
+    this.openedEmptyInMemory = true;
+    return {
+      ...knexConfig,
+      connection: typeof conn === 'string'
+        ? resolved.filename
+        : { ...(conn as object), filename: resolved.filename },
+    } as Knex.Config;
   }
 
   /**
@@ -8667,6 +8775,14 @@ export class SqlDriver implements IDataDriver {
    */
   protected sqliteFilename(): string | null {
     if (!this.isSqlite) return null;
+    // Redirected to `:memory:` because the declared file did not exist and the
+    // host asked not to create one (#6743). `this.config` still names the
+    // declared target — on purpose, so the CLI can print it — but NO on-disk
+    // file backs this connection, which is precisely what this method reports.
+    // Both callers depend on that reading: `ensureDatabaseExists` would
+    // otherwise `mkdir` the state directory this mode exists to avoid, and
+    // `applySqliteJournalMode` would try to put an in-memory database in WAL.
+    if (this.openedEmptyInMemory) return null;
     const conn = (this.config as any).connection;
     const filename = typeof conn === 'string' ? conn : conn?.filename;
     if (typeof filename !== 'string' || filename === '') return null;

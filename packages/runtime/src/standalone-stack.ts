@@ -53,7 +53,7 @@
  */
 
 import { resolve as resolvePath } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { stampSearchPinyinEnabled } from '@objectstack/types';
@@ -151,6 +151,21 @@ export const StandaloneStackConfigSchema = z.object({
      * operator's live database before they have confirmed anything.
      */
     skipSeedData: z.boolean().optional(),
+    /**
+     * What this boot does when the default sqlite database file does not
+     * exist yet (#6743). `'empty-in-memory'` opens an ephemeral database
+     * instead of creating the file, and suppresses the host's `mkdir` of the
+     * state directory with it — so a read-only boot on a never-started
+     * project leaves the filesystem exactly as it found it. Defaults to
+     * `'create'`.
+     *
+     * ⚠️ READ-ONLY BOOTS ONLY. This is NOT implied by `skipSeedData` /
+     * `deferSchemaDdl`, and deliberately so: `os migrate apply` boots deferred
+     * too and then FLUSHES the deferred DDL once the operator confirms, so it
+     * needs a real file. `os migrate plan` never writes and is the caller this
+     * exists for.
+     */
+    sqliteAbsentFile: z.enum(['create', 'empty-in-memory']).optional(),
 });
 
 export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
@@ -499,7 +514,15 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         // sqlite (better-sqlite3)
         driverId = 'sqlite';
         const filename = sqliteFilenameFromUrl(dbUrl, 'sqlite');
-        mkdirSync(resolvePath(filename, '..'), { recursive: true });
+        // The host's filesystem prep. Skipped for a read-only boot whose target
+        // does not exist (#6743): creating `<state dir>/data/` is the other half
+        // of the write side effect `os migrate plan` was leaving behind, and a
+        // `mkdir -p` here would recreate the very directory the driver is about
+        // to decline to put a file in. When the file DOES exist the directory
+        // does too, so this costs the mode nothing.
+        if (!(cfg.sqliteAbsentFile === 'empty-in-memory' && !existsSync(filename))) {
+            mkdirSync(resolvePath(filename, '..'), { recursive: true });
+        }
         driverConfig = { filename };
     } else {
         // Unreachable by construction — and making it unreachable is half the
@@ -518,7 +541,11 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     }
     const defaultDatasourcePlugin = new DefaultDatasourcePlugin(
         { driver: driverId, config: driverConfig },
-        { dev: factoryDev, ...(hostFactory ? { factory: hostFactory } : {}) },
+        {
+            dev: factoryDev,
+            ...(cfg.sqliteAbsentFile ? { sqliteAbsentFile: cfg.sqliteAbsentFile } : {}),
+            ...(hostFactory ? { factory: hostFactory } : {}),
+        },
     );
 
     const artifactBundle = await loadArtifactBundle(artifactPath, {

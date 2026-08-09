@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
+import { existsSync } from 'node:fs';
 import {
   resolveSqliteDriver,
   NATIVE_SQLITE_WASM_FALLBACK_WARNING,
@@ -42,7 +43,24 @@ vi.mock('@objectstack/driver-sql', () => {
     }
     async disconnect(): Promise<void> {}
   }
-  return { SqlDriver };
+  /**
+   * The real `resolveSqliteAbsentFileTarget` (#6743), restated here because
+   * this suite mocks the whole driver package away and the step-down under
+   * test now consults it for the wasm rung. Kept deliberately literal — it is
+   * six lines of pure logic with no driver state — and the assertions below
+   * pin the OUTCOME (which filename each rung receives), so a drift between
+   * this restatement and the real one shows up as a failure there rather than
+   * as silently absent coverage.
+   */
+  const resolveSqliteAbsentFileTarget = (filename: string, mode: string | undefined) => {
+    if (mode !== 'empty-in-memory') return { filename, openedEmptyInMemory: false };
+    if (typeof filename !== 'string' || filename === '' || filename.startsWith(':')) {
+      return { filename, openedEmptyInMemory: false };
+    }
+    if (existsSync(filename)) return { filename, openedEmptyInMemory: false };
+    return { filename: ':memory:', openedEmptyInMemory: true };
+  };
+  return { SqlDriver, resolveSqliteAbsentFileTarget };
 });
 
 vi.mock('@objectstack/driver-sqlite-wasm', () => {
@@ -144,6 +162,37 @@ describe('resolveSqliteDriver — native better-sqlite3 → wasm → in-memory s
       autoMigrate: 'safe',
       schemaMode: 'managed',
     });
+  });
+
+  it('forwards sqliteAbsentFile to the native driver — the step-down does not decide it (#6743)', async () => {
+    await resolveSqliteDriver({ filename: '/tmp/os-absent-never.db', dev: true, sqliteAbsentFile: 'empty-in-memory' });
+    expect(state.nativeConfigs[0]).toMatchObject({ sqliteAbsentFile: 'empty-in-memory' });
+  });
+
+  it('omits sqliteAbsentFile entirely when not asked for — no caller changes behaviour (#6743)', async () => {
+    await resolveSqliteDriver({ filename: ':memory:', dev: true });
+    expect(state.nativeConfigs[0]).not.toHaveProperty('sqliteAbsentFile');
+  });
+
+  it('the wasm rung opens :memory: too, so a step-down cannot create the file either (#6743)', async () => {
+    // The native rung is what normally applies the redirect, and here it is
+    // exactly the rung that fails. `SqliteWasmDriver` takes a bare filename and
+    // has no absent-file mode of its own, so without this the dev step-down
+    // would quietly create the very file `os migrate plan` declined to create.
+    state.nativeFails = true;
+    const missing = '/tmp/os-absent-wasm-never.db';
+    expect(existsSync(missing)).toBe(false);
+
+    const resolved = await resolveSqliteDriver({
+      filename: missing,
+      dev: true,
+      sqliteAbsentFile: 'empty-in-memory',
+      warn: vi.fn(),
+    });
+
+    expect(resolved.engine).toBe('sqlite-wasm');
+    expect(state.wasmConfigs[0]).toMatchObject({ filename: ':memory:', persist: 'on-disconnect' });
+    expect(existsSync(missing)).toBe(false);
   });
 
   it('production (dev=false) is fail-closed — returns native unprobed, never degrades', async () => {
