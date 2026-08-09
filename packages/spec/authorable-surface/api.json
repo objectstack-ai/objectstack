@@ -1026,6 +1026,7 @@
     "api/MetadataEndpointsConfig:cacheTtl",
     "api/MetadataEndpointsConfig:enableCache",
     "api/MetadataEndpointsConfig:endpoints",
+    "api/MetadataEndpointsConfig:maskObjectFields",
     "api/MetadataEndpointsConfig:prefix",
     "api/MetadataEvent:definition",
     "api/MetadataEvent:id",

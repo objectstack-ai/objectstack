@@ -145,17 +145,31 @@ export const API_METHOD_DERIVATION: Record<LegacyApiMethod, DerivationRule> = {
 };
 
 /**
- * Alias table normalizing the two runtime vocabularies onto the canonical
+ * Alias table normalizing the two producer vocabularies onto the canonical
  * {@link ApiOperation} names:
- * - runtime `callData` actions (`query`/`find`→`list`, `batch`→`bulk`);
+ * - runtime `callData` actions — of that closed set only `query`/`find` need
+ *   normalizing (both → `list`); `get`/`create`/`update`/`delete`/`aggregate`
+ *   are already canonical and map to themselves;
  * - REST operation literals (already canonical, listed for completeness).
  *
  * Actions with no entry are passed through unchanged and, if unrecognized by
  * the resolver, treated as ungated (custom actions were never gated by
  * `apiMethods`).
+ *
+ * [#6259] The `batch: 'bulk'` row was removed, and the line above no longer
+ * calls `batch` a runtime `callData` action. It was the one entry with no
+ * producer on either side: `callData` branches on a closed set that has not
+ * contained `batch` since that arm was retired (#5856), and every REST caller
+ * of `apiAccessDenialFromEnable` passes a canonical literal — including the
+ * cross-object `POST /batch` route, which spells `batch` in the URL and gates
+ * on `'bulk'`. A row nobody can reach still taught the reader (and any AI
+ * author) that `batch` is a live runtime spelling, inviting the consumer-side
+ * tolerance for a producer-less alias that Prime Directive #12 forbids. The
+ * spelling is `bulk`; a `batch` lookup is now `undefined` and falls to the
+ * `?? action` pass-through, exactly like any other unrecognized action.
  */
 export const DATA_ACTION_TO_API_OPERATION: Record<string, ApiOperation> = {
-  // runtime callData actions
+  // runtime `callData` actions and REST primitives (identity where canonical)
   get: 'get',
   query: 'list',
   find: 'list',
@@ -163,7 +177,6 @@ export const DATA_ACTION_TO_API_OPERATION: Record<string, ApiOperation> = {
   create: 'create',
   update: 'update',
   delete: 'delete',
-  batch: 'bulk',
   bulk: 'bulk',
   // derived operation literals (identity)
   upsert: 'upsert',

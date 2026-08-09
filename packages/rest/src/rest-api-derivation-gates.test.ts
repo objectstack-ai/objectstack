@@ -128,6 +128,25 @@ describe('REST gate — action alias normalization (#3391)', () => {
     const ro = { apiMethods: ['get', 'list'] };
     expect(allowed(ro, 'query')).toBe(true); // query → list
     expect(allowed(ro, 'find')).toBe(true);  // find → list
-    expect(allowed(ro, 'batch', { bulkChild: 'create' })).toBe(false); // batch → bulk
+    // [#6259] Was `allowed(ro, 'batch', …)` — the third alias this table
+    // claimed to normalize, and the only one no producer ever sends. Every
+    // `enforceApiAccess` call site passes a canonical literal, and the
+    // cross-object `POST /batch` route (rest-server.ts, `registerBatchEndpoints`)
+    // gates on `'bulk'` — the URL spells `batch`, the operation never does.
+    // Re-spelled to `'bulk'`, which is the assertion this line always meant:
+    // an object granting only get/list does not get the bulk surface.
+    expect(allowed(ro, 'bulk', { bulkChild: 'create' })).toBe(false);
+  });
+
+  // [#6259] The REST half of the absence pin. Stated as the fork it is:
+  // `batch` is not DENIED, it is unrecognized — and an unrecognized action is
+  // ungated by `apiMethods` (custom actions never were). That is precisely why
+  // a producer-less row could not be dismissed as harmless: while it existed,
+  // this word silently bought a real bulk∧child verdict.
+  it('`batch` is no longer normalized — it is an unknown, ungated action', () => {
+    const ro = { apiMethods: ['get', 'list'] };
+    expect(allowed(ro, 'batch', { bulkChild: 'create' })).toBe(true);
+    // The canonical spelling the /batch route actually sends stays gated.
+    expect(denial(ro, 'bulk', { bulkChild: 'create' })?.status).toBe(405);
   });
 });

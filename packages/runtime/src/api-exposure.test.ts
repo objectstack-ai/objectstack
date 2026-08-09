@@ -1,5 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import fs from 'node:fs';
+import path from 'node:path';
+import url from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { checkApiExposure } from './api-exposure.js';
 
@@ -108,11 +111,46 @@ describe('checkApiExposure (#1889)', () => {
       expect(checkApiExposure(createOnly, 'import', { writeMode: 'update' }).allowed).toBe(false);
     });
 
+    // [#6259] Was spelled `'batch'`, which reached this rule only through the
+    // `batch: 'bulk'` alias row — a spelling no producer sends (`callData` lost
+    // its `batch` arm in #5856; REST gates `/batch` on `'bulk'`). With the row
+    // gone `'batch'` is an unknown operation and falls to the ungated
+    // pass-through, so the negative assertion below flipped to `true` and this
+    // test went red — the one place in the repo that still depended on the row.
+    // Re-spelled to the canonical `'bulk'`, which is what the rule is about and
+    // what every real caller passes; the assertions themselves are unchanged.
     it('bulk requires the bulk primitive AND the child op', () => {
       const bulkCreate = { apiMethods: ['create', 'bulk'] };
-      expect(checkApiExposure(bulkCreate, 'batch', { bulkChild: 'create' }).allowed).toBe(true);
+      expect(checkApiExposure(bulkCreate, 'bulk', { bulkChild: 'create' }).allowed).toBe(true);
       const createOnly = { apiMethods: ['create'] };
-      expect(checkApiExposure(createOnly, 'batch', { bulkChild: 'create' }).allowed).toBe(false);
+      expect(checkApiExposure(createOnly, 'bulk', { bulkChild: 'create' }).allowed).toBe(false);
+    });
+
+    // [#6259] The absence pin's runtime half: `batch` is no longer a spelling
+    // this gate understands. It is NOT denied — an unmapped action respects
+    // `apiEnabled` only — which is exactly why the row could not be left in
+    // place as "harmless": it silently bought a bulk∧child judgement for a
+    // word no producer emits.
+    it('`batch` is no longer an alias for `bulk` — it is an ungated unknown action', () => {
+      const createOnly = { apiMethods: ['create'] };
+      expect(checkApiExposure(createOnly, 'batch', { bulkChild: 'create' }).allowed).toBe(true);
+      // The object still hides entirely when the API is off, alias or not.
+      expect(checkApiExposure({ apiEnabled: false }, 'batch').status).toBe(404);
+    });
+
+    // [#6259] The prose half of the same finding: this function's `@param`
+    // listed `batch` among the runtime data actions its only caller sends.
+    it('the `@param action` TSDoc does not advertise `batch` as a live action', () => {
+      const source = fs.readFileSync(
+        path.join(path.dirname(url.fileURLToPath(import.meta.url)), 'api-exposure.ts'),
+        'utf8',
+      );
+      const param = source.match(/@param action[\s\S]*?@param opts/);
+      expect(param, 'the `@param action` block vanished').toBeTruthy();
+      // The note recording the removal is expected to name `batch`; the
+      // enumeration of what `callData` can send must not.
+      const [enumeration] = param![0].split('#6259');
+      expect(enumeration).not.toMatch(/batch/);
     });
   });
 });
