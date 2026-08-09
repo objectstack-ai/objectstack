@@ -47,9 +47,10 @@
         },
         "chartConfig": {
           "status": "live",
-          "verifiedAt": "2026-08-03",
-          "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DatasetWidget.tsx:602-603 (chart-config bag forwarded to the chart renderer)",
-          "note": "chart presentation config; read on the dataset-bound chart path."
+          "verifiedAt": "2026-08-09",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui @230ffd875: packages/plugin-dashboard/src/DatasetWidget.tsx:380-429 — chartConfigPresentation lowers NINE of the declared keys, one `if` per key (:390 showLegend, :391 showDataLabels, :393 title, :395 subtitle, :397 description, :401 height, :403 annotations, :405 interaction, :419 and :425 colors, split into the positional palette and categoryColors); objectui: packages/plugin-dashboard/src/DatasetWidget.tsx:1091 calls it and :1118 spreads the result onto the chart schema handed to the renderer; objectui: packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.dom.test.tsx pins the DOM effect of each forwarded key",
+          "note": "chart presentation config on the dataset-bound chart path — read PER KEY, not forwarded as a bag. Of the 14 keys ChartConfigSchema declares, 9 reach the renderer (above) and 5 do not: xAxis/yAxis/series are derived from the dataset selection, so an authored value would shadow the derived binding; type is answered by the widget's own `type` through CHART_TYPE_MAP; aria has no reader on this path (AdvancedChartImpl has no `aria` prop and the ARIA injection reads the flat ariaLabel/ariaDescribedBy/role). This entry previously read 'chart-config bag forwarded to the chart renderer', which was never measured: at that time exactly one key (showLegend, #3135) was lowered, and the overstatement mis-steered the #5022 measurement for half its length. #5175 measured the real 1-of-14 state, #7016 forwarded the keys the chart block actually delivers, and the narrowing half for the 5 unforwarded keys is still open on #5175 — do not read this row as classifying them."
         },
         "colorVariant": {
           "status": "dead",
