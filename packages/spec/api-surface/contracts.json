@@ -163,6 +163,7 @@
     "JobExecution (type)",
     "JobHandler (type)",
     "JobRetryPolicy (interface)",
+    "JobRunOutcome (interface)",
     "JobSchedule (interface)",
     "JobScheduleOptions (interface)",
     "KNOWLEDGE_SERVICE (const)",

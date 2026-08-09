@@ -1163,6 +1163,37 @@ const step17: MigrationStep = {
     + 'surface with no stored source — one semantic TODO below. The mongodb and in-memory '
     + 'backends that implemented these two are inside the #5499 freeze and are untouched; their '
     + 'code is simply no longer reachable through a spec-valid request.\n\n'
+    + 'The same aggregation node loses one more member, and it is the sharper class of the two: '
+    + '`aggregations[].distinct` is removed (#6815, ADR-0049, maintainer ruling 2026-08-09). '
+    + 'The functions above were declared and UNLOWERED — a caller on a SQL datasource got a '
+    + 'refusal. This flag was declared and lowered by exactly ONE of the six faces that read an '
+    + 'aggregation: the engine\'s in-memory fallback deduplicated the values before applying the '
+    + 'function, while `SqlDriver.aggregate`, the Turso `RemoteTransport.aggregate`, '
+    + '`driver-mongodb`\'s `buildAggregationStage`, `driver-memory`\'s `computeAggregate` and '
+    + 'service-analytics\' `AGGREGATE_SQL` all ignored it. So the same query answered a '
+    + 'deduplicated `sum` on the fallback path and an ordinary `sum` on every SQL datasource, '
+    + 'with the engine choosing between the two per query — by driver, by a non-UTC date bucket, '
+    + 'by whether the driver aggregates natively at all. That is the divergence class #6203 and '
+    + '#5907 each closed on this axis, still open on this key, and it is worse to sit on because '
+    + 'the wrong answer is a PLAUSIBLE NUMBER rather than a refusal: no error, no log, nothing '
+    + 'for a dashboard author to notice. It survived the #4286 sweep of this very schema because '
+    + 'that sweep asked which members no executor reads, and this one had a reader — the wrong '
+    + 'question for a key whose defect is WHICH executor reads it. Remove rather than enforce, '
+    + 'per the ruling: `count_distinct` (which just took the enforce leg above, and whose SQL '
+    + 'lowering #6409 landed) already covers the only deduplicating spelling with measured '
+    + 'demand, while `SUM(DISTINCT …)` / `AVG(DISTINCT …)` are near-universally a modelling '
+    + 'mistake and would have to be lowered across five faces, two of them frozen under #5499, '
+    + 'to buy it. The blast radius inside the fallback is narrower than the key suggests and was '
+    + 'measured rather than assumed: only `sum` and `avg` ever changed answer — `count` returned '
+    + 'from its own branch before reaching the dedupe, `count_distinct` fed a Set, and dedupe '
+    + 'does not move `min`/`max`. `AggregationNodeSchema` is non-strict, so the key is '
+    + '`retiredKey()`-tombstoned rather than bare-deleted: a plain deletion would have made zod '
+    + 'silently STRIP what callers still send, trading a divergent flag for an ignored one '
+    + '(#3733, ADR-0104). One tombstone covers every aggregation door, because '
+    + '`QuerySchema.aggregations` and `EngineAggregateOptionsSchema.aggregations` reuse that one '
+    + 'schema by reference. No conversion: a request surface with no stored source — one '
+    + 'semantic TODO below, the disposition every other `data.query.*` retirement in this major '
+    + 'already takes.\n\n'
     + 'One entry in this step is not a removal at all but a SECURE-DEFAULT FLIP, the shape '
     + "protocol 12 last used for `api.requireAuth`: an omitted `ActionDescriptor.resumeAuthority` "
     + "resolves to `'service'` instead of `'any'`, so a pausing node type that never states who "
@@ -1540,6 +1571,54 @@ const step17: MigrationStep = {
         + 'as a stored field. A query still carrying either value fails to parse with the '
         + 'removal prescription naming it, and authoring it is a `tsc` error at the call site; '
         + '`count_distinct` continues to parse and is unaffected.',
+    },
+    {
+      id: 'aggregation-node-distinct-retired',
+      surface: 'data.query.aggregations[].distinct',
+      replacement:
+        'the `count_distinct` aggregation FUNCTION for a deduplicated count — the one '
+        + 'deduplicating spelling every face computes, lowered to `COUNT(DISTINCT field)` on '
+        + 'both SQL faces since #6409. `SUM(DISTINCT …)` / `AVG(DISTINCT …)` get no '
+        + 'replacement: no backend ever computed them here, and a per-row measure that needs '
+        + 'deduplicating before summing is a modelling problem to fix in the data',
+      reason:
+        'A DIVERGENCE, not an inert declaration — which is why it outlived the #4286 sweep '
+        + 'that dispositioned every other `data.query.*` member. That sweep asked which keys '
+        + 'no executor reads; this one HAD an executor, exactly one out of six. The engine\'s '
+        + 'in-memory fallback (`objectql/src/in-memory-aggregation.ts`) deduplicated the '
+        + 'values before applying the function, while `SqlDriver.aggregate`, the Turso '
+        + '`RemoteTransport.aggregate`, `driver-mongodb`\'s `buildAggregationStage`, '
+        + '`driver-memory`\'s `computeAggregate` and service-analytics\' `AGGREGATE_SQL` all '
+        + 'ignored the key. So `{ function: \'sum\', field: \'amount\', distinct: true }` '
+        + 'answered a deduplicated sum when the engine fell back in memory and an ordinary sum '
+        + 'on every SQL datasource: one query, two numbers, chosen by which backend happened '
+        + 'to serve it — and unlike the #6203 / #5907 divergences closed on the same axis, the '
+        + 'wrong answer here is a plausible NUMBER rather than a refusal, so nothing surfaced '
+        + 'it to the author. Measured blast radius inside the fallback: `sum` and `avg` only — '
+        + '`count` returned from its own branch before reaching the dedupe, `count_distinct` '
+        + 'fed the values into a Set (dedupe-then-Set is Set), and dedupe does not move '
+        + '`min`/`max`. ENFORCE was weighed and rejected (maintainer ruling 2026-08-09): '
+        + '`count_distinct` already covers the only spelling anyone has measured demand for, '
+        + 'and lowering `SUM(DISTINCT …)` across five faces — two of them frozen under #5499 — '
+        + 'buys a shape that is near-universally a modelling mistake. A REQUEST surface — '
+        + '`QueryAST` is the client SDK builder\'s output and the `POST /data/:object/query` '
+        + 'body, never stored in stack metadata — so there is no source for the chain to '
+        + 'rewrite and callers move their own queries: the #4286 disposition for '
+        + '`joins`/`cursor`/`distinct`/`windowFunctions`, applied verbatim one level down. '
+        + 'ADR-0049, #6815.',
+      acceptanceCriteria:
+        'No caller sends `distinct` inside an `aggregations[]` entry, on the wire or through '
+        + 'the SDK; a deduplicated count is written as `{ function: \'count_distinct\', field }` '
+        + 'and reads the same number on every backend. A query still carrying the key fails to '
+        + 'parse with the removal prescription — including through '
+        + '`EngineAggregateOptionsSchema`, which reuses `AggregationNodeSchema` by reference — '
+        + 'and `POST /api/v1/data/:object/query` answers `400 VALIDATION_FAILED` with a '
+        + '`fields[]` entry at `aggregations.<i>.distinct` instead of serving a number. '
+        + 'Authoring it is a `tsc` error at the call site. ⚠️ The observable NUMBERS change on '
+        + 'exactly one path and that is the point of the change: a `sum`/`avg` that used to be '
+        + 'deduplicated by the in-memory fallback now answers what every SQL face has always '
+        + 'answered for the same query. Verify against the SQL answer, not against the '
+        + 'pre-upgrade fallback answer — the two disagreed, which is why the key is gone.',
     },
     {
       id: 'workflow-service-slot-retired',
@@ -3274,6 +3353,27 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // callers rather than a stack conversion").
     'api/ListNotificationsRequest:cursor',
     'api/ListNotificationsResponse:cursor',
+    // #6815 — the per-aggregation DISTINCT flag, retired under ADR-0049 by
+    // maintainer ruling 2026-08-09. ONE key, and one entry, because
+    // `AggregationNodeSchema` is reused BY REFERENCE rather than `.extend()`ed:
+    // `QuerySchema.aggregations` and `EngineAggregateOptionsSchema.
+    // aggregations` are both `z.array(AggregationNodeSchema)`, so the walked
+    // shape has a single `data/AggregationNode` def and the baseline marks one
+    // line `[RETIRED]`. Contrast the `shared/FieldMapping:transform` trio at
+    // the top of this list, where two `.extend()`s copied the property into
+    // three walked shapes and each needed its own registration.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the same
+    // reason as the notification pair above: `QueryAST` is a REQUEST surface —
+    // the client SDK builder's output and the `POST /data/:object/query` body
+    // — never stored in stack metadata, so there is no authored source or
+    // `sys_metadata` row for a D2 conversion to rewrite. The prescription
+    // reaches consumers as the D3 semantic entry
+    // `aggregation-node-distinct-retired` plus this tombstone, which is the
+    // disposition every other `data.query.*` retirement in this major already
+    // takes (`query-joins-retired` / `query-cursor-retired` /
+    // `query-distinct-retired` / `query-window-functions-retired`, #4286).
+    'data/AggregationNode:distinct',
   ],
 };
 
