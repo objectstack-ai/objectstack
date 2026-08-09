@@ -70,7 +70,7 @@ describe('[#6409] driver-sqlite-wasm — aggregate vocabulary conformance', () =
       },
     ]);
     for (const row of AGGREGATION_ROWS) {
-      await driver.create(OBJECT, { ...row }, { bypassTenantAudit: true } as any);
+      await driver.create(OBJECT, { ...row }, { bypassTenantAudit: true });
     }
   });
 
