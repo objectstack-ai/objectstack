@@ -26,6 +26,15 @@ import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.
 
 const MANIFEST_ID_RE = /^[a-z0-9][a-z0-9._-]{0,254}$/i;
 
+/**
+ * Mirror of `manifest.namespace`'s pattern in `@objectstack/spec`
+ * (`kernel/manifest.zod.ts`, and `cloud/package.zod.ts` for the publish
+ * payload): 2-20 chars, a lowercase letter followed by lowercase letters,
+ * digits or underscores. Pinned against the spec schema in
+ * `test/package-publish.test.ts`.
+ */
+export const NAMESPACE_RE = /^[a-z][a-z0-9_]{1,19}$/;
+
 function slugify(input: string): string {
   return input
     .toLowerCase()
@@ -51,6 +60,28 @@ function deriveManifestId(artifact: any, artifactPath: string): string {
     return `local.${slugify(name)}`;
   }
   return `local.${slugify(basename(artifactPath).replace(/\.json$/i, ''))}`;
+}
+
+/**
+ * Read the metadata namespace off the COMPILED ARTIFACT's manifest — the same
+ * place {@link deriveManifestId} reads `manifest.id`.
+ *
+ * ADR-0048 addendum §A.2 (Phase A1) requires the namespace to travel with the
+ * publish payload so the publish-time exclusivity gate has an input to check.
+ * It is deliberately NOT overridable by a flag or by `objectstack.manifest.json`
+ * (unlike `manifestId`): the namespace is the physical object-name prefix baked
+ * into the artifact at build time, and a reservation that names a different
+ * string than the package actually ships would be worse than no reservation —
+ * a publisher could reserve `foo` while installing `bar_*` objects.
+ *
+ * Returns `undefined` when the artifact declares no namespace. That is a
+ * supported artifact shape (`manifest.namespace` is optional), and §A.2's
+ * algorithm opens with `if (namespace is absent) -> allow`.
+ */
+function readArtifactNamespace(artifact: any): string | undefined {
+  const ns = artifact?.manifest?.namespace;
+  if (typeof ns !== 'string' || !ns.trim()) return undefined;
+  return ns.trim();
 }
 
 function deriveDisplayName(artifact: any, manifestId: string): string {
@@ -294,6 +325,21 @@ export default class PackagePublish extends Command {
         this.exit(1);
         return;
       }
+      // ADR-0048 addendum §A.2 Phase A1 — the namespace must reach the control
+      // plane, and it must be the artifact's real one. A malformed value is
+      // refused here, before any network call: silently dropping it would
+      // publish an artifact whose namespace the exclusivity gate never sees,
+      // which is precisely the hole this phase exists to close.
+      const namespace = readArtifactNamespace(artifact);
+      if (namespace !== undefined && !NAMESPACE_RE.test(namespace)) {
+        printError(
+          `Invalid manifest.namespace '${namespace}' in the artifact. Expected 2-20 characters: ` +
+          'a lowercase letter followed by lowercase letters, digits or underscores ' +
+          "(e.g. 'crm'). Fix `manifest.namespace` in objectstack.config.ts and rebuild.",
+        );
+        this.exit(1);
+        return;
+      }
       const displayName = (
         flags['display-name']
         ?? (typeof m.displayName === 'string' ? m.displayName : undefined)
@@ -339,6 +385,11 @@ export default class PackagePublish extends Command {
         display_name: displayName,
         visibility: flags.visibility,
       };
+      // Absent namespace ⇒ absent key. `CreatePackageRequestSchema.namespace`
+      // is optional and §A.2 allows an unnamespaced publish; sending `null` or
+      // `''` would turn "declares no namespace" into a value the gate has to
+      // interpret.
+      if (namespace) pkgBody.namespace = namespace;
       const desc = flags.description ?? (typeof m.description === 'string' ? m.description : undefined);
       if (desc) pkgBody.description = desc;
       const cat = flags.category ?? (typeof m.category === 'string' ? m.category : undefined);
@@ -516,6 +567,7 @@ export default class PackagePublish extends Command {
       printSuccess('Package published');
       printKV('  Package',        manifestId);
       printKV('  Package ID',     String(pkg?.id ?? '—'));
+      if (namespace) printKV('  Namespace', namespace);
       printKV('  Version',        String(ver?.version ?? version));
       printKV('  Version ID',     String(ver?.id ?? '—'));
       if (ver?.checksum) printKV('  Checksum', String(ver.checksum).slice(0, 16));
