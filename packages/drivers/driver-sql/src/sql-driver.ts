@@ -3983,6 +3983,27 @@ export class SqlDriver implements IDataDriver {
     return this.formatOutput(object, updated) || null;
   }
 
+  /**
+   * Columns `upsert`'s merge branch must never write ([#7011]): `created_at`
+   * (the row's birth timestamp belongs to the original insert) and every
+   * `auto_number` column — an autonumber is an immutable business identifier
+   * once assigned, so an upsert that lands on an existing row keeps that row's
+   * number (see the fuller rationale at the merge site). Autonumber columns
+   * are returned under their PHYSICAL names (an external object can remap
+   * logical fields via `external.columnMap`), matching the
+   * `applyWriteColumnMap`-processed row the merge column list is derived from;
+   * `created_at` stays the literal post-map key it has always been filtered as.
+   */
+  protected insertOnlyUpsertColumns(object: string): Set<string> {
+    // Same config resolution as `fillAutoNumberFields`: object name first,
+    // then the storage-mapped table name.
+    const tableName = this.physicalTableByObject[object] ?? StorageNameMapping.resolveTableName({ name: object } as any);
+    const cfgs = this.autoNumberFields[object] || this.autoNumberFields[tableName] || [];
+    const columns = new Set<string>(['created_at']);
+    for (const cfg of cfgs) columns.add(this.remoteColumn(object, cfg.name, cfg.name));
+    return columns;
+  }
+
   async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, any>> {
     const { _id, ...rest } = data;
     const toUpsert = { ...rest };
@@ -4022,9 +4043,22 @@ export class SqlDriver implements IDataDriver {
       const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
       // `created_at` is insert-only — never overwrite it when an existing row is
       // merged on conflict (the stamped/seeded value belongs to the original
-      // insert). Everything else (incl. `updated_at`) merges as before, so an
-      // upsert that updates a row still advances `updated_at`.
-      const mergeColumns = Object.keys(formatted).filter((c) => c !== 'created_at');
+      // insert). [#7011] `auto_number` columns are insert-only for the same
+      // reason, and a stronger one: the number is an externally visible
+      // business identifier once assigned (`CASE-00001`), and
+      // `fillAutoNumberFields` above reserved a FRESH value before the
+      // statement could know it would merge — leaving these columns in the
+      // merge set rewrote the existing row's number on every merge-path upsert
+      // (measured on a healthy counter: create → CASE-00001, two upserts of
+      // the same id → CASE-00002 then CASE-00003, one row throughout). The
+      // exclusion is unconditional — an explicit payload value does not
+      // renumber on merge either; `update()` is the deliberate renumbering
+      // path. The reservation itself still happens on the merge path (a gap,
+      // not a rewrite) — that pre-burn half is #6943's reseed family, not
+      // this exclusion's. Everything else (incl. `updated_at`) merges as
+      // before, so an upsert that updates a row still advances `updated_at`.
+      const insertOnlyColumns = this.insertOnlyUpsertColumns(object);
+      const mergeColumns = Object.keys(formatted).filter((c) => !insertOnlyColumns.has(c));
       const insertion = builder.insert(formatted).onConflict(mergeKeys);
 
       try {
