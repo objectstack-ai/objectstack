@@ -90,21 +90,25 @@ const AUTH_DOCS = resolve(REPO_ROOT, 'content/docs/permissions/authentication.md
  * module loading — is process startup, about which #6531 says nothing.
  *
  * Armed at spawn instead, this budget policed startup rather than the contract.
- * Measured on this file (5 runs, probe replicating {@link runDeviceLogin}), of
+ * Measured on this file (10 runs, probe replicating {@link runDeviceLogin}), of
  * the latency from spawn to the record being readable:
  *
  * | segment                                               | measured     |
  * |-------------------------------------------------------|--------------|
- * | spawn → device-code request (startup)                 | 6844–8841 ms |
+ * | spawn → device-code request (startup)                 | 6844–9587 ms |
  * | device-code response → record readable (the contract) | 13–39 ms     |
  *
  * So ~99.7% of the old budget was spent on work the contract does not govern,
- * leaving startup needing only a ~2.3x slowdown to exhaust 20 s — ordinary on a
- * box running four concurrent worktree builds, or on a merge-queue runner. Its
- * cloud sibling, on the identical harness, duly ejected two unrelated PRs
- * (#6847 spec-only, #6835 docs-only) before #6855 re-anchored it. Anchored
- * here, the budget covers a ~20 ms window with ~500x headroom, and the number
- * itself is unchanged: this is a re-anchoring, NOT a widened timeout.
+ * leaving startup needing only a ~2.1x slowdown to exhaust 20 s. The spread in
+ * that row is itself the argument: the same probe measured 6844 ms on a quiet
+ * box and 9587 ms once other worktrees started building, with nothing about
+ * the contract having changed in between. The cloud sibling, on this identical
+ * harness, duly ejected two unrelated PRs from the merge queue (#6847
+ * spec-only, #6835 docs-only) before #6855 re-anchored it.
+ *
+ * Anchored here, the budget covers a ~20 ms window with ~500x headroom, and
+ * the number itself is unchanged: this is a re-anchoring, NOT a widened
+ * timeout.
  */
 const RELEASE_DEADLINE_MS = 20_000;
 
