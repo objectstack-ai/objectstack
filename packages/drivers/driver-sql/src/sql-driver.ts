@@ -4103,7 +4103,8 @@ export class SqlDriver implements IDataDriver {
       // groupBy items may be plain strings ('region') or structured objects
       // ({ field: 'closed_at', dateGranularity: 'quarter' }). For structured
       // items we emit a dialect-specific bucket expression aliased as the
-      // field name so the resulting row keys match in-memory bucketDateValue.
+      // projected column name so the resulting row keys match in-memory
+      // bucketDateValue — see the `outKey` note below for what that name is.
       // [#6212] The element type is `GroupByNode` — the spec's own union — so
       // the local `Array<string | { field, dateGranularity? }>` restatement is
       // gone. It had drifted from the declaration it was restating: `alias` was
@@ -4116,6 +4117,18 @@ export class SqlDriver implements IDataDriver {
           const kind = this.readPresentationKind(table, g);
           if (kind) presentedOutput.set(g, kind);
         } else if (g && typeof g === 'object' && g.field) {
+          // [#6401] The projected column is named `alias ?? field` — the rule
+          // `AggregationNodeSchema.alias` already gets a few dozen lines below,
+          // and the one `in-memory-aggregation.ts` has always applied
+          // (`g.alias ?? g.field`). This face was the half that PARSED the key
+          // and ignored it, so one aggregate came back keyed by `closed_at`
+          // under pushdown and by `qtr` under the in-memory fallback — decided
+          // by a driver capability bit and a timezone the caller cannot see
+          // (`engine.ts`'s `allStructuredSupported && !tzRequiresInMemory`
+          // fork). GROUP BY still keys on the FIELD; only the projection is
+          // renamed, so the buckets are identical and only their column name
+          // moves.
+          const outKey = g.alias ?? g.field;
           if (g.dateGranularity) {
             const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity, table);
             if (!bucket) {
@@ -4129,12 +4142,18 @@ export class SqlDriver implements IDataDriver {
               );
             }
             builder.groupByRaw(bucket.sql, bucket.bindings);
-            builder.select(this.knex.raw(`${bucket.sql} as ??`, [...bucket.bindings, g.field]));
+            builder.select(this.knex.raw(`${bucket.sql} as ??`, [...bucket.bindings, outKey]));
           } else {
             builder.groupBy(g.field);
-            builder.select(g.field);
+            // `?? as ??` only when the name actually moves: an alias equal to
+            // the field would otherwise rewrite `select "region"` into
+            // `select "region" as "region"` on every dialect for no gain.
+            builder.select(outKey === g.field ? g.field : this.knex.raw('?? as ??', [g.field, outKey]));
+            // Keyed by the OUTPUT column, like the aggregation branch below —
+            // `presentReadColumns` matches on the name the row actually
+            // carries, so an aliased group value went unpresented before.
             const kind = this.readPresentationKind(table, g.field);
-            if (kind) presentedOutput.set(g.field, kind);
+            if (kind) presentedOutput.set(outKey, kind);
           }
         }
       }

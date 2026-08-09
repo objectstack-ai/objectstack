@@ -43,6 +43,8 @@
     "AuthSession (interface)",
     "AuthSessionApi (interface)",
     "AuthUser (interface)",
+    "AuthoredRowWriteOperation (type)",
+    "AuthoredRowWriteVerdict (type)",
     "AutomationContext (interface)",
     "AutomationResult (interface)",
     "CacheStats (interface)",

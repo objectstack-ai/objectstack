@@ -28,7 +28,10 @@ import { parseNodeConfig } from './parse-config.js';
  *  - **Request/response (default)** — a synchronous `fetch()` returning
  *    `{ response, status }` to the flow, preserving the historical `http_request`
  *    behavior so existing flows that read the response keep working. (The ADR's
- *    `isAsync` suspend-and-resume variant is future work.)
+ *    suspend-and-resume variant is future work. ADR-0018 called it the `isAsync`
+ *    path; that descriptor key was retired in #6748 — a suspending HTTP node
+ *    would declare `supportsPause: true` plus a `resumeAuthority` and return
+ *    `suspend: true`, which is the mechanism the engine actually enforces.)
  */
 
 /** Structural view of `service-messaging`'s HTTP outbox surface (ADR-0018 M3). */

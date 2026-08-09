@@ -47,14 +47,21 @@
  * envelope would have been a new fork, so both faces were moved together and the
  * parity block below compares their runtime messages.
  *
- * # `alias` is deliberately NOT read
+ * # `alias` IS read — as of #6401
  *
- * `GroupByNodeSchema.alias` is honoured by the in-memory path
- * (`in-memory-aggregation.ts` projects `g.alias ?? g.field`) and ignored by
- * `SqlDriver.aggregate`. Reading it here would make this transport the only SQL
- * face that honours it — a new divergence dressed as a fix. It is ignored, in
- * step with the local face, and the pushdown/in-memory disagreement is filed
- * separately; it is not created here.
+ * This section used to read "`alias` is deliberately NOT read", and the reason
+ * it gave was sound: `GroupByNodeSchema.alias` was honoured by the in-memory
+ * path (`in-memory-aggregation.ts` projects `g.alias ?? g.field`) and ignored
+ * by `SqlDriver.aggregate`, so reading it HERE alone would have made this
+ * transport the only SQL face that did — a new divergence dressed as a fix. The
+ * disagreement was filed separately instead (#6401).
+ *
+ * That issue resolved to ENFORCE, and moved all three SQL faces in one change:
+ * `driver-sql`, this transport, and `driver-sqlite-wasm` (which inherits
+ * `SqlDriver`'s compiler). The projected column is `alias ?? field` everywhere;
+ * GROUP BY still keys on the FIELD. So the deferral is discharged rather than
+ * reversed — the condition it named ("only one face would read it") is what
+ * stopped being true.
  *
  * # Reverse verification — direction predicted BEFORE it was run, per case
  *
@@ -176,17 +183,60 @@ describe('[#6212] RemoteTransport compiles the GroupByNode union', () => {
       expect(calls[0].sql).toBe('SELECT "stage", count("stage") AS "n" FROM "deal" GROUP BY "stage"');
     });
 
-    it('ignores `alias`, in step with the local face', async () => {
-      // Pinned as a DELIBERATE choice, not an oversight: `SqlDriver.aggregate`
-      // does not read `alias` either, so honouring it only here would make this
-      // transport the one SQL face that does. See the file header.
+    it('[#6401] projects `alias` as the column name, and still GROUPS BY the field', async () => {
+      // Flipped from 'ignores `alias`, in step with the local face'. That pin
+      // was correct when written — at #6212 this transport was the only face
+      // that could have started reading the key, and doing so alone would have
+      // been a new divergence. #6401 moved all three SQL faces together, so the
+      // step it was keeping is now a step toward the alias, not away from it.
+      //
+      // The old assertion is REPLACED, not dropped: it claimed the alias never
+      // reaches the statement; the new truth is the exact statement that
+      // carries it — projection renamed, grouping untouched.
       const { t, calls } = transportWithCapturingClient();
       await t.aggregate('deal', {
         groupBy: [{ field: 'stage', alias: 'bucket' }],
         aggregations: [{ function: 'count', field: 'stage', alias: 'n' }],
       });
+      expect(calls[0].sql).toBe(
+        'SELECT "stage" AS "bucket", count("stage") AS "n" FROM "deal" GROUP BY "stage"',
+      );
+      // ⛔ The grouping key is the FIELD. SQLite resolves output names in
+      // GROUP BY, so a face that grouped by the alias would return identical
+      // rows here and diverge on a dialect that does not.
+      expect(calls[0].sql).not.toContain('GROUP BY "bucket"');
+    });
+
+    it('[#6401] an alias equal to the field name emits no self-rename', async () => {
+      const { t, calls } = transportWithCapturingClient();
+      await t.aggregate('deal', {
+        groupBy: [{ field: 'stage', alias: 'stage' }],
+        aggregations: [{ function: 'count', field: 'stage', alias: 'n' }],
+      });
+      // Byte-identical to the string spelling above — the degenerate alias must
+      // not start rewriting statements on every dialect for no gain.
       expect(calls[0].sql).toBe('SELECT "stage", count("stage") AS "n" FROM "deal" GROUP BY "stage"');
-      expect(calls[0].sql).not.toContain('bucket');
+    });
+
+    it('[#6401] refuses an unsafe identifier in `alias`, not only in `field`', async () => {
+      // The alias is caller-supplied text that now reaches the statement as a
+      // quoted identifier, so it needs the gate `field` already has. The
+      // assertion names the OFFENDING TEXT, not just the sentence (#6144): a
+      // `field` that is itself safe is what makes this case reach the alias
+      // check at all.
+      const { t, calls } = transportWithCapturingClient();
+      const err = await t
+        .aggregate('deal', {
+          groupBy: [{ field: 'stage', alias: 'bucket"; DROP TABLE deal; --' }],
+          aggregations: [{ function: 'count', alias: 'n' }],
+        })
+        .then(
+          () => { throw new Error('expected the transport to refuse an unsafe alias'); },
+          (e) => e as Error,
+        );
+      expect(err.message).toContain('unsafe identifier rejected');
+      expect(err.message).toContain('bucket"; DROP TABLE deal; --');
+      expect(calls).toEqual([]);
     });
 
     it('still refuses an unsafe identifier inside a structured entry', async () => {

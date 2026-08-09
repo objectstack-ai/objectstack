@@ -56,6 +56,8 @@ import {
   type IRlsMembershipResolver,
   type ISecurityService,
   type SharingWriteVerdict,
+  type AuthoredRowWriteVerdict,
+  type AuthoredRowWriteOperation,
 } from '@objectstack/spec/contracts';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
@@ -736,6 +738,20 @@ export class SecurityPlugin implements Plugin {
             return 'own';
           }
         },
+        // [#5493 / ADR-0105 D3] Authored-row-write evidence: does an
+        // APP-AUTHORED (non-floor) RLS policy admit this row for this write,
+        // with the platform's `created_by` ownership floor taken out by
+        // provenance? The composed RLS answer cannot stand in for it — the
+        // floor admits every row's CREATOR, so a caller deferring to "composed
+        // RLS admits" hands transferred records back to their former creators
+        // (#5493 probe E-A). Verdict-shaped and fail-closed to `abstain`; see
+        // the method for why a null Layer 1 is an abstention.
+        checkAuthoredRowWrite: (
+          object: string,
+          recordId: string,
+          operation: AuthoredRowWriteOperation,
+          context?: any,
+        ) => this.checkAuthoredRowWrite(object, recordId, operation, context),
         // [ADR-0046 §6.7] Effective permission-set NAMES for a caller — the
         // primitive the REST read layer needs to evaluate a permission-set-
         // gated book/doc audience ({ permissionSet: '…' }). Same resolution
@@ -796,7 +812,7 @@ export class SecurityPlugin implements Plugin {
           this.getMetadataReadableFields(object, context),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547 / #5493');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -2589,6 +2605,110 @@ export class SecurityPlugin implements Plugin {
         e instanceof Error ? e : new Error(String(e)),
       );
       return 'deny';
+    }
+  }
+
+  /**
+   * [#5493 / ADR-0105 D3] `ISecurityService.checkAuthoredRowWrite` — does an
+   * APP-AUTHORED row-level policy admit this row for this write operation, on
+   * its own, with the platform's ownership floor taken out?
+   *
+   * The question exists because the composed RLS answer cannot stand in for it.
+   * `member_default` — the additive baseline every authenticated member
+   * resolves — ships `owner_only_writes` / `owner_only_deletes`
+   * (`created_by == current_user.id`, see `platform-ownership-policies.ts`), so
+   * "the composed RLS admits this row" is true for the row's CREATOR whether or
+   * not any app policy mentions it. #5493's probe E-A measured the gap: a
+   * creator who is no longer the owner (a record transferred away) is admitted
+   * by the floor and refused by sharing with a byte-identical envelope, so a
+   * deferral keyed on the composed answer would hand transferred records back
+   * to their former creators. Provenance is the only thing that separates the
+   * two, and it is private to this package by design.
+   *
+   * **No second RLS evaluator.** The verdict is read off the SAME
+   * {@link computeLayeredRlsFilter} the middleware enforces with, driven by the
+   * SAME `dropPlatformOwnershipFloor` knob #6684 landed for the by-id write
+   * pre-image gate — the floor is removed by provenance, everything else
+   * compiles exactly as it would on the enforcement path. Two consequences
+   * worth naming, because both are load-bearing:
+   *
+   *  - `layer1 == null` is read as `abstain`, never as "admitted". Layer 1 is
+   *    null precisely when no authored predicate is actually gating this write:
+   *    the applicable set was empty, or the ADR-0066 ① posture-gated superuser
+   *    short-circuit skipped business RLS wholesale. A superuser bypass is not
+   *    an authored admission, and reporting it as one would re-open E-A from
+   *    the other side. (The field-existence net's deny sentinel is NOT null, so
+   *    it flows through the probe and matches nothing — also `abstain`.)
+   *  - Layer 0 (the tenant wall) stays AND-ed in. A row in another tenant is
+   *    admitted by nothing, and dropping the wall here would make this the one
+   *    surface in the plugin that answers across it.
+   *
+   * **Fail-closed in the `abstain` direction** — the caller uses `admit` to
+   * WIDEN, so every failure must be the answer that changes nothing. No throw
+   * ever escapes: a principal-less context, an on-behalf-of context (ADR-0090
+   * D10 — the delegator intersection is not computed on this path, exactly as
+   * {@link hasWriteBypass} and {@link resolveWriteScope} fail closed on it), an
+   * unresolvable probe and a thrown lookup all return `abstain`.
+   *
+   * The pre-image read is the same `findOne` shape the by-id write gate uses,
+   * with the caller's own context — so a row the caller cannot READ is not
+   * "admitted by declaration" here either, which is the non-widening direction
+   * and matches what the enforcement path already does with the same read.
+   */
+  async checkAuthoredRowWrite(
+    object: string,
+    recordId: string,
+    operation: AuthoredRowWriteOperation,
+    context?: any,
+  ): Promise<AuthoredRowWriteVerdict> {
+    try {
+      if (!object || recordId == null || recordId === '') return 'abstain';
+      if (operation !== 'update' && operation !== 'delete') return 'abstain';
+      if (!this.ql) return 'abstain';
+      // No principal, or a delegated identity this path cannot intersect —
+      // both are "cannot measure", which is `abstain` (never `admit`).
+      if (!context?.userId) return 'abstain';
+      if (context?.onBehalfOf?.userId) return 'abstain';
+
+      const permissionSets = await this.resolvePermissionSetsForContext(context);
+      if (permissionSets.length === 0) return 'abstain';
+
+      // Cheap provenance pre-check: if the caller holds NO app-authored policy
+      // applicable to (object, operation), there is nothing that could admit by
+      // declaration — answer without spending a database round-trip. This is
+      // the same collection the compiler consumes, filtered by the same
+      // provenance predicate, so the two cannot disagree about what "authored"
+      // means.
+      const authored = this.collectRLSPolicies(
+        permissionSets,
+        object,
+        operation,
+        (context?.positions ?? []) as string[],
+      ).filter((p) => !isPlatformOwnershipFloorPolicy(p));
+      if (authored.length === 0) return 'abstain';
+
+      const { layer0, layer1 } = await this.computeLayeredRlsFilter(
+        permissionSets,
+        object,
+        operation,
+        context,
+        { dropPlatformOwnershipFloor: true },
+      );
+      // See the doc above: a null Layer 1 means no authored predicate is
+      // gating this write, which is an abstention and not an admission.
+      if (layer1 == null) return 'abstain';
+
+      const parts = [{ id: recordId }, ...(layer0 ? [layer0] : []), layer1];
+      const row = await this.ql.findOne(object, { where: { $and: parts }, context });
+      return row ? 'admit' : 'abstain';
+    } catch (e) {
+      this.logger.warn?.(
+        `[security] checkAuthoredRowWrite could not resolve an authored-policy verdict for ` +
+          `'${object}' record '${recordId}' (${operation}, user ${context?.userId ?? 'unknown'}) — ` +
+          `abstaining (fail-closed, #5493)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return 'abstain';
     }
   }
 
