@@ -804,7 +804,7 @@ routing 用 `repo:*` 表达(rule 4 的座位协议),不另打 `domain:*` —— 
 | `domain:spec` | #6017 | ✅ 有行 |
 | `domain:spec-surface` | #6298 | ✅ 有行 |
 | `domain:cli` | #6024 | ✅ 有行 |
-| `domain:spec-tooling` | #6018 | ⚠️ **故意无行** —— 见下一段 |
+| `domain:spec-tooling` | #6018 | ✅ 有行(2026-08-09 裁决后补,见下一段) |
 
 **已退役(⛔ 分诊不再打;见到就是误标,按 rule 4 的误标路径上报):**
 
@@ -825,7 +825,11 @@ routing 用 `repo:*` 表达(rule 4 的座位协议),不另打 `domain:*` —— 
 一步**。本表这两行是它们今天唯一的防线;**删除是 PM 的动作**(dev 侧无删除标签的
 工具),⛔ 删掉之前不要把它们当成不存在。
 
-### `domain:spec-tooling` —— 在册车道,包家族表故意不给它行(#5469 未闭)
+### `domain:spec-tooling` —— 在册车道,三处争议面已按判据裁定(#5469)
+
+**⚠️ 读法**:本节是**沿革**,不是待办。生效的路由规则在上面的包家族表
+`spec-tooling` / `devx` 两行;本节解释那两行为什么长成那样,以及两条**已被
+事实推翻的旧裁决**为什么不能照抄执行。
 
 维护者 2026-08-06 裁决(#5469,原文引用、未翻译):
 
@@ -844,19 +848,24 @@ routing 用 `repo:*` 表达(rule 4 的座位协议),不另打 `domain:*` —— 
   #6232 / #6221 / #5828 / #5757 / #5163,其中 #6797、#6350 已 `pm:dispatched`),
   67 单 closed,最近一次新打在 2026-08-08。
 
-⇒ 该标签是**在册车道,分诊照常打**。包家族表不给它行的原因**不是**「它不存在」,
-而是它与 `domain:devx` 的三处文件面重叠**至今未裁**;在未裁之前给它一行,会当场
-违反本节 anchoring rule 的那一句(每个包恰好属于一个 domain)。
+⇒ 该标签是**在册车道,分诊照常打**。
+
+**维护者 2026-08-09 裁决(#5469,取代上面 2026-08-06 那条):判据切分,给行。**
+拖住补行的从来不是「它是否存在」,而是它与 `domain:devx` 的三处文件面重叠未裁 ——
+裁完即补,包家族表的 `spec-tooling` 行就是该裁决的登记:
 
 - **无争议、可直接路由的两处**:`packages/spec/scripts/**`、`packages/spec/docs/**`
   ⇒ `domain:spec-tooling`。devx 从未声明这两处,依据是 #6018 座位贴的 Scope 段与
   上面 2026-08-07 的 surface / tooling 分界(tooling 改「围着契约转的机器」)。
-- ⚠️ **未裁的三处**:`packages/lint`、`content/docs/**`、`scripts/` —— 座位贴 #6018
+- **曾争议的三处**:`packages/lint`、`content/docs/**`、`scripts/` —— 座位贴 #6018
   与 #6023 **同时声明**这三处。这不是纸面问题,2026-08-09 实测两侧都在落地:
   `domain:spec-tooling` 的 #6778 整单落在 `packages/lint/src/`(PR #6831),而同期
   `domain:devx` 的 #5957 / #5330 / #6381 也落在 `packages/lint`。
-- ⇒ **落在这三处的卡,分诊 FLAG 回 #5469,⛔ 不自行二选一。** 备选方案 A / B 写在
-  #5469 正文里,裁定权在维护者与两条车道的 PM,⛔ 不由分诊或 dev 代拍。
+- ⇒ **按「是否围着 spec 契约转」逐卡判**:契约门禁/生成器/lint 规则/报错散文/
+  references 管线 ⇒ `spec-tooling`;一般开发工具面 ⇒ `devx`。这是 anchoring rule
+  在 `packages/spec` 内那条显式例外的**延伸,不是第二套规则** —— 2026-08-07 拆分
+  已写下判据的前半(「tooling 改围着契约转的机器」),本裁决把同一句话铺到这三处。
+  拿不准的按 rule 4 误标路径 FLAG 回分诊,⛔ 不由 dev 代拍。
 
 **`engine` 一分为二(#5472,与 #5095 同批)。** 旧 `domain:engine` 同时覆盖
 objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
