@@ -89,6 +89,16 @@ write state only through these signals:
   absent from the issue. Finish the pair or revert the half before you stop;
   the next reader (possibly your own post-compact self) has only GitHub to
   read.
+- **代执行他人指令的关闭/作废,评论里必须带指令出处。** 上面几条管「状态与它的
+  记录成对」;这一条管**理由**:关闭是一次状态变更,而它的**依据**无法从状态机里
+  读回来。并发多席位下,一个没有出处的关闭与一次误操作**在证据上不可区分** ——
+  PR #6668(ADR-0123 草案,draft、全绿)被兄弟席位无说明关闭,本席读作误扫,重开
+  并发跨席询问;维护者随后说明那是**他本人的指令**,遂按原话重新关闭并把出处附在
+  PR 上。写那行出处要 20 秒,查「这是不是误操作」要一个跨席往返。⇒ 代执行(维护者
+  口头指令、别的座位的裁决、聊天里的一句话)一律留出处三件:**谁的指令、原话、
+  在哪说的**;同理适用于作废、摘标签、回收认领这类**不可从标签反推理由**的动作。
+  (同一个 PR 的另一半沿革 —— 维护者以「没人要这个能力」结案 —— 在 Guardrails 的
+  ADR 条款里,那条讲的是**决定**,本条讲的是**执行记录**。)
 - **写后回读。** PR/issue 正文、评论、标签的写操作**发出后回读校验** —— 一班实测
   四次「写成功但内容不对」全靠回读才抓到:两次裸 ESC 字节被实体化、两次 GitHub
   sanitizer 吞内容(#5885);Auto Label bot 的整组 PUT 还会**冲掉刚打的手工标签**
@@ -1176,6 +1186,16 @@ Prime Directive #10 是一个强力生产者,而循环原本只有「修掉」�
   (发布后修不回);④ 发布说明里需要为它道歉的(含「照文档抄即失败」的首小时
   体验)。改进型、优化、重构、观察类 finding、内部工具、纯展示瑕疵默认**不
   阻塞** —— 坐下一班车。
+- **拆分 / 分票时 `target:*` 随工作走,不随票号留 —— 对每一半重跑一遍上面那条
+  二元判据。** #6806 是 `target:v17` 的 #5495 拆出的引擎侧残余:拆分把**工作**移了
+  出去,发版目标却留在原地,于是板上同时有**一张不会动的卡**(父单的剩余范围已被
+  裁定 parked)和**一张看不见的卡**(真正在兑现 v17 义务的那一半)。查
+  `label:target:v17` 的人两头都读错,而两个错误方向相反、互相掩盖。默认是**继承**
+  (义务跟着工作走);判定某一半不该继承时,**把理由按上面四类阻塞写在那张卡上**
+  (可证伪),⛔ 不默认不带。#6806 正是两面的标本:它正文里写过「why `pm:queue`
+  without `target:v17`」的理由,该理由后来被重判、标签补上,两张卡今天都带
+  `target:v17` —— 写下的理由会被复核,不写的默认不会。生产者不变(分诊座位 /
+  objectui 整仓座位),拆分本来就是它做的,本条只是给它加一个必答项。
 - **每个 backlog 恰好一个生产者**(与 `domain:*` 同款单一生产者纪律,只是把
   作用域切对 —— 一个生产者管一个 backlog,不是一个生产者管全部):
   - **objectstack 主 backlog → 分诊座位**:step 0 分诊 defect 类新单时顺手判;
@@ -1326,6 +1346,22 @@ warning **and** the `Blocked-by:` line were written onto #4821 in the same round
 looking dispatchable to every sweep, including another PM's; whatever you
 learned about it is worthless until it is on the issue. Rule: when step 3 pushes
 an issue to a later round, record the known trap on it before the round ends.
+
+**维护者豁免同文件串行时,替代纪律是四条,⛔ 不是「放开」。** 上一段的默认是硬串
+行;豁免只在维护者明示时发生,而被豁免掉的是**排队**,不是防撞 —— 少了替代纪律,
+豁免就是把批次独立性直接删掉。2026-08-08/09 单班实测:#5543 / #6457 / #5929 三张卡
+同时改 `packages/objectql/src/engine.ts`,下面四条换来**三卡零冲突**:
+
+1. **互斥区域申报** —— 每张卡的认领评论把文件面写到**区域**级(函数 / 段落),
+   不止文件名。与座位贴「热文件串行队」的区域列是同一份判据,两处分工不同:那里
+   记的是**跨轮常设**的排队顺序,这里记的是**本轮**的不相交证明;
+2. **开 PR 前合一次 `main`**;
+3. **兄弟卡落地后再合一次** —— 三卡的第二次合并各自发生在对方合入之后;
+4. **冲突交由合并队列仲裁,⛔ PM 不手动排序** —— 队列本来就按合并后的树重算,
+   手排是拿一次人工猜测换掉一次机械判定。
+
+⛔ 豁免不外溢:认领协议、门禁、批次独立性的其余判据一条不减;没有维护者明示豁免
+时,默认仍是上一段的「不同轮次,无例外」。
 
 **阻塞解除后要给延后的那一单重新定价 —— 放回队列不等于原价放回。** 上一段管
 「延后当轮就把坑记到被延后的 issue 上」;这一段管**前一单合入之后**:后一单的成本
@@ -1543,8 +1579,8 @@ GitHub 读全文与全部评论(premise-first 本来就强制它读一遍),正�
 上读不到、或读到了也会被读错」的部分:
 
 - **裁决原文逐字引用**(中文不翻译);
-- **「裁决(不可重裁)」/「PM 机制假设(须实测,鼓励证伪)」的分区**(下面那一段
-  说明了为什么这个分区不能省);
+- **「裁决 / PM 机制假设 / PM 建议的路线」三分区**(下面那一段说明了为什么这个
+  分区不能省,以及第三块是怎么补上的);
 - **卡特定条款**与**同日变更**(same-day churn)行。
 
 ⚠️ **代价与缓解:notes 12 的读取截断。** 长正文经工具读取可能被静默截断,粘贴时
@@ -1585,6 +1621,9 @@ PREVIOUS ATTEMPT REVIEW — fix all of these before returning:
 PM 机制假设(须实测,鼓励证伪):
 {the PM's own guesses about how the code works}
 
+PM 建议的路线(可选 —— 实测优先,拒绝它不需要理由之外的许可):
+{any implementation option / assertion shape / exclusion the PM merely suggests}
+
 Card-specific clauses:
 {only the conditional standard clauses whose 适用判据 this card hits, plus any
 same-day-churn line — see the paragraphs below this template}
@@ -1620,6 +1659,31 @@ Return ONLY the JSON report defined in your agent definition.
 下沉进 os-dev 定义。真正下沉的是**无条件那一批**(worktree、build-first、filter
 方向、锚点与 `gen:schema`、英文政策、报告契约),它们对每张卡都成立,重复抄写只是
 在为同一句话反复付费。
+
+**派发令里的清单、路径、行号,一律在派发那一刻从树上取 —— ⛔ 不从卡片、上一次
+派发或记忆里抄。** 模板里那行「Local gates for this card」要 PM 点名门禁族,而门禁清单
+是**当天就会过期**的东西:2026-08-08/09 单班之内它长了两次 —— #6672 加
+`check:kernel-hook-pairs`、#6661 加 `check:app-nav-i18n`(两条今天都在 `lint.yml`
+里)。所以派发流程里写**取数命令**,不写清单本身:
+
+```bash
+grep -rn 'pnpm.*check:' .github/workflows/*.yml   # 门禁清单当场取数
+```
+
+⛔ **取数的是 PM,不是 dev** —— 产出是「本卡该跑的**那几族**」,填进模板那一行。
+本条 ⛔ 不是让 dev 去本地枚举全 farm:那条(#5738 era)已被 #6871 的「Local
+verification scope」收窄否掉,farm 归 CI 跑一次。两条合起来才成立 —— dev 只跑被
+点名的几族,所以**点名的准确性从此是 PM 独担的**,凭记忆点名等于把那一族漏进 CI。
+
+⚠️ 连「门禁清单 = `lint.yml`」这句本身都是记忆形状的断言:本卡实测 61 条
+`pnpm check:*` 在 `lint.yml`,另有 7 条散在 `ci.yml` / `spec-liveness-check.yml` /
+`validate-deps.yml` / `release.yml` / `showcase-smoke.yml`。同形错误刚在 #6865 上
+发生过 —— 转述进派发令的六个 required-context 名里,**四个其实住在 `ci.yml`**。
+⇒ **卡片或分诊评论里的行级断言,转述进派发令之前必须自己重验一遍**:#6673 的
+「第三处提示串在 `protocol.ts:4780`」实测落在另一个函数、另一条轴上。这与 step 3
+「解锁那一刻」的 #6413(15 分钟前贴出的行号只匹配合并前的父提交)、「入队与落地 A」
+的 #6492(一份清单的第二份拷贝)、编译面清单那句「⚠️ 派发前复核一遍再抄」是**同
+一条纪律的四个位置**;派发令是它最后一道出口,漏在这里就直接变成 dev 的一轮返工。
 
 **下沉进 os-dev 定义的那三条验证条款(build-first、filter 方向、跨包反向验证)治
 的是同一个病:验证动作看起来做了,实际对被测风险失明。**
@@ -1658,10 +1722,39 @@ dev 都用实测顶回并保住了裁决意图 —— 因为派发令把两类�
 
 - **「裁决(不可重裁)」**:维护者/PM 已拍板的方向与语义 —— dev 执行,不重开;
 - **「PM 机制假设(须实测,鼓励证伪)」**:PM 对代码机制的判断 —— dev 动手前
-  验证,证伪了照实报告并按裁决意图换实现路径,⛔ 不许为了顺从假设硬做。
+  验证,证伪了照实报告并按裁决意图换实现路径,⛔ 不许为了顺从假设硬做;
+- **「PM 建议的路线(可选,实测优先)」**:PM 顺手给的实现选项、断言写法、排除面
+  —— dev 有更好的就换,⛔ 不得因为「派发令写了」而照做。
 
 不分区块的派发令里,机制假设穿着裁决的衣服,dev 要么盲从错误假设、要么连裁决
 一起重开 —— 两个方向都是返工。
+
+**第三块是 2026-08-09 单班补的:前两块漏掉了最便宜的那一类 —— PM 顺口给的一个
+「看起来无害」的选项。** 同一班被证伪两次,两次 dev 拒绝都是对的:#6865 的卡自带
+一条「断言 job 上没有 `if:`」的验收写法,照做会把**四个正确的 job** 判红;#6893 的
+派发令把「把 `content/docs/releases/**` 排除出审计范围」写成「亦可辩护」的选项,
+而那正是 #4920 明确否决的 option A —— `scripts/docs-audit/check-audit-scope.mjs`
+在该目录**离开审计范围时直接 `process.exit(1)`**,脚本注释逐字点了 #4920 与 #6893。
+⇒ **把一个便宜选项写成已裁定,恰好招来相反的结果**:dev 要么照做产出一个红,要么
+为了顶回来花掉一轮往返。裁决那一块只写真裁决,凡是「我觉得可以这样」的一律降到
+第三块 —— 措辞的成本是零,读错的成本是一轮。
+
+**文件面要写「预期落点 + 生产者在别包时怎么办」,⛔ 不能只写一个路径名。** 这是
+第二块最常见、也最贵的一个实例。#5586 的派发令把文件面锚在**消费者**
+`packages/core/src/utils/filter-tokens.ts`,而那条文法的**生产者**在
+`packages/spec/src/data/context-tokens.zod.ts`;dev 在生产者侧修是对的(os-dev 的
+contract-first 条款本来就要求它这么做),因而突破了申报的文件面。**只写一个路径名
+的派发令,是在要求 dev 在「守约」与「修对」之间二选一** —— 而按它自己的定义,那
+两条本该是同一条。所以文件面写成两句:
+
+> 预期落点是 `<X>`;若实测表明真正的生产者在别包,**报备后按生产者侧修**(落点与
+> 理由写进报告和 PR 正文),⛔ 不在消费者侧打补丁。
+
+PM 侧的对价是**事后补声明**:#5586 那次判偏离成立,按 #6532 先例补了跨席声明
+(#6017)。要一起记住的机械事实是**跨包常常等于跨车道** —— 这一例的消费者在
+`domain:engine-core`、生产者在 `packages/spec`(「shared contract surfaces have one
+owner」恒归 spec 座位),所以补的是**跨座位**声明,而不是随手越界;走的路径是
+rule 4 的跨域例外与「跨座位转移协议」,本条不另造机制。
 
 **Same-day churn on the issue's files goes INTO the prompt.** Step 1's
 stale-premise check protects against issues that aged; the same-day variant is
@@ -2115,6 +2208,14 @@ statement that no live subtask remains. Four agents stalled 6 times across the
   immediately with that posture line attached; ⛔ do not wait out any silence
   threshold (the cloud-mode ~2 h below): a threshold is for *no* answer, not for
   an answer that says the agent stopped.
+- **每一次复位比上一次更具体 —— 原样重发同一句话不算一次复位。** 2026-08-09 单班
+  三个 dev 各自以「等我挂的后台定时器唤醒」结束回合(**自己挂的定时器不会唤醒
+  自己**:完成通知本身就是「没有活的子任务了」这句声明)。两个在**点名该机制**的
+  第一枪探针后恢复;第三个**在被告知之后立刻重复了同一个停摆**,直到第三枪
+  **点名下一个该发的工具调用**、并**明令禁止任何后台等待**才恢复。所以复位有梯度:
+  ① 复述执行姿态 → ② 点名下一个工具调用 + 明令禁止后台等待 → ③ 判 unreliable
+  (下一条)。把 ① 原样再发一遍只是把同一个失败重放一次,却会把三次停摆的计数
+  用掉一次 —— 梯度不是礼貌,是让第三次真的携带新信息。
 - **A third stall means unreliable** — re-dispatch a fresh agent onto that
   branch under "Handing off an interrupted dev" in step 5 (worktree already exists,
   read every existing commit first, re-run the verification in full, claim and
@@ -2177,6 +2278,18 @@ Routine 的取舍是:凡验证管线可能超过一个 fire 的活,**一开始�
 对照 `origin/main` 复核 PR 正文的前提声明与验证叙述,step 7 其余判据不变
 (2026-08-05 的 #5550/#5556 即此路径落地并合并)。顺序保护:agent 可能还
 活着时**先探活、后翻 ready** —— 抢先翻会与它的收尾推送竞态。
+
+**死因可以是舰队级的,那一格里探活半边同时不可用。** 2026-08-08/09 单班两次
+**全账号 token 断粮**(~11:0x–12:10Z、~16:0x–17:1x),每次一口气打死四个在飞
+dev —— 没有可探的对面,也没有可发的探针,三条件里能取的读数只剩 (a) 与 (c)。四张卡
+**零信息损失**的唯一原因是**分支已推、draft PR 已开、且 PR 正文自带验证证据** ——
+PM 走本条直接验收照常收口(报告丢了,PR body 就是报告)。⇒「推分支 → 开 draft PR
+→ 再等 CI 收敛」这个顺序是**保险,不是效率优化**:agent 的死亡是常态而非异常,
+而它可以在任意时刻、成批地发生。⛔ 但这**不**推出「把该顺序抄进派发令」:它是
+无条件条款,已住在 `.claude/agents/os-dev.md` 的 Definition of done
+(push → draft PR → 等 CI 收敛 → 交报告),按 step 5 的下沉纪律派发令只带增量;
+本条是它在 PM 侧的**读法** —— 知道为什么那个顺序值钱,才不会在 dev 报告缺席时
+误判为「要重派」。
 
 ### 7. Review each report
 
@@ -2461,7 +2574,12 @@ PM 看到 —— 感知通道缺口实测)。四条边界:
 - ⛔ 不订阅 dev 交报告前的 PR —— 报告前是 dev 的领地,双驾驶员互踩;
 - 订阅是**感知补充**,不替代 flip 定点(上一段一字不变:CI success webhook
   依旧不可靠,转 ready 仍由定点驱动);
-- MERGED / 关闭即退订(`unsubscribe_pr_activity`);
+- **MERGED / 关闭即退订(`unsubscribe_pr_activity`),同刻把 `mode:cloud` 派出的
+  那个会话 `archive_session`。** 归档是 ACCEPT 收尾的**固定动作序列**的一环,与
+  「flip / 跟到 MERGED」同级,不是可选的清理:触发条件是**卡的终局**(PR MERGED
+  或卡作废),不是「dev 交了报告」。实测代价:维护者问起「派出的云卡片合并以后
+  是否应该关闭」时,一个座位已累积 **11 个**已完成但未归档的空转容器 —— 它们不
+  报错、不占队列、在任何看板上都不显示,所以只会被问出来,不会被发现;
 - 仅会话型座位可用 —— webhook 投进订阅它的那个会话,Routine 座位每 fire 新
   会话、收不到,维持轮询姿态。暂停/交接时清点在挂的订阅并写进座位贴,⛔ 不留
   孤儿订阅。
@@ -2689,6 +2807,30 @@ area; that is the loop working, not failing):
 - **release blockers** — open `target:<major>` count and trend(归零 = 可发版;
   清板协议见「发版板」)。
 
+**波次收工点 —— 会话型座位的压缩节奏(维护者 2026-08-09 裁定,#6902 评论)。**
+班内节奏是「一波任务处理完 → 收工存档 → `/compact` → 再继续」,⛔ 不是一直跑到
+被自动压缩。成本依据(#6806 云卡在飞约 2 小时的读数):`cache_read` **10.18M**,
+未命中 input 仅 **6.9K** —— 边际每轮成本 ∝ 已积累上下文长度,随班龄单调增长;而
+**「不压缩」并不保全上下文**:自动压缩是一次**计划外的、由机器在任意时点执行的
+自我交班**,时点不可选、裁剪者不知道哪些判断链重要。计划内压缩在两个维度上严格
+占优(时点取在飞归零,裁剪者是知道轻重的在任 PM)。四步,顺序有含义:
+
+1. **收工点 = 在飞归零** —— 上一张 MERGED + 云卡 `archive_session` + 退订、决策箱
+   清空。⛔ 不在 step 7 复核中途压缩;
+2. **收工存档 = 把任何只存在于上下文里的判断 flush 到 GitHub**(座位贴终检到现值)。
+   这本来就是「状态变更不过夜」的既有义务,此处只是清欠账,边际成本 ≈ 0;
+3. **`/compact` 由维护者执行** —— agent 无法自压,这是机制现实,不是分工偏好;
+4. **压缩后再派下一波第一张,⛔ 不抢派** —— 派发令、认领、竞态复读产生的上下文
+   属于新一波,不该生出来就立刻被摘要掉。
+
+**换人轮换降级为班末动作**(换视角带来的免费证伪 —— step 5「dev 证伪 PM」那条的
+PM 侧对偶),不再是班内节奏:同席压缩与换人的 token 账等价,但压缩**保全会话
+绑定** —— PR 订阅、`send_later` 自绑定定时器、座位贴登记的会话 ID、对云卡的父子
+关系全部不动,三处同笔的接管协议也免了。**Routine 座位不适用**:它每 fire 一个
+新会话,本来就是从 GitHub 重建(见「座位 Routine 化」)。本条唯一的前提是本文
+开篇那条不变量 —— **GitHub 恒为唯一权威,上下文只是工作缓存**;它失守时,压缩就
+从「丢缓存」退化为「丢判断」。
+
 **座位 Routine 没有交互通道。** fresh-session fire 没有对话对面的人,轮次报告
 因此走 Routine 的**完成通知**(`notifications`,fresh-session Routine 专有;
 座位 Routine 创建时就该开)。需要留档的结论 —— 裁决、否决窗口项、分诊理由 ——
@@ -2770,7 +2912,8 @@ Stop the loop and report when any of these hits:
 - Every dev agent works in its **own worktree per repo** (enforced by
   `guard-main-checkout.sh`; the os-dev definition repeats it).
 - Parallelism is capped by `batch`. Dev agents for one batch must be
-  file-disjoint by construction (step 3).
+  file-disjoint by construction (step 3) —— 唯一的松动是**维护者明示豁免**同文件
+  串行时的替代四条(step 3),那条路径要求申报降到**区域**级,不是取消不相交。
 - **分诊座位永不认领、永不派发、永不写代码** —— 它的产出只有标签、拆分、审计
   评论(rule 4)。**执行座位只在自己那一个 `domain:*` 车道里认领**,唯一例外是
   分诊座位指定的跨域例外单(且必须申报文件面 + 跑定向在飞检查)。
