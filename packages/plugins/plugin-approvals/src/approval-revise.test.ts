@@ -448,8 +448,13 @@ describe('Send back for revision (ADR-0044)', () => {
         type: APPROVAL_REVISE_NODE_TYPE,
         resumeAuthority: 'service',
         supportsPause: true,
-        isAsync: true,
       });
+      // `isAsync: true` stood alongside those two until #6748 retired it
+      // (ADR-0049, zero readers). Asserted as ABSENT rather than dropped: the
+      // line above is `toMatchObject`, which would go on passing if the key
+      // came back, and the point of the retirement is that the descriptor
+      // publishes ONE spelling of "this type can suspend".
+      expect(descriptor).not.toHaveProperty('isAsync');
       // The generic `wait` stays open to its external producer — this fix must
       // not gate every author-placed wait in the system.
       expect(automation.getActionDescriptors().find(d => d.type === 'wait')?.resumeAuthority)

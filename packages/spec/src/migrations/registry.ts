@@ -1140,7 +1140,21 @@ const step17: MigrationStep = {
     + 'nothing and only the MEANING of silence moved. That is exactly why it needs a ledger '
     + 'entry: a third-party plugin author has no compile error to discover it with, and the '
     + 'one-line prescription (declare `resumeAuthority` on the descriptor) has to arrive before '
-    + 'a user meets a run that will not continue.',
+    + 'a user meets a run that will not continue.\n\n'
+    + 'The same descriptor loses a key in this step, and the pairing is the point (#6748, '
+    + 'ADR-0049). `ActionDescriptor.isAsync` and `ActionDescriptor.supportsPause` were two '
+    + 'spellings of one capability — "this node type can suspend the run" — and #6667 split '
+    + 'them by evidence rather than by preference: `supportsPause` took the ENFORCE leg (the '
+    + 'engine now refuses a suspension the descriptor never declared, at the one seam every '
+    + 'suspension passes through), and `isAsync` takes the REMOVE leg, because a fresh '
+    + 'three-repo measurement found zero readers and no consumer it could grow into. What '
+    + 'makes the duplicate worse than an ordinary inert key is that five shipped descriptors '
+    + 'WROTE it, so the platform itself modelled a declaration that decided nothing — and a '
+    + 'plugin author copying `screen` (which declared BOTH) had no way to tell which of the '
+    + 'two the runtime honoured. It is tombstoned rather than deleted, so the answer arrives '
+    + 'as a rejection carrying the fix; and because a descriptor lives in executor TypeScript '
+    + 'rather than in stored metadata, its prescription is a semantic entry below rather than '
+    + 'a conversion `os migrate meta` could replay.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -2753,10 +2767,15 @@ const step17: MigrationStep = {
         + 'on each of your pausing nodes can still be continued the way you intend: a resume '
         + "through the generic route succeeds for the ones you declared `'any'`, and answers "
         + "403 (`PERMISSION_DENIED`) for the ones you declared `'service'`, which continue "
-        + 'through your own service API instead. ⚠️ `supportsPause` is a declaration nothing '
-        + 'enforces (#5703), so an executor whose `execute()` returns `suspend: true` while '
-        + 'leaving `supportsPause` false is warned about by NEITHER channel — check those by '
-        + 'hand against the same rule.',
+        + 'through your own service API instead. ⚠️ `supportsPause` is no longer the '
+        + 'declaration nothing enforced (#5703, closed by #6667): an executor whose '
+        + '`execute()` returns `suspend: true` while leaving `supportsPause` false is still '
+        + 'warned about by neither warning channel, but '
+        + '`AutomationEngine.refuseUndeclaredSuspension` now refuses that suspension at the '
+        + 'one seam every suspension passes through — a guard-class failure no `fault` edge '
+        + 'routes — so it needs no hand-check. The residue that does: an executor registering '
+        + 'NO descriptor declares nothing for either warning or the refusal to read, so its '
+        + 'pauses are still created and refused only later, on the resume route (#5561).',
     },
     {
       id: 'export-field-meta-constraints-retired',
@@ -2814,6 +2833,47 @@ const step17: MigrationStep = {
         + "replacement key: it was the derived predicate `defaultValue != null`, mirroring the "
         + "engine's `applyFieldDefaults` gate, so read `fields[name].defaultValue` and apply "
         + 'that same `!= null` test yourself.',
+    },
+    {
+      id: 'action-descriptor-is-async-retired',
+      surface: 'ActionDescriptor.isAsync (the descriptor an executor publishes via `registerNodeExecutor` / `defineActionDescriptor`)',
+      replacement:
+        'nothing to re-declare — delete the key. Suspension is `execute()` RETURNING '
+        + '`suspend: true`, and permission to suspend is `supportsPause: true` on the same '
+        + 'descriptor (with the `resumeAuthority` its pauses need)',
+      reason:
+        'ADR-0049 enforce-or-remove. `isAsync` declared "this action suspends the flow '
+        + 'awaiting an external reply" and NOTHING read it: a fresh three-repo measurement '
+        + '(#6748, re-run at pickup) found zero property reads across objectstack, objectui '
+        + 'and cloud — every hit was the declaration itself, a generated baseline, one of '
+        + 'five shipped descriptors WRITING it, a test fixture pinning the shape, or prose. '
+        + 'So declaring it never made a node suspend and omitting it never stopped one, '
+        + 'which is the silently-inert declaration ADR-0049 exists to end. It was always a '
+        + 'second, weaker spelling of the capability `supportsPause` states, and the two '
+        + 'diverged in exactly the way a duplicated declaration does: `screen` declared '
+        + 'both, `map` and `wait` declared `isAsync` alongside `supportsPause`, and nothing '
+        + 'anywhere reconciled them. The sibling took the ENFORCE leg of the same ruling in '
+        + '#6667 — `AutomationEngine` now refuses a suspension whose type does not declare '
+        + '`supportsPause: true` — so the capability this key gestured at is now a real, '
+        + 'enforced fact under one name. This one had no consumer to grow into and takes '
+        + 'the remove leg. '
+        + 'Why D3 semantic and not a D2 conversion: an ActionDescriptor is published from '
+        + "an executor's TypeScript, never stored in stack metadata — no stack, example or "
+        + 'template carries the key — so there is no source for the chain to rewrite and '
+        + '`os migrate meta` cannot reach it. The schema tombstones it via `retiredKey()` '
+        + 'and descriptor authors delete the key themselves; that rejection (a `tsc` error '
+        + 'at the authoring site, and a parse error inside `defineActionDescriptor`) is the '
+        + 'channel a third-party plugin author actually meets. The '
+        + '`EnhancedApiError.fieldErrors` disposition, one layer down.',
+      acceptanceCriteria:
+        'No descriptor declares `isAsync` — not the five that shipped it (`screen`, `map`, '
+        + '`wait`, `approval`, `approval_revise`), not a plugin\'s. Every node type that '
+        + 'returns `suspend: true` from `execute()` declares `supportsPause: true` on its '
+        + 'descriptor together with a `resumeAuthority`, and its runs still pause and resume '
+        + 'as before: the behaviour never depended on `isAsync`, so deleting the key changes '
+        + 'no run. Authoring `isAsync` fails `tsc` at the descriptor literal and fails '
+        + '`defineActionDescriptor()` at runtime with the prescription, instead of parsing '
+        + 'clean and being stripped.',
     },
   ],
 };
@@ -2943,6 +3003,15 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     'ui/ElementRecordPickerProps:multiple',
     'ui/ElementRecordPickerProps:searchFields',
     'ui/PageCardProps:body',
+    // #6748 — ADR-0049 enforce-or-remove on the action-descriptor capability
+    // block. `isAsync` was a second spelling of `supportsPause` with ZERO
+    // readers on a fresh three-repo measurement; its sibling took the enforce
+    // leg in #6667 and this one takes the remove leg. Descriptors are published
+    // from executor TypeScript, not from stack metadata, so the D2 side is a D3
+    // `SemanticMigration` (`action-descriptor-is-async-retired`) rather than a
+    // MetadataConversion — there is no stored source for `os migrate meta` to
+    // rewrite. The `EnhancedApiError.fieldErrors` precedent.
+    'automation/ActionDescriptor:isAsync',
   ],
 };
 

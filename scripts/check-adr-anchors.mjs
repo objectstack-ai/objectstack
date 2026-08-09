@@ -193,10 +193,13 @@ const UNRESOLVED_ADR_CITATIONS = [
     // Deleted 2026-02-11 (9da8e3e72) together with 0002-database-driven-metadata-
     // storage.md and docs/adr/README.md, in the permission-protocol rewrite.
     // Cited as history by `docs/adr/0002-...md` ("already discarded in v3.4's
-    // ADR-0001"). ⚠️ ARCHITECTURE.md still carries a markdown LINK to the deleted
-    // path — a genuinely broken pointer, not history, filed separately from
-    // #6634; this entry keeps the gate honest about the number, it does not
-    // bless that link.
+    // ADR-0001"), which is what keeps this entry earning its place.
+    // ARCHITECTURE.md used to carry a markdown LINK to the deleted path — a
+    // genuinely broken pointer rather than history, filed separately from #6634
+    // and fixed in #6733: that section now names the deleted path as plain text
+    // and states the current single-provider architecture (MetadataPlugin is the
+    // sole `metadata` provider; ObjectQL consumes it) instead of pointing at a
+    // 404. This entry never blessed that link and does not bless any future one.
     why: 'record deleted 2026-02-11 (9da8e3e72); cited as history by ADR-0002',
   },
   {
