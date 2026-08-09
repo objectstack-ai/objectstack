@@ -136,6 +136,10 @@ describe('#5714 — which driver arms read a declared `pool`', () => {
   // The two sqlite arms' text is UNCHANGED by #5931 — pinned whole, against the
   // literal as it stood on `origin/main` before this change, because "we only
   // added an arm" is a claim about bytes.
+  // Byte-for-byte as #5714 wrote it, with ONE word changed: the closing clause
+  // names the pooled drivers, and #6345 renamed the canonical mongo id to
+  // `mongodb`. Naming the retired canon in an instruction the author is meant to
+  // act on would send them to a spelling the catalog no longer publishes.
   it('leaves the sqlite arms\' message byte-for-byte as #5714 wrote it', () => {
     const expected =
       "Datasource 'crm_primary' declares a `pool` block, but the 'sqlite' driver does not read " +
@@ -144,7 +148,7 @@ describe('#5714 — which driver arms read a declared `pool`', () => {
       "empty database. Sizing it here would therefore split one datasource's data across " +
       'several stores, so the block is rejected instead of dropped. Remove `pool` from this ' +
       'datasource declaration; it stays meaningful on the pooled drivers ' +
-      '(postgres / mysql / mongo).';
+      '(postgres / mysql / mongodb).';
     expect(unsupportedPoolMessage('sqlite', 'crm_primary')).toBe(expected);
     expect(unsupportedPoolMessage('sqlite-wasm', 'crm_primary'))
       .toBe(expected.replace("the 'sqlite' driver", "the 'sqlite-wasm' driver"));

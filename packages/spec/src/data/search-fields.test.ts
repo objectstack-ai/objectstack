@@ -5,6 +5,9 @@ import {
   resolveSearchFieldResolution,
   resolveSearchFields,
   SEARCH_AUTO_EXCLUDED_FIELDS,
+  SEARCH_AUTO_EXCLUDED_TYPES,
+  SEARCHABLE_ENUM_TYPES,
+  SEARCHABLE_TEXTUAL_TYPES,
 } from './search-fields';
 
 // ---------------------------------------------------------------------------
@@ -116,5 +119,71 @@ describe('[#4483] $search auto field set — lead orders, never admits', () => {
     // out of `allowed` the override matches nothing and cannot widen the scan.
     expect(resolveSearchFields({ fields: pkOnly, displayField: 'id', requestedFields: 'id' }))
       .toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#6934] The three search type vocabularies stay PAIRWISE DISJOINT.
+//
+// `autoDefaultFields` tests `SEARCH_AUTO_EXCLUDED_TYPES` immediately before the
+// positive `SEARCHABLE_TEXTUAL_TYPES` / `SEARCHABLE_ENUM_TYPES` allow-list. With
+// the sets disjoint that guard cannot change an outcome — measured over the full
+// field-type domain, deleting it moves not one resolution. It is kept as the
+// fail-closed tiebreak (reasons at its site); these tests are what make the
+// disjointness a CHECKED fact instead of a coincidence.
+//
+// Why both halves are here. A type declared in the excluded set AND in a
+// positive list is a contradiction that resolves SILENTLY in either shape:
+// dropped from the scan with the guard, admitted to the scan — and to the #4254
+// ingress allow-list — without it. Neither is a diagnostic the author ever sees.
+// These assertions are. The set assertions name the contradiction directly; the
+// two resolution assertions below go red on an overlap independently of them,
+// and in opposite directions, so no single relaxation can make this pin vacuous.
+// ---------------------------------------------------------------------------
+describe('[#6934] search type vocabularies are pairwise disjoint', () => {
+  const overlap = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
+    [...a].filter((t) => b.has(t)).sort();
+
+  it('no type is both auto-excluded and on a positive allow-list', () => {
+    expect(
+      overlap(SEARCH_AUTO_EXCLUDED_TYPES, SEARCHABLE_TEXTUAL_TYPES),
+      'a type cannot be both auto-excluded and searchable-textual',
+    ).toEqual([]);
+    expect(
+      overlap(SEARCH_AUTO_EXCLUDED_TYPES, SEARCHABLE_ENUM_TYPES),
+      'a type cannot be both auto-excluded and searchable-enum',
+    ).toEqual([]);
+  });
+
+  it('the two positive allow-lists share no type either', () => {
+    // Not cosmetic: the ENGINE branches on `SEARCHABLE_ENUM_TYPES` FIRST
+    // (`fieldClausesForTerm`, objectql `search-filter.ts`), so a type in both
+    // would be searched by option-label mapping and never as raw `$contains`.
+    expect(
+      overlap(SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES),
+      'an enum type is searched by label mapping, a textual one by $contains',
+    ).toEqual([]);
+  });
+
+  it('every auto-excluded type is REJECTED by the auto-default', () => {
+    // Goes red if an overlap resolves the positive way (i.e. if the guard is
+    // dropped while the sets intersect).
+    for (const t of SEARCH_AUTO_EXCLUDED_TYPES) {
+      expect(
+        resolveSearchFieldResolution({ fields: { probe: { type: t } } }),
+        `'${t}' is auto-excluded but the auto-default admitted it`,
+      ).toEqual({ allowed: [], source: 'auto' });
+    }
+  });
+
+  it('every searchable type is ADMITTED by the auto-default', () => {
+    // Goes red if an overlap resolves the negative way (the guard silently
+    // dropping a type an author has just declared searchable).
+    for (const t of [...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES]) {
+      expect(
+        resolveSearchFieldResolution({ fields: { probe: { type: t } } }),
+        `'${t}' is declared searchable but the auto-default rejected it`,
+      ).toEqual({ allowed: ['probe'], source: 'auto' });
+    }
   });
 });

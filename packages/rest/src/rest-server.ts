@@ -2615,6 +2615,9 @@ export class RestServer {
     /**
      * Filter an `App` metadata item by the current user's `systemPermissions`.
      *
+     * - Drops the app entirely when it is UNPUBLISHED (`_unpublished: true`,
+     *   ADR-0045 §3) and the caller is not a builder. Note the key: `hidden` is
+     *   navigation presentation and is deliberately NOT consulted (#4829).
      * - Drops the app entirely if its top-level `requiredPermissions` are not
      *   a subset of the user's system permissions.
      * - Recursively strips child navigation entries (groups, items) whose
@@ -2633,9 +2636,9 @@ export class RestServer {
      * pinned in `rest.test.ts`: server-side CEL needs a bound `user` context
      * that this layer does not have, and is its own change.
      *
-     * Returns `null` when the app should be hidden from the user. Returns a
-     * shallow copy with filtered `navigation` / `areas` otherwise — the original
-     * is never mutated so cached metadata stays clean.
+     * Returns `null` when the app should be withheld from the user entirely.
+     * Returns a shallow copy with filtered `navigation` / `areas` otherwise —
+     * the original is never mutated so cached metadata stays clean.
      *
      * Takes the **app document itself**, never the `getMetaItem` envelope
      * (#5563). Both callers now hand it a document: the list path always did,
@@ -2647,11 +2650,23 @@ export class RestServer {
      */
     private filterAppForUser(item: any, sysPerms: Set<string>, serviceGate?: (name: string) => boolean): any | null {
         if (!item || typeof item !== 'object') return item;
-        // ADR-0045: an unpublished app (`hidden: true`) is externally
-        // unobservable — only builders (studio/setup access) receive it at all,
-        // for direct-URL preview. The launcher's client-side hidden filter is a
-        // listing courtesy; THIS is the visibility gate.
-        if (item.hidden === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access')) {
+        // ADR-0045 §3 (as revised 2026-08, #4829) — the publish gate. An
+        // UNPUBLISHED app is externally unobservable, not merely unlisted: only
+        // builders (studio/setup access) receive it at all, for direct-URL
+        // preview. THIS is the visibility gate; the launcher's client-side
+        // filtering is a listing courtesy.
+        //
+        // ⛔ It judges `_unpublished`, the machine-managed key, and NOT `hidden`.
+        // `hidden` is navigation presentation — "not in the App Switcher, reach
+        // it from the avatar menu" — and reading it here made those two
+        // contracts one boolean. #4829 measured the cost: `account`, the
+        // platform's own personal-settings app, is authored `hidden: true` for
+        // exactly the reason its spec docblock gives, so this branch erased it
+        // from `GET /meta/app` for every user without builder access — password,
+        // avatar, sessions, inbox all 404 — while any admin saw a healthy
+        // system. A hidden app is fully routable and permission-checked here;
+        // only `_unpublished` withholds it.
+        if (item._unpublished === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access')) {
             return null;
         }
         const reqApp = Array.isArray(item.requiredPermissions) ? item.requiredPermissions : [];

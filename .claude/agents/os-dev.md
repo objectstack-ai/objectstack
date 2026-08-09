@@ -26,6 +26,34 @@ reason to ask what model the batch will run on.
 If a dispatch genuinely needs a different model, pass `model` on the Agent call:
 that override takes precedence over this line, so pinning here costs nothing and
 removes the silent-inheritance failure mode. Removing this line puts it back.
+
+THE PIN IS A FLOOR FOR THE UNSPECIFIED CASE, NOT A CEILING ON THE DISPATCHER —
+read this before concluding that a tiering policy cannot take effect. Claude Code
+resolves a subagent's model in FOUR steps, in this order (verified 2026-08-09
+against the subagent documentation, "Claude Code resolves the subagent's model in
+this order"):
+
+  1. the `CLAUDE_CODE_SUBAGENT_MODEL` environment variable, when set
+  2. the per-invocation `model` parameter on the Agent call
+  3. this definition's `model:` frontmatter
+  4. the main conversation's model
+
+So a dispatch passing `model: "sonnet"` DOES run on sonnet: step 2 outranks step
+3. This line decides only what happens when the dispatcher says nothing — which is
+the incident above, and the only case it was ever meant to decide. The PM's
+S-class tiering policy (`.claude/skills/pm-dispatch/SKILL.md` §5, "Model tiering")
+therefore takes effect as written; it is not defeated by this pin.
+
+Two adjacent traps worth knowing, both from the same table:
+
+  • `CLAUDE_CODE_SUBAGENT_MODEL` outranks BOTH the argument and this line. It is
+    not set in the dispatch container today (checked 2026-08-09) — but if it ever
+    is, it silently overrides every per-dispatch tier choice the PM makes, and
+    nothing in this repo would show it. Check the environment before concluding a
+    dispatched tier is what actually ran.
+  • A value your organization's `availableModels` allowlist blocks does not fall
+    back to THIS line — it falls back to the INHERITED model, i.e. straight back
+    into the silent-inheritance failure this pin exists to stop.
 -->
 
 
@@ -170,15 +198,89 @@ build/test runs OOM it.** Binding rules:
    of the pinned fakes the gate lists on a green run instead
    (`service-automation/src/builtin/crud-bulk-intent.test.ts` is the fullest).
 
+**Local verification scope — targeted gates locally, the full farm is CI's job.**
+Do **not** enumerate every `check:*` step out of `.github/workflows/lint.yml` and
+run all 55+ locally. That rule (#5738 era) was written before "wait for CI
+convergence" existed, and stacking the two makes every dispatch pay for the same
+farm twice: once on a shared container, once on the runners that were always going
+to run it anyway. Your local pass is:
+
+1. **Build closure first** — see toolchain trap 2; this is the first command in a
+   fresh worktree, before typecheck or test.
+2. **The affected packages' own suites** — `pnpm test` / `pnpm typecheck`, scoped
+   by `--filter` per resource rule 3.
+3. **The gate families that touch your card's surface, and those only** — the
+   dispatch prompt names them; add any you can see are implicated (a new fake
+   engine ⇒ `check:engine-double-contract`; a new error code ⇒
+   `check:error-code-casing`; `.claude/agents/**` ⇒ `check:agent-model-declared`;
+   any edit at all ⇒ `check:nul-bytes`). Naming one is cheap; running all of them
+   is what was expensive.
+
+⚠️ **The accepted cost is a lap, and the safety half is NOT optional.** Scoping the
+local farm means a non-obvious gate can go red in CI that you would previously have
+caught on your own machine — an occasional extra push-fix lap, deliberately traded
+for not paying the full farm on every dispatch. That trade is only sound because
+you still **wait for CI to converge before reporting** (see the CI-convergence item
+in Definition of done, which this rule makes load-bearing rather than redundant).
+⛔ This is not licence to report before CI converges — it is the opposite: the
+local farm was the thing that could be dropped precisely because the CI wait
+cannot be. A red gate in CI is still yours to fix in this task.
+
+**Standard clauses live HERE, not in your dispatch prompt.** The prompt used to
+repeat ~1.5k tokens of these verbatim on every dispatch; it now carries only the
+*deltas* for your card (ruling quotes, the 裁决 / PM-机制假设 partition,
+card-specific clauses, same-day churn). So the clauses below are binding on you
+whether or not your prompt mentions them — a prompt's silence about any of them is
+the expected shape, never permission:
+
+- **Build before you judge anything (#6371).** In a fresh worktree the first
+  verification command is `pnpm --filter '@objectstack/<your-pkg>^...' build`
+  (suffix `^...` = the packages it depends on). Skip it and tsc reads whatever
+  stale `dist/*.d.ts` someone left behind — and it lies in **both** directions:
+  false red burns laps chasing a non-existent problem, false green lets a narrowed
+  export type read as "consumers are clean" when the consumer never saw the new
+  `.d.ts` at all.
+- **The consumer sweep's filter direction is a PREFIX (#6218).**
+  `pnpm --filter '...@objectstack/<pkg>'` is the **downstream consumers**;
+  `'@objectstack/<pkg>...'` (suffix) is the upstream dependencies — the opposite
+  direction. Signature narrowing, exported-type changes and contract tightening
+  always land downstream. When your report says "N packages green", it **must also
+  say which direction you used**, or the sentence cannot be reviewed: #6210's "25
+  packages green" was a suffix sweep, and CI went red on `@objectstack/dogfood`
+  immediately.
+- **A cross-package type change needs a reverse verification, not just a green.**
+  Paste a key the new type rejects, confirm it goes red, restore it — that is what
+  proves you actually read the rebuilt `.d.ts` rather than a cached one.
+- **`packages/spec`: the anchor rewrite is a product, and MERGE state is a trap.**
+  A spec build (`gen:schema`) **rewrites** `authorable-surface.base.json` — that is
+  the expected artifact; ⛔ never revert it, never hand-edit it to make some
+  equality hold (hand-editing it is exactly the attack #4650 closed). The assertion
+  that counts is `pnpm --filter @objectstack/spec check:authorable-surface` being
+  green; `baseRev` is **allowed to lag** and a lag prints one informational line,
+  not an error. ⛔ **Never run `gen:schema` while the tree is in MERGE state**
+  (#5370): HEAD is still the pre-merge branch tip, so the anchor is silently rolled
+  back to the old fork point — and the rolled-back anchor is still *authentic*, so
+  every gate passes while a landed advance is quietly undone. Commit the merge
+  first, then regenerate. Sister trap: `gen:schema`'s `rmSync` also wipes
+  `gen:openapi`'s output, which shows up as ~5 bogus `expected 503 to be 200`
+  failures in `@objectstack/rest`; restore with
+  `pnpm --filter @objectstack/spec gen:openapi`.
+
 Definition of done, in order:
 
 - Implementation matches the issue's acceptance criteria.
 - Tests: new/updated tests covering the change; run the affected packages'
-  `pnpm test` and `pnpm typecheck` and capture real output for the report.
+  `pnpm test` and `pnpm typecheck` and capture real output for the report —
+  scoped per "Local verification scope" above, not as a whole-repo sweep.
 - Changeset added when the change is user-visible.
 - Pushed with `git push -u origin claude/issue-<n>-<slug>` (retry on network
   failure with backoff).
-- **Draft** PR to `main`, body starting `Fixes #<n>`, **title and explanatory
+- **Draft** PR to `main`, body starting `Fixes #<n>` — **but `Part of #<n>` when
+  merging it would not close the card.** If you implemented only half of it (the
+  other half is `needs_decision` awaiting a ruling, or was deliberately excluded by
+  scope), the first line reads `Part of #<n>` and the body says which half you
+  left; ⛔ never use `Fixes` to close a card that is still in the decision box.
+  Also **title and explanatory
   prose in English** — GitHub artifacts (issue and PR titles, bodies, comments)
   are English per the maintainer ruling of 2026-08-08 quoted in AGENTS.md
   §Communication; Chinese is for talking to the maintainer in Claude Code, not
