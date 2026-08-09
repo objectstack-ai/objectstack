@@ -75,7 +75,11 @@ function install(opts: {
   visible: Record<string, Record<string, string[]>>;
 }) {
   let mw!: (ctx: CommentReadMiddlewareCtx, next: () => Promise<void>) => Promise<void>;
-  const calls = { parentFinds: [] as Array<{ object: string; ids: string[]; userId?: string }> };
+  const calls = {
+    parentFinds: [] as Array<{ object: string; ids: string[]; userId?: string }>,
+    /** [#7141] The context each parent probe was handed, verbatim. */
+    parentFindContexts: [] as any[],
+  };
 
   const engine: CommentAccessEngine = {
     registerHook: () => {},
@@ -90,6 +94,7 @@ function install(opts: {
       const userId = options?.context?.userId as string | undefined;
       const ids: string[] = (options?.where?.id?.$in ?? []).map(String);
       calls.parentFinds.push({ object, ids, userId });
+      calls.parentFindContexts.push(options?.context);
       const vis = opts.visible[object]?.[userId ?? ''] ?? [];
       return ids.filter((id) => vis.includes(id)).map((id) => ({ id })) as any;
     },
@@ -200,6 +205,38 @@ describe('installCommentReadVisibility', () => {
     const anon = await runRead(mw, { context: undefined });
     expect(anon.where).toBeUndefined();
     expect(calls.parentFinds).toHaveLength(0);
+  });
+
+  // [#7141] The parent probe reads a DIFFERENT object than the one the security
+  // middleware resolved its depth for, so the caller's envelope crosses over
+  // but the operation-private keys must not: `__readScope` is `sys_comment`'s
+  // access DEPTH and `__expandRead` waives the object-level CRUD check.
+  it('probes the parent with the caller ENVELOPE, minus the operation-private keys', async () => {
+    const { mw, calls } = install(dataset);
+    await runRead(mw, {
+      context: {
+        userId: 'rep2',
+        principalKind: 'agent',
+        onBehalfOf: { userId: 'human_1', principalKind: 'human' },
+        accessible_org_ids: ['org_1'],
+        __readScope: 'org',
+        __delegatorReadScope: 'org',
+        __expandRead: true,
+      } as any,
+    });
+    const probed = calls.parentFindContexts;
+    expect(probed.length).toBeGreaterThan(0);
+    for (const c of probed) {
+      expect(c).toMatchObject({
+        userId: 'rep2',
+        principalKind: 'agent',
+        onBehalfOf: { userId: 'human_1', principalKind: 'human' },
+        accessible_org_ids: ['org_1'],
+      });
+      for (const key of ['__readScope', '__delegatorReadScope', '__expandRead']) {
+        expect(c).not.toHaveProperty(key);
+      }
+    }
   });
 
   it('does not touch write operations (the hooks gate those)', async () => {
