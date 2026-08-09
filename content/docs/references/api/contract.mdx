@@ -27,7 +27,7 @@ const result = ApiErrorSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +253 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ ERROR_CODE_LEDGER) |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +253 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
 | **message** | `string` | ✅ | Readable error message |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
