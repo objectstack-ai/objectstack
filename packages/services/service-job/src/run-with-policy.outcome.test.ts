@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { JobHandler, JobRunOutcome } from '@objectstack/spec';
+import type { JobHandler, JobRunOutcome } from '@objectstack/spec/contracts';
 import { runWithPolicy } from './run-with-policy.js';
 
 /**
