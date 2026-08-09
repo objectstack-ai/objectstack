@@ -297,6 +297,7 @@
     "HookBodySchema": "src/data/hook-body.zod.ts#HookBodySchema (const)",
     "HookContext": "src/data/hook.zod.ts#HookContext (type)",
     "HookContextSchema": "src/data/hook.zod.ts#HookContextSchema (const)",
+    "HookDispatch": "src/data/hook.zod.ts#HookDispatch (type)",
     "HookEvent": "src/data/hook.zod.ts#HookEvent (const)",
     "HookEventType": "src/data/hook.zod.ts#HookEventType (type)",
     "HookParsed": "src/data/hook.zod.ts#HookParsed (type)",
