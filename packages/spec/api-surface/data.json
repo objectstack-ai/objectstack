@@ -572,6 +572,7 @@
     "TursoConfigParsed (type)",
     "TursoConfigSchema (const)",
     "TursoDriverSpec (const)",
+    "TursoTransportMode (type)",
     "TursoTransportModeSchema (const)",
     "UniqueScope (type)",
     "UniqueScopeSchema (const)",
