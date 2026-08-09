@@ -1,0 +1,92 @@
+---
+title: Driver Turso
+description: Driver Turso protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Turso / libSQL Driver Protocol (#6345).
+
+## Why this arrives late, and what it closes
+
+`turso` was the one connection block on the platform with NO gate. #4410 gave
+every built-in driver's `datasource.config` a contract and made
+`DatasourceSchema` parse against it, but turso was not a builtin: its driver
+ships in an OPTIONAL package (`@objectstack/driver-turso`, #5602), so
+`resolveDriverId('turso')` returned `undefined` and `validateDriverConfig`
+answered `{ known: false }` — "nothing to check against". Meanwhile both boot
+hosts dispatched `turso` for real. So a libSQL datasource could carry
+`{ token: … }` (the wrong key — it is `authToken`) and be accepted in silence,
+then connect unauthenticated, which is precisely the failure #4410 exists to
+end, surviving in the one driver #4410 could not see.
+
+The maintainer's #6345 ruling closes it by making turso a complete builtin
+rather than a permanent exception. Optionality of the PACKAGE is orthogonal to
+existence of the CONTRACT — `mongodb` and `sqlite-wasm` are optional installs
+too, and both have had a contract since #4410.
+
+## What is declared here, and what is deliberately not
+
+The keys below are exactly the `TursoDriverConfig` fields the driver reads and
+that an author can express as data. Three are deliberately absent:
+
+ - `client` (a pre-constructed `@libsql/client` instance) — a live object, not
+   authorable metadata; declaring it would promise a JSON slot that can never
+   be filled from a `sys_metadata` row.
+ - `pool` — connection pooling is the datasource's own block, not driver
+   config, exactly as on postgres/mysql/mongo.
+ - `schemaMode` / `readOnly` — datasource-level, same as every other driver.
+
+ADR-0049 (enforce-or-remove) is why the list is drawn from what the driver
+READS rather than from what libSQL supports: a key declared here that no
+driver consults would be a new inert slot, and this file exists to close one.
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/driver/turso.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { TursoConfigSchema, TursoTransportModeSchema } from '@objectstack/spec/data';
+import type { TursoConfig } from '@objectstack/spec/data';
+
+// Validate data
+const result = TursoConfigSchema.parse(data);
+```
+
+---
+
+## TursoConfig
+
+Turso / libSQL Connection Configuration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **url** | `string` | ✅ | libSQL endpoint or local file (libsql://…, https://…, file:…, :memory:) |
+| **authToken** | `string` | optional | JWT auth token for a remote libSQL database (prefer external.credentialsRef) |
+| **encryptionKey** | `string` | optional | AES-256 encryption key for the local database file (local/replica modes) |
+| **concurrency** | `integer` | optional | Maximum concurrent requests to the remote database |
+| **syncUrl** | `string` | optional | Remote sync URL for embedded-replica mode (libsql:// or https://) |
+| **sync** | `{ intervalSeconds?: integer; onConnect?: boolean }` | optional | Embedded-replica sync configuration (requires `syncUrl`) |
+| **timeout** | `integer` | optional | Operation timeout in milliseconds for remote operations |
+| **mode** | `Enum<'local' \| 'replica' \| 'remote'>` | optional | Force a transport mode instead of inferring it from `url` |
+
+
+---
+
+## TursoTransportMode
+
+Force a transport mode instead of inferring it from `url`
+
+### Allowed Values
+
+* `local`
+* `replica`
+* `remote`
+
+
+---
+

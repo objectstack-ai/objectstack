@@ -57,6 +57,9 @@ import {
 export const TursoTransportModeSchema = z.enum(['local', 'replica', 'remote'])
   .describe('Force a transport mode instead of inferring it from `url`');
 
+/** Post-parse shape of {@link TursoTransportModeSchema}. */
+export type TursoTransportMode = z.infer<typeof TursoTransportModeSchema>;
+
 export const TursoConfigSchema = lazySchema(() => strictObject(
   {
     surface: "this turso datasource's config",
@@ -125,8 +128,18 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
       .describe('Remote sync URL for embedded-replica mode (libsql:// or https://)')
       .meta({ title: 'Sync URL' }),
 
-    /** Embedded-replica sync policy. Only meaningful beside {@link syncUrl}. */
-    sync: z.object({
+    /**
+     * Embedded-replica sync policy. Only meaningful beside {@link syncUrl}.
+     *
+     * `z.strictObject`, not a bare `z.object`: a nested block left at zod's
+     * default STRIP posture would silently drop `sync: { interval: 60 }` — the
+     * plausible misspelling of `intervalSeconds` — and the datasource would then
+     * sync on the 60-second default while the author believed they had set it.
+     * That is the exact silent acceptance this whole file exists to end, and it
+     * would have been a new strip site in the #4001 ledger rather than a
+     * closed one.
+     */
+    sync: z.strictObject({
       intervalSeconds: z.number().int().nonnegative().optional()
         .describe('Periodic sync interval in seconds (0 = manual only)'),
       onConnect: z.boolean().optional().describe('Sync immediately on connect'),
