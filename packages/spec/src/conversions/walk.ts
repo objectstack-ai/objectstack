@@ -175,50 +175,100 @@ export function mapPages(stack: Dict, mapper: (page: Dict, path: string) => Dict
 }
 
 /**
- * Immutably map every **region-level** page component in
- * `stack.pages[].regions[].components[]`.
+ * Immutably map every **declared-shape** page component — the two places a
+ * `PageComponentSchema` actually lives: `stack.pages[].regions[].components[]`
+ * and `stack.pages[].slots.<slot>` (which is `PageComponent | PageComponent[]`).
  *
  * `mapper` receives each component dict and its path
- * (`pages[i].regions[j].components[k]`) and returns the same reference (no
- * change) or a new dict. The stack, `pages`, a page, its `regions`, a region
- * and its `components` are each copied only when a descendant actually
- * changed — {@link mapPages}' contract, one level deeper.
+ * (`pages[i].regions[j].components[k]`, `pages[i].slots.tabs`,
+ * `pages[i].slots.tabs[0]`) and returns the same reference (no change) or a new
+ * dict. Every container on the way — the stack, `pages`, a page, its `regions`,
+ * a region, its `components`, its `slots` — is copied only when a descendant
+ * actually changed: {@link mapPages}' contract, one level deeper.
  *
- * Region level is the whole surface a page-component conversion can reach:
- * `PageComponentSchema` declares no children key, so anything nested (tab
- * panels, card bodies) sits inside another component's free-form `properties`
- * and is not typed page-component shape. Same boundary, drawn for the same
- * reason, as `translatePage` in `system/i18n-resolver.ts`.
+ * That is the whole surface, and it is bounded by the type rather than by the
+ * shape of any one page: `PageComponentSchema` declares no children key, so
+ * anything nested (tab panels, card bodies) sits inside another component's
+ * free-form `properties` and is NOT typed page-component shape — the tombstone
+ * (`tsc` + the parse) covers those, as every retirement entry's doc says.
+ *
+ * **`slots` was missing until #6776, and the gap was load-bearing.** This
+ * walker's own comment used to call region level "the whole surface", on the
+ * reasoning that everything else is inside a free-form bag. `slots` is the
+ * counter-example: `PageSchema.slots` is a closed map of seven named slots,
+ * each declared `z.union([PageComponentSchema, z.array(PageComponentSchema)])`
+ * — exactly as typed as a region component, and the canonical authoring shape
+ * for a `kind: 'slotted'` record page. `walkPageComponents` in `packages/lint`
+ * has always visited both, so every conversion here reached strictly less than
+ * the lint rule that judges the result. #6776 is where that cost something
+ * real: all four in-repo `page:tabs` authoring sites are `slots.tabs`, so a
+ * region-only rewrite would have left `os migrate meta` unable to touch the
+ * only shape that key is written in, while the tombstone's prescription
+ * promised it would.
  */
 export function mapPageComponents(
   stack: Dict,
   mapper: (component: Dict, path: string) => Dict,
 ): Dict {
   return mapPages(stack, (page, pagePath) => {
+    let nextPage = page;
+
     const regions = page.regions;
-    if (!Array.isArray(regions)) return page;
+    if (Array.isArray(regions)) {
+      let regionsChanged = false;
+      const nextRegions = regions.map((region, ri) => {
+        if (!isDict(region)) return region;
+        const components = region.components;
+        if (!Array.isArray(components)) return region;
 
-    let regionsChanged = false;
-    const nextRegions = regions.map((region, ri) => {
-      if (!isDict(region)) return region;
-      const components = region.components;
-      if (!Array.isArray(components)) return region;
+        let componentsChanged = false;
+        const nextComponents = components.map((component, ci) => {
+          if (!isDict(component)) return component;
+          const mapped = mapper(component, `${pagePath}.regions[${ri}].components[${ci}]`);
+          if (mapped !== component) componentsChanged = true;
+          return mapped;
+        });
 
-      let componentsChanged = false;
-      const nextComponents = components.map((component, ci) => {
-        if (!isDict(component)) return component;
-        const mapped = mapper(component, `${pagePath}.regions[${ri}].components[${ci}]`);
-        if (mapped !== component) componentsChanged = true;
-        return mapped;
+        if (!componentsChanged) return region;
+        regionsChanged = true;
+        return { ...region, components: nextComponents };
       });
 
-      if (!componentsChanged) return region;
-      regionsChanged = true;
-      return { ...region, components: nextComponents };
-    });
+      if (regionsChanged) nextPage = { ...nextPage, regions: nextRegions };
+    }
 
-    if (!regionsChanged) return page;
-    return { ...page, regions: nextRegions };
+    const slots = page.slots;
+    if (isDict(slots)) {
+      let slotsChanged = false;
+      const nextSlots: Dict = { ...slots };
+      for (const [slot, value] of Object.entries(slots)) {
+        // A slot holds one component or an array of them — the same
+        // normalization `walkPageComponents` does, and the path spelling
+        // matches it so a conversion notice and a lint finding name one site
+        // with one string.
+        if (Array.isArray(value)) {
+          let listChanged = false;
+          const nextList = value.map((component, i) => {
+            if (!isDict(component)) return component;
+            const mapped = mapper(component, `${pagePath}.slots.${slot}[${i}]`);
+            if (mapped !== component) listChanged = true;
+            return mapped;
+          });
+          if (!listChanged) continue;
+          nextSlots[slot] = nextList;
+          slotsChanged = true;
+        } else {
+          if (!isDict(value)) continue;
+          const mapped = mapper(value, `${pagePath}.slots.${slot}`);
+          if (mapped === value) continue;
+          nextSlots[slot] = mapped;
+          slotsChanged = true;
+        }
+      }
+      if (slotsChanged) nextPage = { ...nextPage, slots: nextSlots };
+    }
+
+    return nextPage;
   });
 }
 

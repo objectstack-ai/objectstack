@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type {
+  AuthoredRowWriteOperation,
+  AuthoredRowWriteVerdict,
   ISharingService,
   IHierarchyScopeResolver,
   RecordShare,
@@ -143,6 +145,28 @@ function hasOwnerField(schema: any): boolean {
 export interface SharingSecurityProbe {
   hasWriteBypass?(object: string, context: unknown): Promise<boolean>;
   /**
+   * [#5493] `ISecurityService.checkAuthoredRowWrite` — "does an APP-AUTHORED
+   * row-level policy admit this row for this write operation, on its own, with
+   * the platform's ownership floor taken out?"
+   *
+   * Read by {@link SharingService.probeAuthoredRowWrite} so the write gate can
+   * DEFER instead of hard-refusing a by-id write that a declared widener
+   * admits. Structural on purpose, exactly like the two members above: this
+   * plugin does not depend on `@objectstack/plugin-security`, it declares the
+   * slice it probes.
+   *
+   * `admit` is EVIDENCE, never authorization — it says a declared policy speaks
+   * for this row, not that the write is permitted. Every other outcome
+   * (`abstain`, an absent method, an absent service, a throw) is one
+   * instruction: keep today's refusal.
+   */
+  checkAuthoredRowWrite?(
+    object: string,
+    recordId: string,
+    operation: AuthoredRowWriteOperation,
+    context?: unknown,
+  ): Promise<AuthoredRowWriteVerdict>;
+  /**
    * [ADR-0111 D1 DEPTH] The caller's effective WRITE scope on `object`
    * (`own` / `own_and_reports` / `unit` / `unit_and_below` / `org`), resolved
    * from their permission sets exactly as the CRUD middleware resolves it.
@@ -190,6 +214,11 @@ export interface SharingServiceOptions {
    * the super-user write bypass (`modifyAllRecords`) in
    * {@link SharingService.canManageShares}. Absent / throwing / returning
    * null → management authority fails CLOSED to owner-only.
+   *
+   * [#5493] The SAME handle carries the authored-row-write verdict read by
+   * {@link SharingService.probeAuthoredRowWrite} — one late binding, two
+   * probes, so a deployment cannot end up with one of them wired and the other
+   * not. Both fail closed on absence, in their own directions.
    */
   securityService?: () => SharingSecurityProbe | null | undefined;
   /**
@@ -615,6 +644,75 @@ export class SharingService implements ISharingService {
     context: SharingExecutionContext,
   ): Promise<boolean> {
     return (await this.checkDelete(object, recordId, context)) !== 'deny';
+  }
+
+  /**
+   * [#5493 / maintainer ruling 2026-08-08, issue comment 5226389104] Ask the
+   * OTHER row-level write authority whether an APP-AUTHORED RLS policy admits
+   * this row for this operation, so the by-id write gate can DEFER instead of
+   * hard-refusing a write that a declaration already speaks for.
+   *
+   * **This is not a sharing verdict and it never becomes one.** Nothing here
+   * feeds {@link checkEdit} / {@link checkDelete} / {@link buildWriteFilter} —
+   * those keep answering exactly what record sharing knows, which is what
+   * `plugin-security`'s own composition (#5492) reads off this service. Folding
+   * the probe into them would make the two authorities read each other in a
+   * circle. Only the middleware's refusal branch consults it.
+   *
+   * **Why the security service answers it and this plugin does not re-derive
+   * it.** Row-level write authority is ONE composite determination, but its two
+   * halves know different things. The composed RLS answer cannot stand in for
+   * "an app policy admits this row": the platform's own ownership floor
+   * (`owner_only_writes` / `owner_only_deletes`, `created_by ==
+   * current_user.id`) ships on the additive `member_default` baseline, so the
+   * composed answer is true for the row's CREATOR whether or not any app policy
+   * mentions it. #5493's probe E-A measured the cost — a creator who is no
+   * longer the owner (a record transferred away) would get their old records
+   * back. Separating the two needs policy PROVENANCE, which is private to
+   * `plugin-security` by design. Hence a verdict on the service, and hence this
+   * method is a PASSTHROUGH with no logic of its own to drift.
+   *
+   * **Fail-closed in the `abstain` direction**, because the caller uses `admit`
+   * to WIDEN: an absent security service (no `plugin-security` at all), a
+   * service that predates the method, a probe that throws, a principal-less
+   * context, a delegated (on-behalf-of) identity, and any verdict this consumer
+   * does not recognise all return `abstain` — byte-for-byte the behaviour of a
+   * deployment that never asked.
+   */
+  async probeAuthoredRowWrite(
+    object: string,
+    recordId: string,
+    operation: AuthoredRowWriteOperation,
+    context: SharingExecutionContext,
+  ): Promise<AuthoredRowWriteVerdict> {
+    try {
+      if (!context?.userId) return 'abstain';
+      // [ADR-0090 D10] A delegated identity is not measurable here. The
+      // delegator intersection is composed by the MIDDLEWARE (it gates twice),
+      // so a single verdict would be resolved against one of the two identities
+      // and silently stand for both. Declining to defer is the answer that
+      // changes nothing — the same stance `hasWriteBypass` and
+      // `resolveWriteScope` already take on this context.
+      if ((context as { onBehalfOf?: { userId?: string } }).onBehalfOf?.userId) return 'abstain';
+
+      const probe = this.securityService?.();
+      // Feature-detected, never assumed: the contract declares the method
+      // OPTIONAL precisely so absence and `abstain` are ONE instruction.
+      if (!probe || typeof probe.checkAuthoredRowWrite !== 'function') return 'abstain';
+
+      const verdict = await probe.checkAuthoredRowWrite(object, recordId, operation, context);
+      // Only the literal `admit` widens. A probe answering in a vocabulary this
+      // consumer does not know is an unmeasured answer, not a permission.
+      return verdict === 'admit' ? 'admit' : 'abstain';
+    } catch (err) {
+      this.logger?.warn?.(
+        `[sharing] the authored-row-write probe for '${object}' record '${recordId}' `
+        + `(${operation}, user ${context?.userId ?? 'unknown'}) could not be resolved — `
+        + 'ABSTAINING, so the existing refusal stands (fail-closed, #5493)',
+        err instanceof Error ? err : new Error(String(err)),
+      );
+      return 'abstain';
+    }
   }
 
   /**

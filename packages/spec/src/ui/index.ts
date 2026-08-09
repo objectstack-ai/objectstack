@@ -13,6 +13,10 @@
 export * from './chart.zod';
 export * from './chart-aggregate';
 export * from './i18n.zod';
+// `resolveI18nLabel` — the shared `I18nLabel` → `string` resolver (#6765,
+// #6761 ruling B). The rule that reads an inline locale map lives here, ONCE,
+// so a backend producer never has to grow a private copy of it.
+export * from './i18n-label-resolver';
 export * from './responsive.zod';
 export * from './app.zod';
 export * from './bulk-action.zod';
