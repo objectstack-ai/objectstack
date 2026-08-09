@@ -38,6 +38,9 @@ import {
   type ViewData,
   type HttpRequest,
   defineView,
+  defineForm,
+  ViewItemSchema,
+  ViewMetadataSchema,
 } from './view.zod';
 
 import {
@@ -538,6 +541,12 @@ describe('FormViewSchema', () => {
     };
 
     expect(() => FormViewSchema.parse(formView)).not.toThrow();
+    // #6926 — acceptance is unchanged; the OUTPUT is what changed. This pin
+    // asserted acceptance only, which is exactly why it stayed green through
+    // the whole life of the unfolded alias. Say what the parse now produces.
+    const parsed = FormViewSchema.parse(formView) as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(parsed, 'groups')).toBe(false);
+    expect((parsed.sections as Array<{ label?: string }>)[0]?.label).toBe('Account Details');
   });
 
   it('should accept tabbed form view', () => {
@@ -655,6 +664,132 @@ describe('FormViewSchema', () => {
       expect(FormViewSchema.safeParse({
         sections: [{ label: 'Task', pane: 'primary', fields: ['title'] }],
       }).success).toBe(false);
+    });
+  });
+});
+
+/**
+ * #6926 — `groups` is declared as an alias of `sections` and, until this
+ * change, nothing folded it: the alias was honored one boundary downstream in
+ * objectui's renderer, so the same authored form rendered in the console and
+ * degraded on the framework's REST public-form routes (which read `sections`
+ * only). The fold now happens at the PRODUCER.
+ *
+ * These cases discriminate the fold — the two pre-existing `groups` pins
+ * (acceptance, and the `pane` error path) cannot, which is the measured reason
+ * an unfolded alias survived this file for its whole life.
+ */
+describe('FormViewSchema — the `groups` legacy alias folds onto `sections` (#6926)', () => {
+  const S = (label: string) => ({ label, fields: [label.toLowerCase()] });
+  const has = (o: unknown, k: string) => Object.prototype.hasOwnProperty.call(o as object, k);
+
+  it('groups-only → sections, with `groups` absent from the output', () => {
+    const parsed = FormViewSchema.parse({ type: 'simple', groups: [S('Account')] });
+    expect(has(parsed, 'groups')).toBe(false);
+    expect(parsed.sections?.map((s) => s.label)).toEqual(['Account']);
+  });
+
+  it('both present → `sections` wins (the renderer\'s own `sections ?? groups` rule)', () => {
+    const parsed = FormViewSchema.parse({
+      type: 'simple',
+      sections: [S('Canonical')],
+      groups: [S('Legacy')],
+    });
+    expect(has(parsed, 'groups')).toBe(false);
+    expect(parsed.sections?.map((s) => s.label)).toEqual(['Canonical']);
+  });
+
+  it('an EMPTY `sections` still wins over a populated `groups` (`??`, not a merge)', () => {
+    const parsed = FormViewSchema.parse({ type: 'simple', sections: [], groups: [S('Legacy')] });
+    expect(has(parsed, 'groups')).toBe(false);
+    expect(parsed.sections).toEqual([]);
+  });
+
+  it('an empty `groups` folds to an empty `sections` (content, not absence)', () => {
+    const parsed = FormViewSchema.parse({ type: 'simple', groups: [] });
+    expect(has(parsed, 'groups')).toBe(false);
+    expect(parsed.sections).toEqual([]);
+  });
+
+  it('sections-only and neither-key forms are untouched', () => {
+    expect(FormViewSchema.parse({ type: 'simple', sections: [S('Only')] }).sections?.[0]?.label)
+      .toBe('Only');
+    const bare = FormViewSchema.parse({ type: 'simple' });
+    expect(has(bare, 'sections')).toBe(false);
+    expect(has(bare, 'groups')).toBe(false);
+  });
+
+  it('the ACCEPTANCE face is unchanged — `groups` stays legal at input', () => {
+    expect(FormViewSchema.safeParse({ type: 'simple', groups: [S('Account')] }).success).toBe(true);
+    // …and the fold does not launder an invalid section past the schema.
+    expect(FormViewSchema.safeParse({ type: 'simple', groups: [{ label: 'No fields' }] }).success)
+      .toBe(false);
+  });
+
+  it('the `pane` refinement still reports the key the AUTHOR wrote', () => {
+    const result = FormViewSchema.safeParse({
+      type: 'simple',
+      groups: [{ label: 'Account', pane: 'primary', fields: ['account_name'] }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.join('.') === 'groups.0.pane')).toBe(true);
+    }
+  });
+
+  describe('every parse door inherits the fold (one declaration, not per-door)', () => {
+    it('ViewSchema.form', () => {
+      const parsed = ViewSchema.parse({ form: { type: 'simple', groups: [S('Account')] } });
+      expect(has(parsed.form, 'groups')).toBe(false);
+      expect(parsed.form?.sections?.map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('ViewSchema.formViews.*', () => {
+      const parsed = ViewSchema.parse({ formViews: { edit: { type: 'simple', groups: [S('Account')] } } });
+      expect(has(parsed.formViews?.edit, 'groups')).toBe(false);
+      expect(parsed.formViews?.edit?.sections?.map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('defineView (the authored container door)', () => {
+      const view = defineView({ form: { type: 'simple', groups: [S('Account')] } });
+      expect(has(view.form, 'groups')).toBe(false);
+      expect(view.form?.sections?.map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('defineForm (the metadata-admin form door)', () => {
+      const form = defineForm({ schemaId: 'report', type: 'simple', groups: [S('Account')] });
+      expect(has(form, 'groups')).toBe(false);
+      expect(form.sections?.map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('ViewItemSchema — the standalone `form` record arm', () => {
+      const parsed = ViewItemSchema.parse({
+        name: 'account_edit',
+        object: 'account',
+        viewKind: 'form',
+        config: { type: 'simple', groups: [S('Account')] },
+      });
+      const config = (parsed as { config: Record<string, unknown> }).config;
+      expect(has(config, 'groups')).toBe(false);
+      expect((config.sections as Array<{ label?: string }>).map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('ViewMetadataSchema — the container member', () => {
+      const parsed = ViewMetadataSchema.parse({ form: { type: 'simple', groups: [S('Account')] } }) as {
+        form?: Record<string, unknown>;
+      };
+      expect(has(parsed.form, 'groups')).toBe(false);
+      expect((parsed.form?.sections as Array<{ label?: string }>).map((s) => s.label)).toEqual(['Account']);
+    });
+
+    it('ViewMetadataSchema — the FLATTENED form-overlay member (`.extend()` inherits the fold)', () => {
+      const parsed = ViewMetadataSchema.parse({
+        viewKind: 'form',
+        type: 'simple',
+        groups: [S('Account')],
+      }) as Record<string, unknown>;
+      expect(has(parsed, 'groups')).toBe(false);
+      expect((parsed.sections as Array<{ label?: string }>).map((s) => s.label)).toEqual(['Account']);
     });
   });
 });
