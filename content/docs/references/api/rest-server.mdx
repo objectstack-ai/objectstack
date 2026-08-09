@@ -156,7 +156,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableOpenApi** | `boolean` | ✅ | Enable OpenAPI 3.1 spec & docs viewer endpoints |
 | **enableProjectScoping** | `boolean` | ✅ | Enable project-scoped routing for data/meta/AI APIs |
 | **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | ✅ | Project ID resolution strategy |
-| **requireAuth** | `never` | optional | [REMOVED] `api.requireAuth` was removed in @objectstack/spec 17 (#3963). Anonymous access to object data is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of opening the whole data plane. |
+| **requireAuth** | `never` | optional | [REMOVED] `api.requireAuth` was removed in @objectstack/spec 17 (#3963). Anonymous access to object data is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of opening the whole data plane. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **documentation** | `{ enabled: boolean; title: string; description?: string; version?: string; … }` | optional | OpenAPI/Swagger documentation config |
 | **responseFormat** | `{ envelope: boolean; includeMetadata: boolean; includePagination: boolean }` | optional | Response format options |
 

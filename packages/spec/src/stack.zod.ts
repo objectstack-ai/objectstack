@@ -350,7 +350,8 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
       '`api.requireAuth` was removed in @objectstack/spec 17 (#3963). Anonymous access to object data '
       + 'is now always denied. Delete the key; publish public surfaces by declaration instead — a public '
       + "form view, a share link, or `book.audience: 'public'`. A stack that mounts no auth at all now "
-      + 'fails at boot rather than silently serving object data to anonymous callers.',
+      + 'fails at boot rather than silently serving object data to anonymous callers. '
+      + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
     ),
     /** Enable environment-scoped routing for data/meta/AI APIs. */
     enableProjectScoping: z.boolean().optional(),

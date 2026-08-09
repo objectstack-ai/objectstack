@@ -1284,12 +1284,14 @@ export const ListViewSchema = lazySchema(() => strictObject({
   // objectui@fb35e48; ledger: dead).
   responsive: retiredKey(
     '`view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
-    'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key.',
+    'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   performance: retiredKey(
     '`view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'no renderer or runtime read it; list-view performance tuning was never implemented. ' +
-    'Delete the key.',
+    'Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 }));
 
@@ -1710,7 +1712,8 @@ export const FormViewSchema = lazySchema(() => strictObject({
   defaultSort: retiredKey(
     '`form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'nothing read it: a related list inside a form sorts by its own list view\'s `sort`. ' +
-    'Delete the key and set the sort on the related list view instead.',
+    'Delete the key and set the sort on the related list view instead. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /** Public form sharing configuration */
@@ -1808,7 +1811,8 @@ export const FormViewSchema = lazySchema(() => strictObject({
     '`form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form ' +
     'renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. ' +
     'Delete the key. The form renderer emits its own semantic markup; report gaps as ' +
-    'renderer issues rather than per-view attribute overrides.',
+    'renderer issues rather than per-view attribute overrides. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 }).superRefine((view, ctx) => {
   // `section.pane` is split-only vocabulary. On any other form type it would

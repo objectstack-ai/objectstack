@@ -197,7 +197,8 @@ export const SkillSchema = lazySchema(() => strictObject({
     "— phrases were never matched against the user's message; skill activation is " +
     "`triggerConditions` (AND of context field/operator/value) intersected with the agent's " +
     '`skills[]`, plus explicit /skill-name pinning. Delete the key. Put routing intent in ' +
-    '`triggerConditions`; describe intent in `description`/`instructions` for the LLM.',
+    '`triggerConditions`; describe intent in `description`/`instructions` for the LLM. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
