@@ -282,9 +282,11 @@ interface WriteObservabilityOptions {
 }
 
 interface DroppedFieldsEvent {
-  object: string;                        // resolved object name
-  fields: string[];                      // caller-supplied fields that were dropped
-  reason: 'readonly' | 'readonly_when';  // why they were dropped
+  object: string;   // resolved object name
+  fields: string[]; // caller-supplied fields that were dropped
+  // why they were dropped — an OPEN vocabulary that grows with the write
+  // path's legal strips; branch on it exhaustively, never with a binary test
+  reason: 'readonly' | 'readonly_when' | 'primary_key';
 }
 ```
 

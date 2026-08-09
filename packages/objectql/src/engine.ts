@@ -6847,7 +6847,8 @@ export class ObjectQL implements IObjectQLEngine {
      };
 
      // [#3407] Structured strip observability. The readonly/readonlyWhen strips
-     // below are LEGAL semantics (the write still succeeds without the locked
+     // below — and, since #6437, the primary-key strip at each branch's head —
+     // are LEGAL semantics (the write still succeeds without the dropped
      // fields), but until now the only trace was a server-side logger warn — a
      // caller that reports success per requested field (a flow's `update_record`
      // step) saw a clean success while the DB value never changed. When the
@@ -6878,10 +6879,19 @@ export class ObjectQL implements IObjectQLEngine {
      //    would otherwise report a partial success for a write that never
      //    happened. Quiet-and-observable or loud — one per call.
      //
-     // Drops accumulate across BOTH passes and throw ONCE (below, after the
+     // Drops accumulate across EVERY pass and throw ONCE (below, after the
      // static strip) so the caller gets every offending field in one error
      // instead of a round-trip per field. The throw lands before any driver
      // call, so nothing is written.
+     //
+     // [#6437] Adding a reason therefore adds a REFUSAL, and that is the
+     // contract rather than a side effect: `strictReadonlyWrites` is documented
+     // as covering "every drop `onFieldsDropped` reports" — a set DERIVED from
+     // what this helper reports, never an enumeration frozen at #5126. So the
+     // `primary_key` strip is refused under strict for exactly the reason the
+     // read-only ones are (don't half-apply my payload), and the refusal error
+     // composes its wording from `drops` so it never calls a stripped `id`
+     // read-only. Route a new strip through here ⇒ own both halves.
      const onFieldsDropped = options?.onFieldsDropped;
      const strictReadonlyWrites = options?.strictReadonlyWrites === true;
      const strictDrops: DroppedFieldsEvent[] = [];
@@ -7159,13 +7169,14 @@ export class ObjectQL implements IObjectQLEngine {
                //  - Per-driver skip lists (route C) are the #5240 / #4434 shape
                //    of five backends answering one question five ways.
                //
-               // Same choice as #6262 on the reporting seam: NOT routed through
-               // `reportDroppedFields`, because `DroppedFieldsEvent.reason` is a
-               // closed enum over the two READ-ONLY strips (`readonly` /
-               // `readonly_when`, #3407/#3042) and this drop is neither;
-               // widening that vocabulary is a `packages/spec` change with its
-               // own consumers (filed separately as #6437). The `warn` is the
-               // #4632 duty meanwhile — the caller is told the write succeeded.
+               // [#6437] REPORTED, on the same seam as the read-only strips.
+               // The vocabulary widened (`DroppedFieldsEvent.reason` gained
+               // `primary_key`), so the strip no longer has to choose between
+               // silence and a `reason` that lies — the choice #6262 / #6435
+               // were right to refuse. The `warn` below STAYS: it carries the
+               // remedy prose, and `onFieldsDropped` is opt-in, so a caller
+               // that registered no listener would otherwise lose the #4632
+               // signal entirely.
                const preIdById = hookContext.input.data as Record<string, unknown> | null | undefined;
                if (
                    preIdById &&
@@ -7184,6 +7195,7 @@ export class ObjectQL implements IObjectQLEngine {
                        `SELECT rows by an id set, put it in \`where\` ` +
                        `(\`{ where: { id: { $in: [...] } }, multi: true }\`).`,
                    );
+                   reportDroppedFields(preIdById, hookContext.input.data as Record<string, unknown>, 'primary_key');
                }
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
@@ -7349,14 +7361,16 @@ export class ObjectQL implements IObjectQLEngine {
                // `data.id` outranks both `where` and `multi` and never gets
                // here, and N rows cannot share one primary key anyway.
                //
-               // Deliberately NOT reported through `reportDroppedFields`:
-               // `DroppedFieldsEvent.reason` is a closed enum over the two
-               // READ-ONLY strips (`readonly` / `readonly_when`, #3407/#3042),
-               // and this drop is neither. Widening that vocabulary is a
-               // `packages/spec` change with its own consumers (batch + REST
-               // protocol responses), not a rider on an engine fix. The `warn`
-               // is the #4632 duty in the meantime: name the consequence and
-               // the remedy, since the caller is told the write succeeded.
+               // [#6437] REPORTED through `reportDroppedFields` under the
+               // `primary_key` reason. `DroppedFieldsEvent.reason` was a closed
+               // enum over the two READ-ONLY strips when this block landed, and
+               // this drop is neither — so PR #6433 emitted only the `warn`
+               // rather than force-fit an arm that would have lied. #6437
+               // widened the vocabulary instead (spec, plus the batch/REST
+               // protocol responses that carry it transitively), which is what
+               // lets the seam report it truthfully now. The `warn` STAYS: it
+               // carries the remedy prose, and a caller that registered no
+               // listener still needs the #4632 signal.
                const preIdMulti = hookContext.input.data as Record<string, unknown> | null | undefined;
                if (preIdMulti && typeof preIdMulti === 'object' && Object.prototype.hasOwnProperty.call(preIdMulti, 'id')) {
                    const { id: notAnId, ...withoutId } = preIdMulti;
@@ -7369,6 +7383,7 @@ export class ObjectQL implements IObjectQLEngine {
                        `scalar id (\`update(object, { id, ...fields })\` or \`{ where: { id } }\`) instead of ` +
                        `options.multi; to SELECT rows by an id set, put it in \`where\` (\`{ where: { id: { $in: [...] } }, multi: true }\`).`,
                    );
+                   reportDroppedFields(preIdMulti, hookContext.input.data as Record<string, unknown>, 'primary_key');
                }
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);

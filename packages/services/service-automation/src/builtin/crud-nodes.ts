@@ -115,6 +115,11 @@ function resolveNodeFilter(
 const DROPPED_REASON_LABEL: Record<DroppedFieldsEvent['reason'], string> = {
     readonly: 'the field is read-only (readonly: true)',
     readonly_when: 'the field is conditionally read-only (readonlyWhen; on multi-row updates: locked in ≥1 matched row)',
+    // [#6437] The map is `Record<DroppedFieldsEvent['reason'], string>` on
+    // purpose: a reason added in `packages/spec` fails THIS file's typecheck
+    // until it is worded, which is how the flow author keeps getting a true
+    // sentence instead of a fall-through label. Keep it exhaustive.
+    primary_key: "the field is the object's primary key and the value sent is not an identifier — the row(s) are identified by the id argument or the filter, so writing it would have overwritten their primary key (pass a scalar id, or put an id set in the filter)",
 };
 
 function droppedFieldsWarning(nodeType: string, e: DroppedFieldsEvent): string {

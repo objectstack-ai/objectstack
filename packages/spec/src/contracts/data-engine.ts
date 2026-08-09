@@ -17,10 +17,12 @@ import type { IDataDriver } from './data-driver.js';
  *
  * `onFieldsDropped` is invoked by the engine when caller-supplied write fields
  * are LEGALLY stripped from the payload before the driver write — static
- * `readonly` (#2948) or a TRUE `readonlyWhen` predicate (#3042). The write
- * still succeeds; the listener exists so callers that report per-field success
- * (e.g. a flow's `update_record` step) can surface a warning instead of a
- * silent success (#3356's masked stage write-backs).
+ * `readonly` (#2948), a TRUE `readonlyWhen` predicate (#3042), or the
+ * primary-key strip of a payload `id` the update dispatch has ruled is not an
+ * identifier (#6437). The write still succeeds; the listener exists so callers
+ * that report per-field success (e.g. a flow's `update_record` step) can
+ * surface a warning instead of a silent success (#3356's masked stage
+ * write-backs).
  *
  * Lives on the TS contract — NOT in the serializable Zod options schemas
  * (`EngineUpdateOptionsSchema` etc.): a function is unrepresentable in JSON
@@ -45,14 +47,30 @@ export interface WriteObservabilityOptions {
    * would have survived. The strip passes still run — that is how the engine
    * learns WHICH fields would go — but their result is discarded.
    *
-   * It covers every drop `onFieldsDropped` reports, i.e. both
+   * It covers every drop `onFieldsDropped` reports — coverage DERIVED from the
+   * reported set, never an enumeration frozen at #5126. Today that is all three
    * `DroppedFieldsEvent['reason']` arms: static `readonly: true` (#2948, which
-   * only runs for non-system callers) and a TRUE `readonlyWhen` predicate
-   * (#3042, which runs for every caller, `isSystem` included). Covering only
-   * the static arm would leave a trusted caller — the very caller this option
-   * exists for, one that already passes `{ context: { isSystem: true } }` and
-   * is therefore exempt from the static strip — still losing `readonlyWhen`
-   * fields in silence, which is the bug this option exists to abolish.
+   * only runs for non-system callers), a TRUE `readonlyWhen` predicate (#3042,
+   * which runs for every caller, `isSystem` included), and the `primary_key`
+   * strip (#6437). Covering only the static arm would leave a trusted caller —
+   * the very caller this option exists for, one that already passes
+   * `{ context: { isSystem: true } }` and is therefore exempt from the static
+   * strip — still losing `readonlyWhen` fields in silence, which is the bug
+   * this option exists to abolish.
+   *
+   * ⚠️ **A new `reason` therefore adds a new REFUSAL, by construction** — the
+   * price of the derived coverage above, paid deliberately when `primary_key`
+   * landed (#6437). Since that change a `strictReadonlyWrites` caller that puts
+   * a ruled-non-key value in `data.id` is REFUSED, where it previously got a
+   * success whose `id` had been silently dropped. That is this option's whole
+   * promise ("don't half-apply my payload") reaching one more strip class, not
+   * a second policy: the strip already ran and already discarded the key.
+   *
+   * The flag's NAME is narrower than its coverage and stays that way on
+   * purpose — renaming a shipped in-process option is a separate acceptance
+   * decision, and the coverage sentence above, not the name, is the contract.
+   * The refusal error names what actually happened PER REASON, so a
+   * `primary_key` refusal never claims the field was read-only.
    *
    * `onFieldsDropped` does NOT fire on a write this option refuses. The two are
    * alternative outputs of one seam, not a sequence: `DroppedFieldsEvent` is
@@ -64,9 +82,12 @@ export interface WriteObservabilityOptions {
    *
    * `ERR_READONLY_FIELD_REJECTED` (registered in `ERROR_CODE_LEDGER` under
    * `@objectstack/objectql`), carrying the FULL list of rejected fields
-   * accumulated across both strip passes — one error naming everything, so a
-   * caller fixes its payload once instead of one round-trip per field. Engines
-   * identify it by `code`, not `instanceof`, so it survives package boundaries.
+   * accumulated across every strip pass the operation runs — one error naming
+   * everything, so a caller fixes its payload once instead of one round-trip
+   * per field. Engines identify it by `code`, not `instanceof`, so it survives
+   * package boundaries. The code is stable across reasons deliberately: a
+   * caller catches ONE code and reads `drops` for the per-reason breakdown,
+   * which is why adding a reason does not add an error code (#6437).
    *
    * ## In-process only — what a REMOTE caller observes
    *

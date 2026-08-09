@@ -451,7 +451,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object the write targeted (resolved object name) |
 | **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
-| **reason** | `Enum<'readonly' \| 'readonly_when'>` | ✅ | Why the fields were dropped: static readonly (#2948) or a TRUE readonlyWhen predicate (#3042) |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly (#2948), a TRUE readonlyWhen predicate (#3042), or the primary-key strip of a payload id the engine ruled is not an identifier (#6437) |
 
 
 ---
