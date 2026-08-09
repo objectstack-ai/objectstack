@@ -1638,6 +1638,17 @@ type WithFormSectionAlias = { sections?: unknown; groups?: unknown };
  * as present, and so does this: `{ sections: [], groups: [...] }` folds to
  * `sections: []`, matching the renderer rather than inventing a merge.
  *
+ * ⚠️ The two objectui folds disagree on exactly that input, and this rule picks
+ * the PRIMARY path's answer. `spec-bridge/bridges/form-view.ts` uses `??`, so
+ * an empty `sections` wins; `plugin-form/ObjectForm.tsx` gates on
+ * `!folded.sections?.length`, so there the alias wins when `sections` is empty.
+ * An alias is consulted when the canonical key is ABSENT — a fallback-on-empty
+ * is a lenient-consumer accommodation, which is the shape this fold exists to
+ * remove. Also note ObjectForm's fold rewrites sub-keys (`title` → `label`,
+ * `defaultCollapsed` → `collapsed`): that is a renderer-local shape adaptation,
+ * NOT spec semantics. This fold is `FormSectionSchema` → `FormSectionSchema`,
+ * verbatim, with no sub-key rewriting.
+ *
  * ## Why `.overwrite()` and not `.transform()` (measured, #6926)
  *
  * Both fold identically at parse. `.transform()` returns a `ZodPipe`, and this
