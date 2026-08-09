@@ -89,6 +89,7 @@
     "CustomPersistenceConfig (type)",
     "CustomPersistenceConfigSchema (const)",
     "DATABASE_DRIVER_SELECTION_ALIASES (const)",
+    "DATABASE_DRIVER_SELECTION_IDS (const)",
     "DATA_ACTION_TO_API_OPERATION (const)",
     "DATE_MACRO_ALIAS_TOKENS (const)",
     "DATE_MACRO_DESCRIPTIONS (const)",

@@ -321,24 +321,35 @@ describe('SysMetadataRepository', () => {
         expect(result.version).toMatch(/^sha256:/);
     });
 
-    it('put accepts statically-registered `api` with intent=runtime-only (#5271)', async () => {
-        // The other half of the same gate: `api` graduated INTO the registry
-        // with `allowRuntimeCreate: true`, so the repository door it already
-        // had must stay open. `assertAllowed` is a TYPE gate — the body shape
-        // is judged by `saveMetaItem`'s 422, one layer up.
-        const result = await repo.put(
-            { org: 'org_alpha', type: 'api', name: 'my_api' },
-            {
-                name: 'my_api',
-                path: '/api/v1/apps/alpha/tasks',
-                method: 'GET',
-                type: 'object_operation',
-                target: 'alpha_task',
-                objectParams: { object: 'alpha_task', operation: 'find' },
-            },
-            { parentVersion: null, actor: 'studio', intent: 'runtime-only' },
-        );
-        expect(result.version).toMatch(/^sha256:/);
+    it('put refuses statically-registered `api` with allowRuntimeCreate:false (#5488)', async () => {
+        // RETIREMENT PIN. This case asserted the OPPOSITE until 2026-08-09:
+        // `api` graduated into the registry with `allowRuntimeCreate: true`
+        // (#5271), so "the repository door it already had must stay open".
+        // That door is now deliberately shut — maintainer ruling
+        // 2026-08-07T16:59Z, implemented in #5488 — because a runtime-created
+        // endpoint was never served: `matchEndpoint` reads
+        // `MetadataManager.listForIndex('api')` (registry + filesystem/memory
+        // loaders), and a runtime write lands in `sys_metadata`, in neither.
+        //
+        // `assertAllowed` derives its allow-list from the same registry
+        // constant the protocol inlet uses, so the repository refuses in the
+        // same breath — the second of the two doors #5086 named. The body
+        // below is deliberately spec-VALID: only a body nothing else would
+        // reject proves the refusal came from the TYPE gate.
+        await expect(
+            repo.put(
+                { org: 'org_alpha', type: 'api', name: 'my_api' },
+                {
+                    name: 'my_api',
+                    path: '/api/v1/apps/alpha/tasks',
+                    method: 'GET',
+                    type: 'object_operation',
+                    target: 'alpha_task',
+                    objectParams: { object: 'alpha_task', operation: 'find' },
+                },
+                { parentVersion: null, actor: 'studio', intent: 'runtime-only' },
+            ),
+        ).rejects.toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
     });
 
     it('put still refuses plugin-registered type without runtime-only intent', async () => {

@@ -44,7 +44,20 @@ function makeDispatcher(saveError: unknown) {
         getService: svc,
         getServiceAsync: async (name: string) => svc(name),
     };
-    return new HttpDispatcher(kernel);
+    const dispatcher = new HttpDispatcher(kernel);
+    // [#7019] The `/meta` PUT this guard uses as its vehicle now demands the
+    // `manage_metadata` capability — an authoring capability, not just a
+    // session. `dispatch()` re-resolves the execution context from the auth /
+    // objectql services (overwriting whatever the caller passes in), and these
+    // stubs have no objectql, so the resolved caller would hold NO capabilities
+    // and be refused before reaching the error path under test. Stubbing the
+    // resolution is the dispatcher-side spelling of the `resolveExecCtx`
+    // override the REST suites use. What is under test — the sanitisation of a
+    // RETURNED error — is untouched.
+    (dispatcher as any).timedResolveExecutionContext = async () => ({
+        userId: 'u1', systemPermissions: ['manage_metadata'],
+    });
+    return dispatcher;
 }
 
 async function putMeta(saveError: unknown) {

@@ -808,7 +808,7 @@ const actionObject = () => strictObject({
   execute: retiredKey(
     '`execute` was removed in @objectstack/spec 17 (#3855) — use `target`. ' +
     'Rename the key; the value (a handler / flow / URL ref) is unchanged. ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   
   /**

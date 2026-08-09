@@ -175,36 +175,163 @@ export function mapPages(stack: Dict, mapper: (page: Dict, path: string) => Dict
 }
 
 /**
- * Immutably map every **declared-shape** page component — the two places a
- * `PageComponentSchema` actually lives: `stack.pages[].regions[].components[]`
- * and `stack.pages[].slots.<slot>` (which is `PageComponent | PageComponent[]`).
+ * Depth ceiling for the page-component recursion, mirroring
+ * {@link MAX_REGION_DEPTH} and for the same reason: a stack handed to
+ * `defineStack` is hand-built objects rather than parsed JSON, so a component
+ * whose `properties.children` contains itself is reachable and would otherwise
+ * be an unbounded recursion on the load path.
+ */
+const MAX_COMPONENT_DEPTH = 32;
+
+/**
+ * The container keys a page component nests its sub-tree under, listed exactly
+ * as `walkPageComponents` (`packages/lint/src/page-walk.ts`) lists them:
+ * `page:card` → `body` / `footer`, every layout container → `children`.
+ * `page:tabs` / `page:accordion` hang theirs off `items[].children`, handled
+ * separately below because of the extra index.
+ *
+ * Recognised by SHAPE — an array — and deliberately NOT keyed by component
+ * `type`, which is the same rule lint applies: `properties` is an open bag that
+ * nothing validates per-type on the load path, and layout containers compose
+ * `children` without ever declaring it in a props schema. A `body: 'Confirm the
+ * work'` string on a `record:alert` is not an array and so is never mistaken
+ * for a slot; a non-dict element inside one is passed through untouched.
+ */
+const COMPONENT_CHILD_KEYS = ['children', 'body', 'footer'] as const;
+
+/**
+ * Map a list of page components, immutably. Returns the SAME array reference
+ * when nothing under it changed, so the copy-on-write contract survives the
+ * descent.
+ */
+function mapComponentList(
+  list: unknown[],
+  basePath: string,
+  mapper: (component: Dict, path: string) => Dict,
+  depth: number,
+): unknown[] {
+  let changed = false;
+  const next = list.map((child, i) => {
+    if (!isDict(child)) return child;
+    const mapped = mapComponentTree(child, `${basePath}[${i}]`, mapper, depth);
+    if (mapped !== child) changed = true;
+    return mapped;
+  });
+  return changed ? next : list;
+}
+
+/**
+ * Map one page component **and everything nested under it** — the component
+ * itself, then the components inside its `properties` containers, recursively
+ * (a card inside a tab panel inside a card).
+ *
+ * The mapper runs on the container FIRST and the descent then reads the
+ * *mapped* component's `properties`, the same ordering {@link mapNodeTree} uses
+ * for flow regions. That is what keeps the walk single-visit under a conversion
+ * that MOVES a container key: `page-card-body-to-children` renames
+ * `properties.body` → `properties.children`, and because the descent happens
+ * after the rename, the sub-tree is walked once under the canonical key instead
+ * of once per spelling.
+ */
+function mapComponentTree(
+  component: Dict,
+  path: string,
+  mapper: (component: Dict, path: string) => Dict,
+  depth: number,
+): Dict {
+  const mapped = mapper(component, path);
+  if (depth >= MAX_COMPONENT_DEPTH) return mapped;
+  const properties = mapped.properties;
+  if (!isDict(properties)) return mapped;
+
+  let nextProps = properties;
+
+  // `page:tabs` / `page:accordion` — `items[].children[]`.
+  const items = nextProps.items;
+  if (Array.isArray(items)) {
+    let itemsChanged = false;
+    const nextItems = items.map((item, i) => {
+      if (!isDict(item) || !Array.isArray(item.children)) return item;
+      const nextChildren = mapComponentList(
+        item.children,
+        `${path}.properties.items[${i}].children`,
+        mapper,
+        depth + 1,
+      );
+      if (nextChildren === item.children) return item;
+      itemsChanged = true;
+      return { ...item, children: nextChildren };
+    });
+    if (itemsChanged) nextProps = { ...nextProps, items: nextItems };
+  }
+
+  for (const key of COMPONENT_CHILD_KEYS) {
+    const list = nextProps[key];
+    if (!Array.isArray(list)) continue;
+    const next = mapComponentList(list, `${path}.properties.${key}`, mapper, depth + 1);
+    if (next !== list) nextProps = { ...nextProps, [key]: next };
+  }
+
+  return nextProps === properties ? mapped : { ...mapped, properties: nextProps };
+}
+
+/**
+ * Immutably map every page component — the two places a `PageComponentSchema`
+ * lives (`stack.pages[].regions[].components[]` and `stack.pages[].slots.<slot>`,
+ * which is `PageComponent | PageComponent[]`) **plus everything nested inside a
+ * component's `properties` containers**, to any depth.
  *
  * `mapper` receives each component dict and its path
  * (`pages[i].regions[j].components[k]`, `pages[i].slots.tabs`,
- * `pages[i].slots.tabs[0]`) and returns the same reference (no change) or a new
- * dict. Every container on the way — the stack, `pages`, a page, its `regions`,
- * a region, its `components`, its `slots` — is copied only when a descendant
- * actually changed: {@link mapPages}' contract, one level deeper.
+ * `pages[i].slots.tabs[0]`,
+ * `pages[i].regions[j].components[k].properties.items[0].children[1]`) and
+ * returns the same reference (no change) or a new dict. Every container on the
+ * way — the stack, `pages`, a page, its `regions`, a region, its `components`,
+ * its `slots`, and each `properties` bag on the way down — is copied only when
+ * a descendant actually changed: {@link mapPages}' contract, all the way down.
  *
- * That is the whole surface, and it is bounded by the type rather than by the
- * shape of any one page: `PageComponentSchema` declares no children key, so
- * anything nested (tab panels, card bodies) sits inside another component's
- * free-form `properties` and is NOT typed page-component shape — the tombstone
- * (`tsc` + the parse) covers those, as every retirement entry's doc says.
+ * **The reach is `walkPageComponents`'s reach (#6775), and getting there took
+ * two goes.** This walker's comment used to call region level "the whole
+ * surface", reasoning that a conversion can only reach what the type declares
+ * and that everything else sits in a free-form bag which the tombstone (`tsc` +
+ * the parse) covers instead. Both halves failed where it counted:
  *
- * **`slots` was missing until #6776, and the gap was load-bearing.** This
- * walker's own comment used to call region level "the whole surface", on the
- * reasoning that everything else is inside a free-form bag. `slots` is the
- * counter-example: `PageSchema.slots` is a closed map of seven named slots,
- * each declared `z.union([PageComponentSchema, z.array(PageComponentSchema)])`
- * — exactly as typed as a region component, and the canonical authoring shape
- * for a `kind: 'slotted'` record page. `walkPageComponents` in `packages/lint`
- * has always visited both, so every conversion here reached strictly less than
- * the lint rule that judges the result. #6776 is where that cost something
- * real: all four in-repo `page:tabs` authoring sites are `slots.tabs`, so a
- * region-only rewrite would have left `os migrate meta` unable to touch the
- * only shape that key is written in, while the tombstone's prescription
- * promised it would.
+ *   - **`slots` (#6776)** is as typed as a region component — `PageSchema.slots`
+ *     is a closed map of seven named slots, each
+ *     `z.union([PageComponentSchema, z.array(PageComponentSchema)])` — and is
+ *     the canonical authoring shape for a `kind: 'slotted'` record page. All
+ *     four in-repo `page:tabs` sites are `slots.tabs`, so a region-only rewrite
+ *     left `os migrate meta` unable to touch the only shape that key is written
+ *     in, while the tombstone's prescription promised it would.
+ *   - **Container nesting (#6775)** is where "the tombstone covers it" fails: a
+ *     tombstone only fires for a key some props schema judges, and `properties`
+ *     is an open bag nothing validates by `type` on the load path. So
+ *     `page-header-subtitle-alias`, whose retired `description` is tombstoned
+ *     nowhere (`description` is a live declared prop on other components), got
+ *     no diagnostic at a nested site from any layer: the conversion did not
+ *     fire, `PageSchema` stayed green, and the advisory props gate runs CLI-only
+ *     and on already-converted metadata. A slotted record page — the shape
+ *     objectui's own guide recommends — could carry a header the rewrite never
+ *     saw, so objectui's `subtitle ?? description` fallback could not retire
+ *     without silently dropping those subtitles.
+ *
+ * `walkPageComponents` in `packages/lint` has visited all three surfaces from
+ * the start, so until now every conversion here reached strictly less than the
+ * lint rule that judges its result — "same key, different meaning depending on
+ * where you put it", the position-dependence the flow-node region recursion
+ * (#4347) was built to abolish.
+ *
+ * Two differences from the lint walk remain, both deliberate:
+ *
+ *   1. **Source-authored pages** (`kind: 'html' | 'react' | 'jsx'`) are visited
+ *      here and skipped there. For lint that skip prevents findings about a
+ *      DERIVED region cache the author never wrote; a conversion still has to
+ *      normalize that cache, or a stored page rehydrates in a shape the runtime
+ *      no longer serves. Skipping them here would REMOVE reach conversions have
+ *      had since #5509.
+ *   2. **The {@link MAX_COMPONENT_DEPTH} ceiling** has no counterpart in lint,
+ *      which walks parsed JSON only. This walker also runs on hand-built
+ *      `defineStack` objects, where a self-referencing `children` is reachable.
  */
 export function mapPageComponents(
   stack: Dict,
@@ -221,15 +348,14 @@ export function mapPageComponents(
         const components = region.components;
         if (!Array.isArray(components)) return region;
 
-        let componentsChanged = false;
-        const nextComponents = components.map((component, ci) => {
-          if (!isDict(component)) return component;
-          const mapped = mapper(component, `${pagePath}.regions[${ri}].components[${ci}]`);
-          if (mapped !== component) componentsChanged = true;
-          return mapped;
-        });
+        const nextComponents = mapComponentList(
+          components,
+          `${pagePath}.regions[${ri}].components`,
+          mapper,
+          0,
+        );
 
-        if (!componentsChanged) return region;
+        if (nextComponents === components) return region;
         regionsChanged = true;
         return { ...region, components: nextComponents };
       });
@@ -247,19 +373,13 @@ export function mapPageComponents(
         // matches it so a conversion notice and a lint finding name one site
         // with one string.
         if (Array.isArray(value)) {
-          let listChanged = false;
-          const nextList = value.map((component, i) => {
-            if (!isDict(component)) return component;
-            const mapped = mapper(component, `${pagePath}.slots.${slot}[${i}]`);
-            if (mapped !== component) listChanged = true;
-            return mapped;
-          });
-          if (!listChanged) continue;
+          const nextList = mapComponentList(value, `${pagePath}.slots.${slot}`, mapper, 0);
+          if (nextList === value) continue;
           nextSlots[slot] = nextList;
           slotsChanged = true;
         } else {
           if (!isDict(value)) continue;
-          const mapped = mapper(value, `${pagePath}.slots.${slot}`);
+          const mapped = mapComponentTree(value, `${pagePath}.slots.${slot}`, mapper, 0);
           if (mapped === value) continue;
           nextSlots[slot] = mapped;
           slotsChanged = true;

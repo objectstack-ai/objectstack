@@ -152,9 +152,9 @@ const result = AIChatWindowProps.parse(data);
 | **targetVariable** | `string` | optional | Page variable to bind selected record ID(s) |
 | **placeholder** | `string \| Record<string, string>` | optional | Placeholder text |
 | **emptyText** | `string \| Record<string, string>` | optional | Text shown when the query returns no records (default "No records") |
-| **displayField** | `never` | optional | [REMOVED] `element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key to `labelField`; the value (a field name) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically. |
-| **searchFields** | `never` | optional | [REMOVED] `element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no renderer ever read it and it narrowed nothing. Delete the key. To restrict which records the picker offers, use `filter` (or the component-level `dataSource.filter`), which the query path does apply. Run `os migrate meta --from 16` to remove it automatically. |
-| **multiple** | `never` | optional | [REMOVED] `element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable holds one record id, so `multiple: true` selected nothing extra and reported success. Delete the key; multi-record selection is not implemented on this element. Run `os migrate meta --from 16` to remove it automatically. |
+| **displayField** | `never` | optional | [REMOVED] `element:record_picker` property `displayField` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key to `labelField`; the value (a field name) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **searchFields** | `never` | optional | [REMOVED] `element:record_picker` property `searchFields` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no renderer ever read it and it narrowed nothing. Delete the key. To restrict which records the picker offers, use `filter` (or the component-level `dataSource.filter`), which the query path does apply. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **multiple** | `never` | optional | [REMOVED] `element:record_picker` property `multiple` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable holds one record id, so `multiple: true` selected nothing extra and reported success. Delete the key; multi-record selection is not implemented on this element. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -217,7 +217,7 @@ const result = AIChatWindowProps.parse(data);
 | **bordered** | `boolean` | ✅ |  |
 | **actions** | `string[]` | optional |  |
 | **children** | `any[]` | optional | Card content components, in order (the card body slot) |
-| **body** | `never` | optional | [REMOVED] `page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a second spelling of the composition slot every other container calls `children`, and the renderer reads both. Rename the key to `children`; the value (an array of child components) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically. |
+| **body** | `never` | optional | [REMOVED] `page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — it was a second spelling of the composition slot every other container calls `children`, and the renderer reads both. Rename the key to `children`; the value (an array of child components) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **footer** | `any[]` | optional | Card footer components (slot) |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
@@ -261,7 +261,7 @@ const result = AIChatWindowProps.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **tabStyle** | `Enum<'line' \| 'card' \| 'pill'>` | optional | Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills |
-| **type** | `never` | optional | [REMOVED] `page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — a props key named `type` collides with the page component's own dispatch key, so it is unauthorable in the flat and JSX carriers and was never validated in them. Rename the key to `tabStyle`; the value (`line` \| `card` \| `pill`) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically. |
+| **type** | `never` | optional | [REMOVED] `page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — a props key named `type` collides with the page component's own dispatch key, so it is unauthorable in the flat and JSX carriers and was never validated in them. Rename the key to `tabStyle`; the value (`line` \| `card` \| `pill`) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **position** | `Enum<'top' \| 'left'>` | optional |  |
 | **items** | `{ label: string \| Record<string, string>; icon?: string; visibleWhen?: string \| object; value?: string; … }[]` | ✅ |  |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |

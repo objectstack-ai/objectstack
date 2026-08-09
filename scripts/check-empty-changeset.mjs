@@ -128,13 +128,29 @@ const REPO_ROOT = resolve(__dirname, '..');
 /**
  * The bump entries declared in a changeset's YAML frontmatter.
  *
- * The entry regex is deliberately the SAME shape `check-changeset-no-major.mjs`
- * uses to find `major` bumps. Two gates reading the same block must agree on
- * what counts as a declaration, or one of them is judging a different file than
- * it appears to.
+ * The entry regex is deliberately the SAME shape `check-changeset-no-major.mjs`,
+ * `check-adr-0087-registration.mjs` and `objectui-changeset-digest.mjs` use.
+ * Four readers of the same block must agree on what counts as a declaration, or
+ * one of them is judging a different file than it appears to. That agreement is
+ * asserted mechanically in this file's self-test (see "the family reads one
+ * block one way"), not merely claimed here (#7004).
  *
  * A file with no opening `---` fence declares nothing either, and is reported as
  * its own kind so the message can say which of the two shapes it is.
+ *
+ * ## Why a comment-bearing entry is this gate's FALSE-RED half (#7004)
+ *
+ * The regex used to end `([A-Za-z]+)\s*$`, which accepts nothing after the bump
+ * word. So `"@objectstack/spec": major # keep` — a real major to
+ * @changesets/parse@0.4.3 — declared nothing here, and a PR that added a
+ * perfectly valid changeset was rejected as empty-frontmatter under #5471. Same
+ * anchor, same miss, for a QUOTED bump value (`: "major"`).
+ *
+ * The opposite direction was this gate's FALSE-GREEN half, and it is the one
+ * that mattered more: a whole-line comment containing a colon (`# note: major`)
+ * is entry-shaped, so a frontmatter block holding only comments parsed as a
+ * declaration of a package named `# note` — i.e. as NON-empty. That is exactly
+ * the #4898 input this gate exists to refuse.
  *
  * @param {string} text
  * @returns {{ fenced: boolean, packages: string[] }}
@@ -148,8 +164,10 @@ export function declaredBumpsIn(text) {
   const packages = [];
   for (let j = i + 1; j < lines.length; j++) {
     if (lines[j].trim() === '---') break; // end of frontmatter
+    if (/^\s*#/.test(lines[j])) continue; // a whole-line YAML comment declares nothing
     // "<name>": <bump>   |   '<name>': <bump>   |   <name>: <bump>
-    const m = /^\s*["']?([^"':]+)["']?\s*:\s*([A-Za-z]+)\s*$/.exec(lines[j]);
+    // with an optionally quoted bump value and an optional trailing ` # comment`.
+    const m = /^\s*["']?([^"':]+)["']?\s*:\s*["']?([A-Za-z]+)["']?(?:\s+#.*)?\s*$/.exec(lines[j]);
     if (m) packages.push(m[1].trim());
   }
   return { fenced: true, packages };
@@ -1021,10 +1039,19 @@ function selfTest() {
       );
       assert(
         /check-adr-0087-registration\.mjs --self-test/.test(wiring),
-        'consumer: `check:changeset-gate-self-tests` must run `check-adr-0087-registration.mjs --self-test` too -- both checkers live in the same exempted job and both were unwired by it (#6509). `check-changeset-no-major.mjs` is deliberately absent: it has no `--self-test` to run.',
+        'consumer: `check:changeset-gate-self-tests` must run `check-adr-0087-registration.mjs --self-test` too -- both checkers live in the same exempted job and both were unwired by it (#6509).',
+      );
+      // The third member of the family, added in #6923. It was absent from this
+      // step until then for a stated reason -- it had no `--self-test` to run --
+      // and that reason expired the moment it grew one. Its REAL scan stays in
+      // pr-automation.yml (its `allow-major` escape hatch lives there), so what
+      // joins this step is the self-test half only, exactly like the other two.
+      assert(
+        /check-changeset-no-major\.mjs --self-test/.test(wiring),
+        'consumer: `check:changeset-gate-self-tests` must run `check-changeset-no-major.mjs --self-test` as well -- it is the third checker of this family, and its fixtures land in the same exemption-free job (#6923)',
       );
       assert(
-        !/check-(?:empty-changeset|adr-0087-registration)\.mjs(?! --self-test)/.test(wiring),
+        !/check-(?:empty-changeset|adr-0087-registration|changeset-no-major)\.mjs(?! --self-test)/.test(wiring),
         'consumer: every invocation in `check:changeset-gate-self-tests` must carry `--self-test` -- chaining a real scan into the lint job is the #6129 direction this split exists to avoid',
       );
     }
@@ -1042,6 +1069,114 @@ function selfTest() {
       'parser: multiple declarations count',
     );
     assert(declaredBumpsIn('no fence here\n').fenced === false, 'parser: a fenceless file reports fenced=false');
+
+    // ── THE FIX (#7004): comments and quoted bump values ─────────────────────
+    //
+    // This gate's FALSE-RED half. Every fixture here is a changeset that
+    // @changesets/parse@0.4.3 reads as a real release; before #7004 each one
+    // declared nothing to this parser, so a PR adding a perfectly valid
+    // changeset was rejected as empty-frontmatter under #5471.
+    //
+    // Predicted direction on reverse verification: restoring the old anchor
+    // (`([A-Za-z]+)\s*$`) turns exactly these red — `isEmptyDeclaration` goes
+    // true and the gate rejects a valid file.
+    const declares = (label, text, expected) => {
+      const { packages } = declaredBumpsIn(text);
+      assert(
+        packages.length === expected.length && expected.every((p) => packages.includes(p)),
+        `parser: ${label} ⇒ ${JSON.stringify(expected)} — got ${JSON.stringify(packages)}`,
+      );
+    };
+    declares('a trailing YAML comment (#7004)', '---\n"@objectstack/spec": minor # keep\n---\n\nbody\n', ['@objectstack/spec']);
+    declares('a trailing comment after a tab (#7004)', '---\n"@objectstack/spec": minor\t# keep\n---\n\nbody\n', ['@objectstack/spec']);
+    declares('a trailing comment containing a colon (#7004)', '---\n"@objectstack/spec": minor # note: keep\n---\n\nbody\n', [
+      '@objectstack/spec',
+    ]);
+    declares('a double-quoted bump value (#7004)', '---\n"@objectstack/spec": "minor"\n---\n\nbody\n', ['@objectstack/spec']);
+    declares('a single-quoted bump value (#7004)', '---\n"@objectstack/spec": \'minor\'\n---\n\nbody\n', ['@objectstack/spec']);
+    declares('a quoted bump value AND a comment (#7004)', '---\n"@objectstack/spec": "minor" # keep\n---\n\nbody\n', ['@objectstack/spec']);
+    assert(
+      !isEmptyDeclaration('---\n"@objectstack/spec": minor # keep\n---\n\nbody\n'),
+      'parser: a comment-bearing declaration is NOT an empty changeset — the #7004 false-RED, stated in this gate own vocabulary',
+    );
+
+    // The other direction, and this gate FALSE-GREEN half. A whole-line comment
+    // containing a colon is entry-shaped; it used to parse as a package named
+    // `# note`, so a frontmatter block of nothing but comments read as NON-empty
+    // and sailed through the very check that exists to refuse it (#4898).
+    assert(
+      isEmptyDeclaration('---\n# note: minor\n---\n\nbody\n'),
+      'parser: a frontmatter holding only a colon-bearing comment IS empty — it declares no package (#7004 false-GREEN half)',
+    );
+    assert(
+      isEmptyDeclaration('---\n   # note: minor\n# another: patch\n---\n\nbody\n'),
+      'parser: indented and repeated comment lines are still no declaration (#7004)',
+    );
+    assert(
+      declaredBumpsIn('---\n# note: minor\n---\n\nbody\n').fenced === true,
+      'parser: control — that comment-only fixture IS fenced, so the emptiness above is about the entries and not a missing fence',
+    );
+    declares('control — a real entry beside a colon-bearing comment line', '---\n# note: minor\n"@objectstack/real": patch\n---\n\nbody\n', [
+      '@objectstack/real',
+    ]);
+
+    // YAML needs whitespace before an inline `#`, so this is the scalar
+    // `minor# keep` and @changesets/parse THROWS on it. Reading it as no
+    // declaration is agreement with changesets, not a residual gap.
+    assert(
+      isEmptyDeclaration('---\n"@objectstack/spec": minor# keep\n---\n\nbody\n'),
+      'parser: `minor# keep` (no space before #) is not a YAML comment — changesets throws on it, so declaring nothing here agrees with it (#7004)',
+    );
+
+    // ── The family reads one block one way (#7004) ───────────────────────────
+    //
+    // Until now that claim was four prose comments asserting each other. It is
+    // the load-bearing invariant of this family — the moment two of these
+    // parsers disagree, one gate is judging a different file than it appears to
+    // — so it is checked against the actual file text instead.
+    //
+    // #7004 is what a comment-only invariant costs: the trailing-comment gap
+    // reached all four carriers at once, and the fourth
+    // (`objectui-changeset-digest.mjs`) was not even named in the report,
+    // because nothing mechanical connected it to the other three.
+    {
+      const FAMILY = [
+        'scripts/check-changeset-no-major.mjs',
+        'scripts/check-empty-changeset.mjs',
+        'scripts/check-adr-0087-registration.mjs',
+        'scripts/objectui-changeset-digest.mjs',
+      ];
+      const literals = new Map();
+      for (const rel of FAMILY) {
+        const path = join(REPO_ROOT, rel);
+        assert(existsSync(path), `family: ${rel} must exist — it is one of the four readers of a changeset frontmatter block`);
+        const src = existsSync(path) ? readFileSync(path, 'utf8') : '';
+        const found = src.match(/\/\^\\s\*\["'\]\?.*?\/\.exec\(/g) ?? [];
+        // Anti-vacuous-green (#6983): an extraction that stops matching yields
+        // an empty set, and "all zero literals agree" is a green that judged
+        // nothing at all. So each file is asserted to have yielded exactly one.
+        assert(found.length === 1, `family: exactly one entry regex must be extractable from ${rel} — found ${found.length} (the extraction went stale, and the agreement below would compare nothing)`);
+        if (found.length === 1) literals.set(rel, found[0]);
+      }
+      const distinct = new Set(literals.values());
+      assert(
+        distinct.size === 1,
+        `family: all four changeset frontmatter parsers must use a byte-identical entry regex — found ${distinct.size} distinct spellings: ${JSON.stringify([...literals])}`,
+      );
+      // And the shared spelling must actually be the comment-aware one, so this
+      // block cannot go green on four identically-STALE copies.
+      assert(
+        [...distinct][0]?.includes('(?:\\s+#.*)?'),
+        'family: the shared entry regex must carry the `(?:\\s+#.*)?` trailing-comment arm — four identical copies of the OLD anchor would satisfy the agreement check above while re-opening #7004',
+      );
+      for (const rel of FAMILY) {
+        const src = existsSync(join(REPO_ROOT, rel)) ? readFileSync(join(REPO_ROOT, rel), 'utf8') : '';
+        assert(
+          /\/\^\\s\*#\/\.test\(lines\[[ij]\]\)\) continue;/.test(src),
+          `family: ${rel} must skip whole-line YAML comments — without it a colon-bearing comment parses as a package named \`# note\` (#7004)`,
+        );
+      }
+    }
 
     // ── Missing input is a failure, never a pass (#4690) ─────────────────────
     {

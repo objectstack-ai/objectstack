@@ -40,14 +40,14 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-function withTimeout(run: () => Promise<void>, jobId: string, timeoutMs?: number): Promise<void> {
+function withTimeout<T>(run: () => Promise<T>, jobId: string, timeoutMs?: number): Promise<T> {
   if (!timeoutMs || timeoutMs <= 0) return run();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const guard = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new JobTimeoutError(jobId, timeoutMs)), timeoutMs);
     (timer as any)?.unref?.();
   });
-  return Promise.race([run(), guard]).finally(() => clearTimeout(timer)) as Promise<void>;
+  return Promise.race([run(), guard]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
 /**
@@ -67,12 +67,22 @@ function withTimeout(run: () => Promise<void>, jobId: string, timeoutMs?: number
  *   convergence (#4661) and are enforced here, not merely declared: jitter is
  *   what stops a fleet of jobs that failed on the same outage from retrying in
  *   lockstep.
+ *
+ * Generic in the run's resolved value, defaulting to `void` (#6617). Every
+ * existing caller passes a `() => Promise<void>` and still infers `T = void`,
+ * so this is purely additive — what changed is that the wrapper no longer
+ * ERASES what the run resolved to. It has to stop erasing it because
+ * {@link JobHandler} can now resolve a `JobRunOutcome`, and a wrapper typed
+ * `() => Promise<void>` rejects that: TypeScript's return-type `void` special
+ * case does not reach through `Promise<void>`. Retry semantics are untouched —
+ * only a REJECTED promise retries, so a resolved outcome (degraded or not)
+ * returns on the first attempt exactly as a resolved `undefined` always did.
  */
-export async function runWithPolicy(
+export async function runWithPolicy<T = void>(
   jobId: string,
-  run: () => Promise<void>,
+  run: () => Promise<T>,
   options?: JobScheduleOptions,
-): Promise<void> {
+): Promise<T> {
   const timeoutMs = options?.timeout;
   if (!options?.retryPolicy) {
     return withTimeout(run, jobId, timeoutMs);
@@ -93,8 +103,7 @@ export async function runWithPolicy(
       await sleep(delay);
     }
     try {
-      await withTimeout(run, jobId, timeoutMs);
-      return;
+      return await withTimeout(run, jobId, timeoutMs);
     } catch (err) {
       lastError = err;
     }
