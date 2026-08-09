@@ -237,6 +237,47 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(r.status, 'no @objectstack/service-automation is installed on this boot').toBe(501);
   });
 
+  // ── /packages (dispatcher-mounted; runtime domains/packages.ts) — #7033/#7023 ─
+  //
+  // The LAST routed domain to join the baseline. Like /automation, the gate is
+  // DOMAIN-WIDE and sits ahead of the ObjectQL registry probe, so the 401 an
+  // anonymous caller gets cannot be confused with the 503 "Package service not
+  // available" the domain answers when no registry is present. The `:id` is a
+  // deliberately non-existent package: the floor is the FIRST statement of
+  // `handlePackagesRequest`, so an anonymous request is refused before any
+  // package is looked up. These four were all measured answering 200 to a
+  // guest-principal caller before the fix — two of them DESTRUCTIVE.
+  it('anonymous GET /packages is denied (401) — the id enumeration face stays private', async () => {
+    const r = await anon('GET', '/packages');
+    expect(r.status, 'anonymous package listing must be 401').toBe(401);
+  });
+
+  it('anonymous GET /packages/:id/export is denied (401)', async () => {
+    const r = await anon('GET', '/packages/anon-probe-pkg/export');
+    expect(r.status, 'anonymous package export must be 401').toBe(401);
+  });
+
+  it('anonymous POST /packages/:id/discard-drafts is denied (401) — the destructive one', async () => {
+    const r = await anon('POST', '/packages/anon-probe-pkg/discard-drafts', {});
+    expect(r.status, 'anonymous draft discard must be 401').toBe(401);
+  });
+
+  it('anonymous POST /packages/:id/publish-drafts is denied (401) — the #7023 route', async () => {
+    const r = await anon('POST', '/packages/anon-probe-pkg/publish-drafts', {});
+    expect(r.status, 'anonymous draft publish must be 401').toBe(401);
+  });
+
+  it('an authenticated member reaches the packages domain — not 401 (the deny targets anonymity)', async () => {
+    // Teeth for the anonymous cases above: the same route, with a session,
+    // clears the auth floor. A plain member holds neither `studio.access` nor
+    // `setup.access`, so the ADR-0106 D4 read gate then answers 403 — which is
+    // exactly NOT 401, and proves the anonymous 401s are the floor's answer, not
+    // the capability gate's (drop the floor and the anonymous cases collapse
+    // onto the member's 403).
+    const r = await stack.apiAs(memberToken, 'GET', '/packages');
+    expect(r.status, 'authenticated package listing must clear the auth floor').not.toBe(401);
+  });
+
   // ── one code, one message — two wrappers ───────────────────────────────
   it('every denied surface answers the SAME code and message (the wrappers differ)', async () => {
     const rest = await Promise.all([
@@ -248,6 +289,8 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
       anon('POST', `/automation/${FLOW}/trigger`, {}).then((r) => r.json()),
       anon('GET', '/automation').then((r) => r.json()),
       anon('DELETE', `/automation/${FLOW}`).then((r) => r.json()),
+      anon('GET', '/packages').then((r) => r.json()),
+      anon('POST', '/packages/anon-probe-pkg/discard-drafts', {}).then((r) => r.json()),
     ]);
 
     // Each family is read in ITS OWN declared shape — no `??` chain across the

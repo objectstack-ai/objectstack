@@ -2346,6 +2346,21 @@ export class RestServer {
     }
 
     /**
+     * [#7033 / #7023] Resolve a caller's execution context for a DIRECT-MOUNT
+     * package route (`@objectstack/rest`'s `registerPackageRoutes`), which does
+     * not run inside a `registerXxxEndpoints` handler and so cannot reach the
+     * private {@link resolveExecCtx} on its own. The package gate reads the
+     * SAME identity/RBAC resolution the `/meta` REST gate does — never a second
+     * source — so the two capability cohorts cannot drift. `environmentId` comes
+     * from the scoped route param (`/environments/:environmentId/packages`) when
+     * present, `undefined` for the unscoped mount.
+     */
+    resolvePackageRouteExecutionContext(req: any): Promise<any | undefined> {
+        const environmentId = req?.params?.environmentId ?? undefined;
+        return this.resolveExecCtx(environmentId, req).catch(() => undefined);
+    }
+
+    /**
      * [ADR-0046 §6.7] The audience-evaluation view of the caller for book/doc
      * gating. `permissionSets` resolves through the security service's
      * `resolvePermissionSetNames` — the SAME resolution as data-plane

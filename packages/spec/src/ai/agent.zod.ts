@@ -251,7 +251,8 @@ export const AgentSchema = lazySchema(() => strictObject({
     "`search_knowledge` tool takes `sourceIds` from the LLM's tool-call arguments, not from " +
     'the agent record. Delete the block. Restrict retrieval at the knowledge-service / ' +
     'source level (per-source permissions), and describe intended grounding in ' +
-    '`instructions` so the model asks for the right sources.',
+    '`instructions` so the model asks for the right sources. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /** Interface */

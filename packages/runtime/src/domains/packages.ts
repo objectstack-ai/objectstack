@@ -11,6 +11,13 @@
 
 import { CoreServiceName } from '@objectstack/spec/system';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import {
+    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
+// [#7033 / #7023] The read gate reuses the SAME "builder" capability set the
+// object-schema mask exempts (ADR-0106 D4) — REFERENCED, never re-spelled, so
+// the package-read cohort cannot drift from the metadata mask's exemption.
+import { OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
 import { organizationIdForMetaWrite } from '../meta-write-org-scope.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -22,6 +29,70 @@ export function createPackagesDomain(deps: DomainHandlerDeps): DomainRoute {
         handler: (req, context) =>
             handlePackagesRequest(deps, req.path.substring(9), req.method, req.body, req.query, context),
     };
+}
+
+/**
+ * ADR-0066 D1 WRITE gate for the `/packages` domain (#7033 / #7023).
+ *
+ * Every state-changing package route — install, enable/disable, publish,
+ * publish-drafts, discard-drafts, the ADR-0067 commit revert / rollback /
+ * revert family, adopt-orphans, duplicate, manifest PATCH and DELETE — demands
+ * the same `manage_metadata` capability the sibling `/meta` writes carry:
+ * #6603 gated the REST `PUT /meta/:type/:name` and #7019 its dispatcher
+ * transport, and `POST /meta/_migrate-stored` gates on the same key. Promoting
+ * a whole package's drafts to active, discarding them, deleting the package or
+ * rolling it back are metadata-authoring writes of the same class, so they
+ * carry the same capability. (The reason `manage_metadata` and not the D4 read
+ * set: this is ADR-0066 D1's authoring capability; the maintainer's 2026-08-09
+ * ruling — "whoever can write schema is who may manage packages" — mirrors
+ * #6603's judgement verbatim. #7020 tracks whether the two sets should align.)
+ *
+ * Returns a 403 result to short-circuit on, or `null` to proceed. Engine
+ * self-invocation (`isSystem`, never settable from the wire) bypasses, exactly
+ * as the migrate-stored gate does. Callers MUST run this BEFORE resolving the
+ * protocol/metadata service AND before mutating the registry, so (a) an
+ * unauthorized caller cannot use the 501-vs-200 answer to fingerprint which
+ * primitives the deployment supports, and (b) nothing is written or deleted
+ * before the refusal — "delete first, refuse second" is the worst shape here.
+ */
+function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolContext): HttpDispatcherResult | null {
+    const ec: any = context?.executionContext;
+    if (!ec?.isSystem && !new Set<string>(ec?.systemPermissions ?? []).has('manage_metadata')) {
+        return {
+            handled: true,
+            response: deps.error('Managing packages requires the `manage_metadata` capability.', 403),
+        };
+    }
+    return null;
+}
+
+/**
+ * ADR-0106 D4 READ gate for the `/packages` domain (#7033 / #7023).
+ *
+ * Package reads disclose authored metadata — the `GET /packages` id
+ * ENUMERATION face (the first step of the survey's attack chain), the
+ * `GET /packages/:id` detail, the `GET /packages/:id/commits` history and the
+ * `GET /packages/:id/export` whole-package export (27 metadata types) — so each
+ * requires one of the two "builder" capabilities the object-schema mask exempts
+ * ({@link OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES} = `studio.access` /
+ * `setup.access`), or `isSystem`. The read cohort is deliberately BROADER than
+ * the write cohort: an `organization_admin` holding `setup.access` (but not
+ * `manage_metadata`) may inspect a package yet not publish or delete it.
+ *
+ * Returns a 403 result to short-circuit on, or `null` to proceed. Callers MUST
+ * run this BEFORE reading, so the answer never leaks the package inventory to a
+ * caller outside the cohort.
+ */
+function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolContext): HttpDispatcherResult | null {
+    const ec: any = context?.executionContext;
+    const held = new Set<string>(ec?.systemPermissions ?? []);
+    if (!ec?.isSystem && !OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES.some((c) => held.has(c))) {
+        return {
+            handled: true,
+            response: deps.error('Reading packages requires the `studio.access` or `setup.access` capability.', 403),
+        };
+    }
+    return null;
 }
 
 /**
@@ -52,6 +123,30 @@ export function createPackagesDomain(deps: DomainHandlerDeps): DomainRoute {
  */
 export async function handlePackagesRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     const m = method.toUpperCase();
+
+    // [#7033 / #7023] Anonymous-deny floor for the WHOLE /packages domain.
+    // The same ADR-0056 D2 baseline (#3963) its five sibling dispatcher domains
+    // — /meta, /actions, /automation, /ai, /security — already carry and this
+    // one lacked: a survey drove a credential-less caller (identity resolved to
+    // `principalKind: 'guest'`) straight to a 200 on the destructive
+    // discard-drafts and the whole-package export. FIRST statement, ahead of
+    // the ObjectQL registry probe below, so an anonymous caller is answered 401
+    // before the 503 "Package service not available" and cannot use the
+    // 401-vs-503 difference to fingerprint whether the package service is
+    // mounted (the same ordering rationale the /automation gate records).
+    // `isSystem` (never settable from the wire) and CORS `OPTIONS` preflights
+    // pass. Gating the DOMAIN rather than each route is what keeps a newly added
+    // package route from arriving ungated.
+    {
+        const ec: any = _context?.executionContext;
+        if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem, method: m })) {
+            return {
+                handled: true,
+                response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+            };
+        }
+    }
+
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
 
     // Try to get SchemaRegistry from the ObjectQL service
@@ -66,6 +161,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
     try {
         // GET /packages → list packages
         if (parts.length === 0 && m === 'GET') {
+            const denied = requireReadCapability(deps, _context); if (denied) return denied;
             let packages = registry.getAllPackages();
             // Apply optional filters
             if (query?.status) {
@@ -83,6 +179,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // reads) AND the durable `sys_packages` table. Fall back to the bare
         // registry write only when the protocol service/method is unavailable.
         if (parts.length === 0 && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const manifest = body.manifest || body;
             const pkgId = typeof manifest?.id === 'string' ? manifest.id.trim() : '';
             // A package id is mandatory — without one the install cannot be keyed.
@@ -118,6 +215,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
 
         // PATCH /packages/:id/enable
         if (parts.length === 2 && parts[1] === 'enable' && m === 'PATCH') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const pkg = registry.enablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
@@ -131,6 +229,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
 
         // PATCH /packages/:id/disable
         if (parts.length === 2 && parts[1] === 'disable' && m === 'PATCH') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const pkg = registry.disablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
@@ -144,6 +243,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
 
         // POST /packages/:id/publish → publish package metadata
         if (parts.length === 2 && parts[1] === 'publish' && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
             if (metadataService && typeof (metadataService as any).publishPackage === 'function') {
@@ -159,6 +259,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // reuses the per-item publish primitive) — no metadata service
         // dependency, unlike /publish above.
         if (parts.length === 2 && parts[1] === 'publish-drafts' && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).publishPackageDrafts === 'function') {
@@ -354,6 +455,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // physical tables are untouched. Routes through the sys_metadata
         // path (no metadata-service dependency, unlike /revert below).
         if (parts.length === 2 && parts[1] === 'discard-drafts' && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).discardPackageDrafts === 'function') {
@@ -376,6 +478,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
 
         // GET /packages/:id/commits → the commit timeline (newest-first).
         if (parts.length === 2 && parts[1] === 'commits' && m === 'GET') {
+            const denied = requireReadCapability(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).listCommits === 'function') {
@@ -397,6 +500,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // (ADR-0067). Created artifacts are soft-removed, edited ones are
         // restored to their pre-commit version; the revert is itself a commit.
         if (parts.length === 4 && parts[1] === 'commits' && parts[3] === 'revert' && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const commitId = decodeURIComponent(parts[2]);
             const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).revertCommit === 'function') {
@@ -418,6 +522,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // POST /packages/:id/rollback  body { commitId } → roll the package
         // back THROUGH every commit newer than `commitId` (ADR-0067).
         if (parts.length === 2 && parts[1] === 'rollback' && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const protocol = await deps.resolveService(_context, 'protocol');
             if (protocol && typeof (protocol as any).rollbackToPackageCommit === 'function') {
                 if (!body?.commitId) {
@@ -440,6 +545,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
 
         // POST /packages/:id/revert → revert package to last published state
         if (parts.length === 2 && parts[1] === 'revert' && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
             if (metadataService && typeof (metadataService as any).revertPackage === 'function') {
@@ -452,6 +558,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // GET /packages/:id/export → assemble a portable manifest from
         // sys_metadata overlay rows bound to this package (offline export).
         if (parts.length === 2 && parts[1] === 'export' && m === 'GET') {
+            const denied = requireReadCapability(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const manifest = await assemblePackageManifest(deps, id, registry, _context);
             if (!manifest) {
@@ -464,6 +571,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // null / 'sys_metadata') metadata INTO this base (ADR-0070 D5 migration;
         // lets the env retire the "Local / Custom" scope once it has no orphans).
         if (parts.length === 2 && parts[1] === 'adopt-orphans' && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const protocol = await deps.resolveService(_context, 'protocol');
             if (!protocol || typeof (protocol as any).reassignOrphanedMetadata !== 'function') {
@@ -486,6 +594,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // package, re-namespacing objects + rewriting references (ADR-0070 D4
         // "duplicate base"). Body { targetPackageId, targetName?, targetNamespace? }.
         if (parts.length === 2 && parts[1] === 'duplicate' && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const protocol = await deps.resolveService(_context, 'protocol');
             if (!protocol || typeof (protocol as any).duplicatePackage !== 'function') {
@@ -513,6 +622,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
 
         // GET /packages/:id → get package
         if (parts.length === 1 && m === 'GET') {
+            const denied = requireReadCapability(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const pkg = registry.getPackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
@@ -525,6 +635,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // `id` / `scope` / `type` are identity/structure and are NOT editable
         // here. Body accepts the fields flat or under a `manifest` wrapper.
         if (parts.length === 1 && m === 'PATCH') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const src = (body?.manifest && typeof body.manifest === 'object' ? body.manifest : body) ?? {};
             const patch: { name?: string; description?: string; version?: string } = {};
@@ -563,6 +674,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // default. `?keepData=true` preserves object tables (metadata-only
         // delete). Use case: "I don't want this package anymore."
         if (parts.length === 1 && m === 'DELETE') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const registryRemoved = registry.uninstallPackage(id);
 

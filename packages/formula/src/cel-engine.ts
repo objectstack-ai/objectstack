@@ -1036,16 +1036,40 @@ const ISO_TEMPORAL_STRING_RE =
   /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
 
 /**
- * cel-js raises `no such overload: dyn <op> int` (and kin) when a comparison
- * or arithmetic operator sees a `string` on one side and a number on the
- * other. ADR-0032 §1c — numeric fields that serialize as strings (`Field.rating`
- * → `"5.0"`, `Field.currency` → `"250000.00"`, `Field.percent`) trip this in
- * flow conditions / formulas (#1530, #1534) even though the schema and the
- * build-time validator treat them as numeric.
+ * cel-js's code for the operand-type fault this engine accommodates. Raised
+ * from `lib/operators.js` when a comparison or arithmetic operator sees a
+ * `string` on one side and a number on the other, and phrased
+ * `no such overload: dyn<string> >= int`.
+ */
+const CEL_NO_SUCH_OVERLOAD_CODE = 'no_such_overload';
+
+/**
+ * Whether a fault is the one ADR-0032 §1c accommodates — numeric and date
+ * fields that serialize as strings (`Field.rating` → `"5.0"`, `Field.currency`
+ * → `"250000.00"`, `Field.date` → `"2026-06-20"`) tripping a cel-js operand
+ * overload in flow conditions / formulas (#1530, #1534) even though the schema
+ * and the build-time validator treat them as numeric / temporal.
+ *
+ * Read off the error CLASS and its structured `code`, never off its prose —
+ * the same rule {@link classifyCelFault} follows one function below, and for a
+ * sharper reason than symmetry (#6679). This predicate was the last
+ * message-text read in this file that armed behaviour after #6223 / PR #6677,
+ * and the phrase it matched is reachable from a **native** throw: our own
+ * `matches()` stdlib binding is `new RegExp(String(re)).test(...)`, so an
+ * uncompilable pattern escapes cel-js unwrapped as a `SyntaxError` echoing the
+ * pattern verbatim — `Invalid regular expression: /no such overload(/`. The
+ * pattern can come from the source or, via `matches(record.name, record.re)`,
+ * from a row.
+ *
+ * That armed the retry on a fault ADR-0032 §1c never claimed, and the
+ * consequence is not cosmetic: when hydration lets the expression
+ * short-circuit around the throwing call, the retry *succeeds* and returns a
+ * value where the fault was the right answer, so two expressions differing
+ * only in whether a regex literal contains the phrase disagree about whether
+ * they fault at all. Pinned both ways in `cel-overload-retry-trigger.test.ts`.
  */
 function isNumericOverloadError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /no such overload/i.test(message);
+  return err instanceof EvaluationError && err.code === CEL_NO_SUCH_OVERLOAD_CODE;
 }
 
 /**

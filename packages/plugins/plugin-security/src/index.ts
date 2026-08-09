@@ -64,7 +64,7 @@ export { objectPostureGate, registerObjectPostureGate } from './object-posture-g
 export type { ObjectPostureGateContext } from './object-posture-gate.js';
 export { claimSeedOwnership } from './claim-seed-ownership.js';
 export { normalizeManagedByVocab } from './normalize-managed-by.js';
-export { appDefaultPermissionSetName } from './app-default-permission-set.js';
+export { appDefaultPermissionSetName, appSecurityPluginOptions } from './app-default-permission-set.js';
 export { DelegatedAdminGate, isTenantAdmin } from './delegated-admin-gate.js';
 export { assertEngineOwnedWriteAllowed, ENGINE_OWNED_BUCKETS } from './system-write-guard.js';
 export type { EngineOwnedSchemaLike } from './system-write-guard.js';

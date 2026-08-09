@@ -2400,10 +2400,16 @@ const dashboardWidgetResponsiveRemoved: MetadataConversion = {
  * the two places an upgrading author actually reads. All are `toMajor: 17`, so a
  * stored dashboard carrying keys from several of them is cleaned in one replay.
  *
- * `colorVariant`, the fifth key #5010 lists, is deliberately NOT here: its
- * disposition is unresolved (the rewrite target `options.colorVariant` measured
- * dead on the ADR-0021 dataset path too), and 16 authored sites depend on the
- * answer. Retiring it later is a new entry, not an edit to this one.
+ * `colorVariant`, the fifth key #5010 lists, is deliberately NOT here — and the
+ * reason has since been SETTLED, in the other direction. When this entry was
+ * written its disposition was open: the rewrite target its triage assumed,
+ * `options.colorVariant`, measured dead on the ADR-0021 dataset path too, and
+ * 16 authored sites depended on the answer. #5010 ruling B answered ENFORCE —
+ * the declaration stays and objectui implements it — which objectui#3359 /
+ * PR objectui#3799 did, absorbed here by the `.objectui-sha` pin `09987b68`.
+ * The key is `live` in `liveness/dashboard.json` as of #6774, so nothing is
+ * owed: no retirement, no later entry. Read this paragraph as "not being
+ * removed", not as "not removed yet".
  */
 const dashboardWidgetActionAriaRemoved: MetadataConversion = {
   id: 'dashboard-widget-action-aria-removed',

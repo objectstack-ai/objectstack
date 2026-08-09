@@ -20,6 +20,15 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         description: 'A test application',
     };
 
+    /** [#6190] An org-overridable specimen — `view` declares `allowOrgOverride`,
+     *  so it is the type that may legitimately carry an org-scoped row. */
+    const sampleView = {
+        name: 'test_grid',
+        type: 'grid',
+        label: 'Test Grid',
+        columns: ['id', 'title'],
+    };
+
     beforeEach(() => {
         // Each test owns a fresh registry instance — the protocol reads it
         // via `engine.registry`, mirroring the real ObjectQL contract.
@@ -52,17 +61,23 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
     describe('per-organization overlay isolation', () => {
         it('saveMetaItem persists organization_id when provided', async () => {
+            // [#6190] Re-spelled from `app` to `view`. The claim — an org-scoped
+            // save stamps `organization_id` on the row — is unchanged, but since
+            // the 2026-08-08 ruling only types that DECLARE a per-org channel may
+            // carry one, and `app` rolled back to `allowOrgOverride: false` in
+            // #6483. `view` is the whitelisted specimen, so this now measures the
+            // stamping on a row the platform can actually read back.
             mockEngine.findOne.mockResolvedValue(null);
             await protocol.saveMetaItem({
-                type: 'app',
-                name: 'test_app',
-                item: sampleApp,
+                type: 'view',
+                name: 'test_grid',
+                item: sampleView,
                 organizationId: 'org_alpha',
             });
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
                 // ADR-0048 — a package-less save scopes the upsert lookup to the
                 // GLOBAL row (package_id IS NULL), not any package's row.
-                where: { type: 'app', name: 'test_app', organization_id: 'org_alpha', state: 'active', package_id: null },
+                where: { type: 'view', name: 'test_grid', organization_id: 'org_alpha', state: 'active', package_id: null },
             });
             expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 organization_id: 'org_alpha',
@@ -276,13 +291,16 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // installed packages keep independent customizations.
             mockEngine.findOne.mockResolvedValue(null);
 
+            // [#6190] `app` -> `view` for the same reason as the org-persistence
+            // case above: the package dimension this pins is untouched, but the
+            // ORG dimension now requires a type that declares a per-org channel.
             await protocol.saveMetaItem({
-                type: 'app', name: 'test_app', item: sampleApp,
+                type: 'view', name: 'test_grid', item: sampleView,
                 organizationId: 'org_alpha', packageId: 'com.acme.beta',
             });
 
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'app', name: 'test_app', organization_id: 'org_alpha', state: 'active', package_id: 'com.acme.beta' },
+                where: { type: 'view', name: 'test_grid', organization_id: 'org_alpha', state: 'active', package_id: 'com.acme.beta' },
             });
             expect(mockEngine.insert).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
                 package_id: 'com.acme.beta',
@@ -1372,7 +1390,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 type: 'hook',
                 name: 'my_user_hook',
                 item: { name: 'my_user_hook', object: 'case', events: ['beforeUpdate'] },
-                organizationId: 'org_alpha',
             });
 
             expect(result.success).toBe(true);
@@ -1395,7 +1412,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 type: 'hook',
                 name: 'my_user_hook',
                 item: { name: 'my_user_hook', object: 'case', events: ['beforeInsert', 'beforeUpdate'] },
-                organizationId: 'org_alpha',
             });
 
             expect(result.success).toBe(true);
@@ -1411,13 +1427,11 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 type: 'trigger',
                 name: 'my_trigger',
                 item: { name: 'my_trigger', object: 'case', event: 'beforeInsert' },
-                organizationId: 'org_alpha',
             });
             const seedResult = await scoped.saveMetaItem({
                 type: 'seed',
                 name: 'my_seed',
                 item: { object: 'case', records: [] },
-                organizationId: 'org_alpha',
             });
 
             expect(triggerResult.success).toBe(true);
@@ -1664,7 +1678,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                         target: 'alpha_task',
                         objectParams: { object: 'alpha_task', operation: 'find' },
                     },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'NOT_CREATABLE',
@@ -1677,11 +1690,13 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             // The body #5271 pinned at 422. It never reaches the schema now.
             await expect(
+                // [#6190] Env-wide: `api` is `allowOrgOverride: false`, so an
+                // org-scoped write is refused BEFORE the schema is consulted and
+                // this case would have measured that refusal instead of the 422.
                 scoped.saveMetaItem({
                     type: 'api',
                     name: 'my_api',
                     item: { name: 'my_api', path: '/x', method: 'GET' },
-                    organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'NOT_CREATABLE',
@@ -1812,7 +1827,6 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                     label: 'Quote',
                     fields: { name: { type: 'text' }, amount: { type: 'number' } },
                 } as any,
-                organizationId: 'org_alpha',
             });
             // The relaxed save path must succeed — proving the sentinel
             // is not treated as a real artifact origin.

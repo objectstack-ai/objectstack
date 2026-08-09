@@ -59,6 +59,10 @@ import {
   ConnectorAuthConfigSchema as AuthConfigSchema,
 } from '../shared/connector-auth.zod';
 
+import {
+  originFileOf,
+  originMapOf,
+} from '../../scripts/lib/export-origins-testkit';
 // Deriving types from schemas
 type APIKey = z.infer<typeof APIKeySchema>;
 type OAuth2 = z.infer<typeof OAuth2Schema>;
@@ -843,54 +847,18 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
   // ORIGINAL declaration: the same symbol-identity measurement
   // `check:dual-source-exports` makes, but over `src/` so it runs in `pnpm test`
   // without a build.
-  it('no name resolves to two declarations across ./shared and ./integration (types included)', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    const entries = {
-      './shared': resolve(specDir, 'src/shared/index.ts'),
-      './integration': resolve(specDir, 'src/integration/index.ts'),
-    };
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    /** entry → exported name → `file:line` of the ORIGINAL declaration. */
-    const originsByEntry = new Map<string, Map<string, string>>();
-    for (const [sub, file] of Object.entries(entries)) {
-      const sf = program.getSourceFile(file);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this, a resolution failure would make every assertion below
-      // pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-
-      const origins = new Map<string, string>();
-      for (const exported of checker.getExportsOfModule(moduleSym!)) {
-        const decl = unalias(exported).declarations?.[0];
-        if (!decl) continue;
-        const declFile = decl.getSourceFile();
-        origins.set(
-          exported.getName(),
-          `${relative(specDir, declFile.fileName)}:${
-            declFile.getLineAndCharacterOfPosition(decl.getStart()).line + 1
-          }`,
-        );
-      }
-      // Guard #2: an entry that resolved to nothing would also pass vacuously.
+  it('no name resolves to two declarations across ./shared and ./integration (types included)', () => {
+    // The per-entry origin maps `export-origins/` records. (Each of these two
+    // pins used to build its own `ts.createProgram` right here; that resolution
+    // is now a build-time artifact — #4796.)
+    const shared = originMapOf('./shared');
+    const integration = originMapOf('./integration');
+    // Guard: an entry that resolved to nothing would make every assertion below
+    // pass vacuously — the exact way a gate goes dormant (#4642).
+    for (const [sub, origins] of [['./shared', shared], ['./integration', integration]] as const) {
       expect(origins.size, `${sub} must export something`).toBeGreaterThan(20);
-      originsByEntry.set(sub, origins);
     }
 
-    const shared = originsByEntry.get('./shared')!;
-    const integration = originsByEntry.get('./integration')!;
 
     // The names this issue is about. TYPE-level absence of the retired shape —
     // the assertion the runtime `in`-checks above structurally cannot make.
@@ -903,11 +871,9 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
     expect(integration.get('RateLimitConfigSchema')).toBeUndefined();
     // Positive control for the four `toBeUndefined()`s above: a live neighbour
     // in the same file must still resolve, or they would pass vacuously.
-    expect(integration.get('RetryConfigSchema')).toMatch(
-      /^src\/integration\/connector\.zod\.ts:\d+$/,
-    );
-    expect(shared.get('RateLimitConfig')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
-    expect(shared.get('RateLimitConfigSchema')).toMatch(/^src\/shared\/http\.zod\.ts:\d+$/);
+    expect(originFileOf('./integration', 'RetryConfigSchema')).toBe('src/integration/connector.zod.ts');
+    expect(originFileOf('./shared', 'RateLimitConfig')).toBe('src/shared/http.zod.ts');
+    expect(originFileOf('./shared', 'RateLimitConfigSchema')).toBe('src/shared/http.zod.ts');
 
     // And the general invariant for this pair of entries: any name they BOTH
     // export must resolve to one and the same declaration. The list stayed
@@ -1119,67 +1085,30 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
   // TypeScript compiler API — the same symbol-identity measurement
   // `check:dual-source-exports` makes against `dist`, run over `src/` so it is
   // part of `pnpm test`. Three entries means THREE pairs, all checked.
-  it('no name resolves to two declarations across ./shared, ./integration and ./data (types included)', async () => {
-    const ts = (await import('typescript')).default;
-    const { resolve, relative, dirname } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-
-    const specDir = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    const entries = {
-      './shared': resolve(specDir, 'src/shared/index.ts'),
-      './integration': resolve(specDir, 'src/integration/index.ts'),
-      './data': resolve(specDir, 'src/data/index.ts'),
-    };
-    const program = ts.createProgram(Object.values(entries), {
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      skipLibCheck: true,
-      noEmit: true,
-    });
-    const checker = program.getTypeChecker();
-    const unalias = (s: import('typescript').Symbol) =>
-      s.getFlags() & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-
-    /** entry → exported name → `file:line` of the ORIGINAL declaration. */
-    const originsByEntry = new Map<string, Map<string, string>>();
-    for (const [sub, file] of Object.entries(entries)) {
-      const sf = program.getSourceFile(file);
-      const moduleSym = sf && checker.getSymbolAtLocation(sf);
-      // Without this, a resolution failure would make every assertion below
-      // pass vacuously — the exact way a gate goes dormant (#4642).
-      expect(moduleSym, `${sub} module symbol must resolve`).toBeTruthy();
-
-      const origins = new Map<string, string>();
-      for (const exported of checker.getExportsOfModule(moduleSym!)) {
-        const decl = unalias(exported).declarations?.[0];
-        if (!decl) continue;
-        const declFile = decl.getSourceFile();
-        origins.set(
-          exported.getName(),
-          `${relative(specDir, declFile.fileName)}:${
-            declFile.getLineAndCharacterOfPosition(decl.getStart()).line + 1
-          }`,
-        );
-      }
-      // Guard #2: an entry that resolved to nothing would also pass vacuously.
+  it('no name resolves to two declarations across ./shared, ./integration and ./data (types included)', () => {
+    // The per-entry origin maps `export-origins/` records. (Each of these two
+    // pins used to build its own `ts.createProgram` right here; that resolution
+    // is now a build-time artifact — #4796.)
+    const shared = originMapOf('./shared');
+    const integration = originMapOf('./integration');
+    const data = originMapOf('./data');
+    // Guard: an entry that resolved to nothing would make every assertion below
+    // pass vacuously — the exact way a gate goes dormant (#4642).
+    for (const [sub, origins] of [['./shared', shared], ['./integration', integration], ['./data', data]] as const) {
       expect(origins.size, `${sub} must export something`).toBeGreaterThan(20);
-      originsByEntry.set(sub, origins);
     }
 
-    const shared = originsByEntry.get('./shared')!;
-    const integration = originsByEntry.get('./integration')!;
-    const data = originsByEntry.get('./data')!;
 
     // Each renamed name resolves into its own domain's file…
     for (const name of ['ConnectorFieldMapping', 'ConnectorFieldMappingSchema']) {
-      expect(integration.get(name), name).toMatch(/^src\/integration\/connector\.zod\.ts:\d+$/);
+      expect(originFileOf('./integration', name), name).toBe('src/integration/connector.zod.ts');
     }
     for (const name of ['ImportFieldMapping', 'ImportFieldMappingSchema']) {
-      expect(data.get(name), name).toMatch(/^src\/data\/mapping\.zod\.ts:\d+$/);
+      expect(originFileOf('./data', name), name).toBe('src/data/mapping.zod.ts');
     }
     // …the base keeps the bare name on `./shared` only…
     for (const name of ['FieldMapping', 'FieldMappingSchema']) {
-      expect(shared.get(name), name).toMatch(/^src\/shared\/mapping\.zod\.ts:\d+$/);
+      expect(originFileOf('./shared', name), name).toBe('src/shared/mapping.zod.ts');
       expect(integration.get(name), `${name} must be gone from ./integration`).toBeUndefined();
       expect(data.get(name), `${name} must be gone from ./data`).toBeUndefined();
     }
@@ -1191,7 +1120,7 @@ describe('[#4703] FieldMapping no longer names three declarations', () => {
     // handful of `./shared` declarations (identical origin — that is fine and
     // is what this measures), so only a name resolving to two DIFFERENT files
     // counts.
-    const pairs: Array<[string, Map<string, string>, string, Map<string, string>]> = [
+    const pairs: Array<[string, ReadonlyMap<string, string>, string, ReadonlyMap<string, string>]> = [
       ['./shared', shared, './integration', integration],
       ['./shared', shared, './data', data],
       ['./integration', integration, './data', data],

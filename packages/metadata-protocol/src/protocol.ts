@@ -4674,6 +4674,26 @@ export class ObjectStackProtocolImplementation implements
      *   both boot hydration (`loadMetaFromDb`) and runtime authoring
      *   (`applyObjectRegistryMutation`) register the schema before its table
      *   is reachable.
+     *
+     *   [#6190] That justification rested on a premise the WRITE path did not
+     *   enforce until this note was written. `allowOrgOverride: false` closed
+     *   the overlay tier only; `object` is also `allowRuntimeCreate: true`, and
+     *   that tier stamped `organization_id` on the row like any other — so a
+     *   Studio-authored `object` COULD legitimately exist as a per-org row,
+     *   invisible to boot hydration, and this gate's fail-closed answer meant
+     *   404 for every record in a table that still held the data. The premise
+     *   is now true by enforcement: {@link orgScopedWriteRefusal} refuses an
+     *   org-scoped write of any type the registry declares non-org-overridable,
+     *   on both minting paths, so the only org-scoped `object` rows that can
+     *   exist are residue written before that gate (#6190's ruling 2 = A:
+     *   handled non-destructively — made audible by
+     *   {@link reportUnhydratableOrgScopedRows} and disposed of operationally,
+     *   NOT rewritten by a migration). Fail-closed stays the right answer for
+     *   those: the registry entry is genuinely absent, and serving the table
+     *   would serve one org's rows to every org. Pinned by
+     *   `protocol.org-scoped-write-refused.test.ts`, which keeps `object` as
+     *   its named specimen precisely so this paragraph cannot go stale
+     *   silently again.
      * - **No registry on the engine at all → skip.** There is no source of
      *   truth to consult, so the check cannot answer; failing closed would
      *   break every registry-less host (edge/Lite embeddings, engine doubles)
@@ -7550,6 +7570,110 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#6190] The org-scope half of the same family: a write that would stamp
+     * `sys_metadata.organization_id` on a type the registry declares has NO
+     * per-org channel. Returns the refusal, or `null` when the write is fine.
+     *
+     * ## Why a write-time refusal and not a read-time repair
+     *
+     * `allowOrgOverride` and `allowRuntimeCreate` are orthogonal tiers (see
+     * {@link isRuntimeCreateAllowed}), and the runtime-create tier never
+     * consulted the ORG dimension: `SysMetadataRepository.put` stamps
+     * `organization_id: this.organizationId` whatever the type is, so a
+     * Studio-authored item of an `allowOrgOverride: false` type persisted a
+     * per-org row that the platform can never read back. Cold boot
+     * (`loadMetaFromDb`, `organization_id: null`) walks past it and the
+     * env-wide consumers never ask for it — the write path was strictly more
+     * permissive than the read path, which is the false-compliance shape
+     * ADR-0049 forbids. Measured consequences, both silent before this gate:
+     *
+     *  - `flow` — the row binds its triggers for the life of the process that
+     *    wrote it and stops firing after the next restart, with no log line
+     *    (#6190's original report; the cold-boot warn that made the residue
+     *    audible shipped separately, see
+     *    {@link reportUnhydratableOrgScopedRows}).
+     *  - `object` — worse, and fails CLOSED: the object is absent from the
+     *    registry after boot while its physical table still holds the data, so
+     *    {@link assertObjectRegistered} answers 404 `OBJECT_NOT_FOUND` for
+     *    every record in it.
+     *
+     * Maintainer ruling 2026-08-08 on #6190 (option A of three): refuse the
+     * write. Option B — silently coercing the row to env-wide — was rejected
+     * because it rewrites the tenancy statement the author made; option D —
+     * the log alone — leaves declared ≠ enforced.
+     *
+     * ## Shape decisions
+     *
+     *  - **Registry-derived, never a hand-written type list** (Prime Directive
+     *    #8): the predicate is {@link isOverlayAllowed} — the same one the
+     *    sibling refusal below it uses, over the same derived
+     *    {@link OVERLAY_ALLOWED_TYPES} set. A type that gains
+     *    `allowOrgOverride: true` tomorrow is admitted here the same day, with
+     *    nothing to keep in sync.
+     *  - **The operator hatch stays ONE door.** Because the predicate is
+     *    `isOverlayAllowed`, `OS_METADATA_WRITABLE` unlocks org scoping exactly
+     *    as it unlocks the overlay — which is what this file already promises a
+     *    few lines down ("unlocking a type there unlocks it here too") and what
+     *    the ruling asked for by naming this the *sibling* of the
+     *    `NOT_OVERRIDABLE` refusal. Two differently-keyed notions of
+     *    "overridable" inside one method would be the drift, not the safety.
+     *
+     *    The DIAGNOSTIC is deliberately wider than the refusal:
+     *    {@link reportUnhydratableOrgScopedRows} ignores the hatch and reports
+     *    an org-scoped row of any non-org-overridable type, because the hatch
+     *    unlocks the write and cannot teach `loadMetaFromDb` to read the row
+     *    back. So an operator who deliberately opens the door still gets told,
+     *    at every boot, that what they wrote did not survive it. Warning is
+     *    free and should be maximal; refusing removes a capability, and the
+     *    declaration — including its documented override — decides that.
+     *  - **Statically-declared types only.** A type with no entry in
+     *    `DEFAULT_METADATA_TYPE_REGISTRY` is plugin-registered at runtime, and
+     *    both existing gates ({@link isRuntimeCreateAllowed} here,
+     *    `assertAllowed` in the repository) treat that family as permissive by
+     *    construction — `getMetaTypes()` synthesises `allowRuntimeCreate: true`
+     *    for it. Refusing those here would extend a ruling measured over the
+     *    registry to a surface nobody measured, so they keep today's behaviour.
+     *    Their org rows are skipped by cold boot too; that gap is stated in the
+     *    PR rather than silently widened here.
+     *  - **`NOT_OVERRIDABLE`, not a new code.** The condition IS "this type has
+     *    no per-org override channel", the sentence `NOT_OVERRIDABLE` already
+     *    carries, and the code vocabulary is a closed set owned by
+     *    `packages/spec`'s ledger (ADR-0112 D3) — a cross-package edit this
+     *    card is not authorised to make. The message carries the distinction.
+     *
+     * Pinned by `protocol.org-scoped-write-refused.test.ts`.
+     */
+    private static orgScopedWriteRefusal(
+        type: string,
+        name: string,
+        organizationId: string | null | undefined,
+    ): Error | null {
+        if (!organizationId) return null;
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (this.isOverlayAllowed(type)) return null;
+        if (!this.STATIC_REGISTRY_TYPES.has(singular) && !this.STATIC_REGISTRY_TYPES.has(type)) return null;
+        const err: any = new Error(
+            `[not_overridable] Metadata item '${type}/${name}' cannot be written org-scoped `
+            + `(organization '${organizationId}'). `
+            + `The metadata-type registry declares allowOrgOverride=false for '${singular}', so the platform has `
+            + `no per-org channel for it: boot hydration loads env-wide rows only, so this row would be absent `
+            + `from the registry after the next restart — a '${singular}' that answered today would stop `
+            + `(an 'object' answers 404 OBJECT_NOT_FOUND for every record in its still-populated table, a 'flow' `
+            + `silently stops firing). Save it env-wide instead (retry with no active organization), or ship the `
+            + `per-org variant as its own deployment (ADR-0005: "Per-org variants are a deployment, not an `
+            + `overlay"). An operator may set OS_METADATA_WRITABLE=${singular} to grant a runtime escape hatch, `
+            + `but note the row still will not survive a restart — the hatch unlocks the write, not the read, `
+            + `and boot logs every such row it walks past. `
+            + `See docs/adr/0005-metadata-customization-overlay.md and #6190.`
+        );
+        err.code = 'NOT_OVERRIDABLE';
+        err.status = 403;
+        err.organizationId = organizationId;
+        err.docs = 'docs/adr/0005-metadata-customization-overlay.md';
+        return err;
+    }
+
+    /**
      * Does an artifact (npm-package-loaded) item exist at `(type, name)`?
      *
      * The schema registry's `_packageId` tag is set only when
@@ -8272,7 +8396,8 @@ export class ObjectStackProtocolImplementation implements
             // which for `object` reads the contributor definition and applies
             // exactly the artifact test the sibling verb applies to the plain
             // key), so this limb inherits that judgement instead of open-coding
-            // a second one.
+            // a second one — PLUS the package-binding check below, which exists
+            // because that inherited judgement is measurably falsifiable here.
             //
             // Not theoretical, and NOT already covered by the gate at the top of
             // `deleteMetaItem`: that two-tier authorization — which refuses an
@@ -8293,18 +8418,129 @@ export class ObjectStackProtocolImplementation implements
                 && !this.isArtifactBacked(singular, name)
                 && typeof registry.unregisterObject === 'function'
             ) {
-                try {
-                    registry.unregisterObject(name);
-                } catch (err: any) {
+                // [#7012] …AND `isArtifactBacked` ALONE CANNOT SEE THAT.
+                // See {@link installedPackageBindingForObject} for the whole
+                // argument; the one-line version is that an overlay row bound
+                // to the packaged owner's id DESTROYS the packaged contributor
+                // at write time, which turns the predicate above `false` for an
+                // object the package still ships.
+                const boundPackageId = this.installedPackageBindingForObject(name);
+                if (boundPackageId !== undefined) {
                     console.warn(
                         `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
-                        + `${err?.message ?? err}`,
+                        + `its owner contributor is bound to installed package '${boundPackageId}'. `
+                        + `A package-shipped object must not be retired by an overlay delete, and this seam `
+                        + `cannot tell one from a package-bound runtime-authored object (#7012 / #6853), so `
+                        + `the entry survives — listable, and rowless if the delete really was the whole item `
+                        + `— until the next restart.`,
                     );
+                } else {
+                    try {
+                        registry.unregisterObject(name);
+                    } catch (err: any) {
+                        console.warn(
+                            `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
+                            + `${err?.message ?? err}`,
+                        );
+                    }
                 }
             }
         } catch {
             // Best-effort registry refresh; next read fixes it anyway
         }
+    }
+
+    /**
+     * [#7012] The package binding of a registered `object`, but only when it
+     * names a package this process has actually INSTALLED. `undefined` means
+     * "no installed package answers for this object" — the only state in which
+     * {@link restoreArtifactRegistryView}'s tier 3 may unregister it.
+     *
+     * ## Why tier 3 needs a second predicate at all
+     *
+     * `isArtifactBacked` is the natural question ("does a code package ship
+     * this?") and it is the WRONG question at this exact point, because the
+     * thing it reads has already been destroyed by the time the walk runs.
+     *
+     * `SchemaRegistry.registerObject` splices out the same-package `own`
+     * contributor before pushing the new one. So an overlay row whose
+     * `package_id` equals the packaged owner's id does not SHADOW the packaged
+     * definition — it REPLACES it, and no second copy exists anywhere in the
+     * registry. {@link loadMetaFromDb} replays that replacement on every boot,
+     * with no authorization gate and no log, stamping `_provenance: 'org'`
+     * server-side (deliberately — cloud#970). `getArtifactItem` for an `object`
+     * is exactly `_provenance !== 'org'`, so `isArtifactBacked` answers `false`
+     * for an object a code package still ships, and tier 3 then took the whole
+     * entry. Measured end to end on a tenant kernel with no escape hatch:
+     *
+     * ```
+     * loadMetaFromDb -> {"loaded":1,"errors":0,"invalid":0}   warnings: []
+     * DELETE         -> {"success":true,"reset":true}
+     * objectContributors: []   getObject: null
+     * data CRUD: OBJECT_NOT_FOUND / 404   (while the table still holds the rows)
+     * ```
+     *
+     * ## Why the BINDING is trustworthy where the definition is not
+     *
+     * The replacement rule fires only when the two package ids MATCH, so the
+     * surviving contributor provably carries the packaged owner's id — the one
+     * fact the overwrite cannot change, precisely because it is the overwrite's
+     * own precondition. The second half, "is that package installed", is a fact
+     * about the PROCESS rather than about the destroyed body:
+     * `SchemaRegistry.installPackage` writes the record and
+     * `ObjectQL.registerApp` calls it immediately before registering the
+     * manifest's objects, so a package-shipped object always has one. Durable
+     * packages (`sys_packages`) are re-installed at boot by `service-package`,
+     * and nested `registerPlugin` objects are keyed to the PARENT package,
+     * which `registerApp` installed. The `'sys_metadata'` sentinel — the key an
+     * overlay row bound to no package keeps — is handled by construction rather
+     * than by a special case: nothing installs a package under it, so it never
+     * resolves to a record.
+     *
+     * ## What this deliberately does NOT ask
+     *
+     * - NOT `enabled` / `status`. `disablePackage` flips lifecycle flags and
+     *   removes no contributor, so a disabled package's objects stay registered
+     *   and stay dispatchable; reading the flag here would unregister a
+     *   definition nothing else removes — the same outage through a second door.
+     * - NOT the manifest's `objects` list. That would re-ask "is this
+     *   code-shipped", which is the question whose answer was destroyed; it is
+     *   also absent for `registerPlugin`-contributed objects.
+     *
+     * ## The accepted cost, ruled and not to be worked around
+     *
+     * A package-bound RUNTIME-authored object (Studio's package workspace,
+     * #4636) carries a real `package_id` too, so it is indistinguishable from a
+     * package-shipped one by binding alone: some genuinely deleted objects stay
+     * registered until restart. Per this walk's own REGISTER WIDE / RETIRE
+     * NARROW argument that is the cheap direction — a surplus entry degrades to
+     * "listable but rowless" and the next reload heals it, a wrongly retired one
+     * 404s data CRUD for every tenant. The honest fix for the distinguishability
+     * itself is #6853's direction B (the tenant overlay registers as its own
+     * contributor layer instead of splicing out the packaged `own`), which
+     * re-arms `isArtifactBacked` here and at `saveMetaItem`'s overlay gate; it is
+     * an ADR-0029 amendment and a separate card by maintainer ruling
+     * (2026-08-09).
+     *
+     * Name-addressed, like every other verb in the walk: `getObjectOwner` reads
+     * the contributor list under the same key `getObject` and
+     * {@link SchemaRegistry.unregisterObject} resolve (`computeFQN` is identity,
+     * so the registry key IS the object name), which is what keeps the decision
+     * and the removal talking about the same entry.
+     */
+    private installedPackageBindingForObject(name: string): string | undefined {
+        const registry: any = (this.engine as any)?.registry;
+        if (
+            !registry
+            || typeof registry.getObjectOwner !== 'function'
+            || typeof registry.getPackage !== 'function'
+        ) {
+            return undefined;
+        }
+        const packageId: unknown = registry.getObjectOwner(name)?.packageId;
+        if (typeof packageId !== 'string' || packageId === '') return undefined;
+        const installed = registry.getPackage(packageId);
+        return installed === undefined || installed === null ? undefined : packageId;
     }
 
     /**
@@ -8487,6 +8723,24 @@ export class ObjectStackProtocolImplementation implements
             throw this.isArtifactBacked(request.type, request.name)
                 ? ObjectStackProtocolImplementation.codeOnlyOverrideError(request.type, request.name)
                 : ObjectStackProtocolImplementation.codeOnlyCreateError(request.type);
+        }
+
+        // [#6190] …and the ORG dimension of the same declaration, on the tier
+        // that never consulted it. Placed HERE — before the topology carve-out
+        // below, before the destructive diff, before the schema parse — for the
+        // two reasons #5086 put its own refusal first: the verdict depends on
+        // nothing but the type and the requested scope, and "refused, not
+        // refused after writing" is the property the issue was filed about, so
+        // the gate must precede every path that could persist a row. Draft
+        // saves are gated identically (the branch is below): a draft is the
+        // first half of the SECOND minting path this closes, and #4463 D1
+        // recorded what happens when only one of the two doors gates.
+        // See {@link orgScopedWriteRefusal} for the ruling and the shape.
+        {
+            const orgRefusal = ObjectStackProtocolImplementation.orgScopedWriteRefusal(
+                request.type, request.name, request.organizationId,
+            );
+            if (orgRefusal) throw orgRefusal;
         }
 
         if (this.environmentId !== undefined) {
@@ -9429,6 +9683,21 @@ export class ObjectStackProtocolImplementation implements
             err.code = 'NOT_OVERRIDABLE';
             err.status = 403;
             throw err;
+        }
+        // [#6190] The draft→active promotion is the OTHER way an org-scoped row
+        // of a non-org-overridable type reaches `active` — `publishMetaItem`
+        // and, behind Studio's "publish whole app", `publishPackageDrafts`.
+        // `saveMetaItem`'s gate now refuses to MINT such a draft, so what this
+        // door closes is the promotion of residue that predates the refusal:
+        // a legacy org-scoped draft row must not be promotable into a fresh
+        // active phantom. Exactly the #4463 D1 posture — gating one door and
+        // not the other makes the refusal bypassable by anyone who saves
+        // `?mode=draft` and then POSTs `/publish`.
+        {
+            const orgRefusal = ObjectStackProtocolImplementation.orgScopedWriteRefusal(
+                request.type, request.name, request.organizationId,
+            );
+            if (orgRefusal) throw orgRefusal;
         }
         // ADR-0010 L3 — lock blocks publish too (publishing is a write).
         const _publishLockErr = await this.assertLockAllowsWrite({

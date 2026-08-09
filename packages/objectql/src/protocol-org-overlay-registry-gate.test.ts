@@ -198,14 +198,28 @@ describe('#6602 — WRITE seam: applyRegistryWriteThrough refuses org-scoped row
         expect(namesIn(registry.listItems('view'))).not.toContain('org_grid');
     });
 
-    it('an ORG-scoped flow write does not reach it either (runtime-create tier)', async () => {
-        const saved = await protocol.saveMetaItem({
-            type: 'flow',
-            name: 'org_sweep',
-            item: flowBody('org_sweep', 'Org A sweep'),
-            organizationId: ORG_A,
-        });
-        expect(saved.success).toBe(true);
+    it('[#6190] an ORG-scoped flow write is now refused outright — it never reaches this seam', async () => {
+        // Replaced wholesale rather than re-spelled. This case used to assert
+        // `saved.success === true` and then that the row stayed out of the
+        // shared registry: the runtime-create tier could mint an org-scoped
+        // `flow`, and #6602's job was to stop that row LEAKING into the
+        // process-wide registry. Since the 2026-08-08 ruling on #6190 the write
+        // itself is refused, one layer earlier, so the leak is closed by
+        // construction and the old assertion could only ever pass for an empty
+        // reason.
+        //
+        // The write-through gate keeps its own coverage: the `view` cases above
+        // exercise it with a type that CAN legitimately carry an org-scoped row,
+        // which is the only way to reach this seam with an org row at all.
+        await expect(
+            protocol.saveMetaItem({
+                type: 'flow',
+                name: 'org_sweep',
+                item: flowBody('org_sweep', 'Org A sweep'),
+                organizationId: ORG_A,
+            }),
+        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+
         expect(registry.getItem('flow', 'org_sweep')).toBeUndefined();
         expect(namesIn(registry.listItems('flow'))).not.toContain('org_sweep');
     });

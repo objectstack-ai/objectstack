@@ -1,10 +1,76 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { IHttpServer } from '@objectstack/core';
+import { IHttpServer, shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE } from '@objectstack/core';
+import { OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
 import type { PackageService } from '@objectstack/service-package';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
+
+/**
+ * [#7033 / #7023] The authorization gate for the REST package transport.
+ *
+ * `/packages` had TWO HTTP transports and both were ungated: the runtime
+ * dispatcher domain (`packages/runtime/src/domains/packages.ts`) AND this
+ * `@objectstack/rest` direct-mount registrar — which registers FIRST in the
+ * production stack (first-match-wins, see the module note above), so for the
+ * three routes both declare (`GET /packages`, `GET /packages/:id`,
+ * `DELETE /packages/:id`) THIS transport is the one production actually serves.
+ * Gating only the dispatcher would leave those routes open — the exact
+ * one-transport gap #6603/#7019 paid for on `/meta`.
+ *
+ * Same ruled policy as the dispatcher (maintainer, 2026-08-09): a domain-wide
+ * anonymous floor, `manage_metadata` for state-changing routes
+ * (`POST /packages/publish`, `DELETE /packages/:id`), and the ADR-0106 D4 read
+ * set (`studio.access` / `setup.access`) for reads (`GET /packages`,
+ * `GET /packages/:id`). The public MARKETPLACE browse is a different surface
+ * (`/marketplace/packages`, MarketplaceProxyPlugin) — these `/api/v1/packages`
+ * routes are management, so denying anonymous here strands no public browse.
+ *
+ * The caller context is resolved through {@link PackageRoutesOptions.resolveExecutionContext},
+ * which the composition wires to the `RestServer`'s own resolver (the SAME
+ * resolution the `/meta` REST gate uses). When it is absent the gate FAILS
+ * CLOSED (401) rather than open — an ungated fallback is the very hole this
+ * closes. `isSystem` is never settable from the wire; CORS `OPTIONS` passes.
+ *
+ * Returns `true` when the response was already sent (the caller must `return`).
+ */
+async function refusePackageRequest(
+  options: PackageRoutesOptions,
+  req: any,
+  res: any,
+  kind: 'read' | 'write',
+): Promise<boolean> {
+  const ctx = options.resolveExecutionContext
+    ? await options.resolveExecutionContext(req).catch(() => undefined)
+    : undefined;
+  // Anonymous-deny floor. This direct-mount surface DECLARES the wrapped
+  // BaseResponseSchema envelope — every other body here goes through
+  // sendOk/sendError, and `check:route-envelope` pins this module at ZERO
+  // hand-written bodies — so the 401 is emitted through the SAME shared
+  // `sendError`, not the flat `ANONYMOUS_DENY_BODY` the `/data`+`/meta`
+  // `enforceAuth` seam writes. The shared DECISION (`shouldDenyAnonymous`) and
+  // semantics (status / code / message) are reused; only the wrapper is this
+  // surface's own (ADR-0112's two live envelopes, read per the seam you called).
+  // `isSystem` is never settable from the wire; CORS `OPTIONS` passes.
+  if (shouldDenyAnonymous({ userId: ctx?.userId, isSystem: ctx?.isSystem, method: req?.method })) {
+    sendError(res, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE);
+    return true;
+  }
+  const held = new Set<string>(Array.isArray(ctx?.systemPermissions) ? ctx.systemPermissions : []);
+  const allowed = ctx?.isSystem || (kind === 'write'
+    ? held.has('manage_metadata')
+    : OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES.some((c) => held.has(c)));
+  if (!allowed) {
+    // Same wrapped envelope, one FORBIDDEN code, message per cohort — the sibling
+    // `/meta` REST capability gate's shape, built through the shared `sendError`.
+    sendError(res, 403, 'FORBIDDEN', kind === 'write'
+      ? 'Managing packages requires the `manage_metadata` capability.'
+      : 'Reading packages requires the `studio.access` or `setup.access` capability.');
+    return true;
+  }
+  return false;
+}
 
 /**
  * The outcome of reading a query parameter that this API declares as
@@ -89,6 +155,19 @@ export interface PackageRoutesOptions {
       cleanups: Array<{ name: string; success: boolean; removed: number; error?: string }>;
     }>;
   };
+  /**
+   * [#7033 / #7023] Resolve the caller's execution context for a package route
+   * request. Wired by the composition to the `RestServer`'s own resolver (the
+   * SAME identity/RBAC resolution the `/meta` REST gate uses), so the capability
+   * gate here reads the same `systemPermissions` the rest of the surface does.
+   * Absent ⇒ the gate fails CLOSED (401). Never resolves an `isSystem` context
+   * from inbound HTTP.
+   */
+  resolveExecutionContext?: (req: any) => Promise<{
+    userId?: string | null;
+    isSystem?: boolean;
+    systemPermissions?: string[];
+  } | undefined>;
 }
 
 /**
@@ -167,6 +246,7 @@ export function registerPackageRoutes(
     metadata: { summary: 'Publish a package to the marketplace registry', tags: ['packages'] },
     handler: async (req, res) => {
     try {
+      if (await refusePackageRequest(options, req, res, 'write')) return;
       const { manifest, metadata } = req.body || {};
 
       if (!manifest || !metadata) {
@@ -206,6 +286,7 @@ export function registerPackageRoutes(
     metadata: { summary: 'List packages (registry + published)', tags: ['packages'] },
     handler: async (_req, res) => {
     try {
+      if (await refusePackageRequest(options, _req, res, 'read')) return;
       // Merge two sources:
       // 1. Registry packages (in-memory, loaded at boot via defineStack/AppPlugin)
       // 2. Database packages (published via POST /packages)
@@ -264,6 +345,7 @@ export function registerPackageRoutes(
     metadata: { summary: 'Get a package by id', tags: ['packages'] },
     handler: async (req, res) => {
     try {
+      if (await refusePackageRequest(options, req, res, 'read')) return;
       const packageId = req.params.id;
       const requested = readSingleQueryValue(req.query?.version);
       if (!requested.ok) {
@@ -309,6 +391,7 @@ export function registerPackageRoutes(
     metadata: { summary: 'Delete a package', tags: ['packages'] },
     handler: async (req, res) => {
     try {
+      if (await refusePackageRequest(options, req, res, 'write')) return;
       const packageId = req.params.id;
       // Refused BEFORE the branch below, because the branch below is exactly
       // what a repeated `?version=` silently changed (#6307): the truthiness of

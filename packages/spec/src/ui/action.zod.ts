@@ -994,13 +994,15 @@ const actionObject = () => strictObject({
     'it never triggered anything: no keydown listener feeds ActionEngine.getShortcuts(), and ' +
     "objectui's keyboard stack (useKeyboardShortcuts) is hand-registered and never consults " +
     'action metadata. Delete the key. For a real shortcut, register the key in the Console ' +
-    'keyboard stack and have its handler invoke the action by name.',
+    'keyboard stack and have its handler invoke the action by name. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   bulkEnabled: retiredKey(
     '`action.bulkEnabled` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'the multi-select toolbar is driven by the LIST VIEW\'s `bulkActions` / `bulkActionDefs`, ' +
     'never by this flag, so setting it changed nothing. Delete the key and declare the action ' +
-    "in the view's `bulkActions` instead.",
+    "in the view's `bulkActions` instead. " +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**
