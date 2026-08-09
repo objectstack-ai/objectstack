@@ -7468,15 +7468,27 @@ export class ObjectStackProtocolImplementation implements
      * ## Shape decisions
      *
      *  - **Registry-derived, never a hand-written type list** (Prime Directive
-     *    #8): the predicate is {@link OVERLAY_ALLOWED_TYPES}, the same derived
-     *    set the overlay gate uses. A type that gains `allowOrgOverride: true`
-     *    tomorrow is admitted here the same day, with nothing to keep in sync.
-     *  - **Env-blind, deliberately.** Unlike {@link isOverlayAllowed} this does
-     *    NOT consult `OS_METADATA_WRITABLE`. That hatch unlocks the WRITE; it
-     *    does not teach `loadMetaFromDb` to read the row back, so honouring it
-     *    here would re-open the phantom in exactly the deployments most likely
-     *    to hit it. Same reasoning, and the same direction, as the cold-boot
-     *    audit's own env-blind type set.
+     *    #8): the predicate is {@link isOverlayAllowed} — the same one the
+     *    sibling refusal below it uses, over the same derived
+     *    {@link OVERLAY_ALLOWED_TYPES} set. A type that gains
+     *    `allowOrgOverride: true` tomorrow is admitted here the same day, with
+     *    nothing to keep in sync.
+     *  - **The operator hatch stays ONE door.** Because the predicate is
+     *    `isOverlayAllowed`, `OS_METADATA_WRITABLE` unlocks org scoping exactly
+     *    as it unlocks the overlay — which is what this file already promises a
+     *    few lines down ("unlocking a type there unlocks it here too") and what
+     *    the ruling asked for by naming this the *sibling* of the
+     *    `NOT_OVERRIDABLE` refusal. Two differently-keyed notions of
+     *    "overridable" inside one method would be the drift, not the safety.
+     *
+     *    The DIAGNOSTIC is deliberately wider than the refusal:
+     *    {@link reportUnhydratableOrgScopedRows} ignores the hatch and reports
+     *    an org-scoped row of any non-org-overridable type, because the hatch
+     *    unlocks the write and cannot teach `loadMetaFromDb` to read the row
+     *    back. So an operator who deliberately opens the door still gets told,
+     *    at every boot, that what they wrote did not survive it. Warning is
+     *    free and should be maximal; refusing removes a capability, and the
+     *    declaration — including its documented override — decides that.
      *  - **Statically-declared types only.** A type with no entry in
      *    `DEFAULT_METADATA_TYPE_REGISTRY` is plugin-registered at runtime, and
      *    both existing gates ({@link isRuntimeCreateAllowed} here,
@@ -7501,7 +7513,7 @@ export class ObjectStackProtocolImplementation implements
     ): Error | null {
         if (!organizationId) return null;
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
-        if (this.OVERLAY_ALLOWED_TYPES.has(singular) || this.OVERLAY_ALLOWED_TYPES.has(type)) return null;
+        if (this.isOverlayAllowed(type)) return null;
         if (!this.STATIC_REGISTRY_TYPES.has(singular) && !this.STATIC_REGISTRY_TYPES.has(type)) return null;
         const err: any = new Error(
             `[not_overridable] Metadata item '${type}/${name}' cannot be written org-scoped `
@@ -7512,7 +7524,9 @@ export class ObjectStackProtocolImplementation implements
             + `(an 'object' answers 404 OBJECT_NOT_FOUND for every record in its still-populated table, a 'flow' `
             + `silently stops firing). Save it env-wide instead (retry with no active organization), or ship the `
             + `per-org variant as its own deployment (ADR-0005: "Per-org variants are a deployment, not an `
-            + `overlay"). OS_METADATA_WRITABLE does not unlock org scoping — it unlocks the write, not the read. `
+            + `overlay"). An operator may set OS_METADATA_WRITABLE=${singular} to grant a runtime escape hatch, `
+            + `but note the row still will not survive a restart — the hatch unlocks the write, not the read, `
+            + `and boot logs every such row it walks past. `
             + `See docs/adr/0005-metadata-customization-overlay.md and #6190.`
         );
         err.code = 'NOT_OVERRIDABLE';

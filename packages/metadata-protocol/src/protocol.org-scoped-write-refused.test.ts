@@ -347,14 +347,41 @@ describe('#6190 — org-scoped writes of non-org-overridable types are refused',
         expect(orgRows(rows)).toEqual([]);
     });
 
-    it('R7 — OS_METADATA_WRITABLE does NOT unlock org scoping (the gate is env-blind)', async () => {
-        // The escape hatch unlocks the WRITE; it does not teach
-        // `loadMetaFromDb` to read the row back. Honouring it here would
-        // re-open the phantom in exactly the deployments most likely to hit it
-        // — the same reasoning the cold-boot audit (PR #6600) used to keep its
-        // own type set env-blind. Env-wide writes of `object` stay unlocked by
-        // it; only the ORG dimension is closed.
+    it('R7 — OS_METADATA_WRITABLE unlocks org scoping too: the operator hatch stays ONE door', async () => {
+        // Not a leak, and the case is here because the alternative was
+        // seriously considered and rejected. The predicate is
+        // `isOverlayAllowed`, the SAME one the sibling `NOT_OVERRIDABLE`
+        // refusal uses — the ruling named this refusal that sibling, and this
+        // file already promises "unlocking a type there unlocks it here too".
+        // A second, differently-keyed notion of "overridable" inside one method
+        // is the drift, not the safety.
+        //
+        // What keeps that honest is that the DIAGNOSTIC is deliberately wider
+        // than the refusal: `reportUnhydratableOrgScopedRows` ignores the hatch
+        // (PR #6600) and reports the row at every boot, because no hatch can
+        // teach `loadMetaFromDb` to read it back. So an operator who opens the
+        // door still gets told what it cost them. Warning is free and should be
+        // maximal; refusing removes a capability, and the declaration — with
+        // its documented override — is what decides that.
         process.env.OS_METADATA_WRITABLE = 'object';
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+        const { protocol, rows } = makeProtocol([], 'env_prod');
+
+        const result = await protocol.saveMetaItem({
+            type: 'object', name: 'org_widget', item: OBJECT, organizationId: 'org_a',
+        });
+
+        expect(result.success).toBe(true);
+        expect(orgRows(rows)).toEqual([
+            { type: 'object', name: 'org_widget', org: 'org_a', state: 'active' },
+        ]);
+    });
+
+    it('R7b — …and with the hatch CLOSED the same write is refused', async () => {
+        // The pair that makes R7 evidence rather than a hole: the hatch is what
+        // opens it, and nothing else does. Without this, R7 would be
+        // indistinguishable from a gate that never fired for `object` at all.
+        delete process.env.OS_METADATA_WRITABLE;
         ObjectStackProtocolImplementation.resetEnvWritableCache();
         const { protocol, rows } = makeProtocol([], 'env_prod');
 
