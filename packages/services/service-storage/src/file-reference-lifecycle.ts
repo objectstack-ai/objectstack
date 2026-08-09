@@ -653,7 +653,7 @@ export function installFileReferenceHooks(
       // predicate update writing a file field gives N records one file id under
       // an EXCLUSIVE-ownership model, so N−1 of them end up referencing bytes
       // they do not own whichever branch is taken. That is a service-storage
-      // defect in its own right, filed separately rather than smuggled into a
+      // defect in its own right — filed as #7102 rather than smuggled into a
       // dispatch-contract change.
       if (!ids || ids.length !== 1) return;
       const recordId = String(ids[0]);
