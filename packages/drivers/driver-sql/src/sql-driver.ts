@@ -4141,14 +4141,22 @@ export class SqlDriver implements IDataDriver {
     //   - **Blanket retry on any unique violation.** Rejected for #5495's
     //     reason: it silently eats the caller's own 409.
     const mayRetry = options?.transaction === undefined;
+    // What each row currently holds, ACROSS attempts. A retry regenerates only
+    // the fields it cleared, so `fillAutoNumberFields` reports only those; a
+    // value kept from the previous pass is still a live reservation and has to
+    // stay described here, or a second collision on a counter that did not go
+    // stale the first time would find nothing to route and rethrow blind.
+    const reservationsPerRow: AutoNumberReservation[][] = rows.map(() => []);
     for (let attempt = 0; ; attempt++) {
       // Reserve a persistent sequence value for each row's autonumber
       // field(s) — the engine no longer pre-fills these (see #1603).
-      const reservationsPerRow: AutoNumberReservation[][] = [];
-      for (const row of rows) {
-        reservationsPerRow.push(
-          row && typeof row === 'object' ? await this.fillAutoNumberFields(object, row, options) : [],
-        );
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || typeof row !== 'object') continue;
+        const reissued = await this.fillAutoNumberFields(object, row, options);
+        if (reissued.length === 0) continue;
+        const replaced = new Set(reissued.map((r) => r.field));
+        reservationsPerRow[i] = [...reservationsPerRow[i].filter((r) => !replaced.has(r.field)), ...reissued];
       }
 
       // Same write-side marshaling as create() (#2735): JSON-typed and
