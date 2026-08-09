@@ -112,11 +112,42 @@ export const FLOW_STRUCTURAL_NODE_TYPES: readonly string[] = ['start', 'end'];
 /**
  * Flow Variable Schema
  * Variables available within the flow execution context.
+ *
+ * `defaultValue` is what makes **declared mean bound** (#4697). Without it a
+ * declaration is documentation only: the engine binds an `isInput` variable
+ * just when `params[name] !== undefined`, so every path that omits the
+ * parameter leaves the name *unbound* — and conditions are strict CEL, where
+ * reading an unbound name aborts the whole predicate rather than yielding
+ * `false`. Measured on 17.0.0-rc.1 and re-measured on this shape:
+ *
+ * | expression      | X unbound                 | X = null | X = {f:1} |
+ * | --------------- | ------------------------- | -------- | --------- |
+ * | `X.f == 1`      | ABORT `Unknown variable`  | ABORT    | `true`    |
+ * | `has(X.f)`      | ABORT `Unknown variable`  | `false`  | `true`    |
+ * | `has(vars.X)`   | `false`                   | `true`   | `true`    |
+ *
+ * i.e. the guard an author reaches for first — `has(X.f)` — does not survive
+ * the very case it is written for; only the `vars.`-scoped `has(vars.X)` tests
+ * bindedness. That is why the answer here is a declared default rather than a
+ * guard: a guard encodes "unanswered means no" into the predicate and leaves
+ * the graph defect in place, while a default removes the unbound state.
+ *
+ * Reported from HotCRM (hotcrm#643): a screen collects a checkbox into
+ * `createOpportunity`, the runner returns only the fields the user touched, and
+ * the untouched path aborted the outgoing edge — a lead conversion that
+ * persisted nothing. The workaround was an `assignment` node before every
+ * screen, mirroring the screen field's own `defaultValue`.
+ *
+ * The value is **not** cross-checked against `type` — same posture as every
+ * other `defaultValue` on the authoring surface (`mapping`, an action param, a
+ * page state slot, a screen field): the declared `type` is itself an open
+ * `string`, so there is no closed vocabulary to check against, and inventing
+ * one here would be a new validation surface rather than this additive key.
  */
 export const FlowVariableSchema = lazySchema(() => strictObject(
   {
     surface: 'this flow variable',
-    aliases: { input: 'isInput', output: 'isOutput' },
+    aliases: { input: 'isInput', output: 'isOutput', default: 'defaultValue', initialValue: 'defaultValue' },
     history:
       'Until #4001 these were dropped silently — the variable still parsed, so a ' +
       'mis-declared input/output contract shipped without a diagnostic.',
@@ -126,6 +157,12 @@ export const FlowVariableSchema = lazySchema(() => strictObject(
   type: z.string().describe('Data type (text, number, boolean, object, list)'),
   isInput: z.boolean().default(false).describe('Is input parameter'),
   isOutput: z.boolean().default(false).describe('Is output parameter'),
+  defaultValue: z.unknown().optional()
+    .describe(
+      'Value bound at run start when no parameter supplies one — this is what makes a ' +
+      'declared variable always bound. An explicitly supplied param wins, including ' +
+      '`false` and `null`; the boundary is `params[name] !== undefined`.',
+    ),
 }));
 
 /**
