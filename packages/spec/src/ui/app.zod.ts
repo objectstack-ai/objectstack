@@ -1331,8 +1331,7 @@ export const AppSchema = lazySchema(() => strictObject(
   _unpublished: z.boolean().optional()
     .describe('Machine-managed publish gate (ADR-0045 §3) — true = unpublished, externally unobservable. Written by AI materialization, cleared by publish-drafts. Never authored.'),
 
-
-  /** 
+  /**
    * Full Navigation Tree — supports unlimited nesting depth.
    * Pages are referenced by name via `type: 'page'` items.
    * Groups can contain other groups for arbitrary sidebar depth.
