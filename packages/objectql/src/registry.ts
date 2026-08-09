@@ -404,17 +404,54 @@ export function applySystemFields(
   // Platform-owned field settings that must WIN over a declared field, rather
   // than lose to it like `additions` does (#4447).
   const overrides: Record<string, any> = {};
+  // Platform-owned index declarations, appended to the object's `indexes[]` —
+  // the ONE surface an index is declared on in this system (#6810, below).
+  const indexAdditions: Array<{ fields: string[] }> = [];
 
   if (wantTenant && !schema.fields?.organization_id) {
-    // [#6562] The authorable shape is the shared table's; `indexed` is spread on
-    // top HERE and only here. It is the one key of this definition that is not a
-    // `FieldSchema` key at all — removed in the 16.x line (#2377, ADR-0049), and
-    // `FieldSchema` is `strictObject`, so a document carrying it is rejected by
-    // name ("never a FieldSchema key; a field-level index flag built no index").
-    // Its only consumer is `driver-mongodb`'s schema builder, which reads the
-    // REGISTERED schema and never a served `/meta` document — so it stays at the
-    // injection site and the served answer converges on everything else.
-    additions.organization_id = { ...TENANT_SCOPE_FIELD_DEF, indexed: opts.multiTenant };
+    // [#6562] The authorable shape is the shared table's, spread verbatim.
+    //
+    // [#6810] Nothing is spread ON TOP of it any more. This line used to read
+    // `{ ...TENANT_SCOPE_FIELD_DEF, indexed: opts.multiTenant }`, and `indexed`
+    // is the one key that was never a `FieldSchema` key at all — removed in the
+    // 16.x line (#2377, ADR-0049) because a field-level index flag built no
+    // index, and `FieldSchema` is a `strictObject`, so a document carrying it is
+    // rejected BY NAME ("never a FieldSchema key; a field-level index flag built
+    // no index"). #6562's reasoning for leaving it here — that its only consumer
+    // reads the REGISTERED schema, never a served document — held for the
+    // consumer and not for the document: `registerObject` runs this function
+    // BEFORE storing and `getItem('object', …)` serves that post-injection
+    // document, so the key reached `/meta`, where `decorateMetadataItem`
+    // re-parsed the served body and stamped `_diagnostics: { valid: false,
+    // errors: [{ path: 'fields.organization_id', code: 'unrecognized_keys' }] }`
+    // on EVERY registry-backed object — both tenancy modes, both read exits. A
+    // defect report the platform wrote about its own column, on a document the
+    // author never wrote and could not fix, in the channel Studio renders
+    // invalid-metadata banners from.
+    additions.organization_id = { ...TENANT_SCOPE_FIELD_DEF };
+
+    // [#6810] So the tenant index is declared where every other index in this
+    // system is declared: the object's `indexes[]`.
+    //
+    // This is also the first time the intent is actually ENFORCED. The sole
+    // reader of the old flag was one line in `driver-mongodb`
+    // (`mongodb-schema.ts`), while `driver-sql` — which every walled deployment
+    // runs — only ever materialized `indexes[]`, so the wall's hottest predicate
+    // ran unindexed no matter what the flag said.
+    //
+    // No `name`: each driver derives its own (SQL's `buildIndexName` is
+    // table-qualified, which a hardcoded name could not be without colliding
+    // across tables on Postgres; Mongo's index names are per-collection).
+    // `unique` is left at its default `false` — a plain lookup index, never a
+    // constraint.
+    //
+    // `multiTenant: false` declares NO index rather than a false one: on an
+    // unwalled stack nothing filters by organization, so the index is dead
+    // weight — the same intent the old flag's value carried, expressed as
+    // presence instead of a boolean.
+    if (opts.multiTenant && !declaresTenantIndex(schema)) {
+      indexAdditions.push({ fields: ['organization_id'] });
+    }
   }
 
   if (wantAudit) {
@@ -496,14 +533,49 @@ export function applySystemFields(
     additions[OWNING_BUSINESS_UNIT_FIELD] = { ...OWNING_BUSINESS_UNIT_FIELD_DEF };
   }
 
-  if (Object.keys(additions).length === 0 && Object.keys(overrides).length === 0) return schema;
+  if (
+    Object.keys(additions).length === 0 &&
+    Object.keys(overrides).length === 0 &&
+    indexAdditions.length === 0
+  ) {
+    return schema;
+  }
 
   return {
     ...schema,
     // `additions` LOSE to an author's field (a declared `owner_id` is theirs);
     // `overrides` WIN over it (the audit family's governance is not authorable).
     fields: { ...additions, ...(schema.fields ?? {}), ...overrides },
+    // [#6810] Author-declared indexes keep their position; the platform's
+    // tenant index is APPENDED, never merged into or reordering theirs.
+    ...(indexAdditions.length > 0
+      ? { indexes: [...((schema as any).indexes ?? []), ...indexAdditions] }
+      : {}),
   };
+}
+
+/**
+ * [#6810] Is the tenant index already declared on this object?
+ *
+ * The append is the one part of this injection that is not naturally
+ * idempotent — the field injection re-runs harmlessly because
+ * `!schema.fields?.organization_id` stops it, an array push does not — so an
+ * author who hand-wrote `indexes: [{ fields: ['organization_id'] }]` must not
+ * end up with the platform's duplicate beside it.
+ *
+ * Matched on the single-column shape this function emits, deliberately: an
+ * author's composite (`['organization_id', 'code']`) is a leading-column match
+ * on some dialects and not on others, so it is not treated as a substitute.
+ */
+function declaresTenantIndex(schema: ServiceObject): boolean {
+  const declared = (schema as any).indexes;
+  if (!Array.isArray(declared)) return false;
+  return declared.some(
+    (idx: any) =>
+      Array.isArray(idx?.fields) &&
+      idx.fields.length === 1 &&
+      idx.fields[0] === 'organization_id',
+  );
 }
 
 /**
@@ -1177,6 +1249,27 @@ export class SchemaRegistry {
    * 2. Legacy FQN match (e.g., 'crm__account') — backward compat.
    */
   getObject(name: string): ServiceObject | undefined {
+    const fqn = this.resolveObjectKey(name);
+    return fqn === undefined ? undefined : this.resolveObject(fqn);
+  }
+
+  /**
+   * [#6808] The name→FQN half of {@link getObject}, extracted so the READ and
+   * the name-addressed REMOVAL ({@link unregisterObject}) cannot disagree
+   * about which contributor entry a bare name addresses.
+   *
+   * That disagreement is not hypothetical — it is the shape of the bug this
+   * was extracted for: `deleteMetaItem`'s registry heal reached one of the two
+   * places an `object` lives, and the surface data CRUD dispatches on
+   * (`getObject`) kept serving a deleted object. A remover that resolved names
+   * its own way would re-open the same seam one layer down: it could remove an
+   * entry `getObject` never served, leaving the served one behind.
+   *
+   * Returns `undefined` when nothing is registered under the name, so
+   * `getObject` keeps its exact previous behaviour: `resolveObject` on an
+   * unknown FQN also answered `undefined`.
+   */
+  private resolveObjectKey(name: string): string | undefined {
     // Canonical: short name lookup
     const matches: string[] = [];
     for (const fqn of this.objectContributors.keys()) {
@@ -1192,11 +1285,11 @@ export class SchemaRegistry {
           `Returning first match. Use FQN to disambiguate.`
         );
       }
-      return this.resolveObject(matches[0]);
+      return matches[0];
     }
 
     // Fallback: explicit FQN
-    return this.resolveObject(name);
+    return this.objectContributors.has(name) ? name : undefined;
   }
 
   /**
@@ -1325,6 +1418,104 @@ export class SchemaRegistry {
       this.mergedObjectCache.delete(fqn);
       this._objectRevision += 1;
     }
+  }
+
+  /**
+   * [#6808] Unregister ONE object, addressed by NAME — the removal verb this
+   * registry was missing, and the reason a deleted object stayed servable.
+   *
+   * ## Why a second removal verb, and not a call to the first one
+   *
+   * Until this method, {@link unregisterObjectsByPackage} was the ONLY way an
+   * object left `objectContributors`, and it is addressed by PACKAGE. That is
+   * the right verb for an uninstall and the wrong one for a delete: an
+   * `object` created at runtime has no package identity of its own (the write
+   * path keys its contributor by the row's `package_id`, or the
+   * `'sys_metadata'` sentinel when the row is package-less), so routing a
+   * single delete through it would mean synthesising an identity and then
+   * tearing down every SIBLING object registered under it — a far wider blast
+   * radius than the delete the operator asked for.
+   *
+   * The gap it left was load-bearing. A runtime-authored `object` is written
+   * into TWO places (`metadata['object']` via {@link registerItem} and
+   * `objectContributors` via {@link registerObject}), and the metadata-protocol
+   * heal that runs after a `sys_metadata` delete only ever reached the first.
+   * Measured over the real repository: after `DELETE /meta/object/<name>` the
+   * row was gone and `metadata['object']` was empty, while `getObject(name)`
+   * — and therefore `getItem('object', name)`, which special-cases straight
+   * back to it — kept serving the object for the life of the process. Since
+   * `getObject` is what the data plane dispatches on
+   * (`assertObjectRegistered`), the deleted object stayed readable, syncable
+   * and WRITABLE.
+   *
+   * ## The ADR-0029 guard, and why it is the SAME judgement, not a second one
+   *
+   * ADR-0029: exactly one package owns an object; others may only `extend` it.
+   * An extender's fields are merged into the owner's definition
+   * ({@link resolveObject}), so removing an owned object out from under a live
+   * extender leaves contributions that resolve to nothing —
+   * {@link assertSingleOwnerPerObject}'s "has extenders but no owner"
+   * violation, reached at runtime instead of at bootstrap.
+   * `unregisterObjectsByPackage` already encodes the answer (refuse, name the
+   * extenders, force overrides), so this mirrors that judgement rather than
+   * inventing a second one; only the address changes, from package to name.
+   * Both facts it needs — the owner and the extenders — are already in the
+   * contributor list, so no new bookkeeping structure exists to drift.
+   *
+   * "Other" means "not the owner's package", the same relation the sibling
+   * verb expresses as "not the package being uninstalled": an extension the
+   * OWNER itself contributed goes away with the object it extends, exactly as
+   * it would on an uninstall. An object with no owner at all (only extenders —
+   * already an ADR-0029 violation) counts every extender as other, so it is
+   * refused rather than silently torn down.
+   *
+   * @param name Short name (canonical) or FQN — resolved exactly as
+   *   {@link getObject} resolves it, so this removes precisely the entry that
+   *   was being served.
+   * @param options.force Skip the extender guard. The escape hatch the
+   *   package-scoped verb has, for a caller that has already decided.
+   * @returns whether an object was removed (`false` = nothing registered
+   *   under that name; removal is idempotent).
+   * @throws Error naming the extenders when the object is still extended by
+   *   another package and `force` is not set.
+   */
+  unregisterObject(name: string, options: { force?: boolean } = {}): boolean {
+    const fqn = this.resolveObjectKey(name);
+    if (fqn === undefined) return false;
+    const contributors = this.objectContributors.get(fqn) ?? [];
+
+    const owner = contributors.find(c => c.ownership === 'own');
+    if (!options.force) {
+      const otherExtenders = contributors.filter(
+        c => c.ownership === 'extend' && c.packageId !== owner?.packageId
+      );
+      if (otherExtenders.length > 0) {
+        throw new Error(
+          `Cannot unregister object "${fqn}": it is extended by ` +
+          `${otherExtenders.map(c => c.packageId).join(', ')}. Unregister the extenders first.`
+        );
+      }
+    }
+
+    // The whole entry goes: the object no longer exists, so no contribution to
+    // it does either. Leaving the extenders behind would be the owner-less
+    // state the guard above exists to prevent.
+    this.objectContributors.delete(fqn);
+    // The same two invalidations every other contributor mutation performs —
+    // the merged-object cache would otherwise keep answering `resolveObject`
+    // for a name with no contributors, and registry-derived caches (the
+    // engine's roll-up summary index) would never learn the set moved.
+    this.mergedObjectCache.delete(fqn);
+    this._objectRevision += 1;
+    // Namespaces are deliberately NOT touched: a namespace is registered per
+    // PACKAGE and shared by every object that package ships, so dropping one
+    // object must not unregister it. `unregisterObjectsByPackage` leaves it
+    // alone too — `uninstallPackage` owns that half.
+    this.log(
+      `[Registry] Unregistered object: ${fqn} ` +
+      `(${contributors.length} contribution(s), owner ${owner?.packageId ?? '(none)'})`
+    );
+    return true;
   }
 
   // ==========================================

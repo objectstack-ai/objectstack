@@ -30,13 +30,15 @@ function coerceRecord(v: unknown): Record<string, unknown> | undefined {
  * Offending bits — the ADR-0090 D5 list: any `systemPermissions`,
  * View/Modify All Data (VAMA), or delete/purge/transfer on any object, plus
  * bulk `export` (#3544).
- * A plain `'*'` wildcard grant is NOT high-privilege by itself (D5 permits
- * a read/create/edit-own baseline to cover all objects — the platform's own
- * `member_default` is exactly that shape); the wildcard ban is the GUEST
+ * A plain `'*'` wildcard grant is NOT high-privilege by itself (D5 permits a
+ * read — or read/create/edit-own — baseline to cover all objects; the
+ * platform's own `viewer_readonly` is exactly that shape, and `member_default`
+ * has carried no wildcard since #5491); the wildcard ban is the GUEST
  * tier's stricter rule (D9 "explicit objects only") — see
  * {@link describeAnchorForbiddenBits}. Fixes #2753: the former blanket
- * wildcard rejection made the default baseline unbindable to `everyone`,
- * forcing it through the separate fallback channel D5 explicitly rejected.
+ * wildcard rejection made the then-wildcard-carrying default baseline
+ * unbindable to `everyone`, forcing it through the separate fallback channel
+ * D5 explicitly rejected.
  *
  * [#3544] `allowExport` joins the list because the export axis is an OPT-IN
  * grant: making export deliberate at the permission-set layer accomplishes

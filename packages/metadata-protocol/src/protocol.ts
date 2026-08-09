@@ -1104,12 +1104,22 @@ const CLONE_STRIP_FIELDS: readonly string[] = [
  * would silently delete the value a historical import is entitled to keep,
  * BEFORE the engine could apply the whitelist. Author-declared `readonly` on
  * every other type is untouched — the #3043 strip is exactly as wide as it was.
+ *
+ * SCOPE, third boundary — `preserveAudit` IS NOT READ HERE, DELIBERATELY (#6640).
+ * The historical-import exemption (#3493) is an **UPDATE-path rule only**; see
+ * {@link warnPreserveAuditIgnoredOnInsert} for the ruling, the reason, and the
+ * loud signal a non-system INSERT gets for asking.
  */
 function stripReadonlyForInsert(schema: any, data: any, context: any): any {
     if (context?.isSystem) return data;
     if (!schema || schema.managedBy || String(schema.name ?? '').startsWith('sys_')) return data;
     const fields = schema?.fields;
     if (!fields || data == null) return data;
+    // [#6640] The UNION of names actually removed, across every row of a batch —
+    // the same aggregation `mergeDroppedFieldEvents` applies, and for the same
+    // reason: the strip is schema-uniform, so one signal per ingress call is
+    // faithful where one per row would be noise.
+    const stripped = new Set<string>();
     const stripRow = (row: any): any => {
         if (row == null || typeof row !== 'object') return row;
         let out = row;
@@ -1121,10 +1131,85 @@ function stripReadonlyForInsert(schema: any, data: any, context: any): any {
             if (!(name in out)) continue;
             if (out === row) out = { ...row };
             delete out[name];
+            stripped.add(name);
         }
         return out;
     };
-    return Array.isArray(data) ? data.map(stripRow) : stripRow(data);
+    const result = Array.isArray(data) ? data.map(stripRow) : stripRow(data);
+    if (context?.preserveAudit && stripped.size > 0) {
+        warnPreserveAuditIgnoredOnInsert(String(schema.name ?? ''), Array.from(stripped));
+    }
+    return result;
+}
+
+/**
+ * [#6640] THE loud half of the `preserveAudit` ruling — a non-system INSERT that
+ * asks for the historical-import exemption is TOLD it does not exist here.
+ *
+ * ## The contradiction this closes
+ *
+ * `FieldSchema.readonly`'s `.describe()` promised the `preserveAudit` exemption
+ * (#3493) on BOTH write paths, and `docs/protocol/objectql/security.mdx` agreed.
+ * Only UPDATE ever implemented it: `stripReadonlyFields` (objectql's
+ * rule-validator) consults `isPreservableUnderAudit`, while this INSERT ingress
+ * has never read `preserveAudit` at all — `isSystem` is its only exemption. REST
+ * import's `treatAsHistorical` (`rest/src/import-runner.ts`) puts
+ * `preserveAudit: true` on the write context and creates through `createData`,
+ * i.e. through exactly this seam. So ONE historical import PRESERVED an
+ * author-declared `readonly` business column (`closed_at`, `resolved_by`) on the
+ * rows it updated and SILENTLY DROPPED it on the rows it created.
+ *
+ * ## Which half the ruling kept (maintainer, 2026-08-08 — option 2)
+ *
+ * The **enforcement** is the truth and the **contract** was narrowed to it: the
+ * exemption is UPDATE-only, and this entry keeps honouring `isSystem` alone.
+ * Honouring `preserveAudit` here instead would have handed a NON-system caller —
+ * `treatAsHistorical` arrives on an ordinary REST import request — the ability to
+ * seed the approval/status columns #3043 exists to protect, in one POST. That is
+ * the #3043 threat model reversed, for a capability with no measured consumer:
+ * replaying archival readonly facts on INSERT is available today, from a system
+ * context, which is what the in-repo importer can run as.
+ *
+ * ## Why it is a WARNING and not a throw — measured, not assumed
+ *
+ * The ruling made loudness binding and left the SHAPE to whichever one can be
+ * both loud and non-breaking. A throw cannot: `runImport`'s per-row writer
+ * collects a write error into `toFailedResult(rowNo, res.error)` rather than
+ * aborting the run, so refusing here would not stop a historical import — it
+ * would convert every row it CREATES into a failed row, while the rows it
+ * updates still succeed. And the trigger is not exotic: the audit family itself
+ * (`created_at` / `created_by` / `updated_at` / `updated_by`) is `readonly: true`
+ * in the registry's `AUDIT_FIELD_DEFS`, so an ordinary export→historical-import
+ * round-trip carries readonly columns on every row. Measured on this branch, a
+ * throwing variant took the historical import of 2 new rows from
+ * `{created: 2, errors: 0}` to `{created: 0, errors: 2}`. Breaking the shipped
+ * `treatAsHistorical` flow for new rows is precisely the condition under which
+ * the ruling names the loud WARNING — strip still applied — as the
+ * containment-correct landing.
+ *
+ * The silence this replaces was specific: the drop itself already surfaces
+ * through `droppedFields` (#3431), but a caller who EXPLICITLY asked for the
+ * exemption could not tell "your fields were stripped by the ordinary #3043
+ * rule" from "the exemption you requested does not exist on this path". This
+ * says the second one, by name. It fires ONLY when `preserveAudit` was requested
+ * AND something was actually removed — a request that loses nothing has nothing
+ * to report, and the ordinary non-`preserveAudit` strip is left exactly as quiet
+ * as #3043 designed it.
+ *
+ * Family precedent #5714/#5931: a declared key silently ignored on one branch
+ * joins the loud set by default. Those two could reject outright because they
+ * judge AUTHORING input, before anything runs; this one sits on a live write
+ * path, which is what moves it from throw to warn.
+ */
+function warnPreserveAuditIgnoredOnInsert(object: string, fields: readonly string[]): void {
+    console.warn(
+        `[Protocol] preserveAudit is UPDATE-only and was IGNORED on this INSERT` +
+        `${object ? ` (object '${object}')` : ''}: the historical-import exemption (#3493) applies when a ` +
+        `record is UPDATED, never when it is created, so the readonly field(s) ${fields.join(', ')} were ` +
+        `STRIPPED from this create rather than preserved. To replay archival readonly facts on INSERT, ` +
+        `write from a system context (\`context.isSystem\`) — a non-system create may not seed a readonly ` +
+        `column (#3043/#6640).`,
+    );
 }
 
 /**
@@ -7925,10 +8010,60 @@ export class ObjectStackProtocolImplementation implements
      * Only the READ is now unconditional, because a project kernel needs the
      * same evidence before retiring an entry.
      *
+     * ## Why `organizationId` is a REQUIRED parameter (#6780)
+     *
+     * Every tier above is `(type, name)`-addressed: `removeRuntimeShadow`
+     * drops the PLAIN key, the layer-2 re-register writes the PLAIN key, and
+     * `removeOverlayEntry` retires the PLAIN key. There is exactly one
+     * plain-key entry per (type, name) in a process, and per ADR-0005 it
+     * belongs to the ENV-WIDE row — an org-scoped overlay never enters the
+     * registry at all (the rule {@link hydrateOverlayIntoRegistry} owns since
+     * #6602). So a heal run on behalf of an ORG-scoped delete cannot address
+     * anything of its own: it can only un-shadow or retire the entry every
+     * other org and the control plane read.
+     *
+     * Measured on `origin/main` before this gate existed: env-wide
+     * `view/shared_grid` in the registry → org A saves its own overlay (the
+     * entry correctly stays `Env grid`, #6602 holding) → org A DELETEs ITS
+     * OWN overlay → `registry.getItem('view','shared_grid')` is `undefined`
+     * while the env-wide row still sits in `sys_metadata`. While the entry is
+     * gone, direct registry readers answer as if the item does not exist
+     * (ADR-0110 D3's declaration gate, `resolveRouteActionDeclaration`,
+     * fail-closed `assertObjectRegistered` → 404) — one tenant's "reset my
+     * customization" degrading every other tenant's runtime on the unscoped
+     * kernels #5086 measured the flagship showcase booting with.
+     *
+     * The verdict lives HERE rather than at the call sites for the reason
+     * {@link hydrateOverlayIntoRegistry} states on the register side (#6602 /
+     * PR #6779): this is the ONE choke point all four heal callers already
+     * route through, and a REQUIRED (never optional) `organizationId` makes a
+     * fifth caller answer the question at compile time. An optional parameter
+     * would default an omission to "env-wide" and reinstate the exact hole.
+     *
+     * REGISTER WIDE, RETIRE NARROW — the asymmetry is deliberate. The
+     * write-through's `object` branch is NOT org-gated ({@link
+     * applyRegistryWriteThrough}), and that carve-out does not transfer to
+     * removal: it is argued from `assertObjectRegistered` failing CLOSED, so
+     * a surplus entry degrades to "listable but rowless" and the next reload
+     * heals it, while a wrongly retired entry 404s data CRUD for every tenant.
+     * The two costs are not symmetric, so the two gates are not either.
+     *
+     * The KERNEL-scope gate stays where it was: `environmentId === undefined`
+     * still guards re-registration only, because that is a fact about the
+     * kernel this protocol instance serves, not about the row in hand.
+     *
      * Best-effort: a failure must never block the delete that already
      * succeeded; the next full reload fixes the registry anyway.
      */
-    private async restoreArtifactRegistryView(type: string, name: string): Promise<void> {
+    private async restoreArtifactRegistryView(
+        type: string,
+        name: string,
+        /** The DELETE's own scope — `null` for an env-wide row. [#6780] */
+        organizationId: string | null,
+    ): Promise<void> {
+        // [#6780] ADR-0005 — the plain-key entry belongs to the env-wide row,
+        // so only an env-wide removal may heal (or retire) it.
+        if (organizationId !== null && organizationId !== undefined) return;
         try {
             const registry: any = this.engine.registry;
             const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -7957,6 +8092,78 @@ export class ObjectStackProtocolImplementation implements
             if (typeof registry.removeOverlayEntry === 'function') {
                 registry.removeOverlayEntry(singular, name);
                 if (type !== singular) registry.removeOverlayEntry(type, name);
+            }
+            // [#6808] …and an `object` lives in a SECOND place, so tier 3 has a
+            // second limb. `applyObjectRegistryMutation` writes both halves on
+            // the way in — `registerItem` into the generic `metadata` map, and
+            // `registerObject` into `objectContributors` — while every verb
+            // this walk used above (`removeRuntimeShadow`, `registerItem`,
+            // `removeOverlayEntry`) addresses only the first. So the walk
+            // retired the listing copy and left the DISPATCH copy: measured
+            // over the real `SysMetadataRepository`, after the delete
+            // `metadata['object']` was empty while `registry.getObject(name)`
+            // — and `getItem('object', name)`, which special-cases back to it —
+            // still served the object, keeping the deleted row's schema
+            // readable and WRITABLE for the life of the process.
+            //
+            // Same tier as `removeOverlayEntry`, and only that tier: tiers 1
+            // and 2 both concluded that a lower layer still serves this name
+            // (a packaged artifact, or a MetadataService baseline), and an
+            // object that is still served must stay registered — retiring it
+            // there would turn "reset to artifact default" into an outage,
+            // because `assertObjectRegistered` fails CLOSED for the whole data
+            // plane. Only "no layer serves it" licenses removal, which is the
+            // verdict this branch already carries for the other half.
+            //
+            // The ADR-0029 extender guard lives in the registry verb (see
+            // {@link SchemaRegistry.unregisterObject}) and it THROWS — which
+            // this best-effort heal must not propagate: the repository delete
+            // has already committed, and the operator's row is gone either
+            // way. So the refusal is caught and stated, deliberately NOT left
+            // to the silent outer `catch`: an extended object surviving a
+            // delete is a real divergence between the store and the runtime,
+            // and it must be visible in the log rather than inferred later
+            // from a registry that disagrees with `sys_metadata`.
+            //
+            // ── AND IT NEVER RETIRES A CODE-SHIPPED OBJECT ──
+            //
+            // The same refusal `removeOverlayEntry` carries one line up, for
+            // the same reason: unregistering shipped code that the overlay
+            // delete never touched would be a worse bug than the one this
+            // closes. It is asked through the protocol's OWN existing predicate
+            // ({@link isArtifactBacked} → `SchemaRegistry.getArtifactItem`,
+            // which for `object` reads the contributor definition and applies
+            // exactly the artifact test the sibling verb applies to the plain
+            // key), so this limb inherits that judgement instead of open-coding
+            // a second one.
+            //
+            // Not theoretical, and NOT already covered by the gate at the top of
+            // `deleteMetaItem`: that two-tier authorization — which refuses an
+            // artifact-backed `object` outright with `not_overridable` — runs
+            // only when `environmentId !== undefined`. On a CONTROL-PLANE
+            // kernel it is skipped, and `revertCommit`'s soft-remove limb
+            // reaches this walk without it either, so the delete can arrive
+            // here for a name a code package still ships. Retiring it would
+            // take that object off the whole data plane until restart, because
+            // `assertObjectRegistered` fails closed.
+            //
+            // The check lives HERE rather than in the verb because it is a
+            // statement about LAYERS, which is what this walk reasons about;
+            // `unregisterObject` stays a general removal whose only refusal is
+            // ADR-0029's extender rule.
+            if (
+                singular === 'object'
+                && !this.isArtifactBacked(singular, name)
+                && typeof registry.unregisterObject === 'function'
+            ) {
+                try {
+                    registry.unregisterObject(name);
+                } catch (err: any) {
+                    console.warn(
+                        `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
+                        + `${err?.message ?? err}`,
+                    );
+                }
             }
         } catch {
             // Best-effort registry refresh; next read fixes it anyway
@@ -10584,9 +10791,17 @@ export class ObjectStackProtocolImplementation implements
                     // is argued from `assertObjectRegistered` failing CLOSED,
                     // which licenses registering broadly and never retiring
                     // broadly. Register wide, retire narrow.
-                    if (orgId === null) {
-                        await this.restoreArtifactRegistryView(it.type, it.name);
-                    }
+                    //
+                    // [#6780] The verdict this comment argues now lives INSIDE
+                    // {@link restoreArtifactRegistryView} as a REQUIRED
+                    // parameter, so `orgId` is handed over rather than tested
+                    // here: PR #6807's call-site `if (orgId === null)` guarded
+                    // this ONE caller while the sibling `deleteMetaItem` — the
+                    // caller this limb was modelled on — had the same hole on
+                    // all three of its own call sites. The gate moved to the
+                    // choke point every caller shares; the pin below this
+                    // comment is unchanged and still covers the batch path.
+                    await this.restoreArtifactRegistryView(it.type, it.name, orgId);
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
                 } else if (it.prevVersion !== null && it.prevVersion !== undefined) {
                     // Edited an existing artifact → restore the pre-commit body.
@@ -11100,8 +11315,18 @@ export class ObjectStackProtocolImplementation implements
                     // shadow may linger in the registry (e.g. pollution from
                     // before this fix shipped) — drop it so the artifact
                     // view really IS the default we claim below.
+                    //
+                    // [#6780] `orgId` is passed, and this branch is where it
+                    // matters MOST: with no row to delete, an org that never
+                    // customized anything at all could evict the env-wide
+                    // plain-key entry with a single no-op DELETE. Measured on
+                    // `origin/main`: receipt `{reset: false, "nothing to
+                    // delete"}` and `registry.getItem('view','shared_grid')`
+                    // → `undefined`, the env-wide row untouched in
+                    // `sys_metadata`. A gate applied only to the delete-ful
+                    // branch below would have left this door standing open.
                     if (targetState === 'active') {
-                        await this.restoreArtifactRegistryView(request.type, request.name);
+                        await this.restoreArtifactRegistryView(request.type, request.name, orgId);
                     }
                     return {
                         success: true,
@@ -11148,8 +11373,16 @@ export class ObjectStackProtocolImplementation implements
                 // see {@link restoreArtifactRegistryView}. Draft discards
                 // skip this: drafts never hydrate into the registry, and the
                 // still-active overlay (if any) must keep its shadow.
+                //
+                // [#6780] SCOPED by the same `orgId` the row was deleted with,
+                // so the registry's view cannot disagree with the row's scope
+                // — the sibling rule the write side states in
+                // {@link applyRegistryWriteThrough}. Org A resetting ITS OWN
+                // overlay used to retire the plain-key entry belonging to the
+                // ENV-WIDE row, i.e. one tenant's "reset to default" blanked
+                // the item for every other tenant and the control plane.
                 if (targetState === 'active') {
-                    await this.restoreArtifactRegistryView(request.type, request.name);
+                    await this.restoreArtifactRegistryView(request.type, request.name, orgId);
                 }
 
                 // Storage teardown (opt-in): drop the now-orphaned physical table
@@ -11287,8 +11520,17 @@ export class ObjectStackProtocolImplementation implements
                 }
             }
 
+            // [#6780] The legacy path deletes under the SAME org predicate it
+            // built into `scopedWhere` above, so the heal reads its scope from
+            // the same place. Reachable only on a control-plane kernel for a
+            // code-only type, which is exactly the kernel whose registry every
+            // org shares — the narrowest path and the widest blast radius.
             if (request.state !== 'draft') {
-                await this.restoreArtifactRegistryView(request.type, request.name);
+                await this.restoreArtifactRegistryView(
+                    request.type,
+                    request.name,
+                    request.organizationId ?? null,
+                );
             }
 
             return {

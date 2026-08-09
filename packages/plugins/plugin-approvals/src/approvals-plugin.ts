@@ -1,6 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import type {
+  IHttpServer,
+  II18nService,
+  IJobService,
+  IObjectQLEngine,
+} from '@objectstack/spec/contracts';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
@@ -12,6 +18,7 @@ import {
   ESCALATION_JOB_NAME,
   ESCALATION_SCAN_INTERVAL_MS,
   type ApprovalEngine,
+  type ApprovalMessagingSurface,
 } from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
@@ -55,7 +62,7 @@ export class ApprovalsServicePlugin implements Plugin {
 
   private readonly options: ApprovalsPluginOptions;
   private service?: ApprovalService;
-  private engine?: any;
+  private engine?: IObjectQLEngine;
   private escalationJobScheduled = false;
 
   constructor(options: ApprovalsPluginOptions = {}) {
@@ -93,7 +100,7 @@ export class ApprovalsServicePlugin implements Plugin {
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:ready', async () => {
         try {
-          const i18n = ctx.getService<any>('i18n');
+          const i18n = ctx.getService<II18nService>('i18n');
           if (i18n && typeof i18n.loadTranslations === 'function') {
             const { ApprovalsTranslations } = await import('./translations/index.js');
             for (const [locale, data] of Object.entries(ApprovalsTranslations)) {
@@ -108,9 +115,14 @@ export class ApprovalsServicePlugin implements Plugin {
 
   async start(ctx: PluginContext): Promise<void> {
     if (this.options.disableService) return;
-    let engine: any = null;
-    try { engine = ctx.getService<any>('objectql'); }
-    catch { try { engine = ctx.getService<any>('data'); } catch { /* ignore */ } }
+    // This plugin needs the engine SEEN WHOLE, not the data plane: it binds
+    // `registerHook` / `unregisterHooksByPackage` below. That is `objectql`,
+    // whose ledger entry (`CoreServiceContracts`) records it as "the SAME
+    // instance as `data`, seen whole" — so the alias fallback resolves the same
+    // object and is typed as the same contract.
+    let engine: IObjectQLEngine | null = null;
+    try { engine = ctx.getService<IObjectQLEngine>('objectql'); }
+    catch { try { engine = ctx.getService<IObjectQLEngine>('data'); } catch { /* ignore */ } }
     if (!engine) {
       ctx.logger.warn('ApprovalsServicePlugin: no ObjectQL engine — service NOT registered');
       return;
@@ -158,7 +170,11 @@ export class ApprovalsServicePlugin implements Plugin {
     // remind / request-info / comment) notify users when present; without it
     // they degrade to audit-only.
     try {
-      const messaging = ctx.getService<any>('messaging');
+      // `messaging` has no contract in the ledger, so this is the named local
+      // surface the service itself already declares — not `any`. It omits
+      // members on purpose; omitting one it USES would be a compile error at
+      // the `attachMessaging` call, which is the whole point.
+      const messaging = ctx.getService<ApprovalMessagingSurface>('messaging');
       if (messaging && typeof messaging.emit === 'function') {
         this.service.attachMessaging(messaging);
       }
@@ -171,7 +187,7 @@ export class ApprovalsServicePlugin implements Plugin {
     // service → SLA stays display-only.
     const wireEscalationClock = async () => {
       try {
-        const jobs = ctx.getService<any>('job');
+        const jobs = ctx.getService<IJobService>('job');
         if (!jobs || typeof jobs.schedule !== 'function' || !this.service) return;
         const svc = this.service;
         const intervalMs = this.options.escalationScanIntervalMs ?? ESCALATION_SCAN_INTERVAL_MS;
@@ -213,7 +229,20 @@ export class ApprovalsServicePlugin implements Plugin {
     // happens exclusively on the POST (mail-gateway prefetch safe).
     const mountActionPages = async () => {
       try {
-        const http = ctx.getService<any>('http-server');
+        // [#4251 B5] Canonical name FIRST. This read was `http-server`-only,
+        // and `http-server` is the deprecated alias: the ledger records
+        // `http.server` as canonical and as "the ONLY name present on all
+        // provider paths" — `runtime.ts`'s `config.server` path registers no
+        // alias at all. On that path this lookup threw, the catch below
+        // swallowed it, and the ADR-0043 action pages silently never mounted,
+        // so every approval e-mail link 404'd. Same latent alias-only miss
+        // #4393 fixed in metadata/cloud-connection; per-name `try` because
+        // `getService` THROWS on an empty slot, so `a() ?? b()` in one `try`
+        // never reaches `b`.
+        const readServer = (name: string): IHttpServer | undefined => {
+          try { return ctx.getService<IHttpServer>(name); } catch { return undefined; }
+        };
+        const http = readServer('http.server') ?? readServer('http-server');
         const rawApp = http && typeof http.getRawApp === 'function' ? http.getRawApp() : null;
         if (!rawApp || !this.service) return;
         const svc = this.service;
@@ -304,7 +333,7 @@ export class ApprovalsServicePlugin implements Plugin {
   async stop(ctx: PluginContext): Promise<void> {
     if (this.escalationJobScheduled) {
       try {
-        const jobs = ctx.getService<any>('job');
+        const jobs = ctx.getService<IJobService>('job');
         await jobs?.cancel?.(ESCALATION_JOB_NAME);
       } catch { /* ignore */ }
       this.escalationJobScheduled = false;

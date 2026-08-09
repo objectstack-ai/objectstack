@@ -164,12 +164,28 @@ export const ObjectPermissionSchema = lazySchema(() => strictObject(
    */
   viewAllRecords: z.boolean().default(false).describe('View All Data (Bypass Sharing)'),
   
-  /** 
-   * Modify All Records: Super-user write access. 
-   * Bypasses Sharing Rules and Ownership checks.
+  /**
+   * Modify All Records: Super-user write access.
+   * Bypasses Sharing Rules and Ownership checks — as RECORD SHARING computes
+   * them, i.e. on every object `ISharingService` enforces on, which is any
+   * object carrying an owner field (the common case, and the one this bit is
+   * granted for).
    * Equivalent to Microsoft Dataverse "Organization" level write access.
+   *
+   * [#6698] It is NOT a bypass of every ownership check the platform runs. On
+   * an object with NO owner field record sharing does not enforce at all —
+   * `checkEdit` / `checkDelete` answer `abstain` before the bypass is ever
+   * probed (#6428's tri-state) — so the platform's own row-level WRITE floor
+   * (`created_by == current_user.id`, shipped as the wildcard
+   * `owner_only_writes` / `owner_only_deletes` policies that answer #1985)
+   * stays in force, and a by-id write to another user's row is still refused.
+   * Measured and pinned in plugin-security's
+   * `row-write-widener-composition.test.ts`. Widening that cell would be a
+   * RUNTIME change in `plugin-sharing` (option B on #6698) and is deliberately
+   * not taken — what moved here is only the declaration, so that it stops
+   * over-claiming (ADR-0049 `declared ≠ enforced`).
    */
-  modifyAllRecords: z.boolean().default(false).describe('Modify All Data (Bypass Sharing)'),
+  modifyAllRecords: z.boolean().default(false).describe('Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies (#6698).'),
 
   /**
    * [ADR-0057 D1] Read access DEPTH (Dataverse-style access level), layered on

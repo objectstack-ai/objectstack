@@ -65,24 +65,64 @@
  * breaks it — strictly worse than not covering the surface at all. Hence:
  *
  * **This module may only be wired to a surface whose record binding is total.**
+ * Necessary, not sufficient — see the `readonlyWhen` row below, where a total
+ * binding is still excluded for a reason totality has nothing to say about.
  *
  * Surface ledger (each verdict traced to the code that decides it, so the next
- * author does not have to re-derive it — #4811):
+ * author does not have to re-derive it — #4811). `binding` is the measured
+ * shape TODAY; `verdict` is whether this gate runs there. Those are two
+ * questions, and since #6454 they have come apart on one row:
  *
  * | surface                        | binding | evidence                                                    | verdict |
  * |:-------------------------------|:--------|:------------------------------------------------------------|:--------|
  * | object validation rules        | TOTAL   | `rule-validator.ts` `materializeDeclaredFields(merged, …)`   | covered |
  * | lifecycle hook `condition`     | TOTAL   | `hook-wrappers.ts` `materializeDeclaredFields(…)`            | covered |
  * | field `requiredWhen`           | TOTAL   | same `merged` in `evaluateValidationRules` — fail-OPEN, so an unguarded predicate enforces NOTHING in silence | covered (#4811) |
- * | field `readonlyWhen`           | sparse  | `stripReadonlyWhenFields` merges `{...previous, ...data}` and never materializes | excluded |
- * | action `visible` / `disabled`  | sparse  | evaluated client-side; no materialization exists in `objectui` | excluded |
- * | flow / edge `condition`        | sparse  | `record-change-trigger.ts` seeds `{...inputDoc, ...after}`   | excluded |
+ * | field `readonlyWhen`           | TOTAL   | `rule-validator.ts` `readonlyWhenBindings` materialises BOTH roots (#4953 clause 1, landed in #6454) | excluded — NOT on totality; see below |
+ * | action `visible` / `disabled`  | sparse  | evaluated client-side; no materialization exists in `objectui` | excluded (decided — #4953 clause 2) |
+ * | flow / edge `condition`        | sparse  | `record-change-trigger.ts` seeds `{...(inputData ?? {}), ...after}` — #4953 clause 1's other half, not yet wired | excluded (not yet) |
  * | sharing-rule `condition`       | n/a     | compiled to a SQL filter; `NULL > x` is three-valued, never faults | excluded |
  * | field `expression` (`Field.formula`) | n/a | product judgement, not a wiring gap — see below              | excluded |
  *
- * The three exclusions that are *not* self-evident, spelled out because a
+ * The four exclusions that are *not* self-evident, spelled out because a
  * surface excluded without a reason is indistinguishable from one nobody
  * looked at — the failure mode this whole family of issues is about:
+ *
+ *  - **Field `readonlyWhen` — the row where `binding` and `verdict` came
+ *    apart.** Its binding is no longer sparse. Since #6454 (the engine-core
+ *    share of the maintainer's #4953 ruling, clause 1) `rule-validator.ts`
+ *    builds the two roots in `readonlyWhenBindings` and runs BOTH — `record`
+ *    (the prior row overlaid with the PATCH) and `previous` — through the same
+ *    `materializeDeclaredFields`. The totality criterion above is therefore
+ *    SATISFIED here, and the evidence this row used to carry
+ *    (`stripReadonlyWhenFields` merging `{...previous, ...data}` raw)
+ *    describes code that no longer exists. What keeps the row excluded is
+ *    clause 3 of the same ruling: the gate widens once BOTH server-side seams
+ *    are total, and the other one — flow trigger-record seeding, services
+ *    lane — is not wired yet. Widening this face alone would also mean the
+ *    `binding` column had stopped being the thing that decides coverage,
+ *    which is the property #4811 bought.
+ *
+ *    Two facts to carry into that widening; neither is bookkeeping:
+ *
+ *      1. **The fail policy is the OPPOSITE of the two surfaces #4763 wired.**
+ *         Validation rules and hook `condition`s are fail-CLOSED. A faulting
+ *         `readonlyWhen` is fail-OPEN: `isReadonlyWhenLocked` logs
+ *         `failed to evaluate — change allowed through`, and the field the
+ *         author declared frozen is WRITTEN. (One exception, #4889 — a fault
+ *         naming an UNBOUND ROOT resolves to LOCKED.) So this face wants
+ *         {@link nullGuardMessage}'s `'fail-open'` outcome for the same reason
+ *         the `requiredWhen` row already carries it: the damage is a declared
+ *         lock that silently enforces nothing, not a rejected write.
+ *      2. **Making the binding total moved one verdict the OTHER way.** On a
+ *         total record `has(record.<declared>)` is uniformly TRUE and
+ *         `!has(record.<declared>)` uniformly FALSE, so a lock spelled
+ *         `readonlyWhen: !has(record.b)` STOPPED locking when #6454 landed.
+ *         That is the `declared-fields.ts` contract since #4649 — `has()`
+ *         guards an UNDECLARED key, never an empty value; test emptiness with
+ *         `!= null` — and #6454 measured the cell and pinned both spellings in
+ *         `rule-validator.test.ts`. It is why "this face is materialized now"
+ *         is not, on its own, an accurate summary of what changed here.
  *
  *  - **Action `visible` / `disabled`.** #4811 asked whether the ActionEngine
  *    materializes declared fields before evaluating. It does not: the record
@@ -93,17 +133,29 @@
  *    `ExpressionInputSchema`, which the renderers preserve) and a fault IS
  *    fail-closed — the action silently vanishes — so the *trap* is real here.
  *    But with a sparse binding the prescription inverts (see the table), so the
- *    gate cannot be the thing that catches it. Covering this surface requires
- *    first deciding whether the action-predicate binding should be made total,
- *    which is a platform contract change, not a lint change.
+ *    gate cannot be the thing that catches it. That question is now DECIDED
+ *    rather than open: #4953 clause 2 defers making this binding total —
+ *    it would mean every REST read padding out all declared columns — so the
+ *    face stays sparse, is documented as sparse, and an author there guards
+ *    with `has()` (`declared-fields.ts` says the same from the engine's side).
+ *    The exclusion is permanent under the current decision, not pending one.
+ *    The ruling's replacement action for this face is the MIRROR of this gate
+ *    — flag `!= null` on a sparse binding — and it is an evaluation owed by
+ *    the devx / objectui lanes, never a widening of `checkNullGuards`.
  *  - **Flow / edge `condition`.** #4811 excluded these for flattened-scope
  *    ambiguity ("a bare identifier may be a flow variable"). That reason does
  *    not actually apply to this module — {@link findUnguardedNullableOperands}
  *    only ever resolves `record.<f>` / `previous.<f>` and never a bare
  *    identifier, and the engine binds `record` / `previous` unconditionally.
  *    The real blocker is totality: the trigger seeds the record as
- *    `{...inputDoc, ...after}`, so a declared column the write never mentioned
+ *    `{...(inputData ?? {}), ...after}` — spelled `inputDoc` here until #5671
+ *    dropped that alias read — so a declared column the write never mentioned
  *    is an ABSENT key, and the `!= null` this gate prescribes would fault.
+ *    Since #4953 that sparseness is a NOT-YET rather than a decision: clause 1
+ *    puts this seam under the same server-side totality guarantee as
+ *    `readonlyWhen`, and only the services-lane wiring is outstanding. When it
+ *    lands, this row and the `readonlyWhen` row flip together — which is
+ *    exactly what clause 3 asks for.
  *    (The flattened-scope ambiguity is real for a *bare-identifier* checker —
  *    flow inputs shadow record fields, and a node's `outputVariable` can
  *    overwrite either — but that is a different, unbuilt pass.)

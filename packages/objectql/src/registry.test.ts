@@ -572,8 +572,12 @@ describe('applySystemFields', () => {
         expect(out.fields.organization_id).toBeDefined();
         expect(out.fields.organization_id.type).toBe('lookup');
         expect(out.fields.organization_id.reference).toBe('sys_organization');
-        // Multi-tenant stacks index the column (per-tenant filtering).
-        expect(out.fields.organization_id.indexed).toBe(true);
+        // [#6810] Multi-tenant stacks index the column (per-tenant filtering) —
+        // declared in `indexes[]`, which is what a driver materializes from. The
+        // field-level `indexed: true` this used to read was never a
+        // `FieldSchema` key (#2377 / ADR-0049) and only ever reached one driver.
+        expect((out as any).indexes).toEqual([{ fields: ['organization_id'] }]);
+        expect(out.fields.organization_id.indexed).toBeUndefined();
         // author-declared field still present
         expect(out.fields.first_name).toBeDefined();
     });
@@ -585,7 +589,10 @@ describe('applySystemFields', () => {
         const out = applySystemFields(baseLead, { multiTenant: false });
         expect(out.fields.organization_id).toBeDefined();
         expect(out.fields.organization_id.type).toBe('lookup');
-        expect(out.fields.organization_id.indexed).toBe(false);
+        // [#6810] "Unindexed" is now the ABSENCE of a declaration, not a
+        // declaration whose value is false.
+        expect((out as any).indexes).toBeUndefined();
+        expect(out.fields.organization_id.indexed).toBeUndefined();
         // audit fields are tenant-independent — still injected
         expect(out.fields.created_at).toBeDefined();
         expect(out.fields.updated_at).toBeDefined();

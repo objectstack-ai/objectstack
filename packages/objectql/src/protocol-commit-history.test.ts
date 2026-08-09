@@ -1029,13 +1029,21 @@ describe('#6621 — revertCommit RESTORE limb refreshes the registry', () => {
  *
  * These assert PARITY with `deleteMetaItem` rather than a literal registry
  * state, deliberately. The two callers perform the same repository delete and
- * should leave the same runtime view; stating it as parity also keeps the pin
- * honest about a gap it does NOT close — `restoreArtifactRegistryView` reaches
- * the `metadata` map but not `objectContributors`, so `getObject` still serves
- * a soft-removed runtime object. That gap is `deleteMetaItem`'s too (there is
+ * should leave the same runtime view; stating it as parity also kept the pin
+ * honest about a gap it did NOT close — `restoreArtifactRegistryView` reached
+ * the `metadata` map but not `objectContributors`, so `getObject` still served
+ * a soft-removed runtime object. That gap was `deleteMetaItem`'s too (there was
  * no per-name object unregister in `SchemaRegistry` at all, only
- * `unregisterObjectsByPackage`), it is not introduced here, and a parity
- * assertion stays green when it is fixed for both.
+ * `unregisterObjectsByPackage`), it was not introduced here, and the parity
+ * assertion was written to stay green when it was fixed for both.
+ *
+ * [#6808] It has been: `SchemaRegistry.unregisterObject` is the name-addressed
+ * removal that was missing, and the heal's tier-3 branch now calls it, so both
+ * callers stop serving the object as well as listing it. The parity assertion
+ * is unchanged and still green — but `objectServed` now reads `false` on both
+ * sides rather than `true` on both, so the object case below states that
+ * value outright. A parity pin that never names the value it agrees on can
+ * freeze a shared bug as "consistent"; this one no longer can.
  */
 
 /** The registry facts a soft-remove is allowed to change, as one comparable value. */
@@ -1115,10 +1123,17 @@ describe('#6621 — revertCommit SOFT-REMOVE limb heals the registry, like delet
     // THE LINE THAT WAS RED: pre-fix the plain-key entry stayed for the life of
     // the process, so `GET /meta/object` kept enumerating a reverted-away item.
     expect(registryShapeFor(viaRevert.registry, 'object', 'myapp_invoice').plainKeyEntry).toBe(false);
+    // [#6808] THE SECOND LINE THAT WAS RED, and the load-bearing one: the
+    // contributor entry survived, so `getObject` — the surface data CRUD
+    // dispatches on — kept serving a soft-removed object. Named outright rather
+    // than left to the parity comparison below, which agreed on `true` before
+    // this was fixed and agrees on `false` after.
+    expect(registryShapeFor(viaRevert.registry, 'object', 'myapp_invoice').objectServed).toBe(false);
 
     const viaDelete = makeRealRepoHarness([], { controlPlane: true });
     await seedCreatedObject(viaDelete.protocol, 'myapp_invoice', APP_PKG);
     await viaDelete.protocol.deleteMetaItem({ type: 'object', name: 'myapp_invoice' });
+    expect(registryShapeFor(viaDelete.registry, 'object', 'myapp_invoice').objectServed).toBe(false);
     expect(registryShapeFor(viaRevert.registry, 'object', 'myapp_invoice'))
       .toEqual(registryShapeFor(viaDelete.registry, 'object', 'myapp_invoice'));
   });

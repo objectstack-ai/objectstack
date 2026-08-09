@@ -218,6 +218,107 @@ export function formatSuggestion(suggestions: string[]): string {
   return `Did you mean one of: ${suggestions.map((s) => `'${s}'`).join(', ')}?`;
 }
 
+/**
+ * One prescription shared by a **named set of keys** — the second `guidance`
+ * form, added at #6619 so the three hand-written `$ZodErrorMap`s could be folded
+ * into this template at all.
+ *
+ * ## Why the exact-key form was not enough
+ *
+ * `guidance` is `Record<key, prescription>`: it answers *this exact spelling*.
+ * The three maps this form was written for do not work that way — each keys its
+ * answer on **membership of a family**:
+ *
+ * - `LEGACY_WIDGET_ANALYTICS_KEYS` — eleven pre-ADR-0021 inline-analytics keys,
+ *   one migration answer ("bind a `dataset`, select `dimensions` + `values`");
+ * - `QUARANTINED_WIDGET_KEYS` — `component` / inline `data`, one quarantine
+ *   verdict;
+ * - the ADR-0089 conditional-visibility family, which is not enumerable at all:
+ *   it is *any* key that reads like a visibility predicate, matched by pattern.
+ *
+ * Transcribing those into N identical exact entries loses two things. It emits
+ * the prescription **once per matching key** (eleven bullets of the same
+ * paragraph for a widget carrying the whole legacy shape), and it cannot express
+ * the pattern case at all.
+ *
+ * ## The two membership forms, and what each buys the audit
+ *
+ * - `keys: readonly string[]` — an enumerated family. `alias-integrity.test.ts`
+ *   judges every member against the shape exactly as it judges an exact
+ *   `guidance` key: a member the shape *declares* is a dead entry, because a
+ *   declared key never reaches the `unrecognized_keys` path.
+ * - `keys: RegExp` — an open family, for the case where the point is to catch
+ *   spellings nobody enumerated (`/vis|conceal|hidden|show.?when/i` answers
+ *   `visibleWhenn`, `visibleIf`, `hiddenWhen`, `conceal`). The dead-entry claim
+ *   cannot be asked of a pattern the same way — this one *deliberately* also
+ *   matches the canonical `visibleWhen`, which the shape declares and which
+ *   therefore never arrives here. So a pattern must carry {@link examples}, and
+ *   the audit asks the answerable question instead: do the spellings this
+ *   pattern was written for really match it, and are they really keys the shape
+ *   rejects? A pattern typo fails that; a pattern shadowed into uselessness by
+ *   the shape fails it too.
+ *
+ * ## Precedence — stated here because a second shape on a shared template is
+ * where accidental precedence bugs live
+ *
+ * 1. An **exact `guidance` entry always wins** over any set. The more specific
+ *    entry decides, so adding a set can never silently steal a key that already
+ *    had a hand-written answer.
+ * 2. Among sets, **declaration order wins** — the first set that claims a key
+ *    answers it, matching the top-to-bottom `if` chain the hand-written maps
+ *    read as.
+ * 3. A set match **suppresses the rename suggestion** for that key, exactly as
+ *    an exact entry does: a prescription and a "did you mean" are two answers to
+ *    one question.
+ * 4. A set contributes **at most one bullet per message**, positioned at the
+ *    first key that matched it — the property that keeps eleven legacy keys to
+ *    one paragraph.
+ *
+ * Rules 1 and 2 are pinned in `strict-object.test.ts`; `alias-integrity.test.ts`
+ * additionally holds every in-repo surface to *unambiguous* tables, so no
+ * shipped message depends on a tie-break being read correctly.
+ */
+export interface KeySetGuidance {
+  /**
+   * The set's name — the constant an author greps for
+   * (`LEGACY_WIDGET_ANALYTICS_KEYS`). Deliberately **not** rendered into the
+   * message: an author-facing rejection should name the KEYS, not the array
+   * that holds them, and each prescription below already spells its family out
+   * in prose (that is what makes it legible). The name is for the declaration
+   * and for the audit's failure text.
+   */
+  readonly name: string;
+  /**
+   * Membership: an enumerated family, or a pattern for the open case. Matched
+   * against the authored spelling **case-sensitively** (an enumerated list is
+   * tested with `includes`; a pattern with its own flags), the same exactness
+   * `guidance` uses — case folding is the rename channel's job.
+   */
+  readonly keys: readonly string[] | RegExp;
+  /**
+   * Required when {@link keys} is a pattern, ignored otherwise: spellings this
+   * pattern exists for. The audit asserts each one matches, and that none of
+   * them is a key the shape declares.
+   */
+  readonly examples?: readonly string[];
+  /** The prescription, emitted verbatim as one bullet line. */
+  readonly prescription: string;
+}
+
+/**
+ * True when `key` is claimed by `set` — the one place membership is decided, so
+ * the template and the audit can never disagree about what a set contains.
+ *
+ * Patterns are tested with `String#search` rather than `RegExp#test`: `test` is
+ * stateful on a `/g` or `/y` regex (it advances `lastIndex`, so the same key
+ * alternates between matching and not), while `search` saves and restores
+ * `lastIndex` by specification. A declaration must not have to remember which
+ * flags are safe.
+ */
+export function keySetMatches(set: KeySetGuidance, key: string): boolean {
+  return set.keys instanceof RegExp ? key.search(set.keys) !== -1 : set.keys.includes(key);
+}
+
 /** Options for {@link strictUnknownKeyError}. */
 export interface StrictUnknownKeyErrorOptions {
   /** Prose name of the authoring surface the key was written on (e.g. `'this permission set'`). */
@@ -240,6 +341,13 @@ export interface StrictUnknownKeyErrorOptions {
    * key. Matched case-sensitively (exact authored spelling).
    */
   guidance?: Readonly<Record<string, string>>;
+  /**
+   * The set-keyed half of the same channel: one prescription shared by a named
+   * family of keys, emitted once per message however many members were written.
+   * Consulted only after {@link guidance} has had its exact say — see
+   * {@link KeySetGuidance} for the full precedence rule and why the form exists.
+   */
+  guidanceSets?: readonly KeySetGuidance[];
   /**
    * One sentence of history: why this key would previously have failed
    * silently. Rendered **last**, after both fix channels (`Did you mean` and
@@ -308,7 +416,7 @@ export interface StrictUnknownKeyErrorOptions {
  * arrive outside the shape-backed audit.
  */
 export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.core.$ZodErrorMap {
-  const { surface, knownKeys, guidance = {}, history } = options;
+  const { surface, knownKeys, guidance = {}, guidanceSets = [], history } = options;
   const aliases: Record<string, string> = {};
   for (const [key, canonical] of Object.entries(options.aliases ?? {})) {
     // Two keys in ONE table that share a probe collapse here, later silently
@@ -326,10 +434,28 @@ export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.
     const keys = (issue as { keys?: readonly string[] }).keys ?? [];
     const renames: string[] = [];
     const prescriptions: string[] = [];
+    // A set answers once per MESSAGE, at the position of the first key that
+    // reached it — eleven legacy analytics keys are one migration paragraph,
+    // not eleven copies of it (#6619).
+    const firedSets = new Set<KeySetGuidance>();
     for (const key of keys) {
+      // Precedence, in the order the two channels are consulted: the exact
+      // entry is the more specific claim, so it decides before any set is
+      // asked. Pinned in `strict-object.test.ts`.
       const prescription = guidance[key];
       if (prescription) {
         prescriptions.push(prescription);
+        continue;
+      }
+      const set = guidanceSets.find((s) => keySetMatches(s, key));
+      if (set) {
+        // Matched, therefore answered — the rename channel is skipped for this
+        // key exactly as an exact entry skips it, even when the set has already
+        // spoken and adds no second bullet.
+        if (!firedSets.has(set)) {
+          firedSets.add(set);
+          prescriptions.push(set.prescription);
+        }
         continue;
       }
       const maxDistance = Math.max(2, Math.floor(key.length / 3));

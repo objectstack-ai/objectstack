@@ -161,6 +161,11 @@ const CASE_SETS = [
     marker: 'FILTER_TEXT_CASES',
     what: 'text operators: ASCII-only case folding, literal comparands, `$regex` refused — #4706/#5701',
   },
+  {
+    file: 'aggregation-conformance.ts',
+    marker: 'AGGREGATION_CASES',
+    what: 'the value each declared AggregationFunction produces, dedup and NULLs included — #6409',
+  },
 ];
 
 // ── The ledger ──────────────────────────────────────────────────────────────
@@ -328,8 +333,24 @@ const CASE_SETS = [
 //      `code` half the case-set requires and the last place a bare `new Error`
 //      escaped the ADR-0112 envelope.
 //
-// Each row's `why` is what that driver does TODAY, measured on this branch by
-// reading the compiler and executing it. Nothing here is predicted.
+// ## AGGREGATION_CASES: two DEBT rows on arrival, and they are the same pair
+//
+// The column arrived with #6409, which lowered `count_distinct` to
+// `COUNT(DISTINCT x)` on the SQL family — the ENFORCE leg of #6188's split
+// ruling. Three of the five cells were covered by that PR: `driver-sql` and
+// `driver-turso` (its REMOTE transport, an independent compiler, which is what
+// the case-set exists to hold against the local one) plus `driver-sqlite-wasm`,
+// whose suite pins the inherited statement surviving a different ENGINE, the
+// same judgement #4405 recorded for its filter-logic cell.
+//
+// The two open cells are `driver-memory` and `driver-mongodb` — the #5499 frozen
+// family, and open by that decision rather than by difficulty. #6409's ruling
+// put both explicitly out of scope and left their partial implementations
+// untouched, so the rows below record what each ANSWERS today, read from the
+// source on this branch. Neither is a prediction, and neither is a permission
+// slip: the cell clears when a suite runs the case-set, not when someone argues
+// the driver would pass it. Both would go RED as they stand, which is the
+// reason the rows exist rather than a reason to omit them.
 
 const LEDGER = [
   {
@@ -380,6 +401,54 @@ const LEDGER = [
       + 'this package is in the #5499 frozen family: its real-mongod suites are opt-in, so whatever clears '
       + 'this cell needs a server-free half like `mongodb-filter-logic-translation.test.ts` has.',
     issue: 'https://github.com/objectstack-ai/objectstack/issues/6682',
+  },
+  {
+    driver: 'driver-memory',
+    marker: 'AGGREGATION_CASES',
+    kind: 'DEBT',
+    why:
+      'Measured on this branch by reading `MemoryDriver.computeAggregate` (`memory-driver.ts`): it has arms '
+      + 'for count/sum/avg/min/max and then `default: return null`. There is NO `count_distinct` arm, so an '
+      + 'aggregation the Query Protocol declares — and that every SQL face now lowers (#6409) — resolves with '
+      + '`{ n: null }`: no error, no log, no refusal. The case-set says 2 over `AGGREGATION_ROWS`. That is a '
+      + 'wrong ANSWER rather than a wrong number, and it is the `default:`-arm shape the '
+      + '`aggregation-lockstep` guard exists to stop one layer up, reached here through a different door. '
+      + 'The package is partial in the way #6409\'s ruling described: its ANALYTICS face '
+      + '(`memory-analytics.ts`) DOES implement `count_distinct`, so this package answers one declared '
+      + 'function two ways depending on which face you enter — the divergence class #5374 fixed for '
+      + '`$contains` in this same package. #5499 freezes it, so the cell is open by decision, not by '
+      + 'difficulty: the fix is one arm beside its neighbours. Tracked as #6814. '
+      + '[#6401] Re-measured when the case-set gained its `groupByAlias` axis: on THAT axis this driver '
+      + 'AGREES. `performAggregation`\'s `normalizeGroupBy` (`memory-driver.ts:1066-1068`) already returns '
+      + '`{ field, alias: node.alias ?? node.field }` and projects the group value under `alias` — the answer '
+      + '#6401 converged the three SQL faces onto. It had reached it independently, so the enforce leg needed '
+      + 'NO mechanical alignment here. The cell stays open on `count_distinct` alone.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/6814',
+  },
+  {
+    driver: 'driver-mongodb',
+    marker: 'AGGREGATION_CASES',
+    kind: 'DEBT',
+    why:
+      'Measured on this branch by reading `mongodb-aggregation.ts`: `count_distinct` lowers to '
+      + '`{ $addToSet: fieldRef ?? null }` and `postProcessAggregation` takes the array\'s `.length`. '
+      + '`$addToSet` adds an explicit `null` to the set, so a nullable column sizes ONE HIGHER than '
+      + '`COUNT(DISTINCT col)` does — 3 where the case-set says 2 over `AGGREGATION_ROWS`. `$addToSet` on a '
+      + 'MISSING field adds nothing, so the divergence shows only for an explicitly-null value, which is '
+      + 'exactly what the fixture seeds and what a nullable column produces in practice. Not executed — this '
+      + 'package has no suite for the cell, which is the debt. #5499 freezes it; the fix is a `$ne: null` '
+      + 'before the `$addToSet` (or sizing a `$setDifference` against `[null]`). Tracked as #6814. Note the '
+      + 'real-mongod suites are opt-in since #5517, so whatever clears this cell needs a server-free half '
+      + 'like `mongodb-filter-logic-translation.test.ts` has. '
+      + '[#6401] Re-measured when the case-set gained its `groupByAlias` axis, and the finding is WIDER than '
+      + 'the alias: `buildAggregationPipeline` annotates `groupBy` as `string[]` and builds '
+      + '`groupId[field] = \'$\' + field` (`mongodb-aggregation.ts:66-69`, mirrored in the `$project` at '
+      + '`:85-88`). A STRUCTURED `GroupByNode` — aliased or not — is an object there, so the `$group._id` key '
+      + 'becomes the literal `"[object Object]"` and its value `"$[object Object]"`. This face cannot take '
+      + 'the structured half of the declared union at all, so the alias is unreachable rather than ignored. '
+      + '`mongodb-driver.ts:512` passes `(query as any).groupBy`, which is why the union never met that '
+      + '`string[]` annotation at `tsc`. Read from the source; not executed. Same #6814 home.',
+    issue: 'https://github.com/objectstack-ai/objectstack/issues/6814',
   },
 ];
 

@@ -1,6 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import type {
+  IDataEngine,
+  IJobService,
+  ISecurityService,
+  SecurityContext,
+} from '@objectstack/spec/contracts';
 import {
   SysSavedReport,
   SysReportSchedule,
@@ -46,7 +52,7 @@ export class ReportsServicePlugin implements Plugin {
   private service?: ReportService;
   private intervalHandle?: ReturnType<typeof setInterval>;
   private jobName?: string;
-  private jobService?: any;
+  private jobService?: IJobService;
 
   constructor(options: ReportsPluginOptions = {}) {
     this.options = options;
@@ -68,16 +74,23 @@ export class ReportsServicePlugin implements Plugin {
 
   async start(ctx: PluginContext): Promise<void> {
     ctx.hook('kernel:ready', async () => {
-      let engine: any = null;
-      try { engine = ctx.getService<any>('objectql'); }
-      catch { try { engine = ctx.getService<any>('data'); } catch { /* ignore */ } }
+      // `IDataEngine`, not the whole engine: `ReportEngine` is a pure data-plane
+      // slice (find/findOne/insert/update/delete), so the narrow contract is the
+      // honest one for BOTH names — `objectql` strictly widens `data` (#4404),
+      // and nothing here reaches past the data plane.
+      let engine: IDataEngine | null = null;
+      try { engine = ctx.getService<IDataEngine>('objectql'); }
+      catch { try { engine = ctx.getService<IDataEngine>('data'); } catch { /* ignore */ } }
       if (!engine) {
         ctx.logger.warn('ReportsServicePlugin: no ObjectQL engine — service NOT registered');
         return;
       }
 
       let email: ReportEmail | undefined;
-      try { email = ctx.getService<any>('email'); } catch { /* email is optional */ }
+      // `ReportEmail` — the named surface this plugin consumes. `IEmailService`
+      // passes straight through it (see the declaration); naming the slice is
+      // what makes a drift in `send`'s shape a compile error here.
+      try { email = ctx.getService<ReportEmail>('email'); } catch { /* email is optional */ }
       if (!email) {
         ctx.logger.warn('ReportsServicePlugin: no email service — schedules will fire without delivery');
       }
@@ -92,10 +105,13 @@ export class ReportsServicePlugin implements Plugin {
       // permission sets anywhere) → the axis does not apply, matching the REST
       // export route's fail-open.
       const canExport = async (object: string, context: unknown): Promise<boolean> => {
-        let security: any;
-        try { security = ctx.getService<any>('security'); } catch { return true; }
+        let security: ISecurityService | undefined;
+        try { security = ctx.getService<ISecurityService>('security'); } catch { return true; }
         if (!security || typeof security.canExport !== 'function') return true;
-        return await security.canExport(object, context);
+        // `ReportService` hands this callback an `unknown` context (it is the
+        // caller's execution envelope, opaque to reports); the security service
+        // types it as a partial `ExecutionContext`.
+        return await security.canExport(object, context as SecurityContext | undefined);
       };
 
       this.service = new ReportService({
@@ -124,7 +140,7 @@ export class ReportsServicePlugin implements Plugin {
       // Prefer the platform job service when available — it lets ops
       // see report dispatch alongside every other scheduled job.
       try {
-        const job = ctx.getService<any>('job');
+        const job = ctx.getService<IJobService>('job');
         if (job && typeof job.schedule === 'function') {
           this.jobService = job;
           this.jobName = 'reports.dispatch';

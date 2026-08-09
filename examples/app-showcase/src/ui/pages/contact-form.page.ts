@@ -10,11 +10,11 @@ import { definePage } from '@objectstack/spec/ui';
  *      input (PageVariableSchema.source = that input's component id).
  *   2. `element:text_input` writes each keystroke into its bound variable
  *      (objectui components/src/renderers/basic/text-input.tsx).
- *   3. The submit `element:button` runs an `api` action whose params reference
- *      the variables as `{{page.<var>}}`. The console action runtime resolves
- *      those tokens against the live page-variable snapshot (published by
- *      PageVariableActionBridge) and POSTs the body to the public web-to-lead
- *      endpoint, creating a `showcase_inquiry`.
+ *   3. The submit `element:button` runs an `api` action whose `bodyExtra`
+ *      references the variables as `{{page.<var>}}`. The console action runtime
+ *      resolves those tokens against the live page-variable snapshot (published
+ *      by PageVariableActionBridge) and POSTs the body to the public
+ *      web-to-lead endpoint, creating a `showcase_inquiry`.
  *
  *   POST /api/v1/forms/contact-us/submit   (ADR-0056 public form -> showcase_inquiry)
  *
@@ -110,11 +110,19 @@ export const ContactFormPage = definePage({
             icon: 'send',
             // `api` action -> absolute endpoint. The runtime resolves the
             // `{{page.<var>}}` tokens against the live snapshot before POSTing.
+            //
+            // The payload goes in `bodyExtra`, NOT `params` (#5777, maintainer
+            // ruling 2026-08-06 direction A). `params` is the ActionParam[]
+            // DEFINITION array — the dialog fields collected from the user
+            // before the action runs — and this form collects nothing that way:
+            // its inputs write page variables, and submit sends them. The two
+            // are different concepts, so they get different keys instead of one
+            // key discriminated by `Array.isArray`.
             action: {
               type: 'api',
               target: '/api/v1/forms/contact-us/submit',
               method: 'POST',
-              params: {
+              bodyExtra: {
                 name: '{{page.inquiryName}}',
                 email: '{{page.inquiryEmail}}',
                 company: '{{page.inquiryCompany}}',

@@ -250,7 +250,7 @@
     "aria": {
       "status": "dead",
       "verifiedAt": "2026-08-01",
-      "note": "retiredKey tombstone (#4142) — app-level ARIA was never read; declare aria on the rendering component/widget."
+      "note": "retiredKey tombstone (#4142) — app-level ARIA was never read; declare aria on the rendering page component (`page.components[].aria`, live in page.json). NOT on a dashboard widget: `dashboard.widgets[].aria` is `dead` in dashboard.json, retired by #5010 in this same major — corrected 2026-08-08 (#6756)."
     },
     "objects": {
       "status": "dead",

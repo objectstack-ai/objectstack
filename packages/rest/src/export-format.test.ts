@@ -8,7 +8,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { toArgb, cellFontColor, exportContentDisposition, type ExportFieldMeta } from './export-format';
+import {
+  toArgb,
+  cellFontColor,
+  exportContentDisposition,
+  buildFieldMetaMap,
+  type ExportFieldMeta,
+} from './export-format';
 
 describe('exportContentDisposition', () => {
   const NOW = new Date(2026, 6, 14, 15, 30, 45); // 2026-07-14 15:30:45 local
@@ -95,5 +101,77 @@ describe('cellFontColor', () => {
     // Multiselect is out of scope (ambiguous single font colour for many values).
     const multi: ExportFieldMeta = { ...priority, type: 'multiselect' };
     expect(cellFontColor('high', multi)).toBeUndefined();
+  });
+});
+
+/**
+ * `buildFieldMetaMap` builds PRESENTATION metadata only (#6536).
+ *
+ * The eight constraint keys (`required` / `system` / `readonly` / `hasDefault` /
+ * `min` / `max` / `minLength` / `maxLength`) were retired under ADR-0049 once
+ * #4633 ruling D (PR #6532) replaced the import dry run's hand-copied pre-check
+ * mirror with `DataProtocol.validateData` — the engine reads the object's own
+ * schema, so nothing consulted the copies any more.
+ *
+ * WHY THE ASSERTION IS AN EXACT KEY SET, and not eight `not.toHaveProperty`
+ * calls: a removal is only observable as ABSENCE, and absence has no natural
+ * red. Pinning the whole set is what gives this test a direction — restore any
+ * retired key to the builder and it goes red on an unexpected key, drop a
+ * surviving presentation key and it goes red on a missing one. Written as
+ * per-key absence checks it could only ever catch the first of those, and it
+ * would stay green against a NINTH constraint key added later, which is exactly
+ * the drift ADR-0049 is about.
+ *
+ * Note these are the keys `buildFieldMetaMap` WRITES, so every one is present
+ * on every entry even when its value is `undefined` — the builder assigns each
+ * unconditionally rather than omitting it.
+ */
+describe('buildFieldMetaMap — presentation keys only (#6536)', () => {
+  const PRESENTATION_KEYS = [
+    'displayField', 'label', 'multiple', 'name', 'options', 'reference', 'type',
+  ];
+
+  /** One field declaring every retired constraint key alongside the presentation ones. */
+  const FIELD = {
+    name: 'amount',
+    type: 'number',
+    label: '金额',
+    reference: 'contracts',
+    displayField: 'title',
+    multiple: false,
+    // The eight retired keys — still legal on a field definition, since the
+    // ENGINE reads them off the object schema. They must not travel into the
+    // export/import metadata copy.
+    required: true,
+    system: true,
+    readonly: true,
+    defaultValue: 0, // the input `hasDefault` used to be derived from
+    min: 1,
+    max: 99,
+    minLength: 2,
+    maxLength: 20,
+  };
+
+  it('stores exactly the presentation keys — object-map `fields` shape', () => {
+    const meta = buildFieldMetaMap({ fields: { amount: FIELD } }).get('amount')!;
+    expect(Object.keys(meta).sort()).toEqual(PRESENTATION_KEYS);
+  });
+
+  it('stores exactly the presentation keys — array `fields` shape', () => {
+    const meta = buildFieldMetaMap({ fields: [FIELD] }).get('amount')!;
+    expect(Object.keys(meta).sort()).toEqual(PRESENTATION_KEYS);
+  });
+
+  it('still carries the presentation values it is built for', () => {
+    const meta = buildFieldMetaMap({ fields: { amount: FIELD } }).get('amount')!;
+    expect(meta).toEqual({
+      name: 'amount',
+      type: 'number',
+      label: '金额',
+      options: undefined,
+      reference: 'contracts',
+      displayField: 'title',
+      multiple: false,
+    });
   });
 });

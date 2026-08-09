@@ -28,6 +28,12 @@ export * from './temporal-conformance';
 // set, so neither a sort key that fails to identify a row (#3106) nor the
 // absence of one altogether (#4363) can let pages overlap or skip.
 export * from './pagination-conformance';
+// Canonical conformance cases for the AGGREGATE vocabulary — the values each
+// declared `AggregationFunction` must produce over one fixture. Created with
+// `count_distinct`'s SQL lowering (#6409), whose emitted shape
+// (`count(distinct x)`) is the first in the vocabulary that two faces of one
+// driver can get wrong in ways only a row-result comparison sees.
+export * from './aggregation-conformance';
 export * from './date-macros.zod';
 export * from './calendar-day';
 // Session-scoped filter placeholders ({current_user_id} / {current_org_id}) —

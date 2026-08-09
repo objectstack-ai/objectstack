@@ -522,21 +522,49 @@ function invalidFilterError(message: string): Error {
 }
 
 /**
- * [#5907] The aggregate functions this TRANSPORT lowers into SQL, and the SQL
- * function each becomes.
+ * [#6409] How one declared aggregate function lowers into SQL — the twin of
+ * `driver-sql`'s `SqlAggregateLowering`.
+ *
+ * `sql` is the function NAME; `distinct` decides whether the argument list
+ * carries the `DISTINCT` keyword. `count_distinct` is the first entry in the
+ * vocabulary whose lowering is not a function name at all (`COUNT(DISTINCT x)`
+ * puts a keyword INSIDE the argument list), which is what a table of bare names
+ * had nowhere to express.
+ *
+ * `distinct` also decides whether a FIELD is mandatory: `COUNT(*)` is the
+ * spelling `AggregationNodeSchema` allows by making `field` optional, and
+ * `COUNT(DISTINCT *)` is a syntax error — see
+ * {@link refuseDistinctAggregateWithoutField}.
+ */
+interface RemoteAggregateLowering {
+  readonly sql: string;
+  readonly distinct: boolean;
+}
+
+/**
+ * [#5907] The aggregate functions this TRANSPORT lowers into SQL, and what each
+ * becomes.
  *
  * The twin of `driver-sql`'s `SQL_AGGREGATE_FUNCTIONS`, and separate on purpose:
  * this transport is deliberately free of knex and of `SqlDriver` (see the file
  * header), so the two faces state their own capability and the refusals below
  * read it off the table instead of a hand-kept list (#5345). They compile the
- * same five today; a face that gains one says so here, alone.
+ * same six today; a face that gains one says so here, alone.
+ *
+ * [#6409] `count_distinct` joined both tables in one change, and it had to: the
+ * two faces are chosen by `url` on ONE driver, so a lowering that landed on one
+ * of them would be the #6203 shape again — one query, two answers, decided by a
+ * connection string. That the tables agree is no longer asserted by reading them
+ * side by side either; `AGGREGATION_CASES` runs the same aggregations through
+ * both and compares the VALUES.
  */
-const REMOTE_AGGREGATE_FUNCTIONS: ReadonlyMap<string, string> = new Map([
-  ['count', 'count'],
-  ['sum', 'sum'],
-  ['avg', 'avg'],
-  ['min', 'min'],
-  ['max', 'max'],
+const REMOTE_AGGREGATE_FUNCTIONS: ReadonlyMap<string, RemoteAggregateLowering> = new Map([
+  ['count', { sql: 'count', distinct: false }],
+  ['sum', { sql: 'sum', distinct: false }],
+  ['avg', { sql: 'avg', distinct: false }],
+  ['min', { sql: 'min', distinct: false }],
+  ['max', { sql: 'max', distinct: false }],
+  ['count_distinct', { sql: 'count', distinct: true }],
 ]);
 
 /**
@@ -590,8 +618,17 @@ function undeclaredAggregateFunctionError(func: string): Error {
  * `array_agg` / `string_agg` left this class at #6188, which answered the
  * question the message below points at: they were retired from
  * `AggregationFunction` rather than implemented, so they are now undeclared
- * names and answer 400. `count_distinct` took the other leg of that ruling and
- * is, until its SQL lowering lands, the whole of this class.
+ * names and answer 400. `count_distinct` took the other leg of that ruling.
+ *
+ * ⚠️ [#6409] **This class is now EMPTY here too, and the producer is kept for
+ * the same reason the twin's is** — see `driver-sql`'s
+ * `uncompilableAggregateFunctionError` for the argument in full. In one line:
+ * this branch is not an unenforced declaration, it is the classifier that
+ * decides which of two truths the NEXT declared-but-unlowered function gets
+ * told, and deleting it makes this transport call a correctly-spelled name a
+ * typo during exactly the window ADR-0049's enforce leg opens on purpose.
+ * Emptiness is asserted positively by
+ * `remote-transport-aggregate-function-refusal.test.ts`.
  */
 function uncompilableAggregateFunctionError(func: string): Error {
   const err = new Error(
@@ -600,11 +637,38 @@ function uncompilableAggregateFunctionError(func: string): Error {
     `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
     `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
     `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
-    `itself should stand is #6188 (ADR-0049 enforce-or-remove) (#5907).`,
+    `itself should stand is ADR-0049's enforce-or-remove question (#5907).`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
   return err;
+}
+
+/**
+ * [#6409] `count_distinct` written with no `field` — the twin of `driver-sql`'s
+ * {@link refuseDistinctAggregateWithoutField}, first sentence for first sentence
+ * (#5240 — one condition, one wording).
+ *
+ * `AggregationNodeSchema` makes `field` optional because `COUNT(*)` is a real
+ * spelling and the schema cannot say "optional for this function, required for
+ * that one", so the node parses and arrives here asking for
+ * `COUNT(DISTINCT *)` — which libsql, being SQLite, rejects as a syntax error.
+ * Class 1 (`INVALID_QUERY` / 400): the function IS compiled here, it is this
+ * aggregation node that is malformed, and the remedy is a key the caller adds.
+ *
+ * Refused before the statement is built, so a malformed aggregation costs no
+ * round trip — the same rule the refusal harness in this package's tests
+ * asserts for every other refusal on this path.
+ */
+function refuseDistinctAggregateWithoutField(func: string): never {
+  const err = new Error(
+    `Aggregate function "${func}" needs a "field" — there is nothing to deduplicate. ` +
+    `COUNT(*) counts rows and is the spelling that takes no field; a distinct count has to name ` +
+    `the column whose values are deduplicated. Add "field" to the aggregations[] entry (#6409).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  throw err;
 }
 
 /**
@@ -907,20 +971,28 @@ export class RemoteTransport {
     //   #6203 shape again: one query, two answers, decided by a connection
     //   string. Reading `.field` converges them.
     //
-    // `alias` is deliberately not read: `SqlDriver.aggregate` does not read it
-    // either, so honouring it here would be the divergence rather than the fix.
-    // That the SQL faces ignore a key the in-memory path honours
-    // (`in-memory-aggregation.ts` projects `g.alias ?? g.field`) is filed
-    // separately — it is not created here.
-    const groupBy: string[] = (Array.isArray(query?.groupBy) ? query.groupBy : []).map((g) => {
-      if (typeof g === 'string') return g;
+    // [#6401] `alias` IS read now, and the note that used to sit here — "not
+    // read, because `SqlDriver.aggregate` does not read it either" — was the
+    // right call at #6212 and is discharged rather than deleted: all three SQL
+    // faces read it as of #6401, so honouring it here is the convergence, not a
+    // new divergence. The projected column is `alias ?? field`, matching
+    // `in-memory-aggregation.ts`'s long-standing `g.alias ?? g.field`; GROUP BY
+    // still keys on the FIELD, so only the column's name moves.
+    const groupBy: Array<{ field: string; outKey: string }> = (
+      Array.isArray(query?.groupBy) ? query.groupBy : []
+    ).map((g) => {
+      if (typeof g === 'string') return { field: g, outKey: g };
       if (g?.dateGranularity) refuseDateBucketedGroupBy(g.dateGranularity);
-      return g?.field;
+      return { field: g?.field, outKey: g?.alias ?? g?.field };
     });
 
-    for (const field of groupBy) {
+    for (const { field, outKey } of groupBy) {
       this.assertSafeIdentifier(field);
-      selectParts.push(`"${field}"`);
+      // The alias reaches the statement as a quoted identifier, so it is held
+      // to the same gate as every other one — an alias is caller-supplied text
+      // and `assertSafeIdentifier` is what keeps it out of the SQL grammar.
+      this.assertSafeIdentifier(outKey);
+      selectParts.push(outKey === field ? `"${field}"` : `"${field}" AS "${outKey}"`);
     }
 
     // [#6321] Was `query?.aggregations || query?.aggregate` — see the twin note
@@ -948,9 +1020,14 @@ export class RemoteTransport {
       // wordings (#5240). `String()` stays so the quoted spelling is a string
       // whatever a JS caller put there.
       const func = String(agg.function);
-      const sqlFunc = REMOTE_AGGREGATE_FUNCTIONS.get(func);
-      if (sqlFunc === undefined) refuseAggregateFunction(func);
+      const lowering = REMOTE_AGGREGATE_FUNCTIONS.get(func);
+      if (lowering === undefined) refuseAggregateFunction(func);
       const field = agg.field || '*';
+      // [#6409] `COUNT(DISTINCT *)` is a syntax error, so a distinct aggregate
+      // with no field is refused here rather than sent — a refused aggregation
+      // must not cost a round trip, and a libsql syntax error would arrive
+      // carrying this transport's own SQL instead of the caller's mistake.
+      if (lowering.distinct && field === '*') refuseDistinctAggregateWithoutField(func);
       let fieldSql: string;
       if (field === '*') {
         fieldSql = '*';
@@ -960,14 +1037,20 @@ export class RemoteTransport {
       }
       // The default alias spells itself with the function NAME (`count_stage`)
       // while the emitted SQL uses the lowering table's VALUE, so that table is
-      // what decides the statement, not a membership check beside it. Identical
-      // text for all five entries today. Unchanged by #6203: only a name already
-      // in the table reaches this line, and every key there is lowercase, so the
-      // alias this produces is byte-identical to the pre-#6203 one for every
-      // input that still compiles.
+      // what decides the statement, not a membership check beside it. Unchanged
+      // by #6203: only a name already in the table reaches this line, and every
+      // key there is lowercase, so the alias this produces is byte-identical to
+      // the pre-#6203 one for every input that still compiles.
+      //
+      // [#6409] The name and the emitted SQL are no longer the same string for
+      // every entry: `count_distinct` aliases itself `count_distinct_stage`
+      // while emitting `count(distinct "stage")`. That the ALIAS follows the
+      // declared name rather than the lowering is what keeps a caller's result
+      // key predictable from their own query.
       const alias = agg.alias || `${func}_${field === '*' ? 'all' : field}`;
       this.assertSafeIdentifier(alias);
-      selectParts.push(`${sqlFunc}(${fieldSql}) AS "${alias}"`);
+      const argSql = lowering.distinct ? `distinct ${fieldSql}` : fieldSql;
+      selectParts.push(`${lowering.sql}(${argSql}) AS "${alias}"`);
     }
 
     if (selectParts.length === 0) selectParts.push('*');
@@ -982,7 +1065,11 @@ export class RemoteTransport {
     }
 
     if (groupBy.length > 0) {
-      sql += ` GROUP BY ${groupBy.map((f) => `"${f}"`).join(', ')}`;
+      // [#6401] By FIELD, never by the alias: the alias renames the projection
+      // only. SQLite would happily group by the output name, which is exactly
+      // the mistake that would make an aliased group silently correct here and
+      // wrong on a dialect that resolves GROUP BY against the input columns.
+      sql += ` GROUP BY ${groupBy.map((g) => `"${g.field}"`).join(', ')}`;
     }
 
     try {

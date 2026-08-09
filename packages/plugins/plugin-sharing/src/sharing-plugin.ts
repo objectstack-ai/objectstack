@@ -3,14 +3,28 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveAuthzContext } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
-import type { IHttpServer, IHttpRequest } from '@objectstack/spec/contracts';
+import type {
+  AuthSessionApi,
+  IAuthService,
+  IHierarchyScopeResolver,
+  IHttpRequest,
+  IHttpServer,
+  II18nService,
+  IMetadataService,
+  IObjectQLEngine,
+} from '@objectstack/spec/contracts';
 // [#6206] The share-link routes' context is the FULL authorization envelope —
 // it feeds enforcement (`engine.find`), so it is an `ExecutionContext`, never
 // the route-local `ShareLinkExecutionContext`.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SysRecordShare, SysSharingRule, SysShareLink } from './objects/index.js';
 import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
-import { SharingService, type SharingEngine, type SharingTenancyProbe } from './sharing-service.js';
+import {
+  SharingService,
+  type SharingEngine,
+  type SharingSecurityProbe,
+  type SharingTenancyProbe,
+} from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
@@ -412,7 +426,7 @@ export class SharingServicePlugin implements Plugin {
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:ready', async () => {
         try {
-          const i18n = ctx.getService<any>('i18n');
+          const i18n = ctx.getService<II18nService>('i18n');
           if (i18n && typeof i18n.loadTranslations === 'function') {
             const { SharingTranslations } = await import('./translations/index.js');
             for (const [locale, data] of Object.entries(SharingTranslations)) {
@@ -427,9 +441,13 @@ export class SharingServicePlugin implements Plugin {
 
   async start(ctx: PluginContext): Promise<void> {
     ctx.hook('kernel:ready', async () => {
-      let engine: any = null;
-      try { engine = ctx.getService<any>('objectql'); }
-      catch { try { engine = ctx.getService<any>('data'); } catch { /* ignore */ } }
+      // The engine SEEN WHOLE (`registerHook` / `unregisterHooksByPackage` /
+      // `registerMiddleware` are all bound below), which is the `objectql`
+      // slot. Its ledger entry records it as "the SAME instance as `data`,
+      // seen whole", so the alias fallback resolves the same object.
+      let engine: IObjectQLEngine | null = null;
+      try { engine = ctx.getService<IObjectQLEngine>('objectql'); }
+      catch { try { engine = ctx.getService<IObjectQLEngine>('data'); } catch { /* ignore */ } }
       if (!engine) {
         ctx.logger.warn('SharingServicePlugin: no ObjectQL engine — service NOT registered');
         return;
@@ -443,14 +461,17 @@ export class SharingServicePlugin implements Plugin {
         // [ADR-0057] Late-bound lookup of the enterprise hierarchy resolver.
         // Open edition: not registered → hierarchy scopes fail closed to own.
         hierarchyResolver: () => {
-          try { return ctx.getService<any>('hierarchy-scope-resolver'); }
+          try { return ctx.getService<IHierarchyScopeResolver>('hierarchy-scope-resolver'); }
           catch { return null; }
         },
         // [ADR-0111 D1/D2] Late-bound security probe for canManageShares'
         // Modify-All path. Absent (no plugin-security) → owner-only, fail
         // closed — a degraded security stack never widens sharing authority.
         securityService: () => {
-          try { return ctx.getService<any>('security'); }
+          // The named surface this option already requires — plugin-security is
+          // OPTIONAL, so the consumer declares the slice it probes rather than
+          // taking a runtime dependency on `ISecurityService`.
+          try { return ctx.getService<SharingSecurityProbe>('security'); }
           catch { return null; }
         },
         // [ADR-0105 D1 / #5859] Late-bound tenancy posture — read exactly the
@@ -541,8 +562,8 @@ export class SharingServicePlugin implements Plugin {
           // sys_sharing_rule BEFORE listRules so the lifecycle hooks bind to a
           // populated table (previously rules were decorative — ruleCount: 0).
           try {
-            let metadataService: any = null;
-            try { metadataService = ctx.getService<any>('metadata'); } catch { /* optional */ }
+            let metadataService: IMetadataService | null = null;
+            try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
             if (metadataService) {
               await bootstrapDeclaredSharingRules(this.ruleService, metadataService, engine, ctx.logger as any);
             }
@@ -604,12 +625,19 @@ export class SharingServicePlugin implements Plugin {
         ctx.registerService('shareLinks', this.linkService);
 
         if (this.options.registerShareLinkRoutes !== false) {
-          let http: IHttpServer | null = null;
-          try {
-            http = ctx.getService<IHttpServer>('http-server');
-          } catch {
-            // No HTTP server — service still reachable via getService.
-          }
+          // [#4251 B5] Canonical name FIRST, alias second. This read was
+          // `http-server`-only, and that is the DEPRECATED alias: the ledger
+          // records `http.server` as canonical and as the only name present on
+          // every provider path (`runtime.ts`'s `config.server` path registers
+          // no alias). On that path the share-link REST routes silently never
+          // mounted. Per-name `try` because `getService` throws on an empty
+          // slot, so both names cannot share one `try` (#4393).
+          // Neither name present → no HTTP server; the service stays reachable
+          // via getService.
+          const readServer = (name: string): IHttpServer | null => {
+            try { return ctx.getService<IHttpServer>(name); } catch { return null; }
+          };
+          const http: IHttpServer | null = readServer('http.server') ?? readServer('http-server');
           if (http) {
             // [Finding-2] Derive the caller from the platform's VERIFIED
             // resolution (session / API key / OAuth), never from spoofable
@@ -635,7 +663,7 @@ export class SharingServicePlugin implements Plugin {
             // grows a dimension nobody remembers to add here. The route's own
             // 401 decision reads `userId` off the same object (see
             // `ShareLinkExecutionContext` in the contract for that boundary).
-            const ql: any = engine;
+            const ql = engine;
             const verifiedContextFromRequest = async (req: IHttpRequest): Promise<ExecutionContext> => {
               try {
                 const headers = new Headers();
@@ -645,8 +673,14 @@ export class SharingServicePlugin implements Plugin {
                 }
                 const getSession = async (h: any) => {
                   try {
-                    const authService: any = ctx.getService('auth');
-                    let api: any = authService?.api;
+                    // Both members are OPTIONAL on the contract, and that is
+                    // load-bearing: the shipped plugin-auth registers an
+                    // `AuthManager`, which has no `api` member at all (#4127
+                    // batch 4), so on every real stack this falls through to
+                    // `getApi()`. Typed, the optionality is visible; erased, the
+                    // dead first branch looked like the primary path.
+                    const authService = ctx.getService<IAuthService>('auth');
+                    let api: AuthSessionApi | undefined = authService?.api;
                     if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
                     return await api?.getSession?.({ headers: h });
                   } catch {

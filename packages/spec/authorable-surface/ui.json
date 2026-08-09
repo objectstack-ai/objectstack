@@ -560,6 +560,7 @@
     "ui/HttpRequest:method",
     "ui/HttpRequest:params",
     "ui/HttpRequest:url",
+    "ui/InlineAction:bodyExtra",
     "ui/InlineAction:confirmText",
     "ui/InlineAction:errorMessage",
     "ui/InlineAction:label",

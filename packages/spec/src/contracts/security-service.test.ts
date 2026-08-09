@@ -1,7 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import type { ISecurityService } from './security-service';
+import type {
+  ISecurityService,
+  AuthoredRowWriteVerdict,
+  AuthoredRowWriteOperation,
+} from './security-service';
 
 /**
  * These tests pin the two things a consumer of the `security` service reasons
@@ -100,6 +104,85 @@ describe('Security Service Contract', () => {
     const partial: Partial<ISecurityService> = { getReadFilter: async () => undefined };
     expect(typeof partial.getReadFilter).toBe('function');
     expect(typeof partial.getReadableFields).toBe('undefined');
+  });
+
+  it('[#5493] AuthoredRowWriteVerdict names exactly admit / abstain (compile-time)', () => {
+    const everyVerdict: AuthoredRowWriteVerdict[] = ['admit', 'abstain'];
+    // Deliberately NO `deny`. This surface is evidence, not a gate: the caller
+    // already holds a refusal and asks only whether a declared widener speaks
+    // for the row. "No evidence" and "evidence against" are the same
+    // instruction to that caller — keep refusing — so a third state would be
+    // one nobody could act on differently.
+    // @ts-expect-error `deny` is not a state this contract defines
+    const notAVerdict: AuthoredRowWriteVerdict = 'deny';
+    expect(everyVerdict).toHaveLength(2);
+    expect(notAVerdict).toBe('deny');
+
+    // The operation axis is the RLS WRITE vocabulary, not the engine verb list:
+    // a caller maps `purge`/`transfer`/`restore` onto its nearest write class
+    // itself, so a new lifecycle verb cannot acquire a widening path here just
+    // by being spelled into a wider union.
+    const everyOperation: AuthoredRowWriteOperation[] = ['update', 'delete'];
+    // @ts-expect-error `select` is a read class — this surface answers writes only
+    const notAWriteOperation: AuthoredRowWriteOperation = 'select';
+    expect(everyOperation).toHaveLength(2);
+    expect(notAWriteOperation).toBe('select');
+  });
+
+  it('[#5493] checkAuthoredRowWrite is OPTIONAL — absence is the fail-closed default (compile-time)', () => {
+    // THE structural pin behind "a deployment without this method behaves
+    // byte-for-byte as today". Declaring it optional is what makes that a
+    // property of the TYPE rather than a promise in prose: a security service
+    // that predates the method still satisfies the contract, and TypeScript
+    // forces every consumer to handle the absent case instead of calling into
+    // `undefined` at runtime.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.checkAuthoredRowWrite).toBe('undefined');
+
+    // …and a consumer cannot forget: the unguarded call does not compile.
+    // Never invoked — its only job is to make the COMPILER prove the point
+    // (invoking it would merely prove that JavaScript throws on `undefined()`,
+    // which is the runtime symptom this declaration exists to prevent).
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a consumer must feature-detect first
+      withoutIt.checkAuthoredRowWrite('deal', 'r1', 'update', {});
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    // The guarded form is the one that compiles, and it degrades to `undefined`
+    // — which the caller reads as `abstain` (see the case below).
+    expect(withoutIt.checkAuthoredRowWrite?.('deal', 'r1', 'update', {})).toBeUndefined();
+  });
+
+  it('[#5493] admit is a positive measurement; every other outcome is abstain', async () => {
+    // `admit` means "an app-authored, non-floor policy matches this row for
+    // this operation" — it never means "the write is permitted" (CRUD, the
+    // tenant wall, sharing and the post-image check all still apply), and it is
+    // never reported for a reason the implementation did not measure.
+    const admitting = makeService({
+      checkAuthoredRowWrite: async (_object, recordId) =>
+        recordId === 'r_open' ? 'admit' : 'abstain',
+    });
+    await expect(admitting.checkAuthoredRowWrite?.('deal', 'r_open', 'update', { userId: 'u1' }))
+      .resolves.toBe('admit');
+    // The #5493 probe E-A shape: a row a platform-floor policy would admit, but
+    // no authored policy names. The verdict is `abstain`, never `admit`.
+    await expect(admitting.checkAuthoredRowWrite?.('deal', 'r_transferred', 'update', { userId: 'u1' }))
+      .resolves.toBe('abstain');
+
+    // Fail-closed, and it is the INVERSE of SharingWriteVerdict's: there a
+    // failed lookup must be `deny` because `abstain` hands the decision on;
+    // here the caller uses `admit` to WIDEN, so the answer that changes nothing
+    // is `abstain`. The method returns a verdict rather than throwing.
+    const failing = makeService({ checkAuthoredRowWrite: async () => 'abstain' });
+    await expect(failing.checkAuthoredRowWrite?.('deal', 'r_open', 'update', { userId: 'u1' }))
+      .resolves.toBe('abstain');
+
+    // Absence and `abstain` are ONE instruction to the caller, which is what
+    // lets a consumer collapse feature detection and the verdict into a single
+    // non-widening branch.
+    const absent = makeService();
+    const verdict = (await absent.checkAuthoredRowWrite?.('deal', 'r_open', 'update', {})) ?? 'abstain';
+    expect(verdict).toBe('abstain');
   });
 
   it('explain accepts a record-scoped request and an explicit target user', async () => {

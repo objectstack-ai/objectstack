@@ -6,7 +6,7 @@ import { CreateRecordConfigSchema } from '../automation/builtin-node-config.zod.
 import { FlowSchema } from '../automation/flow.zod.js';
 import { ScriptConfigSchema } from '../automation/schemaless-node-config.zod.js';
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
-import { PageHeaderProps } from '../ui/component.zod.js';
+import { ElementButtonPropsSchema, PageHeaderProps } from '../ui/component.zod.js';
 import { PageSchema } from '../ui/page.zod.js';
 import { applyConversions, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
@@ -949,6 +949,104 @@ describe('conversion layer (ADR-0087 D2)', () => {
       });
       expect(PageSchema.safeParse(page({ title: 'Leads', description: 'All open leads' })).success).toBe(true);
       expect(PageSchema.safeParse(page({ title: 'Leads', subtitle: 'All open leads' })).success).toBe(true);
+    });
+  });
+
+  /**
+   * `inline-action-api-params-to-body-extra` (#5777).
+   *
+   * The fixture pair above already pins before → after and the notice count.
+   * What needs its own cover is the DISCRIMINATOR, because this entry keys off
+   * a value's shape rather than a key's presence: `Array.isArray` separates the
+   * definition array from the payload map, and the `type:'api'` guard separates
+   * a payload from the `${param.X}` interpolation scope a `url` action reads
+   * out of the same key. Both are ways this rewrite could be lossy, and neither
+   * is visible in a fixture that only carries the happy path.
+   */
+  describe('inline-action-api-params-to-body-extra (#5777)', () => {
+    const button = (action: Record<string, unknown>) => ({
+      pages: [{
+        name: 'showcase_contact_form',
+        regions: [{ name: 'main', components: [{ type: 'element:button', properties: { label: 'Go', action } }] }],
+      }],
+    });
+    const actionOf = (stack: Record<string, unknown>) =>
+      ((stack.pages as { regions: { components: { properties: { action: Record<string, unknown> } }[] }[] }[])[0]!
+        .regions[0]!.components[0]!.properties.action);
+
+    it('rewrites the object form on a type:"api" inline action', () => {
+      const notices: ConversionNotice[] = [];
+      const out = applyConversions(
+        button({ type: 'api', target: '/api/v1/forms/contact-us/submit', params: { name: '{{page.inquiryName}}' } }),
+        { onNotice: (n) => notices.push(n) },
+      );
+      expect(actionOf(out)).toEqual({
+        type: 'api',
+        target: '/api/v1/forms/contact-us/submit',
+        bodyExtra: { name: '{{page.inquiryName}}' },
+      });
+      expect(notices.map((n) => n.conversionId)).toEqual(['inline-action-api-params-to-body-extra']);
+      expect(notices[0]!.path).toBe('pages[0].regions[0].components[0].properties.action.bodyExtra');
+    });
+
+    it('leaves an ActionParam[] definition array alone — that meaning of the key survives', () => {
+      const params = [{ name: 'reason', label: 'Reason', type: 'text' }];
+      const stack = button({ type: 'api', target: '/x', params });
+      const out = applyConversions(stack);
+      // Identity, not just equality: nothing converted, so copy-on-write shares.
+      expect(out).toBe(stack);
+    });
+
+    it('leaves a type:"url" action alone — object `params` is the interpolation scope there', () => {
+      // ActionRunner.interpolateTarget reads a non-array `params` as the
+      // `${param.X}` scope, and executeUrl reads `params.newTab`. Rewriting
+      // those into an api request body would be lossy, so the guard is not a
+      // conservatism — it is the difference between lossless and not.
+      const stack = button({ type: 'url', target: '/x?id=${param.id}', params: { id: 'abc' } });
+      expect(applyConversions(stack)).toBe(stack);
+    });
+
+    it('keeps BOTH when `bodyExtra` already says something different (#4923 house rule)', () => {
+      const stack = button({ type: 'api', target: '/x', params: { a: 1 }, bodyExtra: { b: 2 } });
+      const out = applyConversions(stack);
+      expect(out).toBe(stack);
+      expect(actionOf(out)).toEqual({ type: 'api', target: '/x', params: { a: 1 }, bodyExtra: { b: 2 } });
+    });
+
+    it('is idempotent — the converted result replays to itself with no second notice', () => {
+      const once = applyConversions(button({ type: 'api', target: '/x', params: { a: 1 } }));
+      const notices: ConversionNotice[] = [];
+      const twice = applyConversions(once, { onNotice: (n) => notices.push(n) });
+      expect(twice).toBe(once);
+      expect(notices).toEqual([]);
+    });
+
+    /**
+     * Reachability, judged by what this rule guards — a VALUE verdict, not a
+     * key one (#5046's distinction). The key `params` is declared either way;
+     * what decides is whether its value is a definition array or a payload map.
+     * So the criterion is full-parse-green on the props schema AFTER, and
+     * parse-RED before — while `PageSchema` stays green on both, because
+     * `PageComponent.properties` is an open bag and never judged the value at
+     * all. That gap is the defect's mechanism: the page published clean and
+     * only the #5068 props gate could see it.
+     */
+    it('the props schema refuses the before shape and accepts the after shape; PageSchema accepts both', () => {
+      const props = (action: Record<string, unknown>) => ({ label: 'Submit inquiry', action });
+      const before = { type: 'api', target: '/api/v1/forms/contact-us/submit', params: { name: '{{page.n}}' } };
+      const after = { type: 'api', target: '/api/v1/forms/contact-us/submit', bodyExtra: { name: '{{page.n}}' } };
+
+      expect(ElementButtonPropsSchema.safeParse(props(before)).success).toBe(false);
+      expect(ElementButtonPropsSchema.safeParse(props(after)).success).toBe(true);
+
+      const page = (action: Record<string, unknown>) => ({
+        name: 'showcase_contact_form',
+        label: 'Contact Form',
+        type: 'app' as const,
+        regions: [{ name: 'main', components: [{ type: 'element:button', properties: props(action) }] }],
+      });
+      expect(PageSchema.safeParse(page(before)).success).toBe(true);
+      expect(PageSchema.safeParse(page(after)).success).toBe(true);
     });
   });
 });

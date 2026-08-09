@@ -13,6 +13,7 @@ import {
     viewActiveIndexKeyParts,
     VIEW_ACTIVE_INDEX_NAME,
     VIEW_ACTIVE_PROBE_INDEX_NAME,
+    VIEW_ACTIVE_INDEX_COLUMNS,
     VIEW_ACTIVE_NULL_SENTINELS,
     type IndexExec,
 } from './view-definition-active-index.js';
@@ -387,6 +388,20 @@ describe('sys_view_definition active-row uniqueness (#5839) on a NULL-safe key (
         expect(offenders).toHaveLength(1);
         expect(offenders[0]!.name).toBe('lead.team');
         expect(offenders[0]!.duplicate_rows).toBe(2);
+        // The folded columns come back under their bucket-key aliases (#6772),
+        // and the operator loses nothing by reading them: the offending pair is
+        // `owner IS NULL`, and `''` is the only way that can be spelled here
+        // because an owner is a user id and never the empty string.
+        expect(offenders[0]!.organization_id_key).toBe('org1');
+        expect(offenders[0]!.owner_key).toBe('');
+        // ⚠️ What this test can and cannot see: the pre-#6772 bare projection
+        // EXECUTED here without error and returned the same one offender row
+        // with `duplicate_rows: 2` — SQLite grouped it happily, so the three
+        // assertions above the alias pair were green on the broken query too.
+        // Only the alias names (and the dialect pin below) move. Running the
+        // query on a real database therefore proves it lists the rows; it can
+        // never prove the query is legal on PostgreSQL, because the engine
+        // this test has is precisely the lenient one.
     });
 
     /**
@@ -454,6 +469,14 @@ describe('sys_view_definition active-row uniqueness (#5839) on a NULL-safe key (
         // MariaDB's refusal of a functional key part, which #6417 introduces.
         expect(classifyIndexFailure('Functional index on a column is not supported')).toBe('unsupported');
         expect(classifyIndexFailure('disk I/O error')).toBe('failed');
+        // #6699: the same verdict off the `code` channel, with prose that
+        // carries no signal at all. Asserted through THIS module's re-export
+        // (the public `@objectstack/metadata-protocol` surface), because that is
+        // the export the classifier's own home is reached by — the full
+        // channel matrix lives in `partial-index-probe.test.ts`.
+        expect(
+            classifyIndexFailure(Object.assign(new Error('insert failed'), { code: 'ER_DUP_ENTRY' })),
+        ).toBe('conflict');
     });
 
     it('buildActiveIndexSql scopes rows AND spells the key NULL-safe', () => {
@@ -484,11 +507,56 @@ describe('sys_view_definition active-row uniqueness (#5839) on a NULL-safe key (
         // Same key parts as the index, so what it reports and what the index
         // rejects cannot diverge.
         expect(probe).toContain(`GROUP BY ${viewActiveIndexKeyParts().join(', ')}`);
-        // Selected columns are the RAW ones — an operator needs the stored
-        // values (NULLs included), not the folded bucket keys.
-        expect(probe).toContain('SELECT name, organization_id, owner, COUNT(*) AS duplicate_rows');
+        // The projection is those same key parts — each folded column under
+        // its bucket-key alias, never bare (#6772; see the dialect pin below).
+        expect(probe).toContain(
+            "SELECT name, COALESCE(organization_id, '__global__') AS organization_id_key, "
+            + "COALESCE(owner, '') AS owner_key, COUNT(*) AS duplicate_rows",
+        );
         expect(probe).toContain("WHERE state = 'active'");
         expect(probe).toContain('HAVING COUNT(*) > 1');
+    });
+
+    /**
+     * The query is shipped to an operator inside an `error`-level degradation
+     * report, on both dialects that can build the index it explains. It has to
+     * RUN on both. PostgreSQL requires every non-aggregated projection to
+     * appear verbatim in `GROUP BY`; a bare `organization_id` projected against
+     * `GROUP BY COALESCE(organization_id, '__global__')` is rejected with
+     * `must appear in the GROUP BY clause` — which is exactly what shipped
+     * until #6772, invisible because the only engine the sibling test above can
+     * run is the lenient one.
+     *
+     * Mirrors `overlay-index.test.ts`'s
+     * `the duplicate-listing query is groupable on PostgreSQL, not only SQLite`.
+     */
+    it('the duplicate-listing query is groupable on PostgreSQL, not only SQLite', () => {
+        const sql = buildDuplicateProbeSql();
+        expect(sql).toEqual(
+            "SELECT name, COALESCE(organization_id, '__global__') AS organization_id_key, "
+            + "COALESCE(owner, '') AS owner_key, COUNT(*) AS duplicate_rows "
+            + "FROM sys_view_definition WHERE state = 'active' "
+            + "GROUP BY name, COALESCE(organization_id, '__global__'), COALESCE(owner, '') "
+            + 'HAVING COUNT(*) > 1',
+        );
+
+        // PG's rule, applied term by term rather than only to the whole string:
+        // every BARE projection must be a bare GROUP BY term, and every folded
+        // column must reach the select list only through its own expression.
+        const selectList = sql.slice('SELECT '.length, sql.indexOf(' FROM '));
+        const groupBy = sql.slice(sql.indexOf('GROUP BY ') + 'GROUP BY '.length, sql.indexOf(' HAVING'));
+        for (const column of VIEW_ACTIVE_INDEX_COLUMNS) {
+            const bare = new RegExp(`(^|, )${column}(,|$)`);
+            const sentinel = VIEW_ACTIVE_NULL_SENTINELS[column];
+            if (sentinel === undefined) {
+                expect(selectList).toMatch(bare);
+                expect(groupBy).toMatch(bare);
+            } else {
+                expect(selectList).not.toMatch(bare);
+                expect(selectList).toContain(`COALESCE(${column}, '${sentinel}') AS ${column}_key`);
+                expect(groupBy).toContain(`COALESCE(${column}, '${sentinel}')`);
+            }
+        }
     });
 
     it('resolveIndexExec prefers raw(), falls back to execute(), else undefined', async () => {

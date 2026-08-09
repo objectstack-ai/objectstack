@@ -4948,6 +4948,211 @@ const pageCardBodyToChildren: MetadataConversion = {
   },
 };
 
+/**
+ * Inline `type:'api'` action: object-form `params` → `bodyExtra` (protocol 17,
+ * #5777).
+ *
+ * One key carried two fact-contracts. `InlineActionSchema.params` is picked
+ * from `ActionSchema` and is an `ActionParam[]` **definition array** — the
+ * fields a dialog collects before the action runs. What the showcase's
+ * pure-SDUI contact form authored on its submit button is a **request payload
+ * map** (`params: { name: '{{page.inquiryName}}', … }`), and objectui's
+ * `ActionRunner` took both: its own comment says "Accept both — when `params`
+ * is an array, treat it as the input-collection definition", discriminating on
+ * `Array.isArray`. A tolerant consumer fossilizing a wrong convention is Prime
+ * Directive #12's exact shape, and here the fossil was load-bearing: the
+ * generated reference could only describe the array, so an author following the
+ * docs could not write a working `api` submit button at all.
+ *
+ * The maintainer's 2026-08-06 ruling on #5777 took **direction A — a separate
+ * payload key**, explicitly refusing the same-name union of option B. The
+ * separate key is `bodyExtra`, which `ActionSchema` has declared all along for
+ * exactly this ("static body fragment merged into the outgoing request body for
+ * `type:'api'` actions"); #5777's spec half picks it onto the inline shape, so
+ * the rewrite target is a key the contract already owns rather than a third
+ * name. `payload` is already an alias pointing there (#5013) and `body` is
+ * already the `script` hook body, so those two spellings were never available.
+ *
+ * **Why a conversion and not a deletion.** The two shapes are disjoint —
+ * `Array.isArray` decides, with no value that could be read either way — so the
+ * rewrite is mechanical and lossless, which is the ADR-0087 D2 precondition.
+ * Deleting instead would strand every page authored the old way on a bare
+ * `expected array, received object`.
+ *
+ * **Scoped to `type:'api'`, deliberately.** Object-form `params` on an inline
+ * `type:'url'` action is a THIRD meaning again — `ActionRunner.interpolateTarget`
+ * reads it as the `${param.X}` interpolation scope, and `executeUrl` reads
+ * `params.newTab` — so rewriting those into an api request body would be lossy,
+ * not lossless. Nothing in the reachable corpus authors that shape; it stays
+ * refused by the array-only field, and this entry does not touch it.
+ *
+ * **Not extended to registered actions.** `ActionSchema` is parsed at
+ * `defineAction`, so its array-only `params` has always refused the object form
+ * at the authoring door — the defect existed only on the inline path, where
+ * `PageComponent.properties` is an open bag and nothing parsed the props until
+ * #5068. Registered actions already reach the payload through `bodyExtra`.
+ *
+ * Precedence is {@link renameKey}'s house rule and nothing new: an
+ * already-present `bodyExtra` WINS and a differing object-form `params` is left
+ * exactly where it sits, for the author to reconcile (#4923).
+ *
+ * Region level is the reach, as for {@link pageHeaderSubtitleAlias} and
+ * {@link pageCardBodyToChildren}: `PageComponentSchema` declares no children
+ * key, so a button nested inside another component's free-form `properties` is
+ * not typed page-component shape. The array-only field is what covers the rest
+ * — it refuses the object form with a message naming `bodyExtra`, whether or
+ * not a conversion could reach the site.
+ *
+ * **Live window**; retires at 18.
+ */
+const inlineActionApiParamsToBodyExtra: MetadataConversion = {
+  id: 'inline-action-api-params-to-body-extra',
+  toMajor: 17,
+  surface: 'page.component.element:button.action.params',
+  summary:
+    "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (#5777 — the payload gets its own key; `params` stays the ActionParam[] definition array)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'element:button') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const action = properties.action;
+      if (!isDict(action)) return component;
+      // Only the payload meaning converts. `Array.isArray` is the whole
+      // discriminator — a definition array stays put — and the `api` guard
+      // keeps the url-action interpolation scope out of it.
+      if (action.type !== 'api') return component;
+      if (!isDict(action.params)) return component;
+      const renamed = renameKey(action, 'params', 'bodyExtra');
+      if (!renamed) return component;
+      emit({ from: 'params', to: 'bodyExtra', path: `${path}.properties.action.bodyExtra` });
+      return { ...component, properties: { ...properties, action: renamed } };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'showcase_contact_form',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The measured site: a pure-SDUI form submit posting page vars.
+                {
+                  type: 'element:button',
+                  properties: {
+                    label: 'Submit inquiry',
+                    action: {
+                      type: 'api',
+                      target: '/api/v1/forms/contact-us/submit',
+                      method: 'POST',
+                      params: { name: '{{page.inquiryName}}', email: '{{page.inquiryEmail}}' },
+                    },
+                  },
+                },
+                // A real ActionParam[] definition array — the other meaning of
+                // the same key, untouched.
+                {
+                  type: 'element:button',
+                  properties: {
+                    label: 'Close order',
+                    action: {
+                      type: 'api',
+                      target: '/api/v1/sales_order/close',
+                      params: [{ name: 'reason', label: 'Reason', type: 'text' }],
+                    },
+                  },
+                },
+                // Both spellings, DIFFERENT payloads: kept, so the author
+                // reconciles the two bodies rather than the loader picking.
+                {
+                  type: 'element:button',
+                  properties: {
+                    label: 'Both',
+                    action: {
+                      type: 'api',
+                      target: '/api/v1/x',
+                      params: { a: 1 },
+                      bodyExtra: { b: 2 },
+                    },
+                  },
+                },
+                // `type:'url'` — object-form `params` is the `${param.X}`
+                // interpolation scope there, a third meaning. Not this entry's.
+                {
+                  type: 'element:button',
+                  properties: {
+                    label: 'Open',
+                    action: { type: 'url', target: '/x?id=${param.id}', params: { id: 'abc' } },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'showcase_contact_form',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'element:button',
+                  properties: {
+                    label: 'Submit inquiry',
+                    action: {
+                      type: 'api',
+                      target: '/api/v1/forms/contact-us/submit',
+                      method: 'POST',
+                      bodyExtra: { name: '{{page.inquiryName}}', email: '{{page.inquiryEmail}}' },
+                    },
+                  },
+                },
+                {
+                  type: 'element:button',
+                  properties: {
+                    label: 'Close order',
+                    action: {
+                      type: 'api',
+                      target: '/api/v1/sales_order/close',
+                      params: [{ name: 'reason', label: 'Reason', type: 'text' }],
+                    },
+                  },
+                },
+                {
+                  type: 'element:button',
+                  properties: {
+                    label: 'Both',
+                    action: {
+                      type: 'api',
+                      target: '/api/v1/x',
+                      params: { a: 1 },
+                      bodyExtra: { b: 2 },
+                    },
+                  },
+                },
+                {
+                  type: 'element:button',
+                  properties: {
+                    label: 'Open',
+                    action: { type: 'url', target: '/x?id=${param.id}', params: { id: 'abc' } },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -5005,6 +5210,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     recordPickerDisplayFieldToLabelField,
     recordPickerInertKeysRemoved,
     pageCardBodyToChildren,
+    inlineActionApiParamsToBodyExtra,
   ],
 };
 

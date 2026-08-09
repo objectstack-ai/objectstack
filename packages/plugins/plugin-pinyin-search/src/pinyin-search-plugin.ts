@@ -18,7 +18,10 @@
  * `pinyin-pro` is never imported.
  */
 
-import type { Plugin, PluginContext } from '@objectstack/core';
+// `IObjectQLEngine` via the core barrel, which re-exports it from
+// `@objectstack/spec/contracts`: this package does not depend on spec directly,
+// and the slot's contract is not a reason to add a dependency.
+import type { IObjectQLEngine, Plugin, PluginContext } from '@objectstack/core';
 import { resolveSearchPinyinEnabled } from '@objectstack/types';
 import {
   bindSearchCompanionHooks,
@@ -91,12 +94,18 @@ export class PinyinSearchPlugin implements Plugin {
     }
   }
 
-  private resolveEngine(ctx: PluginContext): any {
+  /**
+   * [#4251 B5] The engine SEEN WHOLE — `bindSearchCompanionHooks` binds
+   * `registerHook`, which lives on `IObjectQLEngine`, not on the data plane.
+   * The ledger records `objectql` as "the SAME instance as `data`, seen whole",
+   * so the alias fallback resolves the same object under the same contract.
+   */
+  private resolveEngine(ctx: PluginContext): IObjectQLEngine | null {
     try {
-      return ctx.getService<any>('objectql');
+      return ctx.getService<IObjectQLEngine>('objectql');
     } catch {
       try {
-        return ctx.getService<any>('data');
+        return ctx.getService<IObjectQLEngine>('data');
       } catch {
         return null;
       }

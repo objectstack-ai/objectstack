@@ -37,6 +37,8 @@
  * a classified status plus the driver's own text and stays out of the way.
  */
 
+import { isUniqueViolationError } from '@objectstack/types';
+
 /** Raw-SQL seam. Mirrors `ensureOverlayIndex`: `raw()` first, `execute()` second. */
 export type IndexExec = (sql: string) => Promise<unknown>;
 
@@ -86,7 +88,26 @@ export type PartialIndexStatus =
     | 'failed';
 
 /**
- * Classify a failed `CREATE UNIQUE INDEX`.
+ * The text the DIALECT arm judges, from a thrown value of any shape.
+ *
+ * `message` first, because that is the channel a driver writes its refusal on
+ * and the only one this arm has ever read; `String()` only as the last resort
+ * — which is what a bare string resolves to unchanged, so a caller holding
+ * nothing but prose is judged exactly as before.
+ */
+function indexFailureText(error: unknown): string {
+    if (typeof error === 'string') return error;
+    if (typeof error === 'object' && error !== null) {
+        const { message } = error as { message?: unknown };
+        if (typeof message === 'string') return message;
+    }
+    return String(error);
+}
+
+/**
+ * Classify a failed `CREATE UNIQUE INDEX`, from the thrown ERROR (#6699).
+ *
+ * ## The two arms, and why the order is load-bearing
  *
  * Duplicate-row wording is checked BEFORE dialect wording: MySQL's duplicate
  * error mentions the key, and some drivers wrap both facts in one string, so
@@ -98,12 +119,35 @@ export type PartialIndexStatus =
  * split: no partial indexes at all, and (before 8.0.13 / on MariaDB) no
  * functional key parts for `COALESCE` parts. Both leave the same outcome — the
  * previous index stays — so one verdict is enough.
+ *
+ * ## Why the first arm is not this module's own regex any more
+ *
+ * "Is this a unique-constraint violation?" is one question, and #6250 gave it
+ * one named answer — `isUniqueViolationError` in `@objectstack/types`. This
+ * function carried a **fifth** private vocabulary for it (#6699, missed by that
+ * inventory because it lives in a package none of the other four touched), and
+ * the copy was strictly weaker in the way that inventory was about: it read the
+ * **message channel only**. A driver that reports the conflict on `code` /
+ * `errno` — SQLite's `SQLITE_CONSTRAINT_UNIQUE`, MySQL's `ER_DUP_ENTRY` /
+ * errno `1062`, Postgres' SQLSTATE `23505` — while giving unhelpful prose
+ * (`insert failed`, a pooled wrapper's `Write failed`, or the condition one step
+ * down `error.cause`) was classified `failed` here, where the shared predicate
+ * answers `true`. Same shape as the hole that made every MySQL conflict a 500
+ * in `mapDataError` before #6541.
+ *
+ * The predicate answers the FIRST arm only. It has no opinion about dialect
+ * support, so the second arm stays this module's own — and stays second.
+ *
+ * ⚠️ Pass the **error**, not `err.message`. A string still works (the predicate
+ * reads it on the message channel, and so does {@link indexFailureText}), but a
+ * caller that unwraps first throws away the `code` / `errno` / `cause` channels
+ * that are the whole reason this reads the object.
  */
-export function classifyIndexFailure(message: string): PartialIndexStatus {
-    if (/unique constraint failed|duplicate entry|duplicate key value|violates unique/i.test(message)) {
+export function classifyIndexFailure(error: unknown): PartialIndexStatus {
+    if (isUniqueViolationError(error)) {
         return 'conflict';
     }
-    if (/partial|where clause|near "where"|near 'where'|functional|syntax/i.test(message)) {
+    if (/partial|where clause|near "where"|near 'where'|functional|syntax/i.test(indexFailureText(error))) {
         return 'unsupported';
     }
     return 'failed';
@@ -169,9 +213,14 @@ export async function probeThenReplaceIndex(
     try {
         await exec(buildSql(probeIndexName));
     } catch (err: unknown) {
+        // `detail` is the OPERATOR-facing text and stays the driver's own prose.
+        // The VERDICT is taken from the error object itself, so a conflict
+        // reported on `code` / `errno` / `cause` with unhelpful prose is still
+        // classified as one (#6699) — unwrapping first is exactly what the
+        // migration onto the shared predicate exists to stop.
         const detail = err instanceof Error ? err.message : String(err);
         await dropIndexQuietly(exec, probeIndexName);
-        return { status: classifyIndexFailure(detail), detail, failedAt: 'probe' };
+        return { status: classifyIndexFailure(err), detail, failedAt: 'probe' };
     }
     await dropIndexQuietly(exec, probeIndexName);
 

@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import { lazySchema } from './lazy-schema';
 import { strictObject } from './strict-object';
+import { keySetMatches } from './suggestions.zod';
 
 const WidgetSchema = lazySchema(() =>
   strictObject(
@@ -244,6 +245,133 @@ describe('message order — the fix comes before the history (#5955)', () => {
     // separator or duplicated clause fails here.
     expect(messageFor({ nonsense: 1 }))
       .toBe(`Unrecognized key(s) on this widget: \`nonsense\`. ${HISTORY}`);
+  });
+});
+
+/**
+ * The set-keyed `guidance` form (#6619) — one prescription shared by a named
+ * key family, the vocabulary the three hand-written `$ZodErrorMap`s needed
+ * before they could fold into this template at all.
+ *
+ * A second shape on a shared template is where accidental precedence bugs
+ * live, so the resolution rules are pinned here as behaviour rather than left
+ * to the docblock:
+ *
+ *   1. an exact `guidance` entry ALWAYS wins over any set;
+ *   2. among sets, declaration order wins;
+ *   3. a set match suppresses the rename channel for that key;
+ *   4. a set speaks once per message, at the first key that matched it.
+ */
+describe('strictObject guidanceSets — the set-keyed prescription channel (#6619)', () => {
+  const HISTORY = 'Until #4001 these were dropped silently.';
+  const SetSchema = lazySchema(() =>
+    strictObject(
+      {
+        surface: 'this set surface',
+        history: HISTORY,
+        guidance: {
+          // Deliberately ALSO a member of `legacySet` below: the exact entry
+          // must win (rule 1), so this text — not the set's — answers `alpha`.
+          alpha: '`alpha` has its own exact prescription.',
+        },
+        guidanceSets: [
+          {
+            name: 'legacySet',
+            keys: ['alpha', 'beta', 'gamma'],
+            prescription: 'The legacy family was retired — use `replacement`.',
+          },
+          {
+            name: 'overlapSet',
+            // `beta` is also in legacySet; declaration order (rule 2) decides.
+            keys: ['beta', 'delta'],
+            prescription: 'The overlap family answer.',
+          },
+          {
+            name: 'patternSet',
+            keys: /^exp(ort|erimental)/,
+            examples: ['exportMode', 'experimentalFlag'],
+            prescription: 'Export/experimental knobs live in `replacement`.',
+          },
+        ],
+      },
+      {
+        name: z.string(),
+        replacement: z.string().optional(),
+      },
+    ),
+  );
+
+  const messageFor = (body: Record<string, unknown>) => {
+    const r = SetSchema.safeParse({ name: 'x', ...body });
+    expect(r.success).toBe(false);
+    return r.error!.issues[0]!.message;
+  };
+
+  it('answers a set member with the set prescription, as a bullet, ahead of the history', () => {
+    const m = messageFor({ beta: 1 });
+    expect(m.startsWith('Unrecognized key(s) on this set surface: `beta`.')).toBe(true);
+    expect(m).toContain('\n  • The legacy family was retired — use `replacement`.');
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+  });
+
+  it('rule 1 — an exact guidance entry always wins over a set that also claims the key', () => {
+    const m = messageFor({ alpha: 1 });
+    expect(m).toContain('`alpha` has its own exact prescription.');
+    expect(m).not.toContain('The legacy family was retired');
+  });
+
+  it('rule 2 — among sets, declaration order decides', () => {
+    // `beta` is a member of BOTH sets; the first declared set answers.
+    const m = messageFor({ beta: 1 });
+    expect(m).toContain('The legacy family was retired');
+    expect(m).not.toContain('The overlap family answer.');
+    // The second set is not dead — its unshared member still reaches it.
+    expect(messageFor({ delta: 1 })).toContain('The overlap family answer.');
+  });
+
+  it('rule 3 — a set match suppresses the rename channel for that key', () => {
+    // `gamma` is within edit distance of nothing declared, but make the point
+    // on a key that IS: `replacment` (no set) gets a rename, while a set
+    // member never does — matched means answered.
+    expect(messageFor({ replacment: 'x' })).toContain('`replacment` → `replacement`');
+    expect(messageFor({ gamma: 1 })).not.toContain('Did you mean');
+  });
+
+  it('rule 4 — a set speaks once per message, however many members are written', () => {
+    const m = messageFor({ beta: 1, gamma: 1 });
+    expect(m.split('The legacy family was retired')).toHaveLength(2);
+  });
+
+  it('rules compose in one message: exact + two sets + a rename, each exactly once', () => {
+    const m = messageFor({ alpha: 1, beta: 1, delta: 1, replacment: 'x' });
+    expect(m).toContain('`alpha` has its own exact prescription.');
+    expect(m).toContain('The legacy family was retired');
+    expect(m).toContain('The overlap family answer.');
+    expect(m).toContain('`replacment` → `replacement`');
+    expect(m.endsWith(` ${HISTORY}`)).toBe(true);
+    // Bullets appear in KEY order (alpha, beta, delta), not set-declaration
+    // order — the set's bullet sits at the first key that matched it.
+    expect(m.indexOf('exact prescription')).toBeLessThan(m.indexOf('legacy family'));
+    expect(m.indexOf('legacy family')).toBeLessThan(m.indexOf('overlap family'));
+  });
+
+  it('the pattern form answers spellings nobody enumerated', () => {
+    for (const key of ['exportMode', 'experimentalFlag', 'exportTarget']) {
+      expect(messageFor({ [key]: 1 }), key).toContain('Export/experimental knobs live in `replacement`.');
+    }
+    // …and does not claim keys outside itself.
+    expect(messageFor({ zz: 1 })).not.toContain('Export/experimental knobs');
+  });
+
+  it('keySetMatches is stateless even on a /g pattern', () => {
+    // `RegExp#test` advances `lastIndex` on a sticky/global regex, making the
+    // same key alternate between matched and unmatched on repeated parses.
+    // `keySetMatches` uses `String#search`, which restores `lastIndex` by
+    // spec — asserted directly so a refactor back to `.test()` fails here.
+    const set = { name: 's', keys: /vis/g, prescription: 'p' } as const;
+    expect(keySetMatches(set, 'visibleWhenn')).toBe(true);
+    expect(keySetMatches(set, 'visibleWhenn')).toBe(true);
+    expect(keySetMatches(set, 'visibleWhenn')).toBe(true);
   });
 });
 

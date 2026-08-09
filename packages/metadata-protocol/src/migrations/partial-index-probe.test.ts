@@ -157,6 +157,97 @@ describe('probe-first partial index replacement (#6418)', () => {
         expect(classifyIndexFailure('disk I/O error')).toBe('failed');
     });
 
+    /**
+     * #6699 — the substance of the migration onto `@objectstack/types`'
+     * `isUniqueViolationError`: the conflict is judged on the channels the
+     * driver actually wrote it to, not on prose alone.
+     *
+     * Every message below is deliberately USELESS — none carries a word any
+     * unique-violation vocabulary's message limb looks for — so each case can
+     * pass ONLY by reading `code` / `errno`. The second assertion in each case
+     * proves that: run the same prose through the classifier on its own and the
+     * verdict is `failed`, which is what this module answered for all of them
+     * while it carried its own message-only regex.
+     */
+    it.each([
+        ['a SQLite extended result code', { code: 'SQLITE_CONSTRAINT_UNIQUE' }],
+        ["mysql2's symbolic name", { code: 'ER_DUP_ENTRY' }],
+        ['a bare MySQL errno', { errno: 1062 }],
+        ['a Postgres SQLSTATE', { code: '23505' }],
+    ])('reads a conflict off %s when the message says nothing (#6699)', (_label, channels) => {
+        const error = Object.assign(new Error('insert failed'), channels);
+        expect(classifyIndexFailure(error)).toBe('conflict');
+        expect(classifyIndexFailure(error.message)).toBe('failed');
+    });
+
+    it('follows a pooled wrapper down to the cause (#6699)', () => {
+        // Pool and query-builder layers re-throw with the original attached, so
+        // the only copy of the condition is one step down.
+        const wrapped = Object.assign(new Error('Write failed'), {
+            cause: Object.assign(new Error('insert failed'), { code: '23505' }),
+        });
+        expect(classifyIndexFailure(wrapped)).toBe('conflict');
+        expect(classifyIndexFailure(wrapped.message)).toBe('failed');
+    });
+
+    it('keeps the data verdict ahead of the dialect verdict on the OBJECT channel too (#6699)', () => {
+        // The arm order, re-pinned where widening the input could have broken
+        // it: a duplicate reported on `code`, wrapped by a layer whose prose is
+        // a dialect refusal. Judged on the message alone this is `unsupported`
+        // — "this database cannot build this index" for a real data conflict,
+        // exactly the misreport the ordering exists to prevent.
+        const both = Object.assign(new Error('near "WHERE": syntax error'), {
+            code: 'SQLITE_CONSTRAINT_UNIQUE',
+        });
+        expect(classifyIndexFailure(both)).toBe('conflict');
+        expect(classifyIndexFailure(both.message)).toBe('unsupported');
+        // …and on a single string carrying both facts, unchanged since #6418.
+        expect(
+            classifyIndexFailure('near "WHERE": syntax error — duplicate key value violates unique constraint'),
+        ).toBe('conflict');
+    });
+
+    it('a dialect refusal carrying its own code is still `unsupported` (#6699)', () => {
+        // Widening the input from `string` to the error object must not blind
+        // the second arm: MySQL's parse error has `code` and `errno` too, and
+        // neither is a unique-violation signal, so the verdict has to come from
+        // the message exactly as before.
+        const parseError = Object.assign(
+            new Error("You have an error in your SQL syntax ... near 'WHERE state'"),
+            { code: 'ER_PARSE_ERROR', errno: 1064 },
+        );
+        expect(classifyIndexFailure(parseError)).toBe('unsupported');
+        const io = Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR', errno: 10 });
+        expect(classifyIndexFailure(io)).toBe('failed');
+    });
+
+    it('the probe hands the ERROR to the classifier, not its message (#6699)', async () => {
+        // The threading pin, and the only test here that can see it: every
+        // assertion above still passes if `probeThenReplaceIndex` keeps
+        // unwrapping `err.message` before classifying. This one cannot — the
+        // verdict exists nowhere but on `code`.
+        const codeOnly: IndexExec = async (sql: string) => {
+            if (sql.startsWith('CREATE')) {
+                throw Object.assign(new Error('insert failed'), { code: 'SQLITE_CONSTRAINT_UNIQUE' });
+            }
+            return db.exec(sql);
+        };
+
+        const outcome = await probeThenReplaceIndex(codeOnly, {
+            indexName: REAL,
+            probeIndexName: PROBE,
+            buildSql,
+        });
+
+        expect(outcome.status).toBe('conflict');
+        expect(outcome.failedAt).toBe('probe');
+        // `detail` is unchanged — still the driver's own prose, for the operator.
+        expect(outcome.detail).toBe('insert failed');
+        // The probe is what failed, so the previous index is untouched.
+        expect(indexDdl(REAL)).toEqual(EXISTING_DDL);
+        expect(indexDdl(PROBE)).toBeUndefined();
+    });
+
     it('logProblem prefers error(), falls back to warn(), and tolerates neither', () => {
         const full = { warn: vi.fn(), error: vi.fn() };
         logProblem(full, 'msg', 'detail');

@@ -1504,10 +1504,24 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
   });
 
   it('rejects arbitrary unknown tenancy keys instead of silently stripping them (#1535)', () => {
+    // Truly arbitrary — no tombstone, no near-declared-key. Rejected with the
+    // surface named; there is nothing more the message can honestly offer.
+    const result = TenancyConfigSchema.safeParse({ enabled: true, zzNotAKey: 1 });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.message).join('\n'))
+      .toContain('Unrecognized key(s) on `tenancy`: `zzNotAKey`');
+  });
+
+  it('a near-miss of a live key gets the template rename, not a dead-end verdict (#6619)', () => {
+    // While the map was hand-written, `tenantfield` was answered with
+    // "`tenantfield` is not a `tenancy` key." — a verdict that names the
+    // problem and never the fix. The fold onto `strictObject` brought the
+    // edit-distance channel with it: the same input now points at the key the
+    // author meant. A deliberate byte change, recorded as such.
     const result = TenancyConfigSchema.safeParse({ enabled: true, tenantfield: 'org_id' });
     expect(result.success).toBe(false);
     expect(result.error!.issues.map((i) => i.message).join('\n'))
-      .toContain('`tenantfield` is not a `tenancy` key');
+      .toContain('Did you mean `tenantfield` → `tenantField`?');
   });
 
   it('rejects a retired key on ObjectSchema.create() (the authoring entrypoint)', () => {
@@ -1522,22 +1536,28 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
 });
 
 /**
- * Message ORDER on `strictTenancyError` (#6416, applying #5955's ruling).
+ * Message ORDER on the `tenancy` unknown-key rejection (#6416, applying
+ * #5955's ruling; #6619 folded the map into the shared template).
  *
- * A hand-written `$ZodErrorMap`: it never calls `strictUnknownKeyError`, so
- * #5955's reorder of the shared template did not reach it, and it is not one of
- * the 44 direct call sites #5593 migrates to `strictObject` either. Its
- * explanatory sentence is the standing two-modes explainer, and its FIX channel
- * is the per-key `  • ` bullets built just above it — the tombstone that tells
- * an upgrading author what to write instead. Those bullets used to sit BEHIND
- * ~160 characters of standing background, which is past the front of the
- * single-line renders several consumers use (`os validate`'s `• where: message`,
- * CI logs).
+ * Written against `strictTenancyError`, the hand-written `$ZodErrorMap` that
+ * neither #5955 nor #5593 could reach; #6416 direction 1 reordered it in place
+ * with these pins as acceptance criteria, and #6619 folded it into
+ * `strictObject` — the tombstones as exact `guidance` entries, the standing
+ * two-modes explainer in the template's `history` slot (which is the slot for
+ * "the sentence that must come LAST"). The pins migrated with the code: the
+ * ORDER contract (front matter → fix channels → explainer last) is now the
+ * template's own. Two byte-level changes rode the fold, pinned below:
+ *
+ * - a near-miss of a live key (`tenantfield`) gets the template's rename in
+ *   the front matter instead of the dead-end "`x` is not a `tenancy` key."
+ *   bullet the hand-written map emitted;
+ * - a key with no fix at all gets NO bullet — the front matter plus the
+ *   explainer carry everything the old catch-all bullet said.
  *
  * ORDER pins, not presence checks. Every `toContain` in the block above stays
  * green under either order — that is exactly why they cannot carry this fact.
  */
-describe('strictTenancyError message order — bullets before the explainer (#6416)', () => {
+describe('tenancy unknown-key message order — bullets before the explainer (#6416 / #6619)', () => {
   const EXPLAINER =
     'The two supported tenancy modes are: database-per-tenant = environment-level ' +
     'deployment (no object config); row-level isolation = `tenancy.enabled` + ' +
@@ -1562,28 +1582,41 @@ describe('strictTenancyError message order — bullets before the explainer (#64
     expect(m.endsWith(` ${EXPLAINER}`)).toBe(true);
   });
 
-  it('keeps EVERY per-key bullet ahead of the explainer, not just the first', () => {
+  it('keeps EVERY fix channel ahead of the explainer, not just the first', () => {
     // One issue names every offending key, so the explainer is a per-MESSAGE
-    // sentence: a reorder that put it after the first bullet would bury the rest.
+    // sentence: a reorder that put it after the first fix would bury the rest.
+    // Three keys, all three channels at once: two tombstone bullets plus the
+    // rename `tenantfield` earns since #6619 (the hand-written map answered it
+    // with a dead-end "is not a `tenancy` key." bullet instead).
     const m = messageFor({ strategy: 'isolated', crossTenantAccess: true, tenantfield: 'org_id' });
-    for (const bullet of [
+    for (const fix of [
+      'Did you mean `tenantfield` → `tenantField`?',
       '`tenancy.strategy` was removed',
       '`tenancy.crossTenantAccess` was removed',
-      '`tenantfield` is not a `tenancy` key.',
     ]) {
-      expect(m).toContain(bullet);
-      expect(m.indexOf(bullet), bullet).toBeLessThan(m.indexOf(EXPLAINER));
+      expect(m).toContain(fix);
+      expect(m.indexOf(fix), fix).toBeLessThan(m.indexOf(EXPLAINER));
     }
     expect(m.split(EXPLAINER)).toHaveLength(2);
     expect(m.endsWith(` ${EXPLAINER}`)).toBe(true);
   });
 
-  it('is a full-message pin for the plain unknown-key case', () => {
+  it('is a full-message pin for the near-miss case', () => {
     // Any stray separator, dropped newline or duplicated clause fails here.
+    // Byte change vs the hand-written map, deliberate (#6619): the dead-end
+    // bullet became the rename the author can act on.
     expect(messageFor({ tenantfield: 'org_id' })).toBe(
-      'Unrecognized key(s) on `tenancy`: `tenantfield`.\n' +
-      '  • `tenantfield` is not a `tenancy` key. ' +
+      'Unrecognized key(s) on `tenancy`: `tenantfield`. ' +
+      'Did you mean `tenantfield` → `tenantField`? ' +
       EXPLAINER,
+    );
+  });
+
+  it('is a full-message pin for the no-fix case', () => {
+    // No tombstone, no near key: no bullet at all — the front matter and the
+    // explainer carry everything the old catch-all bullet said.
+    expect(messageFor({ zzNotAKey: 1 })).toBe(
+      `Unrecognized key(s) on \`tenancy\`: \`zzNotAKey\`. ${EXPLAINER}`,
     );
   });
 });

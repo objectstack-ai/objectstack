@@ -580,10 +580,35 @@ describe('DatabaseLoader schema-sync failure reporting (#4728)', () => {
 
       await loader.list('object');
 
+      // The `project_id` → `environment_id` forward migration still runs; it
+      // probes the column list before touching anything.
       expect(raw).toHaveBeenCalled();
-      expect(raw.mock.calls.some(([sql]) => String(sql).includes('idx_sys_metadata_overlay_active'))).toBe(
+      expect(raw.mock.calls.some(([sql]) => /table_info|information_schema/i.test(String(sql)))).toBe(
         true,
       );
+    });
+
+    /**
+     * #6771 — this path is precisely where the removed producer was NOT a
+     * no-op. `syncSchema` threw "already exists" BEFORE materializing the
+     * declared indexes, so `idx_sys_metadata_overlay_active` was unclaimed and
+     * the loader's own `CREATE UNIQUE INDEX IF NOT EXISTS` won it — with the
+     * pre-ADR-0048 key `(type, name, organization_id, environment_id, scope)`.
+     * `syncDeclaredIndexes` skips by name, so nothing ever repaired it.
+     */
+    it('issues NO overlay-index DDL — this package is not a producer of that name', async () => {
+      const driver = createMockDriver();
+      driver.syncSchema = vi.fn().mockRejectedValue(alreadyExists());
+      const raw = vi.fn().mockResolvedValue(undefined);
+      (driver as unknown as { raw: unknown }).raw = raw;
+      const loader = new DatabaseLoader({ driver });
+
+      await loader.list('object');
+
+      const overlayDdl = raw.mock.calls
+        .map(([sql]) => String(sql))
+        .filter((sql) => /idx_sys_metadata_overlay_active/i.test(sql));
+      expect(overlayDdl).toEqual([]);
     });
   });
 

@@ -261,11 +261,31 @@ Four rules decide whether a given value survives:
 | 1 | **Trusted context is exempt** | A write carrying `context.isSystem === true` skips the strip entirely and may set read-only columns. |
 | 2 | **Only *caller-supplied* keys are candidates** | The engine snapshots the payload's keys at entry (`suppliedKeys`), *before* middleware and `beforeUpdate` hooks run. Only keys in that snapshot can be stripped. |
 | 3 | **Hook / middleware backfill survives** | A key a `beforeUpdate` hook *adds* to `data` is absent from the entry snapshot, so it is not a candidate — this is why the built-in `updated_by` / `updated_at` stamps land even though those columns are `readonly`. |
-| 4 | **`context.preserveAudit` admits a whitelist** | An opt-in historical import reinstates the audit/timestamp family and author-declared business `readonly` fields; platform-managed `system` columns (tenancy, generated) stay stripped. |
+| 4 | **`context.preserveAudit` admits a whitelist — on UPDATE only** | An opt-in historical import reinstates the audit/timestamp family and author-declared business `readonly` fields; platform-managed `system` columns (tenancy, generated) stay stripped. This exemption exists on the **UPDATE** path and nowhere else — see below. |
 
 Rule 2 is scoped to keys, not values: a key the caller sent stays a strip candidate even if
 a hook later overwrites its value. So a `beforeUpdate` hook can *backfill* a read-only
 field, but cannot *rescue* one the caller supplied.
+
+<Callout type="warn">
+**`preserveAudit` is an UPDATE-path exemption. It does not apply on INSERT (#6640).**
+The two write paths run two different strips: UPDATE is stripped inside the engine
+(`stripReadonlyFields`), which consults `preserveAudit`; CREATE is stripped earlier, at the
+DataProtocol ingress (`stripReadonlyForInsert`, #3043), whose only exemption is
+`context.isSystem`. So one historical import that *upserts* keeps an author-declared
+`readonly` column on the rows it **updates** and strips it from the rows it **creates**.
+
+That asymmetry is deliberate, not an oversight: `treatAsHistorical` arrives on an ordinary
+(non-system) REST import request, so honouring it on create would let any caller seed the
+approval/status columns the create-side strip exists to protect — in a single POST. **To
+replay archival read-only facts on create, write from a system context** (`isSystem`), the
+same trust marker rule 1 already names.
+
+A non-system create that *requests* `preserveAudit` and loses fields to the strip is not
+silently ignored: the server logs a `WARN` naming the object, the stripped fields, and this
+UPDATE-only rule. The strip still applies — the warning replaces the silence, not the
+enforcement.
+</Callout>
 
 <Callout type="warn">
 **Server-side plugins are not trusted by default.** `ctx.getService('data')` hands back the

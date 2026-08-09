@@ -2954,23 +2954,26 @@ describe('ADR-0089 D3a — strict view form schemas (loud mis-layered keys)', ()
 });
 
 /**
- * Message ORDER on `strictVisibilityError` (#6416, applying #5955's ruling).
+ * Message ORDER on the ADR-0089 visibility rejection (#6416, applying #5955's
+ * ruling; #6619 folded the map into the shared template).
  *
- * The map in `shared/visibility.ts` is a hand-written `$ZodErrorMap`: it never
- * calls `strictUnknownKeyError`, so #5955's reorder of the shared template did
- * not reach it, and it is not one of the 44 direct call sites #5593 migrates to
- * `strictObject` either. It had the same defect the ruling was filed against —
- * a ~120-char history sentence sitting BETWEEN the offending key and the
- * canonical-key pointer that fixes it, which is past the front of the single-
- * line renders several consumers use (`os validate`'s `• where: message`, CI
- * logs, and `validateFlowTriggerReadiness`, which flattens the newlines).
+ * This block was written against `strictVisibilityError`, the hand-written
+ * `$ZodErrorMap` that #5955 and #5593 could not reach; #6416 direction 1
+ * reordered it in place, and these pins were that reorder's acceptance
+ * criteria. #6619 then folded the map into `strictObject`'s set-keyed
+ * `guidance` channel (`VISIBILITY_STRICT_OPTIONS`), and the pins migrated with
+ * the code — the emission ORDER they encode (front matter → fix channels →
+ * explanatory sentence last) is the template's own contract. One byte-level
+ * change rode the fold and is pinned below as such: the prescription is now
+ * rendered as the template's `\n  • ` bullet instead of joined inline with a
+ * space, the same channel every other closed surface's prescriptions use.
  *
- * These are ORDER pins, not presence checks. The reorder deletes nothing, so
+ * These are ORDER pins, not presence checks. The fold deletes nothing, so
  * every existing `toContain` in the block above stays green either way; a
  * future edit that folds the sentence back into the middle passes all of them
  * and fails here.
  */
-describe('strictVisibilityError message order — fix before history (#6416)', () => {
+describe('visibility unknown-key message order — fix before history (#6416 / #6619)', () => {
   const HISTORY =
     'Before ADR-0089 D3a these were dropped silently, shipping inert metadata; ' +
     'a mis-layered or stale key is now a loud parse error.';
@@ -2988,8 +2991,11 @@ describe('strictVisibilityError message order — fix before history (#6416)', (
     const m = messageFor({ visibleWhenn: 'record.a == 1' });
     // 1. which key is wrong — and nothing before it
     expect(m.startsWith('Unrecognized key(s) on this view/page schema: `visibleWhenn`.')).toBe(true);
-    // 2. the fix, immediately after it — this is the whole point of the reorder
-    expect(m).toContain('`visibleWhenn`. If this is the conditional-visibility predicate');
+    // 2. the fix, immediately after it — this is the whole point of the reorder.
+    //    Since #6619 the prescription arrives as the shared template's `  • `
+    //    bullet (it rides the set-keyed guidance channel); the position is
+    //    unchanged — directly after the key statement, before the history.
+    expect(m).toContain('`visibleWhenn`.\n  • If this is the conditional-visibility predicate');
     // 3. the history sentence, verbatim, last — moved, never dropped
     expect(m).toContain(PRESCRIPTION);
     expect(m.indexOf(PRESCRIPTION)).toBeLessThan(m.indexOf(HISTORY));
