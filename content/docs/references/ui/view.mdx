@@ -829,7 +829,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| … +10 more>` | ✅ | Filter operator |
-| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
 
 ### Allowed Values: `ViewFilterRule.operator`
 
