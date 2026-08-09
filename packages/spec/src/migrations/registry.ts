@@ -1186,7 +1186,22 @@ const step17: MigrationStep = {
     + 'two the runtime honoured. It is tombstoned rather than deleted, so the answer arrives '
     + 'as a rejection carrying the fix; and because a descriptor lives in executor TypeScript '
     + 'rather than in stored metadata, its prescription is a semantic entry below rather than '
-    + 'a conversion `os migrate meta` could replay.',
+    + 'a conversion `os migrate meta` could replay.\n\n'
+    + 'The plugin manifest loses its whole `loading` block in this step (#4914, ADR-0049, '
+    + 'maintainer ruling 2026-08-04) — the same enforce-or-remove question asked of a block '
+    + 'rather than a key, and answered REMOVE on measurement: every reference to '
+    + '`manifest.loading.*` in objectstack, cloud and objectui lived inside `packages/spec` '
+    + 'itself, so a full loading policy parsed, entered the manifest, and configured nothing. '
+    + 'The reason it outranked ordinary inert-key cleanup is that one of its members was '
+    + '`sandboxing`, declaring process / vm / iframe / web-worker isolation and a service ACL: '
+    + 'an inert SECURITY control is worse than an absent one, because an author (very often an '
+    + 'AI, ADR-0033) reads the vocabulary as proof the isolation exists and stops looking. Hot '
+    + 'reload was a two-source defect on top of that — the retired `PluginHotReloadSchema` was '
+    + 'the dead one of two vocabularies, and the ruling converges on the live one, '
+    + '`HotReloadConfigSchema`, which `HotReloadManager` actually reads and which is KEPT '
+    + 'unenforced as the starting point for a separate future decision. Like `isAsync`, its '
+    + 'prescription is a semantic entry rather than a conversion: a manifest is not a stack '
+    + 'collection, so `os migrate meta` has no seam at which to rewrite one.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -2997,6 +3012,61 @@ const step17: MigrationStep = {
         + 'reports the total across the whole matching inbox rather than the window. A caller '
         + 'that omitted `limit` receives the same 50 rows it always received.',
     },
+    {
+      id: 'plugin-manifest-loading-retired',
+      surface:
+        'manifest.loading (the whole block: strategy / preload / codeSplitting / dynamicImport / '
+        + 'initialization / dependencyResolution / hotReload / caching / sandboxing / monitoring)',
+      replacement:
+        'nothing to re-declare — delete the key. Plugins are composed at boot: `defineStack` '
+        + 'registers them and the kernel runs `init` then `start` in an order topologically '
+        + "resolved from each composed plugin's own `dependencies` / `optionalDependencies` "
+        + '(`resolvePluginOrder` in `packages/core/src/plugin-order.ts`). For the isolation '
+        + '`loading.sandboxing` appeared to configure, use the plugin trust tier '
+        + '(`manifest.runtime`, ADR-0025 §3.6) and the manifest permission declarations, which '
+        + 'are the surfaces the platform actually enforces',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-08-04 on #4914. The block declared a '
+        + 'complete plugin loading policy and NOTHING read it. A bare-name scan of all three '
+        + 'repos — objectstack, cloud (measured 2026-08-09) and objectui (measured at pickup), '
+        + 'each with a control probe proving the scan saw the tree — put every hit inside '
+        + '`packages/spec` itself: this module\'s own declaration, its own unit tests, the '
+        + '`Manifest.loading` embed and the generated artifacts. `manifest.loading.*` had zero '
+        + 'readers in `packages/core`, `packages/runtime` and `packages/metadata`. So the key '
+        + 'parsed, entered the manifest, and changed nothing — #3950, at the scale of a whole '
+        + 'block. What made it outrank ordinary inert-key cleanup is `sandboxing`: it declared '
+        + 'process / vm / iframe / web-worker isolation, IPC transports and an `allowedServices` '
+        + 'ACL, so an AI author (ADR-0033) reading that vocabulary concluded the platform '
+        + 'isolates plugins, wrote the config, and received a clean parse and zero isolation. An '
+        + 'inert security control is worse than an absent one because it is believed. Hot reload '
+        + 'was additionally a TWO-SOURCE defect: the docs pointed at this dead '
+        + '`PluginHotReloadSchema` while the only implementation body, `HotReloadManager` '
+        + '(`packages/core/src/hot-reload.ts`), reads a different vocabulary — '
+        + '`HotReloadConfigSchema` in `plugin-lifecycle-advanced.zod.ts`. Ruling §2 converges on '
+        + 'the surviving side: that schema is KEPT as the starting point for a future enforce '
+        + 'decision (it has an implementation body but no runtime composes it yet), and '
+        + 'enforcing it is deliberately a separate decision, not this retirement. '
+        + 'Why D3 semantic and not a D2 conversion: the chain walks a normalized STACK and '
+        + '`applyConversionsToStoredItem` maps a metadata type onto one of its collections. A '
+        + 'package manifest is neither — `PLURAL_TO_SINGULAR` has no `packages` / `plugins` '
+        + 'entry, so a manifest is not a stack collection member and a stored manifest row '
+        + 'passes that seam through unchanged. A conversion would be a transform with no seam '
+        + 'that ever runs.',
+      acceptanceCriteria:
+        'No `objectstack.plugin.json` and no stored package manifest carries a `loading` key. '
+        + 'The enforced channel is the one place a manifest is parsed with an author present: '
+        + '`os plugin build` runs `ManifestSchema.safeParse` and exits non-zero, printing the '
+        + 'tombstone prescription, so a manifest still declaring `loading` fails its build '
+        + 'rather than shipping. TypeScript authors get it earlier still — `loading` is typed '
+        + '`never`, so assigning it is a `tsc` error. ⚠️ Runtime behaviour is deliberately '
+        + 'UNCHANGED and must be verified as such: nothing ever read the block, so removing it '
+        + 'removes no behaviour. A package ALREADY INSTALLED whose stored manifest carries '
+        + '`loading` keeps working — the registry\'s `validate()` is an explicit diagnostic and '
+        + 'not a gate (it catches, logs `[metadata_spec_invalid]`, and registers the item '
+        + 'anyway, deliberately, so bad metadata is never a data outage), so such a row '
+        + 'degrades to one log line at registration rather than a boot failure. Clear it by '
+        + 'deleting the key from the source manifest and reinstalling.',
+    },
   ],
 };
 
@@ -3157,6 +3227,26 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // callers rather than a stack conversion").
     'api/ListNotificationsRequest:cursor',
     'api/ListNotificationsResponse:cursor',
+    // #4914 — ADR-0049 enforce-or-remove on the plugin manifest's whole
+    // `loading` block (maintainer ruling 2026-08-04). ONE tombstoned key here,
+    // because `loading` was the single carrier: every schema underneath it
+    // (`PluginLoadingConfig` and the ten members it combined) leaves the
+    // published set as a whole-def removal and is registered in
+    // `RETIRED_DEFS_BY_MAJOR` below, not as ~27 individual key entries.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `automation/ActionDescriptor:isAsync` above gives: the conversion chain
+    // walks a normalized STACK (`mapCollection(stack, 'objects' | 'views' | …)`)
+    // and `applyConversionsToStoredItem` maps a metadata type onto one of those
+    // collections. A package manifest is neither — there is no `packages` /
+    // `plugins` entry in `PLURAL_TO_SINGULAR`, so a manifest is not a stack
+    // collection member and a stored manifest row passes that seam through
+    // unchanged. A MetadataConversion here would be a transform with no seam
+    // that ever runs. The prescription reaches authors instead through the
+    // tombstone at the one place a manifest is parsed with an author present
+    // (`os plugin build` → `ManifestSchema.safeParse`, which exits non-zero),
+    // and through the D3 semantic entry `plugin-manifest-loading-retired`.
+    'kernel/Manifest:loading',
   ],
 };
 
@@ -3306,5 +3396,29 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     'automation/ETLTransformationType',
     'automation/ETLSyncMode',
     'automation/ETLRunStatus',
+    // #4914 — the plugin manifest's `loading` block (ADR-0049 enforce-or-remove,
+    // maintainer ruling 2026-08-04). `PluginLoadingConfig` was reachable from
+    // authored metadata ONLY through `Manifest.loading`, and the ten members
+    // below were embedded only by it, so retiring the carrier key unpublishes
+    // the whole closure. The carrier itself is a `retiredKey()` tombstone
+    // registered one level up in `RETIRED_KEYS_BY_MAJOR`.
+    //
+    // ⚠️ `kernel/PluginLoadingEvent` and `kernel/PluginLoadingState` are
+    // deliberately NOT here. They live in the same module and share its prefix,
+    // but neither was ever embedded in `PluginLoadingConfig` — they are the
+    // observational half (a lifecycle event and a per-plugin state), they are
+    // not authorable, and they still emit. Module adjacency is not evidence,
+    // the `system/ServerRateLimitConfig` note above applies verbatim.
+    'kernel/PluginLoadingConfig',
+    'kernel/PluginLoadingStrategy',
+    'kernel/PluginPreloadConfig',
+    'kernel/PluginCodeSplitting',
+    'kernel/PluginDynamicImport',
+    'kernel/PluginInitialization',
+    'kernel/PluginDependencyResolution',
+    'kernel/PluginHotReload',
+    'kernel/PluginCaching',
+    'kernel/PluginSandboxing',
+    'kernel/PluginPerformanceMonitoring',
   ],
 };

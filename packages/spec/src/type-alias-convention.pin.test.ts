@@ -920,7 +920,8 @@ export type Iso439 = Assert<Eq< z.input< typeof M94.PluginHealthStatusSchema >, 
 export type Iso440 = Assert<Eq< z.input< typeof M94.PluginHealthReportSchema >, z.infer< typeof M94.PluginHealthReportSchema > >>;
 
 // kernel/plugin-loading.zod.ts
-export type Iso441 = Assert<Eq< z.input< typeof M95.PluginLoadingStrategySchema >, z.infer< typeof M95.PluginLoadingStrategySchema > >>;
+// (Iso441 pinned `PluginLoadingStrategySchema`, removed with the rest of the
+// `manifest.loading` block in #4914 — ADR-0049 enforce-or-remove.)
 export type Iso442 = Assert<Eq< z.input< typeof M95.PluginLoadingEventSchema >, z.infer< typeof M95.PluginLoadingEventSchema > >>;
 
 // kernel/plugin-registry.zod.ts

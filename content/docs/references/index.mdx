@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1586 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1575 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -26,14 +26,14 @@ counts are sums of the rows they head. Regenerate with
 | [Data Protocol](/docs/references/data) | 30 | 166 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 28 | Users and accounts, organizations, positions, API keys, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 27 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
-| [Kernel Protocol](/docs/references/kernel) | 31 | 187 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
+| [Kernel Protocol](/docs/references/kernel) | 31 | 176 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
 | [QA Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
 | [Security Protocol](/docs/references/security) | 5 | 27 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 8 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 37 | 292 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 147 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **200** | **1586** | 14 protocol modules |
+| **Total** | **200** | **1575** | 14 protocol modules |
 
 ---
 
@@ -215,7 +215,7 @@ The single connector protocol (ADR-0097) — catalog descriptors and provider-bo
 
 ## Kernel Protocol
 
-**Source:** `packages/spec/src/kernel/` · **Import:** `@objectstack/spec/kernel` · **31 pages, 187 schemas**
+**Source:** `packages/spec/src/kernel/` · **Import:** `@objectstack/spec/kernel` · **31 pages, 176 schemas**
 
 Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry.
 
@@ -243,7 +243,7 @@ Plugin lifecycle and manifests, capabilities and security, metadata loading, ser
 | [`plugin.zod.ts`](/docs/references/kernel/plugin) | `Plugin` |
 | [`plugin-capability.zod.ts`](/docs/references/kernel/plugin-capability) | `CapabilityConformanceLevel`, `ExtensionPoint`, `PluginCapability`, `PluginCapabilityManifest`, `PluginDependency`, `PluginInterface`, `ProtocolFeature`, `ProtocolReference`, `ProtocolVersion` |
 | [`plugin-lifecycle-advanced.zod.ts`](/docs/references/kernel/plugin-lifecycle-advanced) | `AdvancedPluginLifecycleConfig`, `DistributedStateConfig`, `GracefulDegradation`, `HotReloadConfig`, `PluginHealthCheck`, `PluginHealthReport`, `PluginHealthStatus`, `PluginStateSnapshot`, `PluginUpdateStrategy` |
-| [`plugin-loading.zod.ts`](/docs/references/kernel/plugin-loading) | `PluginCaching`, `PluginCodeSplitting`, `PluginDependencyResolution`, `PluginDynamicImport`, `PluginHotReload`, `PluginInitialization`, `PluginLoadingConfig`, `PluginLoadingEvent`, `PluginLoadingState`, `PluginLoadingStrategy`, `PluginPerformanceMonitoring`, `PluginPreloadConfig`, `PluginSandboxing` |
+| [`plugin-loading.zod.ts`](/docs/references/kernel/plugin-loading) | `PluginLoadingEvent`, `PluginLoadingState` |
 | [`plugin-registry.zod.ts`](/docs/references/kernel/plugin-registry) | `PluginInstallConfig`, `PluginQualityMetrics`, `PluginRegistryEntry`, `PluginSearchFilters`, `PluginStatistics`, `PluginVendor` |
 | [`plugin-security.zod.ts`](/docs/references/kernel/plugin-security) | `DependencyGraph`, `DependencyGraphNode`, `PackageDependencyConflict`, `PackageDependencyResolutionResult`, `PluginProvenance`, `PluginTrustScore`, `ResolvedPackageDependency`, `SBOM`, `SBOMEntry`, `SecurityPolicy`, `SecurityScanResult`, `SecurityVulnerability`, `VulnerabilitySeverity` |
 | [`plugin-security-advanced.zod.ts`](/docs/references/kernel/plugin-security-advanced) | `KernelSecurityPolicy`, `KernelSecurityScanResult`, `KernelSecurityVulnerability`, `PermissionAction`, `PermissionScope`, `PluginPermission`, `PluginPermissionSet`, `PluginSecurityManifest`, `PluginTrustLevel`, `ResourceType`, `RuntimeConfig`, `SandboxConfig` |
