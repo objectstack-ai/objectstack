@@ -5252,6 +5252,40 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#7019] Same gate, same mechanism as the `PUT` twins —
+                    // but the argument for it is NOT the ADR-0106 round trip,
+                    // and saying so matters. Nothing is masked here and nothing
+                    // is round-tripped: this route discards a customization
+                    // overlay outright, so before this gate an authenticated
+                    // session holding no authoring capability at all could
+                    // reset any customized metadata item in the deployment to
+                    // its artifact default — and with `?dropStorage=true`, drop
+                    // the object's physical table with it.
+                    //
+                    // It belongs with the two PUTs because deleting a
+                    // customization is authoring it (ADR-0066 D1), and because
+                    // the fix is the same four lines — not because it is the
+                    // same argument.
+                    //
+                    // Gate FIRST — before the protocol is resolved — so the
+                    // 501-vs-200 answer leaks no kernel capability, and, the
+                    // point here, so the refusal happens with the overlay row
+                    // still intact. A gate that answers 403 after
+                    // `deleteMetaItem` has run would still be the bug.
+                    // `isSystem` bypasses, as everywhere else.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const held = new Set<string>(
+                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                    );
+                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Resetting a metadata item requires the `manage_metadata` capability.',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).deleteMetaItem) {
                         res.status(501).json({
@@ -5578,6 +5612,42 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#7019] The compound-name twin of the gate #6603 put on
+                    // `PUT /meta/:type/:name` — WORD FOR WORD the same
+                    // mechanism, because it is word for word the same
+                    // operation: one generic `saveMetaItem`, reached by a name
+                    // spelled in two segments instead of one.
+                    //
+                    // Gating only the single-segment door left this one as a
+                    // bypass of it, and that was measured rather than reasoned:
+                    // with #6603's gate in place, the identical ADR-0106
+                    // GET → edit a label → PUT still round-tripped a MASKED
+                    // object schema back into the store through here, deleting
+                    // the fields the caller was never allowed to see. Same
+                    // caller, same object, same loss, one route over.
+                    //
+                    // Independently of masking, this door also served the older
+                    // hole for EVERY metadata type: any authenticated session
+                    // could clobber any metadata item.
+                    //
+                    // Gate FIRST — before the protocol is resolved — so an
+                    // unauthorized caller cannot use the 501-vs-200 answer to
+                    // probe which kernels implement saving, and so nothing is
+                    // written before the refusal. `isSystem` bypasses, matching
+                    // every other capability gate on the platform.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const held = new Set<string>(
+                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                    );
+                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Saving a metadata item requires the `manage_metadata` capability.',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
                         res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });

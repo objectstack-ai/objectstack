@@ -262,6 +262,40 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
         // PUT /metadata/:type/:name (Save)
         if (method === 'PUT' && body) {
+            // [#7019] The SECOND TRANSPORT for the operation #6603 gated on the
+            // REST side. Same `protocol.saveMetaItem`, same metadata, different
+            // door — so a gate on only one of them is not a gate, it is a
+            // detour sign. Mechanism copied from `POST /_migrate-stored` below
+            // in this very file rather than reinvented.
+            //
+            // The read side of this dispatcher already runs the ADR-0106 mask
+            // (`resolveObjectMasker` / `maskObjectSchema` above), which is
+            // exactly the read/write asymmetry #6603 describes: a caller is
+            // served an object schema with the fields they may not read removed
+            // WHOLE, and sending that document straight back used to persist it
+            // — deleting those fields. Refusing the write is the write-side
+            // answer, here as there.
+            //
+            // Independently of masking: before this, any authenticated session
+            // could clobber any metadata item through this transport.
+            //
+            // Gate FIRST — before the protocol service is resolved — so an
+            // unauthorized caller cannot use the 501-vs-200 answer to probe
+            // which kernels can save, and so nothing is written before the
+            // refusal. `manage_metadata` is ADR-0066 D1's authoring capability;
+            // engine self-invocation (`isSystem`) bypasses, matching
+            // `actionPermissionError` and the migrate-stored gate below.
+            const ec: any = _context.executionContext;
+            if (!ec?.isSystem && !new Set<string>(ec?.systemPermissions ?? []).has('manage_metadata')) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        'Saving a metadata item requires the `manage_metadata` capability.',
+                        403,
+                    ),
+                };
+            }
+
             // Try to get the protocol service directly
             const protocol = await deps.resolveService(_context, 'protocol');
 
