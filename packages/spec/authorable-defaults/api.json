@@ -103,6 +103,7 @@
     "api/MetadataCacheResponse:notModified = false",
     "api/MetadataEndpointsConfig:cacheTtl = 3600",
     "api/MetadataEndpointsConfig:enableCache = true",
+    "api/MetadataEndpointsConfig:maskObjectFields = true",
     "api/MetadataEndpointsConfig:prefix = \"/meta\"",
     "api/MetadataExportRequest:format = \"json\"",
     "api/MetadataImportRequest:conflictResolution = \"skip\"",

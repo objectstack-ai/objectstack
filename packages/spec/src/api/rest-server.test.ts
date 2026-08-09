@@ -14,6 +14,7 @@ import {
   RestServerConfig,
   type RestApiConfig as RestApiConfigType,
   type RestServerConfig as RestServerConfigType,
+  type MetadataEndpointsConfig,
 } from './rest-server.zod';
 
 describe('RestApiConfigSchema', () => {
@@ -268,6 +269,55 @@ describe('MetadataEndpointsConfigSchema', () => {
     });
 
     expect(config.endpoints?.schema).toBe(false);
+  });
+
+  it('[ADR-0106 D8] maskObjectFields defaults to true — the mask is ON unless opted out', () => {
+    // The default is the whole security posture of the key: a deployment that
+    // never mentions `maskObjectFields` must still mask served object schemas.
+    // Pinning the MATERIALIZED default (not just the declaration) is what makes
+    // a later `.optional()` — which would hand `undefined` to the REST layer —
+    // fail here rather than silently unmask every metadata read.
+    const config = MetadataEndpointsConfigSchema.parse({});
+
+    expect(config.maskObjectFields).toBe(true);
+  });
+
+  it('[ADR-0106 D8] maskObjectFields: false is the declared per-server opt-out', () => {
+    // The opt-out has to SURVIVE the parse. Before this key had a declared seat,
+    // the schema stripped it (zod's default posture for an undeclared key) and
+    // the REST layer only saw it because it reads its config object raw, through
+    // a cast. An author who parses their config first now keeps the opt-out.
+    const optedOut = MetadataEndpointsConfigSchema.parse({ maskObjectFields: false });
+
+    expect(optedOut.maskObjectFields).toBe(false);
+
+    // Explicit `true` is a real answer too, not a no-op the parse discards.
+    expect(MetadataEndpointsConfigSchema.parse({ maskObjectFields: true }).maskObjectFields).toBe(true);
+  });
+
+  it('[ADR-0106 D8] maskObjectFields is authorable without a cast, and is a boolean (compile-time)', () => {
+    // The declaration's REASON for existing: `objectstack.config.ts` authors the
+    // key by name and `packages/rest`'s `normalizeConfig` reads it. Both of them
+    // go through this input type, so this is the pin that says the key no longer
+    // needs `(metadata as any)` to be reachable.
+    const authored: MetadataEndpointsConfig = { maskObjectFields: false };
+    const readAsBoolean: boolean | undefined = authored.maskObjectFields;
+    expect(readAsBoolean).toBe(false);
+
+    // Optional on the INPUT side — omitting it is how a deployment takes the
+    // default, and it must stay legal.
+    const omitted: MetadataEndpointsConfig = { prefix: '/meta' };
+    expect(omitted.maskObjectFields).toBeUndefined();
+
+    // …and it is a boolean switch, not a string one. Never invoked: its only job
+    // is to make the compiler prove the seat is typed rather than `any`, which
+    // is exactly what the cast it replaces could not do.
+    const mustNotCompile = () => {
+      // @ts-expect-error `maskObjectFields` is a boolean — a truthy string is not the opt-out
+      const wrongType: MetadataEndpointsConfig = { maskObjectFields: 'false' };
+      return wrongType;
+    };
+    expect(typeof mustNotCompile).toBe('function');
   });
 });
 

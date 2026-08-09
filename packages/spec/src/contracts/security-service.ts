@@ -33,7 +33,9 @@
  *   answers "which columns may this caller see" for presentation purposes; when
  *   the object schema cannot be resolved it returns `undefined`, meaning
  *   "no answer — use your own fallback", NOT "no fields are readable". An empty
- *   array is a real answer and means the opposite: nothing is readable.
+ *   array is a real answer and means the opposite: nothing is readable. Its
+ *   metadata-plane sibling {@link ISecurityService.getMetadataReadableFields}
+ *   (ADR-0106 D7) reads the same two empty answers the same way.
  * - **Verdicts fail to ABSTENTION.** {@link ISecurityService.checkAuthoredRowWrite}
  *   answers a question a composing caller may use to WIDEN, so its failure mode
  *   is the one that changes nothing: `abstain`. It never reports `admit` for a
@@ -230,6 +232,49 @@ export interface ISecurityService {
    * A system context bypasses field-level security and yields the full field set.
    */
   getReadableFields(object: string, context?: SecurityContext): Promise<string[] | undefined>;
+
+  /**
+   * [ADR-0106 D7] The METADATA-PLANE variant of {@link getReadableFields}:
+   * which field names may be DISCLOSED to `context` when an object SCHEMA is
+   * served, as opposed to which columns of a row it may read.
+   *
+   * Identical to {@link getReadableFields} in every respect but one — a caller
+   * that resolves to **zero** permission sets goes through the same fallback-set
+   * resolution `/auth/me/permissions` uses (`security.fallbackPermissionSet`,
+   * default `member_default`) instead of falling open to the full field set.
+   *
+   * **Why the two differ rather than converge.** `getReadableFields` mirrors the
+   * engine middleware, which skips its whole field gate for a caller with no
+   * permission sets; on the DATA plane, reporting a narrowing the enforcement
+   * path would not apply is its own kind of drift, so falling open is the
+   * correct, drift-free answer there. The metadata plane has no such symmetry to
+   * preserve — the question is disclosure, and D7 rules that a public/guest
+   * deployment's schema exposure must be a deliberate permission-set decision
+   * rather than an accidental everything-default. It still falls open when the
+   * fallback set itself resolves to nothing (no `member_default` in the
+   * deployment at all): that is the "no FLS posture here" tier, not a restricted
+   * caller.
+   *
+   * **Fails SOFT, with the same two distinct empty answers as
+   * {@link getReadableFields}:** `undefined` is "no answer — use your own
+   * fallback" (e.g. the object schema could not be resolved); `[]` is the real
+   * answer that this caller may see NO field. A system context bypasses and
+   * yields the full field set.
+   *
+   * **OPTIONAL, and absence is a defined state — not a bug.** A security service
+   * that predates ADR-0106, or one that cannot honour the fallback resolution,
+   * omits it; consumers feature-detect
+   * (`typeof svc.getMetadataReadableFields === 'function'`) and fall back to
+   * {@link getReadableFields}, which is the pre-ADR-0106 behaviour and never a
+   * *narrower* answer. Declaring it optional is what makes that degradation a
+   * property of the type rather than a promise in prose: the unguarded call does
+   * not compile, so a consumer cannot skip the fallback by accident.
+   *
+   * The masking itself is gated separately by the deployment's D8 opt-outs
+   * (`metadata.maskObjectFields: false`, `OS_ALLOW_UNMASKED_OBJECT_METADATA`);
+   * this method only answers the projection question when a mask applies.
+   */
+  getMetadataReadableFields?(object: string, context?: SecurityContext): Promise<string[] | undefined>;
 
   /**
    * The effective permission-set NAMES for `context` — positions expanded and
