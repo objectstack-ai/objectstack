@@ -136,7 +136,8 @@ export const SysUserDetailPage: Page = {
     tabs: {
       type: 'page:tabs',
       properties: {
-        type: 'line',
+        // `tabStyle`, not `type` (#6776) — see sys-organization.page.ts.
+        tabStyle: 'line',
         position: 'top',
         items: [
           {

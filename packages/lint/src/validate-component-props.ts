@@ -62,11 +62,24 @@
  * warning-period inventory is the acceptance baseline for the error upgrade,
  * and the upgrade is its own step once the inventory is empty.
  *
- * #5775 has since settled the spec side of that inventory — the keys the
- * renderers honour are declared, and the four nothing read are tombstoned with
- * ADR-0087 conversions. What stands between this rule and `error` is now #5728
- * and two page rewrites (`page:card.visible` → the ADR-0089 component-level
- * `visibleWhen`; #5776's tab `key` → `value`), not the props map.
+ * #5775 settled most of the spec side of that inventory — four keys nothing read
+ * are tombstoned with ADR-0087 conversions. Its stronger claim, that every key
+ * the renderers honour is now declared, was **incomplete**: #6776 re-counted
+ * against objectui `origin/main` and found five more author-facing props the
+ * renderers read and this map did not declare — `page:header`'s
+ * `recordChrome` / `showStar` / `showCopyId`, `page:accordion.variant`, and the
+ * tab strip's visual style, which the spec did declare but under a spelling
+ * (`page:tabs.type`) that collides with a page component's own dispatch key and
+ * is therefore unauthorable in the flat and JSX carriers. #6776 declares the
+ * four and renames the fifth to the `tabStyle` every carrier can express. Both
+ * cards are named here rather than only in a changelog because THIS comment is
+ * the inventory the error upgrade is measured against, and a count that reports
+ * itself complete while it is not is how the second half went unnoticed for a
+ * release.
+ *
+ * What stands between this rule and `error` is now #5728 and two page rewrites
+ * (`page:card.visible` → the ADR-0089 component-level `visibleWhen`; #5776's tab
+ * `key` → `value`), not the props map.
  *
  * ## Unregistered types are SKIPPED — a required semantic, not leniency
  *

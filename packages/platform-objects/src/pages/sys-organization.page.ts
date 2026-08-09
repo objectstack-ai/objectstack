@@ -48,7 +48,10 @@ export const SysOrganizationDetailPage: Page = {
     tabs: {
       type: 'page:tabs',
       properties: {
-        type: 'line',
+        // `tabStyle`, not `type` (#6776): the node's own dispatch key is
+        // already `type`, so the old spelling was unauthorable in the flat and
+        // JSX carriers and unvalidated everywhere.
+        tabStyle: 'line',
         position: 'top',
         items: [
           {

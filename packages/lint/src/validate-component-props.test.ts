@@ -312,6 +312,48 @@ describe('validateComponentProps — value verdicts', () => {
   });
 
   /**
+   * #6776 — the five keys #5775's count missed. Each is read by an objectui
+   * renderer and each was reported here as an undeclared key, so objectui's
+   * published manifest and this gate disagreed about the same author's page.
+   * This is the acceptance test for the declaration half: the shapes that used
+   * to warn must now be silent.
+   */
+  it('reports nothing on the page:header / page:accordion keys the renderers honour (#6776)', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        // objectui `apps/console/src/preview-samples.ts:68` verbatim — the
+        // measured warning site, on a non-record page.
+        { type: 'page:header', properties: { title: 'Welcome to the CRM', recordChrome: false } },
+        { type: 'page:header', properties: { title: 'Lead', showStar: false, showCopyId: false } },
+        { type: 'page:accordion', properties: { items: [], variant: 'card' } },
+        { type: 'page:tabs', properties: { tabStyle: 'card', items: [] } },
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  /**
+   * The other direction of the same card. `page:tabs.type` is now a tombstone,
+   * and a tombstone is REFUSED rather than reported as unknown — so the finding
+   * arrives as `component-props-invalid` carrying the rename prescription, not
+   * as `component-props-unknown-key` carrying nothing. The conversion that
+   * rewrites it is `retiredFromLoadPath`, so it deliberately does NOT run on
+   * this normalized input: an already-stored page keeps the old key and the
+   * author is told, which is the whole point of the tombstone.
+   */
+  it('refuses the retired `page:tabs.type` by name, with the prescription (#6776)', () => {
+    const findings = validateComponentProps(
+      stackWith([{ type: 'page:tabs', properties: { type: 'card', items: [] } }]),
+    );
+    expect(invalid(findings).map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.type',
+    ]);
+    expect(invalid(findings)[0].message).toContain('tabStyle');
+    // Not an unknown key — the schema still declares it, as a tombstone.
+    expect(unknownKeys(findings)).toEqual([]);
+  });
+
+  /**
    * The routing that keeps this gate whole across a future `strictObject`
    * batch. `AriaPropsSchema` is the one CLOSED shape inside these props (#4001
    * 批 16), so an unknown key under `aria` is refused by the PARSE rather than
