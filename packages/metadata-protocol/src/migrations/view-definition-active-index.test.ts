@@ -469,6 +469,14 @@ describe('sys_view_definition active-row uniqueness (#5839) on a NULL-safe key (
         // MariaDB's refusal of a functional key part, which #6417 introduces.
         expect(classifyIndexFailure('Functional index on a column is not supported')).toBe('unsupported');
         expect(classifyIndexFailure('disk I/O error')).toBe('failed');
+        // #6699: the same verdict off the `code` channel, with prose that
+        // carries no signal at all. Asserted through THIS module's re-export
+        // (the public `@objectstack/metadata-protocol` surface), because that is
+        // the export the classifier's own home is reached by — the full
+        // channel matrix lives in `partial-index-probe.test.ts`.
+        expect(
+            classifyIndexFailure(Object.assign(new Error('insert failed'), { code: 'ER_DUP_ENTRY' })),
+        ).toBe('conflict');
     });
 
     it('buildActiveIndexSql scopes rows AND spells the key NULL-safe', () => {
