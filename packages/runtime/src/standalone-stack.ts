@@ -57,6 +57,12 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { stampSearchPinyinEnabled } from '@objectstack/types';
+import {
+    BUILTIN_DRIVER_IDS,
+    DATABASE_DRIVER_SELECTION_ALIASES,
+    driverHasLocalDefault,
+    resolveDatabaseDriverId,
+} from '@objectstack/spec/data';
 import type { IDatasourceDriverFactory } from '@objectstack/service-datasource';
 import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
 import { loadTursoDriverFactory } from './turso-driver-factory.js';
@@ -89,21 +95,63 @@ export function resolveObjectStackHome(): string {
 
 /**
  * The driver kinds a standalone boot can dispatch — the ONE list, and the only
- * one (#6265).
+ * one (#6265), now shared with the CLI rather than merely singular here (#6345).
  *
  * Three consumers read it and every one of them used to carry its own answer:
  * the `databaseDriver` config key (a zod enum that rejected loudly), the
  * `OS_DATABASE_DRIVER` env var (a bare `as` cast that validated nothing, so an
  * unknown value fell through the dispatch chain's trailing `else` into SQLite),
- * and the `ResolvedDriverKind` union (a hand-written third copy). They are now
- * one declaration: the union is `z.infer`red from it, the env value is parsed
- * through it, and the refusal message enumerates `.options` rather than
- * repeating them — a kind added here cannot leave a stale legal-values list
- * behind.
+ * and the `ResolvedDriverKind` union (a hand-written third copy). #6265 made
+ * them one declaration.
+ *
+ * What #6265 could not fix from inside this file is that the CLI had a FOURTH
+ * answer. This enum listed canonical spellings only, while
+ * `packages/cli/src/utils/storage-driver.ts` accepted `pg`, `mysql2`, `mongo`,
+ * `libsql`, `wasm`, `sql`, `mingo`, … — measured on `main`, **10 of 21 spellings
+ * disagreed**, so `OS_DATABASE_DRIVER=pg` booted under `os start` and was
+ * refused here. The enum's VALUES are therefore no longer written here either:
+ * they are `BUILTIN_DRIVER_IDS` from `@objectstack/spec`, the one driver
+ * vocabulary both hosts read, and the accepted spellings are that table's
+ * aliases via {@link resolveExplicitDriver}. A driver added to the spec table
+ * appears on both hosts at once, which is the only shape in which this fork
+ * cannot re-open.
  */
-export const StandaloneDatabaseDriverSchema = z.enum([
-    'sqlite', 'sqlite-wasm', 'memory', 'postgres', 'mysql', 'mongodb', 'turso',
-]);
+export const StandaloneDatabaseDriverSchema = z.enum(BUILTIN_DRIVER_IDS);
+
+/**
+ * The `databaseDriver` CONFIG key's schema — an alias-accepting front door onto
+ * {@link StandaloneDatabaseDriverSchema} (#6345).
+ *
+ * `databaseDriver` and `OS_DATABASE_DRIVER` are two spellings of one decision,
+ * so accepting `pg` from the environment and refusing it from a programmatic
+ * config would just relocate the fork this card closes to inside a single host.
+ * Both doors now resolve through the spec table's selection face and both
+ * produce a CANONICAL id, so everything downstream still branches on one value
+ * per driver.
+ */
+const DatabaseDriverSelectionSchema = z.string().transform((raw, ctx) => {
+    const id = resolveDatabaseDriverId(raw);
+    if (!id) {
+        ctx.addIssue({ code: 'custom', message: unsupportedDriverMessage(raw, 'databaseDriver') });
+        return z.NEVER;
+    }
+    return id;
+});
+
+/**
+ * The refusal for a driver selection no builtin claims — one sentence, both
+ * doors, enumerating the spellings that actually work rather than a list
+ * maintained beside them.
+ */
+function unsupportedDriverMessage(raw: string, source: 'OS_DATABASE_DRIVER' | 'databaseDriver'): string {
+    return (
+        `[StandaloneStack] Unsupported ${source} value: "${raw}". ` +
+        `Supported drivers: ${DATABASE_DRIVER_SELECTION_ALIASES.join(', ')}. ` +
+        `Booting on the SQLite default instead would silently ignore the driver you asked for ` +
+        `and write into a local database (#3276). Fix the value, or unset it ` +
+        `to let the OS_DATABASE_URL scheme select the driver.`
+    );
+}
 
 export const StandaloneStackConfigSchema = z.object({
     databaseUrl: z.string().optional(),
@@ -114,7 +162,7 @@ export const StandaloneStackConfigSchema = z.object({
      * reads, and the same pair `--database-auth-token` forwards into).
      */
     databaseAuthToken: z.string().optional(),
-    databaseDriver: StandaloneDatabaseDriverSchema.optional(),
+    databaseDriver: DatabaseDriverSelectionSchema.optional(),
     environmentId: z.string().optional(),
     artifactPath: z.string().optional(),
     /**
@@ -264,14 +312,47 @@ function resolveExplicitDriver(
     if (cfg.databaseDriver) return cfg.databaseDriver;
     const raw = process.env.OS_DATABASE_DRIVER?.trim();
     if (!raw) return undefined;
-    const parsed = StandaloneDatabaseDriverSchema.safeParse(raw.toLowerCase());
-    if (parsed.success) return parsed.data;
+    // #6345: the ACCEPTED SPELLINGS are the spec table's selection aliases, not
+    // this file's canonical list. Lower-casing stays for the reason #6265 gave —
+    // the CLI's reader of this same variable lower-cases — and is now redundant
+    // with `resolveDatabaseDriverId`'s own normalization rather than the only
+    // normalization there is.
+    const id = resolveDatabaseDriverId(raw);
+    if (id) return id;
+    throw new Error(unsupportedDriverMessage(raw, 'OS_DATABASE_DRIVER'));
+}
+
+/**
+ * Refuse a driver whose database lives somewhere this process cannot guess when
+ * nothing named where that is (#6345 fork 2).
+ *
+ * The URL ladder always produces SOMETHING — its last rung is the unified
+ * default file — so before this check a `postgres`/`mysql`/`mongodb`/`turso`
+ * selection with no URL anywhere was handed `file:<state dir>/data/objectstack.db`
+ * and failed inside the driver, two layers from the cause, with a message about
+ * a file for an operator who asked for a server. (The CLI's mirror of this bug
+ * guessed differently — `url: undefined` into `pg`, an invented
+ * `mongodb://localhost:27017/objectstack` — which is why the ruling makes both
+ * sides refuse instead of making the two guesses agree.)
+ *
+ * Only the FALLBACK rungs are refused. A URL that came from `--database`,
+ * `OS_DATABASE_URL`/`DATABASE_URL`/`TURSO_DATABASE_URL`, or the project's own
+ * declared default datasource is a statement about where the database is, and a
+ * `file:` DSN handed to postgres by an operator who typed it is their business,
+ * not a guess of ours.
+ */
+function assertUrlNamedForRemoteDriver(
+    driver: ResolvedDriverKind,
+    source: ProjectDatabaseUrlSource,
+): void {
+    if (driverHasLocalDefault(driver)) return;
+    if (source !== 'unified-default' && source !== 'legacy-file') return;
     throw new Error(
-        `[StandaloneStack] Unsupported OS_DATABASE_DRIVER value: "${raw}". ` +
-        `Supported drivers: ${StandaloneDatabaseDriverSchema.options.join(', ')}. ` +
-        `Booting on the SQLite default instead would silently ignore the driver you asked for ` +
-        `and write into a local database (#3276). Fix the value, or unset OS_DATABASE_DRIVER ` +
-        `to let the OS_DATABASE_URL scheme select the driver.`
+        `[StandaloneStack] The \`${driver}\` driver was selected but no database URL was given, ` +
+        `and ${driver} has no local default to fall back on — its database lives on a server or ` +
+        `endpoint this process cannot guess. Set OS_DATABASE_URL (or --database) to it. ` +
+        `Falling back to the local SQLite file instead would connect you to a database you never ` +
+        `named, and every write would land in the wrong place (#3276).`
     );
 }
 
@@ -368,6 +449,9 @@ export function resolveStandaloneDatabase(config?: StandaloneStackConfig): Resol
     const url = resolution.url;
     const explicitDriver = resolveExplicitDriver(cfg);
     const driver: ResolvedDriverKind = explicitDriver || detectDriverFromUrl(url);
+    // Fork 2 (#6345) — refuse before deriving a sqlite filename from a URL the
+    // selected driver was never going to open.
+    assertUrlNamedForRemoteDriver(driver, resolution.source);
     const isSqlite = driver === 'sqlite' || driver === 'sqlite-wasm';
     const filename = isSqlite ? sqliteFilenameFromUrl(url, driver) : null;
     return {

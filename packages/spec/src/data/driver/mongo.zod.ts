@@ -145,7 +145,11 @@ export const getMongoConfigJsonSchema = driverConfigJsonSchema(MongoConfigSchema
  * described.
  */
 export const MongoDriverSpec = {
-  id: 'mongo',
+  // `mongodb`, not `mongo`, since #6345: the canonical driver id was renamed to
+  // the spelling both boot hosts, the `@objectstack/driver-mongodb` package and
+  // every URL scheme already used, so driver selection and config-contract
+  // selection are one string. `mongo` remains an accepted alias.
+  id: 'mongodb',
   label: 'MongoDB',
   description: 'Official MongoDB Driver for ObjectStack. Supports rich queries, aggregation, and atomic updates.',
   icon: 'database',
