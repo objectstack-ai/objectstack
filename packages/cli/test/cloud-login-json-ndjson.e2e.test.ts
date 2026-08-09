@@ -84,6 +84,30 @@ const DEPLOY_DOCS = resolve(REPO_ROOT, 'content/docs/deployment/index.mdx');
  * anyway. Only reached when the record never arrives early — i.e. when the
  * contract is broken — and exists so that failure is an assertion rather than a
  * suite that hangs until the runner kills it.
+ *
+ * ## The clock starts at device-code issuance, not at spawn (#6855)
+ *
+ * This budget is armed when the endpoint hands the CLI its device code, because
+ * that is the first instant at which the contract is even measurable: from
+ * there the CLI holds the verification URL and owes it to stdout. Everything
+ * before it — `script(1)`, the `tsx` transform of the whole oclif command tree,
+ * module loading — is process startup, about which #6531/#6730 say nothing.
+ *
+ * Armed at spawn instead, this budget policed startup rather than the contract,
+ * and that is what made the assertion flaky. Measured on an idle machine, of
+ * the latency from spawn to the record being readable:
+ *
+ * | segment                              | measured  |
+ * |--------------------------------------|-----------|
+ * | spawn → device-code request (startup)| 3423–3713 ms |
+ * | device-code response → record readable (the contract) | 16–28 ms |
+ *
+ * So ~99.4% of the old budget was spent on work the contract does not govern,
+ * leaving startup needing only a ~5.7x slowdown to exhaust 20 s — routine on a
+ * merge-queue runner executing 84 tasks for 11½ minutes. It duly ejected two
+ * unrelated PRs (#6847 spec-only, #6835 docs-only). Anchored here, the budget
+ * covers a ~20 ms window with ~1000x headroom, and the number itself is
+ * unchanged: this is a re-anchoring, NOT a widened timeout.
  */
 const RELEASE_DEADLINE_MS = 20_000;
 
@@ -111,6 +135,14 @@ function startDeviceEndpoint(outcome: 'token' | 'access_denied') {
   let released = false;
   let authorizedAt: number | null = null;
 
+  // Resolved the moment the CLI has been handed its device code — the instant
+  // the emission contract starts running, and so the anchor for the release
+  // deadline. Definite-assignment: the Promise executor runs synchronously.
+  let markDeviceCodeIssued!: () => void;
+  const deviceCodeIssued = new Promise<void>((res) => {
+    markDeviceCodeIssued = res;
+  });
+
   const server: Server = createServer((req, res) => {
     req.resume();
     req.on('end', () => {
@@ -121,6 +153,7 @@ function startDeviceEndpoint(outcome: 'token' | 'access_denied') {
       const { pathname } = new URL(req.url ?? '/', 'http://placeholder');
 
       if (pathname === '/api/v1/auth/device/code') {
+        markDeviceCodeIssued();
         return send(200, {
           device_code: 'DEV-CODE-6730',
           user_code: 'WXYZ-6730',
@@ -153,6 +186,7 @@ function startDeviceEndpoint(outcome: 'token' | 'access_denied') {
     release: () => {
       released = true;
     },
+    deviceCodeIssued,
     authorizedAt: () => authorizedAt,
     listen: () =>
       new Promise<number>((res) => {
@@ -218,12 +252,20 @@ async function runCloudDeviceLogin(opts: {
     }
   }, WATCH_MS);
 
-  const deadline = setTimeout(() => {
-    if (urlSeenAt === null) {
-      releasedByDeadline = true;
-      endpoint.release();
-    }
-  }, RELEASE_DEADLINE_MS);
+  // Armed on device-code issuance rather than here, so the budget covers the
+  // window the contract governs and not the child's startup — see
+  // {@link RELEASE_DEADLINE_MS} for the measurements behind that (#6855).
+  // Stays unarmed if the CLI never reaches the device flow at all; that run
+  // ends when the child exits, and the assertions below name the absence.
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  void endpoint.deviceCodeIssued.then(() => {
+    deadline = setTimeout(() => {
+      if (urlSeenAt === null) {
+        releasedByDeadline = true;
+        endpoint.release();
+      }
+    }, RELEASE_DEADLINE_MS);
+  });
 
   const shell = [
     `'${TSX}' '${CLI}' cloud login${opts.json ? ' --json' : ''} --no-browser`,
@@ -330,7 +372,13 @@ describe('os cloud login --json — the declared NDJSON stream (#6730)', () => {
     it('hands over the verification URL BEFORE authorization — the reason this route was chosen', () => {
       // The endpoint only authorized because the watcher had already read the
       // record off stdout, so these two facts are the run's own history.
-      expect(ok.releasedByDeadline, 'the device record never reached stdout early').toBe(false);
+      expect(
+        ok.releasedByDeadline,
+        `the device record did not reach stdout within ${RELEASE_DEADLINE_MS}ms of the CLI ` +
+          'receiving its device code — the buffered-emit regression this route was chosen to ' +
+          'prevent. This window excludes process startup (#6855), so a slow runner is not a ' +
+          'cause: at the moment it opens the CLI already holds the verification URL.',
+      ).toBe(false);
       expect(ok.urlSeenAt).not.toBeNull();
       expect(ok.authorizedAt).not.toBeNull();
       expect(ok.urlSeenAt!).toBeLessThanOrEqual(ok.authorizedAt!);
