@@ -764,7 +764,7 @@ describe('FormViewSchema — the `groups` legacy alias folds onto `sections` (#6
 
     it('ViewItemSchema — the standalone `form` record arm', () => {
       const parsed = ViewItemSchema.parse({
-        name: 'account_edit',
+        name: 'crm_account.edit',
         object: 'account',
         viewKind: 'form',
         config: { type: 'simple', groups: [S('Account')] },
