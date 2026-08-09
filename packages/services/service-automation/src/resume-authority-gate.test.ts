@@ -64,7 +64,7 @@ function registerPausers(engine: AutomationEngine): void {
     type: 'gated_pause',
     descriptor: defineActionDescriptor({
       type: 'gated_pause', version: '1.0.0', name: 'Gated Pause',
-      supportsPause: true, isAsync: true, resumeAuthority: 'service',
+      supportsPause: true, resumeAuthority: 'service',
     }),
     async execute() { return { success: true, suspend: true, correlation: 'req_1' }; },
   });

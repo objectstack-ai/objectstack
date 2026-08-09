@@ -24,6 +24,7 @@ import { z } from 'zod';
  * Mirrors the `waitEventConfig.eventType` in flow.zod.ts.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const WaitEventTypeSchema = lazySchema(() => z.enum([
   'timer',      // Resume after duration/datetime
   'signal',     // Resume on named signal dispatch
@@ -285,14 +286,36 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
   /**
    * Supports async pause/resume (e.g. wait, human_task).
    *
-   * **A declaration, not an enforced fact** (#5703). No execution path reads
-   * it: a run pauses because the executor's `execute()` returned
-   * `suspend: true`, and the #3801 resume gate keys on the suspended node's
-   * `resumeAuthority` alone. What it does drive is authoring-time: the designer
-   * palette, the registration warning below, and the
-   * `check:resume-authority-declared` gate. So an executor that suspends
-   * while leaving this `false` is invisible to both of those — #5703 tracks
-   * closing that seam.
+   * **Declared = enforced, since #6667** (which closed the #5703 seam). This
+   * was a declaration no execution path read until then; `AutomationEngine`
+   * now enforces it at the ONE seam every suspension passes through, so the
+   * three authoring-time consumers it always had — the designer palette, the
+   * registration warning below, and the `check:resume-authority-declared`
+   * gate — are no longer the whole of its effect.
+   *
+   * What the runtime half does, and the boundary #6667 drew deliberately:
+   *
+   *  - **Mismatch is refused.** A node type whose descriptor declares
+   *    `supportsPause: false` — or OMITS the key, which parses to the same
+   *    `false` by the default above — and whose executor returns
+   *    `suspend: true` has that suspension REFUSED. It is a guard-class
+   *    refusal: a metadata defect, not a runtime one, so a `fault` edge does
+   *    not route it, and nothing durable is written for a pause nothing could
+   *    have continued (a type declaring no pause declares no `resumeAuthority`
+   *    either, and an unclaimed pause is fail-closed since #5561).
+   *  - **The inverse is legal.** `supportsPause: true` on a type that never
+   *    suspends is not a mismatch — the declaration is a CAPABILITY, not an
+   *    obligation. `wait` legitimately returns without suspending when its
+   *    condition is already met.
+   *  - **Silence is not `false`.** An executor that publishes NO descriptor
+   *    declares nothing for this gate to enforce (`NodeExecutor.descriptor` is
+   *    optional by contract), so its pauses are not refused here; they stay
+   *    governed by #5561's resume gate, which refuses an undeclared
+   *    `resumeAuthority` at the resume end instead.
+   *
+   * Alias hop included: the descriptor consulted is the canonical one a
+   * deprecated ADR-0018 alias forwards to, never the synthesized alias
+   * descriptor carrying schema defaults.
    */
   supportsPause: z.boolean().default(false).describe('Supports async pause/resume'),
   /** Supports mid-execution cancellation. */
@@ -302,9 +325,29 @@ export const ActionDescriptorSchema = lazySchema(() => z.object({
   /** Dispatch through the ADR-0012 service-messaging outbox. */
   needsOutbox: z.boolean().default(false)
     .describe('Dispatch via service-messaging outbox (retry/idempotency/dead-letter)'),
-  /** Request/response action that suspends the flow until a reply. */
-  isAsync: z.boolean().default(false)
-    .describe('Suspends the flow awaiting an external reply'),
+  /**
+   * Tombstoned, not deleted (ADR-0104): `ActionDescriptorSchema` is not
+   * `.strict()`, so a plain deletion would let the five shipped descriptors —
+   * and every third-party one — keep writing `isAsync`, parse clean, and lose
+   * the value in silence. `retiredKey()` turns that into a rejection carrying
+   * the fix, in both channels a descriptor author meets: `tsc` (the input type
+   * is `never`) and the parse `defineActionDescriptor()` runs.
+   *
+   * Retired under ADR-0049 enforce-or-remove (#6748): a fresh three-repo
+   * measurement found ZERO readers. `isAsync` was a second, weaker spelling of
+   * the thing `supportsPause` above now enforces — and where `supportsPause`
+   * grew a runtime consumer in #6667, this one never had one to grow into, so
+   * it took the remove leg of the same ruling rather than the enforce leg.
+   */
+  isAsync: retiredKey(
+    '`ActionDescriptor.isAsync` was removed in @objectstack/spec 17 (#6748, ADR-0049) — ' +
+    'no execution path ever read it, so declaring it never made a node suspend and ' +
+    'omitting it never stopped one. Delete the key. The live mechanism is two-part: an ' +
+    'executor suspends by RETURNING `suspend: true` from `execute()`, and its descriptor ' +
+    'must declare `supportsPause: true` (plus the `resumeAuthority` its pauses need) or ' +
+    'the engine refuses that suspension (#6667). Declaring `isAsync: true` alongside ' +
+    '`supportsPause: true` was always redundant; declaring it alone was always inert.',
+  ),
 
   /**
    * The effect contract this action places on the AUTHOR-SUPPLIED code it

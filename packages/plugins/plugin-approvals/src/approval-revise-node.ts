@@ -76,8 +76,7 @@ export function registerApprovalReviseNode(
       category: 'human',
       paradigms: ['flow'],
       source: 'plugin',
-      supportsPause: true,
-      isAsync: true,
+      supportsPause: true,  // (`isAsync` stood here — retired in #6748, ADR-0049: nothing read it)
       // #3823 / amended ADR-0044: THE point of this node type. The revise
       // window is a service-owned continuation, so the #3801 gate must refuse
       // a raw resume of it — which it does for any node type declaring this.

@@ -47,7 +47,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
         description: 'Collect user input via a screen (human-input element).',
         icon: 'window', category: 'human', source: 'builtin',
         // Human-input nodes suspend the flow awaiting input.
-        supportsPause: true, isAsync: true,
+        supportsPause: true,  // (`isAsync` stood here — retired in #6748, ADR-0049: nothing read it)
         // The generic resume route IS this node's intended door: the flow-runner
         // collects the inputs and hands them back as the continuation, so there
         // is no service decision to route around (#3801). Stated rather than

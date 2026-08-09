@@ -111,8 +111,7 @@ export function registerApprovalNode(
       paradigms: ['flow'],
       source: 'plugin',
       // Human decision: the run suspends here awaiting an external reply.
-      supportsPause: true,
-      isAsync: true,
+      supportsPause: true,  // (`isAsync` stood here — retired in #6748, ADR-0049: nothing read it)
       // #3801: this pause is NOT resumable through the generic run-resume
       // route. Continuing an approval is a side effect of a DECISION, and the
       // decision is the thing that must be authorized (the approver slate),

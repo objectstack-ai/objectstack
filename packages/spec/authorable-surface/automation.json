@@ -9,7 +9,7 @@
     "automation/ActionDescriptor:description",
     "automation/ActionDescriptor:handlerContract",
     "automation/ActionDescriptor:icon",
-    "automation/ActionDescriptor:isAsync",
+    "automation/ActionDescriptor:isAsync [RETIRED]",
     "automation/ActionDescriptor:maturity",
     "automation/ActionDescriptor:name",
     "automation/ActionDescriptor:needsOutbox",

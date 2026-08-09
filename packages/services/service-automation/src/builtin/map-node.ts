@@ -50,8 +50,7 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
       category: 'logic',
       source: 'builtin',
       // Each item's subflow may pause, so the map suspends and resumes per item.
-      supportsPause: true,
-      isAsync: true,
+      supportsPause: true,  // (`isAsync` stood here — retired in #6748, ADR-0049: nothing read it)
       // As with `subflow`, `'any'` here is not the authority that applies: the
       // #3801 gate follows the `map:` correlation to the in-flight item's child
       // run and judges that node instead — judging the loop rather than the item
