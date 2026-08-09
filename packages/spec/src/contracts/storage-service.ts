@@ -13,6 +13,8 @@
  * Aligned with CoreServiceName 'file-storage' in core-services.zod.ts.
  */
 
+import type { StandardErrorCode } from '../api/errors.zod';
+
 /**
  * Options for uploading a file
  */
@@ -39,6 +41,140 @@ export interface StorageFileInfo {
     lastModified: Date;
     /** Custom metadata */
     metadata?: Record<string, string>;
+}
+
+/**
+ * Options for one page of `IStorageService.list()`.
+ *
+ * The whole point of this shape is that a truncated answer is IMPOSSIBLE to
+ * mistake for a complete one — the defect that retired the old `list(prefix)`
+ * (#5266 / #5540): the S3 adapter stopped at 1000 objects and returned an
+ * array indistinguishable from "that is all of them".
+ */
+export interface StorageListOptions {
+    /**
+     * Continuation token taken verbatim from a previous page's `nextCursor`.
+     * Omit for the first page.
+     *
+     * OPAQUE: never construct, parse, compare or persist-and-reinterpret one.
+     * It encodes a position in the backend's key order, and an adapter refuses
+     * a token it cannot decode (`VALIDATION_ERROR` / 400) rather than silently
+     * restarting from the beginning — a silent restart is how a paging sweep
+     * loops forever.
+     */
+    cursor?: string;
+    /**
+     * Maximum number of items in the returned page. Must be a positive
+     * integer; anything else is refused (`VALIDATION_ERROR` / 400) rather than
+     * clamped. Defaults to {@link DEFAULT_STORAGE_LIST_LIMIT}.
+     *
+     * Adapters resolve it through {@link resolveStorageListLimit} so every
+     * backend answers an invalid `limit` the same way.
+     */
+    limit?: number;
+}
+
+/**
+ * One page of `IStorageService.list()`.
+ */
+export interface StorageListPage {
+    /**
+     * The page's files, in ascending key order.
+     *
+     * A page is FULL (`items.length === limit`) unless it is the last one, so
+     * an adapter that has to make several backend round-trips to fill a page
+     * makes them — a caller never sees a short page that merely reflects the
+     * backend's own page size.
+     */
+    items: StorageFileInfo[];
+    /**
+     * Continuation token for the next page — present **if and only if** more
+     * items remain.
+     *
+     * ⚠️ Page until `nextCursor` is absent. Never infer completeness from
+     * `items.length < limit`: under concurrent deletion a final `stat` can drop
+     * an item from a page that still has a successor.
+     */
+    nextCursor?: string;
+}
+
+/**
+ * Page size used when `StorageListOptions.limit` is omitted.
+ *
+ * 1000 is deliberately the same number as S3's `ListObjectsV2` `MaxKeys` cap —
+ * the cap that used to truncate `list(prefix)` in silence. Here it truncates
+ * nothing: the page comes back with a `nextCursor`, so the caller is told there
+ * is more instead of having to guess.
+ */
+export const DEFAULT_STORAGE_LIST_LIMIT = 1000;
+
+/**
+ * Error code every adapter uses to refuse a malformed `list()` argument.
+ *
+ * Typed as `StandardErrorCode` so a misspelling fails `tsc` rather than
+ * shipping a code `ApiErrorSchema` rejects (ADR-0112).
+ */
+const STORAGE_LIST_INVALID_ARGUMENT: StandardErrorCode = 'VALIDATION_ERROR';
+
+/** An ADR-0112-enveloped refusal: `VALIDATION_ERROR` / 400. */
+function storageListRefusal(message: string): Error {
+    const err = new Error(message) as Error & { code?: string; status?: number };
+    err.code = STORAGE_LIST_INVALID_ARGUMENT;
+    err.status = 400;
+    return err;
+}
+
+/**
+ * Resolve `StorageListOptions.limit` into the page size an adapter must honour.
+ *
+ * Lives on the CONTRACT, not in each adapter, for the reason `list` was retired
+ * in the first place: two adapters validating independently is two dialects
+ * waiting to happen. Every backend — including third-party ones — gets the
+ * default and the refusal from here.
+ *
+ * @throws `VALIDATION_ERROR` / 400 when `limit` is present and is not a
+ * positive integer. Refused, never clamped: a clamped `limit: 0` would answer
+ * an empty page that reads exactly like "this prefix is empty".
+ */
+export function resolveStorageListLimit(limit: number | undefined): number {
+    if (limit === undefined) return DEFAULT_STORAGE_LIST_LIMIT;
+    if (!Number.isInteger(limit) || limit < 1) {
+        throw storageListRefusal(
+            `storage list: 'limit' must be a positive integer (received ${String(limit)}).`,
+        );
+    }
+    return limit;
+}
+
+/**
+ * Encode a resume position (the last key of a page) as a `nextCursor`.
+ *
+ * Shared by every adapter so a cursor means ONE thing across backends: "resume
+ * strictly after this key, in ascending key order". base64url is not security —
+ * it exists so the token cannot be confused with a storage key and hand-built
+ * by a caller who then depends on the encoding.
+ */
+export function encodeStorageListCursor(key: string): string {
+    return Buffer.from(key, 'utf8').toString('base64url');
+}
+
+/**
+ * Decode a `StorageListOptions.cursor` back into a resume key.
+ *
+ * @throws `VALIDATION_ERROR` / 400 when the token is not one this contract
+ * issued. Node's base64url decoder is lenient — it drops characters it does not
+ * recognise — so the decode is verified by re-encoding: without that check a
+ * corrupted token silently decodes to a DIFFERENT key and the sweep resumes in
+ * the wrong place, which is worse than refusing.
+ */
+export function decodeStorageListCursor(cursor: string): string {
+    const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
+    if (decoded === '' || Buffer.from(decoded, 'utf8').toString('base64url') !== cursor) {
+        throw storageListRefusal(
+            `storage list: 'cursor' is not a continuation token issued by this contract.`,
+        );
+    }
+    return decoded;
 }
 
 /**
@@ -123,22 +259,59 @@ export interface IStorageService {
      */
     getInfo(key: string): Promise<StorageFileInfo>;
 
-    // `list?(prefix: string): Promise<StorageFileInfo[]>` was REMOVED in
-    // @objectstack/spec 5.x (#5540, ADR-0049 enforce-or-remove; analysis in
-    // #5266). It had no consumer — the only in-repo call site was a proxy
-    // pass-through — and the two shipped adapters answered the same call with
-    // two different semantics, both silently incomplete: the local adapter
-    // listed one level and reported directories as files, the S3 adapter
-    // recursed and truncated at 1000 objects without reading
-    // `IsTruncated`/`ContinuationToken`. One contract method, two dialects,
-    // no signal.
-    //
-    // There is no replacement, deliberately: a prefix enumeration that cannot
-    // paginate is the wrong shape to inherit. When a real caller needs one, it
-    // comes back cursor-shaped — `list(prefix, { cursor, limit })` returning a
-    // page plus a continuation token — with adapter-conformance cases (nested
-    // keys, directory entries, >1000 objects) proving both backends agree.
-    // Until then the storage contract only exposes per-key operations.
+    /**
+     * Enumerate the stored files whose key begins with `prefix`, one page at a
+     * time.
+     *
+     * ## Lineage — read this before changing the signature
+     *
+     * The single-argument `list?(prefix): Promise< StorageFileInfo[] >` was
+     * retired in #5540 / #5541 (ADR-0049 enforce-or-remove; the two-dialect
+     * measurement is #5266): the local adapter listed ONE level deep and pushed
+     * directories into the result as files, while the S3 adapter recursed and
+     * stopped at 1000 objects without reading `IsTruncated` — one method, two
+     * silently-incomplete answers. Both retirement notes reserved exactly one
+     * route back, and this is it (#6781, cloud#1203 maintainer ruling option B):
+     * cursor-shaped, with adapter-conformance cases proving both backends agree.
+     *
+     * ## The semantics an adapter must implement
+     *
+     * 1. **`prefix` is a raw key-string prefix, matched recursively** — S3
+     *    `ListObjectsV2` semantics, which the local adapter emulates rather than
+     *    the other way round. `list('a')` returns `a/b/c` AND `ab.txt`. ⚠️ To
+     *    scope to a folder, pass the trailing slash: `list('a/')`. `list('t/1')`
+     *    also matches `t/10/...`, which for a DELETING sweep is the difference
+     *    between reclaiming one tenant and reclaiming eleven.
+     * 2. **Only files come back.** Filesystem directories are never stat'd into
+     *    results, and an S3 zero-byte directory marker (a key ending in `/`) is
+     *    skipped — neither is downloadable, and returning one on one backend
+     *    only is precisely the old dialect split.
+     * 3. **Ascending key order**, stable across pages.
+     * 4. **Pages are full** (`items.length === limit`) except the last: an
+     *    adapter loops over its backend's own paging to fill one page.
+     * 5. **`nextCursor` is present iff more items remain** (see
+     *    {@link StorageListPage}).
+     * 6. **No duplicates and no gaps** across a pagination run over an unchanged
+     *    key set. Keys written or deleted mid-run may or may not appear.
+     * 7. **`limit` and `cursor` are validated, not coerced** — see
+     *    {@link resolveStorageListLimit} and {@link decodeStorageListCursor},
+     *    which every adapter shares so the refusals cannot diverge.
+     *
+     * Optional, like every other capability on this contract: an adapter that
+     * cannot enumerate simply omits it, and `SwappableStorageService` answers a
+     * clear "does not support list()" for it. It is NOT a required member on
+     * purpose — requiring it would break every third-party adapter, which is a
+     * major-version act, and enumeration is genuinely optional for a backend.
+     *
+     * ⚠️ Prefer enumerating the RECORDS you wrote (`sys_file` / file-reference
+     * rows, paginated through ObjectQL) when they exist. Bucket enumeration is
+     * for the cases where they do not: reclaiming storage a deleted tenant left
+     * behind, or GC-ing blobs whose index is the thing that went away.
+     *
+     * @param prefix - Raw key prefix; `''` enumerates everything.
+     * @param options - Page size and continuation token.
+     */
+    list?(prefix: string, options?: StorageListOptions): Promise<StorageListPage>;
 
     /**
      * Generate a pre-signed URL for temporary access
