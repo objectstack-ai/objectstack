@@ -798,7 +798,7 @@ jobs:
             exit 0
           fi
           echo "Labels on PR #$PR_NUMBER right now: ${LABELS:-(none)}"
-          if grep -qxF 'allow-major' <<<"$LABELS"; then
+          if grep -qF 'allow-major' <<<"$LABELS"; then
             echo "::notice::'allow-major' is on PR #$PR_NUMBER (read live, not from the event payload), so a whole-stack major is intended here and the launch-window guard stands aside."
             echo 'allow=true' >> "$GITHUB_OUTPUT"
           else
