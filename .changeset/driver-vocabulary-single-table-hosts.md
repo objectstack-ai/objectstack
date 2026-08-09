@@ -72,4 +72,14 @@ calling that a `patch` because the old behaviour was a bug would let the change
 arrive unannounced in a changelog. The alias widening on its own would be
 `minor`; the refusals are what price this at `major`.
 
-<!-- adr-0087: not-required (no-migration-prescription) Nothing stored changes on either host. Both halves are BOOT-TIME resolution of `OS_DATABASE_DRIVER` / `--database-driver` / `StandaloneStackConfig.databaseDriver` — an environment variable and a flag, neither of which lives in `sys_metadata`, has a spec schema, or can be reached by a metadata conversion. The alias widening needs no migration by construction (every spelling accepted before is accepted now), and the two refusals prescribe an operator action — set the database URL, or fix the driver value — that no codemod can perform, because the correct URL is a fact only the operator has. The `mongo` → `mongodb` half of #6345 DOES have a stored value and IS registered, as `datasource-driver-mongo-to-mongodb`, on the `@objectstack/spec` and `@objectstack/service-datasource` changesets that own the surfaces publishing that id. -->
+**Migration.** The stored half of this change is the `mongo` → `mongodb`
+canonical-id rename, which both hosts now resolve through the shared table; it is
+registered as the ADR-0087 D2 conversion `datasource-driver-mongo-to-mongodb`
+and needs no action from anyone — `migrate meta` converges the rows and `mongo`
+stays accepted meanwhile. The two refusals have no stored form and no codemod:
+they prescribe an operator action (set the database URL, or fix the driver
+value) whose correct answer is a fact only the operator has, which is why the
+messages name the variable, show the target shape, and say what booting anyway
+would have cost.
+
+<!-- adr-0087: registered datasource-driver-mongo-to-mongodb -->
