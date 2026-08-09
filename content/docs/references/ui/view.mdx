@@ -262,7 +262,7 @@ Column footer summary configuration
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
-| **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
+| **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
 | **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |

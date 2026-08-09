@@ -1600,6 +1600,93 @@ export const FormButtonConfigSchema = lazySchema(() => strictObject({
 }).strict());
 export type FormButtonConfig = z.input<typeof FormButtonConfigSchema>;
 
+/** An object that may carry the `groups` alias beside canonical `sections`. */
+type WithFormSectionAlias = { sections?: unknown; groups?: unknown };
+
+/**
+ * Fold the legacy `groups` alias onto the canonical `sections` and drop
+ * `groups` from the output (#6926) — the whole-array counterpart of
+ * `normalizeVisibleWhen`.
+ *
+ * ## What this makes true
+ *
+ * `groups` was declared with the inline comment *"Legacy support -> alias to
+ * sections"* since the schema existed, and nothing in this repo ever performed
+ * the fold. The alias was honored exactly ONE boundary downstream, inside the
+ * renderer (objectui `spec-bridge/bridges/form-view.ts` `spec.sections ??
+ * spec.groups`, and `plugin-form/ObjectForm.tsx`'s full legacy fold, shipped by
+ * objectui#2545 because a `groups`-only spec had rendered nothing). Every
+ * framework consumer that is NOT that renderer read `sections` only — so the
+ * same authored form rendered in the console and degraded on the REST
+ * public-form routes. Folding at the producer makes the declared alias true for
+ * every consumer of a parsed form at once, instead of teaching each consumer a
+ * second key to read (the lenient-consumer shape this package rejects).
+ *
+ * ## Precedence: `sections` wins
+ *
+ * Deliberately the renderer's own rule (`spec.sections ?? spec.groups`), so no
+ * form that renders today changes what it renders. `??` treats an EMPTY array
+ * as present, and so does this: `{ sections: [], groups: [...] }` folds to
+ * `sections: []`, matching the renderer rather than inventing a merge.
+ *
+ * ## Why `.overwrite()` and not `.transform()` (measured, #6926)
+ *
+ * Both fold identically at parse. `.transform()` returns a `ZodPipe`, and this
+ * schema is consumed as an OBJECT in two places in this file that a pipe breaks:
+ * {@link FormViewOverlayWireSchema} builds the flattened form-overlay union
+ * member with `FormViewSchema.extend(...)` (a pipe has no `.extend`), and
+ * {@link selectViewMetadataBranch} reads `._zod.def.shape.type` through
+ * `overlayTypeValues` — which a pipe answers with an EMPTY set, i.e. a silent
+ * mis-dispatch rather than an error. Splitting into an object schema plus a
+ * piped export would require re-applying the fold on the overlay branch by
+ * hand, which is the re-transcription that lets two doors disagree.
+ *
+ * `.overwrite()` is zod 4's "transform that does not change the type", which is
+ * precisely what a `FormSectionSchema[]` → `FormSectionSchema[]` alias fold is.
+ * It keeps the schema a `ZodObject`, and `.extend()` INHERITS the check, so the
+ * fold reaches every parse door with one declaration: `FormViewSchema` itself,
+ * `ViewSchema.form` / `.formViews.*`, both `ViewItemSchema` form arms, and the
+ * flattened `formOverlay` member of `ViewMetadataSchema`. The cost is that the
+ * INFERRED output type still declares `groups?` even though a parsed form never
+ * carries it; the runtime contract is the enforced one. (Narrowing the exported
+ * `FormViewParsed` by hand is not the fix — ADR-0122's gate requires it to read
+ * `z.infer<typeof FormViewSchema>` verbatim.)
+ *
+ * Deliberately NOT exported: it is an implementation detail of this one schema,
+ * and a public fold helper is an invitation to fold a second time somewhere
+ * else. Export it if and when a pre-parse door is ruled to need the same fold
+ * (see "What this does NOT reach").
+ *
+ * ## Ordering: the `pane` refinement above still sees `groups`
+ *
+ * Checks run in attachment order, so the `.superRefine` is evaluated BEFORE
+ * this fold and keeps reporting a misplaced `pane` at the path the author
+ * actually wrote (`groups.0.pane`, not `sections.0.pane`). Attaching the fold
+ * first would have re-pathed that message onto a key the author never typed.
+ *
+ * ## What this does NOT reach
+ *
+ * Only PARSED forms. Pre-parse consumers still see the authored key and are
+ * right to: `packages/lint`'s view rules walk authored sources
+ * (`validate-form-layout.ts`, `validate-visibility-predicates.ts`), and a
+ * `sys_metadata` row saved through `saveMetaItem` is persisted VERBATIM (the
+ * save validates and then discards `parsed.data` on purpose) and re-read
+ * through the ADR-0087 stored-row conversion chain, which is not a zod parse.
+ * The alias therefore stays legal at input — this fold narrows output, never
+ * acceptance.
+ */
+function foldFormGroupsIntoSections<T extends WithFormSectionAlias>(
+  input: T,
+): Omit<T, 'groups'> {
+  if (input.groups === undefined) return input as Omit<T, 'groups'>;
+  const { groups, ...rest } = input;
+  // `sections` wins when present — including when it is an empty array, which
+  // is what the renderer's `??` does and therefore what authored forms already
+  // render.
+  if (rest.sections !== undefined) return rest as Omit<T, 'groups'>;
+  return { ...rest, sections: groups } as Omit<T, 'groups'>;
+}
+
 /**
  * Form View Schema
  * Defines the layout for creating or editing a single record.
@@ -1671,7 +1758,15 @@ export const FormViewSchema = lazySchema(() => strictObject({
   data: ViewDataSchema.optional().describe('Data source configuration (defaults to "object" provider)'),
 
   sections: z.array(FormSectionSchema).optional(), // For simple layout
-  groups: z.array(FormSectionSchema).optional(), // Legacy support -> alias to sections
+  /**
+   * Legacy alias of {@link FormViewSchema.sections} — accepted at INPUT, folded
+   * onto `sections` at parse (#6926), and therefore never present in a parsed
+   * form. See {@link foldFormGroupsIntoSections} for the fold and why it lives
+   * here rather than in each consumer.
+   */
+  groups: z.array(FormSectionSchema).optional().describe(
+    '[LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`.',
+  ),
 
   /**
    * Inline child collections (master-detail). When present, the standard
@@ -1831,7 +1926,10 @@ export const FormViewSchema = lazySchema(() => strictObject({
       }
     });
   }
-}));
+  // ⚠️ Anything added below this loop still runs BEFORE the `.overwrite()`
+  // fold — see {@link foldFormGroupsIntoSections} — so a refinement that
+  // reads sections must keep reading BOTH buckets.
+}).overwrite(foldFormGroupsIntoSections));
 
 /**
  * Object-scoped user filters (ADR-0047 amendment, framework #2679 / objectui #2338).
