@@ -1272,3 +1272,188 @@ describe('#4254 — searchFields / groupBy / aggregations on the list path (real
             .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD' });
     });
 });
+
+/**
+ * [#6674] The known-but-VIRTUAL axis — the fail-open #4254 closed one axis over,
+ * surviving where the name is real.
+ *
+ * #4254 refuses a `$searchFields` entry the engine would not scan. A `formula`
+ * field slipped through the one gap that judgment had: the DECLARED branch
+ * admitted any entry that EXISTS, so declaring a formula field put it in the
+ * allowed set, and the gate — reading that same set — accepted it. Measured on
+ * `origin/main` before this change:
+ *
+ * ```
+ * AUTO:          {"allowed":["name","project_name"],"source":"auto"}           formula excluded
+ * DECL-FORMULA:  {"allowed":["name","project_name_formula"],"source":"declared"}  admitted verbatim
+ * ?search=Apollo&searchFields=project_name_formula -> 200, 0 rows              silent
+ * ```
+ *
+ * Zero rows is the whole defect: a formula value is computed on read, so no
+ * driver materializes a column for `$contains` to scan — 0 rows on
+ * driver-memory (the property is absent from the stored row) and 0 rows WITH NO
+ * ERROR on driver-sql/better-sqlite3. The declaration reads as search coverage
+ * and delivers none, which is the "an unapplied filter must not look like a
+ * satisfied one" family (#3948) with the sign that matters here: the caller
+ * asked to search a column and got a well-formed empty answer.
+ *
+ * Refused now, with its own message, because BOTH neighbouring messages are
+ * wrong for it: "outside the declared set" is false (it may be IN the list),
+ * and the auto-default's "declare `searchableFields` to choose the searchable
+ * set" would instruct the author to write the very declaration being refused.
+ */
+describe('#6674 — a virtual formula field named in searchFields (real ObjectQL engine)', () => {
+    let engine: ObjectQL;
+    let protocol: ObjectStackProtocolImplementation;
+    let stores: Map<string, Map<string, Record<string, unknown>>>;
+
+    /** Declares a formula field searchable — the card's shape exactly. */
+    const virtualObject = {
+        name: 'showcase_virtual',
+        label: 'Virtual',
+        searchableFields: ['name', 'project_name_formula'],
+        fields: {
+            id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+            name: { name: 'name', label: 'Name', type: 'text' as const },
+            project_name_formula: {
+                name: 'project_name_formula', label: 'Project (formula)',
+                type: 'formula' as const, expression: "record.name + ' · Apollo'",
+            },
+        },
+    };
+
+    /** No declaration at all — the auto-default branch of the same question. */
+    const autoObject = {
+        name: 'showcase_auto_virtual',
+        label: 'Auto Virtual',
+        fields: {
+            id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+            name: { name: 'name', label: 'Name', type: 'text' as const },
+            label_formula: {
+                name: 'label_formula', label: 'Label (formula)',
+                type: 'formula' as const, expression: 'record.name',
+            },
+        },
+    };
+
+    const ids = (r: any): string[] => r.records.map((x: any) => x.id);
+
+    beforeEach(async () => {
+        engine = new ObjectQL();
+        const made = makeStubDriver();
+        stores = made.stores;
+        engine.registerDriver(made.driver, true);
+        await engine.init();
+        engine.registry.registerObject(virtualObject as any, 'test-package');
+        engine.registry.registerObject(autoObject as any, 'test-package');
+        protocol = new ObjectStackProtocolImplementation(engine);
+
+        // The stored row carries `name` only. That IS the fixture's point: the
+        // formula's computed value would contain "Apollo", and the column that
+        // would have to hold it does not exist.
+        stores.set('showcase_virtual', new Map([
+            ['v1', { id: 'v1', name: 'Widget' }],
+            ['v2', { id: 'v2', name: 'Apollo Widget' }],
+        ]));
+        stores.set('showcase_auto_virtual', new Map([['a1', { id: 'a1', name: 'Widget' }]]));
+    });
+
+    it('CONTROL — the declared NON-virtual entry still narrows and still matches', async () => {
+        // Non-vacuity for every rejection below: the same object, the same
+        // declaration, one entry over, answers rows. A conformance block that
+        // only asserted refusals would pass just as happily with search broken.
+        expect(ids(await protocol.findData({
+            object: 'showcase_virtual', query: { search: 'Apollo', searchFields: 'name' },
+        }))).toEqual(['v2']);
+        // …and with no override at all, the search still runs over the surviving
+        // declared entry. Stock compatibility: an already-published object whose
+        // `searchableFields` names a formula field keeps answering plain
+        // searches, over the same rows as before, because the dropped entry
+        // matched nothing anyway.
+        expect(ids(await protocol.findData({
+            object: 'showcase_virtual', query: { search: 'Apollo' },
+        }))).toEqual(['v2']);
+    });
+
+    it('the DECLARED formula entry is refused — 400 INVALID_FIELD, not 200 with no rows', async () => {
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: 'project_name_formula' },
+        })).rejects.toMatchObject({
+            status: 400, code: 'INVALID_FIELD',
+            field: 'project_name_formula', object: 'showcase_virtual',
+        });
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: 'project_name_formula' },
+        })).rejects.toThrow(/is a virtual 'formula' field and cannot be searched/);
+        // The message must name WHY (no stored column) and the fix (a stored
+        // mirror) — the refusal is only useful if the author can act on it.
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: 'project_name_formula' },
+        })).rejects.toThrow(/computed on read and never stored/);
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: 'project_name_formula' },
+        })).rejects.toThrow(/Mirror the computed value onto a stored text field/);
+    });
+
+    it('the objectui echo — the whole declaration, formula entry included — is refused', async () => {
+        // The path this actually reaches production on: objectui's list search
+        // sends `$searchFields: schema.searchableFields` verbatim, so the object
+        // that declares a formula field 400s its own toolbar search. That is the
+        // blast radius the corpus count bounds, and it is why the message says
+        // the declaration is what to fix.
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: ['name', 'project_name_formula'] },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'project_name_formula' });
+        await expect(protocol.findData({
+            object: 'showcase_virtual',
+            query: { search: 'Apollo', searchFields: ['name', 'project_name_formula'] },
+        })).rejects.toThrow(/searchableFields' declares it/);
+    });
+
+    it('an UNDECLARED formula field gets the same reason, not the auto-default advice', async () => {
+        // Before #6674 this fell to the auto-default branch, whose message ends
+        // "Declare 'searchableFields' on the object to choose the searchable set
+        // explicitly" — advice that, followed, produces exactly the declaration
+        // the case above refuses. The virtual reason is checked BEFORE the
+        // source split for that reason.
+        await expect(protocol.findData({
+            object: 'showcase_auto_virtual', query: { search: 'x', searchFields: 'label_formula' },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'label_formula' });
+        await expect(protocol.findData({
+            object: 'showcase_auto_virtual', query: { search: 'x', searchFields: 'label_formula' },
+        })).rejects.toThrow(/is a virtual 'formula' field/);
+        await expect(protocol.findData({
+            object: 'showcase_auto_virtual', query: { search: 'x', searchFields: 'label_formula' },
+        })).rejects.not.toThrow(/choose the searchable set explicitly/);
+    });
+
+    it('CONTROL — the #4254 axes are untouched: unknown, stale and unsearchable keep their messages', async () => {
+        // The neighbour must not regress. Three distinct reasons, three
+        // distinct messages, all still reached.
+        await expect(protocol.findData({
+            object: 'showcase_virtual', query: { search: 'x', searchFields: 'no_such_field' },
+        })).rejects.toThrow(/Unknown field 'no_such_field'/);
+
+        engine.registry.registerObject({
+            name: 'showcase_mixed',
+            label: 'Mixed',
+            searchableFields: ['title', 'ghost'],
+            fields: {
+                id: { name: 'id', label: 'ID', type: 'text', primaryKey: true },
+                title: { name: 'title', label: 'Title', type: 'text' },
+                estimate: { name: 'estimate', label: 'Estimate', type: 'number' },
+            },
+        } as any, 'test-package');
+        await expect(protocol.findData({
+            object: 'showcase_mixed', query: { search: 'x', searchFields: 'ghost' },
+        })).rejects.toThrow(/declared in 'searchableFields' but does not exist/);
+        await expect(protocol.findData({
+            object: 'showcase_mixed', query: { search: 'x', searchFields: 'estimate' },
+        })).rejects.toThrow(/declares 'searchableFields'/);
+    });
+});

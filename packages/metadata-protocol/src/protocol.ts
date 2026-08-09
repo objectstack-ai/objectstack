@@ -45,6 +45,7 @@ import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
+    isVirtualSearchField,
     RUNTIME_OWNED_FIELD_TYPES,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
@@ -5064,11 +5065,16 @@ export class ObjectStackProtocolImplementation implements
      * export would stop downloading "the unsearched superset … in a file that
      * looks authoritative".
      *
-     * Two rejections, one code, different messages, because the fixes differ
-     * (the same split the expand axis draws): a name that is no field at all
-     * is a typo, while a REAL field outside the searchable set needs the
-     * OBJECT changed — added to a declared `searchableFields`, or declared
-     * searchable at all when the auto-default excludes its type. The allowed
+     * Rejections share one code and differ in message, because the fixes
+     * differ (the same split the expand axis draws): a name that is no field
+     * at all is a typo, while a REAL field outside the searchable set needs
+     * the OBJECT changed — added to a declared `searchableFields`, or declared
+     * searchable at all when the auto-default excludes its type. [#6674] adds
+     * the one case where changing the OBJECT cannot help either: a VIRTUAL
+     * (`formula`) field has no stored column on any driver, so declaring it
+     * searchable is not a narrower search but a scan of nothing — it used to
+     * clear this gate precisely BECAUSE the object declared it, the fail-open
+     * shape this axis exists to refuse. The allowed
      * set itself comes from {@link resolveSearchFieldResolution} in
      * `@objectstack/spec/data` — the same function the engine's search
      * expansion consumes — so this gate cannot admit a field the engine would
@@ -5140,10 +5146,24 @@ export class ObjectStackProtocolImplementation implements
         const declaredSet = new Set<string>(Array.isArray(gate.schema?.searchableFields) ? gate.schema.searchableFields : []);
         const unknown = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && !declaredSet.has(n));
         const staleDeclared = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && declaredSet.has(n));
-        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n));
+        // [#6674] A VIRTUAL field is its own rejection, split out of
+        // `unsearchable` before the source branch below rather than after it,
+        // because BOTH of that branch's messages are wrong for it. The declared
+        // one ("a field outside it cannot be a search target until it is added
+        // there") is false — it may already BE in the list, which is exactly the
+        // shape this closes; the auto one prescribes "declare `searchableFields`
+        // to choose the searchable set explicitly", which for a formula field is
+        // an instruction to author the refused declaration. The fix is neither:
+        // the value has no column anywhere, so it must be mirrored onto a stored
+        // one. Judged by the same `@objectstack/spec/data` predicate the
+        // resolution applies, so gate and engine cannot disagree about which
+        // types have a column.
+        const virtual = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && isVirtualSearchField(gate.fields[n]));
+        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && !isVirtualSearchField(gate.fields[n]));
         const [offenders, reason] =
             unknown.length > 0 ? [unknown, 'unknown' as const]
             : staleDeclared.length > 0 ? [staleDeclared, 'stale-declared' as const]
+            : virtual.length > 0 ? [virtual, 'virtual' as const]
             : [unsearchable, 'unsearchable' as const];
         if (offenders.length === 0) return;
         const first = offenders[0];
@@ -5154,6 +5174,18 @@ export class ObjectStackProtocolImplementation implements
                 + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
                 + '. The declaration is stale — searching it can never match, and the engine '
                 + "silently skipped it. Fix the object's 'searchableFields' to name real fields.";
+        } else if (reason === 'virtual') {
+            const vtype = gate.fields[first]?.type ?? 'formula';
+            detail = `Field '${first}' on object '${object}' is a virtual '${vtype}' field and cannot be searched`
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + `. Its value is computed on read and never stored, so no driver materializes a `
+                + `column for 'search' to scan and the entry can never match — measured as 0 rows, `
+                + 'with no error, on both the in-memory and the SQL backends.'
+                + (declaredSet.has(first)
+                    ? ` The object's 'searchableFields' declares it, which is what made the entry `
+                      + 'look like coverage; remove it there as well.'
+                    : '')
+                + ` Mirror the computed value onto a stored text field on '${object}' and search that instead.`;
         } else if (reason === 'unknown') {
             // A dotted path is a special unknown: plausible vocabulary from the
             // select/sort axes, but search scans this object's own columns.
