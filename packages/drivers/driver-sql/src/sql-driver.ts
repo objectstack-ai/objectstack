@@ -3899,6 +3899,24 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Identity of the counter a reservation was drawn from — the same
+   * `(table, tenant, field, scope)` hash {@link getNextSequenceValue} keys the
+   * sequences row by (#6943).
+   *
+   * `create()` never needed this: one row draws at most one reservation per
+   * field, so "which counter" and "which reservation" are the same question.
+   * A batch breaks that — many rows draw from ONE counter — and both of the
+   * batch's collision decisions are per *counter*, not per reservation: re-seed
+   * each stale counter once rather than once per row, and re-issue every row
+   * that drew from it. See {@link bulkCreate}.
+   */
+  protected autoNumberCounterKey(reservation: AutoNumberReservation): string {
+    const resolvedTenantId =
+      reservation.tenantField && reservation.tenantId ? String(reservation.tenantId) : GLOBAL_TENANT;
+    return this.sequenceKeyHash(reservation.tableName, resolvedTenantId, reservation.field, reservation.scope);
+  }
+
+  /**
    * Stamp the builtin audit timestamps to one canonical ISO-8601-with-`Z`
    * instant on the SQLite write paths (`create`/`bulkCreate`/`upsert`), so
    * INSERT and UPDATE agree on a single zone-explicit format.
@@ -3977,23 +3995,56 @@ export class SqlDriver implements IDataDriver {
 
     this.auditMissingTenant(object, 'upsert', options);
     this.injectTenantOnInsert(object, toUpsert, options);
-    await this.fillAutoNumberFields(object, toUpsert, options);
 
-    const formatted = this.applyWriteColumnMap(object, this.formatInput(object, toUpsert));
-    this.stampInsertTimestamps(object, formatted);
     const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
 
-    // Rotation: conflict-merge is scoped to the CURRENT shard (telemetry is
-    // effectively append-only; a cross-shard upsert would need a probe-first
-    // strategy nothing on the platform requires today).
-    const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
-    // `created_at` is insert-only — never overwrite it when an existing row is
-    // merged on conflict (the stamped/seeded value belongs to the original
-    // insert). Everything else (incl. `updated_at`) merges as before, so an
-    // upsert that updates a row still advances `updated_at`.
-    const mergeColumns = Object.keys(formatted).filter((c) => c !== 'created_at');
-    const insertion = builder.insert(formatted).onConflict(mergeKeys);
-    await (mergeColumns.length > 0 ? insertion.merge(mergeColumns) : insertion.merge());
+    // #6943. Measured: `upsert` does NOT share `bulkCreate`'s shape. It is
+    // single-row, so a stale counter costs it exactly one burned number per
+    // call — the same shape `create()` had before #5495, for the same reason
+    // (no re-seed, no retry). `ON CONFLICT (mergeKeys) DO UPDATE` absorbs a
+    // conflict on the merge key only; the tenanted autonumber lives under a
+    // DIFFERENT unique index, so its violation is still raised and still
+    // reaches here. The remedy is therefore `create()`'s, verbatim: re-seed and
+    // re-issue, but only when the collision is provably this counter's
+    // ({@link collidingAutoNumberReservations}), and only outside a caller
+    // transaction (inside one the sequence UPDATE rolls back with the refused
+    // INSERT, so nothing is burned and there is nothing to repair — measured).
+    const mayRetry = options?.transaction === undefined;
+    for (let attempt = 0; ; attempt++) {
+      const reservations = await this.fillAutoNumberFields(object, toUpsert, options);
+
+      const formatted = this.applyWriteColumnMap(object, this.formatInput(object, toUpsert));
+      this.stampInsertTimestamps(object, formatted);
+
+      // Rotation: conflict-merge is scoped to the CURRENT shard (telemetry is
+      // effectively append-only; a cross-shard upsert would need a probe-first
+      // strategy nothing on the platform requires today).
+      const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
+      // `created_at` is insert-only — never overwrite it when an existing row is
+      // merged on conflict (the stamped/seeded value belongs to the original
+      // insert). Everything else (incl. `updated_at`) merges as before, so an
+      // upsert that updates a row still advances `updated_at`.
+      const mergeColumns = Object.keys(formatted).filter((c) => c !== 'created_at');
+      const insertion = builder.insert(formatted).onConflict(mergeKeys);
+
+      try {
+        await (mergeColumns.length > 0 ? insertion.merge(mergeColumns) : insertion.merge());
+        break;
+      } catch (error) {
+        if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
+        const colliding = await this.collidingAutoNumberReservations(error, reservations, options);
+        if (colliding.length === 0) throw error;
+        for (const reservation of colliding) {
+          await this.resyncSequenceToDataMax(reservation);
+          // Clear only what collided, so the next pass regenerates exactly
+          // those fields — a reservation that did NOT collide keeps its value
+          // rather than burning a second number for nothing. (Safe here in a
+          // way it is NOT for a batch: one row cannot collide with itself.
+          // See {@link bulkCreate}.)
+          delete toUpsert[reservation.field];
+        }
+      }
+    }
 
     const readback = this.getBuilder(object, options).where('id', toUpsert.id);
     this.applyTenantScope(readback, object, options);
@@ -4043,33 +4094,118 @@ export class SqlDriver implements IDataDriver {
       return toInsert;
     });
     for (const row of rows) {
-      if (row && typeof row === 'object') {
-        this.injectTenantOnInsert(object, row, options);
-        // Reserve a persistent sequence value for each row's autonumber
-        // field(s) — the engine no longer pre-fills these (see #1603).
-        await this.fillAutoNumberFields(object, row, options);
+      if (row && typeof row === 'object') this.injectTenantOnInsert(object, row, options);
+    }
+
+    // #6943. A stale counter costs this path more than it costs `create()`.
+    // Each row reserves its own number in its own committed transaction, and
+    // then the whole batch goes in as ONE insert — so a single colliding row
+    // does not burn one number, it burns every number the batch reserved and
+    // fails the whole request. Measured on `main` @ `c8ff269` (counter at 10,
+    // rows 11–39 landed by a bypass path): a 3-row `bulkCreate` threw, wrote
+    // ZERO rows and moved `last_value` 10 → 13; the next call moved it 13 → 16
+    // and threw again. And the exposure is the worst available, because
+    // framework#2678 made this the common path for seed/import — which is
+    // precisely what *creates* the staleness (`isSystem` replay and
+    // `preserveAudit` import keep their explicit numbers and never enter
+    // `fillAutoNumberFields`, #5495/#5503).
+    //
+    // ## Batch semantics are deliberately NOT changed
+    //
+    // The card anticipated a decision about partial success and transaction
+    // boundaries. Measurement dissolves it: `insert(rows[])` is a SINGLE
+    // statement (`… select … union all select …` on SQLite, multi-row VALUES
+    // elsewhere), so the batch is ALREADY all-or-nothing — the failed batch
+    // above left the table exactly as it found it. Re-issuing and retrying the
+    // WHOLE batch therefore preserves the existing contract byte for byte: no
+    // partial success is introduced, no transaction is opened, no sibling-
+    // rollback question arises because siblings already fail together.
+    // Rejected instead:
+    //   - **Per-row retry inside the batch** (the shape the card sketched).
+    //     It requires splitting the one statement into N to learn which row
+    //     failed, which INVENTS partial success where none exists, costs N
+    //     round-trips on the hot seed/import path, and is what the engine's
+    //     own #6806 note warns about ("re-writing the batch could DUPLICATE
+    //     the rows that did land"). Nothing lands here, so nothing can.
+    //   - **Wrapping the batch in a driver-opened transaction.** It would move
+    //     the boundary the card was worried about, for no gain (the statement
+    //     is already atomic), and it defeats the reservation model: each
+    //     `getNextSequenceValue` commits on purpose, which is what makes a
+    //     forward-only re-seed meaningful. On SQLite (pool max 1) it is also
+    //     the deadlock `ensureSequencesTable` documents.
+    //   - **Re-seed but do not re-issue** (what the engine does at #6806).
+    //     Correct there, because the engine cannot know whether an arbitrary
+    //     driver applied the batch partially. Inside THIS driver that is
+    //     measurably false, so the caller can be handed a successful batch
+    //     instead of an error it has to retry itself.
+    //   - **Blanket retry on any unique violation.** Rejected for #5495's
+    //     reason: it silently eats the caller's own 409.
+    const mayRetry = options?.transaction === undefined;
+    for (let attempt = 0; ; attempt++) {
+      // Reserve a persistent sequence value for each row's autonumber
+      // field(s) — the engine no longer pre-fills these (see #1603).
+      const reservationsPerRow: AutoNumberReservation[][] = [];
+      for (const row of rows) {
+        reservationsPerRow.push(
+          row && typeof row === 'object' ? await this.fillAutoNumberFields(object, row, options) : [],
+        );
+      }
+
+      // Same write-side marshaling as create() (#2735): JSON-typed and
+      // object-valued fields must be serialized per row before they reach the
+      // knex binder — the raw batch used to hand `{lat, lng}` objects straight
+      // to SQLite ("Wrong API use: tried to bind a value of an unknown type"),
+      // silently failing the whole seed batch. Timestamp stamping runs on the
+      // FORMATTED copy, mirroring create().
+      const formattedRows = rows.map((row) => {
+        if (!row || typeof row !== 'object') return row;
+        const formatted = this.applyWriteColumnMap(object, this.formatInput(object, row));
+        this.stampInsertTimestamps(object, formatted);
+        return formatted;
+      });
+      const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
+
+      try {
+        const result = await builder.insert(formattedRows).returning('*');
+        // Read-back parity with create(): JSON columns come back as their stored
+        // strings from `returning('*')` — decode them so batch callers see the
+        // same shapes single-insert callers do.
+        return Array.isArray(result)
+          ? result.map((r) => this.formatOutput(object, r))
+          : result;
+      } catch (error) {
+        if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
+        const colliding = await this.collidingAutoNumberReservations(error, reservationsPerRow.flat(), options);
+        if (colliding.length === 0) throw error;
+
+        // Re-seed each stale counter ONCE, not once per row that drew from it:
+        // the scan is identical for every row sharing a counter and the update
+        // is forward-only, so the repeats are pure cost.
+        const stale = new Set<string>();
+        for (const reservation of colliding) {
+          const key = this.autoNumberCounterKey(reservation);
+          if (stale.has(key)) continue;
+          stale.add(key);
+          await this.resyncSequenceToDataMax(reservation);
+        }
+
+        // Re-issue EVERY row drawn from a stale counter — including rows whose
+        // own value did not collide. This is where the batch genuinely differs
+        // from `create()`, which keeps a non-colliding value to avoid burning a
+        // second number. Keeping them here is unsound: a batch that straddles
+        // the seeded range (say the counter is at 10, rows 11–39 exist, and the
+        // batch reserved 11–70) has its low rows collide and its high rows not,
+        // and regenerating only the low ones hands them numbers ABOVE the kept
+        // ones — an intra-batch duplicate this driver would have created
+        // itself. Counters that did NOT go stale keep their values, so another
+        // tenant's rows in the same batch are undisturbed.
+        for (let i = 0; i < rows.length; i++) {
+          for (const reservation of reservationsPerRow[i]) {
+            if (stale.has(this.autoNumberCounterKey(reservation))) delete rows[i][reservation.field];
+          }
+        }
       }
     }
-    // Same write-side marshaling as create() (#2735): JSON-typed and
-    // object-valued fields must be serialized per row before they reach the
-    // knex binder — the raw batch used to hand `{lat, lng}` objects straight
-    // to SQLite ("Wrong API use: tried to bind a value of an unknown type"),
-    // silently failing the whole seed batch. Timestamp stamping runs on the
-    // FORMATTED copy, mirroring create().
-    const formattedRows = rows.map((row) => {
-      if (!row || typeof row !== 'object') return row;
-      const formatted = this.applyWriteColumnMap(object, this.formatInput(object, row));
-      this.stampInsertTimestamps(object, formatted);
-      return formatted;
-    });
-    const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
-    const result = await builder.insert(formattedRows).returning('*');
-    // Read-back parity with create(): JSON columns come back as their stored
-    // strings from `returning('*')` — decode them so batch callers see the
-    // same shapes single-insert callers do.
-    return Array.isArray(result)
-      ? result.map((r) => this.formatOutput(object, r))
-      : result;
   }
 
   /**
