@@ -90,7 +90,7 @@ describe('wire-only alias spellings are rejected on direct engine calls (#4371)'
         finds = mem.finds;
         engine.registerDriver(mem.driver, true);
         await engine.init();
-        engine.registry.registerObject(task as any);
+        engine.registry.registerObject(task);
         await engine.insert('task', { title: 'B', status: 'done' });
         await engine.insert('task', { title: 'A', status: 'open' });
         await engine.insert('task', { title: 'C', status: 'done' });

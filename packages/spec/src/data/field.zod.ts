@@ -262,7 +262,7 @@ export const AddressSchema = lazySchema(() => z.object({
  */
 /**
  * Prescriptive rejection for a mis-spelled `unique` scope (ADR-0120
- * §Terminology; pattern of `strictTenancyError`): the error must carry the
+ * §Terminology; pattern of `strictCapabilitiesError`): the error must carry the
  * vocabulary and, for the two predictable near-misses (`'tenant'`, `'org'`),
  * name `'organization'` explicitly — a typo must be a loud, fixable parse
  * error, never a silent scope change. Declared before `UniqueScopeSchema`
@@ -817,7 +817,7 @@ export const FieldSchema = lazySchema(() => strictObject({
 
   /** Security & Visibility */
   hidden: z.boolean().default(false).describe('Hidden from default UI'),
-  readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip: `isSystem` writes (seed replay, migration), and an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). A normal (non-system) import is NOT system-context and still strips.'),
+  readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips.'),
 
   /**
    * [ADR-0066 D3] Capabilities required to READ/EDIT this field. A field

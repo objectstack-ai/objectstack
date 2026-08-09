@@ -324,7 +324,7 @@ describe('[#4770] showcase repro — showcase_audit_task_completion over a real 
     const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(taskObject as any);
+    engine.registry.registerObject(taskObject);
 
     audited = [];
     warn = vi.fn();

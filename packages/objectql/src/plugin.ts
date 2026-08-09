@@ -917,51 +917,51 @@ export class ObjectQLPlugin implements Plugin {
       // This change removes one and makes the engine's the single producer;
       // `captureBefore`'s now-redundant read is the identity lane's follow-up.
       //
-      // ⚠️ `sys_fetch_previous_delete` below is in the SAME position now, and is
-      // deliberately left standing because retiring it is #5929's card, not a
-      // rider on this one. Recording the measurement so that card does not have
-      // to rediscover it:
+      // ⛔ RETIRED — `sys_fetch_previous_delete` (#5929, ADR-0049
+      // enforce-or-remove). Do not reintroduce it.
       //
-      // `delete()` reads its pre-image when `wantsPreImage` is true, and that
-      // gate is `hasHooksFor('beforeDelete', object) || hasHooksFor(
-      // 'afterDelete', object) || summaries`. The builtin is itself a
-      // `beforeDelete` hook on `'*'`, so it makes the FIRST term true for every
-      // object — and then the engine's read binds `previous` before the builtin
-      // runs, so the builtin's own `!ctx.previous` guard is false and it issues
-      // no `findOne`. It is circular: the builtin's only remaining effect is to
-      // hold open the gate that makes it redundant. That circularity IS #5929
-      // ("the delete-side per-object gate is always true"), and after this
-      // change its resolution is the same retirement performed above, with the
-      // same argument.
+      // #5846 left the measurement here rather than the hook, precisely so this
+      // retirement would not have to rediscover it. Quoted from the block above
+      // as it stood then, because it IS the argument:
       //
-      // The one shape where the guard can still be true — the engine read found
-      // nothing (the row is already gone) — is one where the builtin's read
-      // finds nothing either, so it changes no binding.
-      {
-        name: 'sys_fetch_previous_delete',
-        object: '*',
-        events: ['beforeDelete'],
-        priority: 5,
-        description: 'Auto-fetch the previous record for delete hooks',
-        handler: async (hookCtx: any) => {
-          if (hookCtx.input?.id && !hookCtx.previous) {
-            try {
-              const existing = await this.ql!.findOne(hookCtx.object, {
-                where: { id: hookCtx.input.id },
-                context: {
-                  positions: [],
-                  permissions: [],
-                  isSystem: true,
-                  ...(hookCtx.transaction ? { transaction: hookCtx.transaction } : {}),
-                } as any,
-              });
-              if (existing) hookCtx.previous = existing;
-            } catch (_e) {
-              // Non-fatal
-            }
-          }
-        },
-      },
+      //   `delete()` reads its pre-image when `wantsPreImage` is true, and that
+      //   gate is `hasHooksFor('beforeDelete', object) || hasHooksFor(
+      //   'afterDelete', object) || summaries`. The builtin is itself a
+      //   `beforeDelete` hook on `'*'`, so it makes the FIRST term true for
+      //   every object — and then the engine's read binds `previous` before the
+      //   builtin runs, so the builtin's own `!ctx.previous` guard is false and
+      //   it issues no `findOne`. It is circular: the builtin's only remaining
+      //   effect is to hold open the gate that makes it redundant.
+      //
+      // Verified on this branch before removing anything, because a measurement
+      // recorded on one PR is a hypothesis on the next: the engine binds
+      // `previous` ahead of `beforeDelete` on BOTH delete shapes — by-id since
+      // #5272, per matched row since #6697 — so the guard is unreachable in
+      // production, and removing the hook changes no `previous` binding
+      // anywhere. The residual shape, `!hookCtx.previous` because the engine's
+      // own read found nothing, is one where this handler's read finds nothing
+      // either (same row, same transaction, same tenant scope): it binds
+      // nothing, and `bindPreImage` deliberately leaves `previous` UNBOUND
+      // rather than fabricating `{}` (#4649/#4775).
+      //
+      // What retiring it buys, and what it does NOT buy — both worth stating so
+      // the next reader does not over-read the result:
+      //   * it makes `hasHooksFor('beforeDelete', object)` an honest question on
+      //     an objectql-only kernel, so an object with no delete-side hook and
+      //     no roll-up summary finally pays NO prior-row read on a by-id
+      //     `delete()`. That skip could never happen while this hook stood.
+      //   * it does not, on its own, make the gate false on a kernel that also
+      //     loads plugin-auth / plugin-sharing / plugin-audit: each of those
+      //     registers a delete-phase hook with no `object` (i.e. global), and
+      //     they hold the same gate open for their own reasons. Those are real
+      //     consumers with real handlers, not circular ones — the gate answering
+      //     "yes" for them is the gate working. The enumeration lives in
+      //     `engine.ts` beside `wantsPreImage`.
+      //
+      // The retired hook's own shape is replayed as an authored hook in
+      // `engine-delete-prior-read-scope.test.ts`, which measures that its guard
+      // short-circuits and it issues zero reads — so "the guard can no longer be
+      // true" stays a measurement instead of rotting into a claim.
     ];
 
     if (typeof (this.ql as any).bindHooks === 'function') {
@@ -979,7 +979,12 @@ export class ObjectQLPlugin implements Plugin {
       }
     }
 
-    ctx.logger.debug('Audit hooks registered via binder (created_by/updated_by, previousData)');
+    // `previousData` used to be listed here as a third thing these builtins
+    // did. It is not one any more: both fetch-previous hooks are retired
+    // (#5846 update-side, #5929 delete-side) and `previous` is bound by the
+    // ENGINE on both write paths. A log line naming a producer that no longer
+    // exists is the cheapest way to send the next reader looking for it.
+    ctx.logger.debug('Audit hooks registered via binder (created_by/updated_by/created_at/updated_at/tenant_id stamping)');
   }
 
   /**

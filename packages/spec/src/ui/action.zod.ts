@@ -811,8 +811,38 @@ const actionObject = () => strictObject({
     'Run `os migrate meta --from 16` to rewrite it automatically.',
   ),
   
-  /** User Input Requirements */
-  params: z.array(ActionParamSchema).optional().describe('Input parameters required from user'),
+  /**
+   * User Input Requirements — the **parameter DEFINITION array** rendered as a
+   * dialog before the action runs. `ActionParam[]`, never a values map.
+   *
+   * The distinction is load-bearing and was, until #5777, only implicit. A
+   * `type:'api'` author reaches for `params` expecting the REQUEST PAYLOAD —
+   * `params: { name: '{{page.inquiryName}}' }` — because "params" reads like
+   * "what I send". That is a different concept living under the same name:
+   * definitions describe fields to COLLECT, a payload is data to SEND. The
+   * static payload key is {@link bodyExtra}, and the two shapes are disjoint
+   * (array vs object), which is exactly why the confusion survived — every
+   * consumer could tell them apart with `Array.isArray`, so nobody had to.
+   *
+   * The maintainer's 2026-08-06 ruling on #5777 took direction A (a separate
+   * key, no same-name union), so this key keeps ONE meaning and the object form
+   * is REFUSED here — with a message that names `bodyExtra` rather than the
+   * bare "expected array, received object" an author cannot act on. Sources
+   * still carrying the object form are rewritten at load by the
+   * `inline-action-api-params-to-body-extra` conversion (ADR-0087 D2).
+   */
+  params: z.array(ActionParamSchema, {
+    error: (iss) => (
+      iss.code === 'invalid_type'
+        && iss.input !== null
+        && typeof iss.input === 'object'
+        && !Array.isArray(iss.input)
+        ? "`params` is the parameter DEFINITION array (fields collected from the user before the action runs), not the request payload. "
+          + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead (#5777). "
+          + 'Expected an array of ActionParam, received an object.'
+        : undefined
+    ),
+  }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`).'),
   
   /** Visual Style */
   variant: z.enum(['primary', 'secondary', 'danger', 'ghost', 'link']).optional().describe('Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent)'),
@@ -1018,8 +1048,26 @@ const actionObject = () => strictObject({
    * `bodyExtra: { resend: true }` on a resend-invitation action that reuses
    * better-auth's `invite-member` endpoint. Applied after user-collected
    * params and `recordIdParam` so constants always win.
+   *
+   * **This is the static-payload key for `type:'api'`, on registered AND inline
+   * actions alike** (#5777). `params` is the parameter DEFINITION array and
+   * carries no payload; the ruled direction A gave the payload its own key
+   * rather than unioning two meanings onto one name. The name is not new and is
+   * deliberately not new: `body` is already taken on this schema (the `script`
+   * action's L1/L2 hook body, and the #4352 refinement rejects it alongside any
+   * other `type`, so it could never carry an api payload), and `payload` is
+   * already an ALIAS pointing here — written in the table above by #5013 for
+   * exactly that reason. So an author who writes `payload: {…}` is renamed onto
+   * this key, and one who writes `body: {…}` on a `type:'api'` action is
+   * rejected by the refinement that owns that name.
+   *
+   * Values are not required to be literals: objectui's console action runtime
+   * runs `resolvePageVarTokens` over this record, so `{{page.<var>}}` tokens
+   * resolve against the live page-variable snapshot the same way they do for a
+   * collected-params body. That is what makes it the correct home for a
+   * pure-SDUI form submit (`examples/app-showcase/.../contact-form.page.ts`).
    */
-  bodyExtra: z.record(z.string(), z.unknown()).optional().describe('Constant body fields merged into the API request (applied last; overrides user params).'),
+  bodyExtra: z.record(z.string(), z.unknown()).optional().describe('Static request-body fields for a type:"api" action, merged last (overrides user params). `{{page.<var>}}` tokens are resolved by the runtime. This — not `params` — is where a payload goes.'),
   /**
    * Semantic mode hint — UI / runtime can use this to pick confirm copy,
    * default variants, success messaging. Pure metadata; no runtime branching.
@@ -1189,6 +1237,25 @@ export function normalizeInlineAction(value: unknown): unknown {
  * page button running an inline sandboxed script is a separate decision. Widen
  * this when a renderer widens, not before — a declared field no renderer reads
  * is the failure this schema exists to stop.
+ *
+ * **`bodyExtra` is the one field picked AHEAD of its renderer, knowingly**
+ * (#5777, maintainer ruling 2026-08-06). It is the only authorized way for an
+ * inline `type:'api'` action to carry a static request payload: `params` is the
+ * parameter DEFINITION array and the ruling refused a same-name union, so
+ * without this pick the inline shape has no payload key at all — the cost the
+ * issue's option C names. The pick is therefore what makes the ruled direction
+ * A reachable from a page, and it is deliberately taken before objectui's half.
+ *
+ * The divergence that buys, stated rather than hidden: objectui's
+ * `element:button` renderer builds an explicit forward list
+ * (`packages/components/src/renderers/basic/elements.tsx`) that does not yet
+ * include `bodyExtra`, so between this landing and that follow-up an inline
+ * `bodyExtra` validates, publishes, and is dropped one hop before the runner.
+ * The runner and the console `apiHandler` below it already read the key — the
+ * missing hop is the forward list alone. Direction of the window: spec accepts
+ * ahead of the renderer, never the reverse. Tracked as the objectui card the
+ * ruling splits out under `Blocked-by:` this change; the general rule above is
+ * unchanged for every other field.
  */
 export const InlineActionSchema = lazySchema(() => z.preprocess(
   normalizeInlineAction,
@@ -1200,6 +1267,7 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
     openIn: true,
     method: true,
     params: true,
+    bodyExtra: true,
     confirmText: true,
     successMessage: true,
     errorMessage: true,
