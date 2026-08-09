@@ -36,7 +36,9 @@ describe('driver config registry', () => {
 
   it('resolves case- and whitespace-insensitively', () => {
     expect(resolveDriverId('  PostgreSQL ')).toBe('postgres');
-    expect(resolveDriverId('MongoDB')).toBe('mongo');
+    // `mongodb`, not `mongo`, since #6345 renamed the canonical id.
+    expect(resolveDriverId('MongoDB')).toBe('mongodb');
+    expect(resolveDriverId(' Mongo ')).toBe('mongodb');
   });
 
   /**

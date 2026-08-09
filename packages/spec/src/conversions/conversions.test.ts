@@ -5,6 +5,12 @@ import { describe, expect, it } from 'vitest';
 import { CreateRecordConfigSchema } from '../automation/builtin-node-config.zod.js';
 import { FlowSchema } from '../automation/flow.zod.js';
 import { ScriptConfigSchema } from '../automation/schemaless-node-config.zod.js';
+import { DatasourceSchema } from '../data/datasource.zod.js';
+import {
+  getDriverConfigSchema,
+  resolveDriverId,
+  validateDriverConfig,
+} from '../data/driver/config-registry.zod.js';
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
 import { ElementButtonPropsSchema, PageHeaderProps } from '../ui/component.zod.js';
 import { PageSchema } from '../ui/page.zod.js';
@@ -665,6 +671,61 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
+  // #6345 — the `mongo` → `mongodb` canonical-id rename. Two claims have to hold
+  // together, and only together: the stored value CONVERGES, and a deployment
+  // that never runs the conversion is NOT broken. Either alone would be the
+  // wrong shape — a rename that breaks old rows, or a rename that leaves one
+  // deployment holding two spellings of one driver forever.
+  describe('datasource-driver-mongo-to-mongodb (#6345)', () => {
+    const convert = (datasources: unknown[]) =>
+      collectConversionNotices({ datasources }, { includeRetired: true });
+
+    it('converts a stored `driver: "mongo"` row to `mongodb`', () => {
+      const row = { name: 'events', driver: 'mongo', config: { url: 'mongodb://db/x' }, origin: 'runtime' };
+      const out = applyConversionsToStoredItem('datasource', row) as { driver: string };
+      expect(out.driver).toBe('mongodb');
+    });
+
+    it('converts case- and whitespace-insensitively, exactly as the resolver reads it', () => {
+      const { stack } = convert([
+        { name: 'a', driver: 'Mongo', config: {} },
+        { name: 'b', driver: '  mongo  ', config: {} },
+      ]);
+      for (const ds of stack.datasources as Array<{ driver: string }>) expect(ds.driver).toBe('mongodb');
+    });
+
+    it('leaves an already-canonical row, and a merely mongo-LIKE id, alone', () => {
+      const before = {
+        datasources: [
+          { name: 'a', driver: 'mongodb', config: { url: 'mongodb://db/x' } },
+          { name: 'b', driver: 'com.vendor.mongolike', config: { url: 'x://y' } },
+        ],
+      };
+      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
+      expect(stack).toEqual(before);
+      expect(notices.filter((n) => n.conversionId === 'datasource-driver-mongo-to-mongodb')).toHaveLength(0);
+    });
+
+    // THE other half of the migration proof. A deployment that upgrades without
+    // replaying the chain still holds `driver: 'mongo'` rows, and they must keep
+    // working: `mongo` stays an accepted alias on purpose, so it resolves the
+    // same config contract and builds the same driver as before the rename.
+    // This is why the rename is a `minor` on `@objectstack/spec` and not a
+    // boot-breaking change — the conversion converges a spelling, it does not
+    // rescue one.
+    it('an UNCONVERTED `mongo` row is not left broken — same contract, same driver', () => {
+      expect(resolveDriverId('mongo')).toBe('mongodb');
+      expect(getDriverConfigSchema('mongo')).toBe(getDriverConfigSchema('mongodb'));
+      expect(validateDriverConfig('mongo', { url: 'mongodb://db/x' })).toEqual({ known: true, issues: [] });
+      // And it still parses as a datasource — the authoring gate never stopped
+      // accepting the alias, which is the whole reason nothing breaks.
+      const parsed = DatasourceSchema.safeParse({
+        name: 'events', driver: 'mongo', config: { url: 'mongodb://db/x' },
+      });
+      expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    });
+  });
+
   // #4456 — the driver-factory `??` fallback graduation. The mappings are
   // driver-scoped by construction; these pin the two edges the flat fixture
   // pair cannot express as sharply: the same key converting under one driver
@@ -686,6 +747,22 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(c!.config).toEqual({ host: 'db', database: 'orders' });
       expect(d!.config).toEqual({ host: 'db', database: 'events' });
       expect(notices.filter((n) => n.conversionId === 'datasource-config-driver-key-aliases')).toHaveLength(1);
+    });
+
+    it('still lands for a row whose driver id is ITSELF being renamed (#6345)', () => {
+      // The pairs are keyed by CANONICAL driver id, and #6345 renamed mongo's.
+      // A stored `driver: 'mongo'` must therefore still find the mongo pairs
+      // (through the alias) even as the sibling conversion rewrites its id —
+      // otherwise the rename would quietly un-convert every legacy mongo config.
+      const { stack, notices } = convert([
+        { name: 'events', driver: 'mongo', config: { uri: 'mongodb://db/x', user: 'svc' } },
+      ]);
+      const [events] = stack.datasources as Array<{ driver: string; config: Record<string, unknown> }>;
+      expect(events!.config).toEqual({ url: 'mongodb://db/x', username: 'svc' });
+      expect(events!.driver).toBe('mongodb');
+      // Two key renames (`uri` → `url`, `user` → `username`) plus the id rename.
+      expect(notices.filter((n) => n.conversionId === 'datasource-config-driver-key-aliases')).toHaveLength(2);
+      expect(notices.filter((n) => n.conversionId === 'datasource-driver-mongo-to-mongodb')).toHaveLength(1);
     });
 
     it('does not touch a plugin-contributed driver id — no contract, no rewrite', () => {
