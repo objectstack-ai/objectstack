@@ -65,24 +65,52 @@ jobs:
             const docs = data.docs || [];
             const pkgs = (data.changedPackages || []).map(p => p.name || p.dir);
             const marker = '<!-- docs-drift-check -->';
+            // The release-owned rows are PARTITIONED OUT of the editable list, never
+            // dropped (#6893, following the #4920 ruling). They keep getting audited —
+            // `docs` above is still the full set the audit workflow is scoped to — but
+            // listing them beside editable pages steers a reader who treats this comment
+            // as a worklist into the one edit AGENTS.md forbids outright. So they get
+            // their own section, carrying the instruction that makes them safe.
+            const readOnly = data.releaseOwnedDocs || [];
+            const editable = docs.filter(d => !readOnly.includes(d));
             let body;
             if (docs.length === 0) {
               body = `${marker}\n### 📓 Docs Drift Check\nNo hand-written docs reference the ${pkgs.length} changed package(s). ✅`;
             } else {
               const detail = (data.detail || []).reduce((m, d) => (m[d.doc] = d.via, m), {});
-              const list = docs.map(d => `- \`${d}\`${detail[d] ? `  _(via ${detail[d].join(', ')})_` : ''}`).join('\n');
+              const row = d => `- \`${d}\`${detail[d] ? `  _(via ${detail[d].join(', ')})_` : ''}`;
               body = [
                 marker,
                 '### 📓 Docs Drift Check',
                 `This PR changes **${pkgs.length}** package(s): ${pkgs.map(p => `\`${p}\``).join(', ')}.`,
-                '',
-                `**${docs.length}** hand-written doc(s) reference the affected code and may need an implementation-accuracy re-verification:`,
-                '',
-                list,
+              ];
+              if (editable.length) {
+                body.push(
+                  '',
+                  `**${editable.length}** hand-written doc(s) reference the affected code and may need an implementation-accuracy re-verification:`,
+                  '',
+                  editable.map(row).join('\n'),
+                );
+              }
+              if (readOnly.length) {
+                body.push(
+                  '',
+                  `⛔ **${readOnly.length}** release-owned page(s) ${editable.length ? 'also ' : ''}reference the affected code. These are **read-only**:`,
+                  '',
+                  readOnly.map(row).join('\n'),
+                  '',
+                  '> `content/docs/releases/` is RELEASE-OWNED (AGENTS.md "Documentation Guardrails"): release',
+                  '> notes are written centrally at release time, and a code PR that edits them is the exact PR',
+                  '> that guardrail exists to stop. They are still audited — read-only. If one of them is actually',
+                  '> wrong, **file an issue** or open a dedicated docs-only PR; do not edit it here.',
+                );
+              }
+              body.push(
                 '',
                 '> Advisory only. To re-verify, run the `docs-accuracy-audit` workflow scoped to these files:',
                 '> `node scripts/docs-audit/affected-docs.mjs origin/' + baseRef + '` → pass the list as `args.docs`.',
-              ].join('\n');
+              );
+              body = body.join('\n');
             }
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,

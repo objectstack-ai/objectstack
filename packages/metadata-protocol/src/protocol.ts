@@ -65,15 +65,15 @@ import {
 } from '@objectstack/spec/kernel';
 import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
-// [#5206 step 2, #5040 E7 / ADR-0121] The endpoint publish gates, reused
-// verbatim — see `gateApiDraftsForPublish`. `validateApiEndpointDeclarations`
-// is the ONE judge of what is servable; this module calls it, it never restates
-// a criterion.
-import {
-    ApiEndpointSchema,
-    validateApiEndpointDeclarations,
-    type ApiEndpoint,
-} from '@objectstack/spec/api';
+// [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
+// `validateApiEndpointDeclarations`, `type ApiEndpoint` — went with
+// `gateApiDraftsForPublish` (see its retirement note in `publishPackageDrafts`).
+// This module no longer judges endpoints at all: `api` is code-only since #5488,
+// so no `api` draft can be authored here, and the ONE judge of what is servable
+// stays `validateApiEndpointDeclarations` on the artifact route (stack schema,
+// `publishPackage` #5189, and `buildEndpointIndex` at load, PR #5203). An
+// endpoint-shaped import left behind with no caller reads as a capability this
+// module still has (#3950), so it is removed rather than parked.
 import { z } from 'zod';
 import {
     computeMetadataDiagnostics,
@@ -221,22 +221,12 @@ function stripServedSystemColumns<T>(type: string, item: T): T {
     return canonicalMetaType(type) === 'object' ? stripInjectedSystemColumns(item) : item;
 }
 
-/**
- * [#5206 step 2] Where an author of THIS path sets the namespace the ADR-0121
- * D2 gate demands.
- *
- * The criterion itself is the endpoint gate's — this sentence only answers the
- * follow-up question "so where do I put it, from here?", which differs per
- * publish path (`MetadataManager.publishPackage` has its own, #5189). It is
- * appended to the gate's own message, never in place of it.
- */
-const PUBLISH_DRAFTS_NAMESPACE_REMEDY =
-    "From `publishPackageDrafts` specifically: the namespace is read from the package's registered "
-    + '`manifest.namespace`, so declare it on the manifest and re-install/update the package '
-    + '(`installPackage` derives a default from the package id for Studio-authored packages, so an '
-    + 'absent one means the package is not in the runtime registry or its manifest predates that). '
-    + 'Alternatively publish the endpoints as part of a stack artifact (`defineStack` → compile → '
-    + 'artifact ingest), which carries the manifest and runs these same gates at parse time.';
+// [#5488] `PUBLISH_DRAFTS_NAMESPACE_REMEDY` stood here (#5206 step 2): the
+// "so where do I declare the namespace, from here?" sentence appended to the
+// ADR-0121 D2 gate's own message on this path. It is retired with
+// `gateApiDraftsForPublish`, the only thing that ever appended it — this path
+// no longer reports endpoint violations, because it can no longer receive an
+// `api` draft to violate anything.
 
 /**
  * [#3770] One-shot flag for the "engine has no schema registry" warning emitted
@@ -2282,6 +2272,43 @@ export interface MetadataAuthoringGateContext {
 export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void | Promise<void>;
 
 /**
+ * Which authoring channel a kernel's metadata writes arrive on (#6710).
+ *
+ * ADR-0005 carves out "the package author's own bootstrap channel" from the
+ * runtime authoring rules: a control-plane kernel installing a package is not
+ * an author publishing into a live tenant, and gating it would refuse the very
+ * bodies the platform ships. The carve-out is legitimate and stays.
+ *
+ * What #6710 changed is **how a kernel says it is that channel**. Until this
+ * type existed the answer was inferred from `environmentId === undefined` — a
+ * ROW-SCOPING key pressed into service as a topology signal. That proxy lies:
+ * the CLI's lightweight host-config assembler (`serve.ts`'s auto-register
+ * branch, `new ObjectQLPlugin()` with no options) also leaves `environmentId`
+ * undefined, and it serves an END-USER `PUT /api/v1/meta/*`. Both topologies
+ * read identically, so the whole #4463 gate — all 26 shared `AUTHORING_RULES`
+ * — was disengaged on a self-hosted app server. #5086 had already moved the
+ * code-only refusal off the same proxy for the same reason ("keying
+ * authorization off a row-scoping key is what made a type-level declaration
+ * depend on deployment topology; the declaration decides it here instead").
+ *
+ * So the channel is now DECLARED, not inferred:
+ *
+ * - `'environment'` — metadata arrives from an author (Studio tenant, MCP/AI
+ *   agent, `PUT /api/v1/meta/*`). The gate runs. **This is the default**, and
+ *   the default is the whole point: an assembly that forgets to declare gets
+ *   MORE enforcement, never less, so the next assembly variant nobody thought
+ *   about cannot silently reopen this hole.
+ * - `'package-author'` — this kernel IS the package author's own bootstrap
+ *   channel. Only the genuine control-plane assembly may state this.
+ *
+ * Deliberately a channel NAME and not a boolean: `skipAuthoringRules: true`
+ * would be the same bytes with the opposite meaning — a kill switch any
+ * assembly could reach for to make a red publish go away. A caller has to
+ * claim to BE the package author to be treated as one.
+ */
+export type MetadataAuthoringChannel = 'environment' | 'package-author';
+
+/**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
  * D10 — the facade never implemented the other domains; those live in their
  * owning services and are reached through the discovery `services` registry,
@@ -2300,8 +2327,26 @@ export class ObjectStackProtocolImplementation implements
      * saveMetaItem insert/update and loadMetaFromDb query is filtered by
      * `environment_id = environmentId`, so per-project kernels see only their own
      * metadata even if several projects share the same physical database.
+     *
+     * [#6710] Row scoping ONLY. This key keeps every one of its other jobs —
+     * the `environment_id` stamp/filter, the ADR-0005 overlay-whitelist gate,
+     * the #3050 authoring-gate scope, the local metadata-storage provisioning
+     * decision — but it no longer decides whether the #4463 runtime authoring
+     * rules run. See {@link authoringChannel}.
      */
     private environmentId?: string;
+
+    /**
+     * The declared authoring channel (#6710). Defaults to `'environment'`,
+     * which is what makes the #4463 gate active on every kernel that does not
+     * explicitly claim to be the package author's own bootstrap channel.
+     *
+     * Read by {@link assertRuntimeAuthoringRules} and nothing else — this is
+     * deliberately NOT a general-purpose authorization key. The ADR-0005
+     * overlay gate and the #3050 authoring gate keep reading `environmentId`,
+     * because those two really are about row scope.
+     */
+    private authoringChannel: MetadataAuthoringChannel;
 
     /**
      * Lazily-instantiated SysMetadataRepository per organization. Keyed by
@@ -2460,14 +2505,23 @@ export class ObjectStackProtocolImplementation implements
         return (name, body) => canonicalize.call(automation, name, body);
     }
 
+    /**
+     * @param authoringChannel [#6710] which channel this kernel's metadata
+     * writes arrive on. Omitted ⇒ `'environment'` ⇒ the #4463 runtime
+     * authoring gate is ACTIVE. Only the genuine control-plane assembly passes
+     * `'package-author'`. The default is the fail-safe direction on purpose:
+     * a caller that forgets this argument gets more enforcement, never less.
+     */
     constructor(
         engine: IDataEngine,
         getServicesRegistry?: () => Map<string, any>,
         environmentId?: string,
+        authoringChannel: MetadataAuthoringChannel = 'environment',
     ) {
         this.engine = engine as MetadataHostEngine;
         this.getServicesRegistry = getServicesRegistry;
         this.environmentId = environmentId;
+        this.authoringChannel = authoringChannel;
     }
 
     /**
@@ -2585,25 +2639,39 @@ export class ObjectStackProtocolImplementation implements
          */
         organizationId?: string | null;
     }): void {
-        // Environment writes only. `environmentId === undefined` is the
-        // package author's own control-plane channel — the same carve-out the
-        // ADR-0005 authorization gate and the #3050 authoring gate below both
-        // make, and pinned as deliberate by `protocol.runtime-authoring-gate.
-        // test.ts` ("does not gate control-plane (package-author) writes").
+        // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
         //
-        // [#6285] Measured before adding a guardrail behind it, because the
-        // dispatch asked whether the short-circuit makes the new refusal
-        // unreachable in the deployment shape it protects: it does not. Every
-        // serving path binds an environment id — `os dev` / `os start` default
-        // to `env_local` (`cli/src/commands/dev.ts:225`, `start.ts:197`), the
-        // standalone artifact stack to `proj_local`
-        // (`runtime/src/standalone-stack.ts:378`), and a cloud per-project
-        // kernel to its own — so a multi-organization deployment reaches this
-        // gate. What sits behind the short-circuit is the control-plane
-        // bootstrap kernel, which authors no tenant metadata. Widening it is
-        // therefore not this issue's business (and would change the blast
-        // radius of all 26 shared rules, not just this one).
-        if (this.environmentId === undefined) return;
+        // This line used to read `if (this.environmentId === undefined)
+        // return;` — the carve-out keyed off a ROW-SCOPING key. #6285 measured
+        // that short-circuit and found every *regular* serving path safely on
+        // the gated side (`os dev` / `os start` bind `env_local`, the
+        // standalone artifact stack `proj_local`, a cloud per-project kernel
+        // its own), and concluded the only thing behind it was the
+        // control-plane bootstrap kernel. That conclusion was incomplete, and
+        // #6710 measured the counter-example at boot level: the CLI's
+        // lightweight host-config assembler (`serve.ts`'s
+        // `config.objects && !hasObjectQL` branch → `new ObjectQLPlugin()`
+        // with no options) ALSO leaves `environmentId` undefined, and it
+        // serves an end-user `PUT /api/v1/meta/*`. `isHostConfig` →
+        // `shouldBootWithLibrary === false` is the flagship showcase's own
+        // boot shape, so a self-hosted app server ran all 26 shared
+        // `AUTHORING_RULES` on exactly nothing — and for a Studio tenant or an
+        // MCP/AI author this gate is not the weakest of four doors, it is the
+        // ONLY one (#4463's filing reason).
+        //
+        // Two topologies, one key, opposite intents: that is the definition of
+        // a proxy signal, and #5086 had already retired the same proxy for the
+        // code-only refusal a few hundred lines below. So the channel is now
+        // stated by the assembly (`assembleMetadataProtocol` ← the plugin
+        // option) rather than guessed from row scope, and the DEFAULT is the
+        // gated one. An assembly that forgets to declare gets more
+        // enforcement, never less — the direction matters more than the
+        // mechanism, because the failure mode being designed out is precisely
+        // "a new assembly variant nobody thought about".
+        //
+        // `environmentId` keeps every other job it has, including the #3050
+        // authoring gate's own scope check below.
+        if (this.authoringChannel === 'package-author') return;
         if (evt.state !== 'active') return;
         // `os migrate meta --stored --apply` rewrites rows that ALREADY EXIST
         // into the current dialect. It is not an author publishing anything —
@@ -4761,6 +4829,41 @@ export class ObjectStackProtocolImplementation implements
      * gets a message that says which relationship it tried to cross and
      * prescribes what `query-syntax.mdx` has prescribed since #4240:
      * denormalise the value onto the queried object and sort by that.
+     *
+     * [#6924] WHAT to denormalise onto was wrong, and this overturns #4256's
+     * own recorded wording. That issue chose "a formula or rollup field that
+     * copies it into a real column" — a prescription the platform cannot
+     * deliver, so the refusal handed the author a dead end at the exact moment
+     * they asked for help. Measured on a REAL `SqlDriver` (better-sqlite3) and
+     * on `InMemoryDriver`, with a `formula` field named directly (NOT dotted,
+     * so this gate lets it through):
+     *
+     * ```
+     * control  orderBy title asc    -> A B C D E      (a real column sorts)
+     * baseline no sort              -> C A E B D      (insertion order)
+     * orderBy  <formula field> asc  -> C A E B D  200 (insertion order)
+     * orderBy  <formula field> desc -> C A E B D  200 (direction-blind)
+     * ```
+     *
+     * No column exists to order by (`SqlDriver.createColumn` returns early for
+     * `formula`; sqlite answers `no such column`), the #3821 unknown-column
+     * backstop retries WITHOUT the sort, and the response is 200 with every
+     * row present in an arbitrary order — the very failure #4226/#4256 exist
+     * to stop. Following the old hint therefore landed the author back inside
+     * the defect they had just been refused for.
+     *
+     * `rollup`/`summary` was the other half of that wording and is NOT broken
+     * the same way — it does get a real, maintained column (`table.float`;
+     * measured: `orderBy <summary> desc` -> E D C B A over values 5 4 3 2 1).
+     * It is dropped from the hint because it cannot do THIS job: a rollup
+     * aggregates CHILD records (count/sum/min/max/avg), so it cannot carry a
+     * looked-up parent's column (`account.company_name`) onto this object.
+     * Wrong tool, not a broken one — naming it here still sends the author
+     * somewhere that cannot work.
+     *
+     * "Stored" is #6673's vocabulary for the same correction on the SEARCH
+     * axis (`validate-searchable-fields.ts`, "a stored text field"); the two
+     * axes deliberately say the same word.
      */
     private assertSortFieldsExist(object: string, orderBy: ReadonlyArray<{ field: string }>, param: string): void {
         if (orderBy.length === 0) return;
@@ -4797,8 +4900,10 @@ export class ObjectStackProtocolImplementation implements
                   + "not values inside them")
             + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
             {
-                hint: ` Denormalise the value onto '${object}' (a formula or rollup field that`
-                    + ' copies it into a real column) and sort by that.',
+                hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
+                    + ' source changes) and sort by that. Not a formula field: it is virtual,'
+                    + ' no driver materialises a column for one, and ORDER BY on it is silently'
+                    + ' dropped.',
                 extra: { field: first, fields: dotted, object },
             },
         );
@@ -9707,140 +9812,6 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#5206 step 2, #5189, #5040 E7 / ADR-0121] Run the endpoint publish gates
-     * over a batch's `api` drafts and report every failure as a publish-blocking
-     * violation.
-     *
-     * ## Why it exists on THIS path
-     *
-     * E7 (#5111) hung the per-endpoint gates on `ObjectStackDefinitionSchema`,
-     * so every path that parses a STACK is covered. `publishPackageDrafts`
-     * parses no stack: it reads `sys_metadata` draft rows and promotes them.
-     * #5189 closed the same hole on `MetadataManager.publishPackage`; this is
-     * the other door, and the one Studio's "publish everything" button actually
-     * goes through (ADR-0033 / ADR-0067 D2). Until now the only type-aware
-     * pre-flight here was the object namespace-prefix check, so an `api` draft
-     * — anonymous, unmetered, whatever — became `active` unjudged.
-     *
-     * ## One judge, never a second criteria set
-     *
-     * Everything this method decides comes from
-     * {@link validateApiEndpointDeclarations}: the same function the stack
-     * schema runs, the same function `publishPackage` runs, and (minus the two
-     * identity-bearing gates) the same `firstFailure` the endpoint matcher's
-     * load-time backstop runs. The messages are the gate's own — they already
-     * name the endpoint, the offending key and the fix, which is the whole
-     * point of refusing HERE instead of in a boot log. Nothing in this file
-     * restates a rule about what is servable.
-     *
-     * ## Why it can run the FULL gate, namespace included
-     *
-     * Unlike `publishPackage` — which indexes by `packageId`, holds no manifest
-     * and must be handed a `namespace` — this path already resolves the
-     * package's declared `manifest.namespace` for the object-prefix rule. So
-     * the namespace gate (ADR-0121 D1/D2) is judgeable here and is judged.
-     * Deliberately NOT conditional on the namespace being present: the gate's
-     * own precondition ("a stack that declares `apis:` MUST declare an explicit
-     * `manifest.namespace`") is a criterion, and skipping it when the answer is
-     * "there is none" would reopen the hole for exactly the packages least
-     * likely to have been through a stack compile. The object-prefix rule above
-     * grandfathers namespace-less packages because a bare object name is a
-     * naming smell; a namespace-less endpoint is an unownable URL.
-     *
-     * ## Boundaries, stated rather than silently assumed
-     *
-     * - Judged over the drafts BEING PROMOTED, mirroring the object-prefix rule
-     *   directly above it. A draft that collides with an already-`active`
-     *   endpoint of the same package is therefore not caught here; the matcher
-     *   resolves store-wide duplicate claims deterministically and names the
-     *   loser at `error` level (`buildEndpointIndex`). Widening this to the
-     *   package's whole active set would mean refusing a publish over something
-     *   the author is not publishing — a different contract, not a bug fix.
-     * - A draft row that vanished between `listDrafts` and here is skipped, not
-     *   invented into a gate failure: the promote loop reports the real
-     *   `no_draft` for it.
-     * - A store read that FAILS propagates. "Could not read the draft" must
-     *   never be answered with "the gate passed" (ADR-0110 D3's distinction,
-     *   same reason the matcher refuses to turn an outage into a 404).
-     *
-     * @param drafts the batch's draft headers, as `listDrafts` returned them.
-     * @param namespace the package's declared `manifest.namespace`, or
-     *   `undefined` when it declares none (the gate reports that itself).
-     * @returns one entry per violation, `[]` when the batch has no `api`
-     *   drafts (a package without endpoints is untouched by this pass).
-     */
-    private async gateApiDraftsForPublish(
-        drafts: ReadonlyArray<{ type: string; name: string; organizationId: string | null }>,
-        namespace: string | undefined,
-    ): Promise<Array<{ type: string; name: string; error: string; code: string }>> {
-        const apiDrafts = drafts.filter((d) => canonicalMetaType(d.type) === 'api');
-        if (apiDrafts.length === 0) return [];
-
-        const violations: Array<{ type: string; name: string; error: string; code: string }> = [];
-        /** Parsed endpoints, index-aligned with {@link gatedNames}. */
-        const endpoints: ApiEndpoint[] = [];
-        const gatedNames: string[] = [];
-
-        for (const d of apiDrafts) {
-            const draftOrgId = d.organizationId ?? null;
-            const draftRepo = this.getOverlayRepo(draftOrgId);
-            const ref = { type: 'api', name: d.name, org: draftOrgId ?? 'env' } as unknown as Parameters<typeof draftRepo.get>[0];
-            const draft = await draftRepo.get(ref, { state: 'draft' });
-            if (!draft) continue; // raced away — the promote loop reports `no_draft`
-
-            // Parsing is the gate's PRECONDITION, not a sixth gate: an
-            // `ApiEndpoint` is what `validateApiEndpointDeclarations` judges.
-            // Refusing an unparseable draft here is the same ruling #5189 made
-            // on the sibling path — a shape that cannot be gated could not be
-            // served either (the matcher's own loud skip refuses it at load),
-            // so publishing it would mint a route that answers 404 forever.
-            const parsed = ApiEndpointSchema.safeParse(draft.body);
-            if (!parsed.success) {
-                for (const issue of parsed.error.issues) {
-                    violations.push({
-                        type: 'api',
-                        name: d.name,
-                        error:
-                            `api draft '${d.name}' does not satisfy ApiEndpointSchema and cannot be published: `
-                            + `${issue.message} (at ${issue.path.join('.') || '<root>'}). An endpoint that does `
-                            + `not parse cannot be gated (ADR-0121) and would be EXCLUDED from endpoint `
-                            + `matching at load anyway, so its declared route would answer 404.`,
-                        code: 'ENDPOINT_SCHEMA',
-                    });
-                }
-                continue;
-            }
-            endpoints.push(parsed.data);
-            gatedNames.push(d.name);
-        }
-
-        for (const issue of validateApiEndpointDeclarations(endpoints, { namespace })) {
-            // The gate reports per-endpoint issues at `['apis', <index>, …]` and
-            // the namespace PRECONDITION once at `['apis']` — the latter is a
-            // property of the package, not of any one endpoint, so it is
-            // reported once, unattributed, with this path's own remedy appended.
-            const index = typeof issue.path[1] === 'number' ? issue.path[1] : undefined;
-            if (index === undefined) {
-                violations.push({
-                    type: 'api',
-                    name: '',
-                    error: `${issue.message} ${PUBLISH_DRAFTS_NAMESPACE_REMEDY}`,
-                    code: 'ENDPOINT_GATE',
-                });
-                continue;
-            }
-            violations.push({
-                type: 'api',
-                name: gatedNames[index] ?? '',
-                error: issue.message,
-                code: 'ENDPOINT_GATE',
-            });
-        }
-
-        return violations;
-    }
-
-    /**
      * Publish every pending DRAFT bound to a package in one shot (ADR-0033) —
      * the "publish whole app" action. Promotes each draft→active by reusing the
      * per-item {@link publishMetaItem} primitive (which runs the overridable /
@@ -9935,19 +9906,43 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // [#5206 step 2, #5040 E7 / ADR-0121] The endpoint publish gates on the
-        // OTHER publish path. `MetadataManager.publishPackage` gained them in
-        // #5189; this function — the real entry point behind Studio's "publish
-        // everything" (ADR-0033 / ADR-0067 D2) — promoted `api` drafts to
-        // active without meeting a single gate. The security consequence is
-        // already caught one layer down (PR #5203 re-judges every stored item
-        // at index-build time and EXCLUDES the ones that never passed), so what
-        // this closes is the LATENESS: ADR-0121 says publish refuses, and an
-        // author is owed a prescription naming the offending key here, not an
-        // `error` line in a boot log they never read. The load-time backstop
-        // stays exactly where it is — this is the earlier door, not a
-        // replacement for the last one.
-        preflightViolations.push(...(await this.gateApiDraftsForPublish(drafts, pkgNamespace)));
+        // [#5488 — RETIRED GATE, recorded overturn of PR #5279]
+        //
+        // `gateApiDraftsForPublish` stood here (#5206 step 2, #5040 E7 /
+        // ADR-0121) and ran the endpoint publish gates over this batch's `api`
+        // drafts. It is deliberately REMOVED, two days after it landed, by the
+        // maintainer ruling of 2026-08-07T16:59Z implemented in #5488 — not
+        // deleted as dead weight and not lost in a refactor.
+        //
+        // Why it can go: the gate judged whether an `api` draft was fit to be
+        // PROMOTED TO ACTIVE in `sys_metadata`. No such row is ever served. The
+        // serving criterion belongs to `IMetadataService.matchEndpoint` →
+        // `EndpointMatcher` → `MetadataManager.listForIndex('api')`, which
+        // reads the manager's registry plus its filesystem/memory loaders;
+        // `sys_metadata` is in neither, so a promoted endpoint 404s forever
+        // (real boot, #5488 — no `EXCLUDED` line, because it was never in the
+        // index to be excluded from). The gate was a correct verdict about a
+        // state with no consumer.
+        //
+        // Why it MUST go rather than sit unreached: `api` is now code-only
+        // (`allowRuntimeCreate: false` + `allowOrgOverride: false`), and the
+        // #5086 inlet refuses the write BEFORE persistence and BEFORE the
+        // draft/publish branch — it does not look at `mode`. So no `api` draft
+        // row can be created any more, and this gate could never again see one.
+        // Leaving it would leave unreachable code asserting a rule about a row
+        // that cannot exist, which is the shape of a phantom check.
+        //
+        // What still judges endpoints, unchanged: `validateApiEndpointDeclarations`
+        // / `identityFreeEndpointGateFailure` (`api/endpoint-publish-gate.ts`)
+        // on the route that actually serves — the stack schema, `publishPackage`
+        // (#5189), and again at load in `buildEndpointIndex` (PR #5203). ADR-0121
+        // keeps its "publish REJECTS" ruling in full on that route; only the
+        // runtime-authored-draft door it used to also cover is gone, because
+        // that door opened onto nothing.
+        //
+        // Re-entry, as the ruling recorded it: if #2657 Part B promotes `apis`
+        // to a registered type WITH A REAL CONSUMPTION PATH, this gate comes
+        // back with it — implementation first, declaration second.
 
         if (preflightViolations.length > 0) {
             return {

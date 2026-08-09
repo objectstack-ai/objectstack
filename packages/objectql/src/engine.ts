@@ -4225,31 +4225,100 @@ export class ObjectQL implements IObjectQLEngine {
    *    objects route to the dedicated 'telemetry' datasource when registered
    * 4. Package's `defaultDatasource` from manifest
    * 5. Global default driver
+   *
+   * The order itself lives in {@link resolveDatasourceBinding} — this method
+   * turns the name it decides on into a driver, and diagnoses the cases where
+   * that driver is missing.
    */
   private getDriver(objectName: string): IDataDriver {
-    const object = this._registry.getObject(objectName);
+    const binding = this.resolveDatasourceBinding(objectName);
 
-    // 1. Object's explicit datasource field (highest priority)
-    if (object?.datasource && object.datasource !== 'default') {
-      if (this.drivers.has(object.datasource)) {
-        return this.drivers.get(object.datasource)!;
+    if (binding) {
+      const driver = this.drivers.get(binding.datasource);
+      if (driver) {
+        // Debug lines kept at the DECISION they describe, but emitted here so
+        // the resolver stays free of side effects: it also answers the public
+        // {@link resolveEffectiveDatasource} probe, which must be able to name
+        // a datasource without logging a routing event that never happened.
+        if (binding.via === 'mapping') {
+          this.logger.debug('Resolved datasource from mapping', {
+            object: objectName,
+            datasource: binding.datasource
+          });
+        } else if (binding.via === 'package') {
+          this.logger.debug('Resolved datasource from package manifest', {
+            object: objectName,
+            package: binding.packageId,
+            datasource: binding.datasource
+          });
+        }
+        return driver;
       }
+
+      // Only steps 1 and 2 reach here. Steps 3-5 answer ONLY when their driver
+      // is registered (that registration is what opts the deployment into
+      // lifecycle separation / a package default / a global default at all), so
+      // a binding they produce always resolves.
+      //
       // The datasource layer may have recorded WHY this one has no driver —
       // refused by the host policy, or failed to connect under
       // OS_ALLOW_DRIVER_CONNECT_FAILURE (framework#3828). Saying so beats
       // sending the reader hunting for a typo that isn't there.
-      const unavailable = this.unavailableDatasources.get(object.datasource);
+      const unavailable = this.unavailableDatasources.get(binding.datasource);
       if (unavailable) {
         throw new DatasourceUnavailableError(
-          object.datasource,
+          binding.datasource,
           objectName,
           unavailable.kind,
           unavailable.publicDetail,
         );
       }
+      if (binding.via === 'mapping') {
+        throw new Error(
+          `[ObjectQL] Datasource '${binding.datasource}' mapped for object '${objectName}' is not registered. ` +
+          `A datasourceMapping rule routes this object to it, so falling back to the default store would ` +
+          `write the object's data to a different database than the one it declares. Fix the datasource ` +
+          `configuration, or remove the mapping rule.`,
+        );
+      }
       // No record: nothing ever tried to connect this name, so it is genuinely
       // undeclared (or misspelled). Unchanged message — there is nothing to add.
-      throw new Error(`[ObjectQL] Datasource '${object.datasource}' configured for object '${objectName}' is not registered.`);
+      throw new Error(`[ObjectQL] Datasource '${binding.datasource}' configured for object '${objectName}' is not registered.`);
+    }
+
+    throw new Error(`[ObjectQL] No driver available for object '${objectName}'`);
+  }
+
+  /**
+   * WHERE does `objectName`'s data live, and WHICH step decided — the single
+   * implementation of the resolution order documented on {@link getDriver}.
+   *
+   * Split out for #5288 so the order exists exactly once. It had two readers
+   * with two different answers: `getDriver` (all five steps) and every caller
+   * that only needed the NAME, which read `object.datasource` — step 1 of five.
+   * A second, shorter copy of a routing order is the failure
+   * `resolveMappedDatasource` (#4462) was extracted to prevent, and it fails the
+   * same way: silently, in whichever direction the copy is short.
+   *
+   * Steps 1-2 answer even when the named datasource has no registered driver:
+   * they are BINDINGS, and `getDriver` stops there (it throws rather than
+   * falling through — #4462). Steps 3-5 answer only when their driver is
+   * registered, because that registration is what turns each of them on.
+   *
+   * `undefined` means nothing routes the object anywhere: no binding, and no
+   * global default driver to fall back to.
+   */
+  private resolveDatasourceBinding(objectName: string): {
+    datasource: string;
+    via: 'explicit' | 'mapping' | 'lifecycle' | 'package' | 'default';
+    /** Owning package, on `via: 'package'` only — for the debug line. */
+    packageId?: string;
+  } | undefined {
+    const object = this._registry.getObject(objectName);
+
+    // 1. Object's explicit datasource field (highest priority)
+    if (object?.datasource && object.datasource !== 'default') {
+      return { datasource: object.datasource, via: 'explicit' };
     }
 
     // 2. Check datasourceMapping rules
@@ -4267,31 +4336,7 @@ export class ObjectQL implements IObjectQLEngine {
     // false by construction and step 5 is how routing to it works.
     const mappedDatasource = this.resolveDatasourceFromMapping(objectName, object);
     if (mappedDatasource && mappedDatasource !== 'default') {
-      if (this.drivers.has(mappedDatasource)) {
-        this.logger.debug('Resolved datasource from mapping', {
-          object: objectName,
-          datasource: mappedDatasource
-        });
-        return this.drivers.get(mappedDatasource)!;
-      }
-      // Same three-way diagnosis as an explicit `object.datasource` binding —
-      // the two are the same promise made in two places, so they owe the reader
-      // the same answer.
-      const unavailable = this.unavailableDatasources.get(mappedDatasource);
-      if (unavailable) {
-        throw new DatasourceUnavailableError(
-          mappedDatasource,
-          objectName,
-          unavailable.kind,
-          unavailable.publicDetail,
-        );
-      }
-      throw new Error(
-        `[ObjectQL] Datasource '${mappedDatasource}' mapped for object '${objectName}' is not registered. ` +
-        `A datasourceMapping rule routes this object to it, so falling back to the default store would ` +
-        `write the object's data to a different database than the one it declares. Fix the datasource ` +
-        `configuration, or remove the mapping rule.`,
-      );
+      return { datasource: mappedDatasource, via: 'mapping' };
     }
 
     // 3. Lifecycle-class separation (ADR-0057 §3.6): high-frequency
@@ -4307,7 +4352,7 @@ export class ObjectQL implements IObjectQLEngine {
       ObjectQL.SYSTEM_LEDGER_LIFECYCLE_CLASSES.has(lifecycleClass) &&
       this.drivers.has(ObjectQL.LIFECYCLE_DATASOURCE)
     ) {
-      return this.drivers.get(ObjectQL.LIFECYCLE_DATASOURCE)!;
+      return { datasource: ObjectQL.LIFECYCLE_DATASOURCE, via: 'lifecycle' };
     }
 
     // 4. Check package's defaultDatasource
@@ -4316,24 +4361,51 @@ export class ObjectQL implements IObjectQLEngine {
     const owner = this._registry.getObjectOwner(fqn);
     if (owner?.packageId) {
       const manifest = this.manifests.get(owner.packageId);
-      if (manifest?.defaultDatasource && manifest.defaultDatasource !== 'default') {
-        if (this.drivers.has(manifest.defaultDatasource)) {
-          this.logger.debug('Resolved datasource from package manifest', {
-            object: objectName,
-            package: owner.packageId,
-            datasource: manifest.defaultDatasource
-          });
-          return this.drivers.get(manifest.defaultDatasource)!;
-        }
+      const packageDatasource = manifest?.defaultDatasource;
+      if (packageDatasource && packageDatasource !== 'default' && this.drivers.has(packageDatasource)) {
+        return { datasource: packageDatasource, via: 'package', packageId: owner.packageId };
       }
     }
 
     // 5. Fallback to global default driver
     if (this.defaultDriver && this.drivers.has(this.defaultDriver)) {
-      return this.drivers.get(this.defaultDriver)!;
+      return { datasource: this.defaultDriver, via: 'default' };
     }
 
-    throw new Error(`[ObjectQL] No driver available for object '${objectName}'`);
+    return undefined;
+  }
+
+  /**
+   * Which datasource is `objectName` BOUND to? — the effective one, resolved
+   * through the same five steps {@link getDriver} routes by, computed as a NAME
+   * and without taking a driver.
+   *
+   * The public face of {@link resolveDatasourceBinding}, added for #5288, and
+   * the same argument as {@link resolveMappedDatasource} (#4462): a caller that
+   * only needs to NAME the datasource used to read `object.datasource` and stop
+   * there. That is step 1 of five, and `ObjectSchema.datasource` carries
+   * `.default('default')` — so an object routed by a `datasourceMapping` rule,
+   * by the ADR-0057 §3.6 lifecycle split, or by its package's
+   * `defaultDatasource` answered `'default'`, which in this engine means "no
+   * explicit binding, keep looking", never "the primary DB". A diagnostic built
+   * on that answer names a database the rows are not in.
+   *
+   * Returns `undefined` when nothing binds the object anywhere and it simply
+   * rides the deployment's default driver (step 5), which is deliberate on two
+   * counts. The default driver keeps its NATURAL name (#3826 —
+   * `drivers.has('default')` is false by construction), so that name identifies
+   * a driver, not a datasource anyone bound this object to; and "rides the
+   * default" is what the consumers of this answer already document as
+   * `undefined`. Callers that need the default driver's name have
+   * {@link getDefaultDriverName}.
+   *
+   * Never throws. A binding whose datasource has no registered driver is still
+   * this object's datasource — the deployment is broken, `getDriver` says so
+   * loudly, and a naming probe must be able to report the name that is broken.
+   */
+  resolveEffectiveDatasource(objectName: string): string | undefined {
+    const binding = this.resolveDatasourceBinding(objectName);
+    return binding && binding.via !== 'default' ? binding.datasource : undefined;
   }
 
   /**

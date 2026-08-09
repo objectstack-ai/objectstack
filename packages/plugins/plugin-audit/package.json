@@ -2,7 +2,7 @@
   "name": "@objectstack/plugin-audit",
   "version": "17.0.0-rc.5",
   "license": "Apache-2.0",
-  "description": "Audit Plugin for ObjectStack — System audit log object and audit trail",
+  "description": "Audit Plugin for ObjectStack \u2014 System audit log object and audit trail",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -19,11 +19,11 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
-    "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.1.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

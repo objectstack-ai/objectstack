@@ -46,12 +46,12 @@ const result = FlowSchema.parse(data);
 | **errorMessage** | `string` | optional | Toast shown when a screen flow fails (defaults to the raw error). |
 | **version** | `integer` | optional | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional | Deployment status |
-| **template** | `never` | optional | [REMOVED] `flow.template` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no designer or engine path ever read it, so flagging a flow as a template/subflow did nothing. Delete the key. Shared logic is invoked via a subflow NODE referencing the flow by name. |
+| **template** | `never` | optional | [REMOVED] `flow.template` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no designer or engine path ever read it, so flagging a flow as a template/subflow did nothing. Delete the key. Shared logic is invoked via a subflow NODE referencing the flow by name. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
-| **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean }[]` | optional | Flow variables |
+| **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean; … }[]` | optional | Flow variables |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
 | **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | ✅ | Flow connections |
-| **active** | `never` | optional | [REMOVED] `flow.active` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it never had an effect: the engine arms flows from `status`, and `active: false` did NOT stop a flow (worse, the default read as disabled while the engine treated unset as enabled). Delete the key. Use `status: 'obsolete'` (or 'invalid') to unbind and disable a flow, `status: 'active'` to arm it. |
+| **active** | `never` | optional | [REMOVED] `flow.active` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it never had an effect: the engine arms flows from `status`, and `active: false` did NOT stop a flow (worse, the default read as disabled while the engine treated unset as enabled). Delete the key. Use `status: 'obsolete'` (or 'invalid') to unbind and disable a flow, `status: 'active'` to arm it. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **runAs** | `Enum<'system' \| 'user'>` | optional | Execution identity for the run: system = elevated (bypasses RLS), user = the triggering user (RLS-respecting). A run with no trigger user has no identity to scope to, so under user its data operations are REFUSED — declare system to make the elevation explicit. This covers schedule/time-relative/api triggers AND any record-change flow fired by a write that carried no user. |
 | **errorHandling** | `{ strategy?: Enum<'fail' \| 'retry' \| 'continue'>; maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; … }` | optional | Flow-level error handling configuration |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this flow. |
@@ -97,7 +97,7 @@ const result = FlowSchema.parse(data);
 | **position** | `{ x: number; y: number }` | optional |  |
 | **timeoutMs** | `integer` | optional | Maximum execution time for this node in milliseconds |
 | **inputSchema** | `Record<string, { type: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array'>; required?: boolean; description?: string }>` | optional | Input parameter schema for this node |
-| **outputSchema** | `never` | optional | [REMOVED] `flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it was never validated: the engine does not check node outputs against it, so it documented a contract nothing enforced. Delete the key. Downstream nodes read prior outputs via expressions (`{{nodeId.field}}`) regardless of any declaration. |
+| **outputSchema** | `never` | optional | [REMOVED] `flow.nodes[].outputSchema` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it was never validated: the engine does not check node outputs against it, so it documented a contract nothing enforced. Delete the key. Downstream nodes read prior outputs via expressions (`{{nodeId.field}}`) regardless of any declaration. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **waitEventConfig** | `{ eventType: Enum<'timer' \| 'signal' \| 'webhook' \| 'manual' \| 'condition'>; timerDuration?: string; signalName?: string }` | optional | Configuration for wait node event resumption |
 | **boundaryConfig** | `{ attachedToNodeId: string; eventType: Enum<'error' \| 'timer' \| 'signal' \| 'cancel'>; interrupting?: boolean; errorCode?: string; … }` | optional | Configuration for boundary events attached to host nodes |
 
@@ -142,6 +142,7 @@ const result = FlowSchema.parse(data);
 | **type** | `string` | ✅ | Data type (text, number, boolean, object, list) |
 | **isInput** | `boolean` | ✅ | Is input parameter |
 | **isOutput** | `boolean` | ✅ | Is output parameter |
+| **defaultValue** | `any` | optional | Value bound at run start when no parameter supplies one — this is what makes a declared variable always bound. An explicitly supplied param wins, including `false` and `null`; the boundary is `params[name] !== undefined`. |
 
 
 ---

@@ -31,6 +31,23 @@ type ContractMock<T> = Partial<Record<keyof T, unknown>>;
  */
 const AUTHED_CALLER = () => ({ request: {}, executionContext: { userId: 'u_test', isSystem: false, positions: [], permissions: [], systemPermissions: [] } }) as any;
 
+/**
+ * [#7019] The same move as `AUTHED_CALLER` above, one rung up: the dispatcher's
+ * `/meta` PUT now demands the `manage_metadata` authoring capability (ADR-0066
+ * D1), matching the gate #6603 put on the REST twin and the one
+ * `POST /_migrate-stored` already had next door.
+ *
+ * The PUT cases below are about ROUTING and ERROR MAPPING — which service
+ * method a path reaches, whether a 422's issues survive, whether the 501
+ * fallback still means "no kernel support". They were written when a session
+ * alone could write metadata, i.e. their `{ userId: 'u1' }` stub encoded
+ * exactly the premise the gate destroys, so without a capability they now stop
+ * at the 403 before reaching the behaviour each one is named after. Only the
+ * caller changes here; every mechanism, assertion and expected value is
+ * untouched. The gate itself is pinned in `domains/meta-save-capability-gate.test.ts`.
+ */
+const METADATA_AUTHOR = () => ({ request: {}, executionContext: { userId: 'u1', systemPermissions: ['manage_metadata'] } }) as any;
+
 describe('HttpDispatcher', () => {
     let kernel: ObjectKernel;
     let dispatcher: HttpDispatcher;
@@ -74,7 +91,7 @@ describe('HttpDispatcher', () => {
 
     describe('handleMetadata', () => {
         it('should handle PUT /metadata/:type/:name by calling protocol.saveMetaItem', async () => {
-            const context = { request: {}, executionContext: { userId: 'u1' } };
+            const context = METADATA_AUTHOR();
             const body = { label: 'New Label' };
             const path = '/objects/my_obj';
 
@@ -95,7 +112,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('should handle PUT with compound name (3+ path segments)', async () => {
-            const context = { request: {}, executionContext: { userId: 'u1' } };
+            const context = METADATA_AUTHOR();
             const body = { density: 'compact' };
             // /metadata/lead/views/all_leads → type='lead', name='views/all_leads'
             const path = '/lead/views/all_leads';
@@ -123,7 +140,7 @@ describe('HttpDispatcher', () => {
                 return null;
             };
 
-            const context = { request: {}, executionContext: { userId: 'u1' } };
+            const context = METADATA_AUTHOR();
             const body = { label: 'Fallback' };
             const path = '/objects/my_obj';
 
@@ -137,7 +154,7 @@ describe('HttpDispatcher', () => {
         it('should return error if save fails', async () => {
             mockProtocol.saveMetaItem.mockRejectedValue(new Error('Save failed'));
 
-            const context = { request: {}, executionContext: { userId: 'u1' } };
+            const context = METADATA_AUTHOR();
             const body = {};
             const path = '/objects/bad_obj';
 
@@ -161,7 +178,7 @@ describe('HttpDispatcher', () => {
             ];
             mockProtocol.saveMetaItem.mockRejectedValue(err);
 
-            const result = await dispatcher.handleMetadata('/objects/bad', { request: {}, executionContext: { userId: 'u1' } } as any, 'PUT', {});
+            const result = await dispatcher.handleMetadata('/objects/bad', METADATA_AUTHOR(), 'PUT', {});
 
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(422); // NOT the old hardcoded 400
@@ -1145,7 +1162,7 @@ describe('HttpDispatcher', () => {
                     return null;
                 });
 
-                const result = await dispatcher.handleMetadata('/objects/my_obj', { request: {}, executionContext: { userId: 'u1' } } as any, 'PUT', { label: 'Test' });
+                const result = await dispatcher.handleMetadata('/objects/my_obj', METADATA_AUTHOR(), 'PUT', { label: 'Test' });
                 expect(result.handled).toBe(true);
                 expect(result.response?.status).toBe(200);
                 expect(asyncProtocol.saveMetaItem).toHaveBeenCalled();
@@ -1261,7 +1278,7 @@ describe('HttpDispatcher', () => {
             // Remove context.getService to ensure getServiceAsync is used
             (kernel as any).context = {};
 
-            const result = await dispatcher.handleMetadata('/objects/my_obj', { request: {}, executionContext: { userId: 'u1' } } as any, 'PUT', { label: 'Test' });
+            const result = await dispatcher.handleMetadata('/objects/my_obj', METADATA_AUTHOR(), 'PUT', { label: 'Test' });
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(asyncProtocol.saveMetaItem).toHaveBeenCalled();
@@ -1833,16 +1850,23 @@ describe('HttpDispatcher', () => {
             );
         });
 
-        // ADR-0045: "Publish" = live AND visible. A materialized (additive)
-        // build leaves its app at hidden:true; publish-drafts must flip it so
-        // one publish verb serves both the draft and the materialize regimes.
-        it('POST /packages/:id/publish-drafts unhides the package\'s hidden app', async () => {
+        // ADR-0045 §3: "Publish" = live AND visible. A materialized (additive)
+        // build leaves its app at `_unpublished: true`; publish-drafts must clear
+        // that gate so one publish verb serves both the draft and the
+        // materialize regimes.
+        //
+        // #4829 — the gate moved off `hidden`. The KEY matters here as much as
+        // the behaviour: `hidden` also means "keep out of the App Switcher", so
+        // the old flip silently rewrote a presentation choice on publish, and
+        // the REST gate reading the same flag erased the built-in `account` app
+        // for every non-builder.
+        it('POST /packages/:id/publish-drafts clears the publish gate on the package\'s unpublished app', async () => {
             const publishPackageDrafts = vi.fn().mockResolvedValue({
                 success: true, publishedCount: 0, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
             });
             const getMetaItems = vi.fn().mockResolvedValue([
-                { name: 'production_management', label: '生产管理', hidden: true, navigation: [] },
-                { name: 'already_visible', hidden: false, navigation: [] },
+                { name: 'production_management', label: '生产管理', _unpublished: true, navigation: [] },
+                { name: 'already_published', _unpublished: false, navigation: [] },
             ]);
             const saveMetaItem = vi.fn().mockResolvedValue({ ok: true });
             (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
@@ -1855,15 +1879,51 @@ describe('HttpDispatcher', () => {
 
             expect(result.response?.status).toBe(200);
             expect(getMetaItems).toHaveBeenCalledWith(expect.objectContaining({ type: 'app', packageId: 'app.production_management' }));
-            // Only the hidden app is re-saved, with hidden:false and everything else intact.
+            // Only the unpublished app is re-saved, with `_unpublished: false`
+            // and everything else intact.
             expect(saveMetaItem).toHaveBeenCalledTimes(1);
             expect(saveMetaItem).toHaveBeenCalledWith(expect.objectContaining({
                 type: 'app',
                 name: 'production_management',
-                item: expect.objectContaining({ hidden: false, label: '生产管理' }),
+                item: expect.objectContaining({ _unpublished: false, label: '生产管理' }),
                 packageId: 'app.production_management',
             }));
             expect((result.response as any)?.body?.data?.unhiddenApps).toEqual(['production_management']);
+        });
+
+        // #4829 — the other half of the split, pinned at the WRITE point.
+        // Publishing must not touch navigation presentation: an app authored
+        // `hidden: true` (the Account / personal-settings shape) that is also
+        // unpublished comes out of Publish still hidden from the App Switcher.
+        // Under the old regime this write was what destroyed that choice,
+        // because "publish" and "show in the switcher" were one key.
+        it('POST /packages/:id/publish-drafts leaves `hidden` untouched — it publishes, it does not un-hide', async () => {
+            const publishPackageDrafts = vi.fn().mockResolvedValue({
+                success: true, publishedCount: 0, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
+            });
+            const getMetaItems = vi.fn().mockResolvedValue([
+                { name: 'account_like', hidden: true, _unpublished: true, navigation: [] },
+                // Hidden but already published: nothing to do here. A flip keyed
+                // on `hidden` would have re-saved this one and un-hidden it.
+                { name: 'account', hidden: true, navigation: [] },
+            ]);
+            const saveMetaItem = vi.fn().mockResolvedValue({ ok: true });
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
+                if (name === 'protocol') return Promise.resolve({ publishPackageDrafts, getMetaItems, saveMetaItem });
+                if (name === 'objectql') return Promise.resolve({ registry: { getAllPackages: vi.fn().mockReturnValue([]) } });
+                return null;
+            });
+
+            const result = await dispatcher.handlePackages('/app.acct/publish-drafts', 'POST', {}, {}, { request: {} });
+
+            expect(result.response?.status).toBe(200);
+            expect(saveMetaItem).toHaveBeenCalledTimes(1);
+            expect(saveMetaItem).toHaveBeenCalledWith(expect.objectContaining({
+                name: 'account_like',
+                item: expect.objectContaining({ hidden: true, _unpublished: false }),
+            }));
+            expect(saveMetaItem).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'account' }));
+            expect((result.response as any)?.body?.data?.unhiddenApps).toEqual(['account_like']);
         });
 
         it('POST /packages/:id/publish-drafts reports (not throws) when the visibility flip fails', async () => {
@@ -1897,7 +1957,7 @@ describe('HttpDispatcher', () => {
                 success: true, publishedCount: 1, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
             });
             const getMetaItems = vi.fn().mockResolvedValue([
-                { name: 'edu_admin', hidden: true, navigation: [] },
+                { name: 'edu_admin', _unpublished: true, navigation: [] },
             ]);
             const saveMetaItem = vi.fn().mockRejectedValue(new Error('sys_metadata write rejected'));
             (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
@@ -1922,7 +1982,7 @@ describe('HttpDispatcher', () => {
                 // The consequence, concretely — what is not durable, and that the
                 // system keeps looking healthy anyway.
                 expect(line).toContain('app.edu');
-                expect(line).toMatch(/hidden/i);
+                expect(line).toMatch(/unpublished/i);
                 expect(line).toMatch(/publish reports success|reports success/i);
                 // The fix — the concrete action that restores the intended state.
                 expect(line).toContain('publish-drafts');
@@ -1939,17 +1999,17 @@ describe('HttpDispatcher', () => {
         // tells the caller nothing happened for apps whose state DID change,
         // and the 'metadata:reloaded' announce (which reads `unhiddenApps`)
         // then skips exactly those apps, leaving boot-cached consumers stale.
-        it('POST /packages/:id/publish-drafts reports the apps already unhidden when the flip fails MID-LOOP', async () => {
+        it('POST /packages/:id/publish-drafts reports the apps already published when the flip fails MID-LOOP', async () => {
             const publishPackageDrafts = vi.fn().mockResolvedValue({
                 success: true, publishedCount: 0, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
             });
-            // 4 hidden apps; the write for the 3rd rejects. So `alpha` and
-            // `beta` are persisted visible, `gamma` and `delta` are not.
+            // 4 unpublished apps; the write for the 3rd rejects. So `alpha` and
+            // `beta` are persisted published, `gamma` and `delta` are not.
             const getMetaItems = vi.fn().mockResolvedValue([
-                { name: 'alpha', hidden: true, navigation: [] },
-                { name: 'beta', hidden: true, navigation: [] },
-                { name: 'gamma', hidden: true, navigation: [] },
-                { name: 'delta', hidden: true, navigation: [] },
+                { name: 'alpha', _unpublished: true, navigation: [] },
+                { name: 'beta', _unpublished: true, navigation: [] },
+                { name: 'gamma', _unpublished: true, navigation: [] },
+                { name: 'delta', _unpublished: true, navigation: [] },
             ]);
             const saveMetaItem = vi.fn().mockImplementation(async ({ name }: { name: string }) => {
                 if (name === 'gamma') throw new Error('sys_metadata write rejected');
@@ -1988,14 +2048,14 @@ describe('HttpDispatcher', () => {
                 );
 
                 // The operator-facing line names BOTH halves: what flipped and
-                // what is still stored hidden. The old wording claimed "every
-                // hidden app is still stored hidden", which is false here.
+                // what is still stored unpublished. The old wording claimed
+                // "every hidden app is still stored hidden", which is false here.
                 const line = errorSpy.mock.calls
                     .map((c) => String(c?.[0] ?? ''))
                     .find((l) => l.includes('[Packages] publish-drafts')) ?? '';
                 expect(line).toContain('alpha, beta');
                 expect(line).toMatch(/PARTWAY/);
-                expect(line).toMatch(/REMAINING hidden app/);
+                expect(line).toMatch(/REMAINING unpublished app/);
                 expect(line).toContain('sys_metadata write rejected');
             } finally {
                 errorSpy.mockRestore();
@@ -3334,7 +3394,7 @@ describe('HttpDispatcher', () => {
         });
 
         it('PUT /meta/:type/:name should return 501 when protocol is unavailable', async () => {
-            const context = { request: {}, executionContext: { userId: 'u1' } };
+            const context = METADATA_AUTHOR();
             const body = { label: 'Test' };
             const result = await minimalDispatcher.handleMetadata('/objects/my_obj', context, 'PUT', body);
             expect(result.handled).toBe(true);

@@ -294,23 +294,55 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * `$contains`. An application whose users search non-ASCII text should not read
  * `$icontains` as "accent- and case-blind search" — it is not one.
  *
- * ### Implementation status — declared here, NOT yet answered by any backend
+ * ### Implementation status — answered by the SQL family, refused by the rest
  *
- * This PR is the contract half of the #4706 ruling and deliberately ships no
- * runtime behaviour (#5701). No driver evaluates `$icontains` today; all five
- * refuse it, loudly, as an operator they do not implement — which is the
- * fail-closed direction and stays true until #5702 lands the lowerings. The
- * same issue carries the `$contains`-family alignment the ruling above
- * requires (SQLite/turso `LIKE` made case-exact, mongo's hardcoded `'i'`
- * removed). Until then the sentence above is the DECLARATION and #5702 is the
- * gap; `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) is the standard that
- * measures the gap, and the driver-conformance ledger carries one DEBT row per
- * backend so the gap is counted rather than assumed.
+ * #5701 shipped this declaration deliberately ahead of every runtime, and
+ * #5702 (closed 2026-08-08, retuned by #6518) landed the lowerings on the SQL
+ * family. Measured per backend, by running `{ name: { $icontains: 'acme' } }`
+ * against a fixture holding BOTH `acme corp` and `ACME CORP` — not by grepping
+ * for a case arm, which is blind to the face that inherits its compiler and so
+ * undercounts:
+ *
+ * | driver | `$icontains` | how it gets there |
+ * |---|---|---|
+ * | `driver-sql` | ANSWERS both rows | its own `case '$icontains'`, folding through the same emitter that carries the escaping |
+ * | `driver-sqlite-wasm` | ANSWERS both rows | INHERITED — `SqliteWasmDriver extends SqlDriver`; this package carries no text case arm of its own, on a different ENGINE |
+ * | `driver-turso` | ANSWERS both rows, on BOTH transports | local inherits `SqlDriver`; the remote transport compiles independently and has its own arm |
+ * | `driver-memory` | REFUSES — `INVALID_FILTER` / 400 | no arm; its `SUPPORTED_FIELD_OPERATORS` derives from {@link FILTER_OPERATORS}, which deliberately omits it |
+ * | `driver-mongodb` | REFUSES — `INVALID_FILTER` / 400 | no arm; falls to its translator's `default:` |
+ *
+ * The other JS evaluators sit on the refusing side too: objectql's `having`
+ * face records the omission in its own source, and `formula`'s `matchesFilter`
+ * has no `$icontains` arm.
+ *
+ * **So the sentence an author needs is no longer "no backend answers this".**
+ * It is: `$icontains` is EXECUTABLE on the SQL family and refused — loudly,
+ * fail-closed, never silently — everywhere else, so a filter that uses it is
+ * not portable across backends today. An app whose tests run on the in-memory
+ * double and whose production runs SQL gets two different answers from one
+ * filter: that divergence, and the remaining implementations, are #6520.
+ *
+ * **The vocabulary gate below is still closed, and #5702 is no longer what it
+ * waits for.** `$icontains` stays out of {@link FILTER_OPERATORS} on purpose —
+ * that array is a runtime allowlist, and listing an operator the in-memory
+ * `match()` cannot evaluate makes it answer `true` for a NON-match (measured;
+ * see that array's docblock). It joins when the JS faces get arms, in #6520.
+ *
+ * The `$contains`-family alignment the ruling above requires is likewise part
+ * done rather than pending: #6518 made that family case-EXACT across the SQL
+ * dialects, while `driver-memory`'s query path and `driver-mongodb` still fold
+ * the whole Unicode range — the two rows #6682 tracks.
+ *
+ * `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) is the standard that
+ * measures all of the above, and the driver-conformance ledger still carries a
+ * DEBT row for each of the two backends left, so what is open stays counted
+ * rather than assumed.
  *
  * @see FILTER_TEXT_CASES — the conformance standard for every operator here.
  * @see RETIRED_FILTER_OPERATORS — why `$regex` is not in this list.
  * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
- * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the backends)
+ * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
+ * @see https://github.com/objectstack-ai/objectstack/issues/6520 (the JS faces — open)
  */
 export const StringOperatorSchema = lazySchema(() => z.object({
   /** Contains substring, CASE-SENSITIVELY - SQL: LIKE %?% (case-exact) */
@@ -337,8 +369,11 @@ export const StringOperatorSchema = lazySchema(() => z.object({
     + 'sqlite-wasm) folds ASCII only, so a Unicode promise here would be a '
     + 'guarantee three of the five could not keep. The comparand is matched '
     + 'LITERALLY — "%", "_" and regex metacharacters are ordinary characters, not '
-    + 'wildcards. Case-SENSITIVE containment is $contains. [#5701: declared by the '
-    + 'protocol; the driver lowerings land with #5702.]'
+    + 'wildcards. Case-SENSITIVE containment is $contains. [#5701 declared it; #5702 '
+    + 'lowered it on the SQL family (driver-sql, driver-sqlite-wasm, driver-turso on '
+    + 'both transports). driver-memory and driver-mongodb still REFUSE it with '
+    + 'INVALID_FILTER / 400, so a filter using it is not portable across backends yet '
+    + '— #6520.]'
   ),
 }));
 
@@ -1194,10 +1229,12 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * reader (verified — `NormalizedFilterSchema` is their only consumer, and
  * nothing parses a filter through it at runtime), so declaring there is inert.
  * Adding it HERE would flip driver-memory from a loud refusal to the silent
- * widening measured above, before a single backend can answer the operator.
+ * widening measured above, on a face that still cannot answer the operator.
  *
- * **`$icontains` joins this array in the PR that implements it (#5702), not
- * before.** `filter-operator-vocabulary.test.ts` pins the difference between
+ * **`$icontains` joins this array in the PR that gives the JS faces an arm
+ * (#6520), not before** — #5702 implemented the SQL family and correctly did
+ * NOT add it here, because the array is read by the faces that still refuse.
+ * `filter-operator-vocabulary.test.ts` pins the difference between
  * the two surfaces at exactly `{ $icontains }`, so this staging cannot silently
  * grow a second member, and clearing it is what makes that pin fail.
  *
@@ -1265,15 +1302,23 @@ export interface RetiredFilterOperatorGuidance {
  * took that trade explicitly: the spec declares, the existing refusal sites
  * enforce.
  *
- * Those sites are the five that already refuse unknown operators today —
+ * Those sites are the five that refuse unknown operators —
  * `driver-sql`'s `default:` arm, `driver-turso`'s remote transport,
  * `driver-memory`'s `filter-refusal.ts`, `driver-mongodb`'s
  * `translateFieldOperators`, and `objectql`'s `having` — and the point of one
- * table is that they stop each writing their own sentence. Wiring them to it is
- * **#5702**, deliberately not this PR: `$regex` still has one live producer
- * (`plugin-auth`'s ObjectQL adapter, on the authentication path), so a refusal
- * landing before #5710 flips that producer would break sign-in. Hard order:
- * **#5710 flips the producer, then #5702 turns these strings into refusals.**
+ * table is that they stop each writing their own sentence. When this block was
+ * written, wiring them was deliberately deferred behind a hard order ("#5710
+ * flips the producer, then #5702 turns these strings into refusals"), because
+ * `$regex` still had one live producer on the authentication path. Both gates
+ * have fired since — #5710 flipped `plugin-auth`'s adapter to `$contains`,
+ * #5702 wired all five sites — so that ordering is shipped history, not
+ * pending advice. Census per face, by executing `{ $regex }` and a dangling
+ * `{ $options }` against each (re-verified 2026-08, #6993): all five print
+ * this table's `why` verbatim; the four driver faces throw it in the ADR-0112
+ * envelope (`INVALID_FILTER` / 400 — `driver-sqlite-wasm` and both turso
+ * transports inherit or mirror it), while `having`'s refusal is still a bare
+ * `Error` carrying the sentence without `code`/`status` — the one open half,
+ * tracked as #7047.
  *
  * ## Why `$regex` was retired rather than implemented (#4706)
  *

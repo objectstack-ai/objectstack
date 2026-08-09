@@ -44,17 +44,26 @@
     },
     "retryPolicy": {
       "status": "live",
+      "verifiedAt": "2026-08-09",
+      "evidenceScope": "in-repo",
       "evidence": "packages/objectql/src/hook-wrappers.ts",
-      "note": "{maxRetries,backoffMs} linear backoff."
+      "producer": "packages/objectql/src/hook-binder.ts:221 — the binder hands the AUTHORED hook to wrapDeclarativeHook, so the wrapper reads the author's block rather than a caller-built options object",
+      "note": "{maxRetries,backoffMs} linear backoff. Producer-side re-verified 2026-08-09 (#4837 slice): the whole declarative group (condition / async / retryPolicy / timeout / onError) is fed from one call site, so one producer pointer covers it — this is the shape `Seed.env` failed, checked and passing here."
     },
     "timeout": {
       "status": "live",
+      "verifiedAt": "2026-08-09",
+      "evidenceScope": "in-repo",
       "evidence": "packages/objectql/src/hook-wrappers.ts",
+      "producer": "packages/objectql/src/hook-binder.ts:221 (same wrapDeclarativeHook call as retryPolicy)",
       "note": "wall-clock abort, independent of body.timeoutMs."
     },
     "onError": {
       "status": "live",
+      "verifiedAt": "2026-08-09",
+      "evidenceScope": "in-repo",
       "evidence": "packages/objectql/src/hook-wrappers.ts",
+      "producer": "packages/objectql/src/hook-binder.ts:221 (same wrapDeclarativeHook call as retryPolicy)",
       "note": "'log' suppresses+continues; 'abort' rethrows."
     },
     "label": {

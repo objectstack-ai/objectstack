@@ -19,9 +19,17 @@
  * future coverage gap is visible in the report.
  *
  * [#5271] `api` LEFT that bucket. It was the specimen this paragraph named
- * while `PUT /meta/api/:name` stored arbitrary JSON (#5206); it is now a
- * registered kind with `ApiEndpointSchema` bound, so it is swept like any
- * other runtime-creatable type and has a fixture below.
+ * while `PUT /meta/api/:name` stored arbitrary JSON (#5206); it became a
+ * registered kind with `ApiEndpointSchema` bound, and was swept like any other
+ * runtime-creatable type.
+ *
+ * [#5488] `api` has now left this SUITE altogether, and by a different door:
+ * the maintainer ruling of 2026-08-07 flipped its registry entry to
+ * `allowRuntimeCreate: false` (a runtime-created endpoint was never served —
+ * the matcher reads `listForIndex('api')`, a runtime write lands in
+ * `sys_metadata`). Since `creatable` below is DERIVED from that flag, the type
+ * drops out on its own and its fixture was removed with it. Nothing about the
+ * fall-through rule changed; the set it applies to did.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -197,36 +205,17 @@ const FIXTURES: Record<string, Fixture> = {
         invalid: { apps: { sweep_app: { label: 'Sweep' } } },
         invalidatedField: 'locale',
     },
-    // [#5271, part of #5206] `api` used to sit in this file's "no schema →
-    // fall-through" bucket (see the module doc). It now has one, so it gets a
-    // real fixture: the valid body is the E8-migrated showcase shape (an
-    // `object_operation` endpoint under its stack's ADR-0121 D1 carve-out), and
-    // the invalid body drops `target`, which `ApiEndpointSchema` requires.
-    //
-    // The invalid body is deliberately a SCHEMA violation, not a publish-gate
-    // violation: an off-carve-out path or an anonymous-without-armed-budget
-    // endpoint parses green here and is refused one door later, by
-    // `validateApiEndpointDeclarations` (publish) / `buildEndpointIndex`
-    // (load). This sweep must pin the door it actually is, or it would claim
-    // coverage for a judgement it never makes.
-    api: {
-        valid: {
-            name: 'sweep_task_feed',
-            path: '/api/v1/apps/sweep/tasks',
-            method: 'GET',
-            type: 'object_operation',
-            target: 'sweep_task',
-            objectParams: { object: 'sweep_task', operation: 'find' },
-            authRequired: true,
-        },
-        invalid: {
-            name: 'sweep_task_feed',
-            path: '/api/v1/apps/sweep/tasks',
-            method: 'GET',
-            type: 'object_operation',
-        },
-        invalidatedField: 'target',
-    },
+    // [#5488] The `api` fixture (#5271) was REMOVED here, deliberately, rather
+    // than left in place. This suite sweeps `DEFAULT_METADATA_TYPE_REGISTRY
+    // .filter((e) => e.allowRuntimeCreate)`, so flipping `api` to
+    // `allowRuntimeCreate: false` (maintainer ruling 2026-08-07) drops the type
+    // out of `creatable` by itself — and a fixture for a type the sweep no
+    // longer visits is never executed. It would have gone on sitting here
+    // looking like coverage while asserting nothing, which is the failure mode
+    // this file exists to detect in others. `api`'s write door now has explicit
+    // pins of its own: the 403 `NOT_CREATABLE` refusal in
+    // `protocol-meta.test.ts` and `sys-metadata-repository.test.ts` (this
+    // package), and the retirement pins in `metadata-protocol`.
     email_template: {
         valid: {
             name: 'sweep.welcome',

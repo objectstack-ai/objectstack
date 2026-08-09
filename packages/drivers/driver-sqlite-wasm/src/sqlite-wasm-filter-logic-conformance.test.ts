@@ -48,7 +48,7 @@ describe('driver-sqlite-wasm — filter logic conformance', () => {
       },
     ]);
     for (const row of FILTER_LOGIC_ROWS) {
-      await driver.create('conformance', { ...row }, { bypassTenantAudit: true } as any);
+      await driver.create('conformance', { ...row }, { bypassTenantAudit: true });
     }
   });
 
@@ -61,7 +61,7 @@ describe('driver-sqlite-wasm — filter logic conformance', () => {
       const rows = await driver.find(
         'conformance',
         { object: 'conformance', where: c.filter } as any,
-        { bypassTenantAudit: true } as any,
+        { bypassTenantAudit: true },
       );
       const got = (rows as any[])
         .map((r) => String(r.id))
@@ -75,7 +75,7 @@ describe('driver-sqlite-wasm — filter logic conformance', () => {
    * failed cannot read as a case that correctly excluded everything.
    */
   it('the fixture really is all four rows', async () => {
-    const rows = await driver.find('conformance', {} as any, { bypassTenantAudit: true } as any);
+    const rows = await driver.find('conformance', {} as any, { bypassTenantAudit: true });
     expect((rows as any[]).map((r) => String(r.id)).sort()).toEqual(['1', '2', '3', '4']);
   });
 });

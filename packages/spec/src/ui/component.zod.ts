@@ -304,7 +304,7 @@ export const PageTabsProps = z.object({
     + 'a props key named `type` collides with the page component\'s own dispatch key, so it is '
     + 'unauthorable in the flat and JSX carriers and was never validated in them. Rename the key '
     + 'to `tabStyle`; the value (`line` | `card` | `pill`) is unchanged. '
-    + 'Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   position: z.enum(['top', 'left']).default('top'),
   items: z.array(z.object({
@@ -369,7 +369,7 @@ export const PageCardProps = z.object({
     '`page:card` property `body` was removed in @objectstack/spec 17.0.0 (#5775, ADR-0087 D2) — '
     + 'it was a second spelling of the composition slot every other container calls `children`, '
     + 'and the renderer reads both. Rename the key to `children`; the value (an array of child '
-    + 'components) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'components) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /** Slot for footer content */
   footer: z.array(z.unknown()).optional().describe('Card footer components (slot)'),
@@ -843,7 +843,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
     + '(#5775, ADR-0087 D2) — it was a required declaration no renderer ever read, while the '
     + 'renderer honoured `labelField` for the same thing and defaulted to `name`. Rename the key '
     + 'to `labelField`; the value (a field name) is unchanged. '
-    + 'Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /**
    * REMOVED (#5775). ADR-0049 enforce-or-remove: the control has no search
@@ -854,7 +854,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
     + '(#5775, ADR-0049) — the picker renders a plain single-select with no search input, so no '
     + 'renderer ever read it and it narrowed nothing. Delete the key. To restrict which records '
     + 'the picker offers, use `filter` (or the component-level `dataSource.filter`), which the '
-    + 'query path does apply. Run `os migrate meta --from 16` to remove it automatically.',
+    + 'query path does apply. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /**
    * REMOVED (#5775). ADR-0049 enforce-or-remove: the control is a single-select
@@ -865,7 +865,7 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
     + '(#5775, ADR-0049) — the picker is a single-select `Select` and the bound page variable '
     + 'holds one record id, so `multiple: true` selected nothing extra and reported success. '
     + 'Delete the key; multi-record selection is not implemented on this element. '
-    + 'Run `os migrate meta --from 16` to remove it automatically.',
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),

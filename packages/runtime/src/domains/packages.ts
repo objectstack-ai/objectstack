@@ -11,6 +11,7 @@
 
 import { CoreServiceName } from '@objectstack/spec/system';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { organizationIdForMetaWrite } from '../meta-write-org-scope.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -192,16 +193,24 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             (result as any).seedApplied = { success: false, error: e?.message ?? 'seed apply failed' };
                         }
                     }
-                    // ADR-0045: "Publish" makes the package live AND visible.
+                    // ADR-0045 §3: "Publish" makes the package live AND visible.
                     // A materialized (additive) build has no drafts left to
-                    // promote — its app sits at `hidden: true` awaiting the
-                    // visibility flip. Unhide every hidden app bound to this
-                    // package so ONE publish verb serves both regimes (the
-                    // caller never needs to know how the package was built).
-                    // Best-effort: a custom protocol without the meta
+                    // promote — its app sits at `_unpublished: true` awaiting the
+                    // visibility flip. Clear the gate on every unpublished app
+                    // bound to this package so ONE publish verb serves both
+                    // regimes (the caller never needs to know how the package was
+                    // built). Best-effort: a custom protocol without the meta
                     // primitives keeps plain draft-publish semantics.
                     //
-                    // #5242 — `unhidden` and its result assignment live OUTSIDE
+                    // ⛔ #4829 — the gate is `_unpublished`, the MACHINE-managed
+                    // key, and this is the point that clears it. It used to be
+                    // `hidden`, which also means "keep out of the App Switcher"
+                    // to every author — so publishing a package silently rewrote
+                    // a presentation choice, and the REST gate reading the same
+                    // flag 404'd the built-in `account` app for every non-builder.
+                    // `hidden` is now never read or written here.
+                    //
+                    // #5242 — `flipped` and its result assignment live OUTSIDE
                     // this try. A name is pushed only AFTER its `saveMetaItem`
                     // resolved, so at any moment the list is exactly "what is
                     // already flipped on disk". When app k of N throws, the k-1
@@ -212,7 +221,26 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // and the 'metadata:reloaded' announce below — which reads
                     // `unhiddenApps` — skipped them too, leaving boot-cached
                     // consumers stale until the next restart.
-                    const unhidden: string[] = [];
+                    //
+                    // The RESPONSE field keeps its `unhiddenApps` / `unhideError`
+                    // spelling deliberately: it is a wire contract read by the
+                    // objectui Publish button, and renaming it here — in a repo
+                    // that cannot verify or update that consumer — would be a
+                    // silent break of the exact kind #4829 is about. The rename
+                    // rides the objectui follow-up card, together.
+                    //
+                    // [#7018 / the #6190 ruling, Option A] `app` declares
+                    // `allowOrgOverride: false`, so this flip does NOT carry the
+                    // session's active organization — it lands env-wide, on the
+                    // very row boot hydrates and the App Switcher reads. An
+                    // org-scoped flip was a phantom: the app looked published for
+                    // the life of the process and went back to `_unpublished:
+                    // true` on the next restart, because the env-wide row it left
+                    // untouched is the only one cold boot loads. The READ above is
+                    // left org-aware on purpose — a layered read is a superset,
+                    // never a loss.
+                    const flipped: string[] = [];
+                    const flipOrganizationId = organizationIdForMetaWrite('app', organizationId);
                     try {
                         if (
                             typeof (protocol as any).getMetaItems === 'function' &&
@@ -227,16 +255,22 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                 ? appsRes
                                 : Array.isArray((appsRes as any)?.items) ? (appsRes as any).items : [];
                             for (const app of apps) {
-                                if (app && typeof app === 'object' && app.hidden === true && typeof app.name === 'string') {
+                                if (app && typeof app === 'object' && app._unpublished === true && typeof app.name === 'string') {
                                     await (protocol as any).saveMetaItem({
                                         type: 'app',
                                         name: app.name,
-                                        item: { ...app, hidden: false },
+                                        // `false`, not a delete: ADR-0045 §3 makes
+                                        // publish/unpublish symmetric ("unpublish =
+                                        // re-hide"), so the gate stays a two-state
+                                        // flag rather than a key whose absence has
+                                        // to be re-derived. Whatever `hidden` the
+                                        // app carries is copied through untouched.
+                                        item: { ...app, _unpublished: false },
                                         packageId: id,
-                                        ...(organizationId ? { organizationId } : {}),
+                                        ...(flipOrganizationId ? { organizationId: flipOrganizationId } : {}),
                                         ...(body?.actor ? { actor: body.actor } : {}),
                                     });
-                                    unhidden.push(app.name);
+                                    flipped.push(app.name);
                                 }
                             }
                         }
@@ -257,17 +291,17 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         // is still stored hidden", which is plainly false once any
                         // flip persisted, and it left the operator to infer
                         // "nothing changed" from a bare failure line.
-                        const stillHidden = unhidden.length > 0
-                            ? `the flip stopped PARTWAY — ${unhidden.length} app(s) DID flip and are stored visible ` +
-                              `(${unhidden.join(', ')}; they are reported under \`unhiddenApps\` and were announced for ` +
-                              `re-sync), while every REMAINING hidden app bound to it`
-                            : `every hidden app bound to it`;
+                        const stillUnpublished = flipped.length > 0
+                            ? `the flip stopped PARTWAY — ${flipped.length} app(s) DID flip and are stored published ` +
+                              `(${flipped.join(', ')}; they are reported under \`unhiddenApps\` and were announced for ` +
+                              `re-sync), while every REMAINING unpublished app bound to it`
+                            : `every unpublished app bound to it`;
                         logger.error(
                             `[Packages] publish-drafts: the ADR-0045 visibility flip FAILED for package '${id}' — its drafts ARE ` +
-                            `published and live, but ${stillHidden} is still STORED with \`hidden: true\`, so those ` +
-                            `apps stay invisible in the launcher while the publish reports success. Nothing retries this flip. ` +
+                            `published and live, but ${stillUnpublished} is still STORED with \`_unpublished: true\`, so those ` +
+                            `apps stay externally unobservable while the publish reports success. Nothing retries this flip. ` +
                             `Re-run POST /packages/${id}/publish-drafts once the cause below is resolved (it is idempotent), or ` +
-                            `unhide one app directly via PUT /meta/app/<name> with \`{"hidden": false}\`. Cause: ` +
+                            `publish one app directly via PUT /meta/app/<name> with \`{"_unpublished": false}\`. Cause: ` +
                             `${e?.message ?? String(e)}`,
                         );
                         (result as any).unhideError = e?.message ?? 'visibility flip failed';
@@ -277,8 +311,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // `unhideError`: together they say what did flip and that
                     // something did not, which is the honest report. It must
                     // stay ABOVE the announce block, which reads this field.
-                    if (unhidden.length > 0) (result as any).unhiddenApps = unhidden;
-                    // A publish promoted drafts to active (or unhid an additive
+                    if (flipped.length > 0) (result as any).unhiddenApps = flipped;
+                    // A publish promoted drafts to active (or published an additive
                     // app) at RUNTIME — but boot-cached consumers still hold the
                     // pre-publish view. The load-bearing one is the automation
                     // engine: a record-triggered flow authored + published in the

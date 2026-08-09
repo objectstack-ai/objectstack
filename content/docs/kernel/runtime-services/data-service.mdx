@@ -57,7 +57,7 @@ deprecate the legacy-parameter query entries, promote `data.query(AST)`).
 Deprecated means "prefer `query`", not "scheduled for removal in this version":
 `find` remains fully functional, keeps both of its option vocabularies (see
 [below](#find-options-canonical-and-legacy)), and the Canonical source still
-names `QueryOptionsV2` *"the recommended interface for `data.find()` queries"*
+describes `QueryOptionsV2` as *"the vocabulary `data.find()` still accepts"*
 for callers that stay on it. The capability line between the two entries is
 real, though. `find` rides GET query parameters, so it has no spelling for a
 `search` term or for nested `expand` detail — it refuses a nested expand with an
@@ -98,7 +98,7 @@ key for key. A managed runtime binds `services.data` to this same shape.
 
 The signature above accepts `QueryOptions | QueryOptionsV2`, and the Canonical source
 declares which of the two to write. `QueryOptionsV2` is *"canonical query options using
-Spec protocol field names … the recommended interface for `data.find()` queries"*, while
+Spec protocol field names … the vocabulary `data.find()` still accepts"*, while
 `QueryOptions` carries an `@deprecated` tag in the same file describing *"legacy parameter
 names … that require translation to QueryAST"*, with the instruction to *"prefer QueryAST
 fields directly"*. Both interfaces are declared in `packages/client/src/index.ts`, so the

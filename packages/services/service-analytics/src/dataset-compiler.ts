@@ -3,6 +3,7 @@
 import type { Cube, Metric, Dimension as CubeDimension, CubeJoin } from '@objectstack/spec/data';
 import { AggregationFunction } from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
+import { resolveI18nLabel } from '@objectstack/spec/ui';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { datasetInvalidError } from './dataset-refusal.js';
 
@@ -114,23 +115,32 @@ export type RelationshipResolver = (
  */
 export interface DatasetCompileOptions {
   /**
-   * [#5115] The datasource `objectName` DECLARES (`object.datasource`), or
-   * `undefined` when nothing authoritative can answer (no data engine, unknown
-   * object).
+   * [#5115] The datasource `objectName` is BOUND to, or `undefined` when nothing
+   * authoritative can answer (no data engine, unknown object) — or when nothing
+   * binds the object at all and it rides the deployment's default datasource.
    *
    * With it the compiler can settle at COMPILE time what #5033 could only
    * report at QUERY time: a dataset whose join crosses datasources declares a
    * statement no driver can execute, because the analytics engine lowers the
    * whole dataset into ONE SQL statement on the base object's datasource.
    *
-   * IMPORTANT — `'default'` is not an answer. In `ObjectQL.getDriver`'s
-   * resolution order an explicit `object.datasource` other than `'default'`
-   * wins outright (step 1); `'default'` is the schema's DEFAULT value and means
-   * only "no explicit binding", after which routing is decided by
-   * `datasourceMapping` rules, the ADR-0057 §3.6 lifecycle split, and the
-   * owning package's `defaultDatasource` — none of which are visible from here.
-   * The compiler therefore treats `'default'`/`undefined` as UNANSWERED. See
-   * {@link compileDataset}.
+   * [#5288] What the host supplies here changed shape, the rule below did not.
+   * It used to be the object's DECLARED `datasource` — step 1 of the five
+   * `ObjectQL.getDriver` routes by — so an object placed by a
+   * `datasourceMapping` rule, by the ADR-0057 §3.6 lifecycle split, or by its
+   * package's `defaultDatasource` answered `'default'` and was read here as
+   * unanswered. The built-in host (`plugin.ts`) now asks the engine's own
+   * resolver instead, so those three placements ARE visible from here and a join
+   * between two objects bound to two different datasources is decidable
+   * whichever mechanism bound them.
+   *
+   * Still deliberately UNANSWERED: `'default'`, and the object that no rule
+   * places anywhere. The deployment's default driver keeps its natural name
+   * (#3826), so "rides the default" is reported as `undefined` rather than as a
+   * name — which means a join from a bound object to a default-riding one stays
+   * undecidable here and remains the query-time diagnostic's business (#5288
+   * records this boundary; widening it is #5115's follow-up, not this rule's).
+   * See {@link compileDataset}.
    */
   getObjectDatasource?: (objectName: string) => string | undefined;
   /**
@@ -202,6 +212,38 @@ const MAX_JOIN_HOPS = 3;
  *  so single-hop joins stay byte-for-byte identical. */
 const joinAlias = (path: string): string => path.replace(/\./g, '__');
 
+/**
+ * [#6761] The locale this compiler resolves an inline-locale-map label at:
+ * **none**, i.e. the platform source language `en` per `resolveI18nLabel`'s
+ * documented nullish-tolerance.
+ *
+ * This is a decision, not an omission, and it is spelled as a named constant so
+ * it stays visible and greppable rather than reading as a forgotten argument
+ * (the resolver takes `locale` positionally for exactly that reason).
+ *
+ * **A compiled Cube is a REGISTRY artifact, not a response.** `registerDataset`
+ * writes it into `CubeRegistry` under the dataset's name, `queryDataset`
+ * re-registers on every call, and `getMeta()` — the `/analytics/meta` face —
+ * reads it back with **no execution context at all** (`IAnalyticsService.getMeta`
+ * takes `cubeName?` and nothing else, and the route calls it without one). So
+ * the request locale must NOT be baked in here: one `zh-CN` query would leave a
+ * Chinese-labelled cube in a registry every later reader shares, and
+ * `/analytics/meta` would answer whoever queried last. Request-scoped
+ * resolution belongs where a request is in hand — `queryDataset`'s two field
+ * enrichment sites, which read `context.locale`.
+ *
+ * **The fallback stays `d.name`, and that is safe against the `f.label == null`
+ * guard** (#5199 route A / #6761). `Metric.label` and `Dimension.label` are
+ * REQUIRED strings in `analytics.zod.ts`, so an unresolvable label must still
+ * produce one, and the machine name is what this compiler already wrote. It
+ * cannot pre-empt the document-sourced label downstream because a cube label
+ * never reaches `AnalyticsResult.fields[]`: both strategies' `buildFieldMeta`,
+ * the draft preview evaluator, and `DatasetExecutor`'s #5537 descriptor
+ * adoption all emit `{ name, type }` only. The enrichment sites therefore still
+ * see `f.label == null` and write the locale-resolved label over nothing.
+ */
+const REGISTRY_LOCALE: string | undefined = undefined;
+
 export function compileDataset(
   dataset: Dataset,
   resolver?: RelationshipResolver,
@@ -226,18 +268,26 @@ export function compileDataset(
   // already exists; a false REJECT would blank a working dashboard on upgrade,
   // so this gate fires ONLY on a conflict the metadata itself proves.
   //
-  // What counts as an ANSWER (deliberately narrow): an EXPLICIT, non-`'default'`
-  // `object.datasource`. That is step 1 of `ObjectQL.getDriver`'s resolution
-  // order and it wins outright, so two objects declaring two different names are
-  // provably in two databases. `'default'` is the schema's default VALUE, not a
-  // routing decision: an object that leaves it alone is still routed by
-  // `datasourceMapping` rules, by the ADR-0057 §3.6 lifecycle split
-  // (audit/telemetry/event → the `telemetry` datasource), or by its package's
-  // `defaultDatasource` — rules this compiler cannot see. Treating `'default'`
-  // as "the primary DB" would reject a dataset whose two objects a mapping rule
-  // in fact lands on the SAME datasource, and would make the verdict depend on
-  // whether the object happened to be Zod-parsed (which materializes the
-  // default) — so `'default'` is read as UNANSWERED.
+  // What counts as an ANSWER: a non-`'default'` datasource NAME for the object.
+  // Two objects bound to two different names are provably in two databases.
+  //
+  // `'default'` is not one. It is what `ObjectSchema.datasource` defaults to and
+  // what `ObjectQL.getDriver` reads as "no explicit binding, keep looking", so
+  // treating it as "the primary DB" would reject a dataset whose two objects a
+  // mapping rule in fact lands on the SAME datasource, and would make the
+  // verdict depend on whether the object happened to be Zod-parsed (which
+  // materializes the default). It is read as UNANSWERED, as is `undefined`.
+  //
+  // [#5288] The probe used to report only step 1 of that resolution — the
+  // DECLARED value — which left every object placed by a `datasourceMapping`
+  // rule, by the ADR-0057 §3.6 lifecycle split (audit/telemetry/event → the
+  // `telemetry` datasource), or by its package's `defaultDatasource` answering
+  // `'default'` and therefore unanswerable here. The built-in host now asks
+  // `ObjectQL.resolveEffectiveDatasource`, so this rule — unchanged — sees those
+  // placements too. What it still cannot see is the object nothing binds at all:
+  // that one rides the deployment's default driver and is reported as
+  // `undefined`, so a join from a bound object to a default-riding one is not
+  // decidable here and stays with #5033's query-time diagnostic.
   const declaredDatasource = (objectName: string): string | undefined => {
     const declared = options?.getObjectDatasource?.(objectName);
     return declared && declared.toLowerCase() !== 'default' ? declared : undefined;
@@ -373,7 +423,11 @@ export function compileDataset(
     assertDeclared(d.field, 'dimension', d.name);
     const dim: CubeDimension = {
       name: d.name,
-      label: typeof d.label === 'string' ? d.label : d.name,
+      // [#6761] An inline locale map is a label, not a missing one. Before this,
+      // the `typeof === 'string'` test dropped the map and substituted the
+      // machine name, which `/analytics/meta` then published as a display title
+      // (`title: 'owner'` for a dimension labelled `{ en: 'Owner', … }`).
+      label: resolveI18nLabel(d.label, REGISTRY_LOCALE) ?? d.name,
       type: dimensionType(d),
       sql: d.field,
     };
@@ -398,7 +452,8 @@ export function compileDataset(
     if (m.field) assertDeclared(m.field, 'measure', m.name);
     const metric: Metric = {
       name: m.name,
-      label: typeof m.label === 'string' ? m.label : m.name,
+      // [#6761] Same as the dimension label above — see {@link REGISTRY_LOCALE}.
+      label: resolveI18nLabel(m.label, REGISTRY_LOCALE) ?? m.name,
       type: aggregateToMetricType(m),
       // `count` with no field aggregates over rows (*).
       sql: m.field ?? '*',
@@ -410,7 +465,10 @@ export function compileDataset(
 
   const cube: Cube = {
     name: dataset.name,
-    title: typeof dataset.label === 'string' ? dataset.label : dataset.name,
+    // [#6761] The cube's own display title, same rule. `Cube.title` is optional
+    // in the schema, but an absent dataset label already produced the machine
+    // name here and that is not what this card changes — only the map case moves.
+    title: resolveI18nLabel(dataset.label, REGISTRY_LOCALE) ?? dataset.name,
     sql: dataset.object,
     measures,
     dimensions,

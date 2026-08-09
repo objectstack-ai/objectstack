@@ -238,3 +238,85 @@ describe('zodIssuesToFields — invalid_union expansion (#5014)', () => {
         });
     });
 });
+
+/**
+ * [#5389] `invalid_key` / `invalid_element` — the same defect, one property
+ * name over, on the same wire.
+ *
+ * `invalid_union` buries a branch's real complaint in `issue.errors[]`; these
+ * two bury the key/element schema's real complaint in `issue.issues[]`. Before
+ * this, a client POSTing a record with a bad KEY got exactly one `fields[]`
+ * entry — `{field: 'fields.First Name', code: 'invalid_shape', message:
+ * 'Invalid key in record'}` — with the sentence naming the rule produced and
+ * dropped, which is #5014 verbatim.
+ *
+ * The expansion is strictly ADDITIVE, same contract as #5014: the container's
+ * own entry stays (it is the only one naming the slot, and existing clients
+ * read it) and the leaf entries follow it. ADR-0114's `{field, code, message}`
+ * shape is unchanged, and the container entry keeps mapping to `invalid_shape`.
+ *
+ * Every fixture drives a REAL `safeParse`, for the reason the file's header
+ * gives: `issue.issues` is Zod's internal shape.
+ */
+describe('zodIssuesToFields — invalid_key / invalid_element descent (#5389)', () => {
+    const fieldsFor = (schema: z.ZodType, value: unknown) => {
+        const r = schema.safeParse(value);
+        expect(r.success, 'the fixture must actually fail to parse').toBe(false);
+        return zodIssuesToFields((r as { error: { issues: unknown[] } }).error.issues, value);
+    };
+
+    const SnakeKey = z
+        .string()
+        .regex(/^[a-z][a-z0-9_]*$/, "Invalid identifier. Must be lowercase snake_case (e.g. 'first_name').");
+
+    it('delivers the KEY schema prescription beside the container entry', () => {
+        const schema = z.object({ fields: z.record(SnakeKey, z.object({ type: z.string() })) });
+        const fields = fieldsFor(schema, { fields: { 'First Name': { type: 'text' } } });
+
+        expect(fields).toEqual([
+            // Unchanged — the entry clients read today.
+            { field: 'fields.First Name', code: 'invalid_shape', message: 'Invalid key in record' },
+            // …and the leaf that says WHY, with the container's path resolved.
+            {
+                field: 'fields.First Name',
+                code: 'invalid_format',
+                message: "Invalid identifier. Must be lowercase snake_case (e.g. 'first_name').",
+            },
+        ]);
+    });
+
+    it('emits EVERY nested issue — a container has no branches to rank', () => {
+        // Deliberate divergence from the union descent: `errors[]` holds
+        // competing candidates, so it is ranked and capped; `issues[]` is the
+        // one list the element schema produced, and each entry is a real field.
+        const schema = z.map(
+            z.object({ id: z.string() }),
+            z.object({ a: z.string(), b: z.string(), c: z.string() }),
+        );
+        const fields = fieldsFor(schema, new Map([[{ id: 'x' }, {}]]));
+        expect(fields[0]).toMatchObject({ code: 'invalid_shape' });
+        expect(fields.map((f) => f.field)).toEqual(['', 'a', 'b', 'c']);
+    });
+
+    it('keeps the catalog code an ADR-0114 member on every entry', () => {
+        const schema = z.object({ fields: z.record(SnakeKey, z.unknown()) });
+        const codes = FieldErrorCode.options as readonly string[];
+        for (const entry of fieldsFor(schema, { fields: { 'Bad Key': 1 } })) {
+            expect(codes).toContain(entry.code);
+        }
+    });
+
+    it('leaves an ordinary issue exactly as it was', () => {
+        const schema = z.object({ a: z.string() });
+        expect(fieldsFor(schema, {})).toEqual([
+            { field: 'a', code: 'required', message: 'Invalid input: expected string, received undefined' },
+        ]);
+    });
+
+    it('still tolerates a container issue with no nested list', () => {
+        expect(zodIssuesToFields([{ code: 'invalid_key', path: ['m', 'k'], message: 'Invalid key in record' }]))
+            .toEqual([{ field: 'm.k', code: 'invalid_shape', message: 'Invalid key in record' }]);
+        expect(zodIssuesToFields([{ code: 'invalid_element', path: ['m'], message: 'Invalid value', issues: 'nope' }]))
+            .toEqual([{ field: 'm', code: 'invalid_shape', message: 'Invalid value' }]);
+    });
+});

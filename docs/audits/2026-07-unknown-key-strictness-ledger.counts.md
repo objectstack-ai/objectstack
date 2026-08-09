@@ -21,7 +21,7 @@ regenerate.
 | Measure | Value |
 |---|---|
 | Triaged directories | 5 |
-| Object sites in them | 434 |
+| Object sites in them | 436 |
 | Still-open (strip) sites | 180 |
 | Files carrying at least one | 27 |
 
@@ -45,11 +45,11 @@ The `strict` column is the one the campaign schedules against; it counts both th
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
 | `ui/` | 160 | 118 | 5 | 0 | 37 |
-| `data/` | 162 | 54 | 1 | 0 | 107 |
+| `data/` | 164 | 56 | 1 | 0 | 107 |
 | `automation/` | 65 | 42 | 0 | 0 | 23 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **434** | **248** | **6** | **0** | **180** |
+| **total** | **436** | **250** | **6** | **0** | **180** |
 
 ## File-level triage — site counts
 
@@ -95,6 +95,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `driver/mysql.zod.ts` | 1 |
 | `driver/postgres.zod.ts` | 1 |
 | `driver/sqlite.zod.ts` | 2 |
+| `driver/turso.zod.ts` | 2 |
 | `external-catalog.zod.ts` | 4 |
 | `external-lookup.zod.ts` | 12 |
 | `field-value.zod.ts` | 2 |
@@ -108,7 +109,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `seed-loader.zod.ts` | 12 |
 | `seed.zod.ts` | 1 |
 | `validation.zod.ts` | 6 |
-| **total** | **162** |
+| **total** | **164** |
 
 ### `automation/` — sites
 
@@ -178,7 +179,7 @@ over it is here.
 
 ### `data/` — open
 
-**107 strip of 162**, in 16 file(s).
+**107 strip of 164**, in 16 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -198,7 +199,7 @@ over it is here.
 | `object.zod.ts` | 1 | 20 |
 | `query.zod.ts` | 4 | 5 |
 | `seed-loader.zod.ts` | 12 | 12 |
-| **total** | **107** | **162** |
+| **total** | **107** | **164** |
 
 | Bucket | Sites |
 |---|---|

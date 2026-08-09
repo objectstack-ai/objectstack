@@ -10,8 +10,17 @@ import type {
 import { percentScaleOf, type Cube, type FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Dataset } from '@objectstack/spec/ui';
+// [#6761] The ONE shared `I18nLabel → string` resolver (#6765, maintainer
+// ruling B). Imported, never re-implemented: a private twin here is exactly the
+// fork the ruling exists to prevent — it would render the same authored map
+// differently from objectui's `pickLocalized` with neither end erroring.
+import { resolveI18nLabel } from '@objectstack/spec/ui';
 import type { Logger } from '@objectstack/spec/contracts';
 import { createLogger, bucketKeyToCalendarRange, zonedDateStartToUtcMs } from '@objectstack/core';
+// [#6615] The Postgres `"x" of relation "y"` phrase, owned once. This is the
+// only reason this package depends on `@objectstack/types` — see the module's
+// docblock for why the edge is acyclic and why it was worth adding.
+import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
@@ -136,9 +145,17 @@ function hasDeclaredErrorEnvelope(err: unknown): boolean {
  * them is the safe direction of error: a wording this misses merely keeps
  * today's verdict, while one it over-matches would turn a genuinely missing
  * table into a hard failure and regress #5033's deliberate leniency.
+ *
+ * [#6615] "Deliberately that regex rather than a second dialect of it" is now
+ * enforced rather than asserted: the phrase moved to
+ * {@link matchMissingColumnOfRelation} in `@objectstack/types`, which
+ * `rest-server.ts`'s `mapDataError` and `metadata`'s `MISSING_TABLE.excludes`
+ * also read. The two faces can no longer disagree about what postgres says by
+ * one of them being edited. Same pattern, byte for byte — only its owner moved.
  */
-const MISSING_COLUMN_OF_RELATION =
-  /column\s+["'`]([a-z0-9_]+)["'`]\s+of relation\s+\S+\s+does not exist/i;
+function isMissingColumnOfRelation(message: string): boolean {
+  return matchMissingColumnOfRelation(message) !== undefined;
+}
 
 /**
  * Detect the "backing object/table isn't present in this kernel" class of
@@ -173,7 +190,7 @@ const MISSING_COLUMN_OF_RELATION =
  * behaviour change for #5033's leniency.
  *
  * [#6035] The residue #5717 left and named here is now closed by
- * {@link MISSING_COLUMN_OF_RELATION}, subtracted BEFORE any limb below runs.
+ * {@link isMissingColumnOfRelation}, subtracted BEFORE any limb below runs.
  * The anchor above cannot do it alone, for a reason worth stating plainly: the
  * missing-COLUMN wording literally CONTAINS a well-formed missing-relation
  * wording, so no tightening of "does this say a relation is missing" can ever
@@ -184,7 +201,7 @@ function isMissingSourceError(err: unknown): boolean {
   const raw = String((err as { message?: unknown })?.message ?? err ?? '');
   // [#6035] Missing COLUMN is not missing SOURCE — the paragraph above promises
   // column errors stay hard failures, and this is where that promise is kept.
-  if (MISSING_COLUMN_OF_RELATION.test(raw)) return false;
+  if (isMissingColumnOfRelation(raw)) return false;
   const msg = raw.toLowerCase();
   return (
     msg.includes('no such table') ||      // sqlite / libsql
@@ -213,7 +230,7 @@ function isMissingSourceError(err: unknown): boolean {
  * `undefined` when the driver's phrasing carries no name. Unparseable ⇒ the
  * caller keeps today's degradation, never a louder guess.
  *
- * [#6035] It subtracts {@link MISSING_COLUMN_OF_RELATION} for the same reason
+ * [#6035] It subtracts {@link isMissingColumnOfRelation} for the same reason
  * its sibling does, and the reason is CONSISTENCY rather than a second bug:
  * measured on `origin/main`, the column wording made this function answer
  * `sys_team`, so fixing only "is something missing" would leave the pair
@@ -227,7 +244,7 @@ function isMissingSourceError(err: unknown): boolean {
  */
 function missingSourceRelation(err: unknown): string | undefined {
   const msg = String((err as { message?: unknown })?.message ?? err ?? '');
-  if (MISSING_COLUMN_OF_RELATION.test(msg)) return undefined;
+  if (isMissingColumnOfRelation(msg)) return undefined;
   const patterns = [
     /no such table:\s*[`"'[]?([A-Za-z0-9_$.]+)/i,                        // sqlite / libsql
     /relation\s+[`"']?([A-Za-z0-9_$.]+)[`"']?\s+does not exist/i,        // postgres
@@ -451,6 +468,15 @@ export interface AnalyticsServiceConfig {
    * datasources before any query is ever built. Absence keeps the pre-#5115
    * behaviour exactly ("cannot answer, do not block") — the query-time
    * diagnostic above stays as the backstop.
+   *
+   * [#5288] "Bound to" above is the whole contract, and it took until #5288 for
+   * the built-in host to honour it: `plugin.ts` answered with the object's
+   * DECLARED `datasource` — step 1 of the five `ObjectQL.getDriver` routes by —
+   * so an object placed by a `datasourceMapping` rule, by the ADR-0057 §3.6
+   * lifecycle split, or by its package's `defaultDatasource` reported
+   * `'default'` and sent the message above to the wrong database. It now asks
+   * `ObjectQL.resolveEffectiveDatasource`. A custom host owes the same answer:
+   * the datasource an object is BOUND to, `undefined` when nothing binds it.
    */
   getObjectDatasource?: (objectName: string) => string | undefined;
   /**
@@ -856,6 +882,22 @@ export class AnalyticsService implements IAnalyticsService {
       }
     }
 
+    // [#6761] The audience's language for THIS request, and the only locale
+    // either field-label enrichment site below is entitled to use.
+    //
+    // `ExecutionContext.locale` is the BCP-47 tag `resolveExecutionContext`
+    // resolves per request — the caller's `Accept-Language` when it expressed a
+    // preference, else the workspace `localization` setting. It is the same
+    // context field the currency chain a few lines down already reads, so both
+    // display decisions in this response answer to one request identity.
+    //
+    // `undefined` (no context, or an anonymous request that skips localization)
+    // is passed through deliberately rather than defaulted here: the shared
+    // resolver documents nullish as "no locale known" and answers `en`, the
+    // platform's source language. Choosing a different default in this file
+    // would be this service disagreeing with the renderer about the same map.
+    const requestLocale = context?.locale;
+
     // #3602 — every label lookup in this request (sort keys below, display
     // labels further down) reads the REFERENCED object, so bind that object's
     // own read scope to this request once, up front.
@@ -1092,12 +1134,26 @@ export class AnalyticsService implements IAnalyticsService {
     // so presentations show "Tasks" / "$616,000" instead of the raw measure
     // name "task_count" / "616000". Carried on the result fields; the renderer
     // applies the format (it can't be baked into the numeric row value).
+    //
+    // [#6761] The label is resolved through the shared `I18nLabel → string`
+    // resolver, so BOTH authorized forms reach the wire: a plain string, and the
+    // inline locale map `I18nLabelSchema` has authorized since #5728. The old
+    // `typeof m.label === 'string'` test dropped the map silently — a dataset
+    // written the way the schema documents shipped a column with no header at
+    // all. The wire type is unchanged (`fields[].label?: string`, both ends):
+    // this resolves TO a string rather than widening the contract.
     if (result.fields?.length && dataset.measures?.length) {
       const measureByName = new Map(dataset.measures.map((m) => [m.name, m]));
       for (const f of result.fields) {
         const m = measureByName.get(f.name) ?? measureByName.get(f.name.replace(/__compare$/, ''));
         if (!m) continue;
-        if (f.label == null && typeof m.label === 'string') f.label = m.label;
+        // `undefined` from the resolver means "nothing was picked" — an absent
+        // label, or a map with no usable entry. Nothing is written in that case:
+        // this enrichment describes columns, it never invents a header.
+        if (f.label == null) {
+          const label = resolveI18nLabel(m.label, requestLocale);
+          if (label !== undefined) f.label = label;
+        }
         if (f.format == null && m.format) f.format = m.format;
         // ADR-0053 currency chain. A MONETARY measure resolves its display
         // currency from: explicit measure `currency` → source-field
@@ -1172,7 +1228,11 @@ export class AnalyticsService implements IAnalyticsService {
         // Result fields may be keyed by the dataset dimension NAME or the
         // underlying cube FIELD depending on strategy — match either.
         const d = dimByName.get(f.name) ?? dimByField.get(f.name);
-        if (d && typeof d.label === 'string') f.label = d.label;
+        if (!d) continue;
+        // [#6761] Same resolver, same locale, same "write nothing on a miss"
+        // rule as the measure enrichment above.
+        const label = resolveI18nLabel(d.label, requestLocale);
+        if (label !== undefined) f.label = label;
       }
     }
     return result;

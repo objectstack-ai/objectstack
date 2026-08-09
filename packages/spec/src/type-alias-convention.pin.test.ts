@@ -138,6 +138,7 @@ import type * as M60 from './data/driver.zod.js';
 import type * as M61 from './data/driver/common.zod.js';
 import type * as M62 from './data/driver/memory.zod.js';
 import type * as M63 from './data/driver/sqlite.zod.js';
+import type * as M181 from './data/driver/turso.zod.js';
 import type * as M64 from './data/external-lookup.zod.js';
 import type * as M65 from './data/feed.zod.js';
 import type * as M66 from './data/field.zod.js';
@@ -264,7 +265,7 @@ import type * as M167 from './ui/view.zod.js';
 import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
-// 823 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 824 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -736,6 +737,9 @@ export type Iso333 = Assert<Eq< z.input< typeof M62.AutoPersistenceConfigSchema 
 
 // data/driver/sqlite.zod.ts
 export type Iso334 = Assert<Eq< z.input< typeof M63.SqliteWasmPersistModeSchema >, z.infer< typeof M63.SqliteWasmPersistModeSchema > >>;
+
+// data/driver/turso.zod.ts
+export type Iso834 = Assert<Eq< z.input< typeof M181.TursoTransportModeSchema >, z.infer< typeof M181.TursoTransportModeSchema > >>;
 
 // data/external-lookup.zod.ts
 export type Iso335 = Assert<Eq< z.input< typeof M64.ExternalDataSourceSchema >, z.infer< typeof M64.ExternalDataSourceSchema > >>;
@@ -1617,7 +1621,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 823 isomorphic pins', () => {
+  it('still declares all 824 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1755,7 +1759,7 @@ describe('ADR-0122 type-alias convention', () => {
     // first. The file, not the history, is the operand.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(823);
+    expect(pins).toHaveLength(824);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

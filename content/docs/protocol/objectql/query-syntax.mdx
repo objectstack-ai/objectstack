@@ -104,6 +104,19 @@ a `where` predicate on the sort key — §7), and `distinct` (unique values via
 effect was suppressing the REST list count, which is truthful again). **Enforced**:
 `having` (§5). The experimental flags above are tracked in the liveness ledger
 (`packages/spec/liveness/query.json`).
+
+One member of `AggregationNode` was settled separately, in #6815: the
+per-aggregation **`distinct`** flag is **removed** on the same terms. It escaped the
+#4286 sweep because that sweep asked which members no executor reads and this one had
+a reader — one out of six. The engine's in-memory fallback deduplicated before
+applying the function, while `driver-sql`, `driver-turso`, `driver-mongodb`,
+`driver-memory` and the analytics SQL builder all ignored it, so
+`{ function: 'sum', field: 'amount', distinct: true }` answered a deduplicated sum on
+the fallback path and an ordinary sum on every SQL datasource — one query, two
+plausible numbers, chosen by which backend served it. The live deduplicating spelling
+is the **`count_distinct` function** (`COUNT(DISTINCT field)` on both SQL faces since
+#6409); `SUM(DISTINCT …)` / `AVG(DISTINCT …)` have no replacement, because no backend
+ever computed them here.
 </Callout>
 
 ### Key Types
@@ -120,9 +133,9 @@ interface AggregationNode {
   function: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct';
   field?: string;        // optional for COUNT(*)
   alias: string;         // result column alias
-  distinct?: boolean;    // DISTINCT before aggregation — in-memory path only
   filter?: FilterCondition; // [EXPERIMENTAL — not enforced] FILTER WHERE clause — never applied
 }
+// `distinct?: boolean` was REMOVED in protocol 17 (#6815) — see the callout above.
 
 // FieldNode — one entry of the select list. A field name, optionally dotted to
 // reach through a relationship ('owner.name'). Related *records* come from
@@ -531,10 +544,31 @@ no driver can order by it — `SqlDriver` would render it as
 `"account"."company_name"` against a table that was never joined, and until the
 path was refused, the unknown-column backstop retried **without the sort** and
 answered 200 with unordered rows. Denormalise the value onto the queried object
-(for example with a formula or rollup field) when you need to sort by it.
+as a **stored** field — one this object's own rows carry, written when the
+source changes — when you need to sort by it.
 
 Internal callers reaching `engine.find()` directly are unaffected: a dotted
 `orderBy` there still falls through to the driver backstop and orders nothing.
+</Callout>
+
+<Callout type="warn">
+**Do not denormalise onto a `formula` field to sort by it.** A `formula` field
+is virtual: no driver materialises a column for it (the engine evaluates it
+*after* the driver returns), so `ORDER BY` on one hits the same unknown-column
+backstop and is **silently dropped** — 200, every row present, arbitrary order.
+Measured on a real `SqlDriver` (better-sqlite3) and on `InMemoryDriver`: rows
+inserted `C A E B D` come back `C A E B D` for both `asc` and `desc`, while the
+same query on a stored column returns `A B C D E` / `E D C B A`.
+
+A `rollup`/`summary` field *does* get a real, maintained column and can be
+sorted on — but it aggregates **child** records (`count`/`sum`/`min`/`max`/
+`avg`), so it cannot carry a looked-up parent's column such as
+`account.company_name`. For that, write the value onto a stored field of the
+queried object and keep it in sync (a trigger or flow on the source record).
+
+This page taught the `formula`/`rollup` version until #6924, and so did the
+`400 INVALID_SORT` hint itself (#4256) — both are corrected together. The same
+correction on the search axis is #6673.
 </Callout>
 
 ---

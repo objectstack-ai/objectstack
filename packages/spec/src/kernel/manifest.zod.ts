@@ -380,7 +380,7 @@ export const ManifestSchema = z.object({
      * Enables connecting to new types of datasources.
      */
     drivers: z.array(z.object({
-      id: z.string().describe('Driver unique identifier (e.g. "postgres", "mongo")'),
+      id: z.string().describe('Driver unique identifier (e.g. "postgres", "mongodb")'),
       label: z.string().describe('Human readable name'),
       description: z.string().optional(),
     })).optional().describe('Driver contributions'),

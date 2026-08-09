@@ -76,7 +76,7 @@ Salesforce:
 - Manual Sharing: Individual record sharing
 
 ObjectStack RLS:
-- A small, fixed expression grammar (equality, set-membership, always-true)
+- A constrained CEL predicate grammar: comparisons and set-membership against literals or `current_user.*` values, composable with `&&` / `||`; anything that does not lower to a filter fails closed
 - Subquery-shaped needs are pre-resolved by the runtime (§7.3.1)
 - Multiple policies OR-combine for union (any-match-allows) semantics
 
@@ -171,11 +171,11 @@ const result = RLSEvaluationResultSchema.parse(data);
 | **description** | `string` | optional | Policy description and business justification |
 | **object** | `string` | ✅ | Target object name |
 | **operation** | `Enum<'select' \| 'insert' \| 'update' \| 'delete' \| 'all'>` | ✅ | Database operation this policy applies to |
-| **using** | `string` | optional | Filter condition for SELECT/UPDATE/DELETE. One of the four compiler-supported forms: `field = current_user.<prop>`, `field = 'literal'`, `field IN (current_user.<array>)`, or `1 = 1`. Optional for INSERT-only policies. |
+| **using** | `string` | optional | Filter condition for SELECT/UPDATE/DELETE, authored in canonical CEL (ADR-0058 D1). It enforces when the predicate lowers to an ObjectQL filter: a field compared against a literal or a `current_user.*` context value using `==`, `!=`, `<`, `<=`, `>` or `>=`; `in` against a `current_user.*` array or an inline literal list (e.g. status in ['draft', 'pending']); these combined with `&&` / `\|\|`; or the bare allow-all `true`. Anything that does not lower fails closed — the policy matches zero rows. The legacy SQL-ish spellings are still accepted through a transitional bridge that rewrites `=` to `==` and `IN` to `in` (deprecated under ADR-0058 D1); SQL `AND` / `OR` / `NOT IN` / `IS NULL` / `LIKE` are NOT bridged and fail closed. Optional for INSERT-only policies. |
 | **check** | `string` | optional | Validation condition for INSERT/UPDATE (defaults to USING clause if not specified - enforced at application level) |
 | **positions** | `string[]` | optional | Positions this policy applies to (omit for all) |
 | **enabled** | `boolean` | ✅ | Whether this policy is active |
-| **priority** | `never` | optional | [REMOVED] `rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0 (#3896 security audit). It never had an effect and could not: applicable policies OR-combine (most permissive wins), so there is no conflict to order. Delete the key — policy outcomes are unchanged. |
+| **priority** | `never` | optional | [REMOVED] `rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0 (#3896 security audit). It never had an effect and could not: applicable policies OR-combine (most permissive wins), so there is no conflict to order. Delete the key — policy outcomes are unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **tags** | `string[]` | optional | Policy categorization tags |
 
 

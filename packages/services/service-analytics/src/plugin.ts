@@ -54,9 +54,28 @@ interface DataEngineLike {
     }>;
     /** Federation marker (ADR-0015): set on objects bound to an external datasource. */
     external?: unknown;
-    /** The datasource this object is bound to (ADR-0062 D6 external detection). */
-    datasource?: string;
   } | undefined;
+  /**
+   * [#5288] The datasource an object's rows actually live on, by NAME — the
+   * engine's own five-step resolution (explicit `datasource` →
+   * `datasourceMapping` → the ADR-0057 §3.6 lifecycle split → the owning
+   * package's `defaultDatasource` → the deployment default), not the value the
+   * object declares.
+   *
+   * The declared value used to be read straight off `getObject().datasource`,
+   * and it is only step 1 of those five: `ObjectSchema.datasource` defaults to
+   * `'default'`, which in the engine means "no explicit binding, keep looking".
+   * So every object routed by steps 2-4 — `sys_audit_log` among them, routed by
+   * `lifecycle.class: 'audit'` — answered `'default'` and pointed diagnostics at
+   * a database its rows are not in.
+   *
+   * `undefined` ⇒ nothing binds the object anywhere and it rides the
+   * deployment's default datasource (or this engine cannot answer). Optional
+   * because the analytics service runs against engines other than ObjectQL;
+   * absent, the probe below simply never answers, which is the same "cannot
+   * answer, do not block" tiering it already carries.
+   */
+  resolveEffectiveDatasource?(objectName: string): string | undefined;
   /**
    * Resolve the storage driver backing an object (public ObjectQL accessor).
    * Used to delegate temporal storage-form coercion to the driver, which is the
@@ -563,7 +582,17 @@ export class AnalyticsServicePlugin implements Plugin {
       // datasource the query was routed to. Undefined ⇒ the object rides the
       // default datasource (or the engine cannot answer), and the diagnostic
       // says so rather than inventing a name.
-      getObjectDatasource: (objectName: string) => dataEngine()?.getObject?.(objectName)?.datasource,
+      //
+      // [#5288] Asked of the ENGINE's resolver, not of the object's declaration.
+      // `getObject(name).datasource` is the declared value — step 1 of the five
+      // `getDriver` routes by — so an object placed by a `datasourceMapping`
+      // rule, by the ADR-0057 §3.6 lifecycle split, or by its package's
+      // `defaultDatasource` answered `'default'`, and the diagnostic named a
+      // database the rows are not in. Recomputing those rules here instead would
+      // be the second implementation `resolveMappedDatasource` (#4462) exists to
+      // prevent: it drifts by one step, silently, and the drift only surfaces as
+      // an error message pointing at the wrong database.
+      getObjectDatasource: (objectName: string) => dataEngine()?.resolveEffectiveDatasource?.(objectName),
       // ADR-0062 D6 — a federated object carries an `external` block (ADR-0015).
       // Reported so NativeSQLStrategy declines it (its hand-compiled FROM would
       // hit the wrong physical table) and the driver-correct ObjectQL path runs.

@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1584 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1586 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -23,7 +23,7 @@ counts are sums of the rows they head. Regenerate with
 | [API Protocol](/docs/references/api) | 28 | 410 | REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 13 | 68 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
-| [Data Protocol](/docs/references/data) | 29 | 164 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
+| [Data Protocol](/docs/references/data) | 30 | 166 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 28 | Users and accounts, organizations, positions, API keys, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 27 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 31 | 187 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
@@ -33,7 +33,7 @@ counts are sums of the rows they head. Regenerate with
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 37 | 292 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 147 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **199** | **1584** | 14 protocol modules |
+| **Total** | **200** | **1586** | 14 protocol modules |
 
 ---
 
@@ -146,7 +146,7 @@ Environments, packages and versions, marketplace, developer portal, tenancy.
 
 ## Data Protocol
 
-**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **29 pages, 164 schemas**
+**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **30 pages, 166 schemas**
 
 Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.
 
@@ -167,6 +167,7 @@ Objects, fields, queries, filters, datasources and drivers — the ObjectQL laye
 | [`driver/postgres.zod.ts`](/docs/references/data/driver-postgres) | `PostgresConfig` |
 | [`driver-sql.zod.ts`](/docs/references/data/driver-sql) | `DataTypeMapping`, `SQLDialect`, `SQLDriverConfig`, `SSLConfig` |
 | [`driver/sqlite.zod.ts`](/docs/references/data/driver-sqlite) | `SqliteConfig`, `SqliteWasmConfig`, `SqliteWasmPersistMode` |
+| [`driver/turso.zod.ts`](/docs/references/data/driver-turso) | `TursoConfig`, `TursoTransportMode` |
 | [`external-catalog.zod.ts`](/docs/references/data/external-catalog) | `ExternalCatalog`, `ExternalColumn`, `ExternalTable` |
 | [`external-lookup.zod.ts`](/docs/references/data/external-lookup) | `ExternalDataSource`, `ExternalFieldMapping`, `ExternalLookup` |
 | [`feed.zod.ts`](/docs/references/data/feed) | `FeedFilterMode`, `FeedItemType` |
