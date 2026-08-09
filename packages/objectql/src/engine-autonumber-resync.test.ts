@@ -37,16 +37,33 @@
  * the engine can observe but the store cannot report; collision-resync covers
  * drift the store reports but the engine could not observe.
  *
- * ## The collision half is STORAGE-DEPENDENT, and says so
+ * ## The collision half is STORAGE-DEPENDENT, and says so — by driver name
  *
- * It is triggered by the store REJECTING the duplicate, so it exists only where
- * something enforces uniqueness. driver-mongodb does (a single-field unique
- * index, when the field declares `unique`); **driver-memory never does** —
- * `create` is a `table.push()` storing no constraints at all (#4065), so there
- * a duplicate lands SILENTLY and this branch cannot be reached. Section (3b)
- * pins that outcome rather than leaving "collisions are handled" to read as
- * true on a driver where it is not (PD #10). What covers driver-memory is
- * adoption, which waits for no rejection.
+ * It is triggered by the store REJECTING the duplicate, so it reaches only
+ * drivers that take this fallback path AND enforce uniqueness. Measured across
+ * all five in-repo drivers (`supports.autonumber` read from each):
+ * driver-memory (`supports = {}`) and driver-mongodb (absent) take this path;
+ * driver-sql declares `autonumber: true`, and driver-sqlite-wasm and
+ * driver-turso inherit it (`extends SqlDriver`; Turso spreads
+ * `...super.supports`), so none of the three ever reaches here. Of the two that
+ * do, only driver-mongodb can raise anything — a single-field unique index,
+ * when the field declares `unique`. **driver-memory never can**: `create` is a
+ * `table.push()` storing no constraints at all (#4065), so a duplicate lands
+ * SILENTLY and this branch is unreachable.
+ *
+ * That is the repo's EXISTING ruled reading, not a fresh claim by this file:
+ * `scripts/driver-memory-census.ledger.json` records it for
+ * `packages/runtime/src/autonumber-seed-cross-side-parity.integration.test.ts`
+ * as `ruled-permanent` («#6664 A, maintainer 2026-08-08 — inherits #5704
+ * Q2 = B») — "InMemoryDriver declares `supports = {}`, so the ENGINE's
+ * autonumber seeding owns the counter. No SQL backend can stand in". Section
+ * (3b) pins the consequence rather than authoring a second answer to the same
+ * question (#6832's one-contract-two-numbers shape). What covers driver-memory
+ * is adoption, which waits for no rejection.
+ *
+ * NOTE this file imports no driver package — the rig below is a hand-rolled
+ * fake driver — so it adds no `driver-memory` consumer and
+ * `check:driver-memory-census` sees no unledgered arrival.
  *
  * ## What is deliberately NOT changed
  *
@@ -662,7 +679,10 @@ describe('ObjectQL autonumber resync (#6806)', () => {
       // oracle). So a duplicate raises nothing, there is no error to catch, and
       // the re-issue this file pins elsewhere never runs. Recorded rather than
       // papered over (PD #10): "collisions are handled" would be FALSE on one
-      // of the two drivers this fallback path serves.
+      // of the two drivers this fallback path serves — and the fallback path is
+      // only those two of five, the other three inheriting SqlDriver's
+      // `autonumber: true`. So the retry protects ONE backend, and this is the
+      // other one.
       //
       // No `uniqueOn` — this rig is the memory driver's shape exactly.
       const rows = storedRows('doc_no', ['D-0003']);

@@ -2615,14 +2615,30 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * # ⚠ The guarantee is STORAGE-DEPENDENT — say so, do not imply otherwise
    *
-   * This whole branch is triggered by the storage layer REJECTING the duplicate.
-   * Of the two in-repo drivers the fallback path serves, only one can:
+   * This whole branch is triggered by the storage layer REJECTING the duplicate,
+   * so it reaches only drivers that (1) take this fallback path at all and
+   * (2) enforce uniqueness. Measured across all five in-repo drivers:
    *
-   * | driver | uniqueness on the autonumber column | a collision appears as |
-   * |:---|:---|:---|
-   * | driver-mongodb, field declares `unique` | single-field unique index (`idx_<f>_unique`) | `E11000 duplicate key` → re-seed + re-issue, here |
-   * | driver-mongodb, field does not | none | **nothing** — a silent duplicate |
-   * | driver-memory | **none, ever** | **nothing** — a silent duplicate |
+   * | driver | `supports.autonumber` | fallback path? | uniqueness on the column | a collision appears as |
+   * |:---|:---|:---|:---|:---|
+   * | driver-memory | `supports = {}` | **yes** | **none, ever** | **nothing** — a silent duplicate |
+   * | driver-mongodb | absent (`{ batchSchemaSync: true }`) | **yes** | single-field unique index when the field declares `unique` | `E11000 duplicate key` → re-seed + re-issue, here |
+   * | driver-sql | `autonumber: true` | no | — | — |
+   * | driver-sqlite-wasm | inherited (`extends SqlDriver`, no `supports` override) | no | — | — |
+   * | driver-turso | inherited (`...super.supports`) | no | — | — |
+   *
+   * So the retry protects essentially ONE backend: driver-mongodb with a
+   * `unique` autonumber field. That is not a new claim — it is the reading the
+   * repo already ruled and gates, in
+   * `scripts/driver-memory-census.ledger.json`'s disposition for
+   * `packages/runtime/src/autonumber-seed-cross-side-parity.integration.test.ts`
+   * (axis `ruled-permanent`, «#6664 A, maintainer 2026-08-08 — inherits #5704
+   * Q2 = B»), which states it as: "InMemoryDriver declares `supports = {}`, so
+   * the ENGINE's autonumber seeding owns the counter. No SQL backend can stand
+   * in — SqlDriver advertises the capability and its own sequence bootstrap
+   * answers instead". This comment cites that ruling rather than restating it:
+   * a second answer to "who owns the autonumber counter" is the same
+   * one-contract-two-numbers defect this lane keeps closing (#6832).
    *
    * `InMemoryDriver.create` is a `table.push()` and it stores no constraints of
    * any kind — its own docstring says so since #4065, and calls itself a WEAK

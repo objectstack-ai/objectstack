@@ -39,12 +39,23 @@ past that the write fails with `code: 'ERR_AUTONUMBER_COLLISION'` carrying the
 driver's error as `cause`, rather than the raw driver error. A conflict on a
 different column, and any non-unique failure, are rethrown untouched.
 
-**This half is storage-dependent, and the docs say which driver gives what.** It
-is triggered by the store rejecting the duplicate, so it exists only where
-something enforces uniqueness: driver-mongodb does (a single-field unique index,
-when the field declares `unique`); **driver-memory never does** — its `create` is
-a `table.push()` storing no constraints at all — so there a duplicate still lands
-silently and this branch is unreachable. That outcome is now pinned rather than
+**This half is storage-dependent, and the docs name the drivers.** It is
+triggered by the store rejecting the duplicate, so it reaches only drivers that
+take this fallback path *and* enforce uniqueness. Measured across all five
+in-repo drivers: only **driver-memory** (`supports = {}`) and **driver-mongodb**
+(bit absent) take the path at all — driver-sql declares `autonumber: true`, and
+driver-sqlite-wasm and driver-turso inherit it via `extends SqlDriver`. Of those
+two, only driver-mongodb can raise a violation (a single-field unique index, when
+the field declares `unique`); **driver-memory never does** — its `create` is a
+`table.push()` storing no constraints at all — so there a duplicate still lands
+silently and this branch is unreachable.
+
+So the collision retry protects essentially one backend, and that is now stated
+in those terms rather than as "the storage layer". It is not a new claim: it is
+the reading already ruled and gated in `scripts/driver-memory-census.ledger.json`
+for `autonumber-seed-cross-side-parity.integration.test.ts` — "InMemoryDriver
+declares `supports = {}`, so the ENGINE's autonumber seeding owns the counter. No
+SQL backend can stand in". The silent-duplicate outcome is pinned rather than
 left implied, and driver-memory is covered by the adoption half above, which
 waits for no rejection. Enforcing uniqueness in the driver is the remedy for the
 remaining case and is not attempted here.
