@@ -23,7 +23,7 @@ them — and the casts the narrow annotation forced are gone:
   `resolveAuthzContext`'s output reaches the tests that trust this seam instead
   of being absorbed by a double cast.
 - `SharingRuleService`'s system context is typed as the envelope and passed as
-  itself, retiring `SYSTEM_CTX as any` at all 11 of its call sites — an erasure
+  itself, retiring `SYSTEM_CTX as any` at all 10 of its call sites — an erasure
   on an enforcement input switches checking off for the whole argument, not
   just for the readonly-array mismatch that provoked it.
 - The `(context as any).userId` / `.tenantId` reads in `SharingService` now read

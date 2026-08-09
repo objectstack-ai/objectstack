@@ -24,7 +24,7 @@ import { BusinessUnitGraphService } from './business-unit-graph.js';
  * System-elevated context for the rule evaluator's own reconcile writes.
  *
  * [#7136] Typed as the full envelope so it is passed AS ITSELF. It used to be
- * declared `as const` and forced through an `as any` at all 11 of its context
+ * declared `as const` and forced through an `as any` at all 10 of its context
  * call sites — an erasure on an enforcement input, which switches checking off
  * for the whole argument, not just for the readonly-array mismatch that
  * provoked it.
