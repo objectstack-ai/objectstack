@@ -575,6 +575,44 @@ jobs:
       - name: Spec type-alias convention gate (ADR-0122)
         run: pnpm check:spec-parsed-alias
 
+      # Read-side tenant chokepoint gate (#6792, from #3724 / #6577).
+      # `SqlDriver.applyTenantScope()` owns read-side tenant isolation for the
+      # whole SQL family — the tenantId early-out, the no-tenant-field early-out,
+      # the NULL-org platform-row rule (#2734) and the ADR-0105 D2 union posture
+      # (#3623). Its own docstring claimed "every CRUD method routes through it".
+      # Nothing checked that, and it was FALSE for as long as it had existed:
+      # three doors built through `getBuilder()` and never arrived —
+      # `findWithWindowFunctions` (ROWS: a caller passing `tenantId` got every
+      # tenant's rows, measured `[a1,a2,b1,b2,p1]` against `find()`'s
+      # `[a1,a2,p1]`), `analyzeQuery`/`explain` (a PLAN for a statement `find()`
+      # would not run — the same defect #6577 fixed on these methods one builder
+      # line lower), and `distinct` (every tenant's values for one column).
+      #
+      # The third is the argument for gating rather than fixing. It was in NO
+      # card: #6792 asserts the opposite — that `distinct` is among the 13 scoped
+      # sites — and the triage comment and two rounds of measurement all
+      # inherited that sentence without re-deriving it. The 13th read site is
+      # `aggregate()`. Two of the three doors were found by a human reading the
+      # file for another reason; the third was found only by measuring, which is
+      # the thing a prose invariant can never do for itself.
+      #
+      # Keyed on the BUILDER, not the method signature. #6792 sketches "every
+      # method taking `(object, …, options)` and returning rows"; that criterion
+      # is measurably too narrow — `distinct(object, field, filters, options)`
+      # takes no query and `analyzeQuery` returns a plan, so it misses two of the
+      # three. `getBuilder()` is the single constructor of every statement this
+      # driver sends, so every builder is classified and one that cannot be
+      # classified is an error, never a default (#4690's family). Insert builders
+      # are exempt structurally, not by name: write-side tenancy is
+      # `injectTenantOnInsert`.
+      #
+      # Static AST over three files, no build needed, so it belongs in this job.
+      # Runs its own --self-test first, in both directions — the detector can be
+      # broken while every door is fine, and a scan that stops matching would
+      # report OK while reading nothing.
+      - name: Read-side tenant chokepoint gate
+        run: pnpm check:tenant-chokepoint
+
   typecheck:
     name: TypeScript Type Check
     runs-on: ubuntu-latest

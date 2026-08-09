@@ -136,9 +136,10 @@ const CRM_REP: PermissionSet = PermissionSetSchema.parse({
  * — which is the shape #5493 reports from the other side: the security gate
  * admits the row and the SHARING middleware refuses it first.
  *
- * Present as a CONTROL, not a fix. This PR does not touch the sharing
- * middleware; the case at the bottom of this file measures that #5493's symptom
- * is unchanged by the composition landed here.
+ * It arrived as a CONTROL of the OLD position (#5492 left #5493's symptom
+ * standing deliberately). #5493 step 2 fixed it, so the case at the bottom of
+ * this file now measures the DEFERRAL: sharing still refuses on its own terms,
+ * consults `checkAuthoredRowWrite`, gets `admit`, and the write lands.
  */
 const CRM_REP_WIDENED: PermissionSet = PermissionSetSchema.parse({
   name: 'crm_rep_widened',
@@ -485,33 +486,43 @@ describe('[#5492] the platform ownership floor still stands where nothing replac
   });
 });
 
-describe('[#5493 control] the sharing middleware still refuses on its own — unchanged by this PR', () => {
+describe('[#5493] the sharing middleware DEFERS to an app-authored RLS widener instead of hard-refusing', () => {
   let stack: Stack;
   beforeEach(async () => { stack = await makeStack(); });
 
-  it('an APP-AUTHORED RLS update-widener passes the security gate and is still refused by sharing', async () => {
-    // #5493 is this composition's mirror image: there the RLS layer admits and
-    // the SHARING middleware answers FORBIDDEN first. This case reproduces that
-    // shape so the answer to "did #5492's fix change #5493?" is measured rather
-    // than reasoned: the app policy `stage == 'prospecting'` OR-combines past the
-    // platform ownership floor, so the security pre-image gate admits the row —
-    // and the write is still refused, by the other authority, exactly as before.
+  it('an APP-AUTHORED RLS update-widener passes the security gate AND the write now lands', async () => {
+    // ── what this case used to assert, and why it flipped ──────────────────
+    // #5492 (this file's subject) landed the composition and left #5493's
+    // symptom standing on purpose, so this case was written as a CONTROL of
+    // the old position: the security pre-image gate admitted the row and the
+    // SHARING middleware refused it first with `FORBIDDEN`. #5493 step 2 is
+    // the fix for exactly that, so the control flips — the two authorities are
+    // ONE composite determination (maintainer ruling, #5492 comment
+    // 5219846435; mirrored for this card in comment 5217346436), and this
+    // middleware may not hard-refuse a by-id write an app-authored widener
+    // admits by declaration.
+    //
+    // Everything the old case measured is still measured here, and the load
+    // is the same load: sharing STILL refuses on its own terms (`checkEdit` →
+    // `deny`, unchanged — nothing widened the sharing verdict), the security
+    // gate STILL admits the row through the app policy `stage ==
+    // 'prospecting'` OR-combining past the platform ownership floor. What
+    // changed is the composition between them: the middleware consults
+    // `checkAuthoredRowWrite` before refusing, gets `admit`, and hands the row
+    // to the pre-image gate that makes the final decision. The write lands and
+    // the ROW REALLY CHANGES — a completed write with an unchanged row would
+    // mean the middleware chain was bypassed, not that the fix works.
     await expect(
       stack.sharing.checkEdit('crm_opportunity', OPP_THEIRS.id, WIDENED_CTX as any),
     ).resolves.toBe('deny');
+    // The deferral predicate is the SECURITY service's verdict, not anything
+    // this middleware re-derived (ruling Q1 = A, #5493 comment 5226389104).
+    await expect(
+      stack.security.checkAuthoredRowWrite('crm_opportunity', OPP_THEIRS.id, 'update', WIDENED_CTX),
+    ).resolves.toBe('admit');
 
     const out = await stack.write('update', 'crm_opportunity', OPP_THEIRS.id, WIDENED_CTX);
-    expect(out.ok, 'still refused').toBe(false);
-    // The refusal is NOT the row-level pre-image gate's — that one admitted.
-    // Naming which authority refused is the whole point of the control.
-    expect(out.message, 'refused by the sharing middleware, not the RLS pre-image gate').not.toContain(
-      '(row-level security)',
-    );
-    // …and POSITIVELY the other authority's envelope, so this case cannot pass
-    // by refusing for some third reason (a missing CRUD bit, a thrown probe):
-    //   FORBIDDEN: insufficient privileges to update crm_opportunity opp_theirs
-    expect(out.code, "the sharing middleware's own code").toBe('FORBIDDEN');
-    expect(out.message).toContain('insufficient privileges to update crm_opportunity');
-    expect(rowById(stack, 'crm_opportunity', OPP_THEIRS.id)?.next_step).toBe('call');
+    expect(out, out.message).toMatchObject({ ok: true });
+    expect(rowById(stack, 'crm_opportunity', OPP_THEIRS.id)?.next_step).toBe('updated');
   });
 });
