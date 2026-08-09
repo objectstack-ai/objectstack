@@ -88,20 +88,69 @@ export type PartialIndexStatus =
     | 'failed';
 
 /**
+ * How far to follow an `error.cause` chain — deliberately the same bound as
+ * `isUniqueViolationError`'s `MAX_CAUSE_DEPTH` in `@objectstack/types` (#6848).
+ *
+ * Counted the same way too: the thrown value itself is depth 0, so this admits
+ * the outer error plus four wrapper levels below it. The two arms of {@link
+ * classifyIndexFailure} reading the SAME depth is the whole point — see that
+ * function's "Why both arms walk" note.
+ *
+ * It is also the only cycle guard, again matching the predicate: a `cause`
+ * chain that loops back on itself is bounded rather than detected, because a
+ * bound terminates a cycle just as well as a visited-set does and the predicate
+ * this mirrors has no visited-set to mirror.
+ */
+const MAX_CAUSE_DEPTH = 4;
+
+/**
+ * Every message channel on one thrown value and its `cause` chain, in order.
+ *
+ * Deliberately a local walk. `@objectstack/types` owns the *conflict* question
+ * and exports a predicate for it, but it exposes no reusable message-collecting
+ * helper — its own chain walkers (`matchesUniqueViolation`,
+ * `findUniqueViolationColumn`) are private and each answers its own question
+ * rather than handing back text. Hoisting a shared collector there would widen
+ * that package's contract for a single consumer, so this stays here and stays
+ * pinned to the bound above.
+ */
+function collectIndexFailureText(error: unknown, depth: number, into: string[]): void {
+    if (error === null || error === undefined || depth > MAX_CAUSE_DEPTH) return;
+    if (typeof error === 'string') {
+        into.push(error);
+        return;
+    }
+    if (typeof error !== 'object') {
+        into.push(String(error));
+        return;
+    }
+    const err = error as { message?: unknown; cause?: unknown };
+    if (typeof err.message === 'string') into.push(err.message);
+    collectIndexFailureText(err.cause, depth + 1, into);
+}
+
+/**
  * The text the DIALECT arm judges, from a thrown value of any shape.
  *
- * `message` first, because that is the channel a driver writes its refusal on
- * and the only one this arm has ever read; `String()` only as the last resort
- * — which is what a bare string resolves to unchanged, so a caller holding
- * nothing but prose is judged exactly as before.
+ * `message` first, because that is the channel a driver writes its refusal on;
+ * then the same channel one step at a time down `cause`, because pool and
+ * query-builder layers re-throw with the original attached and the refusal is
+ * then the ONLY copy of the dialect's answer (#6848). `String()` only as the
+ * last resort — which is what a bare string resolves to unchanged, so a caller
+ * holding nothing but prose is judged exactly as before.
+ *
+ * ⚠️ The levels are joined with a NEWLINE, never a space. Two of the dialect
+ * vocabulary's alternatives are multi-word (`where clause`, `near "where"`), so
+ * a space would let a phrase be synthesised across a wrapper boundary that no
+ * single driver ever wrote — an outer message ending in `where` above a cause
+ * beginning with `clause` would read as a dialect refusal. A newline cannot
+ * match the literal space in those alternatives, so each level is still judged
+ * on text some layer actually emitted.
  */
 function indexFailureText(error: unknown): string {
-    if (typeof error === 'string') return error;
-    if (typeof error === 'object' && error !== null) {
-        const { message } = error as { message?: unknown };
-        if (typeof message === 'string') return message;
-    }
-    return String(error);
+    const texts: string[] = [];
+    collectIndexFailureText(error, 0, texts);
+    return texts.length > 0 ? texts.join('\n') : String(error);
 }
 
 /**
@@ -138,10 +187,34 @@ function indexFailureText(error: unknown): string {
  * The predicate answers the FIRST arm only. It has no opinion about dialect
  * support, so the second arm stays this module's own — and stays second.
  *
+ * ## Why both arms walk `cause` (#6848)
+ *
+ * They read the same depth because they are asked the same way. #6699 gave the
+ * first arm the shared predicate's four-level `cause` walk and left the second
+ * on the outer message alone; the two then disagreed about how deeply a driver
+ * is allowed to wrap. A dialect refusal arriving behind a pooled wrapper —
+ * outer prose `Write failed`, the real `near "WHERE": syntax error` one step
+ * down — was graded `failed` rather than `unsupported`.
+ *
+ * That gap is **not** a wording difference, which is why it was worth closing
+ * rather than documenting. `view-definition-active-index.ts` disposes of the
+ * two verdicts identically (keep the previous index, report at `error`), but
+ * `overlay-index.ts` builds the composite **fallback lookup index** on
+ * `unsupported` and only there — offered precisely because a dialect that
+ * cannot take the partial form should still get the lookup. Under a `failed`
+ * verdict that branch never runs and the fallback is reported `not-attempted`
+ * instead of `ensured` / `refused`, so the wrap depth silently decides whether
+ * the degradation target is built at all.
+ *
+ * No driver shipped today produces that shape — every one hands knex's error
+ * back with the dialect text on the outer message, which is why every case here
+ * matched on the first read. This closes a dormant asymmetry, not a live defect.
+ *
  * ⚠️ Pass the **error**, not `err.message`. A string still works (the predicate
  * reads it on the message channel, and so does {@link indexFailureText}), but a
  * caller that unwraps first throws away the `code` / `errno` / `cause` channels
- * that are the whole reason this reads the object.
+ * that are the whole reason this reads the object — and, since #6848, the
+ * dialect answer too when a wrapper holds the useless half.
  */
 export function classifyIndexFailure(error: unknown): PartialIndexStatus {
     if (isUniqueViolationError(error)) {

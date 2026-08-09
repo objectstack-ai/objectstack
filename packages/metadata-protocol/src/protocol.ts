@@ -4819,6 +4819,41 @@ export class ObjectStackProtocolImplementation implements
      * gets a message that says which relationship it tried to cross and
      * prescribes what `query-syntax.mdx` has prescribed since #4240:
      * denormalise the value onto the queried object and sort by that.
+     *
+     * [#6924] WHAT to denormalise onto was wrong, and this overturns #4256's
+     * own recorded wording. That issue chose "a formula or rollup field that
+     * copies it into a real column" — a prescription the platform cannot
+     * deliver, so the refusal handed the author a dead end at the exact moment
+     * they asked for help. Measured on a REAL `SqlDriver` (better-sqlite3) and
+     * on `InMemoryDriver`, with a `formula` field named directly (NOT dotted,
+     * so this gate lets it through):
+     *
+     * ```
+     * control  orderBy title asc    -> A B C D E      (a real column sorts)
+     * baseline no sort              -> C A E B D      (insertion order)
+     * orderBy  <formula field> asc  -> C A E B D  200 (insertion order)
+     * orderBy  <formula field> desc -> C A E B D  200 (direction-blind)
+     * ```
+     *
+     * No column exists to order by (`SqlDriver.createColumn` returns early for
+     * `formula`; sqlite answers `no such column`), the #3821 unknown-column
+     * backstop retries WITHOUT the sort, and the response is 200 with every
+     * row present in an arbitrary order — the very failure #4226/#4256 exist
+     * to stop. Following the old hint therefore landed the author back inside
+     * the defect they had just been refused for.
+     *
+     * `rollup`/`summary` was the other half of that wording and is NOT broken
+     * the same way — it does get a real, maintained column (`table.float`;
+     * measured: `orderBy <summary> desc` -> E D C B A over values 5 4 3 2 1).
+     * It is dropped from the hint because it cannot do THIS job: a rollup
+     * aggregates CHILD records (count/sum/min/max/avg), so it cannot carry a
+     * looked-up parent's column (`account.company_name`) onto this object.
+     * Wrong tool, not a broken one — naming it here still sends the author
+     * somewhere that cannot work.
+     *
+     * "Stored" is #6673's vocabulary for the same correction on the SEARCH
+     * axis (`validate-searchable-fields.ts`, "a stored text field"); the two
+     * axes deliberately say the same word.
      */
     private assertSortFieldsExist(object: string, orderBy: ReadonlyArray<{ field: string }>, param: string): void {
         if (orderBy.length === 0) return;
@@ -4855,8 +4890,10 @@ export class ObjectStackProtocolImplementation implements
                   + "not values inside them")
             + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
             {
-                hint: ` Denormalise the value onto '${object}' (a formula or rollup field that`
-                    + ' copies it into a real column) and sort by that.',
+                hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
+                    + ' source changes) and sort by that. Not a formula field: it is virtual,'
+                    + ' no driver materialises a column for one, and ORDER BY on it is silently'
+                    + ' dropped.',
                 extra: { field: first, fields: dotted, object },
             },
         );
