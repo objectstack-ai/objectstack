@@ -356,3 +356,105 @@ describe('safeParsePretty', () => {
     }
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#5389] `invalid_key` / `invalid_element` — the 4th and 5th members of the
+// same family, one property name over.
+//
+// `invalid_union` hides a branch's real complaint on `issue.errors[]`; these two
+// hide the key/element schema's real complaint on `issue.issues[]`. Same defect,
+// same author-facing symptom (a bare wrapper line with the prescription stranded
+// in the payload), and the family had already been fixed three times for the
+// FIRST property name — #4971 here, #5014 on the REST wire, #5341 in the CLI —
+// while these two were never read by any of the three.
+//
+// Zod's OWN formatters (`treeifyError`, `formatError`) descend both codes with
+// `[...path, ...issue.path]` as the parent path, which is the semantics mirrored
+// here.
+//
+// ⚠️ Every fixture drives a REAL `safeParse`. `issue.issues` is zod's internal
+// shape, so a hand-written issue would keep this file green after an upgrade
+// moved it while the author's terminal went back to saying nothing.
+//
+// Reachability, measured on zod 4.4.3 (`v4/core/schemas.js`):
+//   • `z.record(K, V)` raises `invalid_key` when the KEY schema rejects a key.
+//   • `z.map(K, V)` raises `invalid_key` / `invalid_element` only for keys that
+//     are not `PropertyKey`s — a `string`-keyed map prefixes the issue instead.
+//   • `z.set(V)` never raises `invalid_element`; it flattens.
+// The `packages/spec` authoring surface produces none of these today (every
+// `z.record` key schema there is `z.string()` or an enum — #5389's dormancy
+// table), which is why these fixtures are local schemas: the defect is in the
+// CONSUMER, and the consumer is reachable from any caller's schema.
+describe('[#5389] formatZodError descends invalid_key / invalid_element', () => {
+  const SnakeKey = z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/, "Invalid identifier. Must be lowercase snake_case (e.g. 'first_name').");
+
+  it('renders the KEY schema prose under the record line', () => {
+    const schema = z.object({ fields: z.record(SnakeKey, z.object({ type: z.string() })) });
+    const result = schema.safeParse({ fields: { 'First Name': { type: 'text' } } });
+    expect(result.success).toBe(false);
+
+    const formatted = formatZodError(result.error!, 'Stack validation failed');
+    // The wrapper line is PRESERVED — it is what names the slot, and keeping it
+    // makes this strictly additive, exactly as #4971 kept the union's own line.
+    expect(formatted).toContain('✗ fields.First Name: Invalid key in record');
+    // …and the prescription now arrives with it, indented one level.
+    expect(formatted).toContain(
+      "    ✗ fields.First Name: Invalid identifier. Must be lowercase snake_case (e.g. 'first_name').",
+    );
+  });
+
+  it('resolves the nested path against the container, not relative to it', () => {
+    // The key schema's own issues carry `path: []`; the container issue carries
+    // `['fields', '<the bad key>']`. A naive splice would print `(root)`.
+    const schema = z.object({ fields: z.record(SnakeKey, z.unknown()) });
+    const formatted = formatZodError(schema.safeParse({ fields: { 'Bad Key': 1 } }).error!);
+    expect(formatted).not.toContain('✗ (root):');
+  });
+
+  it('descends invalid_element on a map with non-PropertyKey keys', () => {
+    const schema = z.map(z.object({ id: z.string() }), z.number().min(5, 'too small'));
+    const result = schema.safeParse(new Map([[{ id: 'a' }, 1]]));
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.code).toBe('invalid_element');
+
+    const formatted = formatZodError(result.error!);
+    expect(formatted).toContain('too small');
+  });
+
+  it('renders EVERY nested issue — a container has no branches to choose between', () => {
+    // The one deliberate difference from the union descent: `errors[]` holds
+    // competing candidates, so it is ranked and capped; `issues[]` is the one
+    // list the key schema produced, and every line of it is true.
+    const schema = z.map(
+      z.object({ id: z.string() }),
+      z.object({ a: z.string(), b: z.string(), c: z.string() }),
+    );
+    const formatted = formatZodError(schema.safeParse(new Map([[{ id: 'x' }, {}]])).error!);
+    // Three missing requireds, three lines — none ranked away.
+    expect(formatted.match(/received undefined/g)?.length).toBe(3);
+    for (const key of ['a', 'b', 'c']) expect(formatted).toContain(`✗ ${key}:`);
+  });
+
+  it('counts the container as the one issue zod raised', () => {
+    const schema = z.object({ fields: z.record(SnakeKey, z.unknown()) });
+    const result = schema.safeParse({ fields: { 'Bad Key': 1 } });
+    expect(result.error!.issues).toHaveLength(1);
+    expect(formatZodError(result.error!)).toContain('(1 issue)');
+  });
+
+  it('leaves an ordinary issue byte-identical', () => {
+    // The conservative half: nothing that is not one of these two codes may
+    // gain or lose a line because the descent exists.
+    const formatted = formatZodError(z.object({ a: z.string() }).safeParse({}).error!);
+    expect(formatted).toBe(
+      'Validation failed (1 issue):\n\n  ✗ a: Invalid input: expected string, received undefined',
+    );
+  });
+
+  it('tolerates a container issue with no nested list', () => {
+    expect(formatZodIssue({ code: 'invalid_key', path: ['m', 'k'], message: 'Invalid key in record' }))
+      .toBe('  ✗ m.k: Invalid key in record');
+  });
+});

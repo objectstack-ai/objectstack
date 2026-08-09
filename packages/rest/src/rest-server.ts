@@ -211,8 +211,8 @@ function valueAtPath(input: unknown, path: unknown): unknown {
 }
 
 /**
- * How many levels of nested `invalid_union` are expanded below a top-level
- * issue, and how many equally-informative branches are emitted at one level.
+ * How many levels of nested issues are expanded below a top-level issue, and
+ * how many equally-informative union branches are emitted at one level.
  *
  * Both bounds — and the whole selection policy below — are the ones
  * `formatZodError` landed for the CLI/spec side of this defect (#4971,
@@ -222,8 +222,21 @@ function valueAtPath(input: unknown, path: unknown): unknown {
  * the same, or one mistake gets two different prescriptions depending on whether
  * the author published from the terminal or POSTed to the API (#5014).
  */
-const UNION_EXPANSION_DEPTH_LIMIT = 3;
+const NESTED_EXPANSION_DEPTH_LIMIT = 3;
 const UNION_BRANCH_EMIT_LIMIT = 3;
+
+/**
+ * [#5389] The issue codes that hang their real diagnosis on `issue.issues`
+ * rather than on `invalid_union`'s `issue.errors`.
+ *
+ * `invalid_key` is raised when `z.record(K, V)`'s KEY schema rejects a key (and
+ * by `z.map` for a non-`PropertyKey` key); `invalid_element` when `z.map`'s
+ * VALUE schema rejects the value under such a key. Both carry a bare wrapper
+ * message ("Invalid key in record") with everything the client needs one level
+ * down — the same defect as #5014, one property name over. Kept in step with
+ * `CONTAINER_ISSUE_CODES` in `spec/src/shared/error-map.zod.ts`.
+ */
+const CONTAINER_ISSUE_CODES: ReadonlySet<string> = new Set(['invalid_key', 'invalid_element']);
 
 /** A Zod issue path, normalised to the array Zod always produces. */
 function issuePathOf(issue: any): Array<string | number> {
@@ -307,6 +320,14 @@ function selectUnionBranches(branches: readonly (readonly any[])[]): readonly (r
  * the branches that explain it, with `field` resolved against the union's own
  * path — branch paths are relative to it.
  *
+ * [#5389] An `invalid_key` / `invalid_element` behaves the same way one property
+ * name over: its own entry (zod's `"Invalid key in record"`, also
+ * `invalid_shape`) followed by the entries on `issue.issues`, whose paths are
+ * likewise relative. The one difference from a union: those issues are not
+ * competing candidates, so they are NOT ranked or capped — every one of them is
+ * a true statement about the value, and dropping any would be dropping a real
+ * diagnosis rather than declining to guess.
+ *
  * The union's entry is kept rather than replaced: it is the only entry naming
  * the slot the client sent, existing clients already read it, and when every
  * branch is uninformative it is still the whole answer. So the expansion is
@@ -342,7 +363,11 @@ function collectIssueFields(
     const branches: readonly (readonly any[])[] = issue?.code === 'invalid_union' && Array.isArray(issue?.errors)
         ? issue.errors.filter((branch: unknown): branch is any[] => Array.isArray(branch))
         : [];
-    const expandable = branches.length > 0 && depth < UNION_EXPANSION_DEPTH_LIMIT;
+    const contained: readonly any[] = CONTAINER_ISSUE_CODES.has(issue?.code) && Array.isArray(issue?.issues)
+        ? issue.issues
+        : [];
+    const expandable = (branches.length > 0 || contained.length > 0)
+        && depth < NESTED_EXPANSION_DEPTH_LIMIT;
 
     const entry = {
         field,
@@ -360,10 +385,17 @@ function collectIssueFields(
     out.push(entry);
     if (!expandable) return;
 
-    for (const branch of selectUnionBranches(branches)) {
-        for (const nested of branch) {
-            collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
+    if (branches.length > 0) {
+        for (const branch of selectUnionBranches(branches)) {
+            for (const nested of branch) {
+                collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
+            }
         }
+        return;
+    }
+
+    for (const nested of contained) {
+        collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
     }
 }
 
