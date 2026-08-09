@@ -151,32 +151,44 @@ const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
 };
 
 /**
- * Custom zod `error` for the `.strict()` capabilities block: an unknown key —
- * a retired `trash`/`mru` or a typo like `feedEnabled` — is a loud, *fixable*
- * parse error instead of a silent strip (#1535), and a retired key's error
- * carries its upgrade prescription. Every other issue code defers to zod's
- * default.
+ * The standing history sentence for the `enable` block, emitted LAST on every
+ * rejection — the shared template's `history` slot.
  *
- * The LAST hand-written `unrecognized_keys` map in this file — #6619 folded
- * its sibling `strictTenancyError` into the shared `strictObject` template,
- * and this one stayed out for a reason the template can measure: it emits NO
- * trailing history sentence, and `strictUnknownKeyError` appends its `history`
- * unconditionally. Fold it only when the template can express a
- * history-less surface; `scripts/strictness-ledger.test.ts` uses the
- * `ObjectCapabilities` site below as its `z.object(…).strict()` fixture, so
- * move that fixture in the same change.
+ * ## Why the slot, and why the fold waited for it (#6805)
+ *
+ * This block was the LAST hand-written `unrecognized_keys` map in this file.
+ * #6619 folded its sibling `strictTenancyError` into the shared `strictObject`
+ * template and left this one out for a reason it stated precisely: the map
+ * emitted NO trailing sentence while `strictUnknownKeyError` appends its
+ * `history` unconditionally (`${message} ${history}`). Measured again at #6805,
+ * that is a statement about the TEXT and not about the template — `enable` has
+ * a real history, it had simply never been written down. Writing it is the
+ * whole of what the fold needed.
+ *
+ * The reading of the slot is #6619's, unchanged: what it encodes is *position*
+ * — the one standing sentence that follows both fix channels (#5955 / #6416) —
+ * so the surface decides what belongs there, and background is as legitimate as
+ * literal history.
+ *
+ * The rejection itself is unchanged in kind: an unknown key — a retired
+ * `trash`/`mru` or a typo like `feedEnabled` — is a loud, *fixable* parse error
+ * instead of a silent strip (#1535), a retired key's error carries its upgrade
+ * prescription, and every other issue code defers to zod's default. What the
+ * fold changes is the *other* key: `searchible` now resolves to `searchable`
+ * through the template's rename channel instead of being told only that it "is
+ * not an `enable` capability flag", which named the problem and never the fix.
+ * And it is what puts this table under `alias-integrity.test.ts`, which no
+ * hand-rolled map has ever been judged by.
+ *
+ * ⚠️ `scripts/strictness-ledger.test.ts` used the `ObjectCapabilities` site
+ * below as its `z.object(…).strict()` fixture. #6805 moved it to
+ * `PerOperationRequiredPermissionsSchema` in this same file rather than
+ * deleting the assertion, exactly as that test's own note instructs.
  */
-const strictCapabilitiesError: z.core.$ZodErrorMap = (issue) => {
-  if (issue.code !== 'unrecognized_keys') return undefined;
-  const keys = (issue as { keys?: readonly string[] }).keys ?? [];
-  const lines = keys.map((key) =>
-    CAPABILITIES_RETIRED_KEY_GUIDANCE[key] ?? `\`${key}\` is not an \`enable\` capability flag.`,
-  );
-  return (
-    `Unrecognized key(s) on \`enable\`: ${keys.map((k) => `\`${k}\``).join(', ')}.\n` +
-    lines.map((l) => `  • ${l}`).join('\n')
-  );
-};
+const CAPABILITIES_HISTORY =
+  'Until this shape was closed an unknown flag was dropped without a word — the object '
+  + 'shipped as if the author had never written it (#1535); `enable` is a closed vocabulary '
+  + 'in which every flag carries an enforcement contract (#2707).';
 
 /**
  * Capability Flags
@@ -195,6 +207,20 @@ const strictCapabilitiesError: z.core.$ZodErrorMap = (issue) => {
  * `.strict()`: unknown keys (incl. the retired `trash` / `mru`, #2377) are
  * rejected with guidance, not stripped (#1535).
  *
+ * Closed with the shared `strictObject` template since #6805 — see
+ * {@link CAPABILITIES_HISTORY} for why the fold waited on one sentence, and
+ * what changes (and does not) about the message.
+ *
+ * ⚠️ ORDER IS LOAD-BEARING here for the same reason it is at
+ * `ObjectSchemaBase` (#5593, ~1000 lines below): `strictObject` evaluates its
+ * options object at CONSTRUCTION — that is what lets `alias-integrity.test.ts`
+ * judge the table against the real `.shape` — so both
+ * `CAPABILITIES_RETIRED_KEY_GUIDANCE` and `CAPABILITIES_HISTORY` must be
+ * declared ABOVE this site. Moving either below it reintroduces the temporal
+ * dead zone as a module-init crash under `OS_EAGER_SCHEMAS=1` (how
+ * `build-schemas.ts` runs), which the test suite does not reach because tests
+ * import lazily.
+ *
  * @example
  * {
  *   trackHistory: true,
@@ -203,7 +229,11 @@ const strictCapabilitiesError: z.core.$ZodErrorMap = (issue) => {
  *   activities: false
  * }
  */
-export const ObjectCapabilities = z.object({
+export const ObjectCapabilities = strictObject({
+  surface: '`enable`',
+  history: CAPABILITIES_HISTORY,
+  guidance: CAPABILITIES_RETIRED_KEY_GUIDANCE,
+}, {
   /**
    * History tracking (Audit Trail) master switch — opt-in.
    *
@@ -271,7 +301,7 @@ export const ObjectCapabilities = z.object({
 
   /** Allow cloning records */
   clone: z.boolean().default(true).describe('Allow record deep cloning'),
-}, { error: strictCapabilitiesError }).strict();
+});
 
 /**
  * Schema for database indexes.
@@ -573,6 +603,14 @@ export const ObjectAccessConfigSchema = lazySchema(() => strictObject({
  * Operation→class mapping mirrors the CRUD permission bits: `transfer`/`restore`
  * fold into `update`, `purge` into `delete`. `.strict()` so a mistyped key
  * (e.g. `reads`) is rejected at author time rather than silently ignored.
+ *
+ * ⚠️ This site is `scripts/strictness-ledger.test.ts`'s fixture for the OLDER
+ * `z.object(…).strict()` spelling — the reading the ledger's AST walker has to
+ * keep making, and `packages/spec` is not the only tree it reads. The fixture
+ * has moved twice as the campaign converted its predecessors
+ * (`security/permission.zod.ts` → `TenancyConfigSchema` at #5593 →
+ * `ObjectCapabilities` at #6619 → here at #6805). If THIS one is ever
+ * converted, move the fixture again rather than deleting the assertion.
  */
 export const PerOperationRequiredPermissionsSchema = z.object({
   read: z.array(z.string()).optional().describe('Capabilities required to read (find/findOne/count/aggregate).'),
