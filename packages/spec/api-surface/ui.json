@@ -392,6 +392,7 @@
     "reactBlockTagFor (function)",
     "reportForm (const)",
     "reportSelectionOrder (function)",
+    "resolveI18nLabel (function)",
     "stripViewConsoleDecorations (function)",
     "validateActionParams (function)",
     "viewForm (const)"

@@ -60,10 +60,38 @@ import type { DeclaredDefaultChange } from './authorable-defaults.js';
 /**
  * Declared default changes, keyed by the protocol major that shipped them.
  *
- * Empty at major 17: this ratchet lands with no default change to declare, and
- * that emptiness is the gate's own proof — `check:authorable-surface` is green
- * on origin/main with the table holding nothing, which means every default in
- * the tree matches its recorded fingerprint. The first entry will be written by
- * whoever first needs to move one.
+ * The table landed EMPTY at major 17 — that emptiness was the ratchet's own
+ * proof that every default in the tree matched its recorded fingerprint. The
+ * entry below is the first one written (#6361), and it is worth noting what
+ * kind of change opened the account: not a behaviour flip, but the removal of a
+ * default that had never once been applied.
  */
-export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly DeclaredDefaultChange[]>> = {};
+export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly DeclaredDefaultChange[]>> = {
+  17: [
+    {
+      key: 'api/ListNotificationsRequest:limit',
+      from: '20',
+      to: '(none)',
+      reason:
+        'GET /api/v1/notifications declared `limit: z.number().default(20)` while the server '
+        + 'has always answered its own window of 50 (MessagingService.listInbox clamps into '
+        + '1..200). The declared default was never in effect on ANY request path — nothing '
+        + 'parses this query string through this schema, because #3899 wired the route '
+        + "catalog's requestSchema to the real entry for BODIES only — so this removal moves "
+        + 'no deployed behaviour whatsoever: a caller that omitted `limit` received 50 before '
+        + 'and receives 50 after. What changes is the DECLARATION, which stops promising a '
+        + 'number nobody applied. The maintainer ruling (2026-08-07, #6361 Option A) allowed '
+        + 'either re-declaring the real 50 or dropping the default as server-decided; the '
+        + 'second was taken because the fiction was the MECHANISM, not the number — a '
+        + '`.default()` on a schema no request path parses cannot take effect at whatever '
+        + 'value it is spelled, and re-spelling it 50 would merely make it coincide with the '
+        + 'implementation until someone moved the clamp. '
+        + 'A consumer who genuinely relied on 20 was relying on client-side code of their '
+        + 'own, since the wire never delivered it: to keep a 20-row window, send it — '
+        + '`client.notifications.list({ limit: 20 })`. To keep what the server actually '
+        + 'gave you, change nothing. Reading `ListNotificationsRequestParsed.limit` now '
+        + 'yields `number | undefined` instead of `number`; the honest answer to "how big is '
+        + 'the window" is the server\'s, and it is documented on the key.',
+    },
+  ],
+};

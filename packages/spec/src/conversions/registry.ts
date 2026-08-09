@@ -5236,6 +5236,141 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
   },
 };
 
+/**
+ * `page:tabs.type` → `tabStyle` (protocol 17, #6776).
+ *
+ * The concept — the tab strip's visual style, `line` | `card` | `pill` — was
+ * declared all along. What was wrong is the **spelling**: a props key named
+ * `type` sits on the one name a page component cannot spare, because the node's
+ * own dispatch key is `type` too. Three independently-measured consequences on
+ * objectui `origin/main`, none of them cosmetic:
+ *
+ *   - `SchemaRenderer.tsx:253,264` hoists `properties` onto the node but skips
+ *     `type` and `id` explicitly, or the inner value would shadow which
+ *     renderer to dispatch to. Its comment names this very case ("tab visual
+ *     style: 'line' | 'card' | 'pill'").
+ *   - `sdui-parser`'s `BASE_PROPS` (`validate.ts:20-30`) contains `'type'`, and
+ *     `validate.ts:68` `continue`s on any base prop — so a manifest input named
+ *     `type` is skipped before the unknown/typed checks and is never validated.
+ *   - In the flat and JSX carriers a node reads
+ *     `{ type: 'page:tabs', items: […], tabStyle: 'card' }` — `type` is the tag
+ *     name, and the spec's spelling has nowhere left to go.
+ *
+ * So `tabStyle` is not drift: it is the only spelling those carriers can
+ * express, it is what objectui's registry publishes as the designer input, and
+ * `containers.tsx:381` reads BOTH (`schema?.properties?.type || schema?.tabStyle`).
+ * Converging on the spelling the renderer reads — rather than the one that
+ * declares well — is exactly {@link recordPickerDisplayFieldToLabelField}'s
+ * shape (#5775), and one spelling rather than two is Prime Directive #12. The
+ * alternative considered and refused was declaring `tabStyle` as an alias of
+ * `type`: that fossilizes a second dialect for one concept, and the dialect
+ * that would survive is the one that silently fails to validate.
+ *
+ * A rename rather than a deletion because the two keys are synonyms down to the
+ * value vocabulary — the same three-value enum, no re-mapping. Precedence is
+ * {@link renameKey}'s house rule (#4923): a redundant twin is dropped, a
+ * DISAGREEING pair is left for the author to reconcile rather than the loader
+ * picking a look.
+ *
+ * Region level is the reach, as for {@link pageCardBodyToChildren}:
+ * `PageComponentSchema` declares no children key, so a `page:tabs` nested inside
+ * another component's free-form `properties` is not typed page-component shape.
+ * The tombstone covers the rest — `tsc` at the authoring site and the parse at
+ * load, both carrying the prescription whether or not the walk reaches there.
+ *
+ * `retiredFromLoadPath: true`: no alias window, deliberately. The tombstone owns
+ * the refusal; this entry exists so `spec-changes.json`, the upgrade guide and
+ * `os migrate meta` still carry the rewrite.
+ */
+const pageTabsTypeToTabStyle: MetadataConversion = {
+  id: 'page-tabs-type-to-tab-style',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'page.component.page:tabs.type',
+  summary:
+    "page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'page:tabs') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const renamed = renameKey(properties, 'type', 'tabStyle');
+      if (!renamed) return component;
+      emit({ from: 'type', to: 'tabStyle', path: `${path}.properties.tabStyle` });
+      return { ...component, properties: renamed };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'sys_position_detail',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'page:tabs', properties: { type: 'card', items: [{ label: 'Holders' }] } },
+                // Both spellings, SAME value: the redundant twin goes (#4923).
+                { type: 'page:tabs', properties: { tabStyle: 'pill', type: 'pill', items: [] } },
+                // Both spellings, DIFFERENT looks: kept, so the author picks one
+                // rather than the loader picking for them.
+                { type: 'page:tabs', properties: { tabStyle: 'pill', type: 'card', items: [] } },
+                // A `type` one level down inside another component's properties
+                // is a different key entirely — the walk is region-level and
+                // never descends into a props bag.
+                {
+                  type: 'element:button',
+                  properties: { label: 'Open', action: { type: 'url', target: '/x' } },
+                },
+              ],
+            },
+          ],
+        },
+        // The shape this key is really authored in: `page:tabs` IS one of the
+        // seven named slots, and all four in-repo sites are `slots.tabs` on a
+        // `kind: 'slotted'` record page. Region-only reach would have missed
+        // every one of them (#6776 — see `mapPageComponents`).
+        {
+          name: 'sys_user_detail',
+          regions: [],
+          slots: {
+            tabs: { type: 'page:tabs', properties: { type: 'line', position: 'top', items: [] } },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'sys_position_detail',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'page:tabs', properties: { tabStyle: 'card', items: [{ label: 'Holders' }] } },
+                { type: 'page:tabs', properties: { tabStyle: 'pill', items: [] } },
+                { type: 'page:tabs', properties: { tabStyle: 'pill', type: 'card', items: [] } },
+                {
+                  type: 'element:button',
+                  properties: { label: 'Open', action: { type: 'url', target: '/x' } },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'sys_user_detail',
+          regions: [],
+          slots: {
+            tabs: { type: 'page:tabs', properties: { tabStyle: 'line', position: 'top', items: [] } },
+          },
+        },
+      ],
+    },
+    expectedNotices: 3,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -5300,6 +5435,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     recordPickerInertKeysRemoved,
     pageCardBodyToChildren,
     inlineActionApiParamsToBodyExtra,
+    pageTabsTypeToTabStyle,
   ],
 };
 

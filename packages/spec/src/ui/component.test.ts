@@ -50,28 +50,63 @@ describe('PageHeaderProps', () => {
   });
 });
 
+// #6776 — the three record-chrome switches objectui's header renderer has always
+// read (`containers.tsx:979-981`) and `PageHeaderProps` never declared. Until
+// this declaration objectui's published manifest called them legal while
+// `validateComponentProps` (#5068) called them undeclared — two platform
+// authorities disagreeing about one key (#5435), with the renderer siding with
+// the author.
+describe('PageHeaderProps recordChrome / showStar / showCopyId (#6776)', () => {
+  it('defaults all three ON — an unauthored header keeps the record chrome', () => {
+    const result = PageHeaderProps.parse({ title: 'Lead' });
+    expect(result.recordChrome).toBe(true);
+    expect(result.showStar).toBe(true);
+    expect(result.showCopyId).toBe(true);
+  });
+
+  it('accepts the console preview sample verbatim (`recordChrome: false` on a non-record page)', () => {
+    // objectui `apps/console/src/preview-samples.ts:68` — the exact shape that
+    // was reported as an undeclared key before this card.
+    const result = PageHeaderProps.parse({ title: 'Welcome to the CRM', recordChrome: false });
+    expect(result.recordChrome).toBe(false);
+  });
+
+  it('accepts the star and copy-id switches independently', () => {
+    const result = PageHeaderProps.parse({ title: 'Lead', showStar: false, showCopyId: false });
+    expect(result.showStar).toBe(false);
+    expect(result.showCopyId).toBe(false);
+    // Still a record header — only the two chips inside it are off.
+    expect(result.recordChrome).toBe(true);
+  });
+
+  it('rejects a non-boolean rather than silently stripping it', () => {
+    expect(() => PageHeaderProps.parse({ title: 'Lead', recordChrome: 'false' })).toThrow();
+    expect(() => PageHeaderProps.parse({ title: 'Lead', showStar: 'no' })).toThrow();
+  });
+});
+
 describe('PageTabsProps', () => {
   it('should accept valid tabs with defaults', () => {
     const tabs = {
       items: [{ label: 'Tab 1', children: [] }],
     };
     const result = PageTabsProps.parse(tabs);
-    expect(result.type).toBe('line');
+    expect(result.tabStyle).toBe('line');
     expect(result.position).toBe('top');
     expect(result.items).toHaveLength(1);
   });
 
   it('should accept tabs with all options', () => {
     const tabs = {
-      type: 'card' as const,
+      tabStyle: 'card' as const,
       position: 'left' as const,
       items: [{ label: 'Tab 1', icon: 'settings', children: ['child1'] }],
     };
     expect(() => PageTabsProps.parse(tabs)).not.toThrow();
   });
 
-  it('should reject invalid type enum', () => {
-    expect(() => PageTabsProps.parse({ type: 'invalid', items: [] })).toThrow();
+  it('should reject invalid tabStyle enum', () => {
+    expect(() => PageTabsProps.parse({ tabStyle: 'invalid', items: [] })).toThrow();
   });
 
   it('should reject tabs without items', () => {
@@ -116,6 +151,64 @@ describe('PageTabsProps', () => {
     });
     expect(result.items[0].visibleWhen).toBeUndefined();
     expect('visibility' in result.items[0]).toBe(false);
+  });
+});
+
+// #6776 — the tab strip's visual style moves from `type` to `tabStyle`.
+//
+// This is an acceptance-face change in BOTH directions, so both are pinned: the
+// new key is accepted, and the old one is REFUSED BY NAME with the prescription
+// rather than being stripped in silence (the retiredKey contract). The reason
+// the concept had to change spelling at all is structural, not aesthetic: a
+// props key named `type` collides with the page component's own dispatch key,
+// which is why objectui's `SchemaRenderer.tsx:253,264` refuses to hoist
+// `properties.type` and why `sdui-parser`'s `BASE_PROPS` (`validate.ts:20-30`)
+// skips it before any validation runs.
+describe('PageTabsProps tabStyle — renamed from `type` (#6776)', () => {
+  it('accepts the three declared styles under the new key', () => {
+    for (const tabStyle of ['line', 'card', 'pill'] as const) {
+      expect(PageTabsProps.parse({ tabStyle, items: [] }).tabStyle).toBe(tabStyle);
+    }
+  });
+
+  it('rejects the retired `type` with the rename prescription', () => {
+    // Not `.toThrow()` alone: an undeclared key on this non-strict schema would
+    // be stripped silently, and a bare throw assertion cannot tell the two
+    // apart. The message IS the migration doc, so it is what gets asserted.
+    expect(() => PageTabsProps.parse({ type: 'card', items: [] }))
+      .toThrow(/`type`.*removed.*`tabStyle`/s);
+  });
+
+  it('does not materialize the retired `type` on a clean parse', () => {
+    expect(PageTabsProps.parse({ tabStyle: 'card', items: [] })).not.toHaveProperty('type');
+  });
+
+  it('still refuses a value outside the enum under the new key', () => {
+    expect(() => PageTabsProps.parse({ tabStyle: 'underline', items: [] })).toThrow();
+  });
+});
+
+// #6776 — `page:accordion.variant`, read at objectui `containers.tsx:734` and
+// visible on screen (`flush` draws the divider, `card` leaves the border to the
+// panel's own content), declared nowhere until now.
+describe('PageAccordionProps variant (#6776)', () => {
+  const accordion = ComponentPropsMap['page:accordion'];
+
+  it('defaults to `flush` — the renderer default, now stated in the contract', () => {
+    const result = accordion.parse({ items: [] }) as { variant?: string };
+    expect(result.variant).toBe('flush');
+  });
+
+  it('accepts the `card` opt-in the renderer invites authors to write', () => {
+    const result = accordion.parse({
+      items: [{ label: 'Details', children: [] }],
+      variant: 'card',
+    }) as { variant?: string };
+    expect(result.variant).toBe('card');
+  });
+
+  it('rejects a variant outside the two the renderer branches on', () => {
+    expect(() => accordion.parse({ items: [], variant: 'bordered' })).toThrow();
   });
 });
 

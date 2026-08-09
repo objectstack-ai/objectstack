@@ -347,10 +347,6 @@ const DEBT = {
     errors: 11,
     note: 'all code-tier (TS2554 wrong arity x10, TS2552).',
   },
-  '@objectstack/rest': {
-    errors: 2,
-    note: 'code-tier 2 (TS2345).',
-  },
   '@objectstack/service-analytics': {
     errors: 10,
     note: 'code-tier 9 (TS2339 x7, TS7053 x2) + 1 noise (TS6133). Re-measured 10 at e8db1a230, up from 7 '

@@ -7090,11 +7090,32 @@ export class RestServer {
                         });
                         return;
                     }
-                    // Embed the target object's schema (limited to fields
-                    // referenced by the form) so anonymous front-ends can
-                    // render the form without a separate, auth-protected
-                    // meta lookup. The submit handler still enforces the
-                    // field whitelist server-side.
+                    // Embed the target object's schema — limited to exactly the
+                    // fields the form's sections DECLARE — so anonymous
+                    // front-ends can render the form without a separate,
+                    // auth-protected meta lookup.
+                    //
+                    // [#6601] "Exactly" is load-bearing and used not to be. The
+                    // narrowing read `allowed.size === 0 || allowed.has(name)`,
+                    // so a form with no sections (or sections declaring no
+                    // fields) fell through to EVERY non-server-managed field of
+                    // the object — published to an ANONYMOUS caller, with
+                    // labels, types, picklist option values and formula
+                    // expressions. A form created before its sections are wired
+                    // is an ordinary authoring mid-state, so that was reachable
+                    // without an exotic configuration, and this comment claimed
+                    // the opposite. Publication is a DECLARATION now: declare no
+                    // fields and nothing is published (AGENTS.md "Explicit
+                    // composition over default magic").
+                    //
+                    // Do NOT reach for the submit handler as the backstop here.
+                    // It enforces a field whitelist on WRITES, which cannot
+                    // bound a READ disclosure — and its own accepted set
+                    // degenerates identically for a section-less form
+                    // (`allowedFields.size === 0 ||` below), so narrowing this
+                    // schema to "what submit would accept" would have
+                    // republished precisely the set being removed. That
+                    // write-side twin is tracked separately in #6920.
                     let objectSchema: any = null;
                     try {
                         const p = await this.resolveProtocol(environmentId, req);
@@ -7118,12 +7139,13 @@ export class RestServer {
                                     // [#3022] Server-managed anchors are never
                                     // renderable/writable on the anonymous form
                                     // surface — the submit route refuses them, so
-                                    // don't advertise them here (declared or via
-                                    // the zero-sections all-fields expansion).
+                                    // don't advertise them here even when a form
+                                    // (mis)declares one in a section.
                                     if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(name)) continue;
-                                    if (allowed.size === 0 || allowed.has(name)) {
-                                        fields[name] = def;
-                                    }
+                                    // [#6601] Declared or not published. An empty
+                                    // `allowed` yields an empty `fields`.
+                                    if (!allowed.has(name)) continue;
+                                    fields[name] = def;
                                 }
                                 objectSchema = { name: obj.name, label: obj.label, fields };
                                 // Localize labels / help text / option labels so anonymous

@@ -341,8 +341,15 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             // allowOrgOverride:false (no per-org agent fork). The kernel ships
             // exactly two platform agents; tenants extend via skills + tools.
             expect(allowedFromRegistry.has('agent')).toBe(false);
-            expect(allowedFromRegistry.has('permission')).toBe(true);
-            expect(allowedFromRegistry.has('position')).toBe(true);
+            // #6483 — `permission`/`position` rolled BACK to
+            // allowOrgOverride:false (with page/app/action/dataset/book/
+            // tool/skill; the whole nine-type divergence family). ADR-0005's
+            // security row has always said ❌: "Authorization correctness;
+            // overlays would create silent privilege drift." Reintroduction
+            // guard, same as `flow` below: re-opening either requires
+            // amending ADR-0005, not editing this line.
+            expect(allowedFromRegistry.has('permission')).toBe(false);
+            expect(allowedFromRegistry.has('position')).toBe(false);
             // ADR-0090 D2/D3: role/profile kinds retired — reintroduction guards.
             expect(allowedFromRegistry.has('role')).toBe(false);
             expect(allowedFromRegistry.has('profile')).toBe(false);

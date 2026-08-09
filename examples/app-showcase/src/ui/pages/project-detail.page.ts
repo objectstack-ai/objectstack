@@ -35,7 +35,10 @@ export const ProjectDetailPage = definePage({
     tabs: {
       type: 'page:tabs',
       properties: {
-        type: 'line',
+        // `tabStyle`, not `type` (#6776): a props key named `type` collides
+        // with the component node's own dispatch key, so the old spelling
+        // could not be written in a flat or JSX page at all.
+        tabStyle: 'line',
         items: [
           {
             // Explicit details sections — each section's `fields` is a

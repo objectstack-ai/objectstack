@@ -275,6 +275,45 @@ describe('unknown keys are rejected, not stripped (#4001 batch 11)', () => {
     expect(parsed._provenance).toBe('package');
   });
 
+  /**
+   * [#6362] The measurement that card asked for, kept as a pin.
+   *
+   * #6362 fixed `connector`, which TOLERATED the stamped envelope and then
+   * stripped it — success with silent data loss — and asked whether `webhook`
+   * had the same drop. It does not: `WebhookSchema` has carried
+   * `...MetadataProtectionFields` since #4001 batch 11, and all SEVEN keys
+   * survive the round-trip. No spread was added here; this pin is what makes
+   * that reading durable rather than a note in a closed report.
+   *
+   * The test above is the one #4001 left, and it checks two keys by value —
+   * enough for "accepts", not enough for "preserves". The whole `connector`
+   * defect was invisible to an accepts-shaped assertion, so the preservation
+   * question gets an assertion over the complete key set, by value.
+   */
+  it('[#6362] PRESERVES all seven envelope keys — measured, not assumed', () => {
+    const envelope = {
+      _lock: 'full',
+      _lockReason: 'Ships with the package.',
+      _lockSource: 'artifact',
+      _lockDocsUrl: 'https://docs.example.com/locked-webhooks',
+      _provenance: 'package',
+      _packageId: 'com.example.app',
+      _packageVersion: '1.0.0',
+    } as const;
+
+    const parsed = WebhookSchema.parse({ ...valid, ...envelope });
+
+    expect({
+      _lock: parsed._lock,
+      _lockReason: parsed._lockReason,
+      _lockSource: parsed._lockSource,
+      _lockDocsUrl: parsed._lockDocsUrl,
+      _provenance: parsed._provenance,
+      _packageId: parsed._packageId,
+      _packageVersion: parsed._packageVersion,
+    }).toEqual(envelope);
+  });
+
   it('accepts an authored `protection` block (the pre-envelope half of ADR-0010)', () => {
     expect(WebhookSchema.safeParse({
       ...valid,

@@ -103,9 +103,13 @@ export default class Dev extends Command {
       char: 'd',
       description: 'Database URL: file:./db.sqlite | libsql://... | postgres://... | mongodb://... | memory:// (overrides $OS_DATABASE_URL)',
     }),
+    // Enforced allowlist, not a help string — see start.ts's note. Kept in
+    // agreement with `resolveStorageDefinition` by
+    // `database-driver-allowlist.pin.test.ts`, which covers both commands
+    // because the flag is declared once here and once there (#6860).
     'database-driver': Flags.string({
-      description: 'Force driver kind: sqlite | turso | postgres | mongodb | memory (overrides $OS_DATABASE_DRIVER)',
-      options: ['sqlite', 'turso', 'postgres', 'mongodb', 'memory'],
+      description: 'Force driver kind: sqlite | sqlite-wasm | turso | postgres | mysql | mongodb | memory (overrides $OS_DATABASE_DRIVER)',
+      options: ['sqlite', 'sqlite-wasm', 'turso', 'postgres', 'mysql', 'mongodb', 'memory'],
     }),
     'database-auth-token': Flags.string({
       description: 'Auth token for libsql/Turso connections (overrides $OS_DATABASE_AUTH_TOKEN / $TURSO_AUTH_TOKEN)',

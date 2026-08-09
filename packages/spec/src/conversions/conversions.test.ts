@@ -12,7 +12,7 @@ import {
   validateDriverConfig,
 } from '../data/driver/config-registry.zod.js';
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
-import { ElementButtonPropsSchema, PageHeaderProps } from '../ui/component.zod.js';
+import { ElementButtonPropsSchema, PageHeaderProps, PageTabsProps } from '../ui/component.zod.js';
 import { PageSchema } from '../ui/page.zod.js';
 import { applyConversions, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
@@ -1124,6 +1124,149 @@ describe('conversion layer (ADR-0087 D2)', () => {
       });
       expect(PageSchema.safeParse(page(before)).success).toBe(true);
       expect(PageSchema.safeParse(page(after)).success).toBe(true);
+    });
+  });
+
+  /**
+   * `page-tabs-type-to-tab-style` (#6776).
+   *
+   * The fixture pair above pins before → after and the notice count. What needs
+   * its own cover here is everything the fixture cannot show:
+   *
+   *   - the **discriminator** — this entry keys on the component's `type`, and
+   *     the key it rewrites is also called `type`, so "which `type`" is the
+   *     whole correctness question;
+   *   - the **reach** — `page:tabs` is one of the seven named slots, and all
+   *     four in-repo authoring sites are `slots.tabs`, so a region-only walk
+   *     would rewrite nothing that actually exists;
+   *   - **idempotence** and the #4923 both-keys rule;
+   *   - the **acceptance face in both directions**, since a rename moves what
+   *     the schema accepts as well as what it refuses.
+   */
+  describe('page-tabs-type-to-tab-style (#6776)', () => {
+    const regionPage = (properties: Record<string, unknown>) => ({
+      pages: [{ name: 'sys_position_detail', regions: [{ name: 'main', components: [{ type: 'page:tabs', properties }] }] }],
+    });
+    const slottedPage = (properties: Record<string, unknown>) => ({
+      pages: [{ name: 'sys_user_detail', regions: [], slots: { tabs: { type: 'page:tabs', properties } } }],
+    });
+    const convert = (stack: Record<string, unknown>) => {
+      const notices: ConversionNotice[] = [];
+      const out = applyConversions(stack, { includeRetired: true, onNotice: (n) => notices.push(n) });
+      return { out, notices };
+    };
+    type Comp = { type: string; properties: Record<string, unknown> };
+    type Pg = { regions: { components: Comp[] }[]; slots?: { tabs: Comp | Comp[] } };
+    const pageOf = (stack: Record<string, unknown>) => (stack.pages as Pg[])[0]!;
+    const propsOf = (stack: Record<string, unknown>, where: 'region' | 'slot') => {
+      const page = pageOf(stack);
+      return where === 'region'
+        ? page.regions[0]!.components[0]!.properties
+        : (page.slots!.tabs as Comp).properties;
+    };
+
+    it('rewrites `properties.type` → `tabStyle` on a region-level page:tabs', () => {
+      const { out, notices } = convert(regionPage({ type: 'card', items: [] }));
+      expect(propsOf(out, 'region')).toEqual({ tabStyle: 'card', items: [] });
+      expect(notices.map((n) => n.conversionId)).toEqual(['page-tabs-type-to-tab-style']);
+      expect(notices[0]!.path).toBe('pages[0].regions[0].components[0].properties.tabStyle');
+    });
+
+    it('reaches `slots.tabs` — the shape every in-repo site actually uses', () => {
+      // Region-only reach was the pre-#6776 behaviour of `mapPageComponents`,
+      // and for THIS key it would have converted nothing: `page:tabs` is a
+      // named slot, and all four sites in this repo are slotted record pages.
+      // A conversion that cannot reach the corpus makes the tombstone's
+      // "run `os migrate meta`" prescription a false promise.
+      const { out, notices } = convert(slottedPage({ type: 'pill', position: 'top', items: [] }));
+      expect(propsOf(out, 'slot')).toEqual({ tabStyle: 'pill', position: 'top', items: [] });
+      expect(notices[0]!.path).toBe('pages[0].slots.tabs.properties.tabStyle');
+    });
+
+    it('reaches an ARRAY-valued slot too, indexing the path', () => {
+      const stack = {
+        pages: [{
+          name: 'sys_user_detail',
+          regions: [],
+          slots: { tabs: [{ type: 'page:tabs', properties: { type: 'card', items: [] } }] },
+        }],
+      };
+      const { out, notices } = convert(stack);
+      const slot = pageOf(out).slots!.tabs as Comp[];
+      expect(slot[0]!.properties).toEqual({ tabStyle: 'card', items: [] });
+      expect(notices[0]!.path).toBe('pages[0].slots.tabs[0].properties.tabStyle');
+    });
+
+    it('never touches the node\'s OWN `type` — the dispatch key is not the prop', () => {
+      // The one confusion this entry has to be immune to: `component.type` is
+      // `'page:tabs'` and stays that way; only `properties.type` moves.
+      const { out } = convert(regionPage({ type: 'card', items: [] }));
+      expect(pageOf(out).regions[0]!.components[0]!.type).toBe('page:tabs');
+    });
+
+    it('leaves a non-tabs component alone, including a nested `type` in its props', () => {
+      const stack = {
+        pages: [{
+          name: 'p',
+          regions: [{
+            name: 'main',
+            components: [{ type: 'element:button', properties: { label: 'Open', action: { type: 'url', target: '/x' } } }],
+          }],
+        }],
+      };
+      // Identity, not just equality: nothing converted, so copy-on-write shares.
+      expect(applyConversions(stack, { includeRetired: true })).toBe(stack);
+    });
+
+    it('keeps BOTH when `tabStyle` already says something different (#4923 house rule)', () => {
+      const stack = regionPage({ tabStyle: 'pill', type: 'card', items: [] });
+      const { out, notices } = convert(stack);
+      expect(out).toBe(stack);
+      expect(notices).toEqual([]);
+    });
+
+    it('drops the redundant twin when both spellings agree (#4923)', () => {
+      const { out, notices } = convert(regionPage({ tabStyle: 'pill', type: 'pill', items: [] }));
+      expect(propsOf(out, 'region')).toEqual({ tabStyle: 'pill', items: [] });
+      expect(notices).toHaveLength(1);
+    });
+
+    it('is idempotent — the converted result replays to itself with no second notice', () => {
+      const once = applyConversions(regionPage({ type: 'card', items: [] }), { includeRetired: true });
+      const notices: ConversionNotice[] = [];
+      const twice = applyConversions(once, { includeRetired: true, onNotice: (n) => notices.push(n) });
+      expect(twice).toBe(once);
+      expect(notices).toEqual([]);
+    });
+
+    /**
+     * The acceptance face, both directions — a KEY verdict, so the criterion is
+     * the props schema's own judgement of the key (#5046's distinction), not a
+     * full-parse-green demand on a value.
+     *
+     * `PageSchema` stays green on both spellings because
+     * `PageComponent.properties` is an open bag that never judged the key at
+     * all; that gap is the defect's mechanism, and the #5068 props gate is the
+     * only place either verdict is visible.
+     */
+    it('the props schema refuses `type` BY NAME and accepts `tabStyle`; PageSchema accepts both', () => {
+      expect(PageTabsProps.safeParse({ type: 'card', items: [] }).success).toBe(false);
+      // The refusal carries the prescription, not a bare "unrecognized key" —
+      // a `retiredKey` tombstone rather than an undeclared key, which is what
+      // makes the removal audible to an upgrading (often AI) author.
+      expect(() => PageTabsProps.parse({ type: 'card', items: [] }))
+        .toThrow(/`type`.*removed.*`tabStyle`/s);
+      expect(PageTabsProps.safeParse({ tabStyle: 'card', items: [] }).success).toBe(true);
+
+      const page = (properties: Record<string, unknown>) => ({
+        name: 'sys_position_detail',
+        label: 'Position',
+        type: 'record' as const,
+        object: 'sys_position',
+        regions: [{ name: 'main', components: [{ type: 'page:tabs', properties }] }],
+      });
+      expect(PageSchema.safeParse(page({ type: 'card', items: [] })).success).toBe(true);
+      expect(PageSchema.safeParse(page({ tabStyle: 'card', items: [] })).success).toBe(true);
     });
   });
 });

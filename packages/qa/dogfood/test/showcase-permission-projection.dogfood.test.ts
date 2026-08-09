@@ -8,16 +8,24 @@
 //   1. A data-door create/edit lands in the METADATA store (write-through) and
 //      the record is re-derived by the AWAITED projector — consistent on the
 //      very next read, no race.
-//   2. A data-door edit of a DECLARED set becomes an enforced env overlay
-//      (the layered effective body changes), closing the "Setup edit never
-//      enforces" gap.
+//   2. [#6483 inverted this pin] A data-door edit of a CODE-DECLARED set is
+//      REFUSED — `permission` rolled back to `allowOrgOverride: false`
+//      (ADR-0005 security row: "Authorization correctness; overlays would
+//      create silent privilege drift"), so overriding an artifact-backed set
+//      answers 403 `not_overridable` instead of minting an overlay. The
+//      pre-#6483 behaviour (ADR-0094's 2026-07-14 "customize via env
+//      overlay" direction) is closed until an ADR-0005 revision readmits the
+//      type; ADR-0086 two-doors applies meanwhile (edit the package,
+//      re-publish).
 //   3. Deleting a runtime-only set retires its record; deleting an
 //      artifact-backed set RESETS it to the declared body (the definition
 //      ships with the app and cannot be removed from the environment).
-//   4. [ADR-0094, direction 2026-07-14] An environment-door metadata save that
-//      targets a package-owned set is a FIRST-CLASS overlay customization:
-//      the record projects the effective body with its package provenance
-//      preserved, and deleting the overlay resets to the shipped declaration.
+//   4. [#6483 inverted this pin too] An environment-door metadata save that
+//      targets a package-owned, artifact-backed set is refused the same way —
+//      record, provenance and effective body all stay exactly as shipped.
+//      (Package-bound rows MATERIALIZED through the metadata door carry
+//      `sys_metadata` provenance, not an artifact, and stay editable through
+//      the `allowRuntimeCreate` tier — see two-doors-permission 块2.)
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -89,67 +97,74 @@ describe('sys_permission_set pure projection (ADR-0094)', () => {
     expect(await overlayBody(NAME), 'metadata overlay gone too').toBeFalsy();
   });
 
-  // ── 2. Data-door edit of a DECLARED set becomes an enforced overlay ───────
-  it('editing a declared set through the data door produces an enforced metadata overlay', async () => {
-    // member_default is a platform-declared set (an artifact baseline exists).
+  // ── 2. Data-door edit of a DECLARED set is REFUSED (#6483) ────────────────
+  it('editing a declared set through the data door is refused — no overlay is minted', async () => {
+    // member_default is a platform-declared set (an artifact baseline
+    // exists), so the write-through's `saveMetaItem` hits the ADR-0005 type
+    // gate: `permission` is no longer `allowOrgOverride` (#6483, the
+    // security row's "silent privilege drift"). The refusal must be LOUD —
+    // an error status, not a 2xx that quietly skipped the metadata write —
+    // and must leave no overlay behind (#6190's phantom-write shape is the
+    // thing the rollback forbids).
     expect(await overlayBody('member_default'), 'no overlay before the edit').toBeFalsy();
     const md = await findSet('member_default');
     const res = await stack.apiAs(adminToken, 'PATCH', `/data/sys_permission_set/${md.id}`, {
       description: 'customized via Setup (ADR-0094)',
     });
-    expect(res.status).toBeLessThan(300);
+    expect(res.status, 'the refusal surfaces to the data-door caller').toBe(403);
 
-    // The edit is now an env overlay — the store the resolver reads, not a
-    // record-only change that silently never enforces.
-    const overlay = await overlayBody('member_default');
-    expect(overlay, 'Setup edit of a declared set becomes an env overlay').toBeTruthy();
-    expect(overlay.description).toBe('customized via Setup (ADR-0094)');
-    expect((await findSet('member_default')).description).toBe('customized via Setup (ADR-0094)');
+    // Nothing was minted and nothing enforces differently: no overlay row,
+    // record description unchanged.
+    expect(await overlayBody('member_default'), 'no overlay after the refusal either').toBeFalsy();
+    expect((await findSet('member_default')).description ?? null).not.toBe('customized via Setup (ADR-0094)');
   });
 
   // ── 3. Delete of an artifact-backed set RESETS (does not remove) ──────────
   it('deleting a declared set through the data door resets it to the declared body, keeping the record', async () => {
+    // (#6483: with the edit above refused, there is no overlay to lift — the
+    // delete is a no-op reset. The invariant it pins is unchanged: a
+    // declared definition cannot be removed from the environment.)
     const before = await findSet('member_default');
     const res = await stack.apiAs(adminToken, 'DELETE', `/data/sys_permission_set/${before.id}`);
     expect(res.status).toBeLessThan(300);
 
     const after = await findSet('member_default');
     expect(after, 'a packaged/declared set cannot be removed from the environment').toBeTruthy();
-    // Overlay is gone (reset) and the customized description is gone with it.
+    // No overlay (none could be created) and no customized description.
     expect(await overlayBody('member_default')).toBeFalsy();
     expect(after.description ?? null).not.toBe('customized via Setup (ADR-0094)');
   });
 
-  // ── 4. Env overlay of a PACKAGE set is first-class (ADR-0094) ─────────────
-  it('an environment-door metadata save on a package-owned set customizes it and projects immediately', async () => {
+  // ── 4. Env overlay of a PACKAGE set is REFUSED (#6483) ────────────────────
+  it('an environment-door metadata save on a package-owned set is refused and changes nothing', async () => {
     const contributor = await findSet('showcase_contributor');
     expect(contributor?.managed_by, 'showcase_contributor is package-owned').toBe('package');
     const layeredBefore = await protocol.getMetaItemLayered({ type: 'permission', name: 'showcase_contributor' });
     const baseline = layeredBefore?.code ?? null;
     expect(baseline, 'the packaged declaration is the code layer').toBeTruthy();
 
-    await protocol.saveMetaItem({
-      type: 'permission',
-      name: 'showcase_contributor',
-      item: { ...baseline, label: 'Contributor (env customized)' },
-    });
+    // #6483 — `permission` rolled back to `allowOrgOverride: false`
+    // (ADR-0005 security row). The overlay ADR-0094's 2026-07-14 direction
+    // used here is exactly the per-org shadowing of a code-shipped
+    // authorization contract the ADR forbids, so the save refuses LOUDLY at
+    // the moment of the write instead of minting an enforced overlay.
+    await expect(
+      protocol.saveMetaItem({
+        type: 'permission',
+        name: 'showcase_contributor',
+        item: { ...baseline, label: 'Contributor (env customized)' },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
 
-    // Awaited projection: the record already reflects the overlay, the
-    // package provenance is untouched, and it is flagged customized so the
-    // Setup list can badge it.
+    // Nothing moved: record, provenance, customized flag and the effective
+    // body all stay exactly as shipped.
     const after = await findSet('showcase_contributor');
-    expect(after.label).toBe('Contributor (env customized)');
+    expect(after.label).toBe(contributor.label);
     expect(after.managed_by).toBe('package');
     expect(after.package_id).toBe(contributor.package_id);
-    expect(after.customized).toBe(true);
-
-    // Deleting the overlay resets the record to the shipped declaration and
-    // clears the customized flag.
-    await protocol.deleteMetaItem({ type: 'permission', name: 'showcase_contributor' });
-    const reset = await findSet('showcase_contributor');
-    expect(reset.label).toBe(contributor.label);
-    expect(reset.managed_by).toBe('package');
-    expect(reset.customized).toBe(false);
+    expect(after.customized).toBe(false);
+    const layeredAfter = await protocol.getMetaItemLayered({ type: 'permission', name: 'showcase_contributor' });
+    expect(layeredAfter?.overlay ?? null, 'no overlay row was minted').toBeFalsy();
   });
 
   it('a brand-new environment set authored through the metadata door appears as a Setup record', async () => {
