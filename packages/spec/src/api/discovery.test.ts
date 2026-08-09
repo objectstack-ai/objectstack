@@ -113,6 +113,24 @@ describe('ApiRoutesSchema', () => {
     expect(minimal.packages).toBeUndefined();
     expect(minimal.datasources).toBeUndefined();
   });
+
+  // [#6714] The email surface key — base under which `POST {email}/send` is
+  // mounted. Optional: absent = not mounted (ADR-0076 D12); a rebased
+  // deployment advertises its real base and the SDK follows it.
+  it('accepts the email surface key, rebased or absent', () => {
+    const rebased = ApiRoutesSchema.parse({
+      data: '/backend/api/v9/data',
+      metadata: '/backend/api/v9/meta',
+      email: '/backend/api/v9/email',
+    });
+    expect(rebased.email).toBe('/backend/api/v9/email');
+
+    const minimal = ApiRoutesSchema.parse({
+      data: '/api/v1/data',
+      metadata: '/api/v1/meta',
+    });
+    expect(minimal.email).toBeUndefined();
+  });
 });
 
 /** Minimal services map used as base fixture for DiscoverySchema tests */

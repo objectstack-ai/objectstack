@@ -157,6 +157,20 @@ describe('[#4828] getDiscovery() conforms to DiscoverySchema', () => {
       expect(Object.prototype.hasOwnProperty.call(discovery.routes, 'datasources')).toBe(false);
       expect(declaredRouteKeys().has('datasources')).toBe(true);
     });
+
+    it('[#6714] does NOT advertise `email` — this builder knows nothing about the email mount', async () => {
+      // Same disposition as `datasources` above: `registerEmailEndpoints`
+      // mounts `POST {base}/email/send` on the REST host (unconditionally,
+      // 501-degrading when no email service is configured), which this builder
+      // cannot see — and the runtime dispatcher serves no /email domain at
+      // all. Advertising here would be the advertise-the-unmounted half of
+      // ADR-0076 D12. The REST discovery endpoint advertises it from its
+      // recorded route registrations.
+      const discovery: any = await makeImpl().getDiscovery();
+
+      expect(Object.prototype.hasOwnProperty.call(discovery.routes, 'email')).toBe(false);
+      expect(declaredRouteKeys().has('email')).toBe(true);
+    });
   });
 
   // ═════════════════════════════════════════════════════════════════════════
