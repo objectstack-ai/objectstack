@@ -309,6 +309,12 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    *
    * **Supported expression grammar (reference compiler)**
    *
+   * ⚠️ **STALE — the enumeration below UNDER-states what compiles (#6919).**
+   * The `.describe()` on this property carries the current truth: `!=`, the
+   * ordering comparisons, `in` over an inline literal list, `&&`, `||` and a
+   * bare `true` all lower today. Rewriting this block is tracked in #6919; do
+   * not read the four-item list as the accepted set.
+   *
    * The reference RLS compiler implements a deliberately **small, fixed
    * grammar** rather than a general SQL parser. Exactly four forms compile;
    * anything else fails closed (the policy matches zero rows). Keep `using`
