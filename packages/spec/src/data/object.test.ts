@@ -66,6 +66,56 @@ describe('ObjectCapabilities', () => {
     const result = ObjectCapabilities.safeParse({ feedEnabled: true });
     expect(result.success).toBe(false);
   });
+
+  // ── #6805 — the map folded into the shared `strictObject` template ────────
+  // `strictCapabilitiesError` was a hand-written `$ZodErrorMap`, so
+  // `CAPABILITIES_RETIRED_KEY_GUIDANCE` registered in no registry and nothing
+  // judged it. Acceptance did not move (every case above is unchanged); these
+  // pin the assembly the template brings.
+
+  const capabilityRejection = (body: Record<string, unknown>): string => {
+    const result = ObjectCapabilities.safeParse(body);
+    expect(result.success).toBe(false);
+    return result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
+  };
+
+  it.each([
+    ['searchible', 'searchable'],
+    ['trackHistroy', 'trackHistory'],
+    ['clon', 'clone'],
+    ['feed', 'feeds'],
+  ])('a near-miss `%s` now gets the rename channel, not just "not an `enable` capability flag"', (written, canonical) => {
+    const message = capabilityRejection({ [written]: true });
+    expect(message).toContain(`\`${written}\` → \`${canonical}\``);
+    expect(message).not.toContain('is not an `enable` capability flag');
+  });
+
+  it('a key beyond edit distance is still named, with no misleading suggestion', () => {
+    const message = capabilityRejection({ feedEnabled: true });
+    expect(message).toContain('`feedEnabled`');
+    expect(message).not.toContain('Did you mean');
+  });
+
+  it('emission order: which key is wrong → the fix → the history, last (#5955)', () => {
+    const message = capabilityRejection({ trash: false, searchible: true });
+    const preamble = 'Unrecognized key(s) on `enable`:';
+    const fix = 'os migrate meta --from 16';
+    const history = 'every flag carries an enforcement contract (#2707)';
+
+    expect(message.startsWith(preamble)).toBe(true);
+    expect(message.indexOf(fix)).toBeGreaterThan(message.indexOf(preamble));
+    expect(message.indexOf(history)).toBeGreaterThan(message.indexOf(fix));
+    expect(message.trimEnd().endsWith(`${history}.`)).toBe(true);
+    expect(message.split(history)).toHaveLength(2);
+  });
+
+  it('the tombstone text survives the fold byte-for-byte', () => {
+    expect(capabilityRejection({ mru: true })).toContain(
+      '`enable.mru` was removed from @objectstack/spec in the 16.x line (#2377/#3207, '
+      + 'ADR-0049) — Most-Recently-Used tracking was never implemented; no reader '
+      + 'existed, so the flag changed nothing.',
+    );
+  });
 });
 
 describe('LifecycleSchema (ADR-0057)', () => {

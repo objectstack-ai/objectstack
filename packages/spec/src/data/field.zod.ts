@@ -262,11 +262,25 @@ export const AddressSchema = lazySchema(() => z.object({
  */
 /**
  * Prescriptive rejection for a mis-spelled `unique` scope (ADR-0120
- * §Terminology; pattern of `strictCapabilitiesError`): the error must carry the
- * vocabulary and, for the two predictable near-misses (`'tenant'`, `'org'`),
- * name `'organization'` explicitly — a typo must be a loud, fixable parse
- * error, never a silent scope change. Declared before `UniqueScopeSchema`
- * because `OS_EAGER_SCHEMAS=1` evaluates the factory at module load (TDZ).
+ * §Terminology): the error must carry the vocabulary and, for the two
+ * predictable near-misses (`'tenant'`, `'org'`), name `'organization'`
+ * explicitly — a typo must be a loud, fixable parse error, never a silent
+ * scope change. Declared before `UniqueScopeSchema` because
+ * `OS_EAGER_SCHEMAS=1` evaluates the factory at module load (TDZ).
+ *
+ * ⚠️ **The last hand-written `$ZodErrorMap` in `packages/spec`, and it stays
+ * one.** This docblock used to say "pattern of `strictCapabilitiesError`";
+ * #6805 folded that sibling into the shared `strictObject` template and the
+ * pointer would have gone stale, so it is replaced by the reason this map is
+ * NOT following it. The fold's channel is `unrecognized_keys` — an unknown
+ * KEY, answered from a per-key `guidance` table. This map answers
+ * `invalid_union`, a VALUE-level verdict on a key the schema declares, which
+ * `strictObject` does not address at any level. Folding it would be a category
+ * error, and `alias-integrity.test.ts`'s class pin
+ * (`NO module outside the shared helpers writes its own unrecognized_keys
+ * map`) is scoped by `issue.code` precisely so this site is out of class by
+ * measurement rather than by an exemption — that pin reads this file as a live
+ * control.
  */
 const uniqueScopeError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code !== 'invalid_union') return undefined;

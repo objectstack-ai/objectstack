@@ -61,7 +61,7 @@ describe('bare-day $lte on Field.datetime — the #3777 repro', () => {
       await driver.create(
         'task',
         { id, title: id, created_at: new Date(at), created_on: at.slice(0, 10) },
-        { bypassTenantAudit: true } as any,
+        { bypassTenantAudit: true },
       );
     }
   });

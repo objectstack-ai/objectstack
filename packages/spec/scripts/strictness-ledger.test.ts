@@ -169,19 +169,34 @@ describe('posture reading, with a red control for each', () => {
     // wiring; #5593 migrated all four to `strictObject`, so the file no longer
     // exercised the branch under test, and the fixture moved to
     // `TenancyConfigSchema` — until #6619 folded ITS hand-written map into the
-    // shared template (the set-keyed `guidance` form gave the template the
-    // vocabulary #6416 had recorded as out of reach) and the site became
-    // `strictObject` like the rest. `ObjectCapabilities`, same file, is the
-    // spelling's remaining deliberate carrier: its map
-    // (`strictCapabilitiesError`) emits NO trailing history sentence, which
-    // the shared template still cannot express. If it is ever converted, move
-    // this fixture rather than deleting the assertion — the AST reader still
-    // has to make the reading, and `packages/spec` is not the only tree it
-    // reads.
+    // shared template. It then moved to `ObjectCapabilities`, same file, on the
+    // reading that its map (`strictCapabilitiesError`) emitted NO trailing
+    // history sentence and so could not fold. **#6805 disproved that reading**:
+    // the missing sentence was a gap in the TEXT, not a limit of the template
+    // (`history` encodes position, and `enable` had a real history nobody had
+    // written down), so that site is `strictObject` too now.
+    //
+    // `PerOperationRequiredPermissionsSchema`, still the same file, is the
+    // spelling's carrier today — and a more durable one, because it carries no
+    // guidance table at all and therefore nothing pulls it toward the helper.
+    // If it is ever converted, move this fixture AGAIN rather than deleting the
+    // assertion: the AST reader still has to make the reading, and
+    // `packages/spec` is not the only tree it reads.
     const objectSites = analyzeSites(at('data/object.zod.ts'));
-    const capabilities = objectSites.find((s) => s.name === 'ObjectCapabilities');
-    expect(capabilities?.posture, 'a plain `.strict()` chain is still strict').toBe('strict');
-    expect(capabilities?.idiom).toBe('z.object');
+    const perOperation = objectSites.find((s) => s.name === 'PerOperationRequiredPermissionsSchema');
+    expect(perOperation?.posture, 'a plain `.strict()` chain is still strict').toBe('strict');
+    expect(perOperation?.idiom).toBe('z.object');
+
+    // …and the two sites the fixture vacated read as the helper now, which is
+    // the control that keeps the line above a statement about the READER
+    // rather than about one lucky survivor. Without it, a reader that simply
+    // stopped distinguishing idioms would still satisfy the assertion.
+    for (const name of ['ObjectCapabilities', 'TenancyConfigSchema']) {
+      const folded = objectSites.find((s) => s.name === name);
+      expect(folded, `${name} is not a site any more — re-point this test, do not delete it`).toBeDefined();
+      expect(folded?.idiom, `${name} folded into the helper at #6619/#6805`).toBe('strictObject');
+      expect(folded?.posture).toBe('strict');
+    }
 
     // The permission file's four are now the helper, and still strict — the
     // control that keeps this test a statement about the READER rather than

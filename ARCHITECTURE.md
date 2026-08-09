@@ -267,16 +267,6 @@ official plugin lives in `packages/plugins/*`.
 
 **Dependencies**: `@objectstack/core`, `@objectstack/spec`, `@objectstack/types`, `hono`
 
-#### `@objectstack/plugin-msw`
-**Location**: `packages/plugins/plugin-msw/`  
-**Role**: Mock Service Worker Plugin
-
-- Browser-based API mocking
-- E2E testing support
-- Development mode
-
-**Dependencies**: `@objectstack/objectql`, `@objectstack/spec`, `@objectstack/types`, `msw`
-
 ### Tools Packages
 
 #### `@objectstack/cli`
@@ -403,7 +393,7 @@ Lifecycle:
 
 ### Plugin Capability Declaration
 
-**Location**: `packages/spec/src/system/plugin-capability.zod.ts`
+**Location**: `packages/spec/src/kernel/plugin-capability.zod.ts`
 
 Plugins declare capabilities through structured manifests:
 
@@ -433,8 +423,6 @@ interface PluginCapabilityManifest {
     ├── @objectstack/core (Kernel + Logger)
     │       ↑
     │       ├── @objectstack/objectql (Query Engine)
-    │       │       ↑
-    │       │       └── @objectstack/plugin-msw
     │       │
     │       ├── @objectstack/metadata (Metadata I/O)
     │       │       ↑
@@ -579,7 +567,7 @@ export type Field = z.infer<typeof FieldSchema>;
 - Parallel development
 - Incremental migration
 
-**See Also**: [content/docs/introduction/architecture.mdx](content/docs/introduction/architecture.mdx)
+**See Also**: [content/docs/concepts/architecture.mdx](content/docs/concepts/architecture.mdx)
 
 ### 7. Monorepo Structure
 
@@ -676,7 +664,9 @@ plugin files above are the live source of truth.
 
 ### Component-Specific Documentation
 
-- [Metadata Flow Documentation](docs/METADATA_FLOW.md) - Detailed explanation of how metadata flows from definition to runtime, including configuration examples and troubleshooting
+`docs/METADATA_FLOW.md` no longer exists in this repository and no replacement was ever
+written; the closest live description of how metadata flows from definition to runtime is
+the "Metadata service architecture" walkthrough immediately above.
 
 ---
 
@@ -713,15 +703,16 @@ plugin files above are the live source of truth.
 
 ## Related Documentation
 
-- [Quick Reference Guide](./QUICK-REFERENCE.md) - Fast lookup for common tasks
-- [Package Dependency Graph](./PACKAGE-DEPENDENCIES.md) - Complete dependency visualization
 - [Development Roadmap](./ROADMAP.md) - Next-phase optimization & improvement plan
-- [Studio Roadmap](./apps/studio/ROADMAP.md) - Studio IDE development plan
-- [MicroKernel Architecture Guide](./content/docs/developers/micro-kernel.mdx)
-- [Plugin Ecosystem Architecture](./content/docs/developers/plugin-ecosystem.mdx)
-- [Writing Plugins](./content/docs/developers/writing-plugins.mdx)
-- [Three-Layer Stack](./content/docs/introduction/architecture.mdx)
-- [Design Principles](./content/docs/introduction/design-principles.mdx)
+- [Three-Layer Stack](./content/docs/concepts/architecture.mdx) - How the Data, System, and UI protocols work together as one cohesive system
+- [Design Principles](./content/docs/concepts/design-principles.mdx)
+
+Six more links used to live in this list — a Quick Reference Guide, a Package Dependency
+Graph, a Studio Roadmap, and three `content/docs/developers/*` guides (MicroKernel
+Architecture, Plugin Ecosystem, Writing Plugins). None of those files exist anywhere in
+this repository today (Studio itself now lives in the separate `objectui` repository, so
+no relative link from here can reach a Studio roadmap), and no replacement was ever
+written, so the entries are removed rather than repointed at a guess.
 
 ---
 

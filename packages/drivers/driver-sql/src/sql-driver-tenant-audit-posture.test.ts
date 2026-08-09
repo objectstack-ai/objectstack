@@ -143,7 +143,7 @@ describe('#5262 — tenant-audit fires on a posture-only walled deployment', () 
     await driver.create(
       'account',
       { id: 'x1', organization_id: 'org_a', name: 'X1' },
-      { bypassTenantAudit: true } as any,
+      { bypassTenantAudit: true },
     );
     expect(tenantAuditWarned()).toBe(false);
   });

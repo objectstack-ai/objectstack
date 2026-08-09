@@ -44,7 +44,7 @@
 import { resolve as resolvePath, isAbsolute } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolveDriverId } from '@objectstack/spec/data';
+import { resolveDatabaseDriverId, resolveDriverId } from '@objectstack/spec/data';
 
 /** The unified default database filename (`<state dir>/data/objectstack.db`). */
 export const UNIFIED_DEFAULT_DB_FILENAME = 'objectstack.db';
@@ -178,8 +178,8 @@ function resolveDatabaseStateDir(opts: {
  * underivable connection all yield `undefined` — resolution then falls
  * through to the unified default, which is what those projects got before
  * this tier existed. (Driver-id spellings resolve through the spec's ONE
- * alias table, `resolveDriverId`; `turso`/`libsql` are recognized here
- * additionally because they are not builtin factory ids.)
+ * alias table, `resolveDriverId` — including `turso`/`libsql`, which became
+ * rows in it in #6345 and no longer need a local special-case here.)
  */
 function readConfigDeclaredDefault(opts: {
     artifactPath?: string;
@@ -221,8 +221,10 @@ function readConfigDeclaredDefault(opts: {
 /** Express a declared datasource's connection as a database URL, or `undefined`. */
 function datasourceUrlOf(ds: { driver?: unknown; config?: unknown }, projectRoot?: string): string | undefined {
     const config = (ds.config ?? {}) as { filename?: unknown; url?: unknown };
-    const rawDriver = typeof ds.driver === 'string' ? ds.driver.trim().toLowerCase() : '';
-    const canonical = resolveDriverId(ds.driver) ?? (rawDriver === 'turso' || rawDriver === 'libsql' ? 'turso' : undefined);
+    // Since #6345 `turso`/`libsql` are rows in the shared table like every other
+    // builtin, so the local special-case they needed while turso had no config
+    // contract is gone — one lookup answers for all of them.
+    const canonical = resolveDriverId(ds.driver);
     switch (canonical) {
         case 'sqlite':
         case 'sqlite-wasm': {
@@ -238,7 +240,7 @@ function datasourceUrlOf(ds: { driver?: unknown; config?: unknown }, projectRoot
             return 'memory://';
         case 'postgres':
         case 'mysql':
-        case 'mongo':
+        case 'mongodb':
         case 'turso':
             return typeof config.url === 'string' && config.url.trim() ? config.url.trim() : undefined;
         default:
@@ -271,7 +273,11 @@ export function resolveProjectDatabaseUrl(
     // An explicitly in-memory boot gets no file default imposed on it. Only
     // `memory` is judged here; unknown driver values are refused downstream
     // (`resolveExplicitDriver`) with the full legal-values list.
-    const driver = (opts.explicitDriver ?? env.OS_DATABASE_DRIVER)?.trim().toLowerCase();
+    // Resolved through the shared table (#6345): `OS_DATABASE_DRIVER=mingo` is an
+    // accepted spelling of `memory` on both hosts, so it must reach this rung
+    // too — a raw string compare would have imposed the unified default FILE on
+    // a boot that explicitly asked for the in-memory engine.
+    const driver = resolveDatabaseDriverId(opts.explicitDriver ?? env.OS_DATABASE_DRIVER);
     if (driver === 'memory') return { url: 'memory://', source: 'memory-driver' };
 
     const fromConfig = readConfigDeclaredDefault(opts);

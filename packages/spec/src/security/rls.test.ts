@@ -543,3 +543,67 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
     expect(messages).toContain('Delete the key');
   });
 });
+
+// ---------------------------------------------------------------------------
+// #6762 — the published `using` description must describe what the compiler
+// actually lowers, in the canonical dialect.
+//
+// It previously advertised "one of the four compiler-supported forms" and
+// spelled all four in the SQL-ish dialect. Both halves were wrong in the same
+// direction — it UNDER-promised, and it steered authors at the dialect being
+// retired:
+//
+//   - `isSupportedRlsExpression` (`@objectstack/formula/src/rls-predicate.ts`)
+//     is broader than four forms. Measured against the gate on this branch,
+//     `!=`, `<`, `<=`, `>`, `>=`, `in` over an inline literal list, `&&`, `||`
+//     and the bare `true` all ENFORCE — `rls-predicate.test.ts` already pins
+//     that behaviour, so this file pins only that the PROSE agrees with it.
+//   - ADR-0058 D1 makes CEL canonical and marks `sqlPredicateToCel`
+//     `@deprecated`, so the SQL spellings are the transitional bridge, not the
+//     definition.
+//
+// Deliberately NOT asserted: a count. Replacing an under-promising "four" with
+// a differently-wrong number is the same defect, so the pin holds the SHAPE
+// (which operators are advertised) and forbids the closed count instead.
+//
+// Asserted by IDIOM, not by sentence. The first case is the anti-vacuity arm:
+// the negative assertion below would pass vacuously against `.describe('')`,
+// so the non-empty check is what makes this pin fail on an emptied string
+// rather than only on changed wording.
+// ---------------------------------------------------------------------------
+describe('RowLevelSecurityPolicySchema.using — the published description (#6762)', () => {
+  const description = RowLevelSecurityPolicySchema.shape.using.description ?? '';
+
+  it('is present and non-empty, so the generated reference row is not blank', () => {
+    expect(description).not.toBe('');
+    expect(description.trim().length).toBeGreaterThan(0);
+  });
+
+  it('names CEL as the dialect the predicate is authored in', () => {
+    expect(description).toMatch(/\bCEL\b/);
+  });
+
+  it('advertises the comparison operators the compiler really lowers', () => {
+    for (const operator of ['==', '!=', '<=', '>=']) {
+      expect(description, `operator ${operator} must be advertised`).toContain(operator);
+    }
+  });
+
+  it('advertises membership and boolean combination', () => {
+    expect(description).toMatch(/\bin\b/);
+    expect(description).toMatch(/&&/);
+  });
+
+  it('states the fail-closed verdict for anything that does not lower', () => {
+    expect(description).toMatch(/fails? closed/i);
+  });
+
+  it('frames the SQL spellings as the transitional bridge, not the definition', () => {
+    expect(description).toMatch(/transitional|bridge|deprecated/i);
+  });
+
+  it('does not re-close the set with a fixed count of forms', () => {
+    expect(description).not.toMatch(/\bfour\b/i);
+    expect(description).not.toMatch(/\b(one|two|three|four|five)\s+(compiler-supported\s+)?forms\b/i);
+  });
+});

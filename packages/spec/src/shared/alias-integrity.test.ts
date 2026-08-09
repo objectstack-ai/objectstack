@@ -371,6 +371,110 @@ function callSites(file: string, callee: keyof typeof CALLEES): CallSite[] {
 
 const CALL_SITES = MODULES.flatMap((f) => callSites(f, 'strictObject'));
 
+/**
+ * Sites where a module hands a zod shape an `{ error: … }` of its own that
+ * decides **`unrecognized_keys`** — the structural signature of a hand-written
+ * unknown-key error map (#6805).
+ *
+ * The criterion is the class's own definition, in two conjuncts, and BOTH are
+ * load-bearing:
+ *
+ * 1. **Attached.** The map is passed as `error` in the params object of a
+ *    `z.<factory>(…)` call — the construction-time wiring that makes it *this
+ *    shape's* unknown-key voice. A map that is never attached to a shape has no
+ *    alias/guidance table for a registry to judge, so it is not what #6416
+ *    named. Two live specimens prove the conjunct is doing work rather than
+ *    decorating the sentence: `shared/error-map.zod.ts`'s `objectStackErrorMap`
+ *    *does* decide `unrecognized_keys`, but it is a per-parse map a CALLER
+ *    passes to `safeParse` (a generic "check for typos" fallback carrying no
+ *    per-key content), and `carriesUnknownKey` in the same file only *reads*
+ *    `issue.code` to rank union branches. Neither is a per-schema table, and
+ *    the first draft of this scan flagged both.
+ * 2. **Deciding `unrecognized_keys`.** Judged by the code the map branches on,
+ *    never by its name. `data/field.zod.ts`'s `uniqueScopeError` is attached
+ *    exactly this way — `z.union([…], { error: uniqueScopeError })` — and is
+ *    NOT in the class, because it answers `invalid_union`, a value-level
+ *    verdict `strictObject`'s guidance channel does not address.
+ *
+ * AST rather than text throughout, which is the other load-bearing choice: the
+ * literal `'unrecognized_keys'` appears in PROSE all over this package
+ * (including in the pins that call this function), and a comment is not a node
+ * this walk visits.
+ */
+interface HandwrittenMapSite { readonly line: number; readonly name: string }
+
+function scanSource(file: string, text: string): HandwrittenMapSite[] {
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+
+  /** True when `node`'s subtree compares something to `'unrecognized_keys'`. */
+  const decidesUnknownKeys = (node: ts.Node): boolean => {
+    let found = false;
+    const walk = (n: ts.Node): void => {
+      if (found) return;
+      if (
+        (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n))
+        && n.text === 'unrecognized_keys'
+      ) { found = true; return; }
+      ts.forEachChild(n, walk);
+    };
+    walk(node);
+    return found;
+  };
+
+  // Module-scope `const x = …` / `function x() {}`, so an `{ error: x }` can be
+  // resolved back to the body it names. Same-module only: a map imported from
+  // elsewhere is judged where it is DECLARED, by this same scan over that file.
+  const declarations = new Map<string, ts.Node>();
+  const collect = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      declarations.set(node.name.text, node.initializer);
+    } else if (ts.isFunctionDeclaration(node) && node.name) {
+      declarations.set(node.name.text, node);
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(source);
+
+  const sites: HandwrittenMapSite[] = [];
+  const visit = (node: ts.Node): void => {
+    // `z.object(…)`, `z.union(…)`, `z.never(…)`, … — a zod FACTORY call, which
+    // is where a params object binds a map to a shape. Deliberately not any
+    // `{ error: … }` anywhere: `schema.safeParse(data, { error: map })` is a
+    // caller's choice for one parse, not a property of the shape.
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && ts.isIdentifier(node.expression.expression)
+      && node.expression.expression.text === 'z'
+    ) {
+      for (const arg of node.arguments) {
+        if (!ts.isObjectLiteralExpression(arg)) continue;
+        for (const p of arg.properties) {
+          if (!ts.isPropertyAssignment(p)) continue;
+          if (!ts.isIdentifier(p.name) || p.name.text !== 'error') continue;
+          const init = p.initializer;
+          // An identifier is resolved to its declaration; an inline function is
+          // its own body. A CALL (`strictObjectError(options, shape)`) is the
+          // shared template being invoked — the opposite of hand-written — and
+          // its body lives in a helper module this scan does not read.
+          const body = ts.isIdentifier(init) ? declarations.get(init.text) : init;
+          if (!body || !decidesUnknownKeys(body)) continue;
+          sites.push({
+            line: source.getLineAndCharacterOfPosition(p.getStart()).line + 1,
+            name: ts.isIdentifier(init) ? init.text : '(inline)',
+          });
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return sites;
+}
+
+const handwrittenMapSites = (file: string): HandwrittenMapSite[] =>
+  scanSource(file, fs.readFileSync(file, 'utf8'));
+
 // ---------------------------------------------------------------------------
 // 1. Coverage — the walk reached every table the source declares
 // ---------------------------------------------------------------------------
@@ -753,6 +857,150 @@ describe('alias integrity — every table is a true claim about its schema', () 
     const tenancy = bySurface.get('`tenancy`');
     expect(tenancy, 'TenancyConfigSchema no longer declares through strictObject').toBeDefined();
     expect(Object.keys(tenancy!.options.guidance ?? {}).sort()).toEqual(['crossTenantAccess', 'strategy']);
+  });
+
+  it('the two maps #6619 MISSED are folded and judged here too (#6805)', () => {
+    // #6619's inventory was two short, and both survivors were the same shape
+    // as the three above — `unrecognized_keys` prescription tables attached to
+    // a `.strict()` object through `{ error: … }`, seen by no registry. The
+    // one that mattered is `strictToolError`: it carried
+    // `TOOL_RETIRED_KEY_GUIDANCE`, a hand-maintained PER-KEY retirement table,
+    // which is the most rot-prone content this audit exists for (the #6756 /
+    // #6758 sweep found live prescriptions pointing at keys that no longer
+    // exist, in tables nothing was judging either).
+    //
+    // Recorded as its own case rather than folded into the one above, so the
+    // two closures stay separately readable: #6619 closed the instances #6416
+    // NAMED, #6805 closed the two it missed, and the class pin below closes the
+    // shape so there is no third round.
+    const bySurface = new Map(SURFACES.map((s) => [s.options.surface, s]));
+
+    const tool = bySurface.get('the tool definition');
+    expect(tool, 'ToolSchema no longer declares through strictObject').toBeDefined();
+    expect(Object.keys(tool!.options.guidance ?? {}).sort()).toEqual([
+      'active', 'builtIn', 'category', 'permissions', 'requiresConfirmation',
+    ]);
+
+    const capabilities = bySurface.get('`enable`');
+    expect(capabilities, 'ObjectCapabilities no longer declares through strictObject').toBeDefined();
+    expect(Object.keys(capabilities!.options.guidance ?? {}).sort()).toEqual(['mru', 'trash']);
+  });
+
+  it('NO module outside the shared helpers writes its own `unrecognized_keys` map (#6805)', () => {
+    // The class, not the instances. Both closure pins above name surfaces, so
+    // each only holds the line it was written for — #6416 named three, and the
+    // inventory that produced the number was two short. A pin over the SHAPE
+    // cannot be two short: any new hand-rolled unknown-key map fails here on
+    // arrival, whatever it is called and whatever surface it closes.
+    //
+    // ⚠️ Scoped to `unrecognized_keys` DELIBERATELY, and this is the whole
+    // discrimination. `data/field.zod.ts`'s `uniqueScopeError` is a
+    // `$ZodErrorMap` too and is NOT in this class: it branches on
+    // `invalid_union`, a VALUE-level verdict, which `strictObject`'s guidance
+    // channel does not address and could not absorb. A blanket "no error maps
+    // outside the helpers" rule would have to carry an exemption for it, and an
+    // exemption is exactly the seam an inventory drifts through. Judged by the
+    // `issue.code` the map decides on, never by its name.
+    //
+    // Adjacent to #6635 (a general "a retirement updated some mentions and not
+    // others" gate) and deliberately not it: that one compares PROSE mentions
+    // of a retired symbol against each other and catches a table whose
+    // prescriptions have gone stale; this one is structural and catches a
+    // guidance channel that never entered a registry. Neither subsumes the
+    // other — after this fold, `TOOL_RETIRED_KEY_GUIDANCE` is visible to the
+    // audit and could still name a key that no longer exists, which is #6635's
+    // to find and this pin is silent about.
+    // ⚠️ Scanned over EVERY module, `HELPER_MODULES` included — deliberately no
+    // exemption. The direct-call ratchet above needs one because
+    // `strictUnknownKeyError`'s own definition is a call site of itself; this
+    // criterion needs none, because the helper does not hand a shape a
+    // hand-written map either: `strict-object.ts`'s one
+    // `z.object(shape, { error: … })` passes a CALL to the shared factory, and
+    // a call is exactly what "not hand-written" looks like. Measured, not
+    // assumed — an exemption that excuses nothing reads as coverage for a case
+    // nobody checked, which is the failure mode of the inventory this pin
+    // replaces.
+    const offenders = MODULES
+      .flatMap((f) => handwrittenMapSites(f)
+        .map((s) => `${path.relative(SPEC_SRC, f)}:${s.line} — \`${s.name}\``));
+
+    expect(
+      offenders.sort(),
+      'build the shape with `strictObject(options, shape)` and put the prescriptions in '
+      + '`guidance` / `guidanceSets` — a hand-rolled map registers in no registry, so its '
+      + 'aliases and prescriptions are unmeasured rather than clean (#6416/#6619/#6805)',
+    ).toEqual([]);
+  });
+
+  it('…and that scan is alive: the pre-fold shape is found, prose and the two out-of-class maps are not (#6805)', () => {
+    // Anti-vacuity for the verdict above, which asserts that a search came back
+    // EMPTY — the shape that passes just as well when the instrument is dead.
+    // Four controls, each closing a different way it could be.
+    //
+    // Note what is NOT a control here: "the helper modules light up". Under an
+    // earlier, coarser criterion (the bare `'unrecognized_keys'` literal) they
+    // did, and that reading was the reason the first draft also flagged
+    // `objectStackErrorMap`. The tightened criterion asks whether a shape was
+    // handed a hand-written map, which the helper never does — so the honest
+    // liveness evidence is (a) below, a fresh file the scan has never seen.
+    //
+    // (a) it recognises the class in a file it has never seen. The specimen is
+    //     `strictToolError` and its wiring as they stood on `main` immediately
+    //     before this PR folded them, so what is pinned is the real thing
+    //     rather than a stylised stand-in — this is the exact source the
+    //     verdict must never let back in.
+    const specimen = `
+      const strictToolError: z.core.$ZodErrorMap = (issue) => {
+        if (issue.code !== 'unrecognized_keys') return undefined;
+        const keys = (issue as { keys?: readonly string[] }).keys ?? [];
+        return \`Unrecognized key(s): \${keys.join(', ')}.\`;
+      };
+      export const ToolSchema = z.object({
+        name: z.string(),
+      }, { error: strictToolError }).strict();
+    `;
+    expect(scanSource('specimen.ts', specimen)).toEqual([{ line: 9, name: 'strictToolError' }]);
+
+    // (b) it is not a grep. This package's docblocks discuss
+    //     `unrecognized_keys` by name constantly — including the pin above —
+    //     and prose is not a map. A text scan would flag every one of them, and
+    //     the verdict would have needed an allowlist, which is the maintenance
+    //     shape this pin exists to avoid.
+    const prose = `
+      /** The alias table is consulted from the unrecognized_keys path only. */
+      // A guidance entry answers an 'unrecognized_keys' issue.
+      export const NOT_A_MAP = 1;
+    `;
+    expect(scanSource('prose.ts', prose)).toEqual([]);
+
+    // (c) the ATTACHMENT conjunct earns its place. `objectStackErrorMap`
+    //     decides `unrecognized_keys` and is deliberately out of class: it is a
+    //     per-parse map a caller passes to `safeParse`, with one generic "check
+    //     for typos" sentence and no per-key content, so there is no table for
+    //     a registry to judge. The first draft of this scan — literal presence
+    //     alone — flagged it and its neighbour `carriesUnknownKey` (a reader,
+    //     not a map). Recorded as a MEASURED negative rather than an exemption:
+    //     if that file ever does attach a per-schema map, this control does not
+    //     protect it.
+    const errorMap = path.join(SPEC_SRC, 'shared/error-map.zod.ts');
+    const errorMapSource = fs.readFileSync(errorMap, 'utf8');
+    expect(errorMapSource, 'objectStackErrorMap no longer decides unknown keys — re-point this control')
+      .toContain("issue.code === 'unrecognized_keys'");
+    expect(handwrittenMapSites(errorMap)).toEqual([]);
+
+    // (d) the CODE conjunct earns its place, on the live specimen #6805's card
+    //     named as out of class. `uniqueScopeError` is attached exactly the way
+    //     the class is — `z.union([…], { error: uniqueScopeError })` — so the
+    //     scan reaches it and declines it on `issue.code` alone. That is the
+    //     discrimination made by the instrument rather than by an exemption,
+    //     which is what keeps "do not sweep it in" from decaying into a name.
+    const field = path.join(SPEC_SRC, 'data/field.zod.ts');
+    const fieldSource = fs.readFileSync(field, 'utf8');
+    expect(fieldSource, 'uniqueScopeError is no longer attached — re-point this control')
+      .toContain('error: uniqueScopeError,');
+    expect(fieldSource, 'uniqueScopeError no longer branches on invalid_union — re-read the class')
+      .toContain("issue.code !== 'invalid_union'");
+    expect(handwrittenMapSites(field)).toEqual([]);
   });
 
   it('no guidance key is itself a declared key (the same dead entry, other channel)', () => {

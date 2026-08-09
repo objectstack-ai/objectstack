@@ -158,7 +158,7 @@ describe('audit writers — actor attribution (ADR-0014 D2, cloud#340)', () => {
     await fire('afterDelete', {
       object: 'sys_environment',
       input: { id: 'os-790m7q' },
-      __previous: { id: 'os-790m7q', name: 'test' },
+      previous: { id: 'os-790m7q', name: 'test' },
       result: { id: 'os-790m7q' },
       session: { actor: 'svc:cloud-control' },
     });
@@ -196,7 +196,7 @@ describe('audit writers — actor attribution (ADR-0014 D2, cloud#340)', () => {
     await fire('afterUpdate', {
       object: 'sys_member',
       input: { id: 'mem-1' },
-      __previous: { id: 'mem-1', role: 'member' },
+      previous: { id: 'mem-1', role: 'member' },
       result: { id: 'mem-1', role: 'admin' },
       // Exactly the envelope `withSystemContext` produces for an
       // `organization/update-member-role` call.
@@ -268,7 +268,7 @@ describe('audit writers — operational plumbing is excluded (#5193, ADR-0057 D5
       'afterUpdate',
       {
         input: { id: 'msg-1', status: 'running' },
-        __previous: { id: 'msg-1', queue: 'email_delivery', status: 'pending', attempts: 0 },
+        previous: { id: 'msg-1', queue: 'email_delivery', status: 'pending', attempts: 0 },
         result: { id: 'msg-1', queue: 'email_delivery', status: 'running', attempts: 1, locked_by: 'worker-1' },
       },
     ],
@@ -276,7 +276,7 @@ describe('audit writers — operational plumbing is excluded (#5193, ADR-0057 D5
       'afterUpdate',
       {
         input: { id: 'msg-1', status: 'completed' },
-        __previous: { id: 'msg-1', queue: 'email_delivery', status: 'running', attempts: 1, locked_by: 'worker-1' },
+        previous: { id: 'msg-1', queue: 'email_delivery', status: 'running', attempts: 1, locked_by: 'worker-1' },
         result: { id: 'msg-1', queue: 'email_delivery', status: 'completed', attempts: 1, completed_at: '2026-08-04T00:00:00.000Z' },
       },
     ],
@@ -284,7 +284,7 @@ describe('audit writers — operational plumbing is excluded (#5193, ADR-0057 D5
       'afterDelete',
       {
         input: { id: 'msg-1' },
-        __previous: { id: 'msg-1', queue: 'email_delivery', status: 'completed', attempts: 1 },
+        previous: { id: 'msg-1', queue: 'email_delivery', status: 'completed', attempts: 1 },
         result: { id: 'msg-1' },
       },
     ],
@@ -318,7 +318,19 @@ describe('audit writers — operational plumbing is excluded (#5193, ADR-0057 D5
     }
   });
 
-  it('does not pay the beforeUpdate snapshot read for a skipped object', async () => {
+  it('pays no before-phase snapshot read — for the skipped object OR the business one (#6656)', async () => {
+    // [#6656] This case used to assert the saving for `sys_job_queue` only,
+    // with `crm_lead` as the CONTROL that still paid — because #5860 could
+    // only narrow the scope of a read the plugin was still issuing. The read
+    // itself is now retired for every object (the engine binds `previous`
+    // before each `before*` dispatch), so the control's direction inverts: the
+    // business object must pay nothing either.
+    //
+    // The case therefore still bites, and on a strictly larger surface —
+    // restoring `captureBefore` turns it red on `crm_lead` where the old
+    // version REQUIRED that read. What replaces the control is the two cases
+    // above: `crm_lead` still reaches the ledger, so this zero is a read that
+    // disappeared, not a hook that stopped running.
     const { engine, fire } = makeEngine(SCHEMA);
     installAuditWriters(engine as any, 'test.audit');
     const reads: string[] = [];
@@ -329,15 +341,11 @@ describe('audit writers — operational plumbing is excluded (#5193, ADR-0057 D5
       },
     };
 
-    // Every queue state transition would otherwise re-read its own row…
     await fire('beforeUpdate', { object: 'sys_job_queue', input: { id: 'msg-1', status: 'running' }, ql });
     await fire('beforeDelete', { object: 'sys_job_queue', input: { id: 'msg-1' }, ql });
-    expect(reads).toEqual([]);
-
-    // …and the control proves the assertion above can fail: a business object
-    // on the same harness DOES get snapshotted.
     await fire('beforeUpdate', { object: 'crm_lead', input: { id: 'lead-1', name: 'Acme' }, ql });
-    expect(reads).toEqual(['crm_lead']);
+    await fire('beforeDelete', { object: 'crm_lead', input: { id: 'lead-1' }, ql });
+    expect(reads).toEqual([]);
   });
 
   it('still audits ordinary business writes (the skip stays narrow)', async () => {
@@ -402,7 +410,7 @@ describe('audit writers — chunked upload sessions are excluded (#5202, ADR-005
         'afterUpdate',
         {
           input: snapshot(n, 'in_progress'),
-          __previous: snapshot(n - 1, 'in_progress'),
+          previous: snapshot(n - 1, 'in_progress'),
           result: snapshot(n, 'in_progress'),
         },
       ]);
@@ -412,7 +420,7 @@ describe('audit writers — chunked upload sessions are excluded (#5202, ADR-005
       'afterUpdate',
       {
         input: { id: 'ups-1', status: terminal.status },
-        __previous: snapshot(chunks, 'in_progress'),
+        previous: snapshot(chunks, 'in_progress'),
         result: snapshot(chunks, terminal.status),
       },
     ]);
@@ -420,7 +428,7 @@ describe('audit writers — chunked upload sessions are excluded (#5202, ADR-005
     if (terminal.via === 'afterDelete') {
       writes.push([
         'afterDelete',
-        { input: { id: 'ups-1' }, __previous: snapshot(chunks, terminal.status), result: { id: 'ups-1' } },
+        { input: { id: 'ups-1' }, previous: snapshot(chunks, terminal.status), result: { id: 'ups-1' } },
       ]);
     }
     return writes;
@@ -473,12 +481,12 @@ describe('audit writers — chunked upload sessions are excluded (#5202, ADR-005
       await fire('beforeUpdate', { object: 'sys_upload_session', input: { id: 'ups-1', uploaded_chunks: n }, ql });
     }
     await fire('beforeDelete', { object: 'sys_upload_session', input: { id: 'ups-1' }, ql });
-    expect(reads).toEqual([]);
-
-    // Control — the assertion above can fail: a business object on the same
-    // harness DOES get snapshotted.
+    // [#6656] `crm_lead` was the control that still paid this read. The read is
+    // retired for every object now, so it joins the assertion instead of
+    // opposing it — see the twin case in the `sys_job_queue` group for why
+    // that makes the pin stronger rather than weaker.
     await fire('beforeUpdate', { object: 'crm_lead', input: { id: 'lead-1', name: 'Acme' }, ql });
-    expect(reads).toEqual(['crm_lead']);
+    expect(reads).toEqual([]);
   });
 
   it('still audits sys_file — mostly permanent business truth, deliberately NOT exempted', async () => {
@@ -541,7 +549,7 @@ describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', 
       object: 'crm_opportunity',
       input: { id: 'opp-1', stage: 'closed_won' },
       result: { id: 'opp-1', name: 'Acme Renewal', stage: 'closed_won' },
-      __previous: { id: 'opp-1', name: 'Acme Renewal', stage: 'proposal' },
+      previous: { id: 'opp-1', name: 'Acme Renewal', stage: 'proposal' },
       session: {},
     });
 
@@ -558,7 +566,7 @@ describe('audit writers — declarative trackHistory activity (ADR-0052 §5b)', 
       object: 'crm_opportunity',
       input: { id: 'opp-1', amount: 200 },
       result: { id: 'opp-1', name: 'Acme Renewal', amount: 200, stage: 'proposal' },
-      __previous: { id: 'opp-1', name: 'Acme Renewal', amount: 100, stage: 'proposal' },
+      previous: { id: 'opp-1', name: 'Acme Renewal', amount: 100, stage: 'proposal' },
       session: {},
     });
 
@@ -603,7 +611,7 @@ describe('audit writers — declarative milestones (ADR-0052 §5b.2)', () => {
       object: 'crm_opportunity',
       input: { id: 'opp-1', stage: 'closed_won' },
       result: { id: 'opp-1', name: 'Acme Renewal', stage: 'closed_won' },
-      __previous: { id: 'opp-1', name: 'Acme Renewal', stage: 'negotiation' },
+      previous: { id: 'opp-1', name: 'Acme Renewal', stage: 'negotiation' },
       session: {},
     });
 
@@ -621,7 +629,7 @@ describe('audit writers — declarative milestones (ADR-0052 §5b.2)', () => {
       object: 'crm_opportunity',
       input: { id: 'opp-1', stage: 'negotiation' },
       result: { id: 'opp-1', name: 'Acme Renewal', stage: 'negotiation' },
-      __previous: { id: 'opp-1', name: 'Acme Renewal', stage: 'proposal' },
+      previous: { id: 'opp-1', name: 'Acme Renewal', stage: 'proposal' },
       session: {},
     });
 
@@ -804,7 +812,7 @@ describe('audit writers — update diff hygiene (objectui detail-history report)
       object: 'gantt_plan',
       input: { id: 'p-1', plan_start: '2026-08-04T12:00:00.000Z' },
       // before: query-path snapshot carries the computed formula value…
-      __previous: { id: 'p-1', name: 'Plan C', plan_start: '2026-07-26T00:00:00.000Z', deps_rendered: ['LnLJIsTwXbv1E2gF'] },
+      previous: { id: 'p-1', name: 'Plan C', plan_start: '2026-07-26T00:00:00.000Z', deps_rendered: ['LnLJIsTwXbv1E2gF'] },
       // …after: raw write result does not.
       result: { id: 'p-1', name: 'Plan C', plan_start: '2026-08-04T12:00:00.000Z' },
       session: { userId: 'user-1' },
@@ -827,7 +835,7 @@ describe('audit writers — update diff hygiene (objectui detail-history report)
     await fire('afterUpdate', {
       object: 'gantt_plan',
       input: { id: 'p-1' },
-      __previous: { id: 'p-1', name: 'Plan C', deps_rendered: ['LnLJIsTwXbv1E2gF'] },
+      previous: { id: 'p-1', name: 'Plan C', deps_rendered: ['LnLJIsTwXbv1E2gF'] },
       result: { id: 'p-1', name: 'Plan C' },
       session: { userId: 'user-1' },
     });
@@ -844,7 +852,7 @@ describe('audit writers — update diff hygiene (objectui detail-history report)
       object: 'gantt_plan',
       input: { id: 'p-1', plan_start: null },
       // `plan_start` key absent before, explicit null after: not a change.
-      __previous: { id: 'p-1', name: 'Plan C' },
+      previous: { id: 'p-1', name: 'Plan C' },
       result: { id: 'p-1', name: 'Plan C', plan_start: null },
       session: { userId: 'user-1' },
     });
@@ -859,7 +867,7 @@ describe('audit writers — update diff hygiene (objectui detail-history report)
     await fire('afterUpdate', {
       object: 'gantt_plan',
       input: { id: 'p-1', plan_start: null },
-      __previous: { id: 'p-1', name: 'Plan C', plan_start: '2026-07-26T00:00:00.000Z' },
+      previous: { id: 'p-1', name: 'Plan C', plan_start: '2026-07-26T00:00:00.000Z' },
       result: { id: 'p-1', name: 'Plan C', plan_start: null },
       session: { userId: 'user-1' },
     });
@@ -918,7 +926,7 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
     const { fire, created } = setup('zh-CN', makeI18n());
 
     await fire('afterInsert', insertCtx());
-    await fire('afterDelete', { ...insertCtx(), result: null, __previous: { id: 'q-1', name: 'OC-00001' } });
+    await fire('afterDelete', { ...insertCtx(), result: null, previous: { id: 'q-1', name: 'OC-00001' } });
 
     const summaries = created.filter((c) => c.object === 'sys_activity').map((c) => c.row.summary);
     expect(summaries).toEqual(['创建了 人员资质 "OC-00001"', '删除了 人员资质 "OC-00001"']);
@@ -928,7 +936,7 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
     const { fire, created } = setup('zh-CN', makeI18n());
     await fire('afterUpdate', {
       ...insertCtx(),
-      __previous: { id: 'q-1', name: 'OC-00001', status: 'draft' },
+      previous: { id: 'q-1', name: 'OC-00001', status: 'draft' },
       result: { id: 'q-1', name: 'OC-00001', status: 'active' },
     });
     const activity = created.find((c) => c.object === 'sys_activity');

@@ -161,7 +161,8 @@ export interface QueryOptions {
 
 /**
  * Canonical query options using Spec protocol field names.
- * This is the recommended interface for `data.find()` queries.
+ * This is the vocabulary `data.find()` still accepts — `find` itself
+ * carries `@deprecated`; new code should call `data.query()` instead.
  *
  *  Canonical field mapping (QueryAST-aligned):
  *   - `where`   — filter conditions (replaces legacy `filter`/`filters`)
@@ -3859,15 +3860,21 @@ export class ObjectStackClient {
    */
   notifications = {
     /**
-     * List notifications for the current user
+     * List notifications for the current user.
+     *
+     * Returns the newest `limit` notifications — a WINDOW, not a page. The
+     * `cursor` parameter was removed in protocol 17 (#6361): it was appended to
+     * the query string here and read by nothing on the server, so a caller
+     * paginating by it re-read the first window forever. Omit `limit` to take
+     * the server's window (the platform inbox answers 50, clamped to 1..200);
+     * raise it to see further back. There is no continuation token.
      */
-    list: async (options?: { read?: boolean; type?: string; limit?: number; cursor?: string }): Promise<ListNotificationsResponse> => {
+    list: async (options?: { read?: boolean; type?: string; limit?: number }): Promise<ListNotificationsResponse> => {
       const route = this.getRoute('notifications');
       const params = new URLSearchParams();
       if (options?.read !== undefined) params.set('read', String(options.read));
       if (options?.type) params.set('type', options.type);
       if (options?.limit) params.set('limit', String(options.limit));
-      if (options?.cursor) params.set('cursor', options.cursor);
       const qs = params.toString();
       const res = await this.fetch(`${this.baseUrl}${route}${qs ? `?${qs}` : ''}`);
       return this.unwrapResponse<ListNotificationsResponse>(res);

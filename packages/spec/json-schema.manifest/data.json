@@ -164,6 +164,8 @@
     "data/TenancyConfig",
     "data/TimeUpdateInterval",
     "data/TransformType",
+    "data/TursoConfig",
+    "data/TursoTransportMode",
     "data/UniqueScope",
     "data/ValidationRule"
   ]

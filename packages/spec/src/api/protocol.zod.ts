@@ -1151,17 +1151,90 @@ export const NotificationSchema = lazySchema(() => z.object({
   createdAt: z.string().datetime().describe('When notification was created'),
 }));
 
+// ==========================================
+// Notification inbox listing — NOT paginated
+// ==========================================
+
+// `cursor` was declared on BOTH halves of `GET /api/v1/notifications` and
+// honoured on neither, and `limit` declared a default the server has never
+// applied. Both are removed per the maintainer ruling of 2026-08-07 (#6361,
+// Option A), ruled together with #6363 as one capability's two halves — a
+// pagination capability is never half-deleted.
+//
+// ## What the route actually does
+//
+// It answers a WINDOW, never a page: `MessagingService.listInbox` reads the
+// newest `limit` rows and stops. There is no continuation token, no `hasMore`,
+// and no ordering key a caller could resume from — so `cursor` had nothing to
+// carry even if something had read it. The request half was ignored by the
+// domain (which reads `read` / `type` / `limit` and nothing else) and the
+// response half was never emitted, so an SDK caller looping "until the cursor
+// runs out" re-read page 1 forever, with no error and no 400.
+//
+// This is `data.query.cursor` (#4286, `query-cursor-retired`) one layer up,
+// with the same verdict for the same reason: a caller-visible pagination
+// parameter no engine implements is worse than inert, because it has a shipped
+// producer. That one deleted `QueryBuilder.cursor()` with the key; this one
+// deletes the `cursor` argument of `client.notifications.list()`.
+//
+// ## Why `limit` loses its default rather than gaining a truer number
+//
+// The ruling allowed either "declare the real default (50)" or "drop the
+// default and describe it as server-decided". The second is taken because the
+// FICTION IS THE MECHANISM, not just the number: nothing parses a query string
+// through this schema (#3899 wired the catalog's `requestSchema` to the real
+// entry for BODIES only), so `.default(...)` has never stamped anything onto
+// anything. Re-spelling `20` as `50` would keep a declaration that does not
+// execute and merely make it coincide with the server for as long as nobody
+// moves the clamp. `.optional()` plus prose is true on both axes: the schema
+// claims no behaviour it does not perform, and the server's window is
+// described as the server's.
+//
+// Deliberately NOT declared: `.int()`, `.positive()` or `.max(200)`. The
+// service CLAMPS an out-of-range limit (`Math.min(Math.max(limit ?? 50, 1),
+// 200)`); it does not refuse one. A constraint here would declare a rejection
+// the wire does not perform — the same declared-not-enforced defect in the
+// opposite direction. ADR-0049, #6361.
+
+/**
+ * One prescription, two rejection sites — the `cursor` key was declared on both
+ * halves of this route, so both tombstone it with the same string.
+ *
+ * Tombstoned rather than deleted for the ADR-0104 reason these schemas keep
+ * paying for: neither is `.strict()`, so a bare deletion makes Zod SILENTLY
+ * STRIP whatever the caller keeps sending — a clean parse and a parameter that
+ * never takes effect, which is the very failure this issue is about, moved one
+ * layer down. `retiredKey()` types the key as `never` (so `tsc` refuses it at
+ * the authoring site) and raises this text at parse time.
+ */
+const NOTIFICATIONS_CURSOR_REMOVED =
+  '`cursor` was removed from GET /api/v1/notifications in @objectstack/spec 17 '
+  + '(#6361, ADR-0049) — it was declared on the request AND the response and honoured on '
+  + 'neither: the server reads only `read`/`type`/`limit`, and no emit site ever wrote the '
+  + 'response key, so a caller paginating by it re-read the first window forever with no '
+  + 'error and no 400. Delete the key; the `cursor` argument of '
+  + '`client.notifications.list()` was removed with it. This route is NOT paginated — it '
+  + 'answers the newest `limit` notifications and stops, so ask for a bigger window '
+  + '(`limit`, clamped by the server into 1..200) instead of a next page. A first-class '
+  + 'inbox cursor, if ever built, will be a response-minted opaque token, not this key.';
+
 export const ListNotificationsRequestSchema = lazySchema(() => z.object({
   read: z.boolean().optional().describe('Filter by read status'),
   type: z.string().optional().describe('Filter by notification type'),
-  limit: z.number().default(20).describe('Maximum number of notifications to return'),
-  cursor: z.string().optional().describe('Pagination cursor'),
+  limit: z.number().optional().describe(
+    'Maximum number of notifications to return — the newest N. Omitted leaves the window '
+    + 'to the server, which is not a fixed part of this contract: the platform inbox '
+    + 'answers 50 and clamps any requested value into 1..200 rather than refusing it. '
+    + 'This endpoint is not paginated — there is no continuation token, so a larger '
+    + 'window is the only way to see more.',
+  ),
+  cursor: retiredKey(NOTIFICATIONS_CURSOR_REMOVED),
 }));
 
 export const ListNotificationsResponseSchema = lazySchema(() => z.object({
-  notifications: z.array(NotificationSchema).describe('List of notifications'),
+  notifications: z.array(NotificationSchema).describe('List of notifications — the newest window, not a page'),
   unreadCount: z.number().describe('Total number of unread notifications'),
-  cursor: z.string().optional().describe('Next page cursor'),
+  cursor: retiredKey(NOTIFICATIONS_CURSOR_REMOVED),
 }));
 
 export const MarkNotificationsReadRequestSchema = lazySchema(() => z.object({

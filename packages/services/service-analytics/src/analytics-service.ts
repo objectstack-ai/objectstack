@@ -10,6 +10,11 @@ import type {
 import { percentScaleOf, type Cube, type FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Dataset } from '@objectstack/spec/ui';
+// [#6761] The ONE shared `I18nLabel → string` resolver (#6765, maintainer
+// ruling B). Imported, never re-implemented: a private twin here is exactly the
+// fork the ruling exists to prevent — it would render the same authored map
+// differently from objectui's `pickLocalized` with neither end erroring.
+import { resolveI18nLabel } from '@objectstack/spec/ui';
 import type { Logger } from '@objectstack/spec/contracts';
 import { createLogger, bucketKeyToCalendarRange, zonedDateStartToUtcMs } from '@objectstack/core';
 // [#6615] The Postgres `"x" of relation "y"` phrase, owned once. This is the
@@ -463,6 +468,15 @@ export interface AnalyticsServiceConfig {
    * datasources before any query is ever built. Absence keeps the pre-#5115
    * behaviour exactly ("cannot answer, do not block") — the query-time
    * diagnostic above stays as the backstop.
+   *
+   * [#5288] "Bound to" above is the whole contract, and it took until #5288 for
+   * the built-in host to honour it: `plugin.ts` answered with the object's
+   * DECLARED `datasource` — step 1 of the five `ObjectQL.getDriver` routes by —
+   * so an object placed by a `datasourceMapping` rule, by the ADR-0057 §3.6
+   * lifecycle split, or by its package's `defaultDatasource` reported
+   * `'default'` and sent the message above to the wrong database. It now asks
+   * `ObjectQL.resolveEffectiveDatasource`. A custom host owes the same answer:
+   * the datasource an object is BOUND to, `undefined` when nothing binds it.
    */
   getObjectDatasource?: (objectName: string) => string | undefined;
   /**
@@ -868,6 +882,22 @@ export class AnalyticsService implements IAnalyticsService {
       }
     }
 
+    // [#6761] The audience's language for THIS request, and the only locale
+    // either field-label enrichment site below is entitled to use.
+    //
+    // `ExecutionContext.locale` is the BCP-47 tag `resolveExecutionContext`
+    // resolves per request — the caller's `Accept-Language` when it expressed a
+    // preference, else the workspace `localization` setting. It is the same
+    // context field the currency chain a few lines down already reads, so both
+    // display decisions in this response answer to one request identity.
+    //
+    // `undefined` (no context, or an anonymous request that skips localization)
+    // is passed through deliberately rather than defaulted here: the shared
+    // resolver documents nullish as "no locale known" and answers `en`, the
+    // platform's source language. Choosing a different default in this file
+    // would be this service disagreeing with the renderer about the same map.
+    const requestLocale = context?.locale;
+
     // #3602 — every label lookup in this request (sort keys below, display
     // labels further down) reads the REFERENCED object, so bind that object's
     // own read scope to this request once, up front.
@@ -1104,12 +1134,26 @@ export class AnalyticsService implements IAnalyticsService {
     // so presentations show "Tasks" / "$616,000" instead of the raw measure
     // name "task_count" / "616000". Carried on the result fields; the renderer
     // applies the format (it can't be baked into the numeric row value).
+    //
+    // [#6761] The label is resolved through the shared `I18nLabel → string`
+    // resolver, so BOTH authorized forms reach the wire: a plain string, and the
+    // inline locale map `I18nLabelSchema` has authorized since #5728. The old
+    // `typeof m.label === 'string'` test dropped the map silently — a dataset
+    // written the way the schema documents shipped a column with no header at
+    // all. The wire type is unchanged (`fields[].label?: string`, both ends):
+    // this resolves TO a string rather than widening the contract.
     if (result.fields?.length && dataset.measures?.length) {
       const measureByName = new Map(dataset.measures.map((m) => [m.name, m]));
       for (const f of result.fields) {
         const m = measureByName.get(f.name) ?? measureByName.get(f.name.replace(/__compare$/, ''));
         if (!m) continue;
-        if (f.label == null && typeof m.label === 'string') f.label = m.label;
+        // `undefined` from the resolver means "nothing was picked" — an absent
+        // label, or a map with no usable entry. Nothing is written in that case:
+        // this enrichment describes columns, it never invents a header.
+        if (f.label == null) {
+          const label = resolveI18nLabel(m.label, requestLocale);
+          if (label !== undefined) f.label = label;
+        }
         if (f.format == null && m.format) f.format = m.format;
         // ADR-0053 currency chain. A MONETARY measure resolves its display
         // currency from: explicit measure `currency` → source-field
@@ -1184,7 +1228,11 @@ export class AnalyticsService implements IAnalyticsService {
         // Result fields may be keyed by the dataset dimension NAME or the
         // underlying cube FIELD depending on strategy — match either.
         const d = dimByName.get(f.name) ?? dimByField.get(f.name);
-        if (d && typeof d.label === 'string') f.label = d.label;
+        if (!d) continue;
+        // [#6761] Same resolver, same locale, same "write nothing on a miss"
+        // rule as the measure enrichment above.
+        const label = resolveI18nLabel(d.label, requestLocale);
+        if (label !== undefined) f.label = label;
       }
     }
     return result;

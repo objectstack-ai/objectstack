@@ -15,7 +15,8 @@
  *   - `sqlite` / `sqlite3`             → `@objectstack/driver-sql` (better-sqlite3)
  *   - `sqlite-wasm` / `wasm-sqlite`    → `@objectstack/driver-sqlite-wasm` (pure-JS)
  *   - `mysql` / `mysql2`               → `@objectstack/driver-sql` (client `mysql2`)
- *   - `mongo` / `mongodb`              → `@objectstack/driver-mongodb` (peer dep)
+ *   - `mongodb` / `mongo`              → `@objectstack/driver-mongodb` (peer dep)
+ *   - `turso` / `libsql`               → `@objectstack/driver-turso` (peer dep)
  *   - `memory` / `inmemory`            → `@objectstack/driver-memory` (ephemeral,
  *     per-datasource — see {@link buildMemoryConfig})
  *
@@ -29,6 +30,16 @@
  *
  * Anything else returns `supports() === false`, so the admin service degrades
  * gracefully (testConnection → `{ ok: false }`, create skips hot pool reg).
+ *
+ * `turso` joined in #6345, and it HAD to: `supports()` is
+ * `resolveKind() !== undefined`, so the moment turso became a builtin id this
+ * factory started claiming it. Without an arm the claim would have been answered
+ * by the trailing `memory` fall-through — a libSQL datasource silently built as
+ * an ephemeral in-process store, which is the #3276 class with a new spelling.
+ * The arm is the same shape `mongodb` and `sqlite-wasm` already use, since all
+ * three ride in optional packages. The trailing fall-through is gone too: the
+ * last arm is now an explicit `memory` case with an exhaustiveness throw after
+ * it, so the NEXT builtin cannot inherit the same trap.
  *
  * SECURITY: the cleartext `spec.secret` is used only to open the connection and
  * is never persisted or logged here.
@@ -432,7 +443,7 @@ export function createDefaultDatasourceDriverFactory(
         return toHandle(driver);
       }
 
-      if (kind === 'mongo') {
+      if (kind === 'mongodb') {
         let MongoDBDriver: any;
         try {
           ({ MongoDBDriver } = await import('@objectstack/driver-mongodb' as any));
@@ -455,17 +466,94 @@ export function createDefaultDatasourceDriverFactory(
         return toHandle(driver);
       }
 
-      // memory — ephemeral per datasource unless the author opts into
-      // persistence, and then into a destination of its own (#4083).
-      //
-      // `spec.pool` is not read here and never was: `InMemoryDriver` opens no
-      // connection, so there is nothing for one to size. It used to be dropped
-      // in silence; since #5931 the guard above rejects it, which is why this
-      // arm needs no pool handling of its own rather than merely having none.
-      const { InMemoryDriver } = await import('@objectstack/driver-memory');
-      return toHandle(new InMemoryDriver(buildMemoryConfig(spec)));
+      if (kind === 'turso') {
+        // libSQL/Turso (#6345). Lazy + caught exactly like `mongodb` and
+        // `sqlite-wasm` above: all three ship in optional packages, and a driver
+        // being an optional INSTALL has never meant it lacks a contract.
+        //
+        // This arm exists because `supports()` is `resolveKind() !== undefined`.
+        // Giving turso a config contract made it a `BuiltinDriverId`, so the
+        // factory began claiming it; before this arm that claim was answered by
+        // the trailing `memory` fall-through, i.e. a libSQL datasource built as
+        // an ephemeral in-process store that reports success and loses every
+        // write (#3276). The CLI and standalone stack still INJECT their own
+        // turso factory for the `default` datasource (#5602's host-factory
+        // seam), which wins over this one; this arm is what serves every OTHER
+        // door — a runtime datasource created in Setup, `testConnection`, a
+        // declared non-default datasource.
+        let TursoDriver: any;
+        try {
+          ({ TursoDriver } = await import('@objectstack/driver-turso' as any));
+        } catch (err: any) {
+          throw new Error(
+            `turso driver requested but @objectstack/driver-turso is not installed (${err?.message ?? err}).`,
+          );
+        }
+        const url = typeof cfg.url === 'string' ? cfg.url.trim() : '';
+        if (!url) {
+          // `TursoConfigSchema.url` is required, so the authoring and wizard
+          // gates already refuse this. A stored row written before #6345 had no
+          // gate at all, and refusing here is the difference between a named
+          // failure and `@libsql/client` opening something unexpected.
+          throw new Error(
+            `datasource '${spec.name ?? 'default'}': the turso driver needs a libSQL url in its `
+            + 'config (e.g. libsql://my-db.turso.io or file:./data/objectstack.db).',
+          );
+        }
+        const driver = new TursoDriver({
+          url,
+          ...(typeof cfg.authToken === 'string' && cfg.authToken ? { authToken: cfg.authToken } : {}),
+          ...(typeof cfg.encryptionKey === 'string' && cfg.encryptionKey
+            ? { encryptionKey: cfg.encryptionKey }
+            : {}),
+          ...(typeof cfg.concurrency === 'number' ? { concurrency: cfg.concurrency } : {}),
+          ...(typeof cfg.syncUrl === 'string' && cfg.syncUrl ? { syncUrl: cfg.syncUrl } : {}),
+          ...(cfg.sync && typeof cfg.sync === 'object' ? { sync: cfg.sync } : {}),
+          ...(typeof cfg.timeout === 'number' ? { timeout: cfg.timeout } : {}),
+          ...(typeof cfg.mode === 'string' ? { mode: cfg.mode } : {}),
+          ...(schemaMode ? { schemaMode } : {}),
+        });
+        return toHandle(driver, () => sqlServerVersion(driver, 'sqlite'));
+      }
+
+      if (kind === 'memory') {
+        // memory — ephemeral per datasource unless the author opts into
+        // persistence, and then into a destination of its own (#4083).
+        //
+        // `spec.pool` is not read here and never was: `InMemoryDriver` opens no
+        // connection, so there is nothing for one to size. It used to be dropped
+        // in silence; since #5931 the guard above rejects it, which is why this
+        // arm needs no pool handling of its own rather than merely having none.
+        const { InMemoryDriver } = await import('@objectstack/driver-memory');
+        return toHandle(new InMemoryDriver(buildMemoryConfig(spec)));
+      }
+
+      // Every `BuiltinDriverId` must have an arm above (#6345). Until then this
+      // was `memory`'s implicit position: an id the spec table knew and this
+      // switch did not silently became an in-process store that accepted writes
+      // and lost them. `kind` is `never` here, so adding a builtin without an
+      // arm is a TYPE error at build time and a named refusal at run time —
+      // never a different engine.
+      return assertEveryBuiltinDriverHasAnArm(kind);
     },
   };
+}
+
+/**
+ * The exhaustiveness stop for {@link createDefaultDatasourceDriverFactory}'s
+ * dispatch — see the comment at its only call site.
+ *
+ * Takes `never`, so it cannot be reached while every builtin has an arm; it
+ * still throws rather than returning, because the type guarantee is erased at
+ * run time and a stale published `@objectstack/spec` beside a newer consumer is
+ * exactly the case that would reach it.
+ */
+function assertEveryBuiltinDriverHasAnArm(kind: never): never {
+  throw new Error(
+    `Driver id '${String(kind)}' is a built-in with a config contract but has no construction arm `
+    + 'in the shared datasource driver factory. This is a platform bug — refusing rather than '
+    + 'falling back, because falling back would build a different engine than the one requested.',
+  );
 }
 
 /** Best-effort server version via a raw query; swallows everything. */

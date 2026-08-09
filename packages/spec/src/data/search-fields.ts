@@ -69,6 +69,30 @@ function autoDefaultFields(fields: Record<string, SearchFieldMeta>, displayField
     if (!meta || meta.hidden) return false;
     const t = meta.type;
     if (!t) return false;
+    // Redundant BY CONSTRUCTION, and kept deliberately (#6934).
+    //
+    // `SEARCH_AUTO_EXCLUDED_TYPES` is disjoint from both positive lists, so
+    // every type it names already falls through the `return` below as `false`
+    // — identically to a type in none of the three sets (`number`, `date`, …).
+    // Measured over the full 56-type domain (`FieldType` ∪ all three
+    // vocabularies), deleting this line moves not one resolution. So it is NOT
+    // load-bearing: adding a type to `SEARCHABLE_TEXTUAL_TYPES` does not also
+    // require keeping it out of this set for the auto-default to reject it.
+    //
+    // What it buys is the DIRECTION the two vocabularies resolve in should that
+    // disjointness ever break. Both directions are silent — the guard is no
+    // safety net, it is a second tiebreak — but they are not equally bad. WITH
+    // it, an overlapping type is dropped from the scan (fail closed). WITHOUT
+    // it the positive list wins and the type enters the auto-default AND, one
+    // layer up, the #4254 ingress allow-list — so `$searchFields=<that field>`
+    // flips from refused to ACCEPTED, the same widening #4483 closed for `id`.
+    // This set names `secret`, `password`, `encrypted` and `vector`: failing
+    // open there means a `$contains` scan over a masked or heavy column.
+    //
+    // The disjointness is not left to coincidence. `search-fields.test.ts` pins
+    // all three vocabularies pairwise disjoint AND pins both resolution
+    // directions, so an overlap is a red test rather than a silent tiebreak
+    // whichever way it lands.
     if (SEARCH_AUTO_EXCLUDED_TYPES.has(t)) return false;
     return SEARCHABLE_TEXTUAL_TYPES.has(t) || SEARCHABLE_ENUM_TYPES.has(t);
   });
