@@ -396,11 +396,11 @@ describe('#7141 — caller envelope forwarded to the sharing gate', () => {
   const row = { id: 'c1', thread_id: 'crm_opportunity:opp1', author_id: 'someone_else', body: 'hi' };
 
   it('forwards the whole envelope MINUS the operation-private keys', async () => {
-    const canEdit = vi.fn(async () => true);
+    const canEdit = vi.fn(async (_object: string, _recordId: string, _callerCtx: any) => true);
     const { beforeDelete } = install({ comments: [row], sharing: { canEdit } });
     await beforeDelete(envelopeWriteCtx('beforeDelete', { id: 'c1' }, { ...DELEGATED_ENVELOPE }));
 
-    const forwarded = canEdit.mock.calls[0]![2] as Record<string, unknown>;
+    const forwarded = canEdit.mock.calls[0]![2] as unknown as Record<string, unknown>;
     // Every principal field survives — the #6523 contract's unit is the envelope
     // and #6206 forbids rebuilding a subset of it.
     expect(forwarded).toEqual({
