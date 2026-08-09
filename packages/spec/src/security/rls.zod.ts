@@ -355,7 +355,7 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    */
   using: z.string()
     .optional()
-    .describe('Filter condition for SELECT/UPDATE/DELETE. One of the four compiler-supported forms: `field = current_user.<prop>`, `field = \'literal\'`, `field IN (current_user.<array>)`, or `1 = 1`. Optional for INSERT-only policies.'),
+    .describe('Filter condition for SELECT/UPDATE/DELETE, authored in canonical CEL (ADR-0058 D1). It enforces when the predicate lowers to an ObjectQL filter: a field compared against a literal or a `current_user.*` context value using `==`, `!=`, `<`, `<=`, `>` or `>=`; `in` against a `current_user.*` array or an inline literal list (e.g. status in [\'draft\', \'pending\']); these combined with `&&` / `||`; or the bare allow-all `true`. Anything that does not lower fails closed — the policy matches zero rows. The legacy SQL-ish spellings are still accepted through a transitional bridge that rewrites `=` to `==` and `IN` to `in` (deprecated under ADR-0058 D1); SQL `AND` / `OR` / `NOT IN` / `IS NULL` / `LIKE` are NOT bridged and fail closed. Optional for INSERT-only policies.'),
 
   /**
    * CHECK clause - Validation for INSERT/UPDATE operations.
