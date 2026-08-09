@@ -90,7 +90,7 @@ describe('[#4560] the `current_user` defaultValue token is engine-owned', () => 
     engine = new ObjectQL();
     engine.registerDriver(makeStubDriver().driver, true);
     await engine.init();
-    engine.registry.registerObject(owned as any);
+    engine.registry.registerObject(owned);
   });
 
   it('stamps the acting user id on an authenticated insert', async () => {
@@ -147,7 +147,7 @@ describe('[#4597] the `NOW()` defaultValue token is engine-owned too', () => {
     engine = new ObjectQL();
     engine.registerDriver(makeStubDriver().driver, true);
     await engine.init();
-    engine.registry.registerObject(stamped as any);
+    engine.registry.registerObject(stamped);
   });
 
   it('resolves on a NON-SQL datasource — the insert succeeds and stores a real instant', async () => {

@@ -82,7 +82,7 @@ describe('engine ambient transaction (ADR-0034)', () => {
     seen = d.seen;
     engine.registerDriver(d.driver, true);
     await engine.init();
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } });
   });
 
   it('threads the active transaction into writes given NO explicit context', async () => {
@@ -243,7 +243,7 @@ describe('ScopedContext.transaction joins the ambient transaction (ADR-0067 D2, 
     committedNames = d.committedNames;
     engine.registerDriver(d.driver, true);
     await engine.init();
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } });
   });
 
   /**
@@ -373,7 +373,7 @@ describe('ScopedContext.transaction joins the ambient transaction (ADR-0067 D2, 
     const oneConn = new ObjectQL();
     oneConn.registerDriver(d.driver, true);
     await oneConn.init();
-    oneConn.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any);
+    oneConn.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } });
     (oneConn as any).registerHook(
       'afterInsert',
       async (ctx: any) => {
@@ -434,7 +434,7 @@ describe('ScopedContext trio joins the ambient transaction (ADR-0067 D2, #6406)'
     committedNames = d.committedNames;
     engine.registerDriver(d.driver, true);
     await engine.init();
-    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, 'test');
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } }, 'test');
   });
 
   const scoped = () => (engine as any).createContext({ userId: 'u1' }) as ScopedContext;
@@ -574,7 +574,7 @@ describe('ScopedContext trio joins the ambient transaction (ADR-0067 D2, #6406)'
     const oneConn = new ObjectQL();
     oneConn.registerDriver(d.driver, true);
     await oneConn.init();
-    oneConn.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } } as any, 'test');
+    oneConn.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } }, 'test');
 
     await expect(
       oneConn.transaction(async () => {

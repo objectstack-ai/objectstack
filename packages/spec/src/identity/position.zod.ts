@@ -83,9 +83,19 @@ export const PositionSchema = lazySchema(() => strictObject(
    * positions (an approver going on leave) opt in; admin-ish positions do
    * NOT — delegating administration would bypass the D12 containment gate,
    * so a delegatable position must never distribute an `adminScope`-carrying
-   * set (enforced by the `security-delegatable-admin-position` lint rule and
-   * the D12 gate). A grant that itself arrived via delegation is not
-   * re-delegatable (chains are cut).
+   * set. A grant that itself arrived via delegation is not re-delegatable
+   * (chains are cut).
+   *
+   * That invariant IS enforced — but at RUNTIME, not at authoring time. The
+   * D12 containment gate (`plugin-security`'s delegated-admin gate, step 6 of
+   * the self-service delegation path) refuses the delegation the moment a
+   * holder attempts it, denying with the offending permission set named. No
+   * lint rule checks the combination, so a package pairing `delegatable: true`
+   * with an `adminScope`-carrying set publishes clean and `os lint` stays
+   * green: what you will see is a delegation deny at first use, not an
+   * author-time error. (The one author-time rule ADR-0091 D3 does have,
+   * `security-delegation-missing-reason`, checks something else — that a
+   * seeded delegation row carries its dual-audit reason.)
    */
   delegatable: z.boolean().default(false).describe(
     'ADR-0091 D3: holders may self-service delegate this position, time-boxed (default false).',

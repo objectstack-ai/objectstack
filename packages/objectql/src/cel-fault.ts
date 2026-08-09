@@ -9,7 +9,12 @@
  * `condition`s (`hook-wrappers.ts`, #4775). Both were told to reuse ONE error
  * shape, and the only durable way to keep two messages worded alike is to stop
  * writing them twice — the same argument that put {@link
- * ./declared-fields.js#materializeDeclaredFields} in front of both evaluators.
+ * ./declared-fields.js#materializeDeclaredFields} in front of every server-side
+ * evaluator: two when this module was written, THREE since #4953 added the
+ * field `readonlyWhen` strips. That third seam is fail-open rather than
+ * rejecting, so it reads only {@link unknownVariableOf} (the #4889
+ * unbound-root branch) and never {@link describeCelFault}'s rejection
+ * sentences.
  *
  * This module has no opinion about what a caller does with a fault. It answers
  * three questions and hands back a sentence:

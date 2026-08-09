@@ -40,7 +40,7 @@ import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
-import { resolveTenancyPosture } from '@objectstack/types';
+import { isUniqueViolationError, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
@@ -507,8 +507,31 @@ function unsupportedFilterError(message: string): Error {
 }
 
 /**
- * [#5907] The aggregate functions this driver LOWERS into SQL, and the SQL
- * function each becomes.
+ * [#6409] How one declared aggregate function lowers into SQL.
+ *
+ * `sql` is the function NAME; `distinct` decides whether the argument list
+ * carries the `DISTINCT` keyword. Two fields rather than one string because
+ * `count_distinct` is the first entry in the vocabulary whose lowering is not a
+ * function name at all — `COUNT(DISTINCT x)` puts a keyword INSIDE the argument
+ * list, so a table of bare names has nowhere to say it. Encoding it as a
+ * template (`'count(distinct %s)'`) was the alternative and was rejected: the
+ * emitter binds the column as a knex identifier (`??`), and a template would
+ * have moved that binding into data.
+ *
+ * `distinct` also decides whether a FIELD is mandatory, which is why there is no
+ * third flag saying so: `COUNT(*)` is the spelling `AggregationNodeSchema`
+ * explicitly allows by making `field` optional, and `COUNT(DISTINCT *)` is a
+ * syntax error in every dialect this driver targets — there is nothing to
+ * deduplicate without a column. See {@link refuseDistinctAggregateWithoutField}.
+ */
+interface SqlAggregateLowering {
+  readonly sql: string;
+  readonly distinct: boolean;
+}
+
+/**
+ * [#5907] The aggregate functions this driver LOWERS into SQL, and what each
+ * becomes.
  *
  * The refusals below read their "compiled here" list off THIS table instead of
  * repeating it. A hand-written copy agrees with the compiler on the day it is
@@ -517,13 +540,24 @@ function unsupportedFilterError(message: string): Error {
  *
  * A `Map` rather than a plain object on purpose: a caller-supplied name is
  * looked up here, and `{}['constructor']` answers with a function.
+ *
+ * [#6409] `count_distinct` joined the table, and with it the table gained the
+ * `distinct` column. It is the ENFORCE leg of #6188's split ruling
+ * (2026-08-07): `array_agg`/`string_agg` left `AggregationFunction` because no
+ * SQL backend compiled them and none had one portable shape to compile TO,
+ * while `count_distinct` has exactly one — `COUNT(DISTINCT x)`, already the
+ * lowering `service-analytics`'s `AGGREGATE_SQL` uses for the Cube face — and
+ * stayed declared on the strength of it. With this entry the declared
+ * vocabulary and this driver's compiled vocabulary are the SAME SET; the values
+ * are pinned against the remote face by `AGGREGATION_CASES`.
  */
-const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, string> = new Map([
-  ['count', 'count'],
-  ['sum', 'sum'],
-  ['avg', 'avg'],
-  ['min', 'min'],
-  ['max', 'max'],
+const SQL_AGGREGATE_FUNCTIONS: ReadonlyMap<string, SqlAggregateLowering> = new Map([
+  ['count', { sql: 'count', distinct: false }],
+  ['sum', { sql: 'sum', distinct: false }],
+  ['avg', { sql: 'avg', distinct: false }],
+  ['min', { sql: 'min', distinct: false }],
+  ['max', { sql: 'max', distinct: false }],
+  ['count_distinct', { sql: 'count', distinct: true }],
 ]);
 
 /**
@@ -596,9 +630,27 @@ function undeclaredAggregateFunctionError(func: string): Error {
  * no SQL backend), so they now fall to class 1 and answer 400: the protocol no
  * longer has those names, which is a different fact from "this backend cannot
  * lower them" and deserves the different answer. `count_distinct` was
- * deliberately kept and takes the enforce leg instead — lowering it here to
- * `COUNT(DISTINCT x)` is its own card, and until that lands it is the only
- * inhabitant of this class.
+ * deliberately kept and took the enforce leg instead.
+ *
+ * ⚠️ [#6409] **This class is now EMPTY, and the producer is kept deliberately.**
+ * `count_distinct` was its last inhabitant; with its lowering landed,
+ * `SQL_AGGREGATE_FUNCTIONS` covers every member of `AggregationFunction` and
+ * nothing reaches this branch — pinned as a positive assertion by
+ * `sql-driver-out-of-contract-aggregate-function.test.ts` ("the
+ * declared-but-uncompiled set is empty"), not left to be rediscovered.
+ *
+ * Deleting it as dead code was considered and rejected. The branch is not an
+ * unenforced DECLARATION — the ADR-0049 shape — it is the classifier that
+ * decides which of two truths a future name gets told. Removing it does not
+ * remove the condition; it makes {@link refuseAggregateFunction} answer 400 for
+ * the FIRST function a later spec bump adds, telling the author of a
+ * correctly-spelled `median` that the protocol has no such function. That is
+ * precisely the misreport #5907 exists to prevent, and it would land in the
+ * window between a spec change and a driver change — the window this repo
+ * opens on purpose whenever it takes ADR-0049's enforce leg, as #6188 just did
+ * for this very name. The cost of keeping it is one unreachable branch; the
+ * cost of dropping it is a wrong answer at exactly the moment the vocabulary
+ * grows.
  *
  * `NOT_IMPLEMENTED` / 501 is the answer, from the ADR-0112 STANDARD catalog
  * ("Feature not yet implemented"), whose own `HttpStatusErrorCodeMap` pairs it
@@ -627,11 +679,42 @@ function uncompilableAggregateFunctionError(func: string): Error {
     `correctly and @objectstack/spec AggregationFunction declares it — this is a capability gap ` +
     `in the backend, not a mistake in the query, which is why it answers NOT_IMPLEMENTED/501 ` +
     `rather than a 400. Aggregate with a function this backend compiles; whether the declaration ` +
-    `itself should stand is #6188 (ADR-0049 enforce-or-remove) (#5907).`,
+    `itself should stand is ADR-0049's enforce-or-remove question (#5907).`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
   return err;
+}
+
+/**
+ * [#6409] `count_distinct` written with no `field` — nothing to deduplicate.
+ *
+ * `AggregationNodeSchema` makes `field` optional because `COUNT(*)` is a real
+ * spelling, and the schema has no way to say "optional for this function,
+ * required for that one". So the aggregation parses, reaches this driver, and
+ * asks for `COUNT(DISTINCT *)` — which no dialect this driver targets accepts.
+ *
+ * Refused HERE rather than emitted and left to the database, for the reason
+ * #5907 gives at length one function up: a syntax error raised by SQLite or
+ * Postgres arrives with the driver's SQL in it and no `code`/`status`, so
+ * `mapDataError` serves an opaque 500 for what is a completely legible mistake
+ * in the request. The class is 1, not 2 — `INVALID_QUERY` / 400: the FUNCTION
+ * is compiled here, it is this aggregation node that is malformed, and the
+ * remedy is a key the caller can add.
+ *
+ * The twin lives in `driver-turso`'s `remote-transport.ts`, first sentence for
+ * first sentence (#5240 — one condition, one wording), and the two are compared
+ * as runtime messages by `remote-transport-aggregate-function-refusal.test.ts`.
+ */
+function refuseDistinctAggregateWithoutField(func: string): never {
+  const err = new Error(
+    `Aggregate function "${func}" needs a "field" — there is nothing to deduplicate. ` +
+    `COUNT(*) counts rows and is the spelling that takes no field; a distinct count has to name ` +
+    `the column whose values are deduplicated. Add "field" to the aggregations[] entry (#6409).`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  throw err;
 }
 
 /**
@@ -4071,14 +4154,24 @@ export class SqlDriver implements IDataDriver {
     if (aggregates) {
       for (const agg of aggregates) {
         const funcName = agg.function;
-        const rawFunc = this.mapAggregateFunc(funcName);
+        const lowering = this.mapAggregateFunc(funcName);
         // Spec: `field` is optional for COUNT (means COUNT(*)).
         const fieldExpr = agg.field ?? '*';
+        // [#6409] `count_distinct` lowers to `count(distinct ??)`. The keyword
+        // goes in the SQL FRAGMENT, never in a binding: `??` still binds the
+        // column as a knex identifier exactly as it did for the other five, so
+        // the caller's field name has no path into the statement text. And
+        // `COUNT(DISTINCT *)` is not valid SQL anywhere — a distinct aggregate
+        // with no field is refused rather than emitted, so the caller reads
+        // their own mistake instead of a dialect's syntax error wrapped in a
+        // 500 (see {@link refuseDistinctAggregateWithoutField}).
+        if (lowering.distinct && fieldExpr === '*') refuseDistinctAggregateWithoutField(funcName);
+        const rawFunc = lowering.distinct ? `${lowering.sql}(distinct ??)` : `${lowering.sql}(??)`;
         if (agg.alias) {
           if (fieldExpr === '*') {
-            builder.select(this.knex.raw(`${rawFunc}(*) as ??`, [agg.alias]));
+            builder.select(this.knex.raw(`${lowering.sql}(*) as ??`, [agg.alias]));
           } else {
-            builder.select(this.knex.raw(`${rawFunc}(??) as ??`, [fieldExpr, agg.alias]));
+            builder.select(this.knex.raw(`${rawFunc} as ??`, [fieldExpr, agg.alias]));
           }
           // `min`/`max` are the only supported functions that hand back a value
           // OF the column rather than a count/total derived from it, so they are
@@ -4093,9 +4186,9 @@ export class SqlDriver implements IDataDriver {
           }
         } else {
           if (fieldExpr === '*') {
-            builder.select(this.knex.raw(`${rawFunc}(*)`));
+            builder.select(this.knex.raw(`${lowering.sql}(*)`));
           } else {
-            builder.select(this.knex.raw(`${rawFunc}(??)`, [fieldExpr]));
+            builder.select(this.knex.raw(rawFunc, [fieldExpr]));
           }
         }
       }
@@ -4194,8 +4287,14 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    if (query.limit) builder.limit(query.limit);
-    if (query.offset) builder.offset(query.offset);
+    // PRESENCE, not truthiness — the same test `findRows()` makes (#6577).
+    // `limit: 0` means "return no records" (#6485), and `0` is falsy, so
+    // `if (query.limit)` dropped the clause and answered a request for NOTHING
+    // with the WHOLE table. Measured on `main` before this line changed: three
+    // rows seeded, `{ limit: 0 }` returned 3 here and 0 through `find()` — one
+    // driver, two answers to one `QueryAST`.
+    if (query.limit !== undefined) builder.limit(query.limit);
+    if (query.offset !== undefined) builder.offset(query.offset);
 
     return await builder;
   }
@@ -4234,8 +4333,15 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    if (query.limit) builder.limit(query.limit);
-    if (query.offset) builder.offset(query.offset);
+    // PRESENCE, not truthiness — see `findWithWindowFunctions()` above (#6577).
+    // The stake is different here and no smaller: this door returns a PLAN, and
+    // a plan is only worth reading if it explains the statement `find()` would
+    // actually run. Measured on `main` before this line changed: `{ limit: 0 }`
+    // compiled to `select * from `orders`` while `find()` sent
+    // `select * from `orders` order by `id` asc limit ?` — an EXPLAIN for a
+    // different query, which is the one thing an EXPLAIN must never be.
+    if (query.limit !== undefined) builder.limit(query.limit);
+    if (query.offset !== undefined) builder.offset(query.offset);
 
     const sql = builder.toSQL();
     const client = (this.config as any).client;
@@ -6335,7 +6441,17 @@ export class SqlDriver implements IDataDriver {
         // different name can race us here — both are benign for our intent
         // (the index exists). Anything else is a real failure.
         if (/already exists|duplicate key name|exists/i.test(msg)) continue;
-        if (nullSafe.size > 0 && /unique constraint failed|duplicate entry|duplicate key value/i.test(msg)) {
+        // The ERROR OBJECT, not `msg` (#6543). This used to be a private
+        // inline regex over the message alone, which is the only channel the
+        // SQLite family reliably fills — but Postgres answers this exact
+        // failure with `could not create unique index "…"` and puts the
+        // verdict on `code` (SQLSTATE 23505) instead, so a message-only read
+        // missed the dialect entirely and took the boot down on the very case
+        // the branch below exists to absorb. The shared predicate reads
+        // `code` / `errno` / `message` / `cause`; see
+        // `@objectstack/types`' `unique-violation.ts` for why it is the one
+        // name for this question.
+        if (nullSafe.size > 0 && isUniqueViolationError(e)) {
           // Existing rows violate the NULL-safe unique — the #5030 defect made
           // visible. Do not take the boot down: the declared constraint is not
           // enforced yet, say so at `error` (from the outside everything looks
@@ -6385,8 +6501,16 @@ export class SqlDriver implements IDataDriver {
       await this.knex.raw(sql);
     } catch (e: any) {
       const msg = String(e?.message ?? e);
+      // The positive limb is this site's own question — "does this server
+      // reject functional key parts?" — and stays a message test, because
+      // that is the only channel the answer is on. The NEGATIVE limb was a
+      // seventh spelling of the unique-violation vocabulary (`/duplicate/i`)
+      // and is now the shared predicate (#6543): a conflict must never be
+      // read as a syntax rejection and silently degraded to the bare
+      // composite, and on the `errno`-only shape mysql2 can hand back, a
+      // message-only exclusion did not fire.
       const functionalUnsupported =
-        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !/duplicate/i.test(msg);
+        this.isMysql && /syntax|functional|not supported|near '\(/i.test(msg) && !isUniqueViolationError(e);
       if (!functionalUnsupported) throw e;
       (this.logger.error ?? this.logger.warn)(
         `[sql-driver] this MySQL/MariaDB server rejects functional key parts — created '${name}' on ` +
@@ -7891,8 +8015,8 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * The SQL function a declared aggregation lowers to, or a refusal that says
-   * which KIND of "no" this is (#5907).
+   * How a declared aggregation lowers into SQL, or a refusal that says which
+   * KIND of "no" this is (#5907).
    *
    * The `switch` this replaced answered both conditions with one bare `Error`
    * carrying no `code` and no `status`, so `mapDataError` fell to its default
@@ -7900,10 +8024,17 @@ export class SqlDriver implements IDataDriver {
    * #1117 gap, at the aggregate door. The lowering table is now the single
    * source of what this face compiles, and {@link refuseAggregateFunction}
    * decides between the two refusals.
+   *
+   * [#6409] Returns the {@link SqlAggregateLowering} RECORD rather than the bare
+   * SQL function name it used to. `count_distinct` lowers to
+   * `COUNT(DISTINCT x)` — a keyword inside the argument list, not a different
+   * function name — so a caller of this method needs both halves to emit the
+   * call. Every entry answering `{ sql, distinct: false }` compiles to exactly
+   * the text the previous `string` return produced.
    */
-  protected mapAggregateFunc(func: string): string {
-    const sql = SQL_AGGREGATE_FUNCTIONS.get(func);
-    if (sql !== undefined) return sql;
+  protected mapAggregateFunc(func: string): SqlAggregateLowering {
+    const lowering = SQL_AGGREGATE_FUNCTIONS.get(func);
+    if (lowering !== undefined) return lowering;
     refuseAggregateFunction(func);
   }
 

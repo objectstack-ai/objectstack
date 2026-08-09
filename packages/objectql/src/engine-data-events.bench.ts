@@ -104,7 +104,7 @@ async function makeEngine(withRealtime: boolean): Promise<ObjectQL> {
   const engine = new ObjectQL();
   engine.registerDriver(makeStubDriver(), true);
   await engine.init();
-  engine.registry.registerObject(task as any, 'bench');
+  engine.registry.registerObject(task, 'bench');
   if (withRealtime) engine.setRealtimeService(nullRealtime);
   // Silence the per-write logger so log formatting is not in the measurement.
   const logger = (engine as any).logger;

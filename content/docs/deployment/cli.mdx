@@ -1045,6 +1045,7 @@ os doctor -v        # Show fix suggestions for warnings
 | `os login` | Sign in and store credentials in `~/.objectstack/credentials.json` |
 | `os whoami` | Show the current authenticated user |
 | `os logout` | Revoke the server session and clear local credentials |
+| `os cloud login` | Sign in to ObjectStack Cloud (the hosted package registry) and store credentials in `~/.objectstack/cloud.json` |
 
 #### `os register`
 
@@ -1120,6 +1121,65 @@ the server-side session is revoked as well.
 ```bash
 os logout
 ```
+
+#### `os cloud login`
+
+Signs you in to **ObjectStack Cloud** — the hosted package registry — rather
+than to a runtime instance. It is the credential `os package publish` and the
+marketplace commands use, and it lands in its own file
+(`~/.objectstack/cloud.json`), separate from `os login`'s
+`~/.objectstack/credentials.json`.
+
+```bash
+os cloud login
+os cloud login --no-browser
+os cloud login --url https://cloud.example.com   # self-hosted control plane
+os cloud login --email me@acme.com --password secret   # CI
+```
+
+Like `os login`, in an interactive terminal it uses the browser-based device
+flow: it prints a one-time verification URL and polls until you approve. If
+cloud credentials already exist it exits successfully with "Already logged in";
+pass `--force` to re-authenticate.
+
+##### `os cloud login --json` is NDJSON — the same exception as `os login`
+
+Every other ObjectStack command writes **exactly one JSON document** to stdout
+under `--json`, so `JSON.parse(<entire stdout>)` is the way to read it. The two
+device-flow login commands — `os login` and `os cloud login` — are the declared
+exceptions, and they are the **same** exception: `--json` output is **NDJSON**,
+one compact JSON document per line. **Parse it line by line.**
+
+The reason is the device flow: it is two events at two points in time, and the
+verification URL is only useful to a script *before* the user authorizes. So the
+CLI emits it as its own record immediately, then a second record when the poll
+resolves:
+
+```console
+$ os cloud login --json --no-browser
+{"device_code":"…","user_code":"WXYZ-1234","verification_uri":"https://…/activate","verification_uri_complete":"https://…/activate?user_code=WXYZ-1234","expires_in":600}
+{"success":true,"email":"user@example.com","userId":"usr_01H…","url":"https://cloud.objectos.ai"}
+```
+
+Read the first record, show the user the URL, then block on the next line:
+
+```bash
+os cloud login --json --no-browser | while IFS= read -r line; do
+  echo "$line" | jq -r 'if .verification_uri_complete then "Approve at: \(.verification_uri_complete)" else "Signed in as \(.email)" end'
+done
+```
+
+Every record is one line, on every path — the `--email`/`--password` result, the
+"already logged in" notice, and the failure payload
+(`{"success":false,"error":"…"}`) included, since a failure can arrive *after*
+the verification-URL record has already been written. Records that report a
+login failure also set exit code `1`.
+
+Before this was declared, `os cloud login --json` emitted a single document and
+**never handed the verification URL to a consumer at all** — formally valid
+JSON that withheld the one thing device flow exists to give a script. The
+device-authorization record's fields are spelled exactly as `os login --json`
+spells them, so one consumer reads both commands.
 
 ### Cloud Environments
 

@@ -123,6 +123,7 @@ import ts from 'typescript';
 
 import { aliasProbe } from './alias-probe';
 import { acceptsNothing, strictObjectDeclarations, type StrictObjectDeclaration } from './strict-object';
+import { keySetMatches } from './suggestions.zod';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPEC_SRC = path.resolve(HERE, '..');
@@ -649,6 +650,109 @@ describe('alias integrity — every table is a true claim about its schema', () 
       }
     }
     expect([...PROSE_ALIAS_TARGETS].filter((x) => !used.has(x)).sort()).toEqual([]);
+  });
+
+  it('no guidance SET member is itself a declared key, and no two entries claim one key (#6619)', () => {
+    // The set-keyed guidance form arrived with #6619's fold of the three
+    // hand-written `$ZodErrorMap`s — maps that, being hand-rolled, no registry
+    // saw and nothing judged (#6416's blind spot). Folding them in is only
+    // worth it if the sets are held to the same claims the exact channel is:
+    //
+    // - an enumerated member the shape DECLARES is dead — a declared key never
+    //   reaches the `unrecognized_keys` path (tombstones included: writing one
+    //   raises `invalid_type` from its `z.never()`, not `unrecognized_keys`);
+    // - a member also filed under exact `guidance` is unreachable for that key
+    //   (the exact entry always wins — pinned in `strict-object.test.ts`), so
+    //   the overlap is at best dead weight and at worst a wrong claim;
+    // - two enumerated sets sharing a member means declaration order decides
+    //   which prescription the author sees. The precedence is pinned, but no
+    //   in-repo table gets to DEPEND on a tie-break being read correctly.
+    const broken: string[] = [];
+    for (const s of SURFACES) {
+      const declared = new Set(Object.keys(s.shape));
+      const exact = new Set(Object.keys(s.options.guidance ?? {}));
+      const seen = new Map<string, string>();
+      for (const set of s.options.guidanceSets ?? []) {
+        if (set.keys instanceof RegExp) continue; // judged in the pattern test below
+        for (const member of set.keys) {
+          if (declared.has(member)) {
+            broken.push(`"${s.options.surface}": set \`${set.name}\` lists \`${member}\`, which is declared here`);
+          }
+          if (exact.has(member)) {
+            broken.push(`"${s.options.surface}": set \`${set.name}\` lists \`${member}\`, which exact guidance already answers`);
+          }
+          const prior = seen.get(member);
+          if (prior && prior !== set.name) {
+            broken.push(`"${s.options.surface}": \`${member}\` is claimed by both \`${prior}\` and \`${set.name}\``);
+          }
+          seen.set(member, set.name);
+        }
+      }
+    }
+    expect(broken.sort()).toEqual([]);
+  });
+
+  it('every pattern-keyed set carries examples that really match it and are really rejected (#6619)', () => {
+    // A pattern is an OPEN family, so the dead-entry question cannot be asked
+    // of its membership the way it is of a list — the visibility pattern
+    // deliberately also matches the canonical `visibleWhen`, which the shape
+    // declares and which therefore never arrives at the map. What CAN be
+    // asked, and is: the spellings the pattern was written for really match it
+    // (a pattern typo fails here), and none of them is a key the shape
+    // declares (a pattern fully shadowed by the shape is a phantom check).
+    const broken: string[] = [];
+    for (const s of SURFACES) {
+      for (const set of s.options.guidanceSets ?? []) {
+        if (!(set.keys instanceof RegExp)) continue;
+        const examples = set.examples ?? [];
+        if (examples.length === 0) {
+          broken.push(`"${s.options.surface}": pattern set \`${set.name}\` carries no examples — nothing anchors what it is for`);
+          continue;
+        }
+        const declared = new Set(Object.keys(s.shape));
+        for (const example of examples) {
+          if (!keySetMatches(set, example)) {
+            broken.push(`"${s.options.surface}": \`${set.name}\` example \`${example}\` does not match its own pattern`);
+          }
+          if (declared.has(example)) {
+            broken.push(`"${s.options.surface}": \`${set.name}\` example \`${example}\` is a declared key — it can never reach the map`);
+          }
+        }
+      }
+    }
+    expect(broken.sort()).toEqual([]);
+  });
+
+  it('the three #6416 hand-written maps are FOLDED and judged here — the blind spot stays closed (#6619)', () => {
+    // The reason #6619 existed: `strictVisibilityError`,
+    // `strictWidgetAnalyticsError` and `strictTenancyError` were hand-rolled
+    // `$ZodErrorMap`s, so their alias pointers and prescriptions registered in
+    // NO registry — unmeasured rather than clean. This assertion is the
+    // closure itself: the three surfaces are declarations this file walks, and
+    // their prescriptions ride channels every test above judges. Reverting any
+    // of them to a hand-written map fails HERE, loudly, instead of quietly
+    // re-opening the blind spot.
+    const bySurface = new Map(SURFACES.map((s) => [s.options.surface, s]));
+
+    const visibility = [...SURFACES].filter((s) => s.options.surface === 'this view/page schema');
+    // Three call sites share the options: FormFieldBase (via strictObjectError),
+    // FormSection, PageComponent — distinct shapes, so distinct declarations.
+    expect(visibility.length).toBeGreaterThanOrEqual(3);
+    for (const v of visibility) {
+      expect(v.options.guidanceSets?.map((g) => g.name)).toContain('VISIBILITY_KEY_PATTERN');
+    }
+
+    const widget = bySurface.get('this dashboard widget');
+    expect(widget, 'DashboardWidgetSchema no longer declares through strictObject').toBeDefined();
+    expect(widget!.options.guidanceSets?.map((g) => g.name)).toEqual([
+      'LEGACY_WIDGET_ANALYTICS_KEYS',
+      'QUARANTINED_WIDGET_KEYS',
+      'WIDGET_DRILL_NEAR_KEYS',
+    ]);
+
+    const tenancy = bySurface.get('`tenancy`');
+    expect(tenancy, 'TenancyConfigSchema no longer declares through strictObject').toBeDefined();
+    expect(Object.keys(tenancy!.options.guidance ?? {}).sort()).toEqual(['crossTenantAccess', 'strategy']);
   });
 
   it('no guidance key is itself a declared key (the same dead entry, other channel)', () => {

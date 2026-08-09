@@ -510,6 +510,6 @@ async function boot(): Promise<{ engine: ObjectQL; driver: any }> {
   const driver = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(taskObject as any);
+  engine.registry.registerObject(taskObject);
   return { engine, driver };
 }

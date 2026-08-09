@@ -179,7 +179,7 @@ async function boot(hooks: Hook[] = [], objects: unknown[] = [taskA, taskB]) {
   const stub = makeCountingDriver();
   engine.registerDriver(stub.driver, true);
   await engine.init();
-  for (const o of objects) engine.registry.registerObject(o as any);
+  for (const o of objects) engine.registry.registerObject(o);
   const warn = vi.fn();
   if (hooks.length > 0) {
     bindHooksToEngine(engine, hooks, {

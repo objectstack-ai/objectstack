@@ -1234,6 +1234,72 @@ describe('BPMN — Wait Event Configuration', () => {
     }
   });
 
+  /**
+   * #6758 — a prescription that does not parse is WORSE than no prescription:
+   * the author lands in the exact rejection the tombstone exists to spare them,
+   * and the second one is a bare `invalid_type` with no guidance attached. Both
+   * author-facing channels on this block print a `timerDuration` value to copy,
+   * and `timerDuration` is `z.string()` — so every value they print must be
+   * QUOTED. Until this test they printed the bare number `60000`, which is
+   * TS2322 at the authoring site and `expected string, received number` at the
+   * parse (the ADR-0087 conversion has always known better: it writes
+   * `String(next.timeoutMs)`, `conversions/registry.ts` — "Moving the number
+   * unstringified would produce a block that no longer parses").
+   *
+   * The value is EXTRACTED from the message rather than compared to a copy: a
+   * hard-coded `'60000'` here would go green the moment someone reworded the
+   * prose, which is precisely when this needs to be checked.
+   */
+  it('every `timerDuration` value the wait-timeout prescriptions print actually parses (#6758)', () => {
+    const waitNode = (waitEventConfig: Record<string, unknown>) => ({
+      id: 'wait_timer', type: 'wait', label: 'Wait', waitEventConfig,
+    });
+    const messageFor = (waitEventConfig: Record<string, unknown>, code: string) => {
+      const result = FlowNodeSchema.safeParse(waitNode(waitEventConfig));
+      expect(result.success).toBe(false);
+      return result.error!.issues.find((i) => i.code === code)?.message;
+    };
+
+    const channels = {
+      // Channel 1 — `retiredKey()`'s `z.never` message, raised when an upgrading
+      // author still writes the removed key.
+      'the `timeoutMs` tombstone': messageFor({ eventType: 'timer', timeoutMs: 60_000 }, 'invalid_type'),
+      // Channel 2 — the `strictObject` `guidance` entry for the `timeout`
+      // misspelling. Worse than channel 1: there is no first failure to learn
+      // from, so a bad prescription here is the FIRST thing the schema ever says.
+      'the `timeout` misspelling guidance': messageFor({ eventType: 'timer', timeout: 60_000 }, 'unrecognized_keys'),
+    };
+
+    for (const [channel, message] of Object.entries(channels)) {
+      // Anti-vacuity. Delete the guidance entry (or gut the tombstone) and these
+      // two fail loudly, rather than the loop below passing on an empty match set.
+      expect(message, `${channel}: raised no message at all`).toBeDefined();
+      expect(message, `${channel} must still point the author at \`timerDuration\``)
+        .toContain('`timerDuration');
+
+      const printed = [...message!.matchAll(/`timerDuration:\s*([^`]+)`/g)].map((m) => m[1]);
+      expect(printed.length, `${channel} must PRINT a \`timerDuration\` value to copy`)
+        .toBeGreaterThan(0);
+
+      for (const literal of printed) {
+        // Read the printed literal exactly as an author retypes it: `'60000'` is
+        // a string, a bare `60000` is a number — and that gap IS the defect.
+        let authored: unknown;
+        try {
+          authored = JSON.parse(literal.replace(/^'(.*)'$/, '"$1"'));
+        } catch {
+          expect.fail(`${channel} prints \`timerDuration: ${literal}\`, which is not a writable literal`);
+        }
+        const result = FlowNodeSchema.safeParse(waitNode({ eventType: 'timer', timerDuration: authored }));
+        expect(
+          result.success,
+          `${channel} prints \`timerDuration: ${literal}\`, but the schema REJECTS it: `
+          + JSON.stringify(result.error?.issues),
+        ).toBe(true);
+      }
+    }
+  });
+
   it('should accept wait node with manual resume', () => {
     const result = FlowNodeSchema.safeParse({
       id: 'wait_manual',
