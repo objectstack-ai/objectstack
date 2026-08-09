@@ -94,7 +94,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional | Deployment status |
 | **template** | `never` | optional | [REMOVED] `flow.template` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no designer or engine path ever read it, so flagging a flow as a template/subflow did nothing. Delete the key. Shared logic is invoked via a subflow NODE referencing the flow by name. |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
-| **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean }[]` | optional | Flow variables |
+| **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean; … }[]` | optional | Flow variables |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
 | **edges** | `{ id: string; source: string; target: string; condition?: string \| object; … }[]` | ✅ | Flow connections |
 | **active** | `never` | optional | [REMOVED] `flow.active` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — it never had an effect: the engine arms flows from `status`, and `active: false` did NOT stop a flow (worse, the default read as disabled while the engine treated unset as enabled). Delete the key. Use `status: 'obsolete'` (or 'invalid') to unbind and disable a flow, `status: 'active'` to arm it. |

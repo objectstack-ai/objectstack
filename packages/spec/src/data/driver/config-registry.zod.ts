@@ -258,6 +258,64 @@ export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | unde
   return DATABASE_DRIVER_ALIASES[driver.trim().toLowerCase()];
 }
 
+/**
+ * The CANONICAL driver ids a boot flag may offer as its choices — the selection
+ * face, reduced to one spelling per driver (#6969).
+ *
+ * ## Which question this answers, and why it is not {@link BUILTIN_DRIVER_IDS}
+ *
+ * The two have equal contents today and answer different questions, which is the
+ * distinction #6345 was written to keep visible:
+ *
+ *  - {@link BUILTIN_DRIVER_IDS} — "which ids does the platform ship a CONFIG
+ *    CONTRACT for". That is what {@link DRIVER_CONFIG_SCHEMAS} is keyed by, and
+ *    what a metadata gate consults for a stored `datasource.driver`.
+ *  - this — "which ids may an operator SELECT at boot, spelled canonically".
+ *    That is what `os start --database-driver` / `os dev --database-driver`
+ *    enumerate in their oclif `options:` allowlist.
+ *
+ * A driver that ships a contract but must not be bootable would belong in the
+ * first and not the second. Nothing is in that position today; the point of the
+ * separate name is that the day one is, the flag does not widen by inheritance.
+ *
+ * ## Derived from the SELECTION column, so the contract-only spellings cannot leak
+ *
+ * Built by filtering {@link DATABASE_DRIVER_SELECTION_ALIASES} — the
+ * {@link DriverVocabularyEntry.aliases} face — down to the spellings that resolve
+ * to THEMSELVES. Ten of its seventeen entries are dropped by that filter (`pg`,
+ * `mingo`, `sql`, `wasm`, `libsql`, …): they select a driver, but under another
+ * driver's canonical name, and an allowlist that offered both would be advertising
+ * one driver twice.
+ *
+ * {@link DriverVocabularyEntry.contractOnlyAliases} (`sqlite3`, `better-sqlite3`,
+ * `mariadb`, `inmemory`) cannot appear here at all — not because they are filtered
+ * out, but because they never enter the array this reads. Deriving a boot flag from
+ * {@link DRIVER_ID_ALIASES} instead would have offered all four, which is a
+ * WIDENING of what both hosts accept, dressed as a refactor: neither host has ever
+ * accepted `--database-driver sqlite3`, and #6345's ruling fixes the selection face
+ * as the union of what they accepted the day it was written.
+ *
+ * ## Order
+ *
+ * Table row order, inherited from {@link DATABASE_DRIVER_SELECTION_ALIASES} — the
+ * same order the hosts' "Supported drivers: …" refusal already prints, so a flag's
+ * `--help` and that flag's own refusal message enumerate drivers alike. Deliberately
+ * NOT a second (e.g. alphabetical) opinion about presentation: the table publishes
+ * one order and everything derived from it publishes that one.
+ *
+ * ## If an id must ever be withheld from the flag
+ *
+ * Declare it on the ROW — a column saying so, next to `hasLocalDefault` — and let
+ * this projection read it. Never subtract it at the consumer: a boot host that
+ * removes an id the table still advertises is exactly the second definition this
+ * export exists to delete.
+ */
+export const DATABASE_DRIVER_SELECTION_IDS: readonly BuiltinDriverId[] = Object.freeze(
+  DATABASE_DRIVER_SELECTION_ALIASES.filter(
+    (alias): alias is BuiltinDriverId => resolveDatabaseDriverId(alias) === alias,
+  ),
+);
+
 /** Canonical id → whether it can be selected with no database URL at all. */
 const DRIVER_LOCAL_DEFAULT: Readonly<Record<BuiltinDriverId, boolean>> = Object.freeze(
   Object.fromEntries(

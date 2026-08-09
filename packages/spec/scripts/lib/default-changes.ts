@@ -62,10 +62,54 @@ import type { DeclaredDefaultChange } from './authorable-defaults.js';
  *
  * The table landed EMPTY at major 17 — that emptiness was the ratchet's own
  * proof that every default in the tree matched its recorded fingerprint. The
- * entry below is the first one written (#6361), and it is worth noting what
- * kind of change opened the account: not a behaviour flip, but the removal of a
- * default that had never once been applied.
+ * first entry written (#6361) is worth noting for what kind of change opened
+ * the account: not a behaviour flip, but the removal of a default that had
+ * never once been applied.
+ *
+ * The `runAutomations` pair (#6704) is the same family seen from the other
+ * side, and the two read best together: where #6361 deleted a fiction, this one
+ * REPLACES a fiction with the fact. Both are declarations that no request path
+ * ever executed; neither moves a byte on the wire. A ratchet row whose `reason`
+ * says "nothing deployed changes behaviour" is therefore not a smell here — for
+ * an HTTP request schema nothing parses, it is the expected shape, and the
+ * consumer who IS affected is the one outside this repo who parses the
+ * published JSON Schema himself.
  */
+/**
+ * Shared by the two `runAutomations` rows below — `CreateImportJobRequestSchema`
+ * IS `ImportRequestSchema`, so one edit moves two published defaults and the two
+ * rows would otherwise be a copy-paste pair that can drift apart.
+ */
+const IMPORT_RUN_AUTOMATIONS_REASON =
+  'The declared default was WRONG about the shipped server, and this row corrects the '
+  + 'declaration rather than the behaviour. `POST /api/v1/data/:object/import` (and its '
+  + 'async twin `.../import/jobs`) decides in `packages/rest/src/import-prepare.ts` with '
+  + '`body?.runAutomations !== false` — an OMITTED flag has run automations since #2922, '
+  + 'because automations always ran on import historically (the engine ignored the flag '
+  + 'entirely before then) and because the platform convention is to fire triggers on '
+  + 'import (Salesforce does). The schema said the opposite, in both machine-readable and '
+  + 'human-readable form: `.default(false)` shipped in `@objectstack/spec`\'s JSON Schema, '
+  + 'and the `describe` prose ("off by default for bulk") rendered into the published '
+  + 'reference tables for BOTH defs. '
+  + 'Nothing in this repo reconciled the two, because no request path parses an import '
+  + 'body through this schema — the route reads the raw body, and the only reference to '
+  + '`CreateImportJobRequestSchema` is the declarative `ImportJobApiContracts` catalog '
+  + 'entry, which is a declaration and not a parse. So NO deployed caller changes '
+  + 'behaviour here: a request that omitted the key ran automations before and runs them '
+  + 'after. '
+  + 'The consumer who WAS affected — and who is the reason this is a correction and not a '
+  + 'cosmetic edit — lives outside this repo: a client or SDK that parses its request '
+  + 'through the published schema materialised `runAutomations: false` from the declared '
+  + 'default and SENT it explicitly, and the server honoured that. Identical request '
+  + 'bodies therefore produced opposite behaviour depending on whether the caller '
+  + 'validated before sending, with the validating caller silently losing its triggers. '
+  + 'To keep automations OFF, write it — `runAutomations: false` — which was always the '
+  + 'only spelling the server actually read. To keep what the server actually did for '
+  + 'you, change nothing. Reading a materialised `ImportRequestParsed.runAutomations` now '
+  + 'yields `true` where it yielded `false`; the value it yields is now the value the '
+  + 'server would have applied anyway. Maintainer ruling 2026-08-09 (#6704, disposition '
+  + 'A: the spec follows the runtime).';
+
 export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly DeclaredDefaultChange[]>> = {
   17: [
     {
@@ -92,6 +136,22 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'gave you, change nothing. Reading `ListNotificationsRequestParsed.limit` now '
         + 'yields `number | undefined` instead of `number`; the honest answer to "how big is '
         + 'the window" is the server\'s, and it is documented on the key.',
+    },
+    {
+      key: 'api/ImportRequest:runAutomations',
+      from: 'false',
+      to: 'true',
+      reason: IMPORT_RUN_AUTOMATIONS_REASON,
+    },
+    {
+      // `CreateImportJobRequestSchema` IS `ImportRequestSchema` — one object, two
+      // published defs (the async job body is declared identical to the sync one).
+      // The ratchet names keys, not schemas, so the single edit is declared twice;
+      // dropping either row leaves that def's default unauthorised and the gate red.
+      key: 'api/CreateImportJobRequest:runAutomations',
+      from: 'false',
+      to: 'true',
+      reason: IMPORT_RUN_AUTOMATIONS_REASON,
     },
   ],
 };

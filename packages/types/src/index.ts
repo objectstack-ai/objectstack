@@ -8,6 +8,10 @@ export * from './error-leak.js';
 export * from './keyset-walk.js';
 export * from './module-not-found.js';
 export * from './response-envelope.js';
+// [#6615] The one home for Postgres' `«sub-object» "x" of relation "y"` phrase,
+// whose missing-COLUMN spelling contains a legal missing-TABLE phrase as a
+// substring. Three packages had each repaired that superstring hole separately.
+export * from './relation-sub-object.js';
 // [#6250] The one named "is this a unique-constraint violation?" predicate.
 // Four hand-written vocabularies used to answer it and disagreed about MySQL,
 // which is why every MySQL conflict came back 500 instead of 409.
