@@ -102,8 +102,12 @@ function resolveEnableBlock(def: ObjectApiDef): EnableLike {
  * Decide whether a data `action` is permitted for `def`'s declared exposure.
  *
  * @param def    Object definition (nested `getObject` shape or flat).
- * @param action Runtime data action (`create`/`get`/`query`/`find`/`aggregate`/
- *               `batch`/…); normalized to a canonical operation internally.
+ * @param action Runtime data action; normalized to a canonical operation
+ *               internally. The only caller is `callData`, whose closed set is
+ *               `create`/`get`/`update`/`delete`/`query`/`find`/`aggregate`.
+ *               (#6259 removed one more name from this list: `callData` has had
+ *               no `batch` arm since #5856, so no caller could ever send that
+ *               word. Batching reaches this gate from REST as canonical `bulk`.)
  * @param opts   Optional `writeMode` (import precision) / `bulkChild` (bulk∧child).
  */
 export function checkApiExposure(

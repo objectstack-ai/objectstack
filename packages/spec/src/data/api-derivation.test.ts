@@ -1,5 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import fs from 'node:fs';
+import path from 'node:path';
+import url from 'node:url';
 import { describe, it, expect } from 'vitest';
 import {
   resolveEffectiveApiMethods,
@@ -194,8 +197,45 @@ describe('api-derivation (#3391)', () => {
     it('maps runtime action vocabulary to canonical operations', () => {
       expect(DATA_ACTION_TO_API_OPERATION.query).toBe('list');
       expect(DATA_ACTION_TO_API_OPERATION.find).toBe('list');
-      expect(DATA_ACTION_TO_API_OPERATION.batch).toBe('bulk');
       expect(DATA_ACTION_TO_API_OPERATION.get).toBe('get');
+      // The canonical bulk spelling — the one every REST caller actually sends,
+      // including the cross-object `POST /batch` route.
+      expect(DATA_ACTION_TO_API_OPERATION.bulk).toBe('bulk');
+    });
+
+    // [#6259] `batch: 'bulk'` was a producer-less row: `callData` has had no
+    // `batch` arm since #5856, and REST gates `/batch` on the literal `'bulk'`.
+    // Two pins, because the finding had two halves — the row AND the prose
+    // that told readers `batch` was a live runtime action.
+    it('has no `batch` row — a lookup is undefined, not an alias for `bulk`', () => {
+      expect(DATA_ACTION_TO_API_OPERATION.batch).toBeUndefined();
+      expect(Object.keys(DATA_ACTION_TO_API_OPERATION)).not.toContain('batch');
+      // Absence is not a denial: an unmapped action falls to the consumers'
+      // `?? action` pass-through and is judged as itself, exactly like any
+      // other unrecognized/custom action.
+      const eff = resolveEffectiveApiMethods({ apiMethods: ['list'] });
+      expect(isApiOperationAllowed(eff, 'batch')).toBe(true);
+      // …while the real bulk surface stays gated on the `bulk` primitive.
+      expect(isApiOperationAllowed(eff, 'bulk')).toBe(false);
+    });
+
+    it('its TSDoc no longer describes `batch` as part of the live vocabulary', () => {
+      const source = fs.readFileSync(
+        path.join(path.dirname(url.fileURLToPath(import.meta.url)), 'api-derivation.ts'),
+        'utf8',
+      );
+      const doc = source.match(
+        /\/\*\*(?:[^*]|\*(?!\/))*?\*\/\s*export const DATA_ACTION_TO_API_OPERATION\b/,
+      );
+      expect(doc, 'DATA_ACTION_TO_API_OPERATION lost its TSDoc block').toBeTruthy();
+      // The block has two halves and only the first is a claim about today:
+      // the vocabulary description, then a `[#6259]` note recording what was
+      // removed and why. The note is EXPECTED to say `batch`; the description
+      // saying it is the drift this issue is about ("runtime `callData`
+      // actions (`query`/`find`→`list`, `batch`→`bulk`)").
+      const [description, history] = doc![0].split('[#6259]');
+      expect(history, 'the `[#6259]` removal note vanished from the TSDoc').toBeTruthy();
+      expect(description).not.toMatch(/batch/);
     });
   });
 

@@ -201,6 +201,7 @@ const result = AIChatWindowProps.parse(data);
 | :--- | :--- | :--- | :--- |
 | **items** | `{ label: string \| Record<string, string>; icon?: string; collapsed: boolean; children: any[] }[]` | ✅ |  |
 | **allowMultiple** | `boolean` | ✅ | Allow multiple panels to be expanded simultaneously |
+| **variant** | `Enum<'flush' \| 'card'>` | ✅ | Panel framing: 'flush' draws a divider under each panel; 'card' leaves the border to each panel's own content |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -245,6 +246,9 @@ const result = AIChatWindowProps.parse(data);
 | **icon** | `string` | optional | Icon name |
 | **breadcrumb** | `boolean` | ✅ | Show breadcrumb |
 | **actions** | `string[]` | optional | Action IDs to show in header |
+| **recordChrome** | `boolean` | ✅ | Render the record chrome — the title as a record chip with its follow star and copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout. |
+| **showStar** | `boolean` | ✅ | Show the follow (favourite) star beside the record title. Part of the record chrome — no effect when `recordChrome` is false. |
+| **showCopyId** | `boolean` | ✅ | Show the copy-record-id button beside the record title. Part of the record chrome — no effect when `recordChrome` is false. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -256,7 +260,8 @@ const result = AIChatWindowProps.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'line' \| 'card' \| 'pill'>` | optional |  |
+| **tabStyle** | `Enum<'line' \| 'card' \| 'pill'>` | optional | Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills |
+| **type** | `never` | optional | [REMOVED] `page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — a props key named `type` collides with the page component's own dispatch key, so it is unauthorable in the flat and JSX carriers and was never validated in them. Rename the key to `tabStyle`; the value (`line` \| `card` \| `pill`) is unchanged. Run `os migrate meta --from 16` to rewrite it automatically. |
 | **position** | `Enum<'top' \| 'left'>` | optional |  |
 | **items** | `{ label: string \| Record<string, string>; icon?: string; visibleWhen?: string \| object; value?: string; … }[]` | ✅ |  |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |

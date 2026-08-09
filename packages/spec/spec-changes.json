@@ -367,6 +367,12 @@
         "to": "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (#5777 — the payload gets its own key; `params` stays the ActionParam[] definition array)",
         "conversionId": "inline-action-api-params-to-body-extra",
         "toMajor": 17
+      },
+      {
+        "surface": "page.component.page:tabs.type",
+        "to": "page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
+        "conversionId": "page-tabs-type-to-tab-style",
+        "toMajor": 17
       }
     ],
     "migrated": [
@@ -1214,6 +1220,12 @@
           "surface": "page.component.element:button.action.params",
           "to": "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (#5777 — the payload gets its own key; `params` stays the ActionParam[] definition array)",
           "conversionId": "inline-action-api-params-to-body-extra",
+          "toMajor": 17
+        },
+        {
+          "surface": "page.component.page:tabs.type",
+          "to": "page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them)",
+          "conversionId": "page-tabs-type-to-tab-style",
           "toMajor": 17
         }
       ],

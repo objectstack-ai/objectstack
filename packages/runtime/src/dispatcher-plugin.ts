@@ -450,6 +450,8 @@ function sendResultBase(
  * the RLS POLICY the tenant is being filtered by:
  *
  * ```
+ * ⚠️ PAST TENSE — the leak this entry CLOSED, not what this exit answers today.
+ *    For the current body see the corrected shape at the end of this block.
  * POST /analytics/query      (tenant caller, object with a broken sharing rule)
  * → 500 {"success":false,"error":{"message":"[read-scope-sql] unsafe field
  *        identifier \"secret_policy_field\" — refusing to build read scope
@@ -464,9 +466,28 @@ function sendResultBase(
  * boundaries. ⛔ It is NOT "withhold every 5xx" — #5667 kept UNDECLARED 5xx
  * legible on purpose, and a bare `Error` still goes through the heuristic alone.
  *
- * The code still travels: `details.code` (#3842, below) carries
- * `READ_SCOPE_COMPILE_FAILED` to the client untouched, so what a machine reads is
- * unchanged and only the prose is withheld — into `errorReporter` and the log.
+ * The code still travels, and `READ_SCOPE_COMPILE_FAILED` reaches the client
+ * untouched — so what a machine reads is unchanged and only the prose is withheld,
+ * into `errorReporter` and the log.
+ *
+ * ⚠️ It reaches the client at `error.code` — NOT `error.details.code`, which is
+ * where this note pointed until #6270 corrected it (#6123 corrected the same
+ * sentence at three sibling sites). The `details` assembly below (#3842) only
+ * STAGES the code in a local object; `buildApiError` then runs
+ * `splitSemanticCode` (`./error-envelope.ts`), which PROMOTES it into the declared
+ * `ApiErrorSchema` field and returns the now-empty `details` as `undefined` — so
+ * the key is omitted from the body and `error.details.code` is never present to
+ * read. Do not mistake the local variable name for the wire contract. The measured
+ * 500 body is exactly:
+ *
+ * ```json
+ * {"success":false,"error":{"code":"READ_SCOPE_COMPILE_FAILED",
+ *  "message":"Internal server error","httpStatus":500}}
+ * ```
+ *
+ * Pinned end-to-end in `analytics-query-read-scope-withhold.test.ts`, which
+ * asserts the code at `error.code` against a real `AnalyticsService` on a real
+ * mounted route.
  */
 function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, string>): void {
     const validation = validationFailureDetails(err);
