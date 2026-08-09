@@ -175,7 +175,7 @@ const result = RLSEvaluationResultSchema.parse(data);
 | **check** | `string` | optional | Validation condition for INSERT/UPDATE (defaults to USING clause if not specified - enforced at application level) |
 | **positions** | `string[]` | optional | Positions this policy applies to (omit for all) |
 | **enabled** | `boolean` | ✅ | Whether this policy is active |
-| **priority** | `never` | optional | [REMOVED] `rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0 (#3896 security audit). It never had an effect and could not: applicable policies OR-combine (most permissive wins), so there is no conflict to order. Delete the key — policy outcomes are unchanged. |
+| **priority** | `never` | optional | [REMOVED] `rowLevelSecurity[].priority` was removed in @objectstack/spec 17.0.0 (#3896 security audit). It never had an effect and could not: applicable policies OR-combine (most permissive wins), so there is no conflict to order. Delete the key — policy outcomes are unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **tags** | `string[]` | optional | Policy categorization tags |
 
 

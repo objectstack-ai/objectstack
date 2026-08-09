@@ -34,6 +34,7 @@
     "check:i18n-coverage": "node scripts/check-i18n-coverage.mjs --self-test && node scripts/check-i18n-coverage.mjs",
     "check:app-nav-i18n": "pnpm --filter @objectstack/cli run check:app-nav-i18n",
     "check:nul-bytes": "node scripts/check-nul-bytes.mjs --self-test && node scripts/check-nul-bytes.mjs",
+    "check:stack-collection-maps": "node scripts/check-stack-collection-maps.mjs --self-test && node scripts/check-stack-collection-maps.mjs",
     "check:doc-authoring": "node scripts/check-doc-authoring.mjs --self-test && node scripts/check-doc-authoring.mjs",
     "check:docs-audit-scope": "node scripts/docs-audit/affected-docs.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs",
     "check:role-word": "node scripts/check-role-word.mjs",

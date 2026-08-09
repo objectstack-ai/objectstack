@@ -140,19 +140,54 @@ interface ZodIssueMinimal {
    * so everything a failing branch has to say lives down here.
    */
   errors?: readonly (readonly ZodIssueMinimal[])[];
+  /**
+   * [#5389] Only on `invalid_key` / `invalid_element`: the ONE issue list the
+   * failing key / element schema produced, with paths RELATIVE to this issue's
+   * own path — the same relationship `errors` has, spelled with a different
+   * property name and without the per-branch nesting (a container has one
+   * inner schema, not N alternatives).
+   *
+   * The distinction that makes this a separate field rather than a second
+   * shape of `errors`: a union's branches are *candidates* and have to be
+   * ranked ({@link selectUnionBranches}), while these issues are simply what
+   * went wrong — every one of them is true and none of them is speculative.
+   */
+  issues?: readonly ZodIssueMinimal[];
 }
+
+/**
+ * [#5389] The issue codes that hang their real diagnosis on `issue.issues`.
+ *
+ * Zod raises these when a CONTAINER's inner schema rejects a key or an element
+ * that cannot be addressed by a path segment:
+ *
+ * - `invalid_key` — `z.record(K, V)`'s **key** schema rejected a key, and
+ *   `z.map(K, V)`'s key schema rejected a non-`PropertyKey` key;
+ * - `invalid_element` — `z.map(K, V)`'s **value** schema rejected the value
+ *   under a non-`PropertyKey` key.
+ *
+ * In both cases the issue's own `message` is a bare wrapper ("Invalid key in
+ * record") and everything the author needs sits one level down, exactly as
+ * `invalid_union` hides a branch's prescription in `errors` (#4971). Zod's own
+ * `treeifyError` / `formatError` descend both codes with `[...path,
+ * ...issue.path]` as the parent path; this renderer did not, which is the
+ * defect #5389 records.
+ */
+const CONTAINER_ISSUE_CODES: ReadonlySet<string> = new Set(['invalid_key', 'invalid_element']);
 
 /** One indent step of a formatted issue line. */
 const ISSUE_INDENT = '  ';
 
 /**
- * How many levels of nested `invalid_union` are expanded below a top-level
- * issue. Unions nest (a union member that is itself a union — `StateMachine →
- * on.GO → actions[0]` is two levels in this repo today), and each level can
+ * How many levels of nested issues are expanded below a top-level issue —
+ * `invalid_union` branches and, since #5389, `invalid_key` / `invalid_element`
+ * container issues alike. Both nest (a union member that is itself a union —
+ * `StateMachine → on.GO → actions[0]` is two levels in this repo today; a
+ * record whose value schema is a union is another), and a union level can
  * render several branches, so the expansion is bounded rather than left to the
  * shape of whatever the author typed.
  */
-const UNION_EXPANSION_DEPTH_LIMIT = 3;
+const NESTED_EXPANSION_DEPTH_LIMIT = 3;
 
 /** How many equally-informative branches are rendered at one level. */
 const UNION_BRANCH_RENDER_LIMIT = 3;
@@ -243,13 +278,21 @@ function renderPath(path: PropertyKey[]): string {
 }
 
 /**
- * Render one issue and — for `invalid_union` — the selected branches beneath
- * it, one indent level deeper, with paths resolved against the union's own.
+ * Render one issue and — for `invalid_union`, and since #5389 for
+ * `invalid_key` / `invalid_element` — the issues beneath it, one indent level
+ * deeper, with paths resolved against the parent issue's own.
+ *
+ * The two descents differ in exactly one way, and it is the reason they are not
+ * merged into one loop: a union's branches are competing CANDIDATES, so they
+ * are ranked and capped ({@link selectUnionBranches}) to keep one mistake from
+ * being reported once per member; a container's `issues` are the one list the
+ * key/element schema actually produced, so every one of them is rendered —
+ * there is no branch to choose between and nothing to omit.
  *
  * `seen` de-duplicates leaf lines *within one top-level issue*: two branches
- * that reject the same key with the same words say it once. Union lines
- * themselves are never de-duplicated, since two same-path `"Invalid input"`
- * lines can head genuinely different sub-trees.
+ * that reject the same key with the same words say it once. Expanded lines
+ * (union and container heads) are themselves never de-duplicated, since two
+ * same-path wrapper lines can head genuinely different sub-trees.
  */
 function renderIssue(
   issue: ZodIssueMinimal,
@@ -260,7 +303,9 @@ function renderIssue(
   const path = [...parentPath, ...issue.path];
   const rendered = renderPath(path);
   const branches = issue.code === 'invalid_union' ? (issue.errors ?? []) : [];
-  const expandable = branches.length > 0 && depth < UNION_EXPANSION_DEPTH_LIMIT;
+  const contained = issue.code && CONTAINER_ISSUE_CODES.has(issue.code) ? (issue.issues ?? []) : [];
+  const expandable =
+    (branches.length > 0 || contained.length > 0) && depth < NESTED_EXPANSION_DEPTH_LIMIT;
 
   if (!expandable) {
     const key = JSON.stringify([depth, rendered, issue.message]);
@@ -271,16 +316,23 @@ function renderIssue(
   const lines = [`${ISSUE_INDENT.repeat(depth + 1)}✗ ${rendered}: ${issue.message}`];
   if (!expandable) return lines;
 
-  const { selected, omitted } = selectUnionBranches(branches);
-  for (const branch of selected) {
-    for (const nested of branch) {
-      lines.push(...renderIssue(nested, path, depth + 1, seen));
+  if (branches.length > 0) {
+    const { selected, omitted } = selectUnionBranches(branches);
+    for (const branch of selected) {
+      for (const nested of branch) {
+        lines.push(...renderIssue(nested, path, depth + 1, seen));
+      }
     }
+    if (selected.length > 0 && omitted > 0) {
+      lines.push(
+        `${ISSUE_INDENT.repeat(depth + 2)}… and ${omitted} more branch${omitted === 1 ? '' : 'es'} rejected this value`,
+      );
+    }
+    return lines;
   }
-  if (selected.length > 0 && omitted > 0) {
-    lines.push(
-      `${ISSUE_INDENT.repeat(depth + 2)}… and ${omitted} more branch${omitted === 1 ? '' : 'es'} rejected this value`,
-    );
+
+  for (const nested of contained) {
+    lines.push(...renderIssue(nested, path, depth + 1, seen));
   }
   return lines;
 }
@@ -339,9 +391,22 @@ export function formatZodIssue(issue: ZodIssueMinimal): string {
  *   ✗ states.s.on.GO.actions.0: Invalid input
  *     ✗ states.s.on.GO.actions.0: Unrecognized key(s) on this action reference: `args`. …
  * ```
- * The issue **count** stays the count of `error.issues` — the union is one
- * issue no matter how many lines explain it, which keeps this header agreeing
- * with the structural consumers (REST error bodies, `ZodError.message`).
+ *
+ * [#5389] `invalid_key` / `invalid_element` hide their diagnosis the same way —
+ * on `issue.issues` rather than `issue.errors` — and are expanded the same way,
+ * so a constrained `z.record` KEY reaches the author as the key schema's own
+ * words instead of zod's bare `"Invalid key in record"`:
+ * ```
+ * Validation failed (1 issue):
+ *
+ *   ✗ fields.First Name: Invalid key in record
+ *     ✗ fields.First Name: Invalid identifier 'First Name'. Must be lowercase snake_case …
+ * ```
+ *
+ * The issue **count** stays the count of `error.issues` — the union (or the
+ * container) is one issue no matter how many lines explain it, which keeps this
+ * header agreeing with the structural consumers (REST error bodies,
+ * `ZodError.message`).
  */
 export function formatZodError(error: z.ZodError, label?: string): string {
   const count = error.issues.length;

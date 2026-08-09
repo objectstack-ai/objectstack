@@ -208,18 +208,37 @@ export function createTimer() {
 // ─── Zod Error Formatting ───────────────────────────────────────────
 
 /**
- * How far the branch lines of an expanded union are pushed to sit UNDER the
- * `code: message` line this file prints for the union itself.
+ * How far the nested lines of an expanded issue are pushed to sit UNDER the
+ * `code: message` line this file prints for the issue itself.
  *
  * `formatZodIssue` indents its own depth-0 line by 2 spaces and each nested
  * level by 2 more; this file's per-issue block is at 4/6. Adding 4 puts the
- * first branch level at 8 — one step below the `invalid_union: Invalid input`
+ * first nested level at 8 — one step below the `invalid_union: Invalid input`
  * line it explains — and keeps every deeper level nested relative to it.
  */
-const UNION_BRANCH_REINDENT = '    ';
+const NESTED_ISSUE_REINDENT = '    ';
 
 /**
- * The lines that explain an `invalid_union`, or nothing at all.
+ * [#5389] The issue codes whose real diagnosis is nested one level down, and
+ * which `formatZodIssue` therefore renders as more than one line.
+ *
+ * `invalid_union` puts each candidate branch on `issue.errors[]`; `invalid_key`
+ * / `invalid_element` put the key/element schema's own issues on
+ * `issue.issues[]`. Same defect, two property names — and the gate below has to
+ * name both, or the terminal keeps printing `invalid_key: Invalid key in
+ * record` with the prescription stranded in the payload.
+ *
+ * Kept in step with `CONTAINER_ISSUE_CODES` in `@objectstack/spec`'s
+ * `error-map.zod.ts`, which is where the descent itself lives.
+ */
+const EXPANDABLE_ISSUE_CODES: ReadonlySet<string> = new Set([
+  'invalid_union',
+  'invalid_key',
+  'invalid_element',
+]);
+
+/**
+ * The lines that explain an expandable issue, or nothing at all.
  *
  * Zod folds every branch of a failed union into ONE issue whose own `message`
  * is the literal `"Invalid input"`; each branch's real rejection sits in
@@ -241,18 +260,24 @@ const UNION_BRANCH_REINDENT = '    ';
  * so had to re-implement the ranking — the terminal needs exactly the STRING
  * that spec already exports, so here the reuse is a plain import.
  *
- * Line 0 of that render is the union's own verdict, which the caller has
+ * [#5389] The same import now also covers `invalid_key` / `invalid_element`,
+ * whose diagnosis hangs on `issue.issues[]` instead. Widening the gate is the
+ * WHOLE of this file's share of that fix — the descent is spec's, so the
+ * terminal inherits it the moment it stops refusing to ask.
+ *
+ * Line 0 of that render is the issue's own verdict, which the caller has
  * already printed in this file's own idiom; only the explanation is returned,
  * so the change is strictly ADDITIVE — nothing that printed before #5341 stops
- * printing. A non-union issue renders as a single line, hence never reaches
- * here and could not add one anyway.
+ * printing. An issue with nothing nested renders as a single line, hence never
+ * reaches here and could not add one anyway.
  */
-function unionBranchLines(issue: unknown): string[] {
-  if ((issue as { code?: unknown } | null)?.code !== 'invalid_union') return [];
+function nestedIssueLines(issue: unknown): string[] {
+  const code = (issue as { code?: unknown } | null)?.code;
+  if (typeof code !== 'string' || !EXPANDABLE_ISSUE_CODES.has(code)) return [];
   return formatZodIssue(issue as Parameters<typeof formatZodIssue>[0])
     .split('\n')
     .slice(1)
-    .map((line) => `${UNION_BRANCH_REINDENT}${line}`);
+    .map((line) => `${NESTED_ISSUE_REINDENT}${line}`);
 }
 
 export function formatZodErrors(error: ZodError) {
@@ -291,8 +316,9 @@ export function formatZodErrors(error: ZodError) {
         console.log(chalk.dim(`      received: ${chalk.red((issue as any).received)}`));
       }
 
-      // [#5341] …and, for a union, the branch that actually explains it.
-      for (const line of unionBranchLines(issue)) {
+      // [#5341] …and, for a union — [#5389] or a record key / map element —
+      // the nested issues that actually explain it.
+      for (const line of nestedIssueLines(issue)) {
         console.log(chalk.dim(line));
       }
     }

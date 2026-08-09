@@ -212,8 +212,8 @@ function valueAtPath(input: unknown, path: unknown): unknown {
 }
 
 /**
- * How many levels of nested `invalid_union` are expanded below a top-level
- * issue, and how many equally-informative branches are emitted at one level.
+ * How many levels of nested issues are expanded below a top-level issue, and
+ * how many equally-informative union branches are emitted at one level.
  *
  * Both bounds — and the whole selection policy below — are the ones
  * `formatZodError` landed for the CLI/spec side of this defect (#4971,
@@ -223,8 +223,21 @@ function valueAtPath(input: unknown, path: unknown): unknown {
  * the same, or one mistake gets two different prescriptions depending on whether
  * the author published from the terminal or POSTed to the API (#5014).
  */
-const UNION_EXPANSION_DEPTH_LIMIT = 3;
+const NESTED_EXPANSION_DEPTH_LIMIT = 3;
 const UNION_BRANCH_EMIT_LIMIT = 3;
+
+/**
+ * [#5389] The issue codes that hang their real diagnosis on `issue.issues`
+ * rather than on `invalid_union`'s `issue.errors`.
+ *
+ * `invalid_key` is raised when `z.record(K, V)`'s KEY schema rejects a key (and
+ * by `z.map` for a non-`PropertyKey` key); `invalid_element` when `z.map`'s
+ * VALUE schema rejects the value under such a key. Both carry a bare wrapper
+ * message ("Invalid key in record") with everything the client needs one level
+ * down — the same defect as #5014, one property name over. Kept in step with
+ * `CONTAINER_ISSUE_CODES` in `spec/src/shared/error-map.zod.ts`.
+ */
+const CONTAINER_ISSUE_CODES: ReadonlySet<string> = new Set(['invalid_key', 'invalid_element']);
 
 /** A Zod issue path, normalised to the array Zod always produces. */
 function issuePathOf(issue: any): Array<string | number> {
@@ -308,6 +321,14 @@ function selectUnionBranches(branches: readonly (readonly any[])[]): readonly (r
  * the branches that explain it, with `field` resolved against the union's own
  * path — branch paths are relative to it.
  *
+ * [#5389] An `invalid_key` / `invalid_element` behaves the same way one property
+ * name over: its own entry (zod's `"Invalid key in record"`, also
+ * `invalid_shape`) followed by the entries on `issue.issues`, whose paths are
+ * likewise relative. The one difference from a union: those issues are not
+ * competing candidates, so they are NOT ranked or capped — every one of them is
+ * a true statement about the value, and dropping any would be dropping a real
+ * diagnosis rather than declining to guess.
+ *
  * The union's entry is kept rather than replaced: it is the only entry naming
  * the slot the client sent, existing clients already read it, and when every
  * branch is uninformative it is still the whole answer. So the expansion is
@@ -343,7 +364,11 @@ function collectIssueFields(
     const branches: readonly (readonly any[])[] = issue?.code === 'invalid_union' && Array.isArray(issue?.errors)
         ? issue.errors.filter((branch: unknown): branch is any[] => Array.isArray(branch))
         : [];
-    const expandable = branches.length > 0 && depth < UNION_EXPANSION_DEPTH_LIMIT;
+    const contained: readonly any[] = CONTAINER_ISSUE_CODES.has(issue?.code) && Array.isArray(issue?.issues)
+        ? issue.issues
+        : [];
+    const expandable = (branches.length > 0 || contained.length > 0)
+        && depth < NESTED_EXPANSION_DEPTH_LIMIT;
 
     const entry = {
         field,
@@ -361,10 +386,17 @@ function collectIssueFields(
     out.push(entry);
     if (!expandable) return;
 
-    for (const branch of selectUnionBranches(branches)) {
-        for (const nested of branch) {
-            collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
+    if (branches.length > 0) {
+        for (const branch of selectUnionBranches(branches)) {
+            for (const nested of branch) {
+                collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
+            }
         }
+        return;
+    }
+
+    for (const nested of contained) {
+        collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
     }
 }
 
@@ -5252,6 +5284,40 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#7019] Same gate, same mechanism as the `PUT` twins —
+                    // but the argument for it is NOT the ADR-0106 round trip,
+                    // and saying so matters. Nothing is masked here and nothing
+                    // is round-tripped: this route discards a customization
+                    // overlay outright, so before this gate an authenticated
+                    // session holding no authoring capability at all could
+                    // reset any customized metadata item in the deployment to
+                    // its artifact default — and with `?dropStorage=true`, drop
+                    // the object's physical table with it.
+                    //
+                    // It belongs with the two PUTs because deleting a
+                    // customization is authoring it (ADR-0066 D1), and because
+                    // the fix is the same four lines — not because it is the
+                    // same argument.
+                    //
+                    // Gate FIRST — before the protocol is resolved — so the
+                    // 501-vs-200 answer leaks no kernel capability, and, the
+                    // point here, so the refusal happens with the overlay row
+                    // still intact. A gate that answers 403 after
+                    // `deleteMetaItem` has run would still be the bug.
+                    // `isSystem` bypasses, as everywhere else.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const held = new Set<string>(
+                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                    );
+                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Resetting a metadata item requires the `manage_metadata` capability.',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!(p as any).deleteMetaItem) {
                         res.status(501).json({
@@ -5578,6 +5644,42 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#7019] The compound-name twin of the gate #6603 put on
+                    // `PUT /meta/:type/:name` — WORD FOR WORD the same
+                    // mechanism, because it is word for word the same
+                    // operation: one generic `saveMetaItem`, reached by a name
+                    // spelled in two segments instead of one.
+                    //
+                    // Gating only the single-segment door left this one as a
+                    // bypass of it, and that was measured rather than reasoned:
+                    // with #6603's gate in place, the identical ADR-0106
+                    // GET → edit a label → PUT still round-tripped a MASKED
+                    // object schema back into the store through here, deleting
+                    // the fields the caller was never allowed to see. Same
+                    // caller, same object, same loss, one route over.
+                    //
+                    // Independently of masking, this door also served the older
+                    // hole for EVERY metadata type: any authenticated session
+                    // could clobber any metadata item.
+                    //
+                    // Gate FIRST — before the protocol is resolved — so an
+                    // unauthorized caller cannot use the 501-vs-200 answer to
+                    // probe which kernels implement saving, and so nothing is
+                    // written before the refusal. `isSystem` bypasses, matching
+                    // every other capability gate on the platform.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const held = new Set<string>(
+                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                    );
+                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Saving a metadata item requires the `manage_metadata` capability.',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
                         res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });

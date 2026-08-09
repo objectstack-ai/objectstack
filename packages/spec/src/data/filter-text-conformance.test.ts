@@ -1,11 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `FILTER_TEXT_CASES` is a standard no backend answers yet (#5701 is the
- * contract half of the #4706 ruling; #5702 writes the lowerings). That makes it
- * unusually easy for the table to be quietly WRONG — nothing executes it, so a
- * miscounted `expected` list would sit there until a driver author trusted it
- * and chased their own correct implementation.
+ * `FILTER_TEXT_CASES` landed as a standard no backend answered yet (#5701, the
+ * contract half of the #4706 ruling). That premise was true when this file was
+ * written and has since been falsified: the SQL-family drivers import and
+ * execute the whole table — that import is what
+ * `scripts/check-driver-conformance.mjs` counts as coverage, and its ledger's
+ * DEBT rows are the open remainder (re-verified 2026-08, #6993). What has NOT
+ * expired is this file's reason to exist: in the window where nothing executed
+ * the table, a miscounted `expected` list would have sat quietly wrong until a
+ * driver author trusted it — and between driver runs, the same oracle is still
+ * what keeps the table honest.
  *
  * So this file executes it, against a reference evaluator written from the
  * declared semantics: ASCII-only case folding, literal comparands. If the table

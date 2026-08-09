@@ -20,8 +20,18 @@
 //     are deleted rather than left unreachable — a `switch` case on a value
 //     the enum no longer has does not type-check, and dead arms are how a
 //     retired vocabulary comes back by accident.
-//   * `distinct: true` on aggregations (collapse duplicates before applying
-//     the function)
+//   * `distinct: true` on aggregations is GONE (#6815, ADR-0049). This module
+//     was its only reader in the whole repo: it collapsed duplicates before
+//     applying the function while `driver-sql`, `driver-turso`,
+//     `driver-mongodb`, `driver-memory` and the service-analytics SQL builder
+//     all ignored the key, so a `sum` with `distinct: true` answered a
+//     deduplicated total here and an ordinary total on every SQL datasource —
+//     the same divergence class as `array_agg`/`string_agg` above, except the
+//     wrong answer was a plausible NUMBER rather than a refusal, so nothing
+//     surfaced it. The key is tombstoned on `AggregationNodeSchema` and the
+//     dedupe limb is deleted rather than left unreachable, for the same reason
+//     the retired function arms were. `count_distinct` is unaffected: it
+//     deduplicates inside its own arm, and every SQL face compiles it (#6409).
 //   * `filter: FilterCondition` on aggregations is **not** evaluated here —
 //     the engine routes filtered aggregations through the driver where
 //     possible; the in-memory fallback ignores the per-aggregation filter and
@@ -170,7 +180,7 @@ function aggregateBucket(rows: any[], aggregations: AggregationNode[]): Record<s
       out[alias] = null;
       continue;
     }
-    const values = collectValues(rows, field, !!agg.distinct);
+    const values = collectValues(rows, field);
 
     switch (fn) {
       case 'count_distinct':
@@ -201,17 +211,18 @@ function aggregateBucket(rows: any[], aggregations: AggregationNode[]): Record<s
   return out;
 }
 
-function collectValues(rows: any[], field: string, distinct: boolean): any[] {
-  if (!distinct) return rows.map((r) => r?.[field]);
-  const seen = new Set<unknown>();
-  const out: any[] = [];
-  for (const r of rows) {
-    const v = r?.[field];
-    if (seen.has(v)) continue;
-    seen.add(v);
-    out.push(v);
-  }
-  return out;
+/**
+ * Every row's value for `field`, in row order, duplicates included.
+ *
+ * The `distinct` parameter is gone with `AggregationNode.distinct` (#6815):
+ * this was the repo's only reader of that flag, and honouring it here while
+ * five other faces ignored it is what made one query answer two numbers. Each
+ * function arm decides for itself what to do with duplicates — `count_distinct`
+ * folds them into a `Set`, every other arm counts them, which is what
+ * `SUM(x)` / `AVG(x)` mean on every SQL face.
+ */
+function collectValues(rows: any[], field: string): any[] {
+  return rows.map((r) => r?.[field]);
 }
 
 function toNumber(v: any): number {

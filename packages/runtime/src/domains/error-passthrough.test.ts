@@ -141,7 +141,18 @@ describe('#3918 follow-up — deliberate per-route fallbacks are preserved', () 
             getService: resolve,
             getServiceAsync: async (name: string) => resolve(name),
         };
-        const result: any = await new HttpDispatcher(kernel).dispatch(
+        const dispatcher = new HttpDispatcher(kernel);
+        // [#7019] The `/meta` PUT now demands the `manage_metadata` capability —
+        // an authoring capability, not just a session. `dispatch()` re-resolves
+        // the execution context from the auth / objectql services, and this stub
+        // has no objectql, so the resolved caller would hold no capabilities and
+        // be refused with a 403 before ever reaching the 501/400 fallback branch
+        // this test pins. Only the caller's capability is stubbed; the fallback
+        // mechanism and its expected statuses are unchanged.
+        (dispatcher as any).timedResolveExecutionContext = async () => ({
+            userId: 'u1', systemPermissions: ['manage_metadata'],
+        });
+        const result: any = await dispatcher.dispatch(
             'PUT', '/meta/object/widget', { name: 'widget' }, {}, {} as any,
         );
         return result.response;

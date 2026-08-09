@@ -775,12 +775,19 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
  * `packages/spec` and objectui two sources of truth for one contract — the
  * fork #2231's derive-by-reference unification exists to prevent (PD#12).
  *
- * ⚠️ Scope of the promotion: `allowAddTab` declares that the tab bar RENDERS an
- * add-tab affordance. The button objectui renders today carries no click
- * handler, so it is presentational — filed against the renderer as #5236, and
- * deliberately NOT written into the `.describe()`, because a contract that
- * promises "end users can add presets" would be advertising a capability the
- * runtime does not deliver (PD#10).
+ * ⚠️ Scope of the promotion, and its RESOLUTION (#5236 → #6961). At promotion
+ * time `allowAddTab` was described as declaring only that the tab bar RENDERS
+ * an add-tab affordance: the button objectui rendered carried no click handler,
+ * so it was presentational, and the narrower wording was deliberate — a
+ * contract promising "end users can add presets" would have advertised a
+ * capability the runtime did not deliver (PD#10). The maintainer then ruled
+ * **A1 — implement, session-scoped** (#5236, 2026-08-06), objectui#3926
+ * delivered it (`packages/plugin-list/src/UserFilters.tsx` — naming popover,
+ * snapshot of the applied filters, component state only, remove affordance on
+ * the added tab), and the `.describe()` below was upgraded back to the real
+ * semantics. The narrowing was the interim state the ruling closed, not the
+ * contract: the key now promises the behaviour, and PD#10 is satisfied by the
+ * delivery rather than by the hedge.
  *
  * ## What closing flips, and why that flip is wanted (批 6e's question)
  *
@@ -814,7 +821,7 @@ export const UserFiltersSchema = lazySchema(() => strictObject({
   showAllRecords: z.boolean().optional()
     .describe('Show an "All records" tab before the presets (tabs element)'),
   allowAddTab: z.boolean().optional()
-    .describe('Render an "add tab" affordance after the presets (tabs element). Page lists only — object views use `listViews` for named presets'),
+    .describe('Let end users add their own tab after the presets (tabs element): the affordance asks for a name and snapshots the filters currently applied as a new tab. SESSION-SCOPED — an added tab lives only for the current mount, is never written back as metadata (ADR-0047), and carries a remove control the authored presets do not. Page lists only — object views use `listViews` for named presets'),
 }).describe('End-user quick-filter configuration (Airtable "User filters" parity)'));
 
 /**
@@ -1284,12 +1291,14 @@ export const ListViewSchema = lazySchema(() => strictObject({
   // objectui@fb35e48; ledger: dead).
   responsive: retiredKey(
     '`view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
-    'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key.',
+    'no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   performance: retiredKey(
     '`view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'no renderer or runtime read it; list-view performance tuning was never implemented. ' +
-    'Delete the key.',
+    'Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 }));
 
@@ -1710,7 +1719,8 @@ export const FormViewSchema = lazySchema(() => strictObject({
   defaultSort: retiredKey(
     '`form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'nothing read it: a related list inside a form sorts by its own list view\'s `sort`. ' +
-    'Delete the key and set the sort on the related list view instead.',
+    'Delete the key and set the sort on the related list view instead. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /** Public form sharing configuration */
@@ -1808,7 +1818,8 @@ export const FormViewSchema = lazySchema(() => strictObject({
     '`form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form ' +
     'renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. ' +
     'Delete the key. The form renderer emits its own semantic markup; report gaps as ' +
-    'renderer issues rather than per-view attribute overrides.',
+    'renderer issues rather than per-view attribute overrides. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 }).superRefine((view, ctx) => {
   // `section.pane` is split-only vocabulary. On any other form type it would
@@ -2334,7 +2345,7 @@ export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem
 // an arbitrary body — Prime Directive #10's "declared ≠ enforced", one layer
 // above the object schemas #4001 closed: at union-MEMBER SELECTION, not at
 // any single member. The fix is a precondition, NOT a strictness flip on the
-// members — see {@link viewIdentityVocabulary}.
+// members — see {@link assertViewIdentity} and {@link viewMetadataVocabulary}.
 
 /**
  * Optional identity + structural-guard fields layered onto the two "flattened
@@ -2451,6 +2462,21 @@ function collectDeclaredTopLevelKeys(schema: unknown, into: Set<string>, depth =
 }
 
 /**
+ * [#5599] The precondition's predicate half, extracted (#6391) so
+ * {@link diagnoseViewMetadata} can ask the SAME question the parse path asks
+ * without having to recognise the issue text the other half writes.
+ *
+ * True for anything this precondition does not judge (non-objects, arrays —
+ * left to the union, which already rejects them) and for any object carrying at
+ * least one key some member declares that the write path did not stamp itself.
+ */
+function speaksViewVocabulary(body: unknown): boolean {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return true;
+  const vocabulary = viewMetadataVocabulary();
+  return Object.keys(body as Record<string, unknown>).some((key) => vocabulary.has(key));
+}
+
+/**
  * [#5599] The minimal identity precondition, run BEFORE the four-arm union.
  *
  * A `view` body must speak the `view` vocabulary — carry at least one key some
@@ -2488,12 +2514,12 @@ function collectDeclaredTopLevelKeys(schema: unknown, into: Set<string>, depth =
  * so a rejected body yields ONE named issue instead of that issue plus four
  * `invalid_union` branches for arms that were never the point.
  */
-function assertViewIdentity(body: unknown, ctx: z.RefinementCtx, vocabulary: Set<string>): boolean {
+function assertViewIdentity(body: unknown, ctx: z.RefinementCtx): boolean {
   // Non-objects and arrays are left to the union, which already rejects them —
   // this precondition answers "which object is not a view", nothing else.
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return true;
+  if (speaksViewVocabulary(body)) return true;
   const keys = Object.keys(body as Record<string, unknown>);
-  if (keys.some((key) => vocabulary.has(key))) return true;
   // Report the two halves separately. Lumping them together would call `name`
   // "unrecognized", which is false and would send an author to fix the wrong
   // key: `name` is declared, it is just discounted as evidence.
@@ -2518,6 +2544,292 @@ function assertViewIdentity(body: unknown, ctx: z.RefinementCtx, vocabulary: Set
       (keys.length === 0 ? '' : '.'),
   });
   return false;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#6391] The union's members, named and published
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Measured from the consumer side (objectui#3606 / PR objectui#3624, against
+// `@objectstack/spec` 17.0.0-rc.5): a consumer that has to turn a
+// `ViewMetadataSchema` failure back into per-field diagnostics had exactly two
+// routes, and both couple to spec internals. It could index the nested
+// `invalid_union` `errors[]` BY MEMBER POSITION — position is an internal
+// detail nobody promised, so objectui pinned it with a CANARY test that rings
+// on every reorder — or it could re-declare each member itself, which is a
+// deeper coupling still and was measured and rejected there.
+//
+// The cause was never the union: member 1 was already the exported
+// `ViewItemWireSchema`, and a consumer could reference THAT contractually. The
+// other three were inline expressions with no name, so member 2 was merely
+// "shaped like `ViewSchema`" — key-for-key identical, behaviourally identical,
+// and NOT the same object, which is precisely the difference between a contract
+// and a resemblance.
+//
+// So the members get names, the union is built FROM those names (the identity
+// is guaranteed by construction, not maintained by hand), and a branch-naming
+// diagnostic entry point sits beside them so a consumer never has to know the
+// order at all — {@link diagnoseViewMetadata}.
+//
+// The names are published as ONE export — {@link VIEW_METADATA_MEMBERS}, keyed
+// by branch — rather than as three individual `…Schema` consts, and that is a
+// decision rather than a style: a top-level exported schema binding mints a new
+// protocol def (`ui/ViewContainerWire`, …) in `json-schema.manifest/` and, for
+// anything with a derivable object shape, a full set of keys in the ratcheted
+// `authorable-surface/`. The container member's 15 keys ARE `ui/View`'s 15
+// keys — duplicating them there would add 15 phantom authorable properties to
+// the ADR-0049 liveness worklist for a wire door nobody authors against. The
+// record gives a consumer the same contractual handle
+// (`VIEW_METADATA_MEMBERS.container`) with none of that.
+//
+// ⛔ What this deliberately does NOT do: convert the union to
+// `z.discriminatedUnion`. That was the filer's other option, and it would move
+// the ACCEPTANCE face — a discriminated union refuses an unknown discriminant
+// outright where this union falls through all four members, and several of
+// these shapes have no discriminant key at all (a flattened overlay may carry
+// nothing but `columns`). The dispatch below is therefore a DIAGNOSTIC
+// dispatch: it names the branch a failure belongs to, and decides nothing about
+// whether the body is accepted. `ViewMetadataSchema` remains the only judge.
+
+/**
+ * [#6391] Member 2 of {@link ViewMetadataSchema} — a non-empty `defineView`
+ * container. Published as `VIEW_METADATA_MEMBERS.container`.
+ *
+ * `ViewSchema` itself accepts `{}` (every slot optional), which would register
+ * zero views; the refinement is what makes this member "a container that
+ * actually defines a view" — see {@link containerHasAView}. It is published
+ * because that refinement, not `ViewSchema`, is what the union holds: a
+ * consumer selecting "the container branch" needs the object the union is
+ * actually going to run, or its diagnosis diverges from the platform's on
+ * exactly the empty-container case.
+ */
+const ViewContainerWireSchema = lazySchema(() =>
+  ViewSchema.refine(containerHasAView, {
+    message:
+      'A view container must define at least one of `list`, `form`, `listViews`, or `formViews`.',
+  }),
+);
+
+/**
+ * [#6391] Member 3 of {@link ViewMetadataSchema} — a flattened runtime LIST
+ * overlay: an inline `ListView` config at the top level plus the optional
+ * identity/round-trip fields a personalization PUT carries. Published as
+ * `VIEW_METADATA_MEMBERS.listOverlay`.
+ *
+ * `.strip()` is load-bearing, not leftover. `.extend()` INHERITS strictness, so
+ * closing `ListViewSchema` for authoring (#4001) silently made this overlay
+ * strict too — and this member exists precisely to carry Studio's auxiliary
+ * round-trip keys (`isPinned`, `sortOrder`, …) that `saveMetaItem` persists
+ * verbatim. Strict here is a 422 on a shape the platform itself writes. The
+ * ledger names this as the trap to watch while batching: a response-side
+ * extension of an authoring schema must strip back, or an upstream field
+ * addition becomes a crash.
+ */
+const ListViewOverlayWireSchema = lazySchema(() =>
+  ListViewSchema.extend(flattenedViewOverlayFields()).strip(),
+);
+
+/**
+ * [#6391] Member 4 of {@link ViewMetadataSchema} — a flattened runtime FORM
+ * overlay, published as `VIEW_METADATA_MEMBERS.formOverlay`. Same construction
+ * and the same `.strip()` rationale as {@link ListViewOverlayWireSchema}; the
+ * list member is tried first, and a flattened form (no required `columns`,
+ * disjoint `type` enum) then matches here.
+ */
+const FormViewOverlayWireSchema = lazySchema(() =>
+  FormViewSchema.extend(flattenedViewOverlayFields()).strip(),
+);
+
+/**
+ * [#6391] The branch names of {@link ViewMetadataSchema}'s union, in
+ * declaration order.
+ *
+ * The order is still the union's evaluation order — that has not changed and is
+ * observable — but a consumer no longer has to *encode* it: it can ask for a
+ * branch by name via {@link VIEW_METADATA_MEMBERS}, or let
+ * {@link diagnoseViewMetadata} name the branch for it.
+ */
+export const VIEW_METADATA_BRANCHES = ['viewItem', 'container', 'listOverlay', 'formOverlay'] as const;
+
+/** [#6391] One branch of {@link ViewMetadataSchema}'s union, by name. */
+export type ViewMetadataBranch = (typeof VIEW_METADATA_BRANCHES)[number];
+
+/**
+ * [#6391] Branch name → the schema {@link ViewMetadataSchema}'s union actually
+ * holds for that branch.
+ *
+ * This record IS the union's member list: the schema below is built by mapping
+ * {@link VIEW_METADATA_BRANCHES} over it, so "member N is the published schema"
+ * is guaranteed by construction rather than by two declarations agreeing. Add a
+ * member here and it is in the union, named, in one edit.
+ *
+ * The values are {@link lazySchema} proxies, so naming them costs no eager
+ * materialisation (ADR-0089 D3a) — reading this record does not build a single
+ * view schema.
+ */
+export const VIEW_METADATA_MEMBERS = {
+  // 1. Standalone ViewItem record — nested config validated genuinely, and the
+  //    WIRE variant, so Studio's round-trip keys have a declared home.
+  viewItem: ViewItemWireSchema,
+  // 2. Non-empty defineView container.
+  container: ViewContainerWireSchema,
+  // 3/4. Flattened runtime overlay — inline ListView / FormView config + identity.
+  listOverlay: ListViewOverlayWireSchema,
+  formOverlay: FormViewOverlayWireSchema,
+} as const satisfies Record<ViewMetadataBranch, z.ZodTypeAny>;
+
+/**
+ * [#5599] The `view` vocabulary, derived once from the members on first use.
+ *
+ * Hoisted out of {@link ViewMetadataSchema}'s factory closure (#6391) so
+ * {@link diagnoseViewMetadata} can consult the SAME derivation the parse path
+ * consults. Two copies of this rule would be two answers to "is this a view
+ * body at all?", and the diagnostic one would be the wrong one.
+ *
+ * Still computed on first call rather than at module load: the members are
+ * {@link lazySchema} proxies whose factories run on first `_zod` touch, and
+ * deriving eagerly would force every view schema in the file to materialise as
+ * a side effect of this module loading (ADR-0089 D3a).
+ */
+let viewVocabularyCache: Set<string> | undefined;
+function viewMetadataVocabulary(): Set<string> {
+  if (!viewVocabularyCache) {
+    const vocabulary = new Set<string>();
+    for (const branch of VIEW_METADATA_BRANCHES) {
+      collectDeclaredTopLevelKeys(VIEW_METADATA_MEMBERS[branch], vocabulary);
+    }
+    // Identity the write path supplies is not evidence of shape — see
+    // `VIEW_WRITE_PATH_IDENTITY_KEYS` for why this subtraction is the
+    // difference between closing #5599 and only appearing to.
+    for (const key of VIEW_WRITE_PATH_IDENTITY_KEYS) vocabulary.delete(key);
+    viewVocabularyCache = vocabulary;
+  }
+  return viewVocabularyCache;
+}
+
+/**
+ * [#6391] The `type` values that tell the two flattened overlay branches apart.
+ *
+ * `ListViewSchema.type` and `FormViewSchema.type` are disjoint enums — the
+ * property the union's own comment already relies on ("a flattened form (no
+ * required `columns`, disjoint `type` enum) then matches the form member"). Read
+ * off the schemas rather than re-listed, so a new view type cannot make the
+ * dispatch disagree with the members.
+ */
+function overlayTypeValues(schema: z.ZodTypeAny): ReadonlySet<string> {
+  const shape = (schema as unknown as { _zod?: { def?: { shape?: Record<string, unknown> } } })
+    ._zod?.def?.shape;
+  const values = (shape?.type as { _zod?: { values?: Set<unknown> } } | undefined)?._zod?.values;
+  return new Set([...(values ?? [])].filter((v): v is string => typeof v === 'string'));
+}
+
+/**
+ * [#6391] Which branch of {@link ViewMetadataSchema} a body CLAIMS to be, by
+ * its structural discriminants — or `null` when nothing in the body settles it.
+ *
+ * This is the "select the member by body" entry the filer asked for, and it
+ * encodes exactly the discriminants the members themselves already declare:
+ *
+ * - a nested `config` means a ViewItem record — both overlay members pin
+ *   `config: z.undefined()` precisely to exclude that shape;
+ * - a container slot (`list` / `form` / `listViews` / `formViews`) means a
+ *   container — both overlay members pin those `undefined` too;
+ * - otherwise the body is a flattened overlay, and `viewKind` (when the write
+ *   path inherited one — #2555) or the disjoint `type` enums say which family.
+ *
+ * ⚠️ A `null` answer is not a rejection and a non-`null` one is not an
+ * acceptance. This function decides which branch is worth EXPLAINING; whether
+ * the body parses is `ViewMetadataSchema`'s answer and only its answer.
+ */
+export function selectViewMetadataBranch(body: unknown): ViewMetadataBranch | null {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
+  const b = body as Record<string, unknown>;
+  if (b.config !== undefined) return 'viewItem';
+  if (b.list !== undefined || b.form !== undefined || b.listViews !== undefined || b.formViews !== undefined) {
+    return 'container';
+  }
+  if (b.viewKind === 'form') return 'formOverlay';
+  if (b.viewKind === 'list') return 'listOverlay';
+  if (typeof b.type === 'string') {
+    if (overlayTypeValues(FormViewSchema).has(b.type)) return 'formOverlay';
+    if (overlayTypeValues(ListViewSchema).has(b.type)) return 'listOverlay';
+  }
+  return null;
+}
+
+/** [#6391] The result of {@link diagnoseViewMetadata}. */
+export type ViewMetadataDiagnosis =
+  | { success: true; branch: ViewMetadataBranch; data: ViewMetadataParsed }
+  | { success: false; branch: ViewMetadataBranch | null; issues: readonly z.core.$ZodIssue[] };
+
+/**
+ * [#6391] Explain a `view` body the way a consumer needs it explained: with the
+ * failing BRANCH named and that branch's own per-field issues, flat.
+ *
+ * The problem this closes, measured in objectui#3624: `ViewMetadataSchema`
+ * failing produces ONE root `invalid_union` issue with the per-field truth
+ * buried in nested `errors[]`, addressable only by member position. Here the
+ * position never appears — the caller gets `branch: 'listOverlay'` and the list
+ * overlay's own issues, with real field paths.
+ *
+ * Three outcomes, and the middle one is the one worth reading twice:
+ *
+ * 1. **The body parses.** `ViewMetadataSchema` accepted it; the branch reported
+ *    is the first member that accepts it.
+ * 2. **The body is not a `view` at all** (#5599's identity precondition —
+ *    `{ nope: 1 }`, `{}`, identity keys only). `branch` is `null` and the
+ *    issues are the precondition's own. Naming a branch here would be a lie:
+ *    the union never ran, and pointing the author at "the form overlay" would
+ *    send them to fix a shape they were not writing.
+ * 3. **The body claims a branch and that branch rejects it.** `branch` names
+ *    it, `issues` are that member's, resolved against the body's own paths.
+ *    When no discriminant settles the claim, every member is tried and the one
+ *    complaining LEAST is reported — the same "fewest issues wins" ranking
+ *    `selectUnionBranches` (`shared/error-map.zod.ts`) already uses for this
+ *    family, so one mistake gets one prescription across every surface.
+ *
+ * ⛔ **Acceptance is not decided here.** This function delegates the verdict to
+ * `ViewMetadataSchema` and only ever explains a verdict it did not make: if the
+ * schema accepts, this reports success no matter what the branch dispatch
+ * thinks. Pinned in `view-union-diagnostics.test.ts`.
+ */
+export function diagnoseViewMetadata(body: unknown): ViewMetadataDiagnosis {
+  const parsed = ViewMetadataSchema.safeParse(body);
+  const stripped = stripViewConsoleDecorations(body);
+
+  if (parsed.success) {
+    const accepting = VIEW_METADATA_BRANCHES.find(
+      (branch) => VIEW_METADATA_MEMBERS[branch].safeParse(stripped).success,
+    );
+    // The union accepted, so some member did; `selectViewMetadataBranch` is the
+    // fallback only for the impossible case, never the primary answer.
+    return { success: true, branch: accepting ?? selectViewMetadataBranch(stripped) ?? 'viewItem', data: parsed.data };
+  }
+
+  // (2) The identity precondition short-circuited the pipe with `z.NEVER`, so
+  // the union never ran and there is no branch to name. Detected by re-running
+  // the precondition's own predicate rather than by pattern-matching its issue
+  // text — same rule, one source.
+  if (!speaksViewVocabulary(body)) {
+    return { success: false, branch: null, issues: parsed.error.issues };
+  }
+
+  const claimed = selectViewMetadataBranch(stripped);
+  const candidates = claimed ? [claimed] : [...VIEW_METADATA_BRANCHES];
+  let best: { branch: ViewMetadataBranch; issues: readonly z.core.$ZodIssue[] } | undefined;
+  for (const branch of candidates) {
+    const result = VIEW_METADATA_MEMBERS[branch].safeParse(stripped);
+    // A member that accepts what the union rejected cannot happen (the union is
+    // exactly these members), but if it ever did, reporting zero issues under a
+    // `success: false` would be the worst possible answer — so skip it.
+    if (result.success) continue;
+    if (!best || result.error.issues.length < best.issues.length) {
+      best = { branch, issues: result.error.issues };
+    }
+  }
+  return best
+    ? { success: false, branch: best.branch, issues: best.issues }
+    : { success: false, branch: claimed, issues: parsed.error.issues };
 }
 
 /**
@@ -2545,48 +2857,15 @@ function assertViewIdentity(body: unknown, ctx: z.RefinementCtx, vocabulary: Set
  * on member 4.
  */
 export const ViewMetadataSchema = lazySchema(() => {
-  const members = [
-    // 1. Standalone ViewItem record — nested config validated genuinely, and
-    //    the WIRE variant, so Studio's round-trip keys have a declared home.
-    ViewItemWireSchema,
-    // 2. Non-empty defineView container.
-    ViewSchema.refine(containerHasAView, {
-      message:
-        'A view container must define at least one of `list`, `form`, `listViews`, or `formViews`.',
-    }),
-    // 3. Flattened runtime overlay — inline ListView / FormView config + identity.
-    //    The list member is tried first; a flattened form (no required
-    //    `columns`, disjoint `type` enum) then matches the form member.
-    //
-    //    `.strip()` is load-bearing, not leftover. `.extend()` INHERITS
-    //    strictness, so closing `ListViewSchema`/`FormViewSchema` for authoring
-    //    (#4001) silently made this overlay strict too — and this member exists
-    //    precisely to carry Studio's auxiliary round-trip keys (`isPinned`,
-    //    `sortOrder`, …) that `saveMetaItem` persists verbatim. Strict here is a
-    //    422 on a shape the platform itself writes. The ledger names this as the
-    //    trap to watch while batching: a response-side extension of an authoring
-    //    schema must strip back, or an upstream field addition becomes a crash.
-    ListViewSchema.extend(flattenedViewOverlayFields()).strip(),
-    FormViewSchema.extend(flattenedViewOverlayFields()).strip(),
-  ] as const;
-
-  // [#5599] Derived once, on first parse — see `collectDeclaredTopLevelKeys`.
-  let vocabulary: Set<string> | undefined;
-  const viewVocabulary = (): Set<string> => {
-    if (!vocabulary) {
-      vocabulary = new Set<string>();
-      for (const member of members) collectDeclaredTopLevelKeys(member, vocabulary);
-      // Identity the write path supplies is not evidence of shape — see
-      // `VIEW_WRITE_PATH_IDENTITY_KEYS` for why this subtraction is the
-      // difference between closing #5599 and only appearing to.
-      for (const key of VIEW_WRITE_PATH_IDENTITY_KEYS) vocabulary.delete(key);
-    }
-    return vocabulary;
-  };
+  // [#6391] The members ARE {@link VIEW_METADATA_MEMBERS}, read in
+  // {@link VIEW_METADATA_BRANCHES} order. Built by mapping rather than
+  // re-listed, so "the published schema is the member the union runs" cannot
+  // drift into "the published schema resembles it" — the exact gap objectui had
+  // to bridge with a canary test.
+  const members = VIEW_METADATA_BRANCHES.map((branch) => VIEW_METADATA_MEMBERS[branch]);
 
   return z.preprocess(
-    (body, ctx) =>
-      assertViewIdentity(body, ctx, viewVocabulary()) ? stripViewConsoleDecorations(body) : z.NEVER,
+    (body, ctx) => (assertViewIdentity(body, ctx) ? stripViewConsoleDecorations(body) : z.NEVER),
     z.union(members as unknown as readonly [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]),
   );
 });

@@ -224,3 +224,42 @@ describe('[#5341] `os validate` delivers a union branch prescription', () => {
     expect(JSON.stringify(payload.errors[0].errors)).toContain('`direction` → `order`');
   }, 120_000);
 });
+
+/**
+ * [#5389] The terminal's share of the 4th/5th family members.
+ *
+ * `invalid_key` / `invalid_element` hang the key/element schema's real
+ * complaint on `issue.issues[]` rather than on `invalid_union`'s
+ * `issue.errors[]`. The descent itself is `@objectstack/spec`'s — reused, not
+ * re-derived, exactly as #5341 reused it for the union — so this file's whole
+ * share of the fix is that its gate stopped saying `code !== 'invalid_union'`
+ * and started naming all three expandable codes.
+ *
+ * Strictly additive, same as #5341: the `code: message` line the terminal
+ * already printed for the container is untouched; only the explanation is new.
+ */
+describe('[#5389] formatZodErrors expands invalid_key / invalid_element', () => {
+  const SnakeKey = z
+    .string()
+    .regex(/^[a-z][a-z0-9_]*$/, "Invalid identifier. Must be lowercase snake_case (e.g. 'first_name').");
+
+  it('prints the key schema prose under the container line', () => {
+    const schema = z.object({ fields: z.record(SnakeKey, z.object({ type: z.string() })) });
+    const out = render(schema.safeParse({ fields: { 'First Name': { type: 'text' } } }).error!);
+    expect(out).toContain('invalid_key: Invalid key in record');
+    expect(out).toContain("Invalid identifier. Must be lowercase snake_case (e.g. 'first_name').");
+  });
+
+  it('prints the element schema prose for a map', () => {
+    const schema = z.map(z.object({ id: z.string() }), z.number().min(5, 'too small'));
+    const out = render(schema.safeParse(new Map([[{ id: 'a' }, 1]])).error!);
+    expect(out).toContain('invalid_element');
+    expect(out).toContain('too small');
+  });
+
+  it('adds nothing to an ordinary issue', () => {
+    // The conservative half: only the three expandable codes may grow lines.
+    const before = render(z.object({ a: z.string() }).safeParse({}).error!);
+    expect(before.split('\n').filter((l) => l.includes('✗'))).toHaveLength(1);
+  });
+});

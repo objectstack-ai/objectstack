@@ -182,13 +182,23 @@
  *   a leading blank line before `---`  | major             | caught (see below)
  *   "@objectstack/spec": MAJOR         | THROWS invalid type | caught (harmless)
  *   no closing `---` fence             | THROWS missing fm | caught (harmless)
- *   "@objectstack/spec": major # note  | major             | MISSED (see below)
+ *   "@objectstack/spec": major # note  | major             | caught (#7004)
+ *   "@objectstack/spec": "major"       | major             | caught (#7004)
+ *   "@objectstack/spec": 'major' # n   | major             | caught (#7004)
+ *   # note: major       (comment line) | declares NOTHING  | ignored (#7004)
+ *   "@objectstack/spec": major# note   | THROWS invalid type | missed (harmless)
  *
  * Rows marked "harmless" are this file being STRICTER than changesets on a file
  * changesets refuses outright: the guard names a major in a changeset that could
  * never version anything. That direction costs an author one confusing message
  * about a file that is already broken. The opposite direction is the one that
  * matters, because it is silent.
+ *
+ * The last row is the one place a `#` does NOT start a comment: YAML requires
+ * whitespace before an inline `#`, so `major# note` is the scalar `major# note`
+ * and changesets throws `invalid version type`. The regex therefore spells the
+ * comment `(?:\s+#.*)?` rather than `(?:#.*)?` — matching YAML exactly, so this
+ * file misses only what changesets refuses.
  *
  * LEADING BLANK LINES (fixed in #6923). This parser used to require the fence on
  * line 1 (`if (lines[0]?.trim() !== '---') return []`), so a changeset opening
@@ -199,14 +209,24 @@
  * blanks, and all three carry a comment saying the three read the same block —
  * so this was also the one place that comment was false. It now skips them too.
  *
- * TRAILING YAML COMMENTS are still missed, and that is a KNOWN GAP recorded
- * rather than implied: the entry regex ends `([A-Za-z]+)\s*$`, so
- * `"@objectstack/spec": major # keep` matches nothing, while changesets reads it
- * as a major. All three parsers in this family share the regex and therefore the
- * gap, with a different consequence in each, so closing it is a family-wide
- * change and not this file's to make alone. Filed as #7004; the fixture below
- * pins the CURRENT behaviour so that closing it turns this file red on purpose
- * rather than by surprise.
+ * TRAILING YAML COMMENTS were missed until #7004, together with two more shapes
+ * the same anchoring hid. The entry regex used to end `([A-Za-z]+)\s*$`, which
+ * accepts nothing after the bump word, so all of these read as no declaration at
+ * all while changesets read a real bump:
+ *
+ *   "@objectstack/spec": major # keep     a trailing comment
+ *   "@objectstack/spec": "major"          a QUOTED bump value  (not in #7004's report)
+ *   "@objectstack/spec": 'major' # keep   both at once
+ *
+ * And one shape ran the other way — invented rather than hidden. A whole-line
+ * comment that happens to contain a colon is entry-shaped, so `# note: major`
+ * parsed as a package literally named `# note` bumped `major`. Measured against
+ * @changesets/parse@0.4.3, which declares nothing for it.
+ *
+ * All four parsers in this family shared the regex and therefore all four gaps,
+ * with a different consequence in each, so #7004 closed them family-wide in one
+ * change. Measured after: 19 shapes changesets ACCEPTS now agree, 0 regressions,
+ * and every surviving difference is on a file changesets throws on.
  *
  * ## RESOLVED HERE: the unreadable-input residual (#7006)
  *
@@ -244,11 +264,14 @@ const REPO_ROOT = resolve(__dirname, '..');
  * A frontmatter line looks like:  "@objectstack/spec": major
  * (single or double quotes, any surrounding whitespace).
  *
- * The entry regex is deliberately the SAME shape `check-empty-changeset.mjs`
- * and `check-adr-0087-registration.mjs` use. Three gates reading one block must
- * agree on what counts as a declaration, or one of them is judging a different
- * file than it appears to. See the dialect table in the header for where they
- * agree with `@changesets/parse` and where they do not.
+ * The entry regex is deliberately the SAME shape `check-empty-changeset.mjs`,
+ * `check-adr-0087-registration.mjs` and `objectui-changeset-digest.mjs` use.
+ * Four readers of one block must agree on what counts as a declaration, or one
+ * of them is judging a different file than it appears to. That agreement is no
+ * longer only a comment: `check-empty-changeset.mjs`'s self-test extracts the
+ * regex literal from all four files and asserts they are byte-identical (#7004).
+ * See the dialect table in the header for where they agree with
+ * `@changesets/parse` and where they deliberately do not.
  *
  * @param {string} text
  * @returns {string[]}
@@ -262,8 +285,10 @@ export function majorPackagesIn(text) {
   const majors = [];
   for (let j = i + 1; j < lines.length; j++) {
     if (lines[j].trim() === '---') break; // end of frontmatter
+    if (/^\s*#/.test(lines[j])) continue; // a whole-line YAML comment declares nothing
     // "<name>": <bump>   |   '<name>': <bump>   |   <name>: <bump>
-    const m = /^\s*["']?([^"':]+)["']?\s*:\s*([A-Za-z]+)\s*$/.exec(lines[j]);
+    // with an optionally quoted bump value and an optional trailing ` # comment`.
+    const m = /^\s*["']?([^"':]+)["']?\s*:\s*["']?([A-Za-z]+)["']?(?:\s+#.*)?\s*$/.exec(lines[j]);
     if (m && m[2].toLowerCase() === 'major') majors.push(m[1].trim());
   }
   return majors;
@@ -738,15 +763,52 @@ function selfTest() {
     'parser: lines that are not `<name>: <bump>` are not declarations',
   );
 
-  // KNOWN GAP, pinned as current behaviour rather than endorsed. Measured:
-  // @changesets/parse@0.4.3 reads this as a real major. The entry regex ends
-  // `([A-Za-z]+)\s*$`, so the trailing comment defeats it — in all three parsers
-  // of this family, which is why closing it is not this file's change to make
-  // alone. When it IS closed, this assertion goes red on purpose: flip it, do
-  // not delete it.
+  // ── THE FIX (#7004): the shapes the old `([A-Za-z]+)\s*$` anchor hid ──────
+  //
+  // This block is #6923's KNOWN-GAP pin, FLIPPED rather than deleted, as the
+  // note it carried asked. It used to assert `.length === 0` — the gap — with
+  // the instruction to invert it on the day the family-wide regex was fixed.
+  // That day is #7004, so the same inputs are asserted to be CAUGHT now.
+  //
+  // Predicted direction on reverse verification: restoring the old anchor
+  // (`([A-Za-z]+)\s*$`) turns exactly these red. Measured with
+  // @changesets/parse@0.4.3: every one of them DOES release a major, so a miss
+  // here is a whole-stack major promoted past a guard that printed a tick.
+  caught('a trailing YAML comment', '---\n"@objectstack/spec": major # keep\n---\n\nbody\n', ['@objectstack/spec']);
+  caught('a trailing comment after a tab', '---\n"@objectstack/spec": major\t# keep\n---\n\nbody\n', ['@objectstack/spec']);
+  caught('a trailing comment containing a colon', '---\n"@objectstack/spec": major # note: keep\n---\n\nbody\n', ['@objectstack/spec']);
+  caught('an empty trailing comment', '---\n"@objectstack/spec": major #\n---\n\nbody\n', ['@objectstack/spec']);
+  caught('a double-quoted bump value', '---\n"@objectstack/spec": "major"\n---\n\nbody\n', ['@objectstack/spec']);
+  caught('a single-quoted bump value', '---\n"@objectstack/spec": \'major\'\n---\n\nbody\n', ['@objectstack/spec']);
+  caught('a quoted bump value AND a comment', '---\n"@objectstack/spec": "major" # keep\n---\n\nbody\n', ['@objectstack/spec']);
+  caught('a package name containing #, plus a comment', '---\n"@objectstack/a#b": major # keep\n---\n\nbody\n', ['@objectstack/a#b']);
+  caught('a commented major beside an uncommented minor', '---\n"@objectstack/a": major # keep\n"@objectstack/b": minor\n---\n\nbody\n', [
+    '@objectstack/a',
+  ]);
+
+  // The other direction #7004 measured: a whole-line comment that happens to
+  // contain a colon is entry-shaped, and used to parse as a package literally
+  // named `# note`. @changesets/parse declares nothing for it, so neither does
+  // this. The control below is what keeps this from passing vacuously.
   assert(
-    majorPackagesIn('---\n"@objectstack/spec": major # keep\n---\n\nbody\n').length === 0,
-    'parser: KNOWN GAP (#7004) — a trailing YAML comment hides a major from this parser (changesets reads it as a major); flip this when the family-wide regex is fixed, never delete it',
+    majorPackagesIn('---\n# note: major\n---\n\nbody\n').length === 0,
+    'parser: a whole-line YAML comment is not a declaration, even when it contains a colon (#7004)',
+  );
+  assert(
+    majorPackagesIn('---\n   # note: major\n---\n\nbody\n').length === 0,
+    'parser: an INDENTED whole-line comment is not a declaration either (#7004)',
+  );
+  caught('control — a real entry beside a colon-bearing comment line', '---\n# note: major\n"@objectstack/real": major\n---\n\nbody\n', [
+    '@objectstack/real',
+  ]);
+
+  // YAML requires whitespace before an inline `#`, so this one is the scalar
+  // `major# keep` and @changesets/parse THROWS `invalid version type`. Missing
+  // it is the harmless direction (a file that can version nothing), and the
+  // regex spells the comment `(?:\s+#.*)?` precisely to keep it that way.
+  assert(
+    majorPackagesIn('---\n"@objectstack/spec": major# keep\n---\n\nbody\n').length === 0,
+    'parser: `major# keep` (no space before #) is not a comment in YAML — changesets throws on it, so missing it is the harmless direction (#7004)',
   );
 
   // ── The exemption switch, in BOTH directions ──────────────────────────────

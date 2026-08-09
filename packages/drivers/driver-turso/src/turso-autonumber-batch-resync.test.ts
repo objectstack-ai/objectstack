@@ -89,6 +89,27 @@ describe('[#6943] TursoDriver batch/upsert autonumber re-seed', () => {
     expect(upserted.case_number).toBe('CASE-00031');
   });
 
+  it('LOCAL: [#7011] a merge-path upsert keeps the existing autonumber', async () => {
+    // Turso OVERRIDES `upsert` (remote → RemoteTransport, else `super`), so
+    // "the base class was fixed" is not on its own an answer about this face —
+    // the local route through `super.upsert` is pinned here.
+    const created = await driver.create(
+      'crm_case',
+      { organization_id: 'orgA', title: 'original' },
+      { bypassTenantAudit: true },
+    );
+    expect(created.case_number).toBe('CASE-00001');
+
+    const merged = await driver.upsert(
+      'crm_case',
+      { id: created.id, organization_id: 'orgA', title: 'edited' },
+      undefined,
+      { bypassTenantAudit: true } as any,
+    );
+    expect(merged.case_number).toBe('CASE-00001');
+    expect(merged.title).toBe('edited');
+  });
+
   it('REMOTE: the transport that bypasses this path has no autonumber machinery to re-seed', async () => {
     const remote = new TursoDriver({ url: 'libsql://example.turso.io', authToken: 'placeholder' });
     expect(remote.transportMode).toBe('remote');

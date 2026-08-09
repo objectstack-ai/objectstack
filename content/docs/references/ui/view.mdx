@@ -264,12 +264,12 @@ Column footer summary configuration
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: any[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
-| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. |
+| **defaultSort** | `never` | optional | [REMOVED] `form.defaultSort` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — nothing read it: a related list inside a form sorts by its own list view's `sort`. Delete the key and set the sort on the related list view instead. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
 | **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior |
 | **buttons** | `{ submit?: object; cancel?: object; reset?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm (framework#1894 / #2998). |
 | **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values; framework#1894 / #2998). |
-| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. |
+| **aria** | `never` | optional | [REMOVED] `form.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no form renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. The form renderer emits its own semantic markup; report gaps as renderer issues rather than per-view attribute overrides. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 
 
 ---
@@ -493,8 +493,8 @@ List chart view configuration
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. |
-| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. |
+| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 
 
 ---
@@ -581,8 +581,8 @@ List chart view configuration
 | **allowPrinting** | `boolean` | optional | Allow users to print the view |
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string }` | optional | Empty state configuration when no records found |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
-| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. |
-| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. |
+| **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: object[] }` | optional |  |
 
 
@@ -734,7 +734,7 @@ End-user quick-filter configuration (Airtable "User filters" parity)
 | **fields** | `{ field: string; label?: string \| Record<string, string>; type?: Enum<'select' \| 'multi-select' \| 'boolean' \| 'date-range' \| 'text'>; options?: object[]; … }[]` | optional | Fields exposed as quick filters (dropdown/toggle elements) |
 | **tabs** | `{ name: string; label?: string \| Record<string, string>; icon?: string; view?: string; … }[]` | optional | Named filter presets rendered as tabs (tabs element). Reuses ViewTabSchema |
 | **showAllRecords** | `boolean` | optional | Show an "All records" tab before the presets (tabs element) |
-| **allowAddTab** | `boolean` | optional | Render an "add tab" affordance after the presets (tabs element). Page lists only — object views use `listViews` for named presets |
+| **allowAddTab** | `boolean` | optional | Let end users add their own tab after the presets (tabs element): the affordance asks for a name and snapshots the filters currently applied as a new tab. SESSION-SCOPED — an added tab lives only for the current mount, is never written back as metadata (ADR-0047), and carries a remove control the authored presets do not. Page lists only — object views use `listViews` for named presets |
 
 
 ---

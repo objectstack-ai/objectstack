@@ -123,8 +123,14 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   //   1. INDEPENDENT LIFECYCLE — the endpoint matcher indexes, invalidates and
   //      re-judges one stored `api` item at a time (`buildEndpointIndex`,
   //      `MetadataManager.ENDPOINT_METADATA_TYPE`).
-  //   2. DECLARATIVE GOVERNABILITY — `allowRuntimeCreate: true` plus file
-  //      patterns (see the registry entry below).
+  //   2. DECLARATIVE GOVERNABILITY — file patterns plus a resolved declaration
+  //      schema (`ApiEndpointSchema`), see the registry entry below. ⚠️ This
+  //      clause originally read "`allowRuntimeCreate: true` plus file
+  //      patterns"; #5488 flipped that flag to `false` (maintainer ruling
+  //      2026-08-07), so governability now rests on the artifact route alone —
+  //      which is the route that was ever governed. The admission test is
+  //      unaffected: ADR-0088 asks whether the kind is DECLARATIVELY governed,
+  //      not whether it is runtime-writable.
   //   3. A REAL CONSUMER — #5040's E-series executor serves them and
   //      `/openapi.json` describes them; #5040 E8 proves it on a real boot.
   // ADR-0088's own `router` row already anticipated this: "the endpoint
@@ -783,31 +789,71 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   //
   // WHY THE FLAGS ARE THESE VALUES (the decision this entry records):
   //
-  // `allowRuntimeCreate: true` is NOT a new grant — it WRITES DOWN what the
-  // runtime already did. Until this entry existed, `api` had no static registry
-  // row, and both write gates treat a type with no row as runtime-creatable on
-  // purpose: `isRuntimeCreateAllowed` (metadata-protocol `protocol.ts`) and
-  // `assertAllowed` (`sys-metadata-repository.ts`) each fall through with
-  // "types with NO static registry entry are synthesised by `getMetaTypes()`
-  // with allowRuntimeCreate: true, so the write gate must agree" — and both
-  // name `api` in that comment. So `PUT /api/v1/meta/api/:name` accepted
-  // writes; it just accepted them UNVALIDATED. Declaring `true` here keeps the
-  // authorization verdict byte-identical and changes exactly one thing: the
-  // body must now satisfy `ApiEndpointSchema` (422 `invalid_metadata`).
+  // ⚠️ RECORDED OVERTURN — 2026-08-09 (#5488). The block below used to record a
+  // decision for `allowRuntimeCreate: true`, and the three bullets it rested on
+  // are reproduced verbatim further down because they were not wrong about the
+  // mechanism — they were wrong about the PREMISE they all shared. That premise
+  // ("there is a runtime create door here worth validating") was disproven by a
+  // real boot: `PUT /api/v1/meta/api/:name` answered 200 "Saved", and the
+  // endpoint was then NEVER SERVED — `GET` on its declared path 404s forever,
+  // with no `[EndpointMatcher] … EXCLUDED` line, because it was not gated out,
+  // it was never in the index at all. The serving criterion is owned by
+  // `IMetadataService.matchEndpoint` → `EndpointMatcher` →
+  // `MetadataManager.listForIndex('api')`, which reads the manager's `registry`
+  // plus its registered loaders (`["filesystem","memory"]`); a runtime write
+  // lands in `sys_metadata`, which is in neither. So `allowRuntimeCreate: true`
+  // declared a capability the runtime never had.
   //
-  // The alternative — CODE-ONLY (`allowRuntimeCreate: false` +
-  // `allowOrgOverride: false`, the `job` / `agent` shape) — was considered and
-  // rejected on the evidence:
-  //   • it would REMOVE a door rather than validate one, turning today's 200
+  // The maintainer ruled on it 2026-08-07T16:59Z, verbatim:
+  //
+  //   "Decision: Option B — flip the `api` registry entry to
+  //    `allowRuntimeCreate: false` and make the write inlet reject loudly
+  //    (the existing #5086 mechanism). ADR-0049 remove side, with the
+  //    corresponding retirement bookkeeping. […] Re-entry path recorded: if
+  //    #2657 Part B ever promotes `apis` to a registered type with a real
+  //    consumption path, re-enable then — implementation first, declaration
+  //    second."
+  //
+  // Rationale as ruled: zero business pull for Studio-authored runtime
+  // endpoints today (17.x declarative endpoints are served via stack artifacts
+  // / `publishPackage`, which is untouched); making the matcher read
+  // `sys_metadata` instead would re-open cache, invalidation, tenancy and the
+  // ADR-0110 D3 miss-vs-outage semantics on a new read path — not a cost to pay
+  // without pull; and a write that answers "Saved" and then 404s forever is the
+  // most dangerous silent-lie shape for AI authors (ADR-0049 false compliance).
+  //
+  // WHAT THE THREE ORIGINAL BULLETS SAID, and what became of each — kept
+  // verbatim so the overturn is auditable rather than silently rewritten:
+  //   • "it would REMOVE a door rather than validate one, turning today's 200
   //     into a 403 for every runtime author, which is a contract change no
-  //     issue in this chain asked for;
-  //   • #5086 (PR #5263) refuses code-only types BEFORE persistence, draft and
+  //     issue in this chain asked for" — TRUE, and now deliberate: #5488 is the
+  //     issue that asked for it, and the door being removed opened onto nothing.
+  //     A 403 that names the artifact route is strictly better than a 200 whose
+  //     route 404s.
+  //   • "#5086 (PR #5263) refuses code-only types BEFORE persistence, draft and
   //     active alike — so `api` DRAFTS would become impossible, and #5206's
   //     step 2 (the `publishPackageDrafts` endpoint gate, PR #5279) would have
-  //     nothing left to gate;
-  //   • ADR-0121's ruling is "publish REJECTS" with a named-key prescription
+  //     nothing left to gate" — MECHANICALLY CORRECT, and it is why the flip
+  //     could not be split spec-first. `gateApiDraftsForPublish` is therefore
+  //     retired in the SAME change (#5488), deliberately and on the record: it
+  //     gated a promotion into a state the matcher can never read.
+  //   • "ADR-0121's ruling is 'publish REJECTS' with a named-key prescription
   //     (D1/D2/D6), which presupposes an author who could write the draft.
-  //     "Rejected at publish" is not "refused at authoring".
+  //     'Rejected at publish' is not 'refused at authoring'." — STILL TRUE of
+  //     ADR-0121, and unaffected: the publish gates
+  //     (`validateApiEndpointDeclarations`) remain the one judge of servability
+  //     on the route that actually serves — the stack artifact / `publishPackage`
+  //     path. What is withdrawn is only the runtime-authored draft, which had no
+  //     servable destination to be judged toward.
+  //
+  // `allowRuntimeCreate: false` + `allowOrgOverride: false` therefore makes
+  // `api` CODE-ONLY (the `job` / `agent` / `capability` shape): the #5086 inlet
+  // refuses `PUT /api/v1/meta/api/:name` before persistence, on every kernel,
+  // in draft mode as well as active, with `code: 'NOT_CREATABLE'`, `status: 403`
+  // and a prescription naming this entry's own `filePatterns[0]`
+  // (`**/*.api.ts`) — i.e. declare the endpoint in the stack artifact and ship
+  // it through `publishPackage`. `OS_METADATA_WRITABLE` remains the one
+  // operator escape hatch, unchanged.
   //
   // `allowOrgOverride: false` (also unchanged from today's effective value): an
   // endpoint is an OUTWARD URL contract owned by the declaring package. A
@@ -827,7 +873,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // run at publish (stack schema, `publishPackage`, `publishPackageDrafts`) and
   // again at load (`buildEndpointIndex`). This entry adds a SHAPE check in
   // front of them, never a second opinion about servability.
-  { type: 'api', label: 'API Endpoint', description: 'Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)', filePatterns: ['**/*.api.ts', '**/*.api.yml', '**/*.api.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 92, domain: 'system' },
+  { type: 'api', label: 'API Endpoint', description: 'Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)', filePatterns: ['**/*.api.ts', '**/*.api.yml', '**/*.api.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 92, domain: 'system' },
   { type: 'translation', label: 'Translation', filePatterns: ['**/*.translation.ts', '**/*.translation.yml', '**/*.translation.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 90, domain: 'system' },
   { type: 'email_template', label: 'Email Template', filePatterns: ['**/*.email-template.ts', '**/*.email-template.yml', '**/*.email-template.json'], supportsOverlay: true, allowOrgOverride: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'system' },
   // ADR-0046: package documentation. Inert data — no runtime behavior, no
