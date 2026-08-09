@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// check-nul-bytes -- rejects raw ASCII control bytes in every tracked TEXT file.
+// check-nul-bytes -- rejects raw ASCII control bytes in every TEXT file git
+// knows about: tracked, plus untracked files git does not ignore (#6984).
 //
 // Scanned set (#5157, #5460): every ASCII control character except the three that
 // ARE ordinary text structure -- tab, LF, CR. The `IS_SCANNED` table below is the
@@ -132,15 +133,62 @@
 // file with a NUL in it is invisible to `grep -r` -- the agent never receives
 // the rules it is supposed to follow, with no signal that anything is missing.
 //
-// So the scope is drawn by CARRIER (every tracked text file) rather than by USE
-// (source code). An extension allow-list would only move the same question --
-// "why exactly these files?" -- one directory further along, to be rediscovered
-// by the next `.claude/`.
+// So the scope is drawn by CARRIER (every text file) rather than by USE (source
+// code). An extension allow-list would only move the same question -- "why
+// exactly these files?" -- one directory further along, to be rediscovered by
+// the next `.claude/`.
+//
+// ## What is enumerated: tracked AND untracked-not-ignored (#6984)
+//
+// The scan set is `git ls-files` PLUS `git ls-files --others --exclude-standard`
+// -- the index, plus every working-tree file git neither tracks nor ignores.
+//
+// It used to be the index alone, and that is a hole shaped exactly like this
+// gate's own accident source. `git ls-files` with no `--others` lists what has
+// been `git add`-ed, so a file that has been WRITTEN but not yet staged was not
+// scanned at all -- and a brand-new file is precisely where an editing tool
+// materialises an escape into its byte (#4763, #4890, PR #5140, #5460's issue
+// body; see the accident-source argument above). The run the agent instructions
+// ask for -- "run this before pushing" -- is therefore the run most likely to be
+// looking at a file the index-only enumeration could not see. It exited 0 and
+// printed its usual success line, which reads as "this tree is clean" rather
+// than "the file you just wrote was not looked at". #6984 measured it: an
+// untracked file carrying a raw 0x1b, the AGENTS.md self-scan finding it, this
+// gate green, and the only difference being the index.
+//
+// Three properties of the widened set, each measured rather than assumed:
+//
+//   - `--exclude-standard` applies .gitignore, $GIT_DIR/info/exclude and the
+//     user's global excludes, so a developer's dependency trees and scratch
+//     files stay out. Measured on this repo with a full `pnpm install` in the
+//     tree: 76122 untracked paths, 0 of them after `--exclude-standard`. The
+//     widened enumeration is quiet on ordinary local junk, and it prunes rather
+//     than walks -- 16ms against 5ms for the index-only call.
+//   - EXCLUDED still applies on top, so a vendored `node_modules/` that someone
+//     un-ignores cannot turn this red either.
+//   - In CI it is a NO-OP by construction: a workflow checks out a commit, so
+//     every path is tracked and the untracked half is empty. That is asserted
+//     in `--self-test` by staging the fixtures and re-scanning, not merely
+//     stated here.
+//
+// Because a green now covers strictly more, the summary line states BOTH halves
+// unconditionally ("N tracked, M untracked-not-ignored") even when M is 0. A
+// count that only appeared when it was non-zero would leave the CI green and the
+// pre-#6984 green looking identical, which is the false confidence this section
+// exists to remove. Offenders found in the untracked half are marked as such,
+// because "not staged yet" is the first thing an author needs to know about a
+// file the gate just rejected.
+//
+// The two-line self-scan in the agent instructions stays the belt to this gate's
+// braces: it is the instrument that found #6984 itself, and it reaches files
+// this gate deliberately does not (ignored ones, and anything rule 3 below reads
+// as binary).
 //
 // ## What counts as binary
 //
 // Deliberately NOT an extension list (that is the defect above, relocated).
-// A tracked blob is scanned unless one of these is true, in order:
+// An enumerated path (see the section above) is scanned unless one of these is
+// true, in order:
 //
 //   1. It is not a regular file (symlink, submodule gitlink) or is absent from
 //      the working tree -- nothing to read.
@@ -408,12 +456,9 @@ function locate(buf, offset) {
   return { line, column };
 }
 
-/**
- * The one scan. `main()` and `--self-test` both go through here, so the
- * self-test exercises the real code path rather than a parallel imitation.
- */
-export function scan(root) {
-  const files = execFileSync('git', ['ls-files', '-z'], {
+/** One `git ls-files` invocation, NUL-split, with EXCLUDED applied. */
+function lsFiles(root, args) {
+  return execFileSync('git', ['ls-files', '-z', ...args], {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
@@ -423,12 +468,49 @@ export function scan(root) {
     .split('\u0000')
     .filter(Boolean)
     .filter((f) => !EXCLUDED.test(f));
+}
+
+/**
+ * The scan set: the index, PLUS the working-tree files git neither tracks nor
+ * ignores (#6984). Argued in the header under "What is enumerated".
+ *
+ * Two calls rather than one `--cached --others`, because the two halves are
+ * COUNTED separately: the summary line has to say how many of each it looked at,
+ * and a combined call cannot tell them apart afterwards.
+ *
+ * The halves are disjoint by definition (`--others` means "not in the index"),
+ * so the Map cannot lose a path; it is there so that a path appearing in both
+ * lists would be scanned once and counted as tracked, rather than twice.
+ *
+ * @returns {{ file: string, untracked: boolean }[]} tracked first, then untracked
+ */
+function enumerate(root) {
+  const tracked = lsFiles(root, []);
+  // --others: working-tree files not in the index. --exclude-standard: apply
+  // .gitignore, $GIT_DIR/info/exclude and the user's global excludes -- that is
+  // what keeps a developer's dependency trees and scratch files out of the set,
+  // and it prunes ignored directories rather than walking them.
+  const untracked = lsFiles(root, ['--others', '--exclude-standard']);
+
+  const byPath = new Map();
+  for (const file of tracked) byPath.set(file, { file, untracked: false });
+  for (const file of untracked) if (!byPath.has(file)) byPath.set(file, { file, untracked: true });
+  return [...byPath.values()];
+}
+
+/**
+ * The one scan. `main()` and `--self-test` both go through here, so the
+ * self-test exercises the real code path rather than a parallel imitation.
+ */
+export function scan(root) {
+  const files = enumerate(root);
 
   const offenders = [];
   const skipped = { binary: [], 'wide-encoding': [], unreadable: [] };
-  let scanned = 0;
+  let scannedTracked = 0;
+  let scannedUntracked = 0;
 
-  for (const file of files) {
+  for (const { file, untracked } of files) {
     const full = join(root, file);
     let stat;
     try {
@@ -451,28 +533,53 @@ export function scan(root) {
       skipped[kind].push(file);
       continue;
     }
-    scanned++;
+    if (untracked) scannedUntracked++;
+    else scannedTracked++;
 
     if (offsets.length === 0) continue;
     const { line, column } = locate(buf, offsets[0]);
     const bytes = [...new Set(offsets.map((o) => buf[o]))].sort((a, b) => a - b);
-    offenders.push({ file, line, column, offset: offsets[0], count: offsets.length, bytes });
+    offenders.push({ file, line, column, offset: offsets[0], count: offsets.length, bytes, untracked });
   }
 
-  return { offenders, scanned, skipped, tracked: files.length };
+  // The untracked half is returned as PATHS, not just a count: `--list` exists to
+  // answer "what got scanned", and these are the paths a reader cannot
+  // reconstruct from the index afterwards.
+  const untrackedFiles = files.filter((f) => f.untracked).map((f) => f.file);
+  return {
+    offenders,
+    scanned: scannedTracked + scannedUntracked,
+    scannedTracked,
+    scannedUntracked,
+    skipped,
+    tracked: files.length - untrackedFiles.length,
+    untracked: untrackedFiles.length,
+    untrackedFiles,
+  };
 }
 
 function repoRoot() {
   return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 }
 
-function summarise({ scanned, skipped }) {
+/**
+ * What the run actually looked at, stated so a green can be read for its SCOPE
+ * (#6984).
+ *
+ * Both halves are named unconditionally, including `0 untracked`. That zero is
+ * the informative case, not the boring one: it is what CI prints (a checked-out
+ * commit has no untracked files), and it is what a local run prints once the
+ * author has staged. Printing the untracked half only when non-zero would make
+ * "nothing new to look at" and "new files were not looked at" -- the pre-#6984
+ * green -- render identically, which is the whole defect.
+ */
+function summarise({ scanned, scannedTracked, scannedUntracked, skipped }) {
   const parts = [];
   if (skipped.binary.length) parts.push(`${skipped.binary.length} binary`);
   if (skipped['wide-encoding'].length) parts.push(`${skipped['wide-encoding'].length} UTF-16/32`);
   if (skipped.unreadable.length) parts.push(`${skipped.unreadable.length} non-regular`);
   const tail = parts.length ? `; skipped ${parts.join(', ')}` : '';
-  return `scanned ${scanned} tracked text file(s)${tail}`;
+  return `scanned ${scanned} text file(s) -- ${scannedTracked} tracked, ${scannedUntracked} untracked-not-ignored${tail}`;
 }
 
 function main() {
@@ -489,7 +596,12 @@ function main() {
   for (const o of offenders) {
     const times = o.count === 1 ? '1 occurrence' : `${o.count} occurrences`;
     const which = o.bytes.map(hex).join(', ');
-    console.error(`  • ${o.file}:${o.line}:${o.column} -- ${times} of ${which}, first at byte offset ${o.offset}`);
+    // "not staged yet" is the first thing an author needs to know about a file
+    // this gate just rejected -- before #6984 such a file was not looked at at
+    // all, so a reader seeing it here should be able to tell which half it came
+    // from without re-deriving it from `git status`.
+    const where = o.untracked ? ' [untracked]' : '';
+    console.error(`  • ${o.file}:${o.line}:${o.column}${where} -- ${times} of ${which}, first at byte offset ${o.offset}`);
   }
 
   const seen = [...new Set(offenders.flatMap((o) => o.bytes))].sort((a, b) => a - b);
@@ -518,9 +630,10 @@ Why every ASCII control byte and not only NUL (#5157, #5460):
     even though it is not a C0 control (#5460): it is the byte the C0-shaped
     range could not reach, and it was sitting nine lines from one that was.
 
-That harm is not any one language's, so this guard covers every tracked TEXT
-file -- markdown and agent instructions under .claude/ included (#4890), not
-just JS/TS sources.
+That harm is not any one language's, so this guard covers every TEXT file git
+knows about -- markdown and agent instructions under .claude/ included (#4890),
+not just JS/TS sources, and untracked-but-not-ignored files as well as staged
+ones (#6984), because a brand-new file is where an escape gets materialised.
 
 Existing convention for the NUL case -- ${CONVENTION}:
 
@@ -606,6 +719,7 @@ function selfTest() {
   const SOH = byte(0x01); // the PR #5140 specimen
   const ETX = byte(0x03); // Ctrl+C, as a CLI key literal
   const DEL = byte(0x7f); // Backspace, as a CLI key literal -- the #5460 specimen
+  const ESC = byte(0x1b); // the #6984 specimen, in an unstaged file
   const dir = mkdtempSync(join(tmpdir(), 'check-nul-bytes-selftest-'));
   const write = (rel, contents) => {
     const full = join(dir, rel);
@@ -615,6 +729,16 @@ function selfTest() {
 
   try {
     execFileSync('git', ['init', '-q'], { cwd: dir });
+    // Hermetic ignore rules (#6984). The untracked half of the scan set is
+    // decided by `--exclude-standard`, which reads the USER's global excludes
+    // file as well as this repo's .gitignore. A developer whose global excludes
+    // happen to list `node_modules/` would make the "EXCLUDED still applies"
+    // fixture below pass for the wrong reason, and one who lists something else
+    // could make a fixture vanish. Pointing core.excludesFile at an empty file
+    // INSIDE .git (never in the working tree, which is the scan surface) leaves
+    // the temp repo's own .gitignore as the only ignore rule in play.
+    writeFileSync(join(dir, '.git', 'empty-excludes'), '');
+    execFileSync('git', ['config', 'core.excludesFile', join(dir, '.git', 'empty-excludes')], { cwd: dir });
 
     // The #4890 case itself: agent instructions under .claude/, markdown, NUL
     // well past git's 8000-byte sniff window.
@@ -711,7 +835,39 @@ function selfTest() {
 
     execFileSync('git', ['add', '-A', '-f'], { cwd: dir });
 
-    const { offenders, scanned, skipped } = scan(dir);
+    // ── #6984: everything BELOW this line is deliberately left unstaged ───────
+    //
+    // The fixtures above are in the index; these are not, which is the state the
+    // gate could not see before #6984 (`git ls-files` with no `--others` lists
+    // the index only). Writing them after the `git add` is the whole mechanism
+    // of the fixture -- staging them would re-create the blind spot instead of
+    // exercising it.
+
+    // The specimen the issue measured: a brand-new test file carrying a raw ESC,
+    // written by an editing tool and not yet `git add`-ed. This is the exact
+    // shape of the accident source -- an escape materialised into its byte while
+    // an author was writing ABOUT control characters -- landing on the one kind
+    // of file the index-only enumeration could not reach.
+    write('packages/cli/test/new-case.test.ts', Buffer.concat([Buffer.from("const esc = '"), ESC, Buffer.from("';\n")]));
+    // The cure, unstaged: the same literal written as escape TEXT stays green,
+    // so the prescription is testable on this half of the set too and an author
+    // who follows it does not land back in the same red.
+    write('packages/cli/test/new-case-fixed.test.ts', "const esc = '\\u001b';\n");
+    // Untracked AND ignored. `--exclude-standard` must keep this out: a gate
+    // that went red on the author's own scratch directory would be turned off
+    // within a day, and then the untracked half buys nothing. Note the
+    // .gitignore is itself untracked -- git honours it anyway, which is what
+    // makes "ignored" and "not yet staged" different states rather than one.
+    write('.gitignore', 'local-junk/\n');
+    write('local-junk/scratch.md', Buffer.concat([Buffer.from('junk '), NUL, Buffer.from('\n')]));
+    // Untracked dependency tree. This temp repo's .gitignore deliberately does
+    // NOT list node_modules and core.excludesFile is empty, so git WILL offer
+    // this path -- which makes the assertion below about EXCLUDED specifically,
+    // and not about git's ignore rules doing the work a second time.
+    write('node_modules/pkg/index.js', Buffer.concat([Buffer.from('var a='), NUL, Buffer.from(';\n')]));
+
+    const result = scan(dir);
+    const { offenders, scanned, skipped } = result;
     const flagged = new Map(offenders.map((o) => [o.file, o]));
 
     assert(flagged.has('.claude/skills/demo/SKILL.md'), '#4890: markdown under .claude/ must be flagged');
@@ -790,6 +946,100 @@ function selfTest() {
     // untested and an author who follows it lands in the same red.
     assert(!flagged.has('packages/cli/src/prompt-fixed.ts'), '#5460: the \\u007f escape spelling stays green');
 
+    // ── #6984: the untracked half of the scan set, proved in both directions ──
+    //
+    // Forward -- a file that has been written but not staged is flagged, and is
+    // reported as untracked so the author is not left wondering why `git status`
+    // and this gate disagree.
+    assert(
+      flagged.has('packages/cli/test/new-case.test.ts'),
+      '#6984: an untracked-but-not-ignored file carrying a raw 0x1b must be flagged',
+    );
+    assert(
+      flagged.get('packages/cli/test/new-case.test.ts')?.untracked === true,
+      '#6984: an offender found in the untracked half is marked untracked',
+    );
+    assert(
+      flagged.get('packages/cli/test/new-case.test.ts')?.bytes.join() === String(0x1b),
+      `#6984: the offending byte is reported as 0x1b, got ${flagged.get('packages/cli/test/new-case.test.ts')?.bytes}`,
+    );
+    // The cure is green on this half too.
+    assert(!flagged.has('packages/cli/test/new-case-fixed.test.ts'), '#6984: the \\u001b escape spelling stays green');
+    // A tracked offender is NOT marked untracked -- otherwise the marker would
+    // be decoration rather than a fact about which half the file came from.
+    assert(
+      flagged.get('packages/x/src/protocol.ts')?.untracked === false,
+      '#6984: a tracked offender is reported as tracked',
+    );
+    //
+    // The widened set stays quiet on what a developer's tree is full of. Both
+    // exclusions are asserted, because they are DIFFERENT mechanisms: git's
+    // ignore rules (via --exclude-standard) and this script's own EXCLUDED.
+    assert(!flagged.has('local-junk/scratch.md'), '#6984: an ignored untracked file is not scanned (--exclude-standard)');
+    assert(
+      !result.untrackedFiles.includes('local-junk/scratch.md'),
+      '#6984: an ignored untracked file is not even enumerated',
+    );
+    assert(
+      !flagged.has('node_modules/pkg/index.js'),
+      '#6984: EXCLUDED still applies to the untracked half -- an un-ignored dependency tree cannot turn this red',
+    );
+    //
+    // Reverse -- and the direction is the ordinary one: restore the pre-#6984
+    // enumeration and the specimen is not in the scan set at all, so the gate was
+    // green on it for a reason unrelated to its bytes. Stated as the enumeration
+    // fact rather than as a re-run, because that IS the change: same classifier,
+    // same byte table, different list of paths.
+    const indexOnlyEnumeration = execFileSync('git', ['ls-files', '-z'], { cwd: dir, encoding: 'utf8' })
+      // Split on the NUL delimiter built from its byte value: this file is in
+      // its own scan surface, so the delimiter is never written as a literal.
+      .split(String.fromCharCode(0))
+      .filter(Boolean);
+    assert(
+      !indexOnlyEnumeration.includes('packages/cli/test/new-case.test.ts'),
+      '#6984 reverse: the specimen is absent from the index-only enumeration, so the pre-#6984 gate never looked at it',
+    );
+    // ...and it was on disk the whole time. Without this the assertion above
+    // would also pass for a file that simply did not exist.
+    assert(
+      findControlBytes(readFileSync(join(dir, 'packages/cli/test/new-case.test.ts'))).length === 1,
+      '#6984 reverse: the byte was on disk all along -- only the enumeration changed',
+    );
+    //
+    // The green states its own scope. This is the half of #6984 that is not
+    // about coverage at all: a summary naming only what it scanned, with no
+    // count for what it did not, is what made the pre-fix green read as "this
+    // tree is clean".
+    // Exactly the three untracked-and-not-ignored fixtures reach the scan set:
+    // the two test files plus the .gitignore itself. The ignored one and the
+    // EXCLUDED one are absent, so this count is also the pin on both exclusions.
+    assert(
+      result.untracked === 3 && result.scannedUntracked === 3,
+      `#6984: 3 untracked paths enumerated and all 3 scanned as text, got ${result.untracked}/${result.scannedUntracked}`,
+    );
+    assert(
+      result.untrackedFiles.slice().sort().join() ===
+        ['.gitignore', 'packages/cli/test/new-case-fixed.test.ts', 'packages/cli/test/new-case.test.ts'].join(),
+      `#6984: the untracked half is reported by path, got ${result.untrackedFiles}`,
+    );
+    assert(
+      result.scanned === result.scannedTracked + result.scannedUntracked,
+      'the halves add up to the total scanned',
+    );
+    const summaryLine = summarise(result);
+    assert(
+      summaryLine.includes(`${result.scannedTracked} tracked, ${result.scannedUntracked} untracked-not-ignored`),
+      `#6984: the summary states BOTH halves, got "${summaryLine}"`,
+    );
+    // The zero case is the one that matters most, because it is what CI prints:
+    // it must still name the untracked half rather than fall silent, or a green
+    // over a fully-tracked tree and the pre-#6984 green become the same sentence.
+    assert(
+      summarise({ scanned: 7, scannedTracked: 7, scannedUntracked: 0, skipped: { binary: [], 'wide-encoding': [], unreadable: [] } }) ===
+        'scanned 7 text file(s) -- 7 tracked, 0 untracked-not-ignored',
+      'the summary names the untracked half even when it is empty',
+    );
+
     // Which byte it was is reported, so the prescription can name the escape.
     assert(
       flagged.get('packages/x/src/key.ts')?.bytes.join() === '1',
@@ -859,6 +1109,34 @@ function selfTest() {
       emittedSet.join() === scannedSet.join(),
       `the emitted class ${scannedCharClass()} matches exactly the scanned set, got ${emittedSet.length} of ${scannedSet.length} bytes`,
     );
+
+    // ── #6984, the CI direction: on a fully tracked tree the widening is a no-op
+    //
+    // A workflow checks out a commit, so every path in CI's tree is tracked and
+    // the untracked half is empty -- which means #6984 cannot change any CI
+    // verdict. That is a claim about behaviour, so it is PROVED here rather than
+    // asserted in a comment: stage the fixtures written above and re-scan.
+    //
+    // `git add -A` WITHOUT `-f`, unlike the first staging: `-f` would force-add
+    // the deliberately-ignored `local-junk/scratch.md`, which would make it
+    // tracked, scanned and flagged -- a real behaviour, but not the one under
+    // test here, and it would turn the offender-set comparison below red for a
+    // reason that has nothing to do with the enumeration widening.
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    const staged = scan(dir);
+    assert(staged.untracked === 0, `#6984: a fully tracked tree has an empty untracked half, got ${staged.untracked}`);
+    assert(
+      staged.offenders.map((o) => o.file).sort().join() === offenders.map((o) => o.file).sort().join(),
+      '#6984: staging changes no verdict -- the same files are flagged either way, so CI sees exactly what it saw before',
+    );
+    assert(
+      staged.offenders.every((o) => o.untracked === false),
+      '#6984: nothing is reported as untracked once everything is staged',
+    );
+    assert(
+      summarise(staged).includes('0 untracked-not-ignored'),
+      `#6984: CI's own summary line still names the untracked half, got "${summarise(staged)}"`,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -884,7 +1162,10 @@ if (process.argv.includes('--self-test')) {
   for (const f of result.skipped.binary) console.log(`binary         ${f}`);
   for (const f of result.skipped['wide-encoding']) console.log(`wide-encoding  ${f}`);
   for (const f of result.skipped.unreadable) console.log(`non-regular    ${f}`);
-  console.log(`\n${summarise(result)} (of ${result.tracked} tracked path(s))`);
+  // The untracked half, named file by file. These are the paths #6984 added to
+  // the set, and the ones a reader cannot reconstruct from the index.
+  for (const f of result.untrackedFiles) console.log(`untracked      ${f}`);
+  console.log(`\n${summarise(result)} (of ${result.tracked} tracked + ${result.untracked} untracked path(s) enumerated)`);
 } else {
   main();
 }

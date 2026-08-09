@@ -117,8 +117,13 @@ jobs:
       - name: "@objectstack/verify stand-in erasure guard"
         run: pnpm check:verify-stand-in
 
-      # Raw control-byte guard (#3127 / #4890 / #5157 / #5460). Scans every
-      # tracked TEXT file for a raw ASCII control byte and fails on any hit.
+      # Raw control-byte guard (#3127 / #4890 / #5157 / #5460 / #6984). Scans
+      # every TEXT file git knows about for a raw ASCII control byte and fails on
+      # any hit. Since #6984 the scan set is the index PLUS untracked-but-not-
+      # ignored working-tree files, so a locally-authored file is covered before
+      # it is staged; here that widening is a no-op, because a workflow checks out
+      # a commit and has no untracked files at all (the step's summary line says
+      # so — it names both halves, and the untracked one reads 0 in CI).
       # WHICH bytes are in the set and WHY each is rejected are stated and argued
       # once, in the gate script's header — `scripts/check-nul-bytes.mjs`. That
       # header is authoritative and this comment cites it rather than restating it
