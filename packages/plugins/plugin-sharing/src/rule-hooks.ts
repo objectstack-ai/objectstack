@@ -99,8 +99,13 @@ export const ruleRegrantQueue = new RuleRegrantQueue();
  *
  *  - `afterInsert` — recompute the inserted row (unchanged behaviour).
  *  - `beforeUpdate` / `beforeDelete` — resolve the affected row set and stash
- *    it on the shared `HookContext` ({@link STASH_KEY}). Must be `before`:
- *    the write is what makes those rows unfindable.
+ *    it for the `after` half (`AFFECTED_ROWS_STASH_KEY`). Must be
+ *    `before`: the write is what makes those rows unfindable.
+ *    [#6966] The stash rides `HookContext.dispatch.scope`, the engine's
+ *    per-write scratch — NOT the context object. A predicate write dispatches
+ *    `before*` per row (#5574) and builds a fresh context for each, so the
+ *    older "the engine reuses one HookContext across the pair" assumption held
+ *    only for single-id writes and silently dropped every bulk write's stash.
  *  - `afterUpdate` — recompute per row when the set is bounded (which grants
  *    AND revokes, so a bulk update INTO a rule's criteria is covered as well
  *    as one out of it); otherwise revoke the object's rule grants set-based
@@ -238,6 +243,22 @@ export function bindRuleHooks(
     /** What the `after` hook should act on when no `before` hook ran. */
     const affectedFrom = (ctx: any): AffectedRows => readAffectedRows(ctx);
 
+    /**
+     * [#6966] Has this write's `after` work already been done by an earlier row
+     * of the same fan-out?
+     *
+     * What the `after` hooks below act on is the WRITE's row set, not the row
+     * they happen to be dispatched for — `affectedFrom` returns the whole
+     * union, and both branches (per-row recompute, object-wide revoke) are
+     * batch-scoped. A predicate write dispatches them once per matched row, so
+     * running them unguarded does the batch's work N times: N identical
+     * object-wide revokes on the unbounded branch, and N×N `recomputeRow` calls
+     * on the bounded one — quadratic in the batch size, which for a write at
+     * the cap is a million recomputes for a thousand rows.
+     */
+    const alreadyHandledThisWrite = (ctx: any): boolean =>
+      ctx?.dispatch?.mode === 'per-row' && ctx.dispatch.index !== 0;
+
     engine.registerHook('afterInsert', async (ctx: any) => {
       if ((ctx?.session as any)?.isSystem) {
         // [#6783] The skip stays exactly as it was; it just stops being silent.
@@ -265,6 +286,7 @@ export function bindRuleHooks(
         noteSystemWriteSkipped(objectName);
         return;
       }
+      if (alreadyHandledThisWrite(ctx)) return;
       try {
         const affected = affectedFrom(ctx);
         if (affected.kind === 'rows') {
@@ -287,6 +309,7 @@ export function bindRuleHooks(
       // writes on its own account (#5103) — and by the boot orphan sweep, so
       // an INFO line here would point an operator at a repair that cannot run.
       if ((ctx?.session as any)?.isSystem) return;
+      if (alreadyHandledThisWrite(ctx)) return;
       try {
         const affected = affectedFrom(ctx);
         if (affected.kind === 'rows') {

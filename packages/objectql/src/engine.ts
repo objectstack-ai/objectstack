@@ -1737,12 +1737,16 @@ export class ObjectQL implements IObjectQLEngine {
   ): HookContext[] {
     const schema = this._registry.getObject(object);
     const options = (batchCtx.input as { options?: unknown } | undefined)?.options;
-    return rows.map((row) => ({
+    return rows.map((row, index) => ({
       ...batchCtx,
       event,
       input: payload
         ? { id: (row as { id?: unknown }).id, data: { ...payload }, options }
         : { id: (row as { id?: unknown }).id, options },
+      // [#6966] `mode` and `scope` ride over from the batch context; only the
+      // position differs. Spreading `batchCtx` would carry index 0 onto every
+      // row, which is the one member a per-row consumer keys "do this once" on.
+      dispatch: { ...(batchCtx.dispatch as object), index } as HookContext['dispatch'],
       previous: coerceBooleanFields(schema as any, row as any),
       result: payload
         ? coerceBooleanFields(schema as any, { ...row, ...payload } as any)
@@ -1811,12 +1815,19 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<void> {
     const schema = this._registry.getObject(object);
     const carriesPayload = event === 'beforeUpdate';
-    for (const row of rows) {
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index];
       const rowId = (row as { id?: unknown }).id;
       const options = (batchCtx.input as { options?: unknown }).options;
       const rowCtx = {
         ...batchCtx,
         event,
+        // [#6966] See `buildPerRowAfterContexts` — same rule. The `scope`
+        // identity carried over from `batchCtx` is what lets a `before*`
+        // handler leave something an `after*` handler can still find: a per-row
+        // context is a fresh object, so a stash written on the context itself
+        // dies with the row that held it.
+        dispatch: { ...(batchCtx.dispatch as object), index } as HookContext['dispatch'],
         // D3: THE payload, read fresh so a previous row's REPLACEMENT is what
         // this row sees. Never a copy.
         input: carriesPayload
@@ -6386,11 +6397,19 @@ export class ObjectQL implements IObjectQLEngine {
       // consumer built for the single shape — the flat-input proxy read
       // `undefined`s, declarative `condition`s evaluated against an array,
       // audit rows and flow-trigger contexts came out mangled (#2922).
+      //
+      // [#6966] Which is exactly why the fan-out has to be STATED rather than
+      // inferred: the shape is deliberately identical, so nothing about a
+      // context tells a handler whether it is one row of a batch. The scratch
+      // is created once per CALL and shared by every row's context, before and
+      // after — see `HookContext.dispatch`.
+      const insertScope: Record<string, unknown> = {};
       const rowHookContexts: HookContext[] = (isBatch ? (defaultedData as any[]) : [defaultedData]).map(
-        (row) => ({
+        (row, rowIndex) => ({
           object,
           event: 'beforeInsert',
           input: { data: row, options: opCtx.options },
+          dispatch: { mode: isBatch ? 'per-row' : 'record', index: rowIndex, scope: insertScope },
           session: this.buildSession(opCtx.context),
           provenance: this.buildProvenance(opCtx.context),
           user: this.buildUser(opCtx.context),
@@ -6958,6 +6977,19 @@ export class ObjectQL implements IObjectQLEngine {
            // before anything is read.
            throw new Error(ENGINE_UPDATE_REJECT_MESSAGE);
        }
+
+       // [#6966] The ladder verdict, stated on the contract. Bound HERE and
+       // nowhere else: this is the one point that knows which branch the write
+       // takes, and re-deriving it downstream is what `asScalarId` stays
+       // unexported to prevent (#4434 / #4550). The batch context carries index
+       // 0; `dispatchPerRowBeforeHooks` and `buildPerRowAfterContexts` override
+       // only `index`, so `mode` and — load-bearing — the `scope` IDENTITY are
+       // shared by every dispatch of this call, in both phases.
+       hookContext.dispatch = {
+           mode: isPredicatePath ? 'per-row' : 'record',
+           index: 0,
+           scope: {},
+       };
 
        const updateSchema = this._registry.getObject(object);
        // Pre-update snapshot. Exposed to hooks via `hookContext.previous` in
@@ -7890,6 +7922,13 @@ export class ObjectQL implements IObjectQLEngine {
         // the id; with the ladder resolved first there is no such conversion.
         throw new Error(ENGINE_DELETE_REJECT_MESSAGE);
       }
+
+      // [#6966] See update()'s twin — same rule, same single binding point.
+      hookContext.dispatch = {
+        mode: isPredicatePath ? 'per-row' : 'record',
+        index: 0,
+        scope: {},
+      };
 
       if (isByIdDelete) {
         if (wantsPreImage) {

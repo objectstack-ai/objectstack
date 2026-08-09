@@ -332,6 +332,12 @@ export function bindRecordShareCascade(
     const objectName = String(ctx?.object ?? '');
     const t = targets(objectName);
     if (!t.shares && !t.links) return;
+    // [#6966] Once per WRITE, not once per row. `readAffectedRows` returns the
+    // whole batch's id set and both branches below act on all of it — so a
+    // predicate delete's per-row `afterDelete` fan-out (#5038) would repeat the
+    // batch's revoke N times, and the unbounded branch's queued walk with it.
+    // The row set is a property of the write; so is this work.
+    if (ctx?.dispatch?.mode === 'per-row' && ctx.dispatch.index !== 0) return;
     // Belt around everything OUTSIDE the two halves (each of which has its own
     // `attempt`): a delete that already landed must never be failed by this
     // hook, whatever goes wrong in it.

@@ -108,8 +108,18 @@ type Engine = ReturnType<typeof fakeEngine>;
 /** Drive an engine-shaped insert: beforeInsert → driver write → afterInsert,
  * with the same ctx object throughout and `input.data` as the persisted row
  * (exactly what engine.ts hands the driver). */
+/**
+ * [#6966] The engine's dispatch marker as a single-record write carries it.
+ * A hand-built context without one already reads as "not a per-row dispatch",
+ * so stating it here changes no verdict — it makes the per-row driver's marker
+ * a visible difference rather than a hidden one.
+ */
+function recordDispatch(scope: Record<string, unknown> = {}) {
+  return { mode: 'record' as const, index: 0, scope };
+}
+
 async function driveInsert(engine: Engine, object: string, data: Record<string, unknown>, id: string) {
-  const ctx: any = { object, event: 'beforeInsert', input: { data } };
+  const ctx: any = { object, event: 'beforeInsert', input: { data }, dispatch: recordDispatch() };
   await engine.trigger('beforeInsert', ctx);
   const row = { ...(ctx.input.data as Record<string, unknown>), id };
   (engine.tables[object] ??= []).push(row);
@@ -120,7 +130,7 @@ async function driveInsert(engine: Engine, object: string, data: Record<string, 
 }
 
 async function driveUpdate(engine: Engine, object: string, id: string, data: Record<string, unknown>) {
-  const ctx: any = { object, event: 'beforeUpdate', input: { id, data } };
+  const ctx: any = { object, event: 'beforeUpdate', input: { id, data }, dispatch: recordDispatch() };
   await engine.trigger('beforeUpdate', ctx);
   const row = (engine.tables[object] ?? []).find((r) => String(r.id) === String(id));
   if (row) Object.assign(row, ctx.input.data);
@@ -130,22 +140,59 @@ async function driveUpdate(engine: Engine, object: string, id: string, data: Rec
   return row;
 }
 
+/**
+ * Drive an engine-shaped delete.
+ *
+ * [#6966] A `where`-shaped delete is driven the way the engine has actually
+ * driven it since #5038/#5574 — the doomed rows are matched FIRST, then
+ * `beforeDelete` and `afterDelete` each fire once per matched row on a
+ * single-record-shaped context carrying that row's `input.id` and the
+ * `dispatch` marker, with one `scope` object shared by all of them.
+ *
+ * This driver used to model the pre-#5574 batch dispatch instead: ONE context
+ * with no `id`, carrying only `options.where`. The engine stopped producing
+ * that shape two releases ago, so the release-on-multi-delete case below was
+ * passing against a dispatch that no longer exists.
+ */
 async function driveDelete(engine: Engine, object: string, input: any) {
-  const ctx: any = { object, event: 'beforeDelete', input };
-  await engine.trigger('beforeDelete', ctx);
   const where = input?.options?.where;
-  if (input?.id != null) {
-    const ids = typeof input.id === 'object' ? input.id.$in : [input.id];
-    engine.tables[object] = (engine.tables[object] ?? []).filter(
-      (r) => !ids.some((i: unknown) => String(i) === String(r.id)),
-    );
-  } else if (where) {
-    engine.tables[object] = (engine.tables[object] ?? []).filter(
-      (r) => !Object.entries(where).every(([k, v]) => r[k] === v),
-    );
+  const byId = input?.id != null;
+  const doomed = byId
+    ? (() => {
+        const ids = typeof input.id === 'object' ? input.id.$in : [input.id];
+        return (engine.tables[object] ?? []).filter((r) => ids.some((i: unknown) => String(i) === String(r.id)));
+      })()
+    : where
+      ? (engine.tables[object] ?? []).filter((r) => Object.entries(where).every(([k, v]) => r[k] === v))
+      : [];
+
+  const drop = () => {
+    const gone = new Set(doomed.map((r) => String(r.id)));
+    engine.tables[object] = (engine.tables[object] ?? []).filter((r) => !gone.has(String(r.id)));
+  };
+
+  if (byId) {
+    // Single-id path: ONE context, reused across the pair, `mode: 'record'`.
+    const ctx: any = { object, event: 'beforeDelete', input, dispatch: recordDispatch() };
+    await engine.trigger('beforeDelete', ctx);
+    drop();
+    ctx.event = 'afterDelete';
+    await engine.trigger('afterDelete', ctx);
+    return;
   }
-  ctx.event = 'afterDelete';
-  await engine.trigger('afterDelete', ctx);
+
+  // Predicate path: per-row fan-out, one shared scope, fresh context per row.
+  const scope: Record<string, unknown> = {};
+  const rowCtx = (event: string, row: any, index: number) => ({
+    object,
+    event,
+    input: { id: row.id, options: input?.options },
+    previous: row,
+    dispatch: { mode: 'per-row' as const, index, scope },
+  });
+  for (let i = 0; i < doomed.length; i++) await engine.trigger('beforeDelete', rowCtx('beforeDelete', doomed[i], i));
+  drop();
+  for (let i = 0; i < doomed.length; i++) await engine.trigger('afterDelete', rowCtx('afterDelete', doomed[i], i));
 }
 
 function install(engine: Engine, storage: any = fakeStorage()) {
@@ -282,7 +329,7 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
       });
     });
 
-    it('releases via the beforeDelete stash for a where-shaped multi delete', async () => {
+    it('releases every row of a where-shaped multi delete, in ONE release pass', async () => {
       const engine = fakeEngine({
         files: [
           file({ ref_object: 'product', ref_id: 'p1', ref_field: 'image' }),
@@ -300,6 +347,19 @@ describe('File Reference Ownership (ADR-0104 D3 wave 2)', () => {
       await driveDelete(engine, 'product', { options: { where: { archived: true } } });
 
       expect(engine.tables.sys_file.every((f) => f.ref_id === null)).toBe(true);
+
+      // [#6966] Both rows released by ONE `sys_file` lookup over an `$in`, not
+      // one lookup per row. The per-row `afterDelete` fan-out is what made the
+      // naive spelling N queries; `dispatch.index === 0` plus the ids the
+      // `before` phase collected onto the shared scope is what collapses it.
+      const ownershipReads = engine.calls.filter((c) => c.op === 'find' && c.object === 'sys_file');
+      expect(ownershipReads).toHaveLength(1);
+      expect(ownershipReads[0].arg).toMatchObject({ ref_id: { $in: ['p1', 'p2'] } });
+
+      // And nothing re-queried the deleted object to learn its ids: the engine
+      // already handed them over row by row. (The pre-#6966 hook ran one
+      // `engine.find(object, { where })` here.)
+      expect(engine.calls.filter((c) => c.op === 'find' && c.object === 'product')).toHaveLength(0);
     });
 
     it('releases the old file and claims the new one when a field is swapped', async () => {

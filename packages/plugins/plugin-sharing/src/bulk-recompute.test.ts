@@ -182,6 +182,67 @@ function makeEngine() {
       ctx.event = 'afterDelete';
       await engine.fire('afterDelete', object, ctx);
     },
+
+    /**
+     * [#6966] A predicate update run the way the engine ACTUALLY runs one
+     * today, which `simulateBulkUpdate` above no longer describes: since
+     * #5038/#5574 BOTH phases dispatch once per matched row, each on a freshly
+     * built single-record-shaped context carrying that row's `input.id` and the
+     * `dispatch` marker, with ONE `scope` object shared by all of them.
+     *
+     * The distinction is this section's whole point. `simulateBulkUpdate`
+     * models the pre-#5574 batch dispatch (one context, no `input.id`), so
+     * assertions written against it are silent about what the engine does now.
+     * It is kept rather than replaced because the same "one context across the
+     * pair" shape is exactly what the single-id path still does.
+     */
+    async simulatePerRowUpdate(object: string, where: any, data: Row, session: any = ADMIN_SESSION) {
+      const t = ensure(object);
+      const matched = t.filter((r) => where == null || matches(r, where)).map((r) => ({ ...r }));
+      const scope: Record<string, unknown> = {};
+      const rowCtx = (event: string, row: Row, index: number) => ({
+        object,
+        event,
+        input: { id: row.id, data, options: { where, multi: true } },
+        previous: { ...row },
+        dispatch: { mode: 'per-row' as const, index, scope },
+        session,
+      });
+      for (let i = 0; i < matched.length; i++) {
+        await engine.fire('beforeUpdate', object, rowCtx('beforeUpdate', matched[i], i));
+      }
+      for (let i = 0; i < t.length; i++) {
+        if (where != null && !matches(t[i], where)) continue;
+        t[i] = { ...t[i], ...data };
+      }
+      for (let i = 0; i < matched.length; i++) {
+        await engine.fire('afterUpdate', object, rowCtx('afterUpdate', matched[i], i));
+      }
+      return matched.length;
+    },
+
+    /** [#6966] The delete twin of `simulatePerRowUpdate`. */
+    async simulatePerRowDelete(object: string, where: any, session: any = ADMIN_SESSION) {
+      const t = ensure(object);
+      const doomed = t.filter((r) => matches(r, where)).map((r) => ({ ...r }));
+      const scope: Record<string, unknown> = {};
+      const rowCtx = (event: string, row: Row, index: number) => ({
+        object,
+        event,
+        input: { id: row.id, options: { where, multi: true } },
+        previous: { ...row },
+        dispatch: { mode: 'per-row' as const, index, scope },
+        session,
+      });
+      for (let i = 0; i < doomed.length; i++) {
+        await engine.fire('beforeDelete', object, rowCtx('beforeDelete', doomed[i], i));
+      }
+      for (let i = t.length - 1; i >= 0; i--) if (matches(t[i], where)) t.splice(i, 1);
+      for (let i = 0; i < doomed.length; i++) {
+        await engine.fire('afterDelete', object, rowCtx('afterDelete', doomed[i], i));
+      }
+      return doomed.length;
+    },
   };
   return engine;
 }
@@ -374,6 +435,85 @@ describe('#4779 predicate (multi) writes recompute sharing rules', () => {
       const warned = logger.warn.mock.calls.map((c: any[]) => String(c[0])).join('\n');
       expect(warned).toContain('re-granted in the background');
       expect(logger.warn.mock.calls.some((c: any[]) => c[1]?.reason === 'over-cap')).toBe(true);
+    });
+  });
+
+  /**
+   * [#6966] The same contract, over the dispatch the engine actually performs.
+   *
+   * Everything above drives `simulateBulkUpdate`, which models the pre-#5574
+   * batch dispatch: ONE context, no `input.id`, reused across the pair. Since
+   * #5574 a predicate write dispatches `before*` per matched row on a FRESHLY
+   * BUILT context, so the stash `stashAffectedRows` wrote never reached the
+   * `after` phase. `readAffectedRows` then answered `resolve-failed` and every
+   * bulk write took the unbounded branch — a full revoke plus a queued
+   * re-grant, once per matched row. Safe, but not what any of these tests say.
+   *
+   * Revert-proof: park the stash back on the context (or read it from there)
+   * and the bounded cases below fall into the unbounded branch — `_deleteCalls`
+   * grows a set-based revoke per row where these expect none.
+   */
+  describe('[#6966] the real per-row dispatch takes the same bounded path', () => {
+    it('a per-row bulk update revokes exactly the rows that left the criteria', async () => {
+      seed(2, 'east');
+      await rules.evaluateRule('srule_east', SYS);
+      expect(ruleShares(engine)).toHaveLength(2);
+
+      await engine.simulatePerRowUpdate('opportunity', { region: 'east' }, { region: 'west' });
+
+      expect(ruleShares(engine)).toEqual([]);
+      // BOUNDED: the row set was known, so no object-wide revoke was needed.
+      // Before this fix there was one per matched row.
+      expect(engine._deleteCalls.filter((c) => c.object === 'sys_record_share' && c.options?.multi))
+        .toHaveLength(0);
+    });
+
+    it('a per-row bulk update INTO the criteria grants every matched row, not just the first', async () => {
+      // The failure this guards against is subtler than "no stash": resolving
+      // once and reusing the answer would freeze the batch to row 0's id,
+      // because `resolveAffectedRows` short-circuits on a bound `input.id`.
+      seed(3, 'west');
+      await rules.evaluateRule('srule_east', SYS);
+      expect(ruleShares(engine)).toEqual([]);
+
+      await engine.simulatePerRowUpdate('opportunity', { region: 'west' }, { region: 'east' });
+
+      expect(ruleShares(engine).map((s) => s.record_id).sort()).toEqual(['opp0', 'opp1', 'opp2']);
+    });
+
+    it('a per-row bulk delete revokes every deleted row\'s grants', async () => {
+      seed(3, 'east');
+      await rules.evaluateRule('srule_east', SYS);
+      expect(ruleShares(engine)).toHaveLength(3);
+
+      engine._deleteCalls.length = 0;
+      await engine.simulatePerRowDelete('opportunity', { region: 'east' });
+
+      expect(ruleShares(engine)).toEqual([]);
+      // ONE revoke for the write, scoped to the deleted ids — not one per row,
+      // and not the object-wide `unbounded` revoke the missing stash produced.
+      const revokes = engine._deleteCalls.filter((c) => c.object === 'sys_record_share');
+      expect(revokes).toHaveLength(1);
+      expect(revokes[0].options).toMatchObject({
+        where: { source: 'rule', object_name: 'opportunity', record_id: { $in: ['opp0', 'opp1', 'opp2'] } },
+        multi: true,
+      });
+    });
+
+    it('the union is still capped — over the cap falls back to the unbounded branch', async () => {
+      // The engine's own per-row ceiling is higher than this module's, so a
+      // batch it lets through can still be more than a per-row recompute will
+      // take. That verdict must stay `over-cap`, not become "N rows, fine".
+      seed(RULE_RECOMPUTE_ROW_CAP + 1, 'east');
+      await engine.simulatePerRowUpdate('opportunity', { region: 'east' }, { stage: 'won' });
+
+      const revokes = engine._deleteCalls.filter((c) => c.object === 'sys_record_share');
+      expect(revokes).toHaveLength(1);
+      expect(revokes[0].options).toMatchObject({
+        where: { source: 'rule', object_name: 'opportunity' },
+        multi: true,
+      });
+      await ruleRegrantQueue.whenIdle();
     });
   });
 

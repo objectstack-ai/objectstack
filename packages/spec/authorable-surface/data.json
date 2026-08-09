@@ -456,6 +456,7 @@
     "data/FullTextSearch:operator",
     "data/FullTextSearch:query",
     "data/HookContext:api",
+    "data/HookContext:dispatch",
     "data/HookContext:event",
     "data/HookContext:id",
     "data/HookContext:input",
