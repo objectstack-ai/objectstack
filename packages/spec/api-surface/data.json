@@ -297,6 +297,7 @@
     "HookBodySchema (const)",
     "HookContext (type)",
     "HookContextSchema (const)",
+    "HookDispatch (type)",
     "HookEvent (const)",
     "HookEventType (type)",
     "HookParsed (type)",
