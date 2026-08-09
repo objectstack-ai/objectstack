@@ -322,6 +322,15 @@ export function readAffectedRows(hookCtx: any): AffectedRows {
   const host = stashHost(hookCtx);
   const seen = host?.[AFFECTED_ROW_IDS_KEY] as Set<string> | undefined;
   if (seen) {
+    if (seen.size === 0) {
+      // Dispatched per row and yet nothing was learned — the accumulator only
+      // exists because a `before*` dispatch created it, so every id it was
+      // handed was null. That is "we do not know", NOT "no rows changed", and
+      // this module's rule is that the two must never be confused: reading it
+      // as an empty row set would silently skip the cleanup entirely, which is
+      // the direction #4757 was filed for.
+      return { kind: 'unbounded', reason: 'resolve-failed', detail: 'per-row dispatch bound no ids' };
+    }
     return seen.size > RULE_RECOMPUTE_ROW_CAP
       ? { kind: 'unbounded', reason: 'over-cap' }
       : { kind: 'rows', ids: [...seen] };

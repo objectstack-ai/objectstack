@@ -33,6 +33,8 @@ import {
   RuleRegrantQueue,
   resolveAffectedRows,
   idsFromHookInput,
+  stashAffectedRows,
+  readAffectedRows,
 } from './bulk-recompute.js';
 
 interface Row { [k: string]: any }
@@ -606,6 +608,58 @@ describe('resolveAffectedRows', () => {
       input: { options: { where: { region: 'east' }, multi: true } },
     });
     expect(out).toMatchObject({ kind: 'unbounded', reason: 'resolve-failed' });
+  });
+});
+
+describe('[#6966] readAffectedRows on a per-row dispatch', () => {
+  /** One shared scope, as the engine builds it for a single write. */
+  const perRow = (scope: Record<string, unknown>, id: unknown, index: number) => ({
+    object: 'opportunity',
+    event: 'beforeUpdate',
+    input: { id, options: { where: { region: 'east' }, multi: true } },
+    dispatch: { mode: 'per-row' as const, index, scope },
+  });
+
+  it('unions the rows the engine hands over, without re-querying the predicate', async () => {
+    const scope: Record<string, unknown> = {};
+    const engine = { find: vi.fn(async () => []) };
+    for (const [i, id] of ['opp0', 'opp1', 'opp2'].entries()) {
+      await stashAffectedRows(engine as any, 'opportunity', perRow(scope, id, i));
+    }
+    expect(readAffectedRows(perRow(scope, 'opp0', 0))).toEqual({ kind: 'rows', ids: ['opp0', 'opp1', 'opp2'] });
+    // The engine already matched the rows — asking again would be a second scan
+    // AND a different question, since the write may already have landed.
+    expect(engine.find).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates across subscribers — two packages stash on every row', async () => {
+    // `rule-hooks` and `record-share-cascade` both register this on the same
+    // write, so every row is offered twice. Appending would double every id.
+    const scope: Record<string, unknown> = {};
+    const engine = { find: vi.fn(async () => []) };
+    for (const [i, id] of ['opp0', 'opp1'].entries()) {
+      await stashAffectedRows(engine as any, 'opportunity', perRow(scope, id, i));
+      await stashAffectedRows(engine as any, 'opportunity', perRow(scope, id, i));
+    }
+    expect(readAffectedRows(perRow(scope, 'opp0', 0))).toEqual({ kind: 'rows', ids: ['opp0', 'opp1'] });
+  });
+
+  it('reads UNBOUNDED, not "no rows", when a per-row dispatch bound no ids at all', async () => {
+    // "We do not know" must never degrade into "nothing changed" — that is the
+    // direction that silently skips cleanup (#4757). An accumulator that exists
+    // but is empty means every id handed over was null, which is the former.
+    const scope: Record<string, unknown> = {};
+    await stashAffectedRows({ find: async () => [] } as any, 'opportunity', perRow(scope, null, 0));
+    expect(readAffectedRows(perRow(scope, null, 0))).toMatchObject({ kind: 'unbounded' });
+  });
+
+  it('applies the cap to the UNION, not to any one row', async () => {
+    const scope: Record<string, unknown> = {};
+    const engine = { find: vi.fn(async () => []) };
+    for (let i = 0; i <= RULE_RECOMPUTE_ROW_CAP; i++) {
+      await stashAffectedRows(engine as any, 'opportunity', perRow(scope, `opp${i}`, i));
+    }
+    expect(readAffectedRows(perRow(scope, 'opp0', 0))).toEqual({ kind: 'unbounded', reason: 'over-cap' });
   });
 });
 
