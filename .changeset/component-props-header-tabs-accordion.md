@@ -79,3 +79,6 @@ slots, all four in-repo authoring sites are `slots.tabs`, and a region-only
 rewrite would have left `os migrate meta` unable to touch the only shape the key
 is written in — while the tombstone promised it could. Every other page-component
 conversion gains the same reach, in the direction it already declares.
+
+<!-- adr-0087: registered page-tabs-type-to-tab-style -->
+
