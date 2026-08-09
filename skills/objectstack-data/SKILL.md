@@ -168,12 +168,10 @@ every entry is dropped.
 
 hint: 'search' scans this object's own columns, so a related record's column
 cannot be a search target — expand the relation and search the related object,
-or copy the value onto a formula field here. Clients echo this declaration
+or copy the value onto a stored text field here. Clients echo this declaration
 verbatim as the '$searchFields' override, so a stale entry becomes a 400
 INVALID_FIELD on list search (#4254), not just a quietly narrowed one.
 ```
-
-(The hint's "formula field" wording is loose — only a **stored** mirror works.)
 
 A request carrying the dotted path is `400 INVALID_FIELD`:
 
