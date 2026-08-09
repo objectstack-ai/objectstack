@@ -125,7 +125,7 @@ const result = CronScheduleSchema.parse(data);
 | **backoffMultiplier** | `number` | ✅ | Exponential backoff multiplier; 1 (the default) keeps the delay flat |
 | **maxRetryDelayMs** | `integer` | ✅ | Ceiling for a single backoff delay (ms) |
 | **jitter** | `boolean` | ✅ | Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries |
-| **retryDelayMs** | `never` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry` and `flow.errorHandling`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. `os migrate meta --from 16` rewrites it for you. |
+| **retryDelayMs** | `never` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 (#4661, #4964) — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry` and `flow.errorHandling`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 
 
 ---

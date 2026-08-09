@@ -801,7 +801,7 @@ export const ConnectorSchema = lazySchema(() => z.object({
     'here was inert while reading like a configured cap. Delete the key. Do NOT substitute ' +
     '`shared` `RateLimitConfig` — that is the inbound limiter and would cap the wrong direction; ' +
     'until an outbound throttle exists, rate-limit at the connector provider or upstream gateway. ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /**

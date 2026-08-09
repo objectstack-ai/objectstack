@@ -31,6 +31,27 @@
  * agent bumping `@objectstack/spec` sees THIS string, not our docs site. Write
  * it as an instruction, with the FROM → TO mapping and the one-line fix.
  *
+ * **The `os migrate meta` sentence is standardized — do not choose a verb.**
+ * A prescription whose surface an ADR-0087 conversion covers closes with
+ * exactly this sentence, whether the conversion STRIPS the key or REWRITES
+ * its value (#6856, maintainer-ruled 2026-08-09):
+ *
+ *     Run `os migrate meta --from <N>` to rewrite existing sources automatically.
+ *
+ * The sentence states a property of the TOOL — it rewrites your source
+ * files — never the fate of the key. The retired "rewrite it" spelling was
+ * misread over strip conversions because "it" has two antecedents (the key
+ * vs your sources) and the wrong reading promises a value conversion that
+ * never happens; "existing sources" has one antecedent. The KEY's fate
+ * belongs in the body prose ("Delete the key…", "Rename the key to…"),
+ * which every prescription already carries — the sentence never restates
+ * it. ONE exception: a conversion that rewrites only PART of the value
+ * keeps the two-clause form naming which part — "… to rewrite the <X> case
+ * … automatically; <what the tool does with the rest>." (model:
+ * `ui/dashboard.zod.ts` `compareTo.offset`). Both shapes are pinned
+ * class-wide by `retired-key-migrate-sentence.test.ts`; a new spelling
+ * fails the pin, not code review.
+ *
  * Tombstones age out, exactly like the `UNKNOWN_KEY_GUIDANCE` entries in
  * `data/object.zod.ts`: drop one ~two majors after the removal, by which point
  * it is archaeology rather than an upgrade (the history lives in CHANGELOG.md).
@@ -47,13 +68,16 @@ import { z } from 'zod';
  *
  * @param guidance - The upgrade prescription. State what replaced the key, the
  *   version that removed it, and the one-line fix — this string IS the migration
- *   doc for anyone who hits it.
+ *   doc for anyone who hits it. When an ADR-0087 conversion covers the surface,
+ *   close with the house `os migrate meta` sentence (module docblock above —
+ *   the wording is pinned, not a choice).
  *
  * @example
  * ```ts
  * conditionalRequired: retiredKey(
  *   '`conditionalRequired` was removed in @objectstack/spec 17.0.0 (#3855). ' +
- *   'Rename the key to `requiredWhen` — the value (a CEL predicate) is unchanged.',
+ *   'Rename the key to `requiredWhen` — the value (a CEL predicate) is unchanged. ' +
+ *   'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
  * ),
  * ```
  */
