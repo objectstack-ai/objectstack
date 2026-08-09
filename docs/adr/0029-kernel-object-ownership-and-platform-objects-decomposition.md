@@ -1,6 +1,6 @@
 # ADR-0029: Kernel Object Ownership — First-Party Capabilities as Plugins That Own Their Data, and Decomposing the `platform-objects` Monolith
 
-**Status**: Accepted — K0/K1/K2/D7 implemented; K3 (pending ADR-0030/storage) + K4 cleanup remaining (proposed 2026-06-01 · calibrated 2026-06-12)
+**Status**: Accepted — K0/K1/K2/D7 implemented; K3 (pending ADR-0030/storage) + K4 cleanup remaining (proposed 2026-06-01 · calibrated 2026-06-12) · **Amended** (2026-08-09, [#6853](https://github.com/objectstack-ai/objectstack/issues/6853) — **D9**: a tenant `sys_metadata` overlay of an `object` registers as its own `overlay` contributor layer instead of taking the packaged `own` slot and splicing the packaged definition out. D3's single-owner invariant is unchanged. **Design only — nothing is implemented yet**; see **"Amendment (2026-08-09, #6853)"** at the end for the measurement, the semantics, the blast radius, and what is deliberately left open.)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0019](./0019-app-as-consumer-unit.md) (app as the consumer-facing unit), [ADR-0025](./0025-plugin-package-distribution.md) (plugin package distribution + dependencies)
 **Related**: [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) (metadata naming & namespace isolation) **depends on** this ADR — its D5/D6 (reserved `sys` namespace, single-owner-per-object, apps-cannot-define-kernel) assume the kernel is properly owned. This ADR is sequenced **first** and is independently valuable; ADR-0028 owns the naming model, this ADR owns kernel object *ownership*.
@@ -319,3 +319,440 @@ the ADR-0028 naming flip.
   This is a *naming/reference-surface* question owned by ADR-0028 (rejected there
   on industry practice + the hub cross-reference graph). Ownership distribution
   (this ADR) is orthogonal and does not require sub-namespaces.
+
+---
+
+## Amendment (2026-08-09, #6853): a tenant overlay of an object is its own contributor LAYER, not a second `own`
+
+**Ruling**: maintainer, 2026-08-09, on [#6853](https://github.com/objectstack-ai/objectstack/issues/6853).
+Direction **B approved in principle**; direction A (reconstruct the packaged
+definition inside the delete-time heal) **rejected**; the stop-the-bleed guard
+shipped separately as [#7012](https://github.com/objectstack-ai/objectstack/issues/7012).
+The ruling was explicit that B's semantics are *designed in the amendment, not
+guessed* — this section is that design, and merging it is what ratifies it
+(`docs/adr/**` is maintainer-merged, [#6741](https://github.com/objectstack-ai/objectstack/issues/6741)).
+
+**Status of the work**: **design only — nothing here is implemented.** Every
+file:line below was read on `2f3e79351` (this repo moves; the measurement report
+on #6853 cites `51f2bb8c3`, and the symbols have moved since). The implementation
+is a separate card, gated on this record being accepted.
+
+**The block amended is D3** ("`sys` is one shared, reserved namespace,
+single-owner *per object*"). That block is **left standing as written** (Prime
+Directive #13 — an accepted record is not silently edited to make the past look
+like it always said the present), so this section is where the present tense
+lives. D3's invariant is **not weakened**: after this amendment there is still
+exactly one `own` contributor per object name, and `assertSingleOwnerPerObject`
+is unchanged. What changes is that a tenant overlay stops *borrowing* that slot.
+
+---
+
+### 1. What the code does today, measured
+
+An object's registry entry is a list of `ObjectContributor`s keyed by name
+(`packages/objectql/src/registry.ts:38-44`), and `registerObject` accepts exactly
+two kinds — `own` and `extend` (`:1070-1075`, the vocabulary at
+`packages/spec/src/data/object.zod.ts:2435`).
+
+A tenant overlay of an `object` reaches that verb through two seams, and both
+pass **two arguments only**, so `ownership` takes its default `'own'`:
+
+| seam | call | when |
+|:--|:--|:--|
+| `applyObjectRegistryMutation` | `packages/metadata-protocol/src/protocol.ts:7897-7911` | every `saveMetaItem` write-through |
+| `loadMetaFromDb` | `packages/metadata-protocol/src/protocol.ts:11670-11673` | **every boot**, no authorization gate |
+
+When the row's `package_id` equals the packaged owner's id, `registerObject`
+takes the re-registration branch at `registry.ts:1157-1160` and **splices the
+packaged contributor out of the list**. The packaged definition is *destroyed at
+write time* — it is not shadowed, and no second copy exists anywhere in the
+registry. Four consequences follow, all measured end-to-end in the 08:12Z report
+on #6853 (P0-P6) and re-read in the source here:
+
+1. **The packaged body is gone.** Measured (P1): `fields` went from
+   `[…, name, amount, packaged_only]` to `[…, name, overlay_only]`, contributor
+   `provenance` from `package` to `org`, on a list of length 1 throughout.
+2. **It re-happens on every boot** (P6), through `loadMetaFromDb`, silently:
+   `{"loaded":1,"errors":0,"invalid":0}` with no warning.
+3. **`isArtifactBacked` starts lying.** It asks `getArtifactItem('object', …)`
+   (`protocol.ts:7535-7540`), whose object branch resolves the **merged** object
+   and rejects it when `_provenance === 'org'` (`registry.ts:1727-1733`, predicate
+   at `:844-846`). Since the overlay is now the *owner*, the merged body carries
+   the tenant's provenance, so the predicate answers `false` for a name a code
+   package still ships.
+4. **Two gates that read that predicate silently disarm.** `saveMetaItem`'s
+   two-tier gate (`protocol.ts:8460-8472`) stops refusing — `object` declares
+   `allowOrgOverride: false, allowRuntimeCreate: true`
+   (`packages/spec/src/kernel/metadata-plugin.zod.ts:628`), so the *first* write
+   is refused and every later one is admitted through the wrong tier. And tier 3
+   of `restoreArtifactRegistryView` (`protocol.ts:8259-8272`), whose comment says
+   in as many words that it never retires a code-shipped object, fires:
+   `objectContributors` goes empty, `getObject` answers `null`, and data CRUD
+   404s on a table the package still ships, until the process restarts (P3/P6).
+
+A fifth shape belongs to the same mechanism. When the row's `package_id`
+**differs** from the packaged owner's, the ownership rule at `:1149-1155` throws,
+the throw is caught and `console.warn`-ed at `protocol.ts:7906-7910`, and
+`saveMetaItem` still reports success — the write-side silent discard filed as
+[#6995](https://github.com/objectstack-ai/objectstack/issues/6995), which the
+ruling requires this model to answer (§ D9.6).
+
+### 2. Why the overlay ever became an `own`
+
+Not by decision. `registerObject` had two kinds and the overlay is neither, so it
+took the default — and then the *re-registration* branch (written for HMR and
+metadata rebuilds replaying the **same** package's object) treated a different
+layer's body as a replay of the same one.
+
+The borrowed slot carries authority the overlay measurably never uses:
+
+- **It claims no namespace.** `registerObject` calls `registerNamespace` only when
+  a namespace argument is passed (`:1136-1138`); both overlay seams pass none, so
+  `namespaceRegistry` keeps the package's entry. What the splice *does* destroy is
+  the owner contributor's own `namespace` field (measured `''` where the package
+  had `'myapp'`, P5) — inert today only because `computeFQN` is identity
+  (`:61-63`).
+- **It does not decide package membership.** `getAllObjects(packageId)` matches
+  *any* contribution's `packageId` (`:1307`), owner or not.
+- **It owns no table.** The physical table is the packaged owner's, created by
+  its schema sync; an overlay's new fields ride ADR-0045 additive materialization.
+
+The one thing ownership gave it was *a place in the list*. That is a storage
+question, and D9 answers it as one.
+
+---
+
+### D9 — a tenant overlay registers as an `overlay` contributor; the packaged `own` contributor is never removed
+
+#### D9.1 — a third contributor kind, loader-set and never authorable
+
+`ObjectContributor.ownership` gains `'overlay'`, and the vocabulary
+`ObjectOwnershipEnum` (`packages/spec/src/data/object.zod.ts:2435`) gains it too
+— one vocabulary, not a parallel list (Prime Directive #8).
+
+That enum is **loader-facing, not author-facing**, and this amendment binds it to
+stay that way. Measured: `ObjectOwnershipEnum` has no runtime consumer at all in
+this repo (`registry.ts` imports only the `ObjectOwnership` *type*), and the two
+existing kinds are set at exactly three call sites — `own` by the package loader
+(`packages/objectql/src/engine.ts:2920`, `:2933`, `:3147`, `:3157`) and `extend`
+by the `objectExtensions` loop (`engine.ts:2956`, priority from the manifest
+entry). No author ever writes `ownership: 'own'`; a package author declares
+`objectExtensions: [{ extend: '…' }]` and the loader picks the kind. `'overlay'`
+is therefore set by the two hydration seams and by nothing else, and the enum's
+docblock must say so alongside the existing warning that separates it from the
+record-`ownership` model (`object.zod.ts:1385-1392`).
+
+This is the "hard to get wrong" property doing real work: the new kind adds **no
+authoring surface**, so no hand-written or AI-written metadata can reach for it,
+correctly or otherwise.
+
+#### D9.2 — resolution: the overlay replaces the BASE layer; extenders still fold on top
+
+`resolveObject` (`registry.ts:1206-1234`) selects its base layer as
+`overlay ?? owner` instead of `owner`, then folds `extend` contributions exactly
+as it does today.
+
+This is deliberately **bit-for-bit what today's splice already produces**. Today
+the overlay *is* the owner, so the fold runs over the overlay body; under D9 the
+fold runs over the same overlay body selected by kind. The resolved schema —
+including its `_provenance: 'org'`, which every registry-direct consumer reads —
+is unchanged. **The resolved object does not move; only what the registry
+remembers does.**
+
+That is the argument for replace-semantics over the two alternatives, and it is
+the one the ruling asked for:
+
+- **Overlay as `extend` is refused.** `mergeObjectDefinitions` merges fields
+  additively (`registry.ts:86-108`; `merged.fields = { ...base.fields,
+  ...extension.fields }` at `:91`) and has no expression for *removal* at all.
+  An overlay that drops a packaged field would silently stop dropping it — the
+  measured overlay body carried `overlay_only` and neither `amount` nor
+  `packaged_only`; as an extender the resolved object would carry all three.
+  That is an authoring-visible behaviour change to stored tenant metadata that
+  nobody asked for, arriving as a silent re-appearance of deleted fields.
+- **A second `own` is refused** — see § 4.
+
+#### D9.3 — selection is by KIND; priority stays descriptive
+
+`contributors.sort((a, b) => a.priority - b.priority)` (`:1189`) totals the whole
+list, so the overlay needs a priority for deterministic ordering:
+`DEFAULT_OVERLAY_PRIORITY = 150`, between `DEFAULT_OWNER_PRIORITY = 100` and
+`DEFAULT_EXTENDER_PRIORITY = 200` (`:31-32`), so a `getObjectContributors()` read
+lists the stack in layer order.
+
+It is **not** the selection rule. Base selection asks the kind, never "highest
+priority wins", because extender priority is author-declared (`ext.priority ?? 200`,
+`engine.ts:2944`) and a package could otherwise re-rank a tenant's overlay by
+declaring `priority: 140`. Declared numbers order *peers*; they must not be able
+to change *which layer is the base*.
+
+#### D9.4 — `computeFQN` is untouched, and the namespace loss is repaired for free
+
+`computeFQN` is identity (`:61-63`); the overlay layer shares the owner's key and
+this amendment introduces **no namespace dimension** — an overlay is a layer over
+one object name, not a second object. The measured namespace loss (P5) is not
+fixed by a rule but by subtraction: the packaged owner's contributor is no longer
+removed, so its `namespace` field survives. Any future de-identity-ing of
+`computeFQN` (ADR-0028's territory) inherits one key per object and therefore one
+overlay slot per object, unchanged.
+
+#### D9.5 — `assertSingleOwnerPerObject` is unchanged, and gains one violation class
+
+`assertSingleOwnerPerObject` (`:1355-1379`) counts `ownership === 'own'`. Overlays
+are not owners, so it keeps reading exactly one owner per object name — literally
+the D3 sentence, with no exemption list. This matters beyond tidiness: ADR-0028's
+D5/D6 (reserved `sys`, single-owner-per-object, apps-cannot-define-kernel)
+**depend on** this ADR, and an ownership rule with a "unless it is an overlay"
+clause would make their premise conditional.
+
+One class is added: an **orphan overlay** — a contributor list holding an
+`overlay` and no `own` — is a violation, in the same shape as the existing
+"extenders but no owner". It is reachable (uninstall the packaged owner while a
+tenant row for its object exists) and must be loud rather than silent, because
+`resolveObject` would otherwise warn once and answer `undefined` for a name the
+tenant can still see in `sys_metadata`. The removal rule that keeps it rare is
+D9.7.
+
+#### D9.6 — artifact identity is read from the OWNER contributor, never from the merged object
+
+This is the clause that makes `isArtifactBacked` stop lying, and it is **not**
+implied by D9.2 — it has to be decided, because D9.2 deliberately leaves the
+merged body identical, `_provenance: 'org'` included.
+
+`getArtifactItem(type, name)`'s object branch (`registry.ts:1727-1733`) currently
+resolves `getObject(name)` — the merged body — and applies the
+`_packageId`/`isTenantAuthored` test to it. Under D9 it applies that test to the
+**owner contributor's definition**. Consequences:
+
+- packaged object, tenant overlay present → owner is the package
+  (`_provenance: 'package'`) → **artifact-backed: true** (today: false);
+- runtime-authored object, no package layer → the owner *is* the tenant's row
+  (`_provenance: 'org'`, or the `'sys_metadata'` sentinel) → **false**,
+  unchanged, which is what keeps cloud#970 closed (an app the user just built
+  must stay editable);
+- everything non-`object` → untouched.
+
+**The authoring-visible consequence, stated plainly.** With the predicate honest,
+`saveMetaItem`'s gate refuses an overlay write to a packaged object with
+`NOT_OVERRIDABLE` **every time**, not only the first — because `object` declares
+`allowOrgOverride: false`. Today the first write is refused, and by destroying the
+evidence it admits every subsequent write through the `allowRuntimeCreate` tier.
+So this is the declared contract being enforced consistently, not a new
+restriction; but a deployment that has been living in the post-first-write state
+will see writes start being refused. The documented operator hatch
+(`OS_METADATA_WRITABLE=object`, `protocol.ts:7380`) is the same one door as
+before, and it now has to stay open for the *life* of the customization rather
+than only for its first save. Deployments that cannot accept that must move the
+customization into a package — which is the position ADR-0005's whitelist has
+always taken for `object`.
+
+#### D9.7 — removal, and why #6853's "restoration" question dissolves
+
+- **Removing the overlay** (`SchemaRegistry.removeObjectOverlay(name)`, the
+  layer-addressed sibling of #6818's name-addressed `unregisterObject`) drops the
+  `overlay` contributor and nothing else. The packaged owner is already there, at
+  its own priority, in its own namespace, with its own definition — so
+  *restoration is not a re-registration at all*. This is the whole point of the
+  direction: #6853's measured wall (the heal needs
+  `(definition, packageId, namespace, ownership, priority)` and three of the five
+  no longer exist when it runs) disappears, because the judgement moves to the
+  moment the information is still in hand — **write time, where the packaged
+  owner is one lookup away — instead of delete time, where it has been
+  destroyed.**
+- **Removing the object** (`unregisterObject`, `:1482-1520`) keeps its ADR-0029
+  extender guard verbatim. Tier 3 of `restoreArtifactRegistryView` then reads:
+  a packaged `own` survives → remove the overlay layer only; no packaged owner →
+  remove the entry, as today.
+- **Uninstalling the owning package** (`unregisterObjectsByPackage`, `:1385-1415`)
+  takes the object's overlay layer with the owner it layers over. Nothing durable
+  is lost: the layer is a runtime projection of a `sys_metadata` row that is not
+  touched, and a re-install re-hydrates it. D9.5's orphan violation is the
+  backstop for the seam this rule cannot reach by package id (a sentinel-bound
+  layer over a package-bound owner).
+
+#### D9.8 — the write-path discriminator, and where it lives
+
+At each hydration seam the kind is chosen by asking the registry a question it
+can answer:
+
+```
+packaged `own` contributor already registered for this name?
+  yes -> register as `overlay`   (a layer over the code definition)
+  no  -> register as `own`       (a runtime-authored object; today's behaviour,
+                                  keyed by the row's package_id or the sentinel)
+```
+
+Both seams — `applyObjectRegistryMutation` and `loadMetaFromDb` — sit **after**
+package registration in the real boot order (measured in P6), so the lookup is
+answerable. The same discriminator is owed to the two metadata-service ingest
+paths that also register `'own'` from a reloaded body
+(`packages/objectql/src/plugin.ts:688-693`, `:765-770`); left alone they re-open
+the splice through a third door.
+
+#### D9.9 — #6995: the row's `package_id` is provenance on the layer, never an ownership claim
+
+Because an overlay makes no ownership claim, `registerObject`'s "already owned by
+package X" throw stops being reachable from the overlay seams at all, and the
+silent-discard-with-success-receipt cannot recur. What replaces it, by the row's
+binding `P` against the packaged owner's id `O`:
+
+| case | verdict |
+|:--|:--|
+| `P == O` | the normal case — one overlay layer over `O`'s object. |
+| `P` empty / absent (the `'sys_metadata'` sentinel) | **accepted.** A package-less env-wide overlay is ADR-0005's platform-global shape; the row addresses the object by name and the registry knows who owns it. Today this throws (measured, P2) — that refusal was an artefact of the borrowed slot, not a decision. |
+| `P == Q`, some other package | **refused at the producer, loudly.** On the write path `saveMetaItem` returns an error (an ADR-0112-registered code minted by the implementation card) instead of a success receipt; at boot the row is not layered and is counted in `loadMetaFromDb`'s per-record `errors` with its reason — which that seam already does today (`protocol.ts:11706-11708`), and which is why #6995 is a **write-path** divergence and not a boot-path one. |
+
+The last row is a real decision, not bookkeeping, and the reason is a store
+asymmetry worth recording: the overlay-uniqueness index keys on
+`(type, name, organization_id, COALESCE(package_id, ''))` (ADR-0005 amendment
+2026-08-09, #6825), so `sys_metadata` can legitimately hold two active rows for
+one `(type, name)` bound to two packages. For every other type that is fine —
+two packages really can ship `page/home`. For `object` it is not representable:
+`computeFQN` is identity, so the registry holds exactly one entry per object name
+and could never serve two. Refusing the mis-bound row is what keeps the two
+stores in agreement instead of letting `sys_metadata` describe a shape the
+registry cannot hold. **At most one overlay layer per object name** in the
+env-wide scope; per-org rows never enter the process-wide registry at all
+(#6602, unchanged by this amendment).
+
+---
+
+### 4. The shape that was rejected: a second, owning kind
+
+The ruling named the alternative as "a new ownership kind" — a contributor that
+*also* owns, with `assertSingleOwnerPerObject` taught to accept two. Rejected:
+
+- **It grants authority nothing consumes.** § 2 measured what ownership carries
+  (namespace registration, the `_packageId` stamp at `:1314`, the table) and the
+  overlay uses none of it.
+- **It makes D3 conditional.** Every consumer of `getObjectOwner` (`:1332-1335`)
+  would have to be re-read to decide *which* owner it means, and ADR-0028's
+  D5/D6 rest on D3 being unconditional. An assertion with an exemption clause is
+  an assertion that has to be re-litigated at every call site.
+- **It re-opens the question the layer model closes.** "Two owners, one table"
+  has no answer for who the table belongs to on uninstall; "one owner, one
+  overlay layer" has the obvious one.
+
+Rejecting it costs nothing that direction B wants: replace-semantics is
+orthogonal to ownership, and D9.2 delivers replace without claiming an owner.
+
+### 5. Blast radius, measured
+
+Every site that reads `ObjectContributor.ownership` on `2f3e79351`, and what D9
+does to it:
+
+| site | today | under D9 |
+|:--|:--|:--|
+| `registry.ts:1075` default priority | `own ? 100 : 200` | third arm, `DEFAULT_OVERLAY_PRIORITY = 150` |
+| `registry.ts:1116-1130` `provisionPrimary` / `provisionSearchCompanion` | gated on `own` | **gate becomes "is this a BASE layer" (`own` or `overlay`)**. Missing this is a silent regression: the overlay body *is* the resolved base, so skipping title provisioning would change `nameField` on every overlaid object. |
+| `:1148-1155` second-owner throw | overlay hits it (#6995) | unreachable from the overlay seams |
+| `:1157-1160` same-package `own` splice | **destroys the packaged body** | untouched; the overlay never enters this branch |
+| `:1167-1170` same-package `extend` splice | — | mirrored for `overlay`: at most one layer, replaced on re-write |
+| `:1217` base selection | `find(own)` | `find(overlay) ?? find(own)` |
+| `:1228` extender fold | folds `extend` | unchanged |
+| `:1314` `getAllObjects` `_packageId` stamp | the overlay's id | the packaged owner's id (the same value whenever `P == O`) |
+| `:1332-1335` `getObjectOwner` | — | unchanged; keeps meaning "the package that owns the table" |
+| `:1355-1379` `assertSingleOwnerPerObject` | — | unchanged + orphan-overlay class (D9.5) |
+| `:1385-1415` `unregisterObjectsByPackage` | — | overlay layer leaves with its base (D9.7) |
+| `:1482-1520` `unregisterObject` | — | extender guard unchanged; tier 3 calls the layer-addressed verb first |
+| `:1727-1733` `getArtifactItem` object branch | reads the merged body | reads the owner contributor (D9.6) |
+| `spec/data/object.zod.ts:2435` | `['own','extend']` | third value + the "loader-set, never authored" clause |
+| `protocol.ts:7897-7911`, `:11670-11673` | register `'own'` | D9.8 discriminator |
+| `objectql/src/plugin.ts:688`, `:765` | register `'own'` | D9.8 discriminator |
+
+`ObjectContributor` is exported (`packages/objectql/src/index.ts:28`,
+`core.ts:24`), so the widened union is a public type change for `objectui` /
+`cloud` consumers and belongs in a minor with a changeset.
+
+### 6. Deliberately left open for the implementation card
+
+1. **Late install.** A package registering an object a tenant row already owns
+   (`own` under the sentinel) still throws "already owned by". Recommended
+   default: the code layer becomes the owner and the tenant contribution is
+   re-classified as its overlay layer — the only outcome that loses nothing —
+   but it is a second discriminator and wants its own measurement.
+2. **The wire error code** for D9.9's mis-bound row: ADR-0112 makes `error.code`
+   a closed vocabulary, so the code is minted with the implementation, not here.
+3. **#7012's tier-3 package-binding guard.** Once D9 lands, `isArtifactBacked` is
+   honest and that guard becomes redundant — but redundant is not wrong, and it
+   fails in the cheap direction (REGISTER WIDE / RETIRE NARROW). Whether to
+   retire it is a measured call for the card that lands D9, not a promise made
+   here.
+4. **Sequencing.** D9 is a runtime-representation change with no stored-format
+   change: `sys_metadata` rows are untouched, so there is no ADR-0087 conversion
+   and no migration. It can land after #7012 without coordinating with it.
+
+### 7. Consequences
+
+**Positive**
+
+- A packaged object's definition survives a tenant overlay, so `isArtifactBacked`
+  answers about the code layer instead of about whatever last overwrote it, and
+  the two gates that read it stop silently disarming.
+- The delete-time restoration problem (#6853) dissolves rather than being solved:
+  nothing is destroyed, so nothing needs reconstructing from values that no
+  longer exist.
+- #6995's silent discard becomes either a legitimate layer (package-less rows) or
+  a loud refusal (mis-bound rows); `saveMetaItem`'s receipt stops disagreeing
+  with the registry.
+- ADR-0005's overlay model — layers coexist, resolution decides — finally applies
+  to `object` the way it already applies to every other type, instead of being
+  approximated by a destructive in-place overwrite.
+
+**Negative / costs**
+
+- A third contributor kind is a permanent widening of the registry's vocabulary,
+  and every future contributor walk has one more case to consider (§ 5 is the
+  current census; it will grow).
+- The honest gate refuses repeat overlay writes that today succeed (D9.6). This
+  is the declared contract, and it is still a behaviour change a live deployment
+  can feel.
+- Two ingest paths (`plugin.ts:688`, `:765`) must adopt the discriminator or the
+  splice returns through a third door — a coupling that is easy to miss because
+  those paths are about metadata-service reloads, not about tenant overlays.
+
+**Neutral / open**
+
+- Whether an overlay layer should ever be *authorable* (a package shipping a
+  layer over another package's object). D9.1 says no, on the "no new authoring
+  surface" axis; if a real business case appears, it is a separate decision, not
+  a widening of this one.
+
+### 8. Anchors
+
+`packages/objectql/src/registry.ts` is registered against ADR-0029 in
+`scripts/adr-anchors.json` by this change. It was **unanchored**, which is the
+recurrence shape Prime Directive #13 names and the same one #6825's amendment
+found for ADR-0005: the file that implements D3 (the `own` splice at `:1157-1160`,
+`assertSingleOwnerPerObject` at `:1355`, the extender guard at `:1490`) never said
+which decision an author editing it was standing on — so the splice could be read
+as an ordinary re-registration convenience, which is precisely how it came to
+destroy a packaged definition.
+
+`packages/metadata-protocol/src/protocol.ts` is deliberately **not** anchored to
+ADR-0029 here. Its ADR-0029 relationship today is the defect this amendment
+describes, not a realized decision; it earns its anchor with the implementation
+that makes D9.8 true there.
+
+### 9. What was verified, and what has no coverage
+
+This amendment is prose, and **prose has no test coverage** — there is no
+reverse-verification to report and none is manufactured. What was verified is
+that every claim above matches the tree at `2f3e79351`: the two hydration seams
+and their argument counts, the splice branch, the base-layer selection in
+`resolveObject`, the additive-only `mergeObjectDefinitions`, the identity
+`computeFQN`, the `own`-gated `provisionPrimary`, the merged-body read inside
+`getArtifactItem`'s object branch, the `own`-only count in
+`assertSingleOwnerPerObject`, the three `registerObject` kind call sites in
+`engine.ts`, the zero runtime consumers of `ObjectOwnershipEnum`, and `object`'s
+`allowOrgOverride: false` / `allowRuntimeCreate: true` registry entry. The
+runtime behaviour it reasons about (P0-P6) was measured on #6853 at `51f2bb8c3`
+and is cited, not re-derived.
+
+The single-owner assertion is exercised by
+`packages/objectql/src/registry-single-owner.test.ts` and the removal verb by
+`registry-unregister-object.test.ts` /
+`packages/metadata-protocol/src/protocol.delete-object-registry-unregister.test.ts`;
+under D9 all three keep their current expectations, which is a consequence of
+D9.2/D9.5 and a check the implementation card should confirm rather than a claim
+this record can make on its own.
