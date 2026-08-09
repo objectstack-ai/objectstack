@@ -8240,7 +8240,8 @@ export class ObjectStackProtocolImplementation implements
             // which for `object` reads the contributor definition and applies
             // exactly the artifact test the sibling verb applies to the plain
             // key), so this limb inherits that judgement instead of open-coding
-            // a second one.
+            // a second one — PLUS the package-binding check below, which exists
+            // because that inherited judgement is measurably falsifiable here.
             //
             // Not theoretical, and NOT already covered by the gate at the top of
             // `deleteMetaItem`: that two-tier authorization — which refuses an
@@ -8261,18 +8262,129 @@ export class ObjectStackProtocolImplementation implements
                 && !this.isArtifactBacked(singular, name)
                 && typeof registry.unregisterObject === 'function'
             ) {
-                try {
-                    registry.unregisterObject(name);
-                } catch (err: any) {
+                // [#7012] …AND `isArtifactBacked` ALONE CANNOT SEE THAT.
+                // See {@link installedPackageBindingForObject} for the whole
+                // argument; the one-line version is that an overlay row bound
+                // to the packaged owner's id DESTROYS the packaged contributor
+                // at write time, which turns the predicate above `false` for an
+                // object the package still ships.
+                const boundPackageId = this.installedPackageBindingForObject(name);
+                if (boundPackageId !== undefined) {
                     console.warn(
                         `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
-                        + `${err?.message ?? err}`,
+                        + `its owner contributor is bound to installed package '${boundPackageId}'. `
+                        + `A package-shipped object must not be retired by an overlay delete, and this seam `
+                        + `cannot tell one from a package-bound runtime-authored object (#7012 / #6853), so `
+                        + `the entry survives — listable, and rowless if the delete really was the whole item `
+                        + `— until the next restart.`,
                     );
+                } else {
+                    try {
+                        registry.unregisterObject(name);
+                    } catch (err: any) {
+                        console.warn(
+                            `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
+                            + `${err?.message ?? err}`,
+                        );
+                    }
                 }
             }
         } catch {
             // Best-effort registry refresh; next read fixes it anyway
         }
+    }
+
+    /**
+     * [#7012] The package binding of a registered `object`, but only when it
+     * names a package this process has actually INSTALLED. `undefined` means
+     * "no installed package answers for this object" — the only state in which
+     * {@link restoreArtifactRegistryView}'s tier 3 may unregister it.
+     *
+     * ## Why tier 3 needs a second predicate at all
+     *
+     * `isArtifactBacked` is the natural question ("does a code package ship
+     * this?") and it is the WRONG question at this exact point, because the
+     * thing it reads has already been destroyed by the time the walk runs.
+     *
+     * `SchemaRegistry.registerObject` splices out the same-package `own`
+     * contributor before pushing the new one. So an overlay row whose
+     * `package_id` equals the packaged owner's id does not SHADOW the packaged
+     * definition — it REPLACES it, and no second copy exists anywhere in the
+     * registry. {@link loadMetaFromDb} replays that replacement on every boot,
+     * with no authorization gate and no log, stamping `_provenance: 'org'`
+     * server-side (deliberately — cloud#970). `getArtifactItem` for an `object`
+     * is exactly `_provenance !== 'org'`, so `isArtifactBacked` answers `false`
+     * for an object a code package still ships, and tier 3 then took the whole
+     * entry. Measured end to end on a tenant kernel with no escape hatch:
+     *
+     * ```
+     * loadMetaFromDb -> {"loaded":1,"errors":0,"invalid":0}   warnings: []
+     * DELETE         -> {"success":true,"reset":true}
+     * objectContributors: []   getObject: null
+     * data CRUD: OBJECT_NOT_FOUND / 404   (while the table still holds the rows)
+     * ```
+     *
+     * ## Why the BINDING is trustworthy where the definition is not
+     *
+     * The replacement rule fires only when the two package ids MATCH, so the
+     * surviving contributor provably carries the packaged owner's id — the one
+     * fact the overwrite cannot change, precisely because it is the overwrite's
+     * own precondition. The second half, "is that package installed", is a fact
+     * about the PROCESS rather than about the destroyed body:
+     * `SchemaRegistry.installPackage` writes the record and
+     * `ObjectQL.registerApp` calls it immediately before registering the
+     * manifest's objects, so a package-shipped object always has one. Durable
+     * packages (`sys_packages`) are re-installed at boot by `service-package`,
+     * and nested `registerPlugin` objects are keyed to the PARENT package,
+     * which `registerApp` installed. The `'sys_metadata'` sentinel — the key an
+     * overlay row bound to no package keeps — is handled by construction rather
+     * than by a special case: nothing installs a package under it, so it never
+     * resolves to a record.
+     *
+     * ## What this deliberately does NOT ask
+     *
+     * - NOT `enabled` / `status`. `disablePackage` flips lifecycle flags and
+     *   removes no contributor, so a disabled package's objects stay registered
+     *   and stay dispatchable; reading the flag here would unregister a
+     *   definition nothing else removes — the same outage through a second door.
+     * - NOT the manifest's `objects` list. That would re-ask "is this
+     *   code-shipped", which is the question whose answer was destroyed; it is
+     *   also absent for `registerPlugin`-contributed objects.
+     *
+     * ## The accepted cost, ruled and not to be worked around
+     *
+     * A package-bound RUNTIME-authored object (Studio's package workspace,
+     * #4636) carries a real `package_id` too, so it is indistinguishable from a
+     * package-shipped one by binding alone: some genuinely deleted objects stay
+     * registered until restart. Per this walk's own REGISTER WIDE / RETIRE
+     * NARROW argument that is the cheap direction — a surplus entry degrades to
+     * "listable but rowless" and the next reload heals it, a wrongly retired one
+     * 404s data CRUD for every tenant. The honest fix for the distinguishability
+     * itself is #6853's direction B (the tenant overlay registers as its own
+     * contributor layer instead of splicing out the packaged `own`), which
+     * re-arms `isArtifactBacked` here and at `saveMetaItem`'s overlay gate; it is
+     * an ADR-0029 amendment and a separate card by maintainer ruling
+     * (2026-08-09).
+     *
+     * Name-addressed, like every other verb in the walk: `getObjectOwner` reads
+     * the contributor list under the same key `getObject` and
+     * {@link SchemaRegistry.unregisterObject} resolve (`computeFQN` is identity,
+     * so the registry key IS the object name), which is what keeps the decision
+     * and the removal talking about the same entry.
+     */
+    private installedPackageBindingForObject(name: string): string | undefined {
+        const registry: any = (this.engine as any)?.registry;
+        if (
+            !registry
+            || typeof registry.getObjectOwner !== 'function'
+            || typeof registry.getPackage !== 'function'
+        ) {
+            return undefined;
+        }
+        const packageId: unknown = registry.getObjectOwner(name)?.packageId;
+        if (typeof packageId !== 'string' || packageId === '') return undefined;
+        const installed = registry.getPackage(packageId);
+        return installed === undefined || installed === null ? undefined : packageId;
     }
 
     /**
