@@ -452,7 +452,12 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
   // existence. Pinned so nobody "fixes" the gap by guessing.
   it('does NOT flag record_change — undecidable at authoring time, caught at run time', () => {
     const fnds = lintFlowPatterns(
-      scheduledDataFlow({ flowType: 'record_change', startConfig: { triggerType: 'record_change', objectName: 'invoice' } }),
+      // #6637 — the token was `'record_change'` (the flow TYPE echoed into the
+      // trigger slot), which is not an authored trigger token at all: the engine
+      // routes only `record-*`, so that fixture described a flow that never fires.
+      // The pin is about a record-change flow, so it spells one — the same token
+      // the sibling guard below already uses.
+      scheduledDataFlow({ flowType: 'record_change', startConfig: { triggerType: 'record-after-update', objectName: 'invoice' } }),
     );
     expect(fnds.map((f) => f.rule)).not.toContain(FLOW_RUNAS_UNSCOPED);
   });

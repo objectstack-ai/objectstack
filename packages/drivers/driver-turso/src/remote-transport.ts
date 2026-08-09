@@ -971,20 +971,28 @@ export class RemoteTransport {
     //   #6203 shape again: one query, two answers, decided by a connection
     //   string. Reading `.field` converges them.
     //
-    // `alias` is deliberately not read: `SqlDriver.aggregate` does not read it
-    // either, so honouring it here would be the divergence rather than the fix.
-    // That the SQL faces ignore a key the in-memory path honours
-    // (`in-memory-aggregation.ts` projects `g.alias ?? g.field`) is filed
-    // separately — it is not created here.
-    const groupBy: string[] = (Array.isArray(query?.groupBy) ? query.groupBy : []).map((g) => {
-      if (typeof g === 'string') return g;
+    // [#6401] `alias` IS read now, and the note that used to sit here — "not
+    // read, because `SqlDriver.aggregate` does not read it either" — was the
+    // right call at #6212 and is discharged rather than deleted: all three SQL
+    // faces read it as of #6401, so honouring it here is the convergence, not a
+    // new divergence. The projected column is `alias ?? field`, matching
+    // `in-memory-aggregation.ts`'s long-standing `g.alias ?? g.field`; GROUP BY
+    // still keys on the FIELD, so only the column's name moves.
+    const groupBy: Array<{ field: string; outKey: string }> = (
+      Array.isArray(query?.groupBy) ? query.groupBy : []
+    ).map((g) => {
+      if (typeof g === 'string') return { field: g, outKey: g };
       if (g?.dateGranularity) refuseDateBucketedGroupBy(g.dateGranularity);
-      return g?.field;
+      return { field: g?.field, outKey: g?.alias ?? g?.field };
     });
 
-    for (const field of groupBy) {
+    for (const { field, outKey } of groupBy) {
       this.assertSafeIdentifier(field);
-      selectParts.push(`"${field}"`);
+      // The alias reaches the statement as a quoted identifier, so it is held
+      // to the same gate as every other one — an alias is caller-supplied text
+      // and `assertSafeIdentifier` is what keeps it out of the SQL grammar.
+      this.assertSafeIdentifier(outKey);
+      selectParts.push(outKey === field ? `"${field}"` : `"${field}" AS "${outKey}"`);
     }
 
     // [#6321] Was `query?.aggregations || query?.aggregate` — see the twin note
@@ -1057,7 +1065,11 @@ export class RemoteTransport {
     }
 
     if (groupBy.length > 0) {
-      sql += ` GROUP BY ${groupBy.map((f) => `"${f}"`).join(', ')}`;
+      // [#6401] By FIELD, never by the alias: the alias renames the projection
+      // only. SQLite would happily group by the output name, which is exactly
+      // the mistake that would make an aliased group silently correct here and
+      // wrong on a dialect that resolves GROUP BY against the input columns.
+      sql += ` GROUP BY ${groupBy.map((g) => `"${g.field}"`).join(', ')}`;
     }
 
     try {

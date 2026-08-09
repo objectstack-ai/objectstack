@@ -57,7 +57,12 @@ const CASES: ReadonlyArray<{ rule: string; blindTo: readonly AuthoringCommand[];
       flows: [{
         name: 'parity_flow', label: 'Parity', type: 'record_change', runAs: 'system', status: 'active',
         nodes: [
-          { id: 'start', type: 'start', label: 'Start', config: { objectName: 'parity_task', triggerType: 'onCreate' } },
+          // #6637 — was `triggerType: 'onCreate'`, which on a `type: 'record_change'`
+          // flow the engine routes to no trigger at all. This case's planted defect
+          // is the approver expression; the trigger token was incidental, and leaving
+          // a second (now gating) defect in the fixture would let the case pass on a
+          // finding it is not about.
+          { id: 'start', type: 'start', label: 'Start', config: { objectName: 'parity_task', triggerType: 'record-after-create' } },
           { id: 'appr', type: 'approval', label: 'Approve', config: { approvers: [{ type: 'expression', value: 'record.owner ==' }] } },
           { id: 'end', type: 'end', label: 'End' },
         ],

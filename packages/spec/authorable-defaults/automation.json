@@ -5,7 +5,6 @@
     "automation/ActionDescriptor:category = \"custom\"",
     "automation/ActionDescriptor:deprecated = false",
     "automation/ActionDescriptor:handlerContract = \"none\"",
-    "automation/ActionDescriptor:isAsync = false",
     "automation/ActionDescriptor:maturity = \"ga\"",
     "automation/ActionDescriptor:needsOutbox = false",
     "automation/ActionDescriptor:paradigms = [\"flow\"]",

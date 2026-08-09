@@ -646,10 +646,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //
   // `gating` since #5762, which reviewed the file's rules as one family and
   // split them on a single question: is THIS STACK enough to know the flow is
-  // dead? Three rules answer yes and now emit `error` — a `config.timeRelative`
+  // dead? Four rules answer yes and emit `error` — a `config.timeRelative`
   // the spec's own `TimeRelativeTriggerSchema` refuses, one the engine's routing
-  // predicate cannot route at all, and a `record-*` triggerType outside the
-  // closed token grammar `triggerTypeToHookEvents` maps. None of those verdicts
+  // predicate cannot route at all, a `record-*` triggerType outside the
+  // closed token grammar `triggerTypeToHookEvents` maps, and (#6637) a
+  // `type: 'record_change'` flow whose triggerType the engine's binding resolver
+  // routes nowhere, silently demoting it to a manual flow. None of those verdicts
   // can be changed by installing a package, so there is no reading under which
   // the flow fires. `flow-trigger-unknown-object` deliberately stayed `warning`
   // (the object may come from another installed package — a hedge this rule

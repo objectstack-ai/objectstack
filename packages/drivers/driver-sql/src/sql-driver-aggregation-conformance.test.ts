@@ -80,7 +80,12 @@ const CONFORMANCE_OBJECT = {
 const astFor = (c: AggregationCase): QueryAST => ({
   object: CONFORMANCE_OBJECT.name,
   aggregations: [{ function: c.function, ...(c.field ? { field: c.field } : {}), alias: 'n' }],
-  ...(c.groupBy ? { groupBy: [c.groupBy] } : {}),
+  // [#6401] A case carrying `groupByAlias` is sent as the STRUCTURED node, so
+  // what the face receives is the union member that declares `alias`. Without
+  // this the alias cases would send a bare string and pin nothing.
+  ...(c.groupBy
+    ? { groupBy: [c.groupByAlias ? { field: c.groupBy, alias: c.groupByAlias } : c.groupBy] }
+    : {}),
 });
 
 /**
@@ -89,10 +94,15 @@ const astFor = (c: AggregationCase): QueryAST => ({
  * numbers — SQLite hands `avg` back as a float and `count` as an integer, and
  * neither is the property under test.
  */
-const actualFor = (c: AggregationCase, rows: Array<Record<string, unknown>>) =>
-  rows
-    .map((r) => ({ group: c.groupBy ? String(r[c.groupBy]) : null, value: Number(r.n) }))
+const actualFor = (c: AggregationCase, rows: Array<Record<string, unknown>>) => {
+  // [#6401] The group value is read from the column the case SAYS it lands in —
+  // `groupByAlias ?? groupBy`. Reading `c.groupBy` unconditionally is the bug
+  // this axis exists to catch: it is green on a face that ignores the alias.
+  const groupKey = c.groupByAlias ?? c.groupBy;
+  return rows
+    .map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: Number(r.n) }))
     .sort((x, y) => String(x.group).localeCompare(String(y.group)));
+};
 
 describe('[#6409] SqlDriver — aggregate vocabulary conformance', () => {
   let driver: SqlDriver;

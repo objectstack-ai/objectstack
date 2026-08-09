@@ -83,6 +83,7 @@ export {
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+  FLOW_TRIGGER_UNROUTABLE,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,

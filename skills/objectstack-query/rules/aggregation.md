@@ -83,10 +83,18 @@ aggregations (never bucket by hand in app code):
 - Granularities: `day`, `week`, `month`, `quarter`, `year` (weeks are
   ISO-8601, starting Monday).
 - Optional `alias` renames the projected group value:
-  `{ field: 'closed_at', dateGranularity: 'quarter', alias: 'quarter' }`.
+  `{ field: 'closed_at', dateGranularity: 'quarter', alias: 'quarter' }`
+  puts the bucket under `quarter` instead of `closed_at`. **The alias renames
+  the projected COLUMN only** — grouping still keys on the field, so the buckets
+  themselves are unchanged. Read the result under `alias ?? field`, and reference
+  that same name from `having`.
 - The engine pushes bucketing down to the driver (`DATE_TRUNC` etc.) when
   the dialect supports that granularity, and transparently falls back to
-  in-memory bucketing otherwise — results are correct either way.
+  in-memory bucketing otherwise — results are correct either way, **including
+  the column keys** (#6401: until then the SQL drivers ignored `alias`, so an
+  aliased group came back under the field name when the query was pushed down
+  and under the alias when it fell back — decided by a capability bit and the
+  `timezone`, neither of which the caller can see).
 
 ## HAVING Clause
 

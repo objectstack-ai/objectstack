@@ -12,8 +12,10 @@ import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
 import { ActionType } from './action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 // `AriaPropsSchema` is no longer imported here: `widgets[].aria` was retired
-// (#5010). The shape itself is NOT removed — it stays live on `app.aria` and
-// `page.components[].aria`, whose renderers really do apply it. See the
+// (#5010). The shape itself is NOT removed — it stays live on `page.aria` /
+// `page.components[].aria` and on the list view's `aria`, whose renderers
+// really do apply it. (NOT on `app.aria`: that key is a `retiredKey()`
+// tombstone of its own, removed in the same 17.0.0 — #6756.) See the
 // tombstone below.
 import { I18nLabelSchema } from './i18n.zod';
 // `ResponsiveConfigSchema` is no longer imported here: `widgets[].responsive`
@@ -608,7 +610,13 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
   // in `DashboardRenderer` / `DatasetWidget` are the renderer's OWN DOM props,
   // and objectui's single `.aria` read (`plugin-view/ObjectView.tsx:989`) is a
   // `view`'s. The shared `AriaPropsSchema` is untouched — it stays live on
-  // `app.aria` and `page.components[].aria`, which really are applied.
+  // `page.aria` / `page.components[].aria` and on the list view's `aria`,
+  // which really are applied (`action.aria` carries the shape too, but the
+  // ledger grades that one PARTIAL). It is NOT live on `app.aria`: that key
+  // is a `retiredKey()` tombstone removed in the same 17.0.0 by the 2026-06
+  // app liveness audit, and `os migrate meta --from 16` strips it — so the
+  // "lift it up to the app" repair this note used to imply was a dead end
+  // that also lost the block (#6756).
   aria: retiredKey(
     '`dashboard.widgets[].aria` was removed in @objectstack/spec 17.0.0 (#5010, ADR-0049 D2) — ' +
     'no renderer ever applied it, so ARIA attributes declared on a widget silently did not reach ' +
@@ -616,9 +624,9 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
     'removal the dashboard-level `aria` got in 17.0.0 (#3896). Delete the key. The dashboard ' +
     'renderer emits its own `aria-*` attributes for the widget grid; author a `title` (and ' +
     '`description`) on the widget instead — those ARE what the renderer labels the card with. ' +
-    'The shared `AriaProps` shape is NOT gone: it stays live on `app.aria` and ' +
-    '`page.components[].aria`. ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'The shared `AriaProps` shape is NOT gone: it stays live on `page.aria`, ' +
+    '`page.components[].aria` and the list view `aria`. ' +
+    'Run `os migrate meta --from 16` to remove it automatically.',
   ),
   // ADR-0021 single-form: every widget binds a `dataset` and selects `values`
   // (both required above) — there is no inline-query shape to disambiguate.

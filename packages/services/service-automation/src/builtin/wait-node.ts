@@ -189,8 +189,7 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
       category: 'logic',
       source: 'builtin',
       // Durable pause — the run suspends and resumes later (timer/signal).
-      supportsPause: true,
-      isAsync: true,
+      supportsPause: true,  // (`isAsync` stood here — retired in #6748, ADR-0049: nothing read it)
       // An external producer is *meant* to resume a signal wait, so the generic
       // route is the door (#3801). Stated rather than inherited from a default:
       // #3823 is what inheriting it costs — ADR-0044 pointed a revise edge at a
