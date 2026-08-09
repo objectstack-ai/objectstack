@@ -24,6 +24,7 @@ import {
     resolveObjectSchemaMaskPosture,
     type ObjectSchemaMaskPosture,
 } from '@objectstack/metadata-core';
+import { organizationIdForMetaWrite } from '../meta-write-org-scope.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
@@ -267,7 +268,20 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
             if (protocol && typeof protocol.saveMetaItem === 'function') {
                 try {
-                    const organizationId = await deps.resolveActiveOrganizationId(_context);
+                    // [#7018 / the #6190 ruling, Option A] The session's active
+                    // organization rides this write ONLY for types the registry
+                    // declares `allowOrgOverride: true`. For every other type it
+                    // is dropped and the write lands env-wide — byte-identical to
+                    // what a no-active-org session already produces today.
+                    //
+                    // Threading it unconditionally is how the runtime minted rows
+                    // boot never reads: `SysMetadataRepository.put` stamps
+                    // `organization_id` for EVERY type, while `loadMetaFromDb`
+                    // hydrates `organization_id IS NULL` only. See
+                    // `../meta-write-org-scope.js` for why the predicate is the
+                    // static registry flag and not `isOverlayAllowed`.
+                    const activeOrganizationId = await deps.resolveActiveOrganizationId(_context);
+                    const organizationId = organizationIdForMetaWrite(type, activeOrganizationId);
                     const result = await protocol.saveMetaItem({ type, name, item: body, organizationId, ...(packageId ? { packageId } : {}) });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
