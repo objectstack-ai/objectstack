@@ -3067,6 +3067,123 @@ const step17: MigrationStep = {
         + 'degrades to one log line at registration rather than a boot failure. Clear it by '
         + 'deleting the key from the source manifest and reinstalling.',
     },
+    {
+      id: 'api-runtime-create-withdrawn',
+      surface: 'PUT /api/v1/meta/api/{name} (runtime-authored `api` endpoints, draft and active alike)',
+      replacement:
+        'Declare the endpoint as a stack artifact (`**/*.api.ts`, or `defineStack({ apis })`) '
+        + 'and ship it through `publishPackage`',
+      reason:
+        'The `api` registry entry declared `allowRuntimeCreate: true` and the runtime never '
+        + 'honoured it. Measured on a real showcase boot (#5488): `PUT /api/v1/meta/api/'
+        + 'e8_backdoor` answered 200 with `{"success":true,…,"message":"Saved …"}`, and the '
+        + 'declared route then answered 404 forever — with NO `[EndpointMatcher] … EXCLUDED` '
+        + 'line, because the endpoint was never in the index to be excluded from. The serving '
+        + 'criterion belongs to `IMetadataService.matchEndpoint` -> `EndpointMatcher` -> '
+        + "`MetadataManager.listForIndex('api')`, which reads the manager's registry plus its "
+        + 'registered loaders (`["filesystem","memory"]` on dev/serve); a runtime write lands '
+        + 'in `sys_metadata`, which is in neither. A declared capability the runtime does not '
+        + 'honour is ADR-0049 false compliance, and a write that answers "Saved" and then 404s '
+        + 'forever is its most dangerous shape for the AI authors ADR-0033 targets. The '
+        + 'maintainer ruled REMOVE on 2026-08-07 rather than converge the read path, because '
+        + 'making the matcher read `sys_metadata` re-opens cache, invalidation, tenancy and '
+        + "the ADR-0110 D3 miss-vs-outage distinction on a new read path, and there is no "
+        + 'business pull for Studio-authored endpoints today (zero `.api.*` artifacts author '
+        + 'them at runtime; showcase uses the artifact route, #5040 E8 LIVE). '
+        + 'There is NO D2 conversion, for the reason this list exists: nothing in an authored '
+        + 'source spells this key. `allowRuntimeCreate` is a PLATFORM registry value, not an '
+        + 'authorable one, and the artifact route it points authors toward is untouched — a '
+        + '`**/*.api.ts` file valid before this change is valid after it, byte for byte. What '
+        + 'changed is a runtime HTTP verdict, so it is one semantic TODO for operators and '
+        + 'Studio callers rather than a stack conversion — the same disposition '
+        + '`BatchOptions.validateOnly` (#4052) takes. Consequently `gateApiDraftsForPublish` '
+        + '(PR #5279) is retired with it: it gated a promotion into a state the matcher can '
+        + 'never read, and with the inlet closed no `api` draft can exist for it to judge. '
+        + 'Re-entry is recorded in the ruling: if #2657 Part B promotes `apis` to a registered '
+        + 'type WITH A REAL CONSUMPTION PATH, the flag flips back then — implementation first, '
+        + 'declaration second. ADR-0049 / ADR-0121, #5488 (subsumes #5311).',
+      acceptanceCriteria:
+        'No caller creates or updates an `api` item through the runtime metadata API. '
+        + '`PUT /api/v1/meta/api/{name}` answers 403 with `code: "NOT_CREATABLE"` and a body '
+        + 'naming both flags (`allowRuntimeCreate=false, allowOrgOverride=false`) and the '
+        + 'prescription `Declare it in source (**/*.api.ts) and redeploy` — in `?mode=draft` '
+        + 'as well as direct-active, because the gate runs before the draft/publish branch and '
+        + 'does not read `mode`. ⚠️ Verify the artifact route is UNAFFECTED, which is the whole '
+        + 'point of the change: a stack declaring `apis:` still compiles, still passes '
+        + '`validateApiEndpointDeclarations` at publish (`publishPackage`, #5189) and at load '
+        + '(`buildEndpointIndex`, PR #5203), and its endpoints still SERVE — that route was '
+        + 'always the only one that served. An operator who genuinely needs the runtime door '
+        + 'back on one deployment sets `OS_METADATA_WRITABLE=api`, the same single escape '
+        + 'hatch `job` / `agent` / `capability` use; note that this unlocks the WRITE only, and '
+        + 'the endpoint still will not be served, which is why it is a diagnostic and not a '
+        + 'workaround. Any `api` rows already sitting in `sys_metadata` from before this change '
+        + 'were never served either; they can be deleted (`deleteMetaItem` is deliberately not '
+        + 'gated by this refusal, so repair stays possible).',
+    },
+    {
+      id: 'import-run-automations-declared-default-corrected',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
+      surface:
+        'api.ImportRequest runAutomations — the declared default of the key on BOTH import '
+        + 'bodies, POST /api/v1/data/:object/import (ImportRequest) and its async twin POST '
+        + '/api/v1/data/:object/import/jobs (CreateImportJobRequest, which IS the same schema '
+        + 'object). It was declared default(false) and described as "off by default for '
+        + 'bulk"; it is now default(true), which is what the server has always done',
+      replacement:
+        'an explicit runAutomations: false on any import request that is meant to load rows '
+        + 'without firing triggers/hooks. That spelling is unchanged and has always been the '
+        + 'only one the server read — what changes is that omitting the key now DECLARES what '
+        + 'it already DID. Callers who want automations on need write nothing',
+      reason:
+        'A DECLARATION corrected to match a runtime that did not move — the inverse of a '
+        + "behaviour flip, and registered here for the reason protocol 12's "
+        + '`rest-requireauth-default-flip` and this major\'s '
+        + '`action-descriptor-resume-authority-default-flip` are: whether a given import was '
+        + 'meant to fire triggers is a judgment no transform can make, so the prescription is '
+        + 'a TODO rather than a rewrite. The server decides in import-prepare.ts with '
+        + '`body?.runAutomations !== false`, i.e. an omitted flag runs automations, and has '
+        + 'since #2922 — automations always ran on import historically (the engine ignored '
+        + 'the flag entirely before then), so opt-out was made the explicit act, matching '
+        + 'platform convention. The schema said the opposite in both machine-readable and '
+        + "human-readable form, and both SHIPPED: `.default(false)` in `@objectstack/spec`'s "
+        + 'JSON Schema, and the describe prose in the published reference tables for both '
+        + 'defs. '
+        + '⚠️ Nothing in this repo reconciled the two and NO deployed caller changes '
+        + 'behaviour: no request path parses an import body through this schema — the route '
+        + 'reads the raw body, and the sole reference to `CreateImportJobRequestSchema` is '
+        + 'the declarative `ImportJobApiContracts` catalog entry, a declaration and not a '
+        + 'parse. That is exactly why this needed a ruling rather than a docs edit: the '
+        + 'divergence was unobservable in-tree and observable only to a consumer OUTSIDE it. '
+        + 'A client or SDK that validated its request through the published schema '
+        + 'materialised `runAutomations: false` from the declared default and sent it '
+        + 'explicitly, and the server honoured it — so the same request body produced '
+        + 'opposite behaviour depending on whether the caller validated before sending, with '
+        + 'the validating caller silently losing its triggers. Nothing rejected it, nothing '
+        + 'warned, and the reference page told an author the wrong thing in the other '
+        + 'direction. There is deliberately NO schema tombstone and no D2 conversion: no key '
+        + 'is removed, and an HTTP request body is neither authored nor persisted — the same '
+        + 'disposition `notification-list-cursor-retired` (#6361) takes for the sibling '
+        + 'default on this major, and `batch-options-validate-only-retired` before it. The '
+        + 'declared move itself is recorded mechanically, per key, in '
+        + 'DEFAULT_CHANGES_BY_MAJOR[17] (#4666), whose `from`/`to` fingerprints are '
+        + 're-derived on every build. Maintainer ruling 2026-08-09 (#6704, disposition A: '
+        + 'the spec follows the runtime). ADR-0049 / ADR-0078.',
+      acceptanceCriteria:
+        'Every import request of yours that must NOT fire triggers sends `runAutomations: '
+        + 'false` explicitly, rather than omitting the key and trusting the old declared '
+        + 'default. The check is worth doing precisely where it looks unnecessary: if you '
+        + 'build the body by parsing it through `ImportRequestSchema` (or the published JSON '
+        + 'Schema) and then send the PARSED object, your bulk loads were running with '
+        + 'automations OFF and will now run with them ON — that is the only class whose '
+        + 'behaviour changes, and it changes toward what an unvalidated caller always got. '
+        + '⚠️ Behaviour on the wire is deliberately UNCHANGED and should be verified as '
+        + 'such: a body that omits `runAutomations` fired triggers before this change and '
+        + 'fires them after, and `runAutomations: false` turns them off before and after. '
+        + 'Nothing starts being refused — the route never validated this body against the '
+        + 'schema and does not begin to. `dryRun` is unaffected and still runs NO automations '
+        + 'whatever the flag says (#6037).',
+    },
   ],
 };
 

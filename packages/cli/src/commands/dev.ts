@@ -9,6 +9,7 @@ import os from 'os';
 import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
 import { redactConnectionUrl } from '../utils/connection-display.js';
+import { databaseDriverFlag } from '../utils/database-driver-flag.js';
 import {
   DEV_WATCH_IGNORED,
   ServeRestartCoordinator,
@@ -103,14 +104,12 @@ export default class Dev extends Command {
       char: 'd',
       description: 'Database URL: file:./db.sqlite | libsql://... | postgres://... | mongodb://... | memory:// (overrides $OS_DATABASE_URL)',
     }),
-    // Enforced allowlist, not a help string — see start.ts's note. Kept in
-    // agreement with `resolveStorageDefinition` by
-    // `database-driver-allowlist.pin.test.ts`, which covers both commands
-    // because the flag is declared once here and once there (#6860).
-    'database-driver': Flags.string({
-      description: 'Force driver kind: sqlite | sqlite-wasm | turso | postgres | mysql | mongodb | memory (overrides $OS_DATABASE_DRIVER)',
-      options: ['sqlite', 'sqlite-wasm', 'turso', 'postgres', 'mysql', 'mongodb', 'memory'],
-    }),
+    // Enforced allowlist, not a help string — see `utils/database-driver-flag.ts`.
+    // Both the choices and the enumerated list in the description come from the
+    // shared driver table (#6969), so this declaration and `start.ts`'s cannot
+    // drift from each other or from the table; `database-driver-allowlist.pin.test.ts`
+    // (#6860) still pins the agreement with `resolveStorageDefinition`.
+    'database-driver': databaseDriverFlag('Force driver kind'),
     'database-auth-token': Flags.string({
       description: 'Auth token for libsql/Turso connections (overrides $OS_DATABASE_AUTH_TOKEN / $TURSO_AUTH_TOKEN)',
     }),

@@ -41,7 +41,7 @@ matching arm entirely, so a doc naming `@objectstack/service-automation` but not
 repo path was a guaranteed miss — #4162.) A deleted package falls back to the coarse
 `packages/<x>` token, which still substring-matches any doc naming the deleted path.
 
-**Two exclusions:** change classes that cannot make an implementation-accuracy doc
+**Three exclusions:** change classes that cannot make an implementation-accuracy doc
 stale are dropped before the changed-package roots are derived:
 
 1. **Test files** (`*.test.*` / `*.spec.*` at any depth, plus `__tests__` /
@@ -52,16 +52,46 @@ stale are dropped before the changed-package roots are derived:
 2. **Package tooling scripts** (`<packageRoot>/scripts/**`): build/verification
    tooling, not the runtime behaviour docs describe (#4183 flagged 106 docs for a diff
    whose only code change was a new check script). Narrow on purpose: `src/scripts/**`
-   is runtime code and stays counted, and so does `package.json` — exports/deps
-   changes ARE implementation. No package publishes runtime code from `scripts/`
+   is runtime code and stays counted. No package publishes runtime code from `scripts/`
    (checked against every `files` allowlist; three plugins ship a lone
    `i18n-extract.config.ts` only for lack of a `files` field).
+3. **Dev-only manifest edits** (#6893): a `<packageRoot>/package.json` whose changed
+   **top-level keys** are all in `{scripts, devDependencies}`. This is the only
+   **field-level** exclusion — `package.json` as a file stays counted, because
+   `exports` / `main` / `dependencies` / `files` / `version` changes ARE implementation.
+
+   It is the residue of exclusion 2: #4183 dropped the check *script* but kept the
+   `package.json` line registering it, so the same PR still lit up the same doc set
+   through the manifest. Measured over 400 merged commits, five had a `package.json` as
+   their only `packages/**` implementation change, and **all five** touched nothing but
+   those two keys — 152 doc-rows in total, none of which could be stale:
+
+   | commit | keys changed | docs flagged |
+   |:--|:--|--:|
+   | `df0605ba5` | `scripts` | 12 |
+   | `2672f855f` | `scripts` | **113** — #6893's headline number |
+   | `a64315556` | `devDependencies` | 10 |
+   | `77d9001c7` | `devDependencies` | 13 |
+   | `466bd9285` | `devDependencies` | 4 |
+
+   The last three are `test(...)` commits: exactly the class exclusion 1 exists to kill,
+   leaking through the manifest instead. The allowlist is an allowlist on purpose — an
+   unknown or newly-invented key falls on the **counted** side — and unparseable, added
+   or deleted manifests are counted too.
+
+   **Why it cannot narrow the net:** the classifier is per *file*. A PR that also touches
+   that package's `src/**` derives the package root from those files anyway, so this arm
+   only ever decides the case where the manifest is the package's sole change. Verified
+   both directions on the real diffs (#6893): adding an `exports` entry to
+   `packages/spec/package.json` still flags 113 docs, and a `scripts` entry *alongside* a
+   `src/` edit also still flags 113 — with the manifest itself reported as skipped.
 
 The excluded counts are reported in the summary line and as `testFilesSkipped` /
-`scriptFilesSkipped` in `--json`, so the narrowing is never silent. `--self-test` pins
-the classifiers *and* the package-root derivation against paths that must and must not
-match (`commands/test.ts` is implementation; `foo.conformance.test.ts` is not; a
-container directory must never come out as a package root).
+`scriptFilesSkipped` / `devOnlyManifestsSkipped` in `--json`, so the narrowing is never
+silent. `--self-test` pins the classifiers *and* the package-root derivation against
+paths that must and must not match (`commands/test.ts` is implementation;
+`foo.conformance.test.ts` is not; a container directory must never come out as a package
+root; `dependencies` is never dev-only).
 
 **And one deliberate non-exclusion:** `packages/*/CHANGELOG.md` stays counted, even though
 release notes define behaviour no more than a test does. Extending the exclusion there
@@ -76,7 +106,9 @@ looks like the obvious next step and is a provable no-op, for two independent re
 2. Even if it did run, `changeset version` writes `package.json` next to every
    `CHANGELOG.md` it appends to — 45 of the former against 46 of the latter on the first
    page of #3910's diff — so dropping the CHANGELOGs would leave the derived package-root
-   set bit-identical.
+   set bit-identical. Exclusion 3 does **not** undercut this: what `changeset version`
+   rewrites is `version` (and workspace `dependencies` ranges), neither of which is in
+   the dev-only allowlist, so those manifests stay counted.
 
 A hand-edited CHANGELOG outside a release is also close to nonexistent in practice. Left
 counted, and recorded here so the idea is not rediscovered as a gap.
@@ -167,6 +199,27 @@ On any PR that touches `packages/**`, runs `affected-docs.mjs` against the base 
 and posts/updates a single advisory PR comment listing the docs that reference the
 changed code. **Never fails the build** — it only flags drift at the source, before it
 lands on `main`. Reviewers (or an on-demand audit run) decide whether to re-verify.
+
+### The comment forks release-owned pages into a read-only section (#6893)
+
+Same ruling as [1b](#release-owned-pages-are-in-scope-and-read-only-4920), one level
+down. The comment used to list `content/docs/releases/v17.mdx` in the same bulleted list
+as editable pages — so a reader treating the advisory as a worklist was being pointed at
+the one edit AGENTS.md forbids outright. The specimen that made it concrete: PR #6921
+changed two diagnostic strings in `packages/lint` and got back three rows, one of them
+that release page.
+
+They are **not filtered out**. `docs` in `--json` stays the full set (it is what scopes
+the audit, and #4920 rejected excluding these pages for good reasons); `releaseOwnedDocs`
+is a **partition** of it — `releaseOwnedDocs ⊆ docs`, always — and the comment renders it
+under its own ⛔ heading telling the reader to file an issue instead of editing.
+
+`affected-docs.mjs` therefore holds a third literal copy of `RELEASE_OWNED_PREFIX`,
+alongside AGENTS.md's guardrail row and the audit workflow's own const. Copies, because
+the workflow is evaluated in a sandbox VM that cannot import and a shared module would
+leave *it* the only unanchored one. `check-audit-scope.mjs` iterates
+`RELEASE_OWNED_CONSUMERS` and fails if any copy stops matching the guardrail row — **add
+a consumer, add it to that list.**
 
 ## 3. `docs-accuracy-audit` workflow — the LLM audit
 

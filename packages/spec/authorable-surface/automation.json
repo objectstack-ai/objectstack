@@ -202,6 +202,7 @@
     "automation/FlowRunSummary:selected",
     "automation/FlowRunSummary:skipped",
     "automation/FlowRunSummary:unmeasured",
+    "automation/FlowVariable:defaultValue",
     "automation/FlowVariable:isInput",
     "automation/FlowVariable:isOutput",
     "automation/FlowVariable:name",

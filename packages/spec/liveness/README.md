@@ -143,6 +143,101 @@ re-verify rather than back-filling guesses. **For objectui-side evidence, pin
 the commit** (`objectui @732b1bf`) — `action.undoable`'s reader line numbers had
 already drifted by 28 lines one day after the issue citing them was filed.
 
+### `producer` — a consumer is only HALF the call graph (#4837)
+
+`live` means **authoring the property changes runtime behaviour**. A cited
+consumer proves something *reads* the key. It does not prove the read has an
+effect, because a read can depend on a second input that nobody supplies.
+
+`seed.json` marked `Seed.env` **live**, evidence `seed-loader.ts` line 91, note
+*"filterByEnv drops datasets whose env list excludes the running
+environment."* Every word of that was checkable against the file, and the
+verdict was still false:
+
+> Line 91 really did call `filterByEnv(request.seeds, config.env)`. But none of
+> the **six** call sites that build a `SeedLoaderRequest` — app boot, per-org
+> replay, hot reload, package apply, draft publish, marketplace install — ever
+> passed `env`. So `config.env` was permanently `undefined`, `filterByEnv`
+> returned its input on its first line, and `dataset.env` was **never read at
+> all**. The evidence pointed at the consumer; the property was dead at the
+> **producer**.
+
+The unit test made it worse rather than better: `seed-loader.test.ts` has always
+had a passing `should handle environment filtering` case — because the test
+supplies `config.env` itself. The mechanism was correct throughout; only the
+wiring was missing, and the ledger and the test both looked exclusively at the
+mechanism. This is the shape Prime Directive #10 already names in another
+context: **a `case` label is not enforcement; check the call site** (#3106).
+
+Hence the criterion:
+
+> When a property's runtime effect depends on a **second input that some
+> producer must supply**, a `live` verdict requires evidence on the producer
+> side too. Cite it in `producer`.
+
+```jsonc
+"env": {
+  "status": "live",
+  "evidence": "packages/metadata-protocol/src/seed-loader.ts:191 (filterByEnv drops …)",
+  "producer": "packages/metadata-protocol/src/seed-loader.ts:174 — load() resolves the comparison environment itself (resolveEnvConfig), rather than trusting a caller to pass it"
+}
+```
+
+`producer` resolves through **the same resolver as `evidence`** — repo-rooted
+paths must exist or CI fails; cross-repo paths are attributed and counted. A
+call-site claim nothing can falsify is precisely what this field exists to
+remove, so it does not get a weaker standard than the pointer it completes.
+
+Which entries need one. The risk is highest for **optional config with a
+default**: those always "have a value" in the type system and can still be
+`undefined` at runtime.
+
+| Shape | Needs `producer`? |
+|---|---|
+| The consumer reads the authored value directly (`hook.priority` orders hooks) | no — the author IS the producer |
+| The consumer compares the authored value against something a caller supplies (`seed.env`) | **yes** — cite who supplies it |
+| The consumer reads it out of an options/config object built elsewhere (`job.timeout`) | **yes** — cite the threading site |
+| The property is `dead` | no — there is nothing to produce |
+
+Absence never fails CI (most of the ledger predates the field, and back-filling
+guesses is the sin this records). `pnpm check:liveness --producer-gap` prints
+every `live` entry citing a consumer only — an upper bound on the debt, to be
+triaged with the table above rather than read as a defect list. A **malformed**
+value does fail.
+
+### `evidenceScope` — how wide the last look actually was (#4895)
+
+Four measured verdicts were reached by searching **this repo only**, and
+published as though they covered every consumer:
+
+| # | Verdict | What the search missed |
+|---|---|---|
+| 1 | `app.homePageId` tombstoned "no shell ever read it" | objectui's `AppContent.resolveLandingRoute()` had been reading it all along (corrected in #4709) |
+| 2 | `flow.nodes.children.position` marked live, "designer canvas layout" | the designer wrote its own `ui:{x,y}` and **nothing** read `position` — a false *live*, the opposite direction |
+| 3 | `HttpMethod` reported unused | the scan matched only `import … from` |
+| 4 | `Notification` / `NotificationConfig` removed on "zero importers" | objectui re-exported them with `export … from`, and the real consumers imported from `@object-ui/types` — **two hops**, so even a scan covering `export … from` misses it while it matches on the spec specifier |
+
+Case 4 is the one that decides the method: **no amount of text or specifier
+matching is sufficient**. A negative cross-repo claim has to follow the resolved
+symbol graph through re-export chains, or it is a guess with a citation. Every
+barrel package adds a blind spot, and the renderer repo is all barrels.
+
+`evidenceScope` records what was actually done, as data:
+
+| Value | Means |
+|---|---|
+| `in-repo` | the call graph was closed inside this repo only |
+| `cross-repo` | a named foreign realm was walked too — say **which**, in the evidence, and **pin the commit** (`objectui @c2fd1223`): `action.undoable`'s reader line numbers drifted 28 lines in one day (#3714) |
+
+Absent = scope undeclared, a worklist row rather than a failure; the field is
+younger than nearly every entry. A value outside the vocabulary FAILS, the same
+asymmetry as `verifiedAt` — a value the parser cannot read would silently exempt
+that entry from every future sweep.
+
+⚠️ Neither `cross-repo` value in the tree today covers **`cloud`**: the closed
+runtime is not reachable from an open-source checkout, so a `cross-repo` claim
+means "the realms named in the evidence", never "everywhere".
+
 ### ⚠️ An authoring/preview renderer is NOT a runtime consumer
 
 `live` means **authoring the property changes runtime behaviour**. A Studio
@@ -522,10 +617,15 @@ over-share.
   silently. Same "pure + unit-tested" reasoning as `orphans.mts`, for the same reason.
 - `../scripts/liveness/check-empty-state.mts` — the empty-state gate (above);
   `empty-state-registry.mts` is its source of truth.
+- `../scripts/liveness/producer.mts` — the `producer` / `evidenceScope` fold
+  (#4837 / #4895). Pure + unit-tested for the same reason as `orphans.mts`: on
+  the shipped ledgers these checks are almost entirely quiet, so a green gate
+  proves nothing about whether they can fire.
 
 ```bash
 pnpm --filter @objectstack/spec check:liveness               # run the gate
 tsx packages/spec/scripts/liveness/check-liveness.mts --dump field   # inventory a type (seeding aid)
+tsx packages/spec/scripts/liveness/check-liveness.mts --producer-gap # live entries citing a consumer only
 ```
 
 CI: `.github/workflows/spec-liveness-check.yml` runs on PRs touching `packages/spec/**`.

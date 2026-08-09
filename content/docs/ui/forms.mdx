@@ -96,6 +96,7 @@ export default defineView({
 > Rules:
 > - The slug in `publicLink` (`contact-us`) becomes the `:slug` segment in the REST URL.
 > - Anything not in the `sections[].fields[]` whitelist is silently stripped at submit time. Treat the whitelist as the form's authoritative "what the public is allowed to set" list.
+> - A form whose sections declare **no** fields collects nothing, so the submit is **refused** (`400 VALIDATION_ERROR`) rather than accepting whatever the caller sent (#6920). Its `GET /forms/:slug` publishes no schema either (#6601) — declare the fields and both planes come alive together.
 > - Multiple form views per object are fine — only the one(s) with `sharing.allowAnonymous === true` are exposed.
 
 ## 2. (Optional) Create the `guest_portal` permission set
@@ -223,6 +224,7 @@ Errors:
 | Status | Code | When |
 |---|---|---|
 | `400 INVALID_REQUEST` | missing / blank slug (an empty body is coerced to `{}` and surfaces as `VALIDATION_FAILED` below, not here) |
+| `400 VALIDATION_ERROR` | the form's sections declare **no** fields, so it collects nothing — wire the fields and resubmit (#6920) |
 | `400 VALIDATION_FAILED` | object schema validators fail (`required`, `format`, `length`, …) |
 | `403 PERMISSION_DENIED` | the resolved profile does not allow create on the target object |
 | `404 FORM_NOT_FOUND` | slug not registered on any `sharing.allowAnonymous: true` view |

@@ -133,6 +133,18 @@ jobs:
       - name: Raw control-byte guard
         run: pnpm check:nul-bytes
 
+      # Stack-collection enumerations vs the schema (#6242). `stack.zod.ts`
+      # decides which collections a stack may declare; eight other enumerations
+      # of that same set are hand-maintained (the map-format list, the
+      # plural→singular map, the artifact category enum, ObjectQL's two
+      # registration loops, the artifact-ingest field map, the runtime's
+      # app-payload probe, the showcase coverage manifest) and nothing compared
+      # any of them to the schema. Each drift instance has been fixed one line at
+      # a time before, always after a missing key silently dropped a collection.
+      # A deviation is legal here only as a waiver row carrying its reason.
+      - name: Stack-collection enumerations answerable to stack.zod.ts
+        run: pnpm check:stack-collection-maps
+
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
       # content/docs/ can drift back to teaching the bare `: Page = {}` literal

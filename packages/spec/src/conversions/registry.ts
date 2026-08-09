@@ -540,8 +540,10 @@ const viewVisibleOnToVisibleWhen: MetadataConversion = {
 /**
  * Page component `visibility` → `visibleWhen` (protocol 15, ADR-0089 D2).
  *
- * The page-component spelling of the same predicate. Applies to
- * `pages[].regions[].components[]`. **Live window**, same terms as
+ * The page-component spelling of the same predicate. Applies to every page
+ * component {@link mapPageComponents} reaches — `regions[].components[]`,
+ * `slots.<slot>`, and the containers a component nests under its `properties`
+ * (#6776, #6775). **Live window**, same terms as
  * {@link viewVisibleOnToVisibleWhen}. (An AI agent's `visibility` property is
  * a different, unrelated surface and is not touched.)
  */
@@ -570,9 +572,28 @@ const pageComponentVisibilityToVisibleWhen: MetadataConversion = {
               components: [
                 { type: 'record:list', visibility: "page.selectedId != ''" },
                 { type: 'element:divider' },
+                // Nested one container down (#6775): the predicate means the
+                // same thing inside a card as it does at region level, so the
+                // walk reaches it there too.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Selected',
+                    children: [{ type: 'record:detail', visibility: "page.selectedId != ''" }],
+                  },
+                },
               ],
             },
           ],
+        },
+        // …and in a named slot on a slotted record page (#6776).
+        {
+          name: 'crm_lead_record',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            highlights: { type: 'record:detail', visibility: "record.stage == 'won'" },
+          },
         },
       ],
     },
@@ -586,13 +607,28 @@ const pageComponentVisibilityToVisibleWhen: MetadataConversion = {
               components: [
                 { type: 'record:list', visibleWhen: "page.selectedId != ''" },
                 { type: 'element:divider' },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Selected',
+                    children: [{ type: 'record:detail', visibleWhen: "page.selectedId != ''" }],
+                  },
+                },
               ],
             },
           ],
         },
+        {
+          name: 'crm_lead_record',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            highlights: { type: 'record:detail', visibleWhen: "record.stage == 'won'" },
+          },
+        },
       ],
     },
-    expectedNotices: 1,
+    expectedNotices: 3,
   },
 };
 
@@ -4694,6 +4730,17 @@ const PAGE_HEADER_COMPONENT_TYPES = new Set(['page:header', 'page-header']);
  * is a live declared prop elsewhere on the same surface (`element:text_input`
  * helper text), and those components are not this entry's business.
  *
+ * **This entry is why the walker's reach had to grow (#6775).** Every other
+ * page-component entry leans on a tombstone to cover the sites a conversion
+ * cannot reach; this one has none to lean on, because `description` stays a
+ * live declared prop on other components, so `properties.description` parses
+ * green at ANY position. Until the walker descended into `slots.*` (#6776) and
+ * into container `properties` (#6775), a header on a `kind: 'slotted'` record
+ * page or inside a card/tab panel was rewritten by nobody and reported by
+ * nobody — and objectui's `subtitle ?? description` fallback could not retire
+ * without those pages silently losing their second line, the exact failure
+ * shape this entry exists to prevent. The fixture pins all three positions.
+ *
  * **Live window**; retires at 18.
  */
 const pageHeaderSubtitleAlias: MetadataConversion = {
@@ -4737,6 +4784,66 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
             },
           ],
         },
+        // The slotted record page — `regions: []`, header in a named slot. This
+        // is the shape objectui's own guide prescribes for a customized record
+        // header, and a region-only walk visited none of it (#6776).
+        {
+          name: 'crm_account_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            header: { type: 'page:header', properties: { title: '{name}', description: 'Account overview' } },
+          },
+        },
+        // Container nesting (#6775): a header inside a card's `children`, one in
+        // its `footer`, one inside a tab panel, and one two levels down. All are
+        // spec-valid (`properties` is an open bag) and all were invisible to the
+        // region-only walk — with no tombstone to catch them at parse time.
+        {
+          name: 'crm_pipeline_dashboard',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Pipeline',
+                    children: [
+                      { type: 'page-header', properties: { title: 'Open', description: 'This quarter' } },
+                    ],
+                    footer: [
+                      { type: 'page:header', properties: { title: 'Closed', description: 'Last quarter' } },
+                    ],
+                  },
+                },
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Activity',
+                        children: [
+                          { type: 'page:header', properties: { title: 'Recent', description: 'Last 7 days' } },
+                          // Two levels down — the recursion, not just one hop.
+                          {
+                            type: 'page:card',
+                            properties: {
+                              children: [
+                                { type: 'page:header', properties: { title: 'Nested', description: 'Deep' } },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
       ],
     },
     after: {
@@ -4755,9 +4862,61 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
             },
           ],
         },
+        {
+          name: 'crm_account_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            header: { type: 'page:header', properties: { title: '{name}', subtitle: 'Account overview' } },
+          },
+        },
+        {
+          name: 'crm_pipeline_dashboard',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Pipeline',
+                    children: [
+                      { type: 'page-header', properties: { title: 'Open', subtitle: 'This quarter' } },
+                    ],
+                    footer: [
+                      { type: 'page:header', properties: { title: 'Closed', subtitle: 'Last quarter' } },
+                    ],
+                  },
+                },
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Activity',
+                        children: [
+                          { type: 'page:header', properties: { title: 'Recent', subtitle: 'Last 7 days' } },
+                          {
+                            type: 'page:card',
+                            properties: {
+                              children: [
+                                { type: 'page:header', properties: { title: 'Nested', subtitle: 'Deep' } },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
       ],
     },
-    expectedNotices: 2,
+    expectedNotices: 7,
   },
 };
 
@@ -4774,14 +4933,15 @@ const pageHeaderSubtitleAlias: MetadataConversion = {
  * contract" — so the honoured keys were declared and the unread ones retire
  * here.
  *
- * **Region level is the reach, deliberately.** {@link mapPageComponents} walks
- * `pages[].regions[].components[]` and stops: `PageComponentSchema` declares no
- * children key, so a picker nested inside a card's `children` sits in another
- * component's free-form `properties` and is not typed page-component shape.
- * Same boundary as {@link pageHeaderSubtitleAlias}, drawn for the same reason.
- * The tombstones are what cover the rest: they type the key `never`, so a
- * nested authoring site fails `tsc` and carries its own prescription at parse
- * time whether or not a conversion could reach it.
+ * **The reach is every position a picker can be authored in** (#6775).
+ * {@link mapPageComponents} walks `regions[].components[]`, `slots.<slot>` and
+ * the containers a component nests under its `properties` — the same set
+ * `walkPageComponents` lints — so a picker inside a card's `children` or a tab
+ * panel is rewritten where it sits. The tombstones still carry the refusal at
+ * parse time for anything a conversion declines to touch (a disagreeing pair
+ * under {@link renameKey}'s house rule, or a source no migration ran over);
+ * what changed is that "run `os migrate meta`" is now a promise the rewrite can
+ * keep at a nested site, not only at region level.
  *
  * All three are **retired from the load path**: each key is tombstoned in
  * `ui/component.zod.ts`, so the loader rejects it loudly with the prescription
@@ -4842,9 +5002,31 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
                 // `displayField` is a live LOOKUP-FIELD key elsewhere on the
                 // surface — a different component's business, untouched here.
                 { type: 'element:form', properties: { object: 'c', displayField: 'title' } },
+                // Nested one container down (#6775) — a picker inside a card is
+                // where a form-shaped page actually puts one.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Link a project',
+                    children: [
+                      { type: 'element:record_picker', properties: { object: 'd', displayField: 'code' } },
+                    ],
+                  },
+                },
               ],
             },
           ],
+        },
+        // A slotted page's named slot — same component, other authoring shape.
+        {
+          name: 'showcase_project_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: [
+              { type: 'element:record_picker', properties: { object: 'e', displayField: 'label' } },
+            ],
+          },
         },
       ],
     },
@@ -4860,13 +5042,32 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
                 { type: 'element:record_picker', properties: { object: 'a', labelField: 'name' } },
                 { type: 'element:record_picker', properties: { object: 'b', labelField: 'name', displayField: 'title' } },
                 { type: 'element:form', properties: { object: 'c', displayField: 'title' } },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Link a project',
+                    children: [
+                      { type: 'element:record_picker', properties: { object: 'd', labelField: 'code' } },
+                    ],
+                  },
+                },
               ],
             },
           ],
         },
+        {
+          name: 'showcase_project_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: [
+              { type: 'element:record_picker', properties: { object: 'e', labelField: 'label' } },
+            ],
+          },
+        },
       ],
     },
-    expectedNotices: 2,
+    expectedNotices: 4,
   },
 };
 
@@ -4916,9 +5117,34 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
                 // `multiple` is a live FIELD key (lookup fields) — a different
                 // surface entirely, and not this entry's business.
                 { type: 'element:form', properties: { object: 'a', multiple: true } },
+                // Inside a tab panel (#6775): `page:tabs` hangs its sub-tree off
+                // `properties.items[].children`, which the walk now descends.
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Pick one',
+                        children: [
+                          { type: 'element:record_picker', properties: { object: 'b', multiple: true } },
+                        ],
+                      },
+                    ],
+                  },
+                },
               ],
             },
           ],
+        },
+        // The named-slot shape, on a slotted record page.
+        {
+          name: 'picker_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'element:record_picker', properties: { object: 'c', searchFields: ['name'] } },
+          },
         },
       ],
     },
@@ -4932,13 +5158,35 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
               components: [
                 { type: 'element:record_picker', properties: { object: 'showcase_project' } },
                 { type: 'element:form', properties: { object: 'a', multiple: true } },
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Pick one',
+                        children: [
+                          { type: 'element:record_picker', properties: { object: 'b' } },
+                        ],
+                      },
+                    ],
+                  },
+                },
               ],
             },
           ],
         },
+        {
+          name: 'picker_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'element:record_picker', properties: { object: 'c' } },
+          },
+        },
       ],
     },
-    expectedNotices: 2,
+    expectedNotices: 4,
   },
 };
 
@@ -4998,9 +5246,31 @@ const pageCardBodyToChildren: MetadataConversion = {
                 },
                 // `body` on a component that is not a card — not this entry's key.
                 { type: 'record:alert', properties: { body: 'Confirm the work before marking it done.' } },
+                // A card nested in a card (#6775). The OUTER rename moves the
+                // sub-tree from `body` to `children`, and the descent reads the
+                // MAPPED component, so the inner card is visited exactly once —
+                // under the canonical key, not once per spelling.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Outer',
+                    body: [
+                      { type: 'page:card', properties: { title: 'Inner', body: [{ type: 'element:text' }] } },
+                    ],
+                  },
+                },
               ],
             },
           ],
+        },
+        // The named-slot shape: a card authored into a slotted page's `details`.
+        {
+          name: 'my_work_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:card', properties: { title: 'Detail', body: [{ type: 'element:text' }] } },
+          },
         },
       ],
     },
@@ -5021,13 +5291,30 @@ const pageCardBodyToChildren: MetadataConversion = {
                   properties: { children: [{ type: 'element:text' }], body: [{ type: 'element:image' }] },
                 },
                 { type: 'record:alert', properties: { body: 'Confirm the work before marking it done.' } },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Outer',
+                    children: [
+                      { type: 'page:card', properties: { title: 'Inner', children: [{ type: 'element:text' }] } },
+                    ],
+                  },
+                },
               ],
             },
           ],
         },
+        {
+          name: 'my_work_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:card', properties: { title: 'Detail', children: [{ type: 'element:text' }] } },
+          },
+        },
       ],
     },
-    expectedNotices: 1,
+    expectedNotices: 4,
   },
 };
 
@@ -5079,12 +5366,13 @@ const pageCardBodyToChildren: MetadataConversion = {
  * already-present `bodyExtra` WINS and a differing object-form `params` is left
  * exactly where it sits, for the author to reconcile (#4923).
  *
- * Region level is the reach, as for {@link pageHeaderSubtitleAlias} and
- * {@link pageCardBodyToChildren}: `PageComponentSchema` declares no children
- * key, so a button nested inside another component's free-form `properties` is
- * not typed page-component shape. The array-only field is what covers the rest
- * — it refuses the object form with a message naming `bodyExtra`, whether or
- * not a conversion could reach the site.
+ * The reach is every position a button can be authored in, as for
+ * {@link pageHeaderSubtitleAlias} and {@link pageCardBodyToChildren} (#6775):
+ * `regions[].components[]`, `slots.<slot>`, and the containers a component
+ * nests under its `properties` — which is where a submit button most often
+ * sits, inside the card that holds the form. The array-only field still covers
+ * anything the rewrite declines to touch: it refuses the object form with a
+ * message naming `bodyExtra`, at any position.
  *
  * **Live window**; retires at 18.
  */
@@ -5170,9 +5458,43 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
                     action: { type: 'url', target: '/x?id=${param.id}', params: { id: 'abc' } },
                   },
                 },
+                // The shape a pure-SDUI form is actually built in (#6775): the
+                // submit button sits in the card's `footer`, one container down.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Contact us',
+                    footer: [
+                      {
+                        type: 'element:button',
+                        properties: {
+                          label: 'Send',
+                          action: { type: 'api', target: '/api/v1/forms/send', params: { note: '{{page.note}}' } },
+                        },
+                      },
+                    ],
+                  },
+                },
               ],
             },
           ],
+        },
+        // The named-slot shape: an action button in a slotted page's `actions`.
+        {
+          name: 'showcase_contact_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            actions: [
+              {
+                type: 'element:button',
+                properties: {
+                  label: 'Resend',
+                  action: { type: 'api', target: '/api/v1/forms/resend', params: { id: '{{record.id}}' } },
+                },
+              },
+            ],
+          },
         },
       ],
     },
@@ -5226,13 +5548,44 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
                     action: { type: 'url', target: '/x?id=${param.id}', params: { id: 'abc' } },
                   },
                 },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Contact us',
+                    footer: [
+                      {
+                        type: 'element:button',
+                        properties: {
+                          label: 'Send',
+                          action: { type: 'api', target: '/api/v1/forms/send', bodyExtra: { note: '{{page.note}}' } },
+                        },
+                      },
+                    ],
+                  },
+                },
               ],
             },
           ],
         },
+        {
+          name: 'showcase_contact_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            actions: [
+              {
+                type: 'element:button',
+                properties: {
+                  label: 'Resend',
+                  action: { type: 'api', target: '/api/v1/forms/resend', bodyExtra: { id: '{{record.id}}' } },
+                },
+              },
+            ],
+          },
+        },
       ],
     },
-    expectedNotices: 1,
+    expectedNotices: 3,
   },
 };
 
@@ -5272,11 +5625,15 @@ const inlineActionApiParamsToBodyExtra: MetadataConversion = {
  * DISAGREEING pair is left for the author to reconcile rather than the loader
  * picking a look.
  *
- * Region level is the reach, as for {@link pageCardBodyToChildren}:
- * `PageComponentSchema` declares no children key, so a `page:tabs` nested inside
- * another component's free-form `properties` is not typed page-component shape.
- * The tombstone covers the rest — `tsc` at the authoring site and the parse at
- * load, both carrying the prescription whether or not the walk reaches there.
+ * The reach is every position, as for {@link pageCardBodyToChildren} (#6775):
+ * a `page:tabs` nested inside another component's `properties` is rewritten
+ * where it sits. The discriminator matters more here than anywhere else, since
+ * the key being renamed shares a name with the node's dispatch key — so the
+ * fixture pins that descending into a props bag does NOT turn some other
+ * component's inner `type` (an action's `type: 'url'`, a tab item's fields)
+ * into a rewrite target: only `properties.type` on a node whose own `type` is
+ * `page:tabs` moves. The tombstone still carries the refusal at the authoring
+ * site (`tsc`) and at load (the parse), whatever the walk reached.
  *
  * `retiredFromLoadPath: true`: no alias window, deliberately. The tombstone owns
  * the refusal; this entry exists so `spec-changes.json`, the upgrade guide and
@@ -5316,11 +5673,39 @@ const pageTabsTypeToTabStyle: MetadataConversion = {
                 // rather than the loader picking for them.
                 { type: 'page:tabs', properties: { tabStyle: 'pill', type: 'card', items: [] } },
                 // A `type` one level down inside another component's properties
-                // is a different key entirely — the walk is region-level and
-                // never descends into a props bag.
+                // is a different key entirely: `action.type` is the action's
+                // discriminator, and the walk descends into CONTAINER keys
+                // (`children` / `items[].children` / `body` / `footer`), never
+                // into an arbitrary props value.
                 {
                   type: 'element:button',
                   properties: { label: 'Open', action: { type: 'url', target: '/x' } },
+                },
+                // Tabs nested in a card, and tabs inside a tab panel (#6775):
+                // the rewrite reaches both, and the outer strip's own `items`
+                // stay ordinary tab records, not components.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Related',
+                    children: [
+                      { type: 'page:tabs', properties: { type: 'pill', items: [{ label: 'Notes' }] } },
+                    ],
+                  },
+                },
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Nested',
+                        children: [
+                          { type: 'page:tabs', properties: { type: 'card', items: [] } },
+                        ],
+                      },
+                    ],
+                  },
                 },
               ],
             },
@@ -5354,6 +5739,29 @@ const pageTabsTypeToTabStyle: MetadataConversion = {
                   type: 'element:button',
                   properties: { label: 'Open', action: { type: 'url', target: '/x' } },
                 },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Related',
+                    children: [
+                      { type: 'page:tabs', properties: { tabStyle: 'pill', items: [{ label: 'Notes' }] } },
+                    ],
+                  },
+                },
+                {
+                  type: 'page:tabs',
+                  properties: {
+                    tabStyle: 'line',
+                    items: [
+                      {
+                        label: 'Nested',
+                        children: [
+                          { type: 'page:tabs', properties: { tabStyle: 'card', items: [] } },
+                        ],
+                      },
+                    ],
+                  },
+                },
               ],
             },
           ],
@@ -5367,7 +5775,7 @@ const pageTabsTypeToTabStyle: MetadataConversion = {
         },
       ],
     },
-    expectedNotices: 3,
+    expectedNotices: 5,
   },
 };
 

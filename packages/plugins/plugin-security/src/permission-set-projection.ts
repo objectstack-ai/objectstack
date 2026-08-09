@@ -26,12 +26,42 @@
  *    records into the metadata store (one-time backfill).
  *
  * Package-owned records (`managed_by:'package'`) keep their shipped
- * declaration as the BASELINE (boot seeding / publish materialization), and —
- * direction confirmed 2026-07-14 — the environment customizes them through
- * the platform's standard ADR-0005 metadata overlay: a data-door edit of a
- * package set becomes an env-scope overlay, the record projects the EFFECTIVE
- * (overlay-wins) body with its package provenance preserved, and deleting the
- * overlay (the data-door "delete") resets the record to the declaration.
+ * declaration as the BASELINE (boot seeding / publish materialization). The
+ * 2026-07-14 direction confirmation that used to sit here — "the environment
+ * customizes them through the platform's standard ADR-0005 metadata overlay"
+ * — is **RETIRED** (ADR-0094 D5-R, 2026-08-09; #6609 ruling A executed by
+ * #6858). #6483 rolled `permission` back to `allowOrgOverride: false`
+ * (PR #6608), so ADR-0005's security row is enforced again: an overlay of the
+ * authorization surface IS the "silent privilege drift" it excludes.
+ *
+ * What that means for THIS file, per write point:
+ *
+ *  - the middleware still TRANSLATES every data-door write into a metadata
+ *    write — that half is unchanged. Whether the translated write is accepted
+ *    is ADR-0005's tier gate, decided by the target's ARTIFACT provenance:
+ *    a CODE-DECLARED set (`*.permission.ts`, a stack's `permissionSets`) is
+ *    refused with 403 `NOT_OVERRIDABLE`; a set whose definition lives only in
+ *    `sys_metadata` — created through the data door, or authored and
+ *    published through the METADATA door (ADR-0070) — rides
+ *    `allowRuntimeCreate`, still `true`, and keeps working;
+ *  - that refusal is deliberately LEFT TO THE PRODUCER. This file does not
+ *    pre-empt it by re-deriving artifact-backing: `isArtifactBacked` is the
+ *    protocol's rule (it excludes the `'sys_metadata'` rehydration sentinel),
+ *    and a second copy here would be the parallel-allowlist failure Prime
+ *    Directive #8 exists to prevent. The `managed_by` column is measurably
+ *    NOT that fact — `member_default`'s row is `managed_by:'admin'` and its
+ *    edit is refused, `twodoors_pkgset`'s row is `managed_by:'package'` and
+ *    its edit lands;
+ *  - the two write points that CATCH a failed metadata write
+ *    ({@link createPermissionSetWriteThrough}'s `restore` leg and
+ *    {@link reconcilePermissionSetProjection}'s backfill) keep catching: both
+ *    run after the record already exists, so a throw would strand the caller
+ *    with a healthy-looking row and no way to hear about it. They log on the
+ *    durability channel (#4632) and the backfill counts the failure — that is
+ *    the degradation report, not a swallow. Neither targets an artifact-backed
+ *    name in the first place (a packaged definition cannot be trashed, and the
+ *    backfill only runs for names with NO metadata presence at all).
+ *
  * Cross-package composition stays a POSITION concern (bind several packages'
  * sets to one position); package-first authoring (ADR-0070) gives
  * runtime-created sets a home package.
@@ -682,6 +712,18 @@ export function createPermissionSetWriteThrough(
       // protection applies HERE (the outer security gate delegates the
       // update/delete package-row check to this middleware): a
       // package-managed row stays read-only through the data door.
+      //
+      // [ADR-0094 D5-R] This is no longer the ONLY reason a packaged set is
+      // read-only through the data door — since #6483 a CAPABLE kernel refuses
+      // an artifact-backed set too, at the protocol's ADR-0005 tier gate. The
+      // remedy this message names ("edit the package and re-publish") is
+      // therefore right on every kernel; only the stated cause is specific to
+      // this branch. The two conditions keep separate wordings deliberately
+      // (#5240 — one condition, one wording): they are distinguishable and an
+      // operator needs to know which one they hit. Note also that this branch
+      // keys on `managed_by:'package'` — a record-provenance heuristic that is
+      // the best this file can do with no protocol to ask, and measurably NOT
+      // the artifact-provenance fact the capable path's gate reads.
       if (op === 'update' || op === 'delete') {
         const targets = await resolveTargetRows(ql, opCtx);
         const pkg = targets.find((t: any) => t?.managed_by === 'package');

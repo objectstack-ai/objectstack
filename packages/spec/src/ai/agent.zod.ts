@@ -233,7 +233,10 @@ export const AgentSchema = lazySchema(() => strictObject({
     'An agent reaches exactly the tools its surface-compatible skills declare ' +
     '(ADR-0064), so move each reference into a skill: a platform tool by its ' +
     'registered name, or `action_<name>` for one of your own AI-exposed Actions. ' +
-    'Run `os migrate meta --from 16` to rewrite it automatically.',
+    'This is NOT a rename — there is no key the value moves to: the migration ' +
+    'DELETES the key and emits a notice naming each tool that was listed, and ' +
+    'you re-declare each one in a skill by hand. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 
   /** Knowledge */

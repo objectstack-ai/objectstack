@@ -1777,7 +1777,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    // [#6603] this route now demands `manage_metadata` — an authoring capability, not just a session.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', systemPermissions: ['manage_metadata'] });
   rest.registerRoutes();
 
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
@@ -1807,7 +1808,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    // [#6603] this route now demands `manage_metadata` — an authoring capability, not just a session.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', systemPermissions: ['manage_metadata'] });
   rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
@@ -1830,7 +1832,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     const protocol = createMockProtocol();
     protocol.saveMetaItem = vi.fn().mockResolvedValue({ success: true });
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    // [#6603] this route now demands `manage_metadata` — an authoring capability, not just a session.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', systemPermissions: ['manage_metadata'] });
   rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 
@@ -1856,7 +1859,8 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
     err.status = 409;
     protocol.saveMetaItem = vi.fn().mockRejectedValue(err);
     const rest = new RestServer(server as any, protocol as any, ANON_API as any);
-    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    // [#6603] this route now demands `manage_metadata` — an authoring capability, not just a session.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', systemPermissions: ['manage_metadata'] });
   rest.registerRoutes();
     const route = getPutRoute(rest, '/api/v1/meta/:type/:name');
 

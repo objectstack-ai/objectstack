@@ -450,9 +450,34 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
             });
     });
 
-    it('the dotted rejection names the relationship it tried to cross and prescribes the fix', async () => {
-        await expect(protocol.findData({ object: 'showcase_task', query: { sort: 'project_id.name' } }))
-            .rejects.toThrow(/follows the relationship 'project_id'[\s\S]*formula or rollup/);
+    it('the dotted rejection names the relationship it tried to cross and prescribes a STORED field', async () => {
+        // [#6924] The prescription is part of the contract, not decoration: a
+        // refusal that hands the author an unbuildable fix is the same dead end
+        // as no hint at all. #4256 chose "a formula or rollup field that copies
+        // it into a real column"; measured on a REAL SqlDriver (better-sqlite3)
+        // and on InMemoryDriver, `orderBy` naming a `formula` field answers 200
+        // with the rows in INSERTION order, identically for asc and desc — no
+        // column exists, so the #3821 backstop retries without the sort. That
+        // is the exact silent degradation this gate exists to stop, so the old
+        // hint routed the author back into it.
+        const err: any = await protocol
+            .findData({ object: 'showcase_task', query: { sort: 'project_id.name' } })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toBeTruthy();
+        // ADR-0112 envelope — a rejection case asserts code AND status, not
+        // merely that something was thrown.
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_SORT');
+        expect(err.message).toMatch(/follows the relationship 'project_id'/);
+        // The remedy must be a STORED field — #6673's vocabulary for the same
+        // correction on the SEARCH axis, deliberately the same word here.
+        expect(err.message).toMatch(/a stored field/);
+        // ...and the old prescription must be gone, not merely joined.
+        expect(err.message).not.toMatch(/formula or rollup/);
+        // `formula` may still appear — but only as the named trap, never as the
+        // thing to build. This is what separates the fix from a reword that
+        // keeps the dead end in a subordinate clause.
+        expect(err.message).toMatch(/Not a formula field/);
     });
 
     it('a dotted path under a non-reference head is refused on the same axis, minus the relationship claim', async () => {

@@ -56,7 +56,14 @@ const queryableMetadataObjects = [
 // source code (which the legacy FilesystemLoader still scans).
 const REPO_SUBDIR = '.objectstack/metadata';
 
-// Map from ObjectStackDefinition field name to MetadataType name
+// Map from ObjectStackDefinition field name to MetadataType name.
+//
+// PINNED against the schema: `scripts/check-stack-collection-maps.mjs` reconciles
+// this map with `ObjectStackDefinitionSchema` in both directions, and every
+// deviation carries a reason there (#6242). It is one of seven hand-maintained
+// enumerations of the same set, and the reason this one has a gate is its own
+// history — `docs` and `roles → positions` were each fixed here one line at a
+// time, after a missing key silently dropped a whole collection.
 const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     objects: 'object',
     objectExtensions: 'object_extension',
@@ -89,7 +96,15 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     emailTemplates: 'email_template',
     docs: 'doc',
     books: 'book',
-    data: 'dataset',
+    // `data:` (the SEED collection) is deliberately absent — #6242 row 4(a).
+    // It used to map to `'dataset'`, the ADR-0021 analytics kind: the exact name
+    // collision `metadata-plugin.zod.ts` warns about in prose. The entry never
+    // registered anything (SeedSchema declares no `name`, and the loop below
+    // skips nameless items) — a dead pointer aimed at the wrong kind, which
+    // would have begun mis-registering the day either side moved. Removed rather
+    // than repointed at `'seed'`: seeds are APPLIED by SeedLoaderService off the
+    // bundle, never registered as metadata items, so a `seed` mapping would be
+    // new behaviour rather than a corrected name.
 };
 
 // ───────────────────────────────────────────────────────────────────────────

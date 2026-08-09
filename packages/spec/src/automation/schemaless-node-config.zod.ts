@@ -258,33 +258,34 @@ export const ScriptConfigSchema = lazySchema(() => strictObject({
     + 'through the messaging service — the in-app inbox by default, real email once '
     + '`@objectstack/plugin-email` is installed); for `slack` use a `connector_action` node with '
     + 'the Slack connector, or an `http` node posting to a webhook; for anything else, move the '
-    + 'name into `config.function`. Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'name into `config.function`. Run `os migrate meta --from 16` to rewrite the shorthand '
+    + 'case into `config.function` automatically; the stub and marker values are removed.',
   ),
   template: retiredKey(
     '`script.config.template` was removed in @objectstack/spec 17 (#4343) — it fed only the '
     + 'logger-backed `email`/`slack` stubs, which never rendered or sent a message, so no template '
     + 'id was ever resolved. Delete the key. A `notify` node carries its own `title`/`message`, and '
     + 'stored templates live in the messaging service (`sys_notification_template`), not on the '
-    + 'node. Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'node. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   recipients: retiredKey(
     '`script.config.recipients` was removed in @objectstack/spec 17 (#4343) — the addresses were '
     + 'logged, never messaged: the `email`/`slack` branches it fed delivered nothing. Use a '
     + '`notify` node, whose `recipients` (user ids, field refs or addresses) reach the messaging '
-    + 'service for real. Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'service for real. Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   variables: retiredKey(
     '`script.config.variables` was removed in @objectstack/spec 17 (#4343) — it injected values '
     + 'into a template no side effect ever rendered. Delete the key. A `notify` node carries '
     + 'structured data in `payload`; a registered function takes it in `config.inputs`. '
-    + 'Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   script: retiredKey(
     '`script.config.script` was removed in @objectstack/spec 17 (#4343) — the built-in runtime has '
     + 'no server-side JS sandbox, so an inline body was recognized and never executed: the node '
     + 'warned and completed as a no-op. Move the logic into a registered function '
     + '(`defineStack({ functions })`) and name it in `config.function`. '
-    + 'Run `os migrate meta --from 16` to rewrite it automatically.',
+    + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 }));
 

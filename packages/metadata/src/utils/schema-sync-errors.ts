@@ -83,6 +83,11 @@
  * ```
  */
 
+// [#6615] The Postgres `"x" of relation "y"` phrase, owned once — see the
+// module docblock in `@objectstack/types` for the superstring hole it closes
+// and for why the exclusion's width deliberately differs from the extractor's.
+import { isRelationSubObjectPhrase } from '@objectstack/types';
+
 /** One "which errors mean X?" vocabulary, in the three forms drivers use. */
 interface DriverErrorSignature {
     /** `error.code` — Postgres SQLSTATE, or mysql2's symbolic name. */
@@ -103,8 +108,15 @@ interface DriverErrorSignature {
     readonly excludes?: {
         /** SQLSTATEs / driver codes that positively mean "**not** this case". */
         readonly codes: ReadonlySet<string>;
-        /** Message shapes that carry a legal match for this case as a substring. */
-        readonly message: RegExp;
+        /**
+         * Message shapes that carry a legal match for this case as a substring.
+         *
+         * A predicate rather than a `RegExp` since #6615, so this channel can be
+         * satisfied by a shared, named question from `@objectstack/types` instead
+         * of a pattern this file owns alone. The phrase it tests is the same one
+         * `@objectstack/rest` and `@objectstack/service-analytics` read.
+         */
+        readonly matchesMessage: (message: string) => boolean;
     };
 }
 
@@ -205,19 +217,24 @@ const MISSING_TABLE: DriverErrorSignature = {
         /**
          * `«sub-object» "x" of relation "y" …` — Postgres' phrasing for a
          * failure about something *inside* a relation, which therefore says the
-         * relation itself is present. The two in-repo siblings that already
-         * carry this phrase are `mapDataError` (`packages/rest`, #5352) and
-         * `MISSING_COLUMN_OF_RELATION` (`service-analytics`, #6035/PR #6346);
-         * this is a deliberate one-line copy rather than a cross-package import,
-         * and deliberately **wider** than theirs. Both of those *extract* the
-         * column name to phrase a better error, so a miss costs a vaguer
-         * message; this one *excludes*, so a miss restores the corruption. It
-         * therefore drops their `column`/`[a-z0-9_]+`/`does not exist` anchors:
-         * any sub-object, any quoted identifier, any verdict. Over-matching here
-         * only ever converts a benign verdict into a loud one, which is the
-         * direction this whole module already errs in.
+         * relation itself is present. The two in-repo siblings that carry this
+         * phrase are `mapDataError` (`packages/rest`, #5352) and
+         * `service-analytics`'s missing-column subtraction (#6035/PR #6346).
+         *
+         * [#6615] All three now read one home — `@objectstack/types` — instead
+         * of three hand-kept copies, so the phrase can no longer be taught to
+         * the repo a fourth time or drift in one package only. The **width**
+         * difference that used to justify the copy is preserved and is the
+         * reason the home exports two functions rather than one: those two
+         * *extract* the column name to phrase a better error, so a miss costs a
+         * vaguer message; this one *excludes*, so a miss restores the
+         * corruption. {@link isRelationSubObjectPhrase} is therefore the wider
+         * question — it drops their `column`/`[a-z0-9_]+`/`does not exist`
+         * anchors: any sub-object, any quoted identifier, any verdict.
+         * Over-matching here only ever converts a benign verdict into a loud
+         * one, which is the direction this whole module already errs in.
          */
-        message: /["'`][^"'`]+["'`]\s+of relation\s/i,
+        matchesMessage: isRelationSubObjectPhrase,
     },
 };
 
@@ -246,7 +263,7 @@ function matchesDriverError(
     if (error === null || error === undefined || depth > MAX_CAUSE_DEPTH) return false;
 
     if (typeof error === 'string') {
-        if (signature.excludes?.message.test(error)) return false;
+        if (signature.excludes?.matchesMessage(error)) return false;
         return signature.message.test(error);
     }
     if (typeof error !== 'object') return false;
@@ -261,7 +278,7 @@ function matchesDriverError(
     const excludes = signature.excludes;
     if (excludes) {
         if (typeof err.code === 'string' && excludes.codes.has(err.code)) return false;
-        if (typeof err.message === 'string' && excludes.message.test(err.message)) return false;
+        if (typeof err.message === 'string' && excludes.matchesMessage(err.message)) return false;
     }
 
     if (typeof err.code === 'string' && signature.codes.has(err.code)) return true;
