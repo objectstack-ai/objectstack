@@ -19,7 +19,13 @@
  * actually validates against.
  */
 import { describe, it, expect } from 'vitest';
-import { ViewMetadataSchema, VIEW_FILTER_OPERATORS, VIEW_FILTER_OPERATOR_ALIASES } from '@objectstack/spec/ui';
+import {
+  ViewMetadataSchema,
+  VIEW_FILTER_OPERATORS,
+  VIEW_FILTER_OPERATOR_ALIASES,
+  VIEW_FILTER_LIST_VALUE_OPERATORS,
+  VIEW_FILTER_PAIR_VALUE_OPERATORS,
+} from '@objectstack/spec/ui';
 import { graftNormalizedOperators } from './protocol.js';
 
 /** Graft through the real spec schema, the way `saveMetaItem` does. */
@@ -29,6 +35,30 @@ function graftThroughSchema(authored: unknown): unknown {
   }).safeParse(authored);
   expect(parsed.success, JSON.stringify(parsed.error)).toBe(true);
   return graftNormalizedOperators(authored, parsed.data);
+}
+
+/**
+ * A `value` whose SHAPE the given canonical operator can carry (#6227).
+ *
+ * This suite's subject is the ALIAS FOLD, and the fold is only observable on a
+ * rule that PARSES. Since #6227 the spec couples `value` to `operator` — the
+ * three aliases that fold to `not_in` (`nin` / `notin` / `notIn`) need an array,
+ * and a range needs two bounds — so a single hard-coded scalar would be refused
+ * for a reason that has nothing to do with what is being tested.
+ *
+ * Read from the spec's own exported vocabularies rather than a local list, so a
+ * list-valued operator added later cannot silently reintroduce the breakage:
+ * that is the same "one declared vocabulary, not N dialects" rule the alias
+ * table itself exists to serve.
+ */
+function valueFor(canonicalOperator: string): unknown {
+  if ((VIEW_FILTER_LIST_VALUE_OPERATORS as readonly string[]).includes(canonicalOperator)) {
+    return ['x'];
+  }
+  if ((VIEW_FILTER_PAIR_VALUE_OPERATORS as readonly string[]).includes(canonicalOperator)) {
+    return ['x', 'y'];
+  }
+  return 'x';
 }
 
 /** Flattened runtime view overlay — the shape a console personalization PUT sends. */
@@ -53,9 +83,9 @@ describe('graftNormalizedOperators — through the real view metadata schema', (
   it('canonicalizes every alias the spec still folds', () => {
     const canonical = new Set<string>(VIEW_FILTER_OPERATORS);
     const stillLegacy: string[] = [];
-    for (const alias of Object.keys(VIEW_FILTER_OPERATOR_ALIASES)) {
+    for (const [alias, foldsTo] of Object.entries(VIEW_FILTER_OPERATOR_ALIASES)) {
       const out = graftThroughSchema(
-        view([{ field: 'status', operator: alias, value: 'x' }]),
+        view([{ field: 'status', operator: alias, value: valueFor(foldsTo) }]),
       ) as { filter: Array<{ operator: string }> };
       if (!canonical.has(out.filter[0].operator)) stillLegacy.push(alias);
     }
