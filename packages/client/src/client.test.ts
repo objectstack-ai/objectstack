@@ -737,6 +737,29 @@ describe('Notifications namespace', () => {
         expect(url).toContain('limit=10');
     });
 
+    it('[#6361] never puts a `cursor` on the query string — the SDK producer is gone', async () => {
+        // The retired half of #6361 asserted where it was PRODUCED. `cursor` was
+        // never a server-read filter; what made it harmful rather than inert is
+        // that this method appended it, so a caller paginating by the published
+        // contract re-read the first window forever with no error.
+        //
+        // The type surface is the enforced channel — `list({ cursor })` is a
+        // TS2353 excess-property error, verified by reverse-verification and
+        // unavailable to a runtime assertion. This pins the RUNTIME half, which
+        // tsc cannot reach: an untyped caller (plain JS, a `Record` spread, a
+        // hand-built options object) must not smuggle the parameter through.
+        const { client, fetchMock } = createMockClient({
+            success: true,
+            data: { notifications: [], unreadCount: 0 }
+        });
+        const untypedOptions = { read: false, limit: 10, cursor: 'n_42' } as unknown as { read?: boolean; limit?: number };
+        await client.notifications.list(untypedOptions);
+        const url = fetchMock.mock.calls[0][0] as string;
+        expect(url).toContain('limit=10');
+        expect(url).not.toContain('cursor');
+        expect(url).not.toContain('n_42');
+    });
+
     it('should mark notifications as read', async () => {
         const { client, fetchMock } = createMockClient({
             success: true,
