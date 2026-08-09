@@ -740,9 +740,10 @@ file the fix touches, you have not triaged it yet, and it is not labelable.
 | `domain:drivers` | `packages/drivers/driver-*`(`driver-memory` / `driver-mongodb` / `driver-sql` / `driver-sqlite-wasm`) |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`(flow 触发器)、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow` |
 | `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |
-| `domain:devx` | `packages/lint`、`packages/sdui-parser`(仅 lint 消费)、`skills/**`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类) |
+| `domain:devx` | `packages/lint`、`packages/sdui-parser`(仅 lint 消费)、`skills/**`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类)—— 其中 `packages/lint` / `content/docs/**` / `scripts/` 与 `domain:spec-tooling` 按「是否围着 spec 契约转」切分,见 `spec-tooling` 行 |
 | `domain:spec` | `packages/spec` 的**语义面**:schema 形状、`contracts/**`、退役的行为半边、strictness 台账 —— 判据是**接受面变化**,见下「`spec` 一分为二」 |
 | `domain:spec-surface` | `packages/spec` 的**文本面**:describe/JSDoc/墓碑迁移散文/错误 guidance 与 alias 表 —— 校验不变量卡,changeset 恒 patch,见下「`spec` 一分为二」 |
+| `domain:spec-tooling` | `packages/spec` 的**机器面**:`packages/spec/scripts/**`、`packages/spec/docs/**`(契约门禁/生成器);与 `devx` 相交的 `packages/lint` / `scripts/` / `content/docs/**` 三面按判据切分 —— **围着 spec 契约转的工具链**(契约门禁/生成器/lint 规则/报错散文/references 管线)归本域,一般开发工具面留 `devx`(维护者 2026-08-09 裁决,#5469)。⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账;程序卡 #5163、座位贴 #6018,见下「`spec` 一分为二」 |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client`、`packages/client-react`(REST 线协议 SDK)、`packages/cloud-connection`、`packages/create-objectstack`、`packages/adapters/*`、`packages/plugins/plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`(`setup` / `studio` / `account`)、`packages/console`、`examples/*` —— 见下,**这一行是显式点名,不是遗漏** |
 
@@ -787,7 +788,8 @@ objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
 文本债持续积压(truth-sweep 审计开采一天可灌 5-10 张)。切分纪律:
 
 - **判据是接受面,不是包、不是 diff 大小。** 这是 anchoring rule 在
-  `packages/spec` 内的**显式例外**:一包两席,按「合法元数据集合变没变」分派 ——
+  `packages/spec` 内的**显式例外**:一包三席(语义 / 文本 / 工具面,工具面
+  判据见下条与表行),前两席按「合法元数据集合变没变」分派 ——
   改动前能过校验的输入,改动后逐字节仍然同判 ⇒ `spec-surface`;否则 `spec`。
   该判据与包归属同样机械(分诊读 diff 落点:语义行 vs 纯文本行)。反向红线:
   **任何改变接受/拒绝行为的卡,不论多小,归 `domain:spec`**(#6245 size S,
@@ -797,7 +799,10 @@ objectql + metadata\* + platform-objects + core + formula + 全部 `driver-*`,
   机器」(门禁/生成器/lint 与 docs 手写页;其席位范围 ⛔ 不碰
   `packages/spec/src/**/*.zod.ts`,与 surface 天然无交集)。同一缺陷两半分治的
   先例:#6146(文档教了一个求值面从未绑定的根 —— surface)与 #6290(lint 一边
-  宣告该根合法一边拒收、还附错误修法 —— tooling 面)。
+  宣告该根合法一边拒收、还附错误修法 —— tooling 面)。与 `devx` 相争的三面
+  (`packages/lint` / `scripts/` / `content/docs/**`)按同一「是否围着 spec
+  契约转」判据切分 —— 维护者 2026-08-09 裁决(#5469),上表 `spec-tooling`
+  行即其登记。
 - **产物随源走**:describe/JSDoc 改动会重生成 `content/docs/references/**` 与
   manifest 的 description 字段 —— 产物变更归触发它的**源 PR**(`check:generated`
   重生成提交,⛔ 手改);同一生成树在飞重生成 >1 张时按 #4675 四步序串行
