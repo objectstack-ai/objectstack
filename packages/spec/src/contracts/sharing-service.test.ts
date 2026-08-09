@@ -530,10 +530,12 @@ describe('[#6428] ISharingService tri-state write verdict', () => {
  * to anything — the old type included — goes red; (2) the SHAPE WITNESS: an
  * implementation typed by the contract reads `accessible_org_ids` / `posture`
  * / `org_user_ids` / `tabPermissions` with **no `as any`**, which under the old
- * signature was TS2339 on each field — that is this file's before-red
- * direction, and it is the mirror of PR #6511's, which was TS2353 at a call
- * site; (3) the narrow type survives UNCHANGED IN SHAPE, so the convergence
- * cannot be undone by widening it back one field at a time.
+ * signature was TS2339 on each field (TS2551 on `tabPermissions` — tsc
+ * suggests `permissions`, the very near-miss the narrow type invited) — that
+ * is this file's before-red direction, and it is the MIRROR of PR #6511's,
+ * which was TS2353 at a call site stating a trimmed envelope; (3) the narrow
+ * type survives UNCHANGED IN SHAPE, so the convergence cannot be undone by
+ * widening it back one field at a time.
  *
  * NOT PINNED, on purpose, and for exactly the reason PR #6511 recorded: there
  * is no `@ts-expect-error` asserting that a `SharingExecutionContext` is
@@ -593,10 +595,15 @@ describe('[#6523] sharing / approval / report enforcement takes the full Executi
     };
 
     // The call site, spelled the way `plugin-sharing`'s engine middleware
-    // spells it: the whole resolved envelope, handed straight down. Written as
-    // an object LITERAL on purpose — excess-property checking applies to
-    // literals, so under the old parameter type each of the four keys below
-    // was additionally a TS2353 error.
+    // spells it: the whole resolved envelope, resolved once and handed straight
+    // down as a VARIABLE — not as an inline literal. That is deliberate, and it
+    // is why reverting this card produces no TS2353 here: excess-property
+    // checking would fire only on an inline literal, and inline-literal damage
+    // is PR #6511's direction (a caller stating a trimmed envelope), not this
+    // one. Here the value was always whole and always assignable; only the
+    // READ above was blocked. Measured on the revert: 22 errors on this file,
+    // TS2339/TS2551 on the four reads and TS2344/TS2322 on the identity pins,
+    // and zero TS2353.
     const envelope: ExecutionContext = {
       userId: 'usr_1',
       tenantId: 'org_plant_a',
