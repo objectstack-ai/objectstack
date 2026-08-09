@@ -78,6 +78,28 @@ const taskObject = {
         // auto-default excludes by TYPE, which is its own rejection.
         notes: { name: 'notes', label: 'Notes', type: 'textarea' as const },
         estimate: { name: 'estimate', label: 'Estimate', type: 'number' as const },
+        // [#6994] The two "calculated" types that sort DIFFERENTLY, side by
+        // side, so the gate below is pinned on both edges at once.
+        //
+        // `sort_key` is virtual: no driver emits a column for a `formula`, its
+        // value is computed after `driver.find` returns, and an ORDER BY on it
+        // is dropped — the defect this axis' third verdict refuses. Its
+        // expression is `record.title`, so the value is VISIBLY the sort key
+        // the caller asked for, which is what makes the silent version so bad.
+        //
+        // `subtask_total` is not: `summary` gets a real, maintained float
+        // column (`SqlDriver.createColumn` → `table.float`) and genuinely
+        // sorts. It is the control that fails if this gate is ever widened to
+        // the spec's `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`),
+        // which is the WRITE contract and would refuse two working types.
+        sort_key: {
+            name: 'sort_key', label: 'Sort key', type: 'formula' as const,
+            expression: 'record.title', returnType: 'text' as const,
+        },
+        subtask_total: {
+            name: 'subtask_total', label: 'Subtask total', type: 'summary' as const,
+            summaryOperations: { object: 'showcase_task', field: 'estimate', function: 'sum' as const },
+        },
     },
 };
 
@@ -162,7 +184,20 @@ function makeStubDriver() {
             const sorted = applySort(matched, ast?.orderBy);
             const from = typeof ast?.offset === 'number' ? ast.offset : 0;
             const page = typeof ast?.limit === 'number' ? sorted.slice(from, from + ast.limit) : sorted.slice(from);
-            return project(page, ast?.fields);
+            // [#6994] Rows are COPIED out, as every real driver hands back rows
+            // it materialised from the wire rather than references into its own
+            // storage. Without this the double leaks engine-side mutation back
+            // into "the database": `applyFormulaPlan` writes each formula value
+            // onto the record it is given, so one read of an object carrying a
+            // `formula` field PERSISTED that value into the store, and the next
+            // read found a column no driver has and really sorted by it.
+            //
+            // Measured, and the reason this is a fix and not a preference: on a
+            // real `SqlDriver` (better-sqlite3) `orderBy <formula> asc` and
+            // `desc` come back BYTE-IDENTICAL, both in insertion order. Through
+            // this double they came back reversed on the second call. The
+            // double was contradicting the driver it stands in for.
+            return project(page, ast?.fields).map((r) => ({ ...r }));
         },
         async findOne(object: string, ast: any) {
             const rows = await this.find(object, ast);
@@ -232,6 +267,13 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
                 parent_id: letter === 'A' ? null : 't_A',
                 owner_id: 'usr_1',
                 created_at: '2026-07-30T00:00:00.000Z',
+                // [#6994] A permutation chosen so the summary control cannot
+                // hold vacuously: C=2 A=5 E=1 B=4 D=3 orders as `E C D B A`
+                // ascending and `A B D C E` descending, and neither matches
+                // insertion order (`C A E B D`) NOR title order (`A B C D E`).
+                // A control that agreed with either would pass against a driver
+                // that ignored `orderBy` entirely.
+                subtask_total: [2, 5, 1, 4, 3][i],
             });
         });
         stores.set('showcase_task', tasks);
@@ -508,6 +550,131 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         await expect(protocol.findData({
             object: 'showcase_task', query: { sort: '-project_id.created_at', top: 2 },
         })).rejects.toMatchObject({ status: 400, code: 'INVALID_SORT', field: 'project_id.created_at' });
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // SORT — [#6994] a KNOWN, NON-DOTTED field whose TYPE materialises
+    // no column. The last shape on this axis that still degraded silently.
+    // ─────────────────────────────────────────────────────────────
+
+    it('a summary field still sorts, in both directions — the family is `formula`, not "computed"', async () => {
+        // CONTROL, and the one that matters most here: `summary` is computed
+        // too, and it is NOT in this family. It gets a real maintained column
+        // (`table.float`) and orders correctly — measured on a real SqlDriver
+        // in #6924 (`orderBy <summary> desc` -> E D C B A over 5 4 3 2 1).
+        //
+        // This is what fails if the gate is ever widened from "materialises no
+        // column" to the spec's `COMPUTED_VALUE_TYPES`
+        // (`formula`/`summary`/`autonumber`) — that set is the WRITE contract
+        // ("never client-written") and refusing a sort with it would break two
+        // types that work.
+        expect(titles(await protocol.findData({ object: 'showcase_task', query: { sort: 'subtask_total' } })))
+            .toEqual(['E', 'C', 'D', 'B', 'A']);
+        expect(titles(await protocol.findData({ object: 'showcase_task', query: { sort: '-subtask_total' } })))
+            .toEqual(['A', 'B', 'D', 'C', 'E']);
+    });
+
+    it.each([
+        ['bare string', { sort: 'sort_key' }],
+        ['descending', { sort: '-sort_key' }],
+        ['second of two', { sort: 'title,sort_key' }],
+        ['string array', { orderBy: ['sort_key'] }],
+        ['SortNode array', { orderBy: [{ field: 'sort_key', order: 'desc' }] }],
+        ['direction map', { orderBy: { sort_key: 'desc' } }],
+        ['OData spelling', { $orderby: 'sort_key' }],
+        ['with top — the "latest N" footgun', { sort: '-sort_key', top: 2 }],
+    ])('sorting by a formula field is a 400, not insertion order — %s', async (_label, query) => {
+        // `sort_key` is a REAL field of this object, so it is in `gate.known`
+        // and passed the #4226 unknown check; it carries no dot, so it passed
+        // the #4256 check as well. It then reached a driver with no column for
+        // it. Measured on a real `SqlDriver` (better-sqlite3) + real `ObjectQL`
+        // + this protocol, on the base of the branch that added this test:
+        //
+        //   FORMULA  orderBy sort_key asc  -> ["C","A","E","B","D"]  5 rows, 200
+        //     its sort_key values          -> ["C","A","E","B","D"]
+        //   FORMULA  orderBy sort_key desc -> ["C","A","E","B","D"]
+        //   RAW SQL  order by sort_key     -> sqlite: no such column: sort_key
+        //
+        // `asc` and `desc` byte-identical is what makes it a DROPPED sort
+        // rather than a coincidence, and the response carrying the very values
+        // it was asked to order by, out of order, is what makes it invisible.
+        await expect(protocol.findData({ object: 'showcase_task', query }))
+            .rejects.toMatchObject({
+                status: 400,
+                code: 'INVALID_SORT',
+                field: 'sort_key',
+                object: 'showcase_task',
+            });
+    });
+
+    it('the formula rejection names the type and prescribes the SAME stored field the dotted one does', async () => {
+        const err: any = await protocol
+            .findData({ object: 'showcase_task', query: { sort: 'sort_key' } })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toBeTruthy();
+        // ADR-0112 envelope — a rejection case asserts code AND status, never
+        // merely that something was thrown.
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_SORT');
+        // It must say WHICH type, or the author cannot tell this apart from a
+        // typo — the whole reason it needs its own verdict.
+        expect(err.message).toMatch(/a formula field on 'showcase_task'/);
+        expect(err.message).toMatch(/computed on read/);
+        // One vocabulary across the doors: #6924 fixed the dotted hint to
+        // prescribe "a stored field, written when the source changes", and
+        // #6673 says "a stored text field" on the SEARCH axis. An author
+        // refused on two axes must not be sent two different ways.
+        expect(err.message).toMatch(/a stored field, written when the source changes/);
+        // ...and it must never prescribe the thing it is refusing.
+        expect(err.message).not.toMatch(/formula or rollup/);
+    });
+
+    it('the two refusals agree word-for-word on the remedy', async () => {
+        // Pins the AGREEMENT itself rather than each wording separately: this
+        // goes red if either door's remedy is reworded without the other, which
+        // is exactly how #4256 and #6673 drifted apart in the first place.
+        const remedy = /Denormalise the value onto 'showcase_task' \(a stored field, written when the source changes\) and sort by that\./;
+        const dotted: any = await protocol
+            .findData({ object: 'showcase_task', query: { sort: 'project_id.name' } })
+            .then(() => null, (e: unknown) => e);
+        const formula: any = await protocol
+            .findData({ object: 'showcase_task', query: { sort: 'sort_key' } })
+            .then(() => null, (e: unknown) => e);
+        expect(dotted.message).toMatch(remedy);
+        expect(formula.message).toMatch(remedy);
+    });
+
+    it.each([
+        ['unknown beats formula', { sort: 'no_such_field,sort_key' }, 'no_such_field'],
+        ['dotted beats formula', { sort: 'sort_key,project_id.name' }, 'project_id.name'],
+    ])('precedence is unknown > dotted > unmaterializable — %s', async (_label, query, field) => {
+        // Identity error first, then shape, then type — the same order the
+        // expand gate uses (`unknown` > `not-a-reference`). Deliberate, and
+        // pinned so it stays a decision rather than an accident: the two older
+        // verdicts keep answering exactly what they answered before this gate
+        // grew a third one.
+        await expect(protocol.findData({ object: 'showcase_task', query }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_SORT', field });
+    });
+
+    it('RECORD OF A KNOWN HOLE — `engine.find` still drops a formula sort silently (#6994 is ingress-only)', async () => {
+        // NOT a defence of this behaviour: a pin on the half the ingress gate
+        // cannot reach, so it is measured rather than assumed closed. Internal
+        // callers (hooks, flows, reports, expand sub-reads) never pass through
+        // `findData`, so they still get the 200-in-arbitrary-order this axis
+        // refuses at the door. Closing it means deciding whether `engine.find`
+        // REFUSES or keeps its documented internal-caller tolerance — an
+        // engine-core contract decision, tracked separately.
+        //
+        // When that lands, this test SHOULD go red. Update it then; do not
+        // reach for it as evidence that the direct path is fine.
+        const asc = await engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] } as any);
+        const desc = await engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'desc' }] } as any);
+        expect(asc.map((r: any) => r.title)).toEqual(INSERTION_ORDER);
+        // Direction-blind, and the rows carry the values they were meant to be
+        // ordered by — the exact signature from the issue's transcript.
+        expect(desc.map((r: any) => r.title)).toEqual(asc.map((r: any) => r.title));
+        expect(asc.map((r: any) => r.sort_key)).toEqual(INSERTION_ORDER);
     });
 
     // ─────────────────────────────────────────────────────────────
