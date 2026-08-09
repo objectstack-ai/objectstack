@@ -342,6 +342,122 @@ Rules:
   right cluster. Authors only control the `allowedVisualizations` whitelist;
   a single-entry whitelist locks the visualization (no switcher).
 
+### Toolbar Search (`searchableFields`, ADR-0061)
+
+The toolbar's search box scans a set the **object** owns. A list view's
+`searchableFields` **narrows** that set for this one list — it can never widen
+it, and the runtime enforces that by **refusing the request**, not by quietly
+dropping the extra name.
+
+<!-- os:check -->
+```typescript
+import { defineView } from '@objectstack/spec';
+
+const data = { provider: 'object' as const, object: 'support_case' };
+
+export const CaseViews = defineView({
+  // No `searchableFields` → the toolbar searches everything the object allows.
+  list: { label: 'All Cases', type: 'grid', data, columns: ['subject', 'status'] },
+  listViews: {
+    // This list only: search the reference number and the subject line.
+    triage: {
+      label: 'Triage', type: 'grid', data,
+      columns: ['case_number', 'subject', 'status'],
+      searchableFields: ['case_number', 'subject'],
+    },
+  },
+});
+```
+
+**What the object allows** is resolved server-side, and it is the whole rule:
+
+| The object … | The allowed set is |
+|:-------------|:-------------------|
+| declares `searchableFields` | **that list, verbatim** — whatever the field types are |
+| declares nothing | the auto-default: the name field + the text-like columns (`text` / `email` / `phone` / `url` / `autonumber` / `textarea` / `markdown` / `select` / `status`) |
+
+So field **type** decides only in the second row. On an object that declares
+`searchableFields: ['subject', 'account_id']`, a view narrowing to
+`['account_id']` — a lookup — is **accepted** and scanned; on the same object,
+narrowing to a `text` column the object left out is **refused**. Judge every
+entry against the object's allowed set, never against the type list.
+
+Modelling side — the object's own set, and the stored-mirror prescription for
+searching by a related record's title: **objectstack-data → Search Fields
+(`searchableFields`)**. Query side (`search.fields` over the API):
+**objectstack-query → Full-Text Search**.
+
+#### ⛔ One bad entry 400s EVERY search on that list
+
+The client echoes this declaration verbatim as the `$searchFields` override —
+the active view's list wins over the object's — and the ingress gate refuses any
+entry outside the allowed set before the engine ever runs. The blast radius is
+the list's whole search box, for every user and every term: not a narrower
+result, no result at all.
+
+| What you write on the view | `os validate` | Toolbar search at runtime |
+|:---------------------------|:--------------|:--------------------------|
+| a subset of the allowed set | clean | scans exactly those columns |
+| key omitted | clean | scans the object's full allowed set |
+| `searchableFields: []` | clean | **identical to omitting it** — see below |
+| a renamed / mistyped column | `searchable-field-unknown` | `400 INVALID_FIELD` |
+| a dotted path (`account_id.name`) | `searchable-field-unknown` | `400 INVALID_FIELD` |
+| a real column outside the allowed set | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
+
+Both diagnostics are **errors**, not warnings — `os validate` fails the build.
+The two you will actually hit, verbatim:
+
+```text
+list-view searchableFields entry "account_id.name" is not a field on object
+"support_case". The declaration is stale: searching it can never match, and the
+engine silently drops it — leaving a narrower search than declared, or the
+auto-default set once every entry is dropped.
+
+list-view searchableFields entry "status" is outside object "support_case"'s
+declared searchableFields (subject, case_number, description) — the set 'search'
+scans. Clients echo this declaration verbatim as the '$searchFields' override,
+and the runtime refuses an entry outside the allowed set: every toolbar search
+on this list returns 400 INVALID_FIELD (#4254).
+```
+
+#### `searchableFields: []` does NOT turn search off
+
+An empty array is **absent**, at all three layers: the client omits the
+`$searchFields` key entirely, the ingress gate treats a zero-length override as
+no override, and the engine falls through to the object's allowed set. A view
+written `searchableFields: []` searches **more** columns than one written
+`searchableFields: ['subject']`, which is the opposite of what the spelling
+suggests.
+
+To actually remove the search box from the toolbar, toggle the affordance —
+a different key, on the same view:
+
+<!-- os:check -->
+```typescript
+import { defineView } from '@objectstack/spec';
+
+const data = { provider: 'object' as const, object: 'support_case' };
+
+export const AuditViews = defineView({
+  list: {
+    label: 'Audit Log', type: 'grid', data,
+    columns: ['case_number', 'status'],
+    userActions: { search: false },   // ← no search box; `searchableFields: []` would NOT do this
+  },
+});
+```
+
+#### Searching by a related record's title
+
+Never reach for a dotted path. `search` scans the queried object's **own**
+columns — unlike `columns` / `sort` / `filter`, the search axis resolves no
+traversal, so `account_id.name` is refused rather than silently dropped. Copy
+the parent's title into a **stored** field on this object and put that field in
+the object's `searchableFields`; the view then narrows to it like any other
+column. The full prescription — the mirror field, the two hooks that maintain
+it, and why a `formula` field cannot be the mirror — lives in
+**objectstack-data → Search Fields (`searchableFields`)**.
+
 ### Sorting
 
 ```typescript
