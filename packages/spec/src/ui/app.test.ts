@@ -1043,7 +1043,11 @@ describe('AppSchema with areas', () => {
 describe('retired dead keys carry prescriptions (#4001)', () => {
   it.each([
     ['version', '1.0.0', 'manifest.version'],
-    ['aria', { label: 'x' }, 'component/widget'],
+    // ⚠️ The expected fragment used to be `component/widget`. The widget half
+    // of that prescription named `dashboard.widgets[].aria`, retired by #5010
+    // in this same 17.0.0 — so the pin held `App.aria`'s prescription pointing
+    // at another tombstone (#6756). Re-aimed at the surviving carrier.
+    ['aria', { label: 'x' }, 'page.components[].aria'],
     ['objects', [], 'defineStack'],
     ['apis', [], 'defineStack'],
   ] as const)('rejects `%s` with its upgrade prescription', (key, value, fragment) => {

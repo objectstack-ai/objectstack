@@ -2592,7 +2592,6 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
                 supportsCancellation: false,
                 supportsRetry: true,
                 needsOutbox: true,
-                isAsync: false,
                 source: 'plugin',
                 deprecated: false,
                 maturity: 'ga',
@@ -2616,7 +2615,7 @@ describe('Action Descriptor Registry (ADR-0018)', () => {
                 type: 'send_sms', version: '1.0.0', name: 'Send SMS',
                 category: 'io', paradigms: ['flow'], supportsPause: false,
                 supportsCancellation: false, supportsRetry: true,
-                needsOutbox: false, isAsync: false, source: 'plugin', deprecated: false, maturity: 'ga',
+                needsOutbox: false, source: 'plugin', deprecated: false, maturity: 'ga',
             },
             async execute() { return { success: true }; },
         });

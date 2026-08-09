@@ -87,8 +87,10 @@ export const appForm = defineForm({
         // impression. The live surface is `FormView.sharing` (public data
         // collection), authored per form view.
         // `aria` removed: tombstoned in 17.0.0 — no renderer read app-level ARIA
-        // attributes; declare `aria` on the component/widget that renders the
-        // DOM node.
+        // attributes; declare `aria` on the page component that renders the
+        // DOM node (`page.components[].aria`). NOT on a dashboard widget —
+        // `dashboard.widgets[].aria` was retired in the same major (#5010,
+        // corrected in #6756).
       ],
     },
   ],

@@ -34,6 +34,10 @@
  *   the object schema cannot be resolved it returns `undefined`, meaning
  *   "no answer — use your own fallback", NOT "no fields are readable". An empty
  *   array is a real answer and means the opposite: nothing is readable.
+ * - **Verdicts fail to ABSTENTION.** {@link ISecurityService.checkAuthoredRowWrite}
+ *   answers a question a composing caller may use to WIDEN, so its failure mode
+ *   is the one that changes nothing: `abstain`. It never reports `admit` for a
+ *   reason it did not measure, and it never throws outward.
  *
  * That distinction is load-bearing: the field projection is only ever a
  * cosmetic narrowing on top of enforcement that already happened (the read path
@@ -137,6 +141,52 @@ export interface AudienceBindingSuggestionSync {
  * through.
  */
 export type AudienceBindingSuggestion = Record<string, unknown>;
+
+/**
+ * [#5493 / ADR-0105 D3] The two-state answer of
+ * {@link ISecurityService.checkAuthoredRowWrite}.
+ *
+ * - `admit` — at least one **applicable, app-authored** row-level security
+ *   policy matches this row for this operation. A positive, measured fact.
+ * - `abstain` — everything else: no authored policy applies, none of the
+ *   applicable ones matches the row, the probe could not be resolved, or the
+ *   implementation declines to answer. **Never** a statement that the write is
+ *   refused — this surface has no `deny` because it is not a gate.
+ *
+ * **Why only two states, and why the missing one is not `deny`.** Its sibling
+ * `SharingWriteVerdict` (`./sharing-service.js`) is a *gate's* verdict, so it
+ * needs `deny` to end a decision. This one is an *evidence*
+ * probe: the caller already holds a refusal and is asking whether a declared,
+ * app-authored widener speaks for this row before it fires. "No evidence" and
+ * "evidence against" are the same instruction to that caller — keep your
+ * refusal — so collapsing them removes a state nobody could act on differently.
+ *
+ * **`abstain` is the FAIL-CLOSED direction here, and that is the inverse of
+ * `SharingWriteVerdict`'s.** There, a failed lookup must be `deny` because
+ * `abstain` hands the decision on. Here the caller uses `admit` to WIDEN, so
+ * the answer that changes nothing is `abstain`: a deployment whose security
+ * service omits {@link ISecurityService.checkAuthoredRowWrite} entirely, or
+ * whose probe throws, behaves byte-for-byte as one that never asked. Read
+ * either verdict's fail direction off *what the caller does with it*, never off
+ * the state's name.
+ *
+ * @see ISecurityService.checkAuthoredRowWrite
+ */
+export type AuthoredRowWriteVerdict = 'admit' | 'abstain';
+
+/**
+ * The row-level WRITE operations {@link ISecurityService.checkAuthoredRowWrite}
+ * answers for — the RLS write vocabulary, not the engine's verb list.
+ *
+ * A caller holding a destructive lifecycle verb maps it onto its nearest write
+ * class itself (`purge` destroys like `delete`; `transfer` / `restore` mutate
+ * like `update`), which is the same mapping the engine's own by-id write
+ * pre-image gate applies before it collects policies. Keeping the mapping on
+ * the caller's side is deliberate: this contract then names exactly the two
+ * classes an RLS policy can declare, and a new lifecycle verb cannot silently
+ * acquire a widening path here by being spelled into a wider union.
+ */
+export type AuthoredRowWriteOperation = 'update' | 'delete';
 
 /**
  * Public contract for the `security` service.
@@ -257,6 +307,64 @@ export interface ISecurityService {
     object: string,
     context?: SecurityContext,
   ): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'>;
+
+  /**
+   * [#5493 / ADR-0105 D3] Does an **app-authored** row-level security policy
+   * admit `recordId` for `operation` — by declaration, on its own, without the
+   * platform's ownership floor?
+   *
+   * The primitive a composing caller needs before it lets a *declared* widener
+   * defer a hard refusal. `getReadFilter` cannot answer it and neither can any
+   * composition of the other methods here, because every one of them reports
+   * the **composed** RLS verdict, and sitting inside that composition is the
+   * platform's own wildcard write floor (`created_by == current_user.id`,
+   * shipped on the `member_default` baseline every authenticated member
+   * resolves additively). Deferring to "the composed RLS admits this row" is
+   * therefore not a cheaper spelling of this question — it is a measurably
+   * different one, and the difference is a security hole:
+   *
+   * > #5493's probe E-A measured a **creator who is no longer the owner** —
+   * > a record transferred away from them — being admitted by the platform
+   * > floor while an authored policy said nothing about the row at all. A
+   * > deferral keyed on the composed answer hands transferred records back to
+   * > their former creators.
+   *
+   * Separating the two needs policy PROVENANCE (which policies the platform
+   * shipped vs. which the app declared), and provenance is deliberately private
+   * to the implementation — an authorable "this is a floor" flag would hand
+   * authors a switch that turns their own policy off. Hence this method, and
+   * hence it lives on the service rather than being re-derived by consumers.
+   *
+   * **`admit` iff** at least one applicable, **non-floor** policy matches the
+   * row for this operation. `abstain` in **every** other case, including:
+   * the caller holds no authored policy for `(object, operation)`; the
+   * authored policies apply but none matches this row; the row is unreadable,
+   * absent, or in another tenant; the context carries no principal; the context
+   * is on-behalf-of (ADR-0090 D10 — the delegator intersection is not computed
+   * on this path, so an answer here would be resolved against the wrong
+   * identity); or any internal probe fails.
+   *
+   * **Fail-closed by construction, in both halves.** The method itself never
+   * throws outward — an internal failure becomes `abstain`. And the method is
+   * OPTIONAL: a deployment whose security service predates it, or omits it,
+   * behaves byte-for-byte as today, because a caller that cannot find it must
+   * read the absence as `abstain` too. Callers therefore feature-detect
+   * (`typeof svc.checkAuthoredRowWrite === 'function'`) and treat every
+   * non-`admit` outcome identically.
+   *
+   * **This is evidence, not authorization.** `admit` says a declared policy
+   * speaks for this row; it does NOT say the write is permitted — object-level
+   * CRUD, the tenant wall, sharing, and the post-image `check` clause all still
+   * apply, and the caller composes this answer with them rather than replacing
+   * them. Nothing here may be used to *narrow*: `abstain` is "no evidence",
+   * never "denied".
+   */
+  checkAuthoredRowWrite?(
+    object: string,
+    recordId: string,
+    operation: AuthoredRowWriteOperation,
+    context?: SecurityContext,
+  ): Promise<AuthoredRowWriteVerdict>;
 
   /**
    * Explain WHY access is granted or denied — the decision plus the layers that

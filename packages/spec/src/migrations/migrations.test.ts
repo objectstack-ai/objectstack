@@ -154,6 +154,63 @@ describe('migration chain (ADR-0087 D3)', () => {
     });
   });
 
+  // Third of the same class, one field over again: `acceptanceCriteria` is the
+  // "Done when" line `gen:upgrade-guide` projects verbatim, so a caveat that has
+  // been overtaken by an enforcement is a published instruction to hand-audit a
+  // mistake the engine now refuses on its own. #6746 (#6667) added
+  // `AutomationEngine.refuseUndeclaredSuspension`
+  // (`packages/services/service-automation/src/engine.ts`), called from
+  // `executeNode` on every `result.suspend === true`, which made this entry's
+  // "warned about by NEITHER channel — check those by hand" false in the
+  // direction that costs a reader work. #6749 fixed the TSDoc half; this is the
+  // registry channel it explicitly excluded (#6844).
+  describe('protocol-17 #5561 entry — supportsPause is enforced now, so stop asking for a hand-audit (#6844)', () => {
+    const entry = () =>
+      MIGRATIONS_BY_MAJOR[17]!.semantic.find(
+        (s) => s.id === 'action-descriptor-resume-authority-default-flip',
+      );
+
+    it('finds the entry, and it still states the resumeAuthority criterion (anti-vacuity)', () => {
+      // Guards the whole block against passing because the entry vanished: every
+      // negative below is vacuously true on `undefined`, and a `.find()` that
+      // stops matching is exactly how that happens.
+      expect(entry()).toBeDefined();
+      expect(entry()!.acceptanceCriteria).toMatch(/resumeAuthority/);
+      expect(entry()!.acceptanceCriteria).toMatch(/supportsPause/);
+    });
+
+    it('no longer tells the reader to hand-check the supportsPause mismatch', () => {
+      // Pinned on the INSTRUCTION, not on wording: the entry may still name the
+      // old gap in order to say it closed — going quiet would leave a reader who
+      // remembers the published guide still doing the audit by hand.
+      const a = entry()!.acceptanceCriteria;
+      expect(a).not.toMatch(/check (those|them) by\s+hand/i);
+      expect(a).not.toMatch(/is a declaration nothing\s+enforces/i);
+      expect(a).not.toMatch(/warned about by NEITHER channel/i);
+    });
+
+    it('names the enforcing mechanism and that a `fault` edge cannot route it', () => {
+      // Matched by idiom, not by sentence: the reader has to be able to FIND the
+      // guard, which is what distinguishes this from a bare "it is enforced now".
+      const a = entry()!.acceptanceCriteria;
+      expect(a).toMatch(/refuseUndeclaredSuspension/);
+      expect(a).toMatch(/#6667/);
+      expect(a).toMatch(/guard-class/);
+      expect(a).toMatch(/`fault` edge/);
+    });
+
+    it('does not over-correct into "nothing left to check"', () => {
+      // The gate deliberately does NOT judge a descriptor-less executor
+      // (engine.ts `refuseUndeclaredSuspension`, "What it does NOT judge →
+      // Silence"; pinned by `supports-pause-runtime-enforcement.test.ts`'s
+      // descriptor-less case). Claiming total coverage would be the same defect
+      // as the old over-claim, pointing the other way.
+      const a = entry()!.acceptanceCriteria;
+      expect(a).toMatch(/NO descriptor/);
+      expect(a).toMatch(/resume route/);
+    });
+  });
+
   describe('composition (cross-major is the designed-for case)', () => {
     it('composes only the steps in (from, to]', () => {
       const chain = composeMigrationChain(10, 11);

@@ -120,7 +120,7 @@ async function pauseARun(engine: AutomationEngine) {
         type: 'test_pause',
         descriptor: defineActionDescriptor({
             type: 'test_pause', version: '1.0.0', name: 'Test Pause',
-            supportsPause: true, isAsync: true,
+            supportsPause: true,
         }),
         async execute() { return { success: true, suspend: true, correlation: 'areq_1' }; },
     });

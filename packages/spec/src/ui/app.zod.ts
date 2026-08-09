@@ -1399,12 +1399,16 @@ export const AppSchema = lazySchema(() => strictObject(
 
   /**
    * REMOVED — never read at the APP level (2026-06 liveness audit). ARIA
-   * attributes are live on the component/widget surfaces that render DOM.
+   * attributes are live on the page / page-component / list-view surfaces that
+   * render DOM. NOT on a dashboard widget: `dashboard.widgets[].aria` was
+   * retired in this same 17.0.0 (#5010), so "component/widget" pointed half of
+   * its readers at another tombstone (#6756).
    */
   aria: retiredKey(
     '`App.aria` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no ' +
-    'renderer read app-level ARIA attributes). Declare `aria` on the component/widget ' +
-    'that renders the DOM node instead. Delete the key.',
+    'renderer read app-level ARIA attributes). Declare `aria` on the page component ' +
+    'that renders the DOM node instead (`page.components[].aria`; `page.aria` and the ' +
+    'list view `aria` are live too). Delete the key.',
   ),
 
   /**

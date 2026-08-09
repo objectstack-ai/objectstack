@@ -81,11 +81,23 @@
  * - **`driver-turso` REMOTE** — `turso-remote-aggregation-conformance.test.ts`,
  *   through `makeLibsqlSqliteStub` (libsql IS SQLite, so the transport gets real
  *   value semantics with no network).
+ * - **`driver-sqlite-wasm`** — `sqlite-wasm-aggregation-conformance.test.ts`. It
+ *   inherits `SqlDriver`'s compiler, so what it re-checks is the sql.js dialect
+ *   the statement then has to survive, not a second lowering.
+ * - **`objectql`'s in-memory fallback** — `in-memory-aggregation-conformance.test.ts`
+ *   in `packages/objectql`. [#6401] Not a SQL face and not a driver, which is
+ *   why #6409 left it out; enrolled here because it is the face that has always
+ *   honoured `alias`, so the alias cases have nothing to pin the SQL faces
+ *   AGAINST without it. It runs as a pure function over {@link AGGREGATION_ROWS}
+ *   — no engine, no driver — which is what makes enrolling it cheap. This
+ *   answers #6409's open question ②.
  *
- * `driver-sqlite-wasm` and `driver-turso` LOCAL are deliberately NOT on that
- * list: both *inherit* `SqlDriver`, so they re-run one compiler rather than
- * check a second one — the same judgement `filter-logic-conformance.ts` records
- * about its own enrolment.
+ * `driver-turso` LOCAL is deliberately NOT on that list: it *inherits*
+ * `SqlDriver`, so it re-runs one compiler rather than checking a second one —
+ * the same judgement `filter-logic-conformance.ts` records about its own
+ * enrolment. (`driver-sqlite-wasm` was named alongside it here until #6401;
+ * that sentence was already contradicted by the wasm suite sitting on disk
+ * since #6409, so it is corrected rather than carried.)
  *
  * ## DEBT — backends that would fail this table, and why they are not enrolled
  *
@@ -98,6 +110,8 @@
  * | `driver-memory` (data face) | **RED** — answers `null` | `MemoryDriver.computeAggregate` has no `count_distinct` arm; the `switch` falls to `default: return null`, so the aggregation resolves with no value and no error. |
  * | `driver-memory` (analytics face) | **agrees** | `memory-analytics.ts` collects `$addToSet` and sizes it — the same NULL question as MongoDB below; not executed against this table. |
  * | `driver-mongodb` | **RED** — counts NULL | `count_distinct` lowers to `$addToSet` and `postProcessAggregation` takes the array's `.length`, so an explicit `null` is one of the distinct values. Read from the source; not executed. |
+ * | `driver-memory` — the #6401 alias cases | **agrees** | `MemoryDriver.performAggregation`'s `normalizeGroupBy` (`memory-driver.ts:1066-1068`) already returns `{ field, alias: node.alias ?? node.field }` and projects the group value under `alias`. It reached the enforce answer independently, so the alias leg needed NO mechanical alignment here — measured, not assumed. |
+ * | `driver-mongodb` — the #6401 alias cases | **RED** — and wider than alias | `buildAggregationPipeline` types `groupBy` as `string[]` and does `groupId[field] = '$' + field` (`mongodb-aggregation.ts:66-69`, mirrored in the `$project` at `:85-88`). A STRUCTURED node — with or without an alias — is an object there, so the `$group._id` key becomes the literal `"[object Object]"` and its value `"$[object Object]"`. The alias is not so much ignored as unreachable: this face cannot take a structured `GroupByNode` at all. `mongodb-driver.ts:512` passes `(query as any).groupBy`, which is why the declared union never met the `string[]` annotation at `tsc`. Read from the source; not executed. |
  *
  * Both packages are inside the **#5499 investment freeze**, which is why these
  * are DEBT rows and not fixes: #6409's ruling put them explicitly out of scope
@@ -108,8 +122,11 @@
  * `objectql`'s in-memory fallback (`in-memory-aggregation.ts`) is a fourth
  * lowering and is NOT frozen: it computes `count_distinct` as
  * `new Set(values.filter(v => v != null)).size`, which is this table's answer.
- * It is unenrolled only because it is not a SQL face and reaching it needs the
- * engine rather than a driver; enrolling it is a candidate, not a debt.
+ * [#6401] It is now ENROLLED (see the list above). The reason it stopped being
+ * "a candidate, not a debt" is the alias axis: this is the face the SQL three
+ * had to be converged ONTO, so leaving it out would have pinned the new
+ * behaviour against nothing. Reaching it turned out not to need the engine at
+ * all — `applyInMemoryAggregation` is a pure function of rows and an AST.
  *
  * @see FILTER_LOGIC_CASES — the combinator standard this table is modelled on.
  */
@@ -190,6 +207,26 @@ export interface AggregationCase {
   readonly field?: string;
   /** The single GROUP BY column, or omitted for a whole-table aggregate. */
   readonly groupBy?: 'region';
+  /**
+   * [#6401] When set, {@link groupBy} is sent as the STRUCTURED node
+   * `{ field, alias }` rather than as a bare column name, and the group value
+   * must come back under this KEY instead of under the field name.
+   *
+   * This is the one property in the table that is about a column's NAME rather
+   * than its value, and it is here because the name was the divergence:
+   * `GroupByNodeSchema.alias` was declared, honoured by
+   * `in-memory-aggregation.ts` (`g.alias ?? g.field`) and ignored by all three
+   * SQL faces, so the same aggregate came back keyed `region` under pushdown
+   * and `bucket` under the fallback — decided by a driver capability bit and a
+   * timezone the caller never sees. A harness must read the group value from
+   * `groupByAlias ?? groupBy`; one that reads the field name unconditionally
+   * passes on a face that ignores the alias and fails on one that honours it,
+   * which is the divergence rather than a check of it.
+   *
+   * Requires {@link groupBy} — an alias with nothing to rename is meaningless,
+   * and the cases below never spell one.
+   */
+  readonly groupByAlias?: string;
   /** Ascending by `group`, with `null` first for the ungrouped case. */
   readonly expected: readonly AggregationExpectation[];
   /** Why the case is here — surfaced in failure output. */
@@ -307,5 +344,41 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
       { group: 'east', value: 110 },
       { group: 'west', value: 100 },
     ],
+  },
+
+  // ── [#6401] the group column's NAME, not its value ────────────────────────
+  {
+    name: 'groupBy alias renames the projected group column',
+    function: 'count',
+    groupBy: 'region',
+    groupByAlias: 'bucket',
+    expected: [
+      { group: 'east', value: 2 },
+      { group: 'west', value: 4 },
+    ],
+    note:
+      '#6401: the VALUES are the `count(*) grouped by region` case verbatim — only '
+      + 'the key moves. A face that ignores `alias` returns the same two numbers '
+      + 'under `region`, so this case can only fail on the KEY, which is the whole '
+      + 'point: every wrong answer here is a valid query returning plausible rows. '
+      + '`bucket` is deliberately not a column on the fixture, so a face that '
+      + 'GROUPED BY the alias instead of projecting under it errors rather than '
+      + 'coincidentally agreeing.',
+  },
+  {
+    name: 'groupBy alias equal to the field name is a no-op',
+    function: 'sum',
+    field: 'score',
+    groupBy: 'region',
+    groupByAlias: 'region',
+    expected: [
+      { group: 'east', value: 110 },
+      { group: 'west', value: 100 },
+    ],
+    note:
+      '#6401: the degenerate alias. Its twin above cannot see a face that emits '
+      + '`"region" AS "region"` and breaks on the self-rename, and a face that '
+      + 'special-cases `alias === field` needs the case that exercises the '
+      + 'special case.',
   },
 ] as const;

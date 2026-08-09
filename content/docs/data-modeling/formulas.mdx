@@ -49,7 +49,7 @@ ObjectStack ships **three** registered expression dialects:
 | Dialect    | Use for                                              | Helper        |
 |:-----------|:-----------------------------------------------------|:--------------|
 | `cel`      | computed values, predicates, defaults, formulas      | `` cel`...` `` / `` F`...` `` / `` P`...` `` |
-| `cron`     | recurring schedules (Job, ETL, sync, exports, jobs)  | `` cron`...` `` |
+| `cron`     | recurring schedules (jobs, scheduled flows, exports, connector sync, backups) | `` cron`...` `` |
 | `template` | text interpolation (`{{path}}`) — notif/prompt/title | `` tmpl`...` `` |
 
 The `js` **expression** dialect was retired in v16 (#3278, ADR-0058 addendum) —

@@ -13,7 +13,14 @@ import { CreatePackageRequestSchema } from './package.zod';
 
 export const TemplateManifestSchema = lazySchema(() =>
   CreatePackageRequestSchema
-    .omit({ ownerOrgId: true, createdBy: true })
+    // `namespace` is omitted alongside the server-managed fields, and for the
+    // same reason: it is not authored here. The publish payload's namespace is
+    // read off the COMPILED ARTIFACT's `manifest.namespace` (ADR-0048 addendum
+    // §A.2 Phase A1), because a reservation is only meaningful if it names the
+    // object-name prefix the package actually ships. Declaring it on this
+    // on-disk descriptor too would create a second source for one fact — the
+    // exact drift the addendum's "two gates, one vocabulary" (§A.7) rules out.
+    .omit({ ownerOrgId: true, createdBy: true, namespace: true })
     .extend({
       name: z.string().regex(/^[a-z][a-z0-9-]*$/)
         .describe('CLI slug (kebab-case, no namespace prefix)'),

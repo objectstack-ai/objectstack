@@ -8,8 +8,10 @@ import {
   ApiMappingSchema,
   ApiEndpoint,
 } from './endpoint.zod';
+import type { ApiEndpointParsed } from './endpoint.zod';
 import { RateLimitConfigSchema } from '../shared/http.zod';
 import { HttpMethod } from './router.zod';
+import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 
 describe('HttpMethod', () => {
   it('should accept valid HTTP methods', () => {
@@ -441,5 +443,147 @@ describe('ApiEndpointSchema', () => {
       type: 'invalid_type',
       target: 'target',
     })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #5384 — the shape is CLOSED. #5227 — the author state is expressible.
+// ---------------------------------------------------------------------------
+
+/**
+ * A minimal endpoint that satisfies every required key and nothing else.
+ *
+ * Deliberately omits `authRequired`: that omission is the SAFE shape the
+ * protocol upgrade guide prescribes (`declarative-apis-endpoints-live`), and
+ * #5227 was filed because it used to be inexpressible in TypeScript.
+ */
+const AUTHORED_ENDPOINT = {
+  name: 'probe_endpoint',
+  path: '/api/v1/apps/probe/things',
+  method: 'GET',
+  type: 'object_operation',
+  target: 'probe_thing',
+} as const;
+
+/**
+ * Every `unrecognized_keys` issue naming `key`, as the author meets it.
+ *
+ * `ApiEndpointSchema.safeParse` speaks in zod ISSUES, not in an ADR-0112
+ * `{ code, status }` envelope — that envelope appears further out, where the
+ * `PUT /meta/api/:name` handler turns this verdict into a 422. So the named
+ * issue is what a rejection test at this layer must assert. `toThrow()` alone
+ * would pass on any failure at all, including the ones these cases exist to
+ * tell apart (refused by NAME with a prescription vs. refused for a missing
+ * required key).
+ */
+function unknownKeyIssues(result: ReturnType<typeof ApiEndpointSchema.safeParse>, key: string) {
+  if (result.success) return [];
+  return result.error.issues.filter(
+    (i) => i.code === 'unrecognized_keys' && (i as { keys?: string[] }).keys?.includes(key),
+  );
+}
+
+describe('#5384 — ApiEndpointSchema REJECTS undeclared keys', () => {
+  it('CONTROL — the authored endpoint parses, and the omitted `authRequired` defaults to true', () => {
+    // Without this the rejection cases below would also pass if the fixture
+    // were simply invalid, which proves nothing about strictness.
+    const ok = ApiEndpointSchema.safeParse(AUTHORED_ENDPOINT);
+    expect(ok.success, 'the CONTROL endpoint must parse').toBe(true);
+    expect(ok.data!.authRequired, 'the omission must still be fail-SAFE').toBe(true);
+  });
+
+  it('CONTROL — a loader-stamped ADR-0010 protection envelope still parses', () => {
+    // The reason the `...MetadataProtectionFields` spread is load-bearing now:
+    // undeclared, these would be REJECTED rather than dropped, and every
+    // registered `api` item the artifact loader stamps would stop parsing.
+    const stamped = ApiEndpointSchema.safeParse({
+      ...AUTHORED_ENDPOINT,
+      _packageId: 'com.acme.things',
+      _provenance: 'package',
+      _lock: 'no-delete',
+    });
+    expect(stamped.success).toBe(true);
+  });
+
+  it('refuses a plain undeclared key by name, naming the surface', () => {
+    const result = ApiEndpointSchema.safeParse({ ...AUTHORED_ENDPOINT, aKeyThatIsNotDeclared: 1 });
+    expect(result.success).toBe(false);
+    const issues = unknownKeyIssues(result, 'aKeyThatIsNotDeclared');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message).toContain('this API endpoint');
+    expect(issues[0]!.message).toContain('aKeyThatIsNotDeclared');
+  });
+
+  it.each([
+    // The three typos the file header names as what the strip used to cost.
+    ['cacheTTL', 'cacheTtl'],
+    ['objectParam', 'objectParams'],
+    ['outputMappings', 'outputMapping'],
+    // The policy block, where a silent strip is worst.
+    ['auth', 'authRequired'],
+    ['requiresAuth', 'authRequired'],
+    ['rateLimiting', 'rateLimit'],
+    // Routing.
+    ['url', 'path'],
+    ['verb', 'method'],
+  ])('refuses `%s` and prescribes `%s`', (written, canonical) => {
+    const result = ApiEndpointSchema.safeParse({ ...AUTHORED_ENDPOINT, [written]: 1 });
+    expect(result.success, `\`${written}\` still parses`).toBe(false);
+    const issues = unknownKeyIssues(result, written);
+    expect(issues, `\`${written}\` was not reported by name`).toHaveLength(1);
+    expect(issues[0]!.message).toContain(canonical);
+  });
+
+  it('refuses `namespace` with the ADR-0121 D2 wrong-layer prescription, not a rename', () => {
+    // The endpoint's namespace segment is DERIVED from `manifest.namespace`
+    // and has never been per-endpoint. Suggesting a rename here would steer the
+    // author at a key this surface refuses (ledger finding 7); the guidance
+    // entry suppresses the suggestion and points at the real layer instead.
+    const result = ApiEndpointSchema.safeParse({ ...AUTHORED_ENDPOINT, namespace: 'acme' });
+    expect(result.success).toBe(false);
+    const issues = unknownKeyIssues(result, 'namespace');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message).toContain('manifest.namespace');
+    expect(issues[0]!.message).toContain('ADR-0121 D2');
+    expect(issues[0]!.message).not.toContain('Did you mean');
+  });
+
+  it('the registered `api` metadata type rejects it too — one contract, both doors', () => {
+    // The write path (`saveMetaItem` / `PUT /meta/api/:name`) parses through the
+    // registry, and the CLI parses through the stack root. They agreed while the
+    // shape was open (both accepted); the point of #5384 is that they now agree
+    // while REJECTING. The CLI half is pinned in
+    // `packages/cli/test/metadata-type-schema-gate.test.ts`, where `api` moved
+    // from NOT_YET_CLOSED into GATED_AT with this change.
+    const registered = getMetadataTypeSchema('api');
+    expect(registered).toBeDefined();
+    const result = registered!.safeParse({ ...AUTHORED_ENDPOINT, aKeyThatIsNotDeclared: 1 });
+    expect(result.success).toBe(false);
+    expect(
+      result.error!.issues.some(
+        (i) => i.code === 'unrecognized_keys' && (i as { keys?: string[] }).keys?.includes('aKeyThatIsNotDeclared'),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('#5227 — the author state is what `ApiEndpoint` denotes', () => {
+  it('omitting `authRequired` type-checks on the AUTHOR state and is the safe shape', () => {
+    // The compile-time half of this file's #5227 claim. `packages/spec` type
+    // checks its tests (`tsconfig.test.json`, AGENTS.md), so the annotation
+    // below is a real check rather than a phantom one — it fails the build if
+    // `ApiEndpoint` ever goes back to denoting the parsed state.
+    const authored: ApiEndpoint = { ...AUTHORED_ENDPOINT };
+    expect(ApiEndpointSchema.safeParse(authored).success).toBe(true);
+  });
+
+  it('the PARSED state still requires it — the two names denote different types', () => {
+    // Control for the case above: if these were the same type, one of the two
+    // assertions could not hold, and #5227 would still be open. This is the
+    // exact TS2741 the issue reported, now attached to the name that should
+    // carry it.
+    // @ts-expect-error `authRequired` is required on the parsed state (ADR-0122).
+    const parsed: ApiEndpointParsed = { ...AUTHORED_ENDPOINT };
+    expect(parsed).toBeDefined();
   });
 });
