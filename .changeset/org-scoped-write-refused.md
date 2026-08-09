@@ -28,15 +28,17 @@ alternatives (save it env-wide, or ship the per-org variant as its own
 deployment — ADR-0005: "Per-org variants are a deployment, not an overlay").
 
 **Which types change behaviour.** The predicate is derived from
-`DEFAULT_METADATA_TYPE_REGISTRY`, never a hand-written list: 19 of its 27
+`DEFAULT_METADATA_TYPE_REGISTRY`, never a hand-written list: 18 of its 27
 entries declare `allowOrgOverride: false` with `allowRuntimeCreate: true` —
 `object`, `field`, `hook`, `seed`, `mapping`, `page`, `app`, `action`,
-`dataset`, `flow`, `datasource`, `external_catalog`, `api`, `doc`, `book`,
-`permission`, `position`, `tool`, `skill`. Unaffected: `view`, `dashboard`,
-`report`, `translation`, `email_template` (they have a per-org channel and
-their org rows are read back on demand), plus plugin types with no static
-registry entry, which keep today's behaviour. Env-wide writes of every type are
-unchanged.
+`dataset`, `flow`, `datasource`, `external_catalog`, `doc`, `book`,
+`permission`, `position`, `tool`, `skill`. (`api` was the 19th when the ruling
+was made; #5488 has since withdrawn its runtime-create door entirely, so it is
+refused as code-only before this gate is consulted.) Unaffected: `view`,
+`dashboard`, `report`, `translation`, `email_template` (they have a per-org
+channel and their org rows are read back on demand), plus plugin types with no
+static registry entry, which keep today's behaviour. Env-wide writes of every
+type are unchanged.
 
 `OS_METADATA_WRITABLE` deliberately does **not** unlock the org dimension: it
 unlocks the write, not the read, so honouring it here would re-open the phantom
