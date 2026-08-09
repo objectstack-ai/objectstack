@@ -532,6 +532,7 @@
     "listLintableAuthoringCollections": "src/kernel/metadata-authoring-lint.ts#listLintableAuthoringCollections (function)",
     "listMetadataCreateSeedTypes": "src/kernel/metadata-create-seeds.ts#listMetadataCreateSeedTypes (function)",
     "listMetadataTypeSchemaTypes": "src/kernel/metadata-type-schemas.ts#listMetadataTypeSchemaTypes (function)",
+    "listUnregisteredKindSchemaTypes": "src/kernel/metadata-type-schemas.ts#listUnregisteredKindSchemaTypes (function)",
     "lowerRequiresFeature": "src/kernel/public-auth-features.ts#lowerRequiresFeature (function)",
     "registerMetadataTypeActions": "src/kernel/metadata-type-schemas.ts#registerMetadataTypeActions (function)",
     "registerMetadataTypeSchema": "src/kernel/metadata-type-schemas.ts#registerMetadataTypeSchema (function)",

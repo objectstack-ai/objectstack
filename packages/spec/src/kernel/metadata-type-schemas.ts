@@ -305,6 +305,33 @@ export function listMetadataTypeSchemaTypes(): string[] {
 // enrolling them here would claim a status this change is careful not to grant
 // (and #2657's B/C decision is exactly the one left open).
 
+/**
+ * Snapshot of the non-KIND stack collections bound in
+ * `UNREGISTERED_KIND_SCHEMAS` — today `webhook` / `connector` / `sharing_rule`.
+ *
+ * [#6931] This exists so a check can ENUMERATE that map, and for nothing else.
+ * The exclusion documented directly above is about {@link
+ * listMetadataTypeSchemaTypes} being the REGISTERED-KIND set that carries KIND
+ * obligations; it was never about the names being unknowable. The side effect
+ * was: `metadata-type-schemas.test.ts` holds the ADR-0010 envelope-declaration
+ * invariant and walks that other list, so these three parse doors — bound to
+ * `PUT /api/v1/meta/:type/:name` by #6245 — sat outside the one gate that exists
+ * to catch "declares no envelope", and each had to be judged by hand instead
+ * (`sharing_rule` by a 422, `connector` only after a silent strip and a separate
+ * card, #6362 / PR #6900).
+ *
+ * ⚠️ Being listed by this function grants NOTHING. It returns names, not
+ * schemas, not descriptors: no `MetadataTypeSchema` enum membership, no
+ * `DEFAULT_METADATA_TYPE_REGISTRY` entry, no create seed, no authorization
+ * verdict, no place in the #4001 campaign count. Every boundary #6245 drew is
+ * where it was, and #2657's B/C decision on whether these should become kinds
+ * stays open and unprejudged. Do not use this to derive a kind set — if you
+ * need one, that is `listMetadataTypeSchemaTypes()` and the answer is no.
+ */
+export function listUnregisteredKindSchemaTypes(): string[] {
+  return Object.keys(UNREGISTERED_KIND_SCHEMAS).sort();
+}
+
 // ==========================================
 // Metadata Type Actions (type-level buttons)
 // ==========================================
