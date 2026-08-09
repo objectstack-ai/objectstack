@@ -5,10 +5,13 @@ import { describe, it, expect } from 'vitest';
 import { DatasourceSchema } from '../datasource.zod';
 import {
   BUILTIN_DRIVER_IDS,
+  DATABASE_DRIVER_SELECTION_ALIASES,
+  DATABASE_DRIVER_SELECTION_IDS,
   DRIVER_CONFIG_SCHEMAS,
   DRIVER_ID_ALIASES,
   getDriverConfigJsonSchemaById,
   getDriverConfigSchema,
+  resolveDatabaseDriverId,
   resolveDriverId,
   validateDriverConfig,
 } from './config-registry.zod';
@@ -158,5 +161,64 @@ describe('DatasourceSchema × driver config (#4410)', () => {
     const paths = result.error!.issues.map((i) => i.path.join('.'));
     expect(paths).toContain('config');
     expect(paths).toContain('external');
+  });
+});
+
+/**
+ * `DATABASE_DRIVER_SELECTION_IDS` — the boot-flag face (#6969).
+ *
+ * These are PROPERTIES of the projection, not a restatement of it: re-deriving
+ * the same `.filter()` here and asserting equality would only pin that the table
+ * equals itself. What each case pins is a way the projection could be wrong, and
+ * the first one is the way that actually matters — reading the CONFIG-CONTRACT
+ * column instead of the SELECTION column silently widens every boot host's flag.
+ */
+describe('DATABASE_DRIVER_SELECTION_IDS — what a boot flag may offer (#6969)', () => {
+  it('offers no contract-only spelling, whatever the derivation is rewritten to read', () => {
+    // The wrong-column guard. `sqlite3` / `better-sqlite3` / `mariadb` /
+    // `inmemory` resolve a config CONTRACT and are refused as a SELECTION, so a
+    // projection built from `DRIVER_ID_ALIASES` (or from `resolveDriverId`) would
+    // pass every other case in this file while widening `--database-driver` on
+    // both hosts. Derived from the same two functions the hosts use, so a fifth
+    // contract-only alias added to the table is covered the day it lands.
+    const contractOnly = Object.keys(DRIVER_ID_ALIASES).filter(
+      (alias) => resolveDriverId(alias) !== undefined && resolveDatabaseDriverId(alias) === undefined,
+    );
+    expect(contractOnly.length, 'the table must still HAVE contract-only aliases for this to test anything')
+      .toBeGreaterThan(0);
+    for (const alias of contractOnly) {
+      expect(DATABASE_DRIVER_SELECTION_IDS, `${alias} must not be offered as a boot selection`)
+        .not.toContain(alias);
+    }
+  });
+
+  it('lists only canonical spellings — every entry resolves to itself', () => {
+    expect(DATABASE_DRIVER_SELECTION_IDS.length).toBeGreaterThan(0);
+    for (const id of DATABASE_DRIVER_SELECTION_IDS) {
+      expect(resolveDatabaseDriverId(id), id).toBe(id);
+    }
+    expect(new Set(DATABASE_DRIVER_SELECTION_IDS).size).toBe(DATABASE_DRIVER_SELECTION_IDS.length);
+  });
+
+  it('withholds no driver a boot host can select', () => {
+    // The other direction: every selection alias collapses onto a canonical id,
+    // and every one of those ids is offered. An id reachable through
+    // `OS_DATABASE_DRIVER=pg` but missing from the flag is #6860 exactly.
+    const canonicalFromAliases = new Set(
+      DATABASE_DRIVER_SELECTION_ALIASES.map((alias) => resolveDatabaseDriverId(alias)),
+    );
+    expect(canonicalFromAliases).toEqual(new Set(DATABASE_DRIVER_SELECTION_IDS));
+  });
+
+  it('is the selectable subset of the ids the platform ships a contract for', () => {
+    // Equal contents today, different questions (see the export's docstring):
+    // nothing shipped is currently withheld from the flag, and this states that
+    // out loud so the day one IS withheld, the change is deliberate and visible
+    // here rather than inferred from a diff.
+    expect([...DATABASE_DRIVER_SELECTION_IDS].sort()).toEqual([...BUILTIN_DRIVER_IDS].sort());
+  });
+
+  it('is frozen, so a consumer cannot mutate the vocabulary it was handed', () => {
+    expect(Object.isFrozen(DATABASE_DRIVER_SELECTION_IDS)).toBe(true);
   });
 });

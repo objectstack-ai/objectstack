@@ -52,6 +52,22 @@
 // flagged 48 of 227 entries with a ~100% false-positive rate, so failing on it
 // would have failed every build. The parse fix is what turned a hit into signal.
 //
+// PRODUCER-SIDE EVIDENCE (`producer`, #4837): `live` means AUTHORING the
+// property changes runtime behaviour. A consumer that reads the property is
+// necessary and not sufficient — when the effect also depends on a second input
+// somebody must supply, the verdict needs evidence that somebody does.
+// `Seed.env` was `live` on a correct consumer pointer (`filterByEnv`) while not
+// one of six call sites passed `env`, so the filter returned its input on line
+// one and the authored value was never read. An optional `"producer"` cites the
+// call site; its paths resolve exactly like `evidence`.
+//
+// EVIDENCE SCOPE (`evidenceScope`, #4895): four measured verdicts have been
+// reached by searching this repo alone and published as if they covered every
+// consumer (`app.homePageId`, `flow.…position`, `HttpMethod`,
+// `Notification`). An optional `"evidenceScope": "in-repo" | "cross-repo"`
+// records how wide the last look actually was. Absent = unverified scope (a
+// worklist row); malformed = FAIL, same asymmetry as `verifiedAt`.
+//
 // RE-VERIFICATION CLOCK (`verifiedAt`): a ledger entry is a claim with a
 // timestamp, and code moves under it in BOTH directions — `flow.status` (#3711)
 // and `action.undoable` (#3714) were both understated by entries that were
@@ -67,6 +83,7 @@
 //   tsx check-liveness.mts --stale-verification   # print the re-verification worklist
 //   tsx check-liveness.mts --stale-verification=90  # ...with a custom staleness threshold
 //   tsx check-liveness.mts --undrilled            # print the undrilled-container worklist
+//   tsx check-liveness.mts --producer-gap         # print the producer-evidence worklist (#4837)
 //   tsx check-liveness.mts --ledger-root=<dir>    # read the ledgers from <dir> instead of
 //                                                 # packages/spec/liveness — how the self-test
 //                                                 # runs the REAL gate against a mutated copy
@@ -96,6 +113,7 @@ import {
   type VerificationReport,
 } from './verification.mts';
 import { checkEvidence } from './evidence.mts';
+import { buildProducerReport, type ProducerEntry, type ProducerReport } from './producer.mts';
 import { ORPHAN_GUIDANCE, findOrphanEntries, type Orphan } from './orphans.mts';
 import {
   STALE_UNDRILLED_GUIDANCE,
@@ -329,6 +347,8 @@ const report: any = {
   deferredContainers: [] as string[], // containers whose subtree IS classified elsewhere — resolved, not believed
   deferredChildKeys: 0, // how many child keys those resolved deferrals actually cover
   verification: null as VerificationReport | null, // `verifiedAt` ages — the re-verification worklist
+  producers: null as ProducerReport | null, // `producer` / `evidenceScope` — the #4837 / #4895 worklists
+  producerMissing: [] as string[], // a `producer` pointer into thin air — FAILS, like a rotted `evidence`
   // The three evidence counters, and the distinction between the first two is
   // the whole point: `evidenceLocal` is how many repo-rooted paths `live` entries
   // DECLARE, `evidenceMissing` is how many of those do not exist here. The
@@ -344,6 +364,9 @@ const report: any = {
 // walk so the age report sees exactly the set the gate itself classified.
 const verificationEntries: VerificationEntry[] = [];
 
+// The same set, folded for the producer / evidence-scope report below.
+const producerEntries: ProducerEntry[] = [];
+
 const proofFs = { existsSync, readFileSync };
 
 function classify(type: string, path: string, status: string, led: any, cat: any) {
@@ -351,7 +374,23 @@ function classify(type: string, path: string, status: string, led: any, cat: any
   cat.byStatus[status] = (cat.byStatus[status] || 0) + 1;
   report.totals.byStatus[status] = (report.totals.byStatus[status] || 0) + 1;
   // Framework-auto entries (`led === null`) have no ledger row to date-stamp.
-  if (led !== null) verificationEntries.push({ key: `${type}/${path}`, status, verifiedAt: led?.verifiedAt });
+  if (led !== null) {
+    verificationEntries.push({ key: `${type}/${path}`, status, verifiedAt: led?.verifiedAt });
+    producerEntries.push({
+      key: `${type}/${path}`,
+      status,
+      producer: led?.producer,
+      evidenceScope: led?.evidenceScope,
+    });
+  }
+  // A `producer` pointer resolves through the SAME resolver as `evidence`: a
+  // call-site claim nothing can falsify is the failure mode this field exists to
+  // remove, so it must not get a weaker standard than the consumer pointer it
+  // completes (#4837).
+  if (typeof led?.producer === 'string') {
+    const pv = checkEvidence(led.producer, (p) => existsSync(join(repoRoot, p)));
+    for (const miss of pv.missing) report.producerMissing.push(`${type}/${path} → ${miss}`);
+  }
   if (status === 'live' && led?.evidence) {
     // Extract every repo-rooted path the evidence claims and resolve the ones
     // attributed to THIS repo. Cross-repo pointers (objectui / cloud) are
@@ -523,6 +562,13 @@ const showWorklist = staleDaysArg !== undefined;
 const showUndrilled = args.includes('--undrilled');
 report.verification = buildVerificationReport(verificationEntries, { staleDays });
 
+// ── producer-side evidence + verification scope (#4837 / #4895) ──
+// Same asymmetry as the clock above: an ABSENT field is a worklist row (the
+// ledger predates both fields, and back-filling guesses is exactly the sin these
+// record), a MALFORMED one fails.
+const showProducerGap = args.includes('--producer-gap');
+report.producers = buildProducerReport(producerEntries);
+
 // ── coverage: is every REGISTERED metadata type accounted for? ──
 // The gate's own blind spot until #4487. Everything above asks "is every
 // property of a governed type classified?" — nothing asked "is every authorable
@@ -551,6 +597,8 @@ const failed =
   report.staleEvidence.length > 0 ||
   report.orphanEntries.length > 0 ||
   report.verification.errors.length > 0 ||
+  report.producers.errors.length > 0 ||
+  report.producerMissing.length > 0 ||
   report.ungoverned.length > 0 ||
   report.stalePending.length > 0 ||
   report.undrilledNew.length > 0 ||
@@ -697,6 +745,36 @@ if (asJson) {
     }
   } else if (v.stale.length || v.unverified.length) {
     console.log('  run with --stale-verification[=days] for the worklist.');
+  }
+
+  // ── producer-side evidence + verification scope ──
+  const pr: ProducerReport = report.producers!;
+  if (pr.errors.length) {
+    console.log(`\n✗ ${pr.errors.length} malformed \`producer\` / \`evidenceScope\` value(s):`);
+    pr.errors.forEach((s: string) => console.log(`    ${s}`));
+  }
+  if (report.producerMissing.length) {
+    console.log(
+      `\n✗ ${report.producerMissing.length} \`producer\` pointer(s) that do not resolve — a call-site claim`
+      + ` nothing can falsify is what this field exists to remove:`,
+    );
+    report.producerMissing.forEach((s: string) => console.log(`    ${s}`));
+  }
+  const scopes = Object.entries(pr.byScope).map(([s, n]) => `${n} ${s}`).join(', ') || 'none';
+  console.log(
+    `\nevidence quality: ${pr.withProducer} live entr(ies) cite a PRODUCER (${pr.withoutProducer.length} do not); `
+    + `verification scope declared on ${scopes} (${pr.unscoped} undeclared).`,
+  );
+  if (showProducerGap) {
+    if (pr.withoutProducer.length) {
+      console.log(
+        `\n  live without producer-side evidence (${pr.withoutProducer.length}) — a consumer pointer is half`
+        + ` the call graph; the half that killed \`Seed.env\` is the other one:`,
+      );
+      pr.withoutProducer.forEach((k: string) => console.log(`    ${k}`));
+    }
+  } else if (pr.withoutProducer.length) {
+    console.log('  run with --producer-gap for the producer-evidence worklist.');
   }
   // ── container coverage: how much rides on inheritance? ──
   // Printed every run, pass or fail. The gate used to say "all properties are

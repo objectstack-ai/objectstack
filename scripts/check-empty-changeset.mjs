@@ -1021,10 +1021,19 @@ function selfTest() {
       );
       assert(
         /check-adr-0087-registration\.mjs --self-test/.test(wiring),
-        'consumer: `check:changeset-gate-self-tests` must run `check-adr-0087-registration.mjs --self-test` too -- both checkers live in the same exempted job and both were unwired by it (#6509). `check-changeset-no-major.mjs` is deliberately absent: it has no `--self-test` to run.',
+        'consumer: `check:changeset-gate-self-tests` must run `check-adr-0087-registration.mjs --self-test` too -- both checkers live in the same exempted job and both were unwired by it (#6509).',
+      );
+      // The third member of the family, added in #6923. It was absent from this
+      // step until then for a stated reason -- it had no `--self-test` to run --
+      // and that reason expired the moment it grew one. Its REAL scan stays in
+      // pr-automation.yml (its `allow-major` escape hatch lives there), so what
+      // joins this step is the self-test half only, exactly like the other two.
+      assert(
+        /check-changeset-no-major\.mjs --self-test/.test(wiring),
+        'consumer: `check:changeset-gate-self-tests` must run `check-changeset-no-major.mjs --self-test` as well -- it is the third checker of this family, and its fixtures land in the same exemption-free job (#6923)',
       );
       assert(
-        !/check-(?:empty-changeset|adr-0087-registration)\.mjs(?! --self-test)/.test(wiring),
+        !/check-(?:empty-changeset|adr-0087-registration|changeset-no-major)\.mjs(?! --self-test)/.test(wiring),
         'consumer: every invocation in `check:changeset-gate-self-tests` must carry `--self-test` -- chaining a real scan into the lint job is the #6129 direction this split exists to avoid',
       );
     }

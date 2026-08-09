@@ -120,17 +120,67 @@ export const TaskCompletionFlow: Flow = {
   label: 'Task Completion Process',
   description: 'Flow triggered when a task is marked as complete',
   type: 'record_change',
+  // The other half of "arm it deliberately" (#6882). `draft` is the status the
+  // schema applies when none is authored, and draft flows DO fire — so on a
+  // flow that now genuinely routes, the omission is the ambiguity
+  // `flow-draft-status-ambiguous` exists to report, and it started reporting
+  // here the moment the trigger resolved (while the flow was dead it routed
+  // nowhere, so even that rule skipped it). Declared, not silenced: `active`
+  // says the firing is intended, which is exactly this card's decision. The two
+  // schedule flows above keep their pre-existing `draft` — a separate call.
+  status: 'active',
 
   variables: [
-    { name: 'taskId', type: 'text', isInput: true, isOutput: false },
+    // #6882 — `taskId` used to be declared here as an `isInput` variable and
+    // read by `get_task` as `{taskId}`. Nothing ever bound it: a record-change
+    // run seeds `params` from the triggering RECORD, which carries `id`, not
+    // `taskId`, and `seedDeclaredVariables` binds an input only from
+    // `context.params[name]` (or a `defaultValue`, #4697 — this had neither).
+    // Invisible while the flow was dead; the first armed run failed at
+    // `get_task` with "1 filter condition(s) resolved to nothing and were
+    // dropped from the query: `{taskId}` (at id)". The triggering record is
+    // already in scope as `record`, which is how every other record-change flow
+    // in the corpus addresses it, so the declaration is gone rather than
+    // re-plumbed — declared means bound.
     { name: 'completedTask', type: 'record', isInput: false, isOutput: false },
   ],
 
   nodes: [
-    { id: 'start', type: 'start', label: 'Start', config: { objectName: 'todo_task', triggerCondition: 'record.status != previous.status && record.status == "completed"' } },
+    // #6882 — this start node declared NEITHER of the two keys that arm a
+    // record-change flow, so the flow was registered and never bound:
+    //
+    //   • no `triggerType` at all. `AutomationEngine.resolveTriggerBinding`
+    //     claims a record-change flow only for a token starting with `record-`;
+    //     with the key absent every later branch missed too (`timeRelative`,
+    //     `config.schedule`, `flow.type === 'schedule'|'api'`) and the method
+    //     returned `undefined`, so `activateFlowTrigger` returned without
+    //     binding. `getTriggerBindingAudit` then SKIPS it (`if (!resolved)
+    //     continue` — it reads as a manual/screen flow), which is why nothing
+    //     anywhere reported the dead flow.
+    //   • the predicate was written to `triggerCondition`, which no code reads.
+    //     The trigger gate is `config.condition` — the key the binding copies
+    //     and `execute()` evaluates. A node `config` is an open slot by design
+    //     (ADR-0018), so the misspelling parsed silently; arming the trigger
+    //     without moving it would have fired this flow on EVERY update.
+    //
+    // `record-after-update` (not `-write`): "marked as complete" is a
+    // transition, so the insert leg has no `previous` to transition FROM — the
+    // same shape the showcase's `showcase_task_completed` uses for this exact
+    // semantic. Keeping insert out of the binding is also what makes the
+    // predicate total: `previous` is bound to `null` on the insert leg, and
+    // `previous.status` against `null` aborts the whole CEL predicate with
+    // `No such key: status` (measured) rather than answering false.
+    {
+      id: 'start', type: 'start', label: 'Start',
+      config: {
+        objectName: 'todo_task',
+        triggerType: 'record-after-update',
+        condition: 'status == "completed" && previous.status != "completed"',
+      },
+    },
     {
       id: 'get_task', type: 'get_record', label: 'Get Completed Task',
-      config: { objectName: 'todo_task', filter: { id: '{taskId}' }, outputVariable: 'completedTask' },
+      config: { objectName: 'todo_task', filter: { id: '{record.id}' }, outputVariable: 'completedTask' },
     },
     // A plain exclusive gateway — the branching is on the OUT-EDGES (e3/e4
     // carry the predicate and its negation). It used to also set

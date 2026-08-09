@@ -87,7 +87,8 @@ async function boot() {
 
     const protocol = new ObjectStackProtocolImplementation(engine as any);
     const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
-    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    // [#6603] this route now demands `manage_metadata` — an authoring capability, not just a session.
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user', systemPermissions: ['manage_metadata'] });
     rest.registerRoutes();
     const route = rest.getRoutes()
         .find((r: any) => r.method === 'PUT' && r.path === '/api/v1/meta/:type/:name');

@@ -10,6 +10,7 @@ import os from 'os';
 import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
 import { redactConnectionUrl } from '../utils/connection-display.js';
+import { databaseDriverFlag } from '../utils/database-driver-flag.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
 
@@ -106,16 +107,13 @@ export default class Start extends Command {
       char: 'd',
       description: 'Database URL: file:./db.sqlite | libsql://... | postgres://... | mongodb://... | memory:// (overrides $OS_DATABASE_URL; defaults to file:<home>/data/objectstack.db)',
     }),
-    // `options:` is an ENFORCED allowlist — oclif rejects anything outside it at
-    // parse time, before the command body runs. It must therefore offer every
-    // driver kind `resolveStorageDefinition` accepts, or the flag refuses a driver
-    // that the equivalent `OS_DATABASE_DRIVER` env var happily selects — one thing,
-    // two answers (#6860: `mysql` and `sqlite-wasm` were missing and unusable via
-    // the flag). `database-driver-allowlist.pin.test.ts` pins the agreement.
-    'database-driver': Flags.string({
-      description: 'Force driver kind when URL is ambiguous: sqlite | sqlite-wasm | turso | postgres | mysql | mongodb | memory (overrides $OS_DATABASE_DRIVER)',
-      options: ['sqlite', 'sqlite-wasm', 'turso', 'postgres', 'mysql', 'mongodb', 'memory'],
-    }),
+    // Choices AND the enumerated list in the description come from the shared
+    // driver table in `@objectstack/spec` (#6969) — this command states no driver
+    // vocabulary of its own. See `utils/database-driver-flag.ts` for which column
+    // is read and why the contract-only spellings must not be offered;
+    // `database-driver-allowlist.pin.test.ts` (#6860) pins the agreement with
+    // `resolveStorageDefinition`.
+    'database-driver': databaseDriverFlag('Force driver kind when URL is ambiguous'),
     'database-auth-token': Flags.string({
       description: 'Auth token for libsql/Turso connections (overrides $OS_DATABASE_AUTH_TOKEN / $TURSO_AUTH_TOKEN)',
     }),
