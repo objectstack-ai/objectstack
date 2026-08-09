@@ -237,6 +237,35 @@ function recordLabel(record: any, id: string): string {
 const COMPUTED_FIELD_TYPES = new Set<string>(['formula', 'summary', 'rollup', 'autonumber', 'auto_number']);
 
 /**
+ * [#6656] Field types that are **virtual** — no driver ever returns a column
+ * for one. Dropped from the FULL SNAPSHOTS (create `new_value`, delete
+ * `old_value`), which is a different job from {@link COMPUTED_FIELD_TYPES}
+ * above, on a deliberately different set.
+ *
+ * Why a snapshot needs the rule at all: `ctx.result` hydrates formulas onto
+ * what a write hands back (#5504) while the pre-image is the engine's RAW row,
+ * which structurally cannot carry them. Left in, create `new_value` would
+ * describe formula fields and delete `old_value` could not — the two snapshot
+ * faces disagreeing about their own vocabulary.
+ *
+ * ⚠️ Why it is NARROWER than `COMPUTED_FIELD_TYPES`, and must stay so. Of that
+ * set only `formula` is virtual — "formulas are virtual: no driver ever returns
+ * a column for one" (`engine.ts`, #5504). The rest are ordinary **stored**
+ * columns the engine maintains: `autonumber` is seeded at insert
+ * (`seedAutonumber`), and a `summary` roll-up is written to the parent row by
+ * `recomputeSummaries` and seeded at create time (#5749/#6063). They are
+ * present on BOTH sides and symmetric, so dropping them from a snapshot would
+ * delete real ledger content — the record's human-facing number, and its
+ * roll-up values — to fix an asymmetry they never had.
+ *
+ * The wider set stays correct for `diff()`, whose rule is a different one: a
+ * derived value's CHANGE is already implied by the source fields that produced
+ * it. That is about change reporting; this is about what a snapshot can
+ * contain. Do not unify them.
+ */
+const VIRTUAL_FIELD_TYPES = new Set<string>(['formula']);
+
+/**
  * Compute a shallow JSON diff between two records. Returns only keys whose
  * value changed (and ignores keys in `NOISE_FIELDS` plus computed field
  * types per `fieldDefs`). Both sides are serialisable via `JSON.stringify` —
@@ -571,15 +600,14 @@ export function installAuditWriters(
    *     `old_value` keeps reading `••••••••`, byte-identical to before this
    *     change, and the ref/cleartext that today reaches `new_value` on every
    *     create and update stops doing so.
-   *  2. **computed fields** (`COMPUTED_FIELD_TYPES`) — dropped from FULL
-   *     SNAPSHOTS only. `diff()` has always skipped them, so this merely
-   *     extends one existing rule to the create/delete faces, which never got
-   *     it. Without it the two snapshot faces would disagree with each other
-   *     and with the diff: `ctx.result` carries hydrated formulas (#5504) so
-   *     `new_value` had them, the raw pre-image has no such column so
-   *     `old_value` would not — a fresh asymmetry introduced by the very
-   *     change removing the old one. Bulk delete already wrote snapshots
-   *     without them.
+   *  2. **virtual fields** (`VIRTUAL_FIELD_TYPES` — `formula` only) — dropped
+   *     from FULL SNAPSHOTS. `ctx.result` carries hydrated formulas (#5504) so
+   *     `new_value` had them; the raw pre-image has no such column, so
+   *     `old_value` structurally could not — a fresh asymmetry that the very
+   *     change removing the old one would otherwise introduce. Deliberately
+   *     NARROWER than the `COMPUTED_FIELD_TYPES` set `diff()` uses: see that
+   *     constant's note for why `autonumber` and `summary` are stored,
+   *     symmetric, and must stay in the snapshot.
    *
    * **File-reference fields need no limb, and that is a measurement rather
    * than an omission.** They are named in the ruling because today's `before`
@@ -620,7 +648,7 @@ export function installAuditWriters(
       const defs = getFieldDefs(objectName);
       for (const key of Object.keys(out)) {
         const type = defs?.[key]?.type;
-        if (typeof type === 'string' && COMPUTED_FIELD_TYPES.has(type)) delete out[key];
+        if (typeof type === 'string' && VIRTUAL_FIELD_TYPES.has(type)) delete out[key];
       }
     }
     return out;

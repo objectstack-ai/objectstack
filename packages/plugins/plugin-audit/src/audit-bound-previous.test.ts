@@ -121,6 +121,10 @@ const bizTask = {
     login_pw: f('login_pw', 'password'),
     attachment: f('attachment', 'file'),
     upper_title: f('upper_title', 'formula', { expression: 'record.title + "!"' }),
+    // A STORED computed column — `COMPUTED_FIELD_TYPES` contains it, but it is
+    // seeded at insert and present on both sides, so it must survive the
+    // snapshot normalisation. See `VIRTUAL_FIELD_TYPES`.
+    ticket_no: f('ticket_no', 'autonumber', { format: 'TK-{00000}' }),
   },
 };
 
@@ -460,15 +464,31 @@ describe('[#6656] no credential value reaches `new_value` on create or update', 
     expect(raw).not.toContain('hunter2');   // the cleartext, leaked before this change
   });
 
-  it('a create snapshot carries no computed field — the diff face never did either', async () => {
-    // `ctx.result` hydrates formulas since #5504 while the raw pre-image has no
-    // such column, so leaving them in would make the create and delete
-    // snapshots disagree with each other and with `diff()`.
+  it('a snapshot drops the VIRTUAL computed field but keeps the STORED one', async () => {
+    // Two halves of one rule, and the second is why `VIRTUAL_FIELD_TYPES` is
+    // narrower than the `COMPUTED_FIELD_TYPES` set `diff()` uses.
+    //
+    //  - `upper_title` is a `formula`: virtual, hydrated onto `ctx.result` by
+    //    #5504 and structurally absent from the raw pre-image. Leaving it in
+    //    would make create `new_value` describe a field delete `old_value`
+    //    could never carry.
+    //  - `ticket_no` is an `autonumber`: seeded at insert into a real column,
+    //    so it is present and equal on BOTH sides. Dropping it would delete the
+    //    record's human-facing identifier from the ledger to fix an asymmetry
+    //    it never had — which is what keying this limb off the wider set did.
     const { engine, storeFor } = await boot();
     installAuditWriters(engine as any);
-    await seedTask(engine);
+    const row: any = await seedTask(engine);
 
-    expect(parse(rowFor(storeFor, 'biz_task', 'create')!.new_value)).not.toHaveProperty('upper_title');
+    const created = parse(rowFor(storeFor, 'biz_task', 'create')!.new_value);
+    expect(created).not.toHaveProperty('upper_title');
+    expect(created.ticket_no).toBe(row.ticket_no);
+    expect(created.ticket_no).toBeTruthy();
+
+    await engine.delete('biz_task', { where: { id: row.id } } as any);
+    const deleted = parse(rowFor(storeFor, 'biz_task', 'delete')!.old_value);
+    expect(deleted).not.toHaveProperty('upper_title');
+    expect(deleted.ticket_no).toBe(row.ticket_no);
   });
 
   it('the activity summary never renders a credential either', async () => {

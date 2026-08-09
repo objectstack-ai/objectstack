@@ -47,10 +47,12 @@ upward rather than down to raw store contents:
   `password` field — which ADR-0100 stores in cleartext at rest — was landing
   there **in plaintext**, in the audit ledger and in the `sys_activity` summary
   rendered in the record feed. Both now record the mask.
-- **Computed fields leave the full snapshots.** `diff()` has always skipped
-  them; create `new_value` and delete `old_value` never got the same rule, so
-  they would have disagreed with each other once the pre-image stopped carrying
-  hydrated formulas.
+- **Virtual (`formula`) fields leave the full snapshots.** `ctx.result` carries
+  hydrated formulas (#5504) and the raw pre-image structurally cannot, so
+  create `new_value` would have described a field delete `old_value` could
+  never carry. Only genuinely virtual fields are dropped: `autonumber` and
+  `summary` are stored columns present and equal on both sides, and they stay
+  in the snapshot.
 
 Two consequences worth naming, both narrowing single-id delete to what bulk
 delete already did: its `old_value` now records a file field's stored id rather
