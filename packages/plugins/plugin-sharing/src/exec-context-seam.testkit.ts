@@ -28,7 +28,7 @@
  */
 
 import { resolveAuthzContext } from '@objectstack/core';
-import type { SharingExecutionContext } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 
 /** A `sys_member` row as the identity tables really store it. */
 export interface SeamMembership {
@@ -75,7 +75,7 @@ function makeSeamQl(tables: Record<string, any[]>) {
  * `isSystem: false`) — this helper never names a tenancy field, so neither does
  * the test that calls it.
  */
-export async function bootRequestContext(principal: SeamPrincipal): Promise<SharingExecutionContext> {
+export async function bootRequestContext(principal: SeamPrincipal): Promise<ExecutionContext> {
   const activeOrg = principal.activeOrganizationId ?? null;
   const memberships: SeamMembership[] =
     principal.memberships ?? (activeOrg ? [{ organization_id: activeOrg, role: 'member' }] : []);
@@ -103,5 +103,13 @@ export async function bootRequestContext(principal: SeamPrincipal): Promise<Shar
     }),
   });
 
-  return { ...authz, isSystem: false } as unknown as SharingExecutionContext;
+  // [#7136] Returned AS RESOLVED — no cast. This helper's whole promise is
+  // that a test receives what a real request receives, and until the sharing
+  // service's own parameters named the full envelope, keeping that promise
+  // required forcing the real thing through `as unknown as` into a six-field
+  // shape. A double cast on the value a test is meant to trust is the seam
+  // lying about itself: it would have absorbed a genuine drift in
+  // `resolveAuthzContext`'s output silently, which is the exact failure mode
+  // (#5852) this file exists to prevent.
+  return { ...authz, isSystem: false };
 }

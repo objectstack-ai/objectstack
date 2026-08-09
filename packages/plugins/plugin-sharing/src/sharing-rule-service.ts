@@ -5,10 +5,13 @@ import type {
   DefineSharingRuleInput,
   SharingRuleRow,
   SharingRuleEvaluationResult,
-  SharingExecutionContext,
   ShareAccessLevel,
   SharingRuleRecipientType,
 } from '@objectstack/spec/contracts';
+// [#7136] The full `resolveAuthzContext` envelope — what `ISharingRuleService`
+// has declared for every one of these context parameters since #6523 (the
+// #6206 ruling: no per-site subset contracts).
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
@@ -17,7 +20,16 @@ import { TeamGraphService } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 
-const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+/**
+ * System-elevated context for the rule evaluator's own reconcile writes.
+ *
+ * [#7136] Typed as the full envelope so it is passed AS ITSELF. It used to be
+ * declared `as const` and forced through an `as any` at all 11 of its context
+ * call sites — an erasure on an enforcement input, which switches checking off
+ * for the whole argument, not just for the readonly-array mismatch that
+ * provoked it.
+ */
+const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permissions: [] };
 
 function uid(prefix: string): string {
   const g: any = globalThis as any;
@@ -95,7 +107,7 @@ export class SharingRuleService implements ISharingRuleService {
    * `manage_sharing` existed. System contexts (boot seeding, hooks, backfills,
    * the REST-independent plugin machinery) bypass.
    */
-  private assertCanManageRules(context: SharingExecutionContext): void {
+  private assertCanManageRules(context: ExecutionContext): void {
     if (context?.isSystem) return;
     const caps = Array.isArray(context?.systemPermissions) ? context.systemPermissions : [];
     if (caps.includes('manage_sharing') || caps.includes('manage_platform_settings')) return;
@@ -104,7 +116,7 @@ export class SharingRuleService implements ISharingRuleService {
     );
   }
 
-  async defineRule(input: DefineSharingRuleInput, context: SharingExecutionContext): Promise<SharingRuleRow> {
+  async defineRule(input: DefineSharingRuleInput, context: ExecutionContext): Promise<SharingRuleRow> {
     this.assertCanManageRules(context);
     if (!input.name) throw new Error('VALIDATION_FAILED: name is required');
     if (!input.label) throw new Error('VALIDATION_FAILED: label is required');
@@ -124,7 +136,13 @@ export class SharingRuleService implements ISharingRuleService {
       throw new Error(`VALIDATION_FAILED: ${MATCH_ALL_CRITERIA_MESSAGE}`);
     }
 
-    const orgId = (context as any)?.organizationId ?? (context as any)?.tenantId ?? null;
+    // [#7136] Only the `tenantId` half of this read lost its cast: `tenantId`
+    // is a declared field of the envelope, `organizationId` is not a field of
+    // it at ALL. That spelling has its own history (#5858 /
+    // `check:org-identifier`) and was explicitly held out of this change
+    // (#7070) — so it stays cast, and the asymmetry above is now the visible
+    // marker of which of the two names the contract actually knows.
+    const orgId = (context as any)?.organizationId ?? context?.tenantId ?? null;
     const now = new Date().toISOString();
     // Authoring path — `full` normalises to `edit`, anything unrecognised is a
     // loud VALIDATION_FAILED alongside the required-field checks above (#3865).
@@ -205,13 +223,14 @@ export class SharingRuleService implements ISharingRuleService {
 
   async listRules(
     filter: { object?: string; activeOnly?: boolean },
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<SharingRuleRow[]> {
     this.assertCanManageRules(context); // [ADR-0111 D6]
     const where: any = {};
     if (filter.object) where.object_name = filter.object;
     if (filter.activeOnly) where.active = true;
-    const orgId = (context as any)?.organizationId ?? (context as any)?.tenantId;
+    // `organizationId` is not on the envelope — see defineRule().
+    const orgId = (context as any)?.organizationId ?? context?.tenantId;
     if (orgId) where.organization_id = orgId;
     const rows = await this.engine.find('sys_sharing_rule', {
       where,
@@ -222,10 +241,11 @@ export class SharingRuleService implements ISharingRuleService {
     return Array.isArray(rows) ? rows.map(rowFromRule) : [];
   }
 
-  async getRule(idOrName: string, context: SharingExecutionContext): Promise<SharingRuleRow | null> {
+  async getRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleRow | null> {
     this.assertCanManageRules(context); // [ADR-0111 D6]
     if (!idOrName) return null;
-    const orgId = (context as any)?.organizationId ?? (context as any)?.tenantId;
+    // `organizationId` is not on the envelope — see defineRule().
+    const orgId = (context as any)?.organizationId ?? context?.tenantId;
     const byId = await this.engine.find('sys_sharing_rule', {
       where: { id: idOrName },
       limit: 1,
@@ -241,7 +261,7 @@ export class SharingRuleService implements ISharingRuleService {
     return null;
   }
 
-  async deleteRule(idOrName: string, context: SharingExecutionContext): Promise<void> {
+  async deleteRule(idOrName: string, context: ExecutionContext): Promise<void> {
     this.assertCanManageRules(context); // [ADR-0111 D6]
     const row = await this.getRule(idOrName, context);
     if (!row) return;
@@ -271,7 +291,7 @@ export class SharingRuleService implements ISharingRuleService {
     } as any);
   }
 
-  async evaluateRule(idOrName: string, context: SharingExecutionContext): Promise<SharingRuleEvaluationResult> {
+  async evaluateRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleEvaluationResult> {
     this.assertCanManageRules(context); // [ADR-0111 D6]
     const rule = await this.getRule(idOrName, context);
     if (!rule) throw new Error('RULE_NOT_FOUND');
@@ -335,7 +355,7 @@ export class SharingRuleService implements ISharingRuleService {
       // A `source: 'rule'` row with no `source_id` names no rule that could
       // ever re-grant it — equally unreachable, equally void.
       if (sourceId != null && live.has(String(sourceId))) continue;
-      await this.sharing.revoke(String((g as any).id), SYSTEM_CTX as any);
+      await this.sharing.revoke(String((g as any).id), SYSTEM_CTX);
       revoked += 1;
     }
     if (revoked > 0) {
@@ -364,7 +384,7 @@ export class SharingRuleService implements ISharingRuleService {
   async evaluateAllForRecord(
     object: string,
     recordId: string,
-    context: SharingExecutionContext,
+    context: ExecutionContext,
   ): Promise<SharingRuleEvaluationResult[]> {
     const rules = await this.listRules({ object }, context);
     if (rules.length === 0) return [];
@@ -397,11 +417,11 @@ export class SharingRuleService implements ISharingRuleService {
    */
   async evaluateAllRulesForObject(object: string): Promise<number> {
     if (!object) return 0;
-    const rules = await this.listRules({ object }, SYSTEM_CTX as any);
+    const rules = await this.listRules({ object }, SYSTEM_CTX);
     let reconciled = 0;
     for (const rule of rules) {
       try {
-        await this.evaluateRule(rule.id, SYSTEM_CTX as any);
+        await this.evaluateRule(rule.id, SYSTEM_CTX);
         reconciled += 1;
       } catch (err: any) {
         this.logger?.warn?.('[sharing-rule] object reconcile failed for rule', {
@@ -610,7 +630,7 @@ export class SharingRuleService implements ISharingRuleService {
               sourceId: rule.id,
               reason: `rule:${rule.name}`,
             } as any,
-            SYSTEM_CTX as any,
+            SYSTEM_CTX,
           );
           updated += 1;
         }
@@ -627,14 +647,14 @@ export class SharingRuleService implements ISharingRuleService {
             sourceId: rule.id,
             reason: `rule:${rule.name}`,
           } as any,
-          SYSTEM_CTX as any,
+          SYSTEM_CTX,
         );
         created += 1;
       }
     }
     // Revoke stale.
     for (const [, stale] of existingMap.entries()) {
-      await this.sharing.revoke(stale.id, SYSTEM_CTX as any);
+      await this.sharing.revoke(stale.id, SYSTEM_CTX);
       revoked += 1;
     }
 
@@ -683,7 +703,7 @@ export class SharingRuleService implements ISharingRuleService {
                 sourceId: rule.id,
                 reason: `rule:${rule.name}`,
               } as any,
-              SYSTEM_CTX as any,
+              SYSTEM_CTX,
             );
             updated += 1;
           }
@@ -700,7 +720,7 @@ export class SharingRuleService implements ISharingRuleService {
               sourceId: rule.id,
               reason: `rule:${rule.name}`,
             } as any,
-            SYSTEM_CTX as any,
+            SYSTEM_CTX,
           );
           created += 1;
         }
@@ -709,7 +729,7 @@ export class SharingRuleService implements ISharingRuleService {
     // Anything still in existingMap is stale (either match=false or
     // user no longer in expanded set).
     for (const [, stale] of existingMap.entries()) {
-      await this.sharing.revoke(stale.id, SYSTEM_CTX as any);
+      await this.sharing.revoke(stale.id, SYSTEM_CTX);
       revoked += 1;
     }
 
@@ -732,7 +752,7 @@ export class SharingRuleService implements ISharingRuleService {
     });
     let revoked = 0;
     for (const row of (existing ?? [])) {
-      await this.sharing.revoke((row as any).id, SYSTEM_CTX as any);
+      await this.sharing.revoke((row as any).id, SYSTEM_CTX);
       revoked += 1;
     }
     return revoked;

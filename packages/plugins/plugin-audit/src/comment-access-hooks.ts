@@ -55,7 +55,8 @@
  * load-bearing.
  */
 
-import type { ISharingService, SharingExecutionContext } from '@objectstack/spec/contracts';
+import type { ISharingService } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 
 /** Minimal engine surface these installers need — duck-typed (like
  * service-storage's attachment seams) so tests can fake it and so plugin-audit
@@ -180,8 +181,25 @@ function asIdList(id: unknown): Array<string | number> | null {
 }
 
 /** The caller's ExecutionContext rides on the operation options — the session
- * snapshot lacks `permissions`, which sharing bypasses need. */
-function callerContext(ctx: any): SharingExecutionContext {
+ * snapshot lacks `permissions`, which sharing bypasses need.
+ *
+ * [#7136] Typed as the full envelope, which is what `ISharingService` declares
+ * for every parameter this value is handed to (#6523 / the #6206 ruling).
+ *
+ * ⚠️ The BODY still projects a five-field subset, which the same ruling tells
+ * callers not to do — and that half is deliberately NOT changed here, because
+ * it is not the inert half. Widening the annotation is type-side; forwarding
+ * `exec` whole is a RUNTIME change. plugin-security's middleware MUTATES the
+ * operation context in place (`sc.__readScope = …`, `security-plugin.ts`), so
+ * the context this hook receives carries the depth resolved for `sys_comment` —
+ * the object of the operation — while these gates ask the sharing service about
+ * the PARENT record's object. Forwarding it would hand one object's access
+ * depth to another object's owner-match, the exact stale-scope leak
+ * `resolveWriteScopeForSharing` was extracted to prevent ("a stale value can
+ * never leak in through a spread"). This projection is currently what stops
+ * that, so replacing it needs its own card and its own evidence — filed rather
+ * than folded in. */
+function callerContext(ctx: any): ExecutionContext {
   const exec = ctx?.input?.options?.context;
   if (exec && typeof exec === 'object') {
     return {
