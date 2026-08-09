@@ -9,11 +9,26 @@ import type {
   IStorageService,
   StorageUploadOptions,
   StorageFileInfo,
+  StorageListOptions,
+  StorageListPage,
   PresignedUploadDescriptor,
   PresignedDownloadDescriptor,
   PresignedDownloadOptions,
 } from '@objectstack/spec/contracts';
+import {
+  decodeStorageListCursor,
+  encodeStorageListCursor,
+  resolveStorageListLimit,
+} from '@objectstack/spec/contracts';
 import { contentDispositionValue } from './content-disposition.js';
+
+/**
+ * Hard ceiling `ListObjectsV2` applies to `MaxKeys`, regardless of what the
+ * caller asks for. It is the number that silently truncated the retired
+ * `list(prefix)` (#5266); here it only ever bounds ONE round-trip, and `list()`
+ * loops until the caller's page is full.
+ */
+const S3_LIST_MAX_KEYS = 1000;
 
 /**
  * Configuration for the S3 storage adapter.
@@ -72,7 +87,7 @@ export class S3StorageAdapter implements IStorageService {
    * Records ok/error counters, a duration histogram, and an error counter
    * keyed by error class on failure. Never swallows the underlying error.
    */
-  private async track<T>(op: 'put' | 'get' | 'delete' | 'head', fn: () => Promise<T>): Promise<T> {
+  private async track<T>(op: 'put' | 'get' | 'delete' | 'head' | 'list', fn: () => Promise<T>): Promise<T> {
     const started = Date.now();
     const baseLabels = { adapter: 's3', op } as const;
     try {
@@ -211,19 +226,101 @@ export class S3StorageAdapter implements IStorageService {
     });
   }
 
-  // `list(prefix)` is gone (#5541), following its removal from IStorageService
-  // (#5540, ADR-0049 enforce-or-remove; analysis #5266). This implementation
-  // issued one `ListObjectsV2` and read neither `IsTruncated` nor
-  // `ContinuationToken`, so past 1000 objects it returned the first page with
-  // nothing to distinguish it from a complete answer — while the local adapter
-  // answered the same call one level deep. Nothing in the repo called either.
-  // Enumerate the records you wrote (`sys_file` / file references, paginated
-  // through ObjectQL) instead of the bucket; if a first-party caller ever needs
-  // real bucket enumeration it returns cursor-shaped —
-  // `list(prefix, { cursor, limit })` — with adapter-conformance cases proving
-  // both backends agree before it ships. Absence is pinned in
-  // `storage-adapter-list-retirement.test.ts`: an excess method on a class is
-  // not a type error, so tsc cannot hold this line.
+  // ---------------------------------------------------------------------------
+  // Prefix enumeration (#6781)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Cursor-shaped prefix enumeration — see `IStorageService.list` for the
+   * contract every adapter shares.
+   *
+   * Two paging mechanisms, one per layer, and confusing them is the defect this
+   * method exists to make impossible:
+   *
+   * - **Inside one call**, `ContinuationToken` loops over `ListObjectsV2`'s own
+   *   pages until the CALLER's page is full. The retired implementation issued
+   *   exactly one request and read neither `IsTruncated` nor
+   *   `ContinuationToken`, so past `MaxKeys` it returned a partial answer that
+   *   looked complete (#5266).
+   * - **Between calls**, the caller-facing cursor is the last key returned,
+   *   resumed with `StartAfter`. It is deliberately NOT the S3 continuation
+   *   token: a key-based cursor means the SAME thing on every backend, so the
+   *   local adapter issues and accepts byte-identical cursors, a token is
+   *   refused identically by both, and a `SwappableStorageService` adapter swap
+   *   mid-sweep resumes instead of restarting. An opaque S3 token would have
+   *   made the cursor a second, per-backend dialect — the exact shape of the
+   *   original defect, moved onto the continuation.
+   *
+   * Shape and behaviour are pinned in `storage-adapter-list-contract.test.ts`
+   * and `storage-adapter-list.conformance.test.ts`, the latter driving this
+   * adapter against a fake bucket that enforces the real 1000-key `MaxKeys`
+   * ceiling — so an implementation that issued one request per call could not
+   * pass it.
+   */
+  async list(prefix: string, options?: StorageListOptions): Promise<StorageListPage> {
+    // Refusals come from the contract's shared helpers, outside `track()`: a
+    // refused call never reached S3, so it is not a failed storage operation.
+    const limit = resolveStorageListLimit(options?.limit);
+    const startAfter = options?.cursor === undefined ? undefined : decodeStorageListCursor(options.cursor);
+
+    return this.track('list', async () => {
+      const client = await this.getClient();
+      const s3 = await this.s3Mod();
+
+      const items: StorageFileInfo[] = [];
+      let continuationToken: string | undefined;
+      let more = false;
+      // The last key EXAMINED, which is not always the last key emitted: a page
+      // whose trailing entries are all directory markers still advanced the
+      // scan past them, and resuming from the last emitted key instead would
+      // re-read them forever.
+      let lastKeySeen: string | undefined;
+
+      while (items.length < limit) {
+        const res = await client.send(
+          new s3.ListObjectsV2Command({
+            Bucket: this.bucket,
+            Prefix: prefix,
+            MaxKeys: Math.min(limit - items.length, S3_LIST_MAX_KEYS),
+            // `StartAfter` is honoured only on the first request of a run; S3
+            // ignores it once `ContinuationToken` is present, which is correct
+            // — the token already encodes a position past it.
+            ...(continuationToken
+              ? { ContinuationToken: continuationToken }
+              : startAfter !== undefined
+                ? { StartAfter: startAfter }
+                : {}),
+          }),
+        );
+
+        for (const object of res.Contents ?? []) {
+          const key: string | undefined = object?.Key;
+          if (!key) continue;
+          lastKeySeen = key;
+          // A zero-byte key ending in `/` is a console-created directory
+          // marker, not a file. The local backend cannot represent one at all,
+          // so emitting it here would be a per-backend dialect.
+          if (key.endsWith('/')) continue;
+          items.push({
+            key,
+            size: object.Size ?? 0,
+            lastModified: object.LastModified ?? new Date(),
+          });
+        }
+
+        if (!res.IsTruncated || !res.NextContinuationToken) {
+          more = false;
+          break;
+        }
+        continuationToken = res.NextContinuationToken;
+        more = true;
+      }
+
+      return more && lastKeySeen !== undefined
+        ? { items, nextCursor: encodeStorageListCursor(lastKeySeen) }
+        : { items };
+    });
+  }
 
   // ---------------------------------------------------------------------------
   // Presigned URLs

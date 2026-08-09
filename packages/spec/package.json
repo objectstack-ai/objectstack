@@ -182,7 +182,7 @@
     "spec-changes.json"
   ],
   "scripts": {
-    "build": "pnpm gen:schema && pnpm gen:openapi && tsup && if [ -z \"$OS_SKIP_DTS\" ]; then NODE_OPTIONS=\"--max-old-space-size=12288\" BUILD_DTS=true tsup; fi",
+    "build": "pnpm gen:schema && pnpm gen:openapi && tsup && if [ -z \"$OS_SKIP_DTS\" ]; then NODE_OPTIONS=\"--max-old-space-size=12288\" BUILD_DTS=true tsup; fi && node ../../scripts/check-dev-prereqs.mjs --stamp",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "gen:schema": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts",

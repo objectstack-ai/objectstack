@@ -1,0 +1,262 @@
+---
+title: System Context (isSystem)
+description: The authoritative table of every platform behaviour keyed off `ExecutionContext.isSystem` — what an elevated write gets, what it loses, and what the flag deliberately does NOT do. Built by census over the whole repo, not by recall.
+---
+
+# System Context (`isSystem`)
+
+`ExecutionContext.isSystem` is the platform's one elevation flag. Setting it on a
+write or read means "this operation is the engine acting on its own behalf" —
+the seed loader replaying package fixtures, a plugin's boot reconciler, a
+service self-write, a migration.
+
+This page is **the authority** for what that flag actually does. It exists
+because the flag is not one concept: it is a single boolean read at **80
+distinct sites across 18 packages**, and knowing three of those behaviours gives
+no hint that the other seventy-seven exist. Every documented app-side bug traced
+to `isSystem` had the same shape — the metadata was complete and correct, and
+the gap was observable only by querying the resulting rows.
+
+<Callout type="warn">
+**Elevation is total, and it is not granular.** `isSystem` is not "skip the
+permission check". It short-circuits authorization, ownership stamping,
+read-only protection, referential-integrity checks, sharing materialisation,
+approval locks and provenance stamping — in eighteen packages that do not know
+about each other. Read the table before you set it; prefer a scoped user
+context whenever one exists.
+</Callout>
+
+## Which `isSystem` this page is about
+
+Four unrelated declarations share the identifier. **This page documents only the
+first.** The others are ordinary metadata fields on a stored document and have
+nothing to do with elevation.
+
+| Declaration | What it is | This page? |
+|:---|:---|:---:|
+| `ExecutionContext.isSystem` — `packages/spec/src/kernel/execution-context.zod.ts:233` | The elevation flag on an operation's context | ✅ |
+| `Object.isSystem` — `packages/spec/src/data/object.zod.ts:1249` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
+| `EmailTemplate.isSystem` — `packages/spec/src/system/email-template.zod.ts:125` | Built-in template; tenants may override but should not delete | ❌ |
+| `Environment.isSystem` — `packages/spec/src/cloud/environment.zod.ts:136` | Platform-infrastructure environment, not user data | ❌ |
+
+The collision is a genuine hazard rather than a naming nit: `Object.isSystem`
+changes an object's **default sharing**, and `ExecutionContext.isSystem` changes
+whether **sharing grants are materialised** — so a search for "isSystem sharing"
+returns both, and they are unrelated decisions.
+
+A fifth, closely-spelled family — `isSystemObjectName()` /
+`isSystemObject()` in `packages/runtime/src/action-execution.ts:53`,
+`packages/mcp/src/mcp-http-tools.ts:178` — keys on the `sys_` **name prefix**,
+not on any flag.
+
+## How the flag is set
+
+`isSystem` is **server-constructed and never client-supplied**. Inbound HTTP
+cannot set it (`packages/rest/src/rest-server.ts:2079`, `:2096`), and neither
+can an action body (`packages/runtime/src/domains/actions.ts:122`). It is
+written by internal callers only, as an option on the engine call:
+
+```ts
+await engine.insert('crm_account', row, { context: { isSystem: true } });
+```
+
+Its parse-time default is `false` (`execution-context.zod.ts:233`), so an absent
+context is never elevated.
+
+---
+
+## The table
+
+Grouped by lane. Every row cites the site that reads the flag. "What you lose"
+is the part that costs app-side bugs — it is the protection or the side effect
+that silently does not happen.
+
+### 1. Authorization and scoping
+
+| # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
+|:--|:---|:---|:---|:---|
+| 1 | **The whole security middleware short-circuits** before any gate runs | plugin-security | Get: every CRUD/FLS/tenant/owner gate below skipped in one branch. Lose: all of rows 2–6 at once — this is the single largest behaviour on the page | `security-plugin.ts:825` |
+| 2 | **`owner_id` is not auto-stamped on INSERT** (the step 3.5 anchor guard is inside the block row 1 skips) | plugin-security | Lose: the row lands `owner_id = NULL`, so the default `owner_only_writes` policy hides it **from its own creator**. Get: nothing — this is a gap, not a capability | guard at `security-plugin.ts:1466`–`1560`, skipped by `:825` |
+| 3 | Row-level read filter resolves to "no filter" | plugin-security | Get: unscoped reads. Lose: row-level scoping entirely | `security-plugin.ts:2747` |
+| 4 | Field-level security returns **all** fields | plugin-security | Get: every column readable. Lose: field masking | `security-plugin.ts:2898` |
+| 5 | Export permission granted unconditionally | plugin-security | Get: `canExport` is `true` | `security-plugin.ts:2964` |
+| 6 | Write bypass = `true`, effective write scope = `org` | plugin-security | Get: widest write scope without holding any capability | `security-plugin.ts:705`, `:727` |
+| 7 | Metadata-plane schema masking exempt (ADR-0106 D4) | metadata-core | Get: unmasked object schema. Note: the exemption is a **caller** property — it short-circuits before the security service is consulted | `object-schema-fls.ts:167` |
+| 8 | `explain()` may target a principal other than the caller | plugin-security | Get: no `manage_users` / delegated-admin check | `security-plugin.ts:2321` |
+| 9 | Anonymous-deny treats the caller as authenticated | core | Get: passes the 401 seam with no `userId` | `anonymous-deny.ts:114` |
+| 10 | Permission-set projection middleware skipped | plugin-security | Lose: projection of permission-set-derived columns | `permission-set-projection.ts:670` |
+| 11 | Session-resolution middleware skipped | plugin-auth | Get: no session lookup attempted | `auth-plugin.ts:1023` |
+| 12 | Per-request performance timings disclosed | observability | Get: timing headers a normal caller cannot pull | `perf-timing.ts:474` |
+
+### 2. Write pipeline and data integrity
+
+| # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
+|:--|:---|:---|:---|:---|
+| 13 | **`readonly` strip bypassed — UPDATE, single row** | objectql | Get: a `readonly` field CAN be written. Lose: the protection that stops a caller seeding e.g. `approval_status` | `engine.ts:6860` |
+| 14 | **`readonly` strip bypassed — UPDATE, bulk/predicate** | objectql | Same, on the multi-row path | `engine.ts:7004` |
+| 15 | **`readonly` strip bypassed — INSERT (engine pass)** | objectql | Same, on create | `engine.ts:6078` |
+| 16 | **`readonly` strip bypassed — INSERT (protocol ingress)** | metadata-protocol | `isSystem` is the **only** exemption here. `preserveAudit` is deliberately not read on this path (#6640) — a non-system historical import is still stripped on create | `protocol.ts:1114` |
+| 17 | Strict-drop refusal never fires | objectql | Lose: a caller that opted into loud refusal gets **silence** — strict refuses exactly what the strip would have taken, and the strip took nothing | `engine.ts:6098`, `readonly-strict-errors.ts:44` |
+| 18 | **Referential-integrity check skipped** | objectql | Get: writes proceed against unreachable/unresolvable targets. Lose: an `isSystem` caller can write a **dangling reference** | `engine.ts:3314` |
+| 19 | Tenant-audit warning silenced; `bypassTenantAudit` threaded to the driver | objectql | Get: unscoped system writes stop warning. Lose: the signal that would flag a genuine user-path scoping bug | `engine.ts:2073`, `:2075`, `:2102` |
+| 20 | Engine-owned / append-only write guard bypassed | plugin-security | Get: generic writes to `managedBy` engine-owned objects | `system-write-guard.ts:96`, `:120` |
+| 21 | Identity write guard bypassed (ADR-0092) | plugin-auth | Get: direct writes to identity tables through the generic data path | `identity-write-guard.ts:98` |
+
+### 3. Sharing (`plugin-sharing`)
+
+The largest single consumer — **19 of the 80 sites**.
+
+| # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
+|:--|:---|:---|:---|
+| 22 | **Sharing-rule grant materialisation is skipped on all four record-write hooks** | Lose: **no `sys_record_share` rows are created**. A fully configured sharing rule grants **nothing** on seeded data until a rule is re-evaluated or the boot backfill runs. This is the behaviour that motivated #4707 | `rule-hooks.ts:157`, `:165`, `:180`, `:194` |
+| 23 | Sharing write verdict short-circuits to `allow` | Get: writes pass the sharing gate unconditionally | `sharing-service.ts:438` |
+| 24 | Record visibility / manage-shares checks return true | Get: no ownership or Modify-All requirement | `sharing-service.ts:635`, `:722`, `:1195` |
+| 25 | `grant()` skips the enforcement + manage-shares assertions | Get: the rule evaluator can materialise through the public API | `sharing-service.ts:808` |
+| 26 | `revoke()` deletes directly, **before** the non-manual-source guard | Get: the evaluator can revoke its own grants. Lose: the `CONFLICT` guard that warns a rule-materialised grant will be silently re-granted on the next reconcile | `sharing-service.ts:884` (guard at `:908`) |
+| 27 | `listShares()` skips the management gate | Get: full enumeration of who can see a record | `sharing-service.ts:936` |
+| 28 | `sys_record_share` reads are **not** self-scoped | Get: tenant-wide share listing without `manage_sharing` | `sharing-plugin.ts:839` |
+| 29 | Share-link policy `enabled` check bypassed; system callers re-enter under a system context | Get: link creation/resolution while the policy is off | `share-link-service.ts:264`, `:312`, `:316`, `:374`, `:404` |
+| 30 | Sharing-rule provenance stamp skipped | Lose: the row is not marked as an admin customization — seeder / `defineRule` / boot reconcilers are "the package door" | `sharing-rule-provenance.ts:50` |
+| 31 | Sharing-rule service write path returns early | Lose: the same provenance/gating step on the service surface | `sharing-rule-service.ts:99` |
+
+### 4. Approvals, reports, attachments, comments, knowledge
+
+| # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
+|:--|:---|:---|:---|:---|
+| 32 | **Approval record lock released** — a locked record is writable | plugin-approvals | Get: engine self-writes (the status mirror) pass. Lose: the lock that stops edits while an approval is live. Note there is deliberately **no admin exemption** here — only `isSystem` | `lifecycle-hooks.ts:325` |
+| 33 | Delegation write guard bypassed | plugin-approvals | Get: service / seed / import may write delegation rows naming another delegator | `lifecycle-hooks.ts:432` |
+| 34 | Approval actor / submitter / pending-approver checks bypassed (7 sites) | plugin-approvals | Get: approve, reject, recall, reassign without being a pending approver or the submitter | `approval-service.ts:658`, `:713`, `:2257`, `:2403`, `:2570`, `:2641`, `:2830`, `:2870` |
+| 35 | Saved-report ownership is **assignable**, and an update may reassign it | plugin-reports | Get: `ownerId` from input is honoured. A non-system caller always owns what it creates and can never reassign | `report-service.ts:334`, `:355` |
+| 36 | Saved-report access / mutation gates bypassed | plugin-reports | Get: read and overwrite any report | `report-service.ts:273`, `:302`, `:377`, `:567` |
+| 37 | Attachment access hooks return early (write + read AST) | service-storage | Lose: attachment visibility scoping | `attachment-access-hooks.ts:95`, `:144`, `:276` |
+| 38 | Comment access hooks return early (write + read AST) | plugin-audit | Lose: comment visibility scoping | `comment-access-hooks.ts:241`, `:346`, `:378`, `:423` |
+| 39 | Knowledge search returns hits unfiltered | service-knowledge | Lose: the permission filter over search results | `knowledge-service.ts:308` |
+
+### 5. Actions, metadata plane, provenance
+
+| # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
+|:--|:---|:---|:---|:---|
+| 40 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes | `action-execution.ts:125` |
+| 41 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `action-execution.ts:388` |
+| 42 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `domains/meta.ts:468`, `rest-server.ts:4047` |
+| 43 | Anonymous-deny seam satisfied on the domain dispatchers | runtime | Get: passes with no `userId` | `domains/actions.ts:129`, `domains/ai.ts:128`, `domains/automation.ts:151`, `domains/meta.ts:171`, `domains/security.ts:92` |
+| 44 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `domains/mcp.ts:60` |
+| 45 | Audience-binding suggestion recording skipped | plugin-security | Lose: install-time suggestions are not recorded for system callers | `suggested-audience-bindings.ts:262` |
+| 46 | Email-template / webhook provenance stamps skipped | plugin-email, plugin-webhooks | Lose: the row is not marked as an admin customization | `email-template-provenance.ts:59`, `webhook-provenance.ts:50` |
+| 47 | **Automation flow data nodes re-add the `owner_id` stamp** (the one place row 2's gap is compensated inline) | service-automation | Get: a flow-authored INSERT under system elevation still lands owned, when the run resolved a user. Fill-only — flow-authored values win | `runtime-identity.ts:279`, called from `builtin/crud-nodes.ts:309` |
+
+---
+
+## What `isSystem` does **not** do
+
+Just as costly as the list above. Each of these is a separate switch, and
+assuming `isSystem` covers it is a documented source of bugs.
+
+| Assumption | Reality | Anchor |
+|:---|:---|:---|
+| "It suppresses triggers / record-change automation" | **No.** Only `skipTriggers` does. A bare `{ isSystem: true }` on a seed write re-fired automation on freshly seeded rows and wedged first boot | `seed-loader.ts:1310`–`1313` (#3760), `flow.zod.ts:630` |
+| "It skips the state machine" | **No.** That is `skipStateMachine`, carried by seed replay and by `treatAsHistorical` imports | `engine.ts` FSM gate; see [State Machine](/docs/protocol/objectql/state-machine) |
+| "It skips validation rules" | **No.** Field shape, `format`, `script` and the rest still run. The `readonly` strip runs *before* validation precisely so a discarded value is not judged | `engine.ts:6060`–`6078` |
+| "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:820` (#3493 / #6640) |
+| "It stamps `created_by`" | **No.** Audit stamping reads `userId` from the context. A user-less system write stamps nothing — that is today's behaviour, not an error | `runtime-identity.ts:268`–`272` |
+| "It bypasses every guard" | **No.** The last-admin guard applies to **every** context, `isSystem` included — the deprovision path that actually locks an org out is the system one | `last-admin-guard.ts:247` |
+| "A client can request it" | **No.** Never settable from inbound HTTP or from an action body | `rest-server.ts:2079`, `:2096`; `domains/actions.ts:122` |
+
+---
+
+## Known rough edges
+
+Recorded rather than smoothed over, because a reader who hits one of these
+should recognise it instead of re-deriving it.
+
+1. **The `owner_id` gap has two independent compensations and no shared
+   mechanism.** Row 2 is a real gap; the platform repairs it twice, in
+   unrelated places — inline for automation flow writes
+   (`runtime-identity.ts:279`, whose own comment states the reason: "the
+   security middleware that stamps it short-circuits on `isSystem` — so the
+   writer fills it here"), and as a boot-time sweep for seeded rows
+   (`plugin-security/src/claim-seed-ownership.ts`). Any *third* system write
+   path gets neither. If you add one, stamp ownership yourself.
+
+2. **Sharing materialisation is skipped silently.** Row 22 produces
+   "configured but inert": nine installed sharing rules, matching records,
+   correct positions — and `sys_record_share` empty, with nothing logged. The
+   boot backfill does eventually fix it, so the behaviour is not wrong; it is
+   undiscoverable. An INFO line for exactly this case is queued as #6783 and is
+   **not** shipped at the time of writing — do not read this row as already
+   observable.
+
+3. **Strict write observability is inert under elevation.** Row 17: a caller
+   that asked to be told loudly about dropped fields is told nothing, because
+   nothing was dropped. The two facts are indistinguishable from the outside.
+
+4. **`revoke()` skips its own conflict guard.** Row 26 is correct for the rule
+   evaluator and surprising for anything else: a system caller can delete a
+   rule-materialised grant that the next reconcile silently restores.
+
+5. **`applySystemFields` does not read this flag.** It is named as if it did.
+   `packages/objectql/src/registry.ts:307` is **schema-side column
+   provisioning** — which columns an object carries — and consumes
+   `ExecutionContext.isSystem` zero times. The write-time ownership behaviour
+   people attribute to it is row 2, in `plugin-security`.
+
+---
+
+## Decision on record: the flag is deliberately **not** being split
+
+Maintainer ruling, #4707, 2026-08-06. Recorded here at the ruling's own request,
+so the proposal stops being re-opened.
+
+Ownership injection, `readonly` bypass and sharing materialisation are
+independent decisions, and a seed loader plausibly wants the first two but not
+the third. The concept is nevertheless **staying as one boolean**:
+
+- **Shipped semantics.** `isSystem` is a published contract with 80 read sites
+  in 18 packages. Splitting it is a breaking contract change across all of them.
+- **No business pull.** No app has asked for the combinations a split would
+  enable; the observed need was to *understand* the flag, which is what this
+  page serves.
+- **Combinatorics are worse for AI authors, not better.** Three independent
+  switches are eight states, most of them untested and several of them
+  incoherent (grant materialisation without ownership). One flag plus this table
+  is judged more mistake-proof at authoring time than a surface where a wrong
+  combination is expressible and silently valid.
+
+The trade-off accepted with that ruling is that elevation stays coarse: you
+cannot ask for the ownership behaviour without also taking the sharing
+behaviour. Where a narrower need exists, the platform answers it with a
+**separate, explicit** option next to `isSystem` — `skipTriggers`,
+`preserveAudit`, `skipStateMachine`, `runAs` — rather than by subdividing the
+flag. That is the pattern to follow for any new narrow exemption.
+
+---
+
+## Maintaining this table
+
+The table's value is exhaustiveness, so it is built by census, not by recall.
+To re-verify after a change:
+
+```bash
+grep -rn "isSystem" --include="*.ts" --include="*.tsx" packages examples \
+  | grep -v node_modules | grep -v "/dist/"
+```
+
+Classify each hit into: a **consumer** of `ExecutionContext.isSystem` (a table
+row), a **producer** (`isSystem: true` on a call — not a behaviour), one of the
+three unrelated metadata fields, a `sys_`-prefix name helper, or a declaration.
+As of this page's census on `main`: **1179** total occurrences — 588 in tests,
+591 in sources; of the source occurrences, 16 declarations, 240 producers and
+121 consumers. Of the 121 consumers, **80 are behaviour-bearing reads of the
+elevation flag** (the rows above), 12 read one of the unrelated metadata
+`isSystem` fields, 11 are `sys_`-prefix name helpers, 5 only propagate the flag
+onward, and 13 are generated i18n, form declarations or schema prose.
+
+A new read of `ExecutionContext.isSystem` belongs in this table in the same PR
+that introduces it.
+
+## Related
+
+- [Authorization Architecture](/docs/permissions/authorization) — the six-gate enforcement chain this flag short-circuits
+- [Security & Access Control](/docs/protocol/objectql/security) — the `readonly` write strip and its exemptions
+- [State Machine](/docs/protocol/objectql/state-machine) — `skipStateMachine`, `preserveAudit`, `treatAsHistorical`
+- [Sharing Rules](/docs/permissions/sharing-rules) — what row 22 is skipping

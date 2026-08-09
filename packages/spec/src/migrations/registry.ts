@@ -2288,8 +2288,10 @@ const step17: MigrationStep = {
       id: 'storage-service-list-retired',
       surface: 'contracts.IStorageService.list',
       replacement:
-        'no replacement — track the keys you wrote (sys_file / file-reference records, '
-        + 'queryable through ObjectQL with real pagination) instead of enumerating the bucket',
+        'track the keys you wrote (sys_file / file-reference records, queryable through '
+        + 'ObjectQL with real pagination) instead of enumerating the bucket — and where no '
+        + 'such record exists, the cursor-shaped `list(prefix, { cursor, limit })` this '
+        + 'entry reserved, restored in #6781',
       reason:
         '`list(prefix)` was an OPTIONAL contract method documented as "List files in a '
         + 'directory/prefix", and the two shipped adapters answered the same call with two '
@@ -2333,7 +2335,19 @@ const step17: MigrationStep = {
         + 'contract, so deleting it is cleanup that can follow. The break is on the CALLER '
         + 'side: `storage.list(...)` no longer type-checks, and a PROXY typed against '
         + '`IStorageService` that forwards to `inner.list` is exactly such a caller — the '
-        + 'one in `@objectstack/service-storage` goes with the adapters (#5541).',
+        + 'one in `@objectstack/service-storage` goes with the adapters (#5541). '
+        + '⚠️ AMENDED 2026-08-09 (#6781, maintainer ruling on cloud#1203, option B): the '
+        + 'RESERVED route in the paragraph above was taken. `list` exists again on the '
+        + 'contract, cursor-shaped — `list(prefix, { cursor, limit })` returning '
+        + '`{ items, nextCursor }` — because cloud had two first-party callers this repo '
+        + 'could not see when the measurement said "nothing calls it" (tenant attachment '
+        + 'reclamation, marketplace snapshot GC). This does NOT un-retire anything and the '
+        + 'acceptance criterion above is unchanged for what it actually governs: the '
+        + 'single-argument `list(prefix): StorageFileInfo[]` is gone for good, a call written '
+        + 'against it still fails to compile, and the two dialects it had are now pinned '
+        + 'against each other in `storage-adapter-list.conformance.test.ts` rather than left '
+        + 'to diverge. What changed for an upgrader is only the destination: prefer the '
+        + 'records you wrote, and reach for the restored member when there are none.',
     },
     {
       id: 'driver-aggregate-undeclared-key-aliases-removed',

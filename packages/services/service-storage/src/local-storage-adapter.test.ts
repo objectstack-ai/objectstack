@@ -31,9 +31,12 @@ describe('LocalStorageAdapter', () => {
     expect(typeof storage.delete).toBe('function');
     expect(typeof storage.exists).toBe('function');
     expect(typeof storage.getInfo).toBe('function');
-    // `list` is deliberately absent: IStorageService no longer declares it
-    // (#5540) and the adapter no longer implements it (#5541). The absence is
-    // pinned in `storage-adapter-list-retirement.test.ts`.
+    // `list` is back, cursor-shaped (#6781). Its presence and shape are pinned
+    // in `storage-adapter-list-contract.test.ts` (the flipped #5540/#5541
+    // retirement pin) and its behaviour in
+    // `storage-adapter-list.conformance.test.ts`, which asserts this backend
+    // and the S3 one answer identically.
+    expect(typeof storage.list).toBe('function');
   });
 
   it('should upload and download a file', async () => {
