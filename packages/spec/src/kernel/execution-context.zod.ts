@@ -353,7 +353,7 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * field-level security are unaffected: this changes only which audit/readonly
    * values the runtime overwrites, never who may write the record.
    */
-  preserveAudit: z.boolean().optional(),
+  preserveAudit: z.boolean().optional().describe('Historical import: preserve the ORIGINAL audit timeline for this write instead of stamping it "now" (#3493). Opt-in and server-constructed only, never client-supplied. On the UPDATE path it admits a whitelist — the audit/timestamp family (created_at / created_by / updated_at / updated_by) plus author-declared business `readonly` fields — while platform-managed `system` columns (tenancy, generated) stay stripped. On INSERT the exemption does NOT apply (#6640): a create is stripped earlier, at the DataProtocol ingress, whose only exemption is `context.isSystem`, so a non-system create carrying `preserveAudit` still has those fields stripped and is warned (WARN) that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. Permissions / RLS / field-level security are unaffected.'),
 
   /**
    * OAuth 2.1 scopes granted to the access token that authenticated this
