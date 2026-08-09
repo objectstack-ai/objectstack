@@ -45,6 +45,7 @@ import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
+    isVirtualSearchField,
     RUNTIME_OWNED_FIELD_TYPES,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
@@ -1554,6 +1555,42 @@ function unusableFilterError(param: string, detail: string): Error {
     err.param = param;
     return err;
 }
+
+/**
+ * [#6994] Field types whose value NO driver materialises, so no driver can
+ * ORDER BY them.
+ *
+ * `formula` is the whole set today, and deliberately not a synonym for
+ * "computed": the three computed types diverge exactly here.
+ *
+ * | type | column | sortable |
+ * |---|---|---|
+ * | `formula` | none — `SqlDriver.createColumn` returns early; `driver-turso`'s transport skips it with the same `Virtual — no column` note | **no** |
+ * | `summary` | `table.float`, maintained by the engine | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
+ * | `autonumber` | `table.string`, engine-assigned | yes |
+ *
+ * So the spec's own `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`)
+ * is the WRITE contract — "never client-written" — and is the wrong set to
+ * gate a sort with: it would refuse the two types that sort correctly.
+ *
+ * This is a local set rather than a shared spec constant because the same fact
+ * is currently spelled in five places, none of them in `packages/spec`:
+ * `driver-sql`'s `fieldHasColumn` and `createColumn`, `driver-turso`'s
+ * `remote-transport`, `objectql`'s `planFormulaProjection` and
+ * `search-companion`, and `plugin-audit`'s `VIRTUAL_FIELD_TYPES`.
+ * Consolidating them is a cross-package change and is filed separately; adding
+ * a sixth local spelling here — with that ledger written down — keeps this fix
+ * inside one package rather than opening a spec-wide edit for one string.
+ *
+ * One deliberate divergence from `fieldHasColumn`: that helper short-circuits
+ * on `multiple` (a `multiple` field is a JSON column whatever its type), so it
+ * would answer "has a column" for a `multiple` formula. This set does not,
+ * because the questions differ — `fieldHasColumn` asks whether DDL emits a
+ * column, this asks whether there is a persisted VALUE to order by, and a
+ * formula's value is computed on read and never written, so that JSON column
+ * is always empty. Ordering by it degrades exactly as the bare case does.
+ */
+const UNMATERIALIZED_SORT_TYPES: ReadonlySet<string> = new Set(['formula']);
 
 /**
  * [#4226] A sort the normalizer cannot turn into a usable `SortNode[]`, or one
@@ -4835,8 +4872,9 @@ export class ObjectStackProtocolImplementation implements
      * copies it into a real column" — a prescription the platform cannot
      * deliver, so the refusal handed the author a dead end at the exact moment
      * they asked for help. Measured on a REAL `SqlDriver` (better-sqlite3) and
-     * on `InMemoryDriver`, with a `formula` field named directly (NOT dotted,
-     * so this gate lets it through):
+     * on `InMemoryDriver`, with a `formula` field named directly — which at the
+     * time was NOT dotted and NOT unknown, so this gate let it through
+     * (#6994 closes that, third verdict below):
      *
      * ```
      * control  orderBy title asc    -> A B C D E      (a real column sorts)
@@ -4864,6 +4902,27 @@ export class ObjectStackProtocolImplementation implements
      * "Stored" is #6673's vocabulary for the same correction on the SEARCH
      * axis (`validate-searchable-fields.ts`, "a stored text field"); the two
      * axes deliberately say the same word.
+     *
+     * [#6994] The non-dotted half of that same defect, refused as the THIRD
+     * verdict below. It is the SORT axis finally growing the verdict its two
+     * neighbours in this class already have: `assertSearchFieldsExist` splits
+     * `unknown` from `unsearchable` (a known field whose TYPE search cannot
+     * scan) and `assertExpandFieldsExist` splits `unknown` from `notRelations`
+     * (a known field whose TYPE cannot be expanded). Sort had only `unknown`
+     * and `dotted`, so "known field, wrong type for this axis" was the one
+     * member of the family with no door — which is why a `formula` field
+     * reached a driver that has no column for it.
+     *
+     * SCOPE, stated because it is a real limit and not an oversight: this is an
+     * INGRESS gate, so it covers what reaches {@link findData} — the REST list
+     * route, `POST /data/:object/query`, the export route (which funnels its
+     * `$orderby` through here) and the RPC dispatcher. An internal caller that
+     * reaches `engine.find()` directly — hooks, flows, reports, expand
+     * sub-reads — still gets the silent drop, exactly as the projection and
+     * search axes note for themselves. Closing that half means deciding whether
+     * `engine.find` REFUSES or keeps its deliberate internal-caller tolerance,
+     * which is an engine-core contract decision rather than a gate fix; it is
+     * tracked separately.
      */
     private assertSortFieldsExist(object: string, orderBy: ReadonlyArray<{ field: string }>, param: string): void {
         if (orderBy.length === 0) return;
@@ -4886,25 +4945,78 @@ export class ObjectStackProtocolImplementation implements
             );
         }
         const dotted = names.filter((f) => f.includes('.'));
-        if (dotted.length === 0) return;
-        const first = dotted[0];
-        const head = first.split('.')[0];
-        const headDef: any = gate.fields[head];
-        const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
+        if (dotted.length > 0) {
+            const first = dotted[0];
+            const head = first.split('.')[0];
+            const headDef: any = gate.fields[head];
+            const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
+            throw invalidSortError(
+                param,
+                (crossesRelation
+                    ? `sorts by '${first}', which follows the relationship '${head}' into another object — `
+                      + `sort reaches only columns of '${object}' itself`
+                    : `sorts by '${first}', a dotted path — sort reaches only whole columns of '${object}', `
+                      + "not values inside them")
+                + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
+                {
+                    hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
+                        + ' source changes) and sort by that. Not a formula field: it is virtual,'
+                        + ' no driver materialises a column for one, and ORDER BY on it is silently'
+                        + ' dropped.',
+                    extra: { field: first, fields: dotted, object },
+                },
+            );
+        }
+
+        // [#6994] The third verdict on this axis: a name that is a REAL,
+        // non-dotted field of this object and still cannot be ordered by,
+        // because its TYPE materialises no column ({@link
+        // UNMATERIALIZED_SORT_TYPES} — `formula`, today the whole set).
+        //
+        // This is the shape the doc comment above already describes and this
+        // gate already let through: being in `gate.known` is what carried it
+        // past the unknown check, being undotted is what carried it past the
+        // check just above. Re-measured on this branch's base (real `SqlDriver`
+        // over better-sqlite3, real `ObjectQL`, real protocol on top):
+        //
+        // ```
+        // FORMULA  orderBy sort_key asc  -> ["C","A","E","B","D"]  5 rows, 200
+        //   its sort_key values          -> ["C","A","E","B","D"]
+        // FORMULA  orderBy sort_key desc -> ["C","A","E","B","D"]  asc === desc
+        // RAW SQL  order by sort_key     -> sqlite: no such column: sort_key
+        // ```
+        //
+        // The response literally carries the values it was asked to sort by,
+        // out of order, under a 200 — so the answer contradicts the request in
+        // plain view and still reports success.
+        //
+        // PRECEDENCE — `unknown` > `dotted` > this. It is last for the same
+        // reason the expand gate reports `unknown` before `not-a-reference`:
+        // identity errors first, then shape, then type. The two above are
+        // therefore unchanged verdict-for-verdict, and a dotted path whose head
+        // is a formula field keeps the dotted answer (it is wrong about the
+        // shape too, and the shape is what the caller wrote).
+        const unmaterialized = names.filter(
+            (f) => UNMATERIALIZED_SORT_TYPES.has(String(gate.fields[f]?.type ?? '')),
+        );
+        if (unmaterialized.length === 0) return;
+        const virtualFirst = unmaterialized[0];
+        const virtualType = String(gate.fields[virtualFirst]?.type);
         throw invalidSortError(
             param,
-            (crossesRelation
-                ? `sorts by '${first}', which follows the relationship '${head}' into another object — `
-                  + `sort reaches only columns of '${object}' itself`
-                : `sorts by '${first}', a dotted path — sort reaches only whole columns of '${object}', `
-                  + "not values inside them")
-            + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : ''),
+            `sorts by '${virtualFirst}', a ${virtualType} field on '${object}' — a ${virtualType} `
+            + 'value is computed on read, so no driver materialises a column to order by'
+            + (unmaterialized.length > 1 ? ` (also: ${unmaterialized.slice(1).join(', ')})` : ''),
             {
+                // Deliberately the same remedy, in the same words, as the
+                // dotted refusal above and as #6673's SEARCH-axis correction:
+                // one vocabulary across the doors, so an author refused twice
+                // is not sent two different ways.
                 hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
-                    + ' source changes) and sort by that. Not a formula field: it is virtual,'
-                    + ' no driver materialises a column for one, and ORDER BY on it is silently'
-                    + ' dropped.',
-                extra: { field: first, fields: dotted, object },
+                    + ' source changes) and sort by that. A formula field is virtual: with no'
+                    + ' column behind it the ORDER BY reaches the driver, finds nothing, and is'
+                    + ' dropped — the arbitrary order this refusal replaces.',
+                extra: { field: virtualFirst, fields: unmaterialized, object },
             },
         );
     }
@@ -5084,11 +5196,16 @@ export class ObjectStackProtocolImplementation implements
      * export would stop downloading "the unsearched superset … in a file that
      * looks authoritative".
      *
-     * Two rejections, one code, different messages, because the fixes differ
-     * (the same split the expand axis draws): a name that is no field at all
-     * is a typo, while a REAL field outside the searchable set needs the
-     * OBJECT changed — added to a declared `searchableFields`, or declared
-     * searchable at all when the auto-default excludes its type. The allowed
+     * Rejections share one code and differ in message, because the fixes
+     * differ (the same split the expand axis draws): a name that is no field
+     * at all is a typo, while a REAL field outside the searchable set needs
+     * the OBJECT changed — added to a declared `searchableFields`, or declared
+     * searchable at all when the auto-default excludes its type. [#6674] adds
+     * the one case where changing the OBJECT cannot help either: a VIRTUAL
+     * (`formula`) field has no stored column on any driver, so declaring it
+     * searchable is not a narrower search but a scan of nothing — it used to
+     * clear this gate precisely BECAUSE the object declared it, the fail-open
+     * shape this axis exists to refuse. The allowed
      * set itself comes from {@link resolveSearchFieldResolution} in
      * `@objectstack/spec/data` — the same function the engine's search
      * expansion consumes — so this gate cannot admit a field the engine would
@@ -5160,10 +5277,24 @@ export class ObjectStackProtocolImplementation implements
         const declaredSet = new Set<string>(Array.isArray(gate.schema?.searchableFields) ? gate.schema.searchableFields : []);
         const unknown = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && !declaredSet.has(n));
         const staleDeclared = names.filter((n) => !allowedSet.has(n) && !gate.known.has(n) && declaredSet.has(n));
-        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n));
+        // [#6674] A VIRTUAL field is its own rejection, split out of
+        // `unsearchable` before the source branch below rather than after it,
+        // because BOTH of that branch's messages are wrong for it. The declared
+        // one ("a field outside it cannot be a search target until it is added
+        // there") is false — it may already BE in the list, which is exactly the
+        // shape this closes; the auto one prescribes "declare `searchableFields`
+        // to choose the searchable set explicitly", which for a formula field is
+        // an instruction to author the refused declaration. The fix is neither:
+        // the value has no column anywhere, so it must be mirrored onto a stored
+        // one. Judged by the same `@objectstack/spec/data` predicate the
+        // resolution applies, so gate and engine cannot disagree about which
+        // types have a column.
+        const virtual = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && isVirtualSearchField(gate.fields[n]));
+        const unsearchable = names.filter((n) => !allowedSet.has(n) && gate.known.has(n) && !isVirtualSearchField(gate.fields[n]));
         const [offenders, reason] =
             unknown.length > 0 ? [unknown, 'unknown' as const]
             : staleDeclared.length > 0 ? [staleDeclared, 'stale-declared' as const]
+            : virtual.length > 0 ? [virtual, 'virtual' as const]
             : [unsearchable, 'unsearchable' as const];
         if (offenders.length === 0) return;
         const first = offenders[0];
@@ -5174,6 +5305,18 @@ export class ObjectStackProtocolImplementation implements
                 + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
                 + '. The declaration is stale — searching it can never match, and the engine '
                 + "silently skipped it. Fix the object's 'searchableFields' to name real fields.";
+        } else if (reason === 'virtual') {
+            const vtype = gate.fields[first]?.type ?? 'formula';
+            detail = `Field '${first}' on object '${object}' is a virtual '${vtype}' field and cannot be searched`
+                + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
+                + `. Its value is computed on read and never stored, so no driver materializes a `
+                + `column for 'search' to scan and the entry can never match — measured as 0 rows, `
+                + 'with no error, on both the in-memory and the SQL backends.'
+                + (declaredSet.has(first)
+                    ? ` The object's 'searchableFields' declares it, which is what made the entry `
+                      + 'look like coverage; remove it there as well.'
+                    : '')
+                + ` Mirror the computed value onto a stored text field on '${object}' and search that instead.`;
         } else if (reason === 'unknown') {
             // A dotted path is a special unknown: plausible vocabulary from the
             // select/sort axes, but search scans this object's own columns.

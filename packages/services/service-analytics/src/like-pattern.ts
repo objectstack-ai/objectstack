@@ -116,13 +116,11 @@
  * Postgres-shaped, and that the family is compiled case-EXACT — so this
  * paragraph goes red rather than merely stale.
  *
- * `$icontains` is a separate matter and is NOT implemented here at all: this
- * package has zero references to it, and both doors refuse an unknown operator
- * outright (`filter-normalizer.ts`'s `fieldLeaves` throws
- * `invalidFilterError`, `read-scope-sql.ts`'s `compileOperator` throws
- * `readScopeCompileError` from its `default:` arm). Unimplemented and
- * fail-closed, which is the correct state until #6520 settles the vocabulary
- * across the frozen backends too.
+ * `$icontains` IS implemented here since #6520, and it is a separate construct
+ * rather than a flag on the family above: it folds ASCII case on BOTH sides via
+ * {@link asciiLowerSqlExpr}, while the `$contains` family stays case-EXACT. The
+ * two must not be collapsed — a shared "case-insensitive" path would give the
+ * `$contains` family the fold the ruling took away from it.
  *
  * ## `String(value)` is safe here because nothing unrenderable reaches it (#5234)
  *
@@ -180,4 +178,46 @@ export function escapeLikePattern(value: unknown): string {
 export function likePattern(shape: LikeShape, value: unknown): string {
   const escaped = escapeLikePattern(value);
   return shape === 'starts' ? `${escaped}%` : shape === 'ends' ? `%${escaped}` : `%${escaped}%`;
+}
+
+/** `A`..`Z` and the `a`..`z` they fold onto — the #4706 Q1 = A domain, as data. */
+const ASCII_UPPER_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+
+/**
+ * [#6520] Wrap a SQL expression in `$icontains`' ASCII-ONLY case fold.
+ *
+ * Character for character `driver-sql`'s postgres arm
+ * (`textMatchPredicate` → `translate(expr, 'ABC…', 'abc…')`), and shared by this
+ * package's three compilers for the same reason `likePattern` is: the escaping
+ * and the fold interact, and a second copy of either is how two compilers of one
+ * filter tree start describing different queries (#5333).
+ *
+ * ## Why `translate()` and not `LOWER()`
+ *
+ * Postgres' `LOWER()` is locale-aware — it folds `É` to `é`, and the contract
+ * says it must not (#4706 Q1 = A, because SQLite folds ASCII only and three of
+ * the five drivers are SQLite underneath). `translate()` with an explicit
+ * 26-character domain folds exactly `A-Z` and leaves every other code point
+ * alone, so it is the fold the ruling names rather than the one the database
+ * happens to offer.
+ *
+ * ## The dialect this assumes, stated so it can go red rather than stale
+ *
+ * Postgres, like everything else these three compilers emit — the claim this
+ * file's header already makes and `__tests__/like-metacharacter-escape.test.ts`
+ * pins. `translate()` is Postgres/Oracle; SQLite has no such function. So the
+ * warning in the header applies to this helper WORD FOR WORD: if these compilers
+ * ever emit for SQLite or MySQL, this expression does not merely over-match, it
+ * fails to parse. The remedy is the per-dialect construct table `driver-sql`'s
+ * `textMatchPredicate` already carries — nested `REPLACE` for the dialects
+ * without `translate` — not a quiet fallback to `LOWER()`, which would silently
+ * restore the Unicode fold this function exists to avoid.
+ *
+ * The caller must apply it to BOTH sides of the comparison. Folding only the
+ * comparand compares a folded needle against a raw column and matches just the
+ * rows that were already lower-case.
+ */
+export function asciiLowerSqlExpr(expr: string): string {
+  return `translate(${expr}, '${ASCII_UPPER_LETTERS}', '${ASCII_LOWER_LETTERS}')`;
 }

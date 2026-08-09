@@ -1,7 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { DriverOptions } from '@objectstack/spec/data';
-import { canonicalAstOperator } from '@objectstack/spec/data';
+// [#6520] `asciiCaseInsensitiveRegexSource` is `$icontains`' fold, defined once
+// in the spec: this face hands a PATTERN to mingo rather than comparing two
+// strings, so the fold has to live in the pattern source. See its docblock for
+// why an `i` flag is the wrong tool.
+import { canonicalAstOperator, asciiCaseInsensitiveRegexSource } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
@@ -964,6 +968,23 @@ export class InMemoryDriver implements IDataDriver {
           break;
         case '$endsWith':
           regexConditions.push({ $regex: new RegExp(`${this.escapeRegex(val)}$`, 'i') });
+          break;
+        // [#6520] `$icontains` — case-insensitive over ASCII and NOTHING else.
+        //
+        // Note what this arm does NOT do, because every neighbour above does it:
+        // it never passes the `i` flag. That flag is the FULL Unicode fold, so
+        // it would match `CAFÉ` against `café` — the answer the SQL family
+        // cannot give (SQLite folds ASCII only) and therefore the one the
+        // protocol forbids (#4706 Q1 = A). The fold instead lives in the pattern
+        // SOURCE, one `[Aa]` class per ASCII letter, built by the spec's shared
+        // `asciiCaseInsensitiveRegexSource` — the same source `driver-mongodb`
+        // binds, so the two document-shaped faces fold identically.
+        //
+        // The neighbours' `i` flags are NOT a precedent to copy here: they are
+        // the `$contains` family folding Unicode, which is the open defect #6682
+        // tracks on this face, not the behaviour to extend.
+        case '$icontains':
+          regexConditions.push({ $regex: new RegExp(asciiCaseInsensitiveRegexSource(val)) });
           break;
         case '$between': {
           // [#5328] The arm used to be CONDITIONAL — a comparand that was not a

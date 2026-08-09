@@ -49,12 +49,15 @@
  *   `driver-turso` (both transports) answer `$icontains` and answer the
  *   `$contains` family case-exactly; their suites import this whole table,
  *   which is what `scripts/check-driver-conformance.mjs` counts as coverage.
- * - `driver-memory` and `driver-mongodb` refuse `$icontains` with
- *   `INVALID_FILTER` / 400 (#6520) and still fold the `$contains` family over
- *   the whole Unicode range (#6682). Each carries a measured DEBT row in that
- *   same gate's ledger — the ledger is RECONCILED against the imports on
- *   every run, so read the open set THERE rather than trusting a count
- *   written in prose here.
+ * - `driver-memory` and `driver-mongodb` ANSWER `$icontains` since #6520 — on
+ *   all three of driver-memory's faces — with the same ASCII-only fold, so the
+ *   first four rows of this table are satisfied everywhere. They still fold the
+ *   `$contains` family over the whole Unicode range (#6682), which is why each
+ *   still carries a measured DEBT row in that same gate's ledger rather than
+ *   importing this table: coverage is judged by IMPORT, and a cell that answers
+ *   one requirement and not the other must not claim the whole set. The ledger
+ *   is RECONCILED against the imports on every run, so read the open set THERE
+ *   rather than trusting a count written in prose here.
  *
  * Rule 2 above still governs the open cells: the rows join a driver's suite
  * in the PR that closes its gap, not before.
@@ -80,7 +83,7 @@
  * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
  * @see https://github.com/objectstack-ai/objectstack/issues/5701 (this table)
  * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
- * @see https://github.com/objectstack-ai/objectstack/issues/6520 ($icontains on the JS faces — open)
+ * @see https://github.com/objectstack-ai/objectstack/issues/6520 ($icontains on the JS faces — landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/6682 (the $contains family on memory + mongodb — open)
  */
 

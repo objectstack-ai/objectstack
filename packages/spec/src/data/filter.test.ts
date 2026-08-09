@@ -744,6 +744,8 @@ describe('Filter Operator Constants', () => {
     expect(FILTER_OPERATORS).toContain('$contains');
     expect(FILTER_OPERATORS).toContain('$startsWith');
     expect(FILTER_OPERATORS).toContain('$endsWith');
+    // [#6520] Enforced, not merely declared, since every JS face got an arm.
+    expect(FILTER_OPERATORS).toContain('$icontains');
     expect(FILTER_OPERATORS).toContain('$null');
     expect(FILTER_OPERATORS).toContain('$exists');
   });

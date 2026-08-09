@@ -559,7 +559,7 @@ export const GroupingConfigSchema = lazySchema(() => strictObject({
   surface: 'this grouping configuration',
   history: VIEW_HISTORY,
 }, {
-  fields: z.array(GroupingFieldSchema).min(1).describe('Fields to group by (supports up to 3 levels)'),
+  fields: z.array(GroupingFieldSchema).min(1).describe('Fields to group by, in nesting order — the first entry is the outermost group and each later entry nests one level deeper (at least one field)'),
 }).describe('Record grouping configuration'));
 
 /**

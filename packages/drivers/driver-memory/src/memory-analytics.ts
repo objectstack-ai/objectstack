@@ -2,6 +2,8 @@
 
 import type { IAnalyticsService, AnalyticsResult, CubeMeta } from '@objectstack/spec/contracts';
 import type { Cube, AnalyticsQuery } from '@objectstack/spec/data';
+// [#6520] `$icontains`' ASCII-only fold, from the spec's one definition.
+import { asciiCaseInsensitiveRegexSource } from '@objectstack/spec/data';
 import type { InMemoryDriver } from './memory-driver.js';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import {
@@ -52,6 +54,13 @@ const MONGO_TO_CUBE_OPERATOR = Object.freeze({
   $nin: 'notIn',
   $contains: 'contains',
   $notContains: 'notContains',
+  // [#6520] This face lowers `$icontains` too, so the analytics/cube surface
+  // answers it like the driver's other two. Leaving it out would have been a
+  // LOUD refusal (`uncompilableFieldOperatorError` — "declared, but this face
+  // cannot compile it"), not a silent drop; it is added because the cube
+  // pipeline can express it, and one driver answering one operator two ways by
+  // entry point is the divergence class #5374 closed for `$contains`.
+  $icontains: 'icontains',
   $exists: 'set',
 } as const);
 
@@ -148,6 +157,18 @@ interface MongoPredicateInput {
    * DRIVER's own rule (`filterSubstringPattern`) rather than re-derived here.
    */
   readonly substring: (value: unknown) => RegExp;
+  /**
+   * [#6520] A comparand as an ASCII-case-insensitive literal-substring pattern —
+   * `$icontains`' fold, which is NOT {@link substring}'s.
+   *
+   * The two are deliberately separate functions rather than one with a flag.
+   * `substring` folds the whole Unicode range (the driver's `i` flag), which is
+   * the open defect #6682 tracks for the `$contains` family on this face; this
+   * one folds `A-Z` only, which is what the protocol says `$icontains` means
+   * (#4706 Q1 = A). Collapsing them would silently give one of the two operators
+   * the other's answer.
+   */
+  readonly asciiSubstring: (value: unknown) => RegExp;
 }
 
 type MongoPredicateBuilder = (input: MongoPredicateInput) => Record<string, unknown>;
@@ -224,6 +245,11 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   notIn: ({ comparands }) => ({ $nin: [...comparands] }),
   // A pattern, not a comparand: `raw`, and the driver's own substring rule.
   contains: ({ raw, substring }) => ({ $regex: substring(raw[0]) }),
+  // [#6520] The case-INSENSITIVE twin, folding ASCII and nothing else. It takes
+  // `asciiSubstring`, not `substring`: the neighbour above folds Unicode, so
+  // reusing it here would answer `CAFÉ` for `café` on this face while the SQL
+  // family answered no rows — the divergence #6520 closed.
+  icontains: ({ raw, asciiSubstring }) => ({ $regex: asciiSubstring(raw[0]) }),
   // The fix this issue is about. `{$not: <scalar>}` constrains nothing; the
   // negation has to wrap a pattern, which is exactly what the live query path
   // builds for `$notContains` (`memory-driver.ts` `normalizeFieldOperators`).
@@ -320,6 +346,9 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           comparands: this.comparandsFor(cube, filter.member, filter.values),
           raw: filter.values,
           substring: (value) => this.driver.filterSubstringPattern(value),
+          // [#6520] `$icontains`' fold, from the spec's shared definition rather
+          // than from the driver's Unicode-folding `filterSubstringPattern`.
+          asciiSubstring: (value) => new RegExp(asciiCaseInsensitiveRegexSource(String(value))),
         });
       }
       if (Object.keys(matchStage).length > 0) {
@@ -929,6 +958,13 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       'notEquals': '!=',
       'contains': 'LIKE',
       'notContains': 'NOT LIKE',
+      // [#6520] Needed because the `|| '='` fallback below is not a default, it
+      // is a wrong ANSWER: without this row `icontains` would render as `=`, an
+      // EQUALITY, in a statement offered to the author as a description of a
+      // containment query. `LIKE` is also the semantically right construct here
+      // — this exit emits SQLite-shaped SQL, and SQLite's `LIKE` folds ASCII
+      // only, which is exactly `$icontains`' domain (#4706 Q1 = A).
+      'icontains': 'LIKE',
       'gt': '>',
       'gte': '>=',
       'lt': '<',

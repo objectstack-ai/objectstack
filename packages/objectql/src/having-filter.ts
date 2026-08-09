@@ -47,6 +47,10 @@ import type { FilterCondition } from '@objectstack/spec/data';
 // and reads the table for the same reason the four driver sites do: one
 // retirement, one sentence.
 import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#6520] `$icontains`' ASCII-only fold. HAVING is the sixth JS evaluation face
+// of one vocabulary, and it reads the fold from the spec for the same reason it
+// reads the retirement prescriptions from there: one rule, one definition.
+import { asciiCaseInsensitiveContains } from '@objectstack/spec/data';
 
 const LOGICAL_OPERATORS = ['$and', '$or', '$not'] as const;
 
@@ -54,13 +58,18 @@ const LOGICAL_OPERATORS = ['$and', '$or', '$not'] as const;
 // `RegExp` over the aggregated value and answered an ILLEGAL pattern with
 // `return false` — "no rows", silently — which is the pair of defects #4706
 // retired the operator over, on the one evaluation face no conformance table
-// covers. `$icontains` is not added in its place: this face would need its own
-// ASCII-only fold, which is the same "semantic completion" investment #5499
-// freezes for the other JS faces, so HAVING refuses it fail-closed for now.
+// covers.
+//
+// [#6520] `$icontains` IS here now, and the sentence this comment used to carry
+// — "this face would need its own ASCII-only fold" — is what stopped being true:
+// the fold is the spec's `asciiCaseInsensitiveContains`, one definition shared
+// by all six JS evaluation faces, so this face needs no fold of its own. The
+// #5499 freeze was lifted for this operator as a sanctioned one-off (maintainer
+// ruling, 2026-08-08), strictly for semantic parity.
 const CONDITION_OPERATORS = [
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$between',
   '$in', '$nin', '$exists', '$null',
-  '$contains', '$notContains', '$startsWith', '$endsWith',
+  '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
 ] as const;
 
 function unknownOperator(
@@ -220,6 +229,15 @@ function checkCondition(value: any, condition: any): boolean {
       case '$notContains': if (typeof value === 'string' && value.includes(target)) return false; break;
       case '$startsWith': if (typeof value !== 'string' || !value.startsWith(target)) return false; break;
       case '$endsWith': if (typeof value !== 'string' || !value.endsWith(target)) return false; break;
+      // [#6520] `$contains`' case-INSENSITIVE twin, over ASCII case only. Same
+      // non-string guard as `$contains` — a value that is not text cannot
+      // contain a substring — and the same fold every other JS face uses, from
+      // the spec, so an aggregate filtered HERE and the same predicate run as a
+      // `where` on any driver select the same rows.
+      case '$icontains':
+        if (typeof value !== 'string' || typeof target !== 'string'
+          || !asciiCaseInsensitiveContains(value, target)) return false;
+        break;
       // [#5702] The `$regex` arm is GONE. It built `new RegExp(target, $options)`
       // and, on an illegal pattern, `return false` — an unrunnable filter
       // answered as "this row does not match", i.e. a silent empty result rather

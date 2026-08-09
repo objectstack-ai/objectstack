@@ -70,6 +70,36 @@
 // the PR diff, `git grep`, this gate's log, and `--list` -- while rendering as
 // nothing in a published changelog. It is not hidden from anyone who reviews.
 //
+// ## Which diff rows are judged (#7045)
+//
+// "Newly ADDS (or newly turns breaking)" is a statement about diff STATUS, and
+// the enumeration has to name every status a changeset can arrive under:
+//
+//   A  breaking at head                              -> judged (a new declaration)
+//   M  breaking at head, NOT breaking at base        -> judged (turned breaking)
+//   M  breaking at head, already breaking at base    -> skipped (inherited stock)
+//   R  breaking at head, NOT breaking at the OLD path-> judged (renamed into it)
+//   R  breaking at head, already breaking there      -> skipped (stock, moved)
+//
+// The last two rows arrived late. Git's rename detection is on by default
+// (`diff.renames`, since git 2.9), so a changeset renamed AND turned breaking in
+// one commit reports as `R`, and this file passed `--diff-filter=AM` until #7045
+// -- which drops the `R` row wholesale. A declared-breaking changeset arriving
+// that way carried no ADR-0087 disposition and was never asked for one, which is
+// #6148 again through a door nobody had checked. Measured on git 2.43.0, renaming
+// `.changeset/old.md` to `.changeset/new.md` while adding the breaking declaration
+// reports `R077<TAB>.changeset/old.md<TAB>.changeset/new.md`, and the same diff
+// under `AM` prints nothing at all.
+//
+// The fix is `AMR` plus reading the base side at the OLD path -- field 2 of an
+// `R` row, not field 3. It costs nothing: a PURE move of an already-breaking
+// stock changeset compares breaking-at-base and stays skipped, so no author is
+// asked to re-dispose of somebody else's declaration for renaming a file.
+// `check-changeset-no-major.mjs` made the same one-letter correction first
+// (#7005 / PR #7048); this gate and `check-empty-changeset.mjs` followed in
+// #7045, separately, because each of the three owns its own fixtures and its own
+// messages.
+//
 // ## Why the escape hatch is the MAJORITY path, and why that is fine (measured)
 //
 // Measured over the last 400 first-parent commits on main: 32 newly-added
@@ -1304,14 +1334,24 @@ export function scan({ cwd, base, head = 'HEAD' }) {
   let pkgsCache = null;
   const packages = () => (pkgsCache ??= workspacePackagesAt(head, cwd));
 
-  const out = git(['diff', '--name-status', '--diff-filter=AM', from, head, '--', '.changeset/*.md'], cwd);
+  // `AMR`, not `AM`: see "Which diff rows are judged" in the header (#7045). An
+  // `R` row is how a declared-breaking changeset used to arrive unseen.
+  const out = git(['diff', '--name-status', '--diff-filter=AMR', from, head, '--', '.changeset/*.md'], cwd);
   const problems = [];
   const judged = [];
   const skipped = [];
 
   for (const line of out.split('\n')) {
     if (!line.trim()) continue;
-    const [status, file] = line.split('\t');
+    const fields = line.split('\t');
+    // `R` is `R<score>\t<old path>\t<new path>`; `A` and `M` are `<status>\t<path>`.
+    // One character wide, because the `R` letter carries a similarity score and
+    // `=== 'R'` against the whole field would never match.
+    const status = fields[0][0];
+    const file = status === 'R' ? fields[2] : fields[1];
+    // The path the branch-point side is READ at: the same one for `M`, the
+    // PRE-RENAME one for `R`. Field 2 either way.
+    const basePath = fields[1];
     if (!file || !isChangesetFile(file)) continue;
 
     const headText = showOrNull(head, file, cwd);
@@ -1321,11 +1361,23 @@ export function scan({ cwd, base, head = 'HEAD' }) {
     const decl = breakingDeclaration(parsed);
     if (!decl.breaking) { skipped.push(file); continue; }
 
-    // A changeset that was ALREADY breaking at base is inherited, not introduced.
-    // Same philosophy as check-empty-changeset: this gate judges what a PR brings,
-    // never the stock it forked from.
-    if (status === 'M') {
-      const baseText = showOrNull(from, file, cwd);
+    // A changeset that was ALREADY breaking at the branch point is inherited, not
+    // introduced. Same philosophy as check-empty-changeset: this gate judges what a
+    // PR brings, never the stock it forked from.
+    //
+    // `R` is read at `basePath` -- its pre-rename name -- which is the only thing
+    // the rename status changes here (#7045). The statuses are spelled out rather
+    // than written `!== 'A'` so that widening the filter again some day cannot
+    // silently grant an unlisted status the inheritance exemption; an unknown
+    // status falls through and gets JUDGED, which is the safe direction.
+    //
+    // `isChangesetFile(basePath)` because git pairs renames by CONTENT, not by
+    // name: an `R` row can arrive as `.changeset/README.md -> .changeset/x.md`,
+    // and README is documentation that declares nothing. Inheriting "already
+    // breaking" from it would exempt a genuinely new breaking changeset. For `M`
+    // the guard is a no-op -- `basePath` is the path already accepted above.
+    if ((status === 'M' || status === 'R') && isChangesetFile(basePath)) {
+      const baseText = showOrNull(from, basePath, cwd);
       if (baseText !== null && breakingDeclaration(parseChangeset(baseText)).breaking) {
         skipped.push(file);
         continue;
@@ -1776,8 +1828,13 @@ function selfTest() {
   /**
    * Build a two-commit repo: base carries the ledger + a breaking changeset in
    * stock (so the convention assertion is satisfied), head adds `files`.
+   *
+   * `baseFiles` puts extra files on the BASE commit, and a `null` in `files`
+   * deletes one at head. Together they are how a RENAME is expressed (#7045):
+   * git infers `R` from a delete plus an add of similar content, so the fixture
+   * has to be able to say both halves.
    */
-  const build = ({ baseIds = ['old-entry-one', 'old-entry-two'], headIds = null, files = {}, pkgs = null }) => {
+  const build = ({ baseIds = ['old-entry-one', 'old-entry-two'], headIds = null, files = {}, baseFiles = {}, pkgs = null }) => {
     const dir = mkdtempSync(join(tmpdir(), 'adr0087-'));
     const w = (rel, text) => {
       mkdirSync(dirname(join(dir, rel)), { recursive: true });
@@ -1795,6 +1852,7 @@ function selfTest() {
     for (const [name, p] of Object.entries(pkgs ?? { '@objectstack/spec': { dir: 'packages/spec', private: false } })) {
       w(`${p.dir}/package.json`, JSON.stringify({ name, version: '1.0.0', ...(p.private ? { private: true } : {}) }));
     }
+    for (const [rel, text] of Object.entries(baseFiles)) w(rel, text);
     git(['add', '-A'], dir);
     git(['commit', '-qm', 'base'], dir);
     const base = git(['rev-parse', 'HEAD'], dir).trim();
@@ -1803,7 +1861,10 @@ function selfTest() {
       w(LEDGER_SOURCES[0], REG(headIds));
       w(SPEC_CHANGES, SPEC_CHANGES_JSON(headIds));
     }
-    for (const [rel, text] of Object.entries(files)) w(rel, text);
+    for (const [rel, text] of Object.entries(files)) {
+      if (text === null) rmSync(join(dir, rel));
+      else w(rel, text);
+    }
     git(['add', '-A'], dir);
     // `--allow-empty`: some cases deliberately add nothing at head (the "this PR
     // touches no changeset" and "inherited changeset" shapes), and an empty commit
@@ -2118,6 +2179,94 @@ function selfTest() {
     writeFileSync(join(r.dir, '.changeset/stock-breaking.md'), CS({ body: 'stock\n\n**BREAKING** something, now with more prose\n' }));
     git(['commit', '-qam', 'touch stock'], r.dir);
     green('G6 inherited breaking changeset not re-judged', run(r));
+  }
+
+  // ---- The `R` rows (#7045) -------------------------------------------------
+  //
+  // `--diff-filter=AM` -- what this gate passed until #7045 -- drops an `R` row
+  // wholesale, so R15 below was GREEN with an undisposed breaking declaration
+  // sitting in the diff. Both cases carry a CONTROL asserting that git really
+  // emitted `R`: rename detection is a SIMILARITY score, and a short body degrades
+  // to add-plus-delete, at which point R15 is an ordinary `A` case that would have
+  // been caught before the fix too -- green for a reason that is not the fix.
+  const RENAMEABLE_BODY =
+    'a summary line, with a body long enough that git scores the move below as a\n' +
+    'rename rather than as an add plus a delete. The `R` status is the entire\n' +
+    'subject of these two cases, so the fixture may not be allowed to degrade.\n';
+  /** The `R` row for `old -> new` in this repo's diff, or null. */
+  const renameRow = (dir, base, oldPath, newPath) =>
+    git(['diff', '--name-status', base, 'HEAD', '--', '.changeset/*.md'], dir)
+      .split('\n')
+      .find((l) => new RegExp(`^R\\d+\t${oldPath}\t${newPath}$`).test(l)) ?? null;
+
+  // ---- R15: a changeset RENAMED AND turned breaking in the same commit ------
+  // The #7045 shape, and R1's own shape with a `git mv` bolted on: a declaration
+  // this PR introduces, arriving at a path that did not exist at the branch point,
+  // saying nothing about the ledger.
+  {
+    const r = mk({
+      baseFiles: { '.changeset/pending.md': CS({ bumps: [['@objectstack/spec', 'patch']], body: RENAMEABLE_BODY }) },
+      files: {
+        '.changeset/pending.md': null,
+        '.changeset/pending-renamed.md': CS({ bumps: [['@objectstack/spec', 'major']], body: `**BREAKING** ${RENAMEABLE_BODY}` }),
+      },
+    });
+    assert(
+      renameRow(r.dir, r.base, '\\.changeset/pending\\.md', '\\.changeset/pending-renamed\\.md') !== null,
+      `R15 control: git must really report this as \`R\`, or the case below is an ordinary \`A\` -- got ${JSON.stringify(git(['diff', '--name-status', r.base, 'HEAD', '--', '.changeset/*.md'], r.dir))}`,
+    );
+    red('R15 the #7045 shape (renamed AND turned breaking, no disposition)', run(r), [
+      /pending-renamed/,
+      /no `adr-0087:` disposition marker/,
+      /#6148/,
+    ]);
+  }
+
+  // ---- G10: a PURE rename of an ALREADY-breaking stock changeset ------------
+  // The paired control, and the reason `AMR` costs nothing: the declaration was
+  // already at the branch point, so moving the file asks nobody to dispose of it
+  // again. This case can only be green through the `R` path -- were the rename to
+  // degrade to add-plus-delete the new path would arrive as `A`, and `A` never
+  // reads the base side at all, so it would be RED.
+  {
+    const r = mk({ files: {} });
+    git(['mv', '.changeset/stock-breaking.md', '.changeset/stock-breaking-moved.md'], r.dir);
+    git(['commit', '-qm', 'move the stock changeset'], r.dir);
+    assert(
+      renameRow(r.dir, r.base, '\\.changeset/stock-breaking\\.md', '\\.changeset/stock-breaking-moved\\.md') !== null,
+      'G10 control: git must really report the move as `R`',
+    );
+    const res = run(r);
+    green('G10 a pure move of an inherited breaking changeset is not re-judged', res);
+    assert(
+      res.skipped.includes('.changeset/stock-breaking-moved.md'),
+      `G10: ...and it is reported as SKIPPED at its new path, not silently absent -- got ${JSON.stringify(res.skipped)}`,
+    );
+  }
+
+  // ---- R16: an `R` row whose BASE side is README.md inherits NOTHING --------
+  // Git pairs renames by CONTENT, not by name, so an `R` row can arrive as
+  // `.changeset/README.md -> .changeset/x.md` (measured, git 2.43.0). README is
+  // documentation and declares nothing, so reading "already breaking at base" off
+  // it would exempt a genuinely new breaking changeset. Delete the
+  // `isChangesetFile(basePath)` guard in the scan and this case goes green.
+  {
+    const BREAKING_README = `# Changesets\n\n**BREAKING** ${RENAMEABLE_BODY}`;
+    const r = mk({
+      baseFiles: { '.changeset/README.md': BREAKING_README },
+      files: {
+        '.changeset/README.md': null,
+        '.changeset/was-the-readme.md': `---\n'@objectstack/spec': major\n---\n\n${BREAKING_README}`,
+      },
+    });
+    assert(
+      renameRow(r.dir, r.base, '\\.changeset/README\\.md', '\\.changeset/was-the-readme\\.md') !== null,
+      `R16 control: git must really pair the new changeset with README.md -- got ${JSON.stringify(git(['diff', '--name-status', r.base, 'HEAD', '--', '.changeset/*.md'], r.dir))}`,
+    );
+    red('R16 a breaking changeset paired with README.md by rename detection is still judged', run(r), [
+      /was-the-readme/,
+      /no `adr-0087:` disposition marker/,
+    ]);
   }
 
   // ---- Input assertions (#4690) --------------------------------------------

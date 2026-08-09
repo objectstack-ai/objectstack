@@ -149,8 +149,9 @@ const UNDECLARED: Array<[label: string, where: unknown, key: string, path: strin
  * and every one of them compiled to a predicate on a column named after the
  * operator. `$between` is included even though this transport never compiles it
  * (TursoDriver lowers it first) — misplaced is misplaced — and `$icontains`
- * because this transport compiles it (#5702) even though `FILTER_OPERATORS`
- * does not list it yet.
+ * because this transport compiles it (#5702). [#6520] `FILTER_OPERATORS` lists
+ * `$icontains` now too, so that clause's "even though" is history: the word
+ * list and every evaluator agree.
  *
  * [#5702] `$regex` LEFT this table for the undeclared one above: it is retired,
  * so it is not a field operator at any level and its author must not be told to
