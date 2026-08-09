@@ -1302,15 +1302,23 @@ export interface RetiredFilterOperatorGuidance {
  * took that trade explicitly: the spec declares, the existing refusal sites
  * enforce.
  *
- * Those sites are the five that already refuse unknown operators today —
+ * Those sites are the five that refuse unknown operators —
  * `driver-sql`'s `default:` arm, `driver-turso`'s remote transport,
  * `driver-memory`'s `filter-refusal.ts`, `driver-mongodb`'s
  * `translateFieldOperators`, and `objectql`'s `having` — and the point of one
- * table is that they stop each writing their own sentence. Wiring them to it is
- * **#5702**, deliberately not this PR: `$regex` still has one live producer
- * (`plugin-auth`'s ObjectQL adapter, on the authentication path), so a refusal
- * landing before #5710 flips that producer would break sign-in. Hard order:
- * **#5710 flips the producer, then #5702 turns these strings into refusals.**
+ * table is that they stop each writing their own sentence. When this block was
+ * written, wiring them was deliberately deferred behind a hard order ("#5710
+ * flips the producer, then #5702 turns these strings into refusals"), because
+ * `$regex` still had one live producer on the authentication path. Both gates
+ * have fired since — #5710 flipped `plugin-auth`'s adapter to `$contains`,
+ * #5702 wired all five sites — so that ordering is shipped history, not
+ * pending advice. Census per face, by executing `{ $regex }` and a dangling
+ * `{ $options }` against each (re-verified 2026-08, #6993): all five print
+ * this table's `why` verbatim; the four driver faces throw it in the ADR-0112
+ * envelope (`INVALID_FILTER` / 400 — `driver-sqlite-wasm` and both turso
+ * transports inherit or mirror it), while `having`'s refusal is still a bare
+ * `Error` carrying the sentence without `code`/`status` — the one open half,
+ * tracked as #7047.
  *
  * ## Why `$regex` was retired rather than implemented (#4706)
  *

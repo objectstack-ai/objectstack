@@ -34,22 +34,40 @@
  *    discriminant. #5240's `{ field: {} }` family can adopt the shape from here
  *    without reopening the logic table.
  *
- * ## Status: NO backend answers this table yet — that is the design
+ * ## Status: the SQL family answers this table; the ledger counts the rest
  *
- * This is the contract half of the #4706 ruling (#5701). `$icontains` is
- * declared by `StringOperatorSchema` (`filter.zod.ts`) and implemented by nobody; the
- * `$contains` family's case-sensitivity is declared and honoured by two of five
- * backends. Every driver therefore carries a measured DEBT row in
- * `scripts/check-driver-conformance.mjs`, pointing at **#5702**, which is the
- * issue that writes the lowerings and deletes the rows. A suite arriving here
- * before then would be red about work nobody has been dispatched to do, which
- * is the failure mode rule 2 above names.
+ * This is the contract half of the #4706 ruling (#5701). What this section
+ * said when the table landed — `$icontains` "implemented by nobody", the
+ * `$contains` family's case-sensitivity "honoured by two of five backends",
+ * "every driver carries a measured DEBT row" pointing at #5702 — was true in
+ * the #5701 era and has since been falsified by #5702 (closed 2026-08-08) and
+ * #6518 (re-verified 2026-08 by EXECUTING every face, #6993 — a text scan
+ * undercounts here, because `driver-sqlite-wasm` inherits its compiler and
+ * carries no case arm of its own):
  *
- * The `$regex` rejection cases carry a further ordering constraint: `$regex`
- * still has one LIVE producer — `plugin-auth`'s ObjectQL adapter emits
- * `{ field: { $regex: value } }` for better-auth's `contains` search, on the
- * authentication path. **#5710 flips that producer first.** A backend that
- * enrols these cases before #5710 lands breaks sign-in.
+ * - `driver-sql`, `driver-sqlite-wasm` (inherited, on the sql.js engine) and
+ *   `driver-turso` (both transports) answer `$icontains` and answer the
+ *   `$contains` family case-exactly; their suites import this whole table,
+ *   which is what `scripts/check-driver-conformance.mjs` counts as coverage.
+ * - `driver-memory` and `driver-mongodb` refuse `$icontains` with
+ *   `INVALID_FILTER` / 400 (#6520) and still fold the `$contains` family over
+ *   the whole Unicode range (#6682). Each carries a measured DEBT row in that
+ *   same gate's ledger — the ledger is RECONCILED against the imports on
+ *   every run, so read the open set THERE rather than trusting a count
+ *   written in prose here.
+ *
+ * Rule 2 above still governs the open cells: the rows join a driver's suite
+ * in the PR that closes its gap, not before.
+ *
+ * The `$regex` rejection cases carried a further ordering constraint when
+ * this table landed: `plugin-auth`'s ObjectQL adapter still emitted
+ * `{ field: { $regex: value } }` on the authentication path, so a backend
+ * enrolling them early would have broken sign-in. That constraint is history
+ * rather than advice now — #5710 flipped the producer to `$contains` (the
+ * whole-repo re-scan finding no other live producer is recorded in
+ * `driver-memory/src/filter-refusal.ts`), and the refusal sites print
+ * `RETIRED_FILTER_OPERATORS`' prescriptions (re-verified 2026-08, #6993; the
+ * per-face envelope census lives on that table's own docblock).
  *
  * ## What belongs here
  *
@@ -61,7 +79,9 @@
  * @see FILTER_LOGIC_CASES — combinator semantics, the sibling standard.
  * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
  * @see https://github.com/objectstack-ai/objectstack/issues/5701 (this table)
- * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the backends)
+ * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
+ * @see https://github.com/objectstack-ai/objectstack/issues/6520 ($icontains on the JS faces — open)
+ * @see https://github.com/objectstack-ai/objectstack/issues/6682 (the $contains family on memory + mongodb — open)
  */
 
 import type { FilterCondition } from './filter.zod';
@@ -222,14 +242,20 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
   // ── The `$contains` family is CASE-SENSITIVE (#4706 Q2 = A) ────────────────
   //
   // Supersedes `filter.zod.ts`\'s former "Case sensitivity should be handled at
-  // backend level". Two of five backends already answer this way
-  // (driver-memory, formula); the SQL family\'s LIKE and mongo\'s hardcoded
-  // `$options: 'i'` are #5702\'s work.
+  // backend level". "The SQL family\'s LIKE and mongo\'s hardcoded `$options: 'i'`
+  // are #5702\'s work" was the score when these rows landed and has since split
+  // (re-measured 2026-08, #6993, by executing each face): #6518 made the SQL
+  // family case-exact (GLOB on the SQLite dialects), so those three drivers
+  // answer these rows today, while mongo\'s `$options: 'i'` is STILL hardcoded
+  // (`translateFilter` lowers `$contains` to `$regex` + `$options: 'i'`) and
+  // driver-memory\'s query path still folds Unicode — that remainder is #6682\'s
+  // work now, not #5702\'s. (`formula` and driver-memory\'s reference matcher
+  // measured case-exact both then and now.)
   {
     name: '$contains is case-SENSITIVE — a lower-case comparand misses the upper-case row',
     filter: { name: { $contains: 'acme' } },
     expected: ['2'],
-    note: 'Row 1 (ACME Corp) must NOT match. On SQLite/turso today LIKE folds ASCII and returns both.',
+    note: 'Row 1 (ACME Corp) must NOT match. SQLite\'s LIKE folds ASCII — the defect #6518 replaced with GLOB on the SQLite dialects; a backend returning both here has regressed to it (driver-memory / driver-mongodb still fold — #6682).',
   },
   {
     name: '$contains is case-SENSITIVE — an upper-case comparand misses the lower-case row',
@@ -269,7 +295,7 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
     expectRejection: true,
     code: 'INVALID_FILTER',
     mustMention: ['$regex', '$options', '$icontains'],
-    note: 'The exact shape plugin-auth\'s adapter can emit, and the one `$icontains` replaces one-for-one. #5710 flips that producer BEFORE any backend enrols this case. "One mistake" is about the AUTHOR\'s fix being single (write $icontains), not about the message naming one key: it must name BOTH retired spellings, or an author who fixes only $regex trips the dangling-$options refusal on the next attempt.',
+    note: 'The exact shape plugin-auth\'s adapter used to emit, and the one `$icontains` replaces one-for-one. #5710 flipped that producer before any backend enrolled this case (re-verified 2026-08, #6993). "One mistake" is about the AUTHOR\'s fix being single (write $icontains), not about the message naming one key: it must name BOTH retired spellings, or an author who fixes only $regex trips the dangling-$options refusal on the next attempt.',
   },
   {
     name: 'a dangling $options with no $regex is REFUSED',
