@@ -143,6 +143,15 @@ export type InlineLocaleMap = z.input<typeof InlineLocaleMapSchema>;
  *     objectui resolves them (`pickLocalized`), so the map is a delivered
  *     capability, not a convention the runtime ignores.
  *
+ * Form 2 is resolved **on this side too**, since #6765: `resolveI18nLabel` in
+ * `./i18n-label-resolver` is the shared `I18nLabel` → `string` resolver, pinned
+ * limb for limb to `pickLocalized` by an executed parity table. Before it, the
+ * meaning of the shape this file declares existed only in the other repo, and a
+ * backend producer holding a map could do nothing with it but drop it — which
+ * is exactly what every one of them did (#6761, maintainer ruling 2026-08-08,
+ * option B). Form 1's bundle lookup is `system/i18n-resolver.ts`; a caller
+ * holding either form runs `resolveI18nLabel` first.
+ *
  * Both are real; neither is deprecated by this schema. The bundle route is the
  * one that scales (translators never touch `*.page.ts`) and remains the
  * long-term direction — but a contract that declared only form 1 while the
