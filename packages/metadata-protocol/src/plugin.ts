@@ -36,6 +36,7 @@ import {
     resolveIndexExec,
 } from './migrations/view-definition-active-index.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import type { MetadataAuthoringChannel } from './protocol.js';
 
 export interface MetadataProtocolPluginOptions {
     /**
@@ -46,10 +47,30 @@ export interface MetadataProtocolPluginOptions {
      * Mirrors `ObjectQLPluginOptions.environmentId` — pass the same value.
      */
     environmentId?: string;
+    /**
+     * [#6710] Which authoring channel this kernel's metadata writes arrive on.
+     *
+     * Leave unset on ANY kernel that serves `PUT /api/v1/meta/*` to end users
+     * (Studio tenants, MCP/AI authors, self-hosted app servers): the default
+     * `'environment'` runs the #4463 runtime authoring rules, which for those
+     * authors is the only author-time gate that exists.
+     *
+     * Set `'package-author'` ONLY on the genuine control-plane assembly — the
+     * kernel that installs packages on the platform's own behalf and is not an
+     * author publishing into a live tenant. Stating it is a claim about what
+     * this kernel IS; it is not a switch for making a red publish go away.
+     *
+     * Deliberately no env-var fallback (unlike `skipSchemaSync`): a deployment
+     * must not be able to turn an end-user guardrail off from the outside. The
+     * per-write escape hatch that DOES exist is
+     * `OS_ALLOW_UNLINTED_METADATA_WRITES` (#4463 D4), which degrades the
+     * refusal to a loud log instead of silencing it.
+     */
+    authoringChannel?: MetadataAuthoringChannel;
 }
 
 export function createMetadataProtocolPlugin(options: MetadataProtocolPluginOptions = {}): Plugin {
-    const { environmentId } = options;
+    const { environmentId, authoringChannel } = options;
     return {
         name: 'com.objectstack.metadata.protocol',
         version: '1.0.0',
@@ -71,9 +92,18 @@ export function createMetadataProtocolPlugin(options: MetadataProtocolPluginOpti
                 );
             }
 
-            assembleMetadataProtocol(ctx, ql, environmentId);
+            assembleMetadataProtocol(ctx, ql, environmentId, { authoringChannel });
         },
     };
+}
+
+/** Extra assembly inputs that are not row scope. Bag-shaped so the next one is additive. */
+export interface AssembleMetadataProtocolOptions {
+    /**
+     * [#6710] See {@link MetadataProtocolPluginOptions.authoringChannel}.
+     * Omitted ⇒ `'environment'` ⇒ the #4463 runtime authoring gate is active.
+     */
+    authoringChannel?: MetadataAuthoringChannel;
 }
 
 /**
@@ -98,6 +128,7 @@ export function assembleMetadataProtocol(
     ctx: PluginContext,
     ql: any,
     environmentId?: string,
+    options: AssembleMetadataProtocolOptions = {},
 ): ObjectStackProtocolImplementation {
             // Metadata-storage platform objects (sys_metadata + history/audit
             // siblings + sys_view_definition). Same `environmentId === undefined`
@@ -123,10 +154,20 @@ export function assembleMetadataProtocol(
                 });
             }
 
+            // [#6710] The authoring channel is threaded here and NOWHERE else:
+            // this function is the one seam BOTH mounts share (the delegated
+            // MetadataProtocolPlugin and ObjectQLPlugin's built-in
+            // `registerProtocol !== false` convenience mode), so a declaration
+            // that lands here cannot be half-applied depending on how the host
+            // chose to mount the protocol. `?? 'environment'` is the fail-safe
+            // default restated at the seam — a caller reaching
+            // `assembleMetadataProtocol` directly with no options bag gets the
+            // gated channel, exactly like one that omits the plugin option.
             const protocolShim = new ObjectStackProtocolImplementation(
                 ql,
                 () => (ctx.getServices ? ctx.getServices() : new Map()),
                 environmentId,
+                options.authoringChannel ?? 'environment',
             );
             ctx.registerService('protocol', protocolShim);
             ctx.logger.info('Protocol service registered (MetadataProtocolPlugin)');
