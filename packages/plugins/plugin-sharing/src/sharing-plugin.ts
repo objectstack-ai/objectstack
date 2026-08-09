@@ -815,6 +815,14 @@ export class SharingServicePlugin implements Plugin {
  * write operations. Exported so it can be unit-tested without booting
  * a kernel. `log` is optional — the [ADR-0111 D10] delete-denial breadcrumb
  * is best-effort and absent in unit tests.
+ *
+ * [#5493] The by-id write gate DEFERS before it hard-refuses: a refusal is
+ * checked against `service.probeAuthoredRowWrite`, the security service's
+ * app-authored RLS verdict, and only stands when that verdict is not `admit`.
+ * The probe is reached through the `security` late-binding the passed
+ * {@link SharingService} already holds, so this builder's signature — and every
+ * caller of it — is unchanged, and a stack without `@objectstack/plugin-security`
+ * behaves exactly as before.
  */
 export function buildSharingMiddleware(
   service: SharingService,
@@ -899,6 +907,38 @@ export function buildSharingMiddleware(
           });
         }
         if (!ok) {
+          // [#5493 / maintainer ruling 2026-08-08, issue comment 5226389104]
+          // Row-level write authority is ONE composite determination. Before
+          // this middleware HARD-REFUSES a by-id write, it asks the other half
+          // whether an APP-AUTHORED RLS widener admits this row by declaration.
+          //
+          // The measured defect: on an object where record sharing enforces
+          // (a `private`/`public_read` OWD *and* an `owner_id` field), this
+          // gate answered FORBIDDEN before RLS was ever consulted, so an
+          // app-declared update-widener was never asked. On an object where
+          // sharing ABSTAINS — a `public` model, `controlled_by_parent`, or no
+          // `owner_id` column — `canEdit` already answered `true` and the same
+          // widener worked. Half a mechanism, discriminated by a property no
+          // author declares.
+          //
+          // `admit` does NOT authorize the write: it retracts THIS authority's
+          // refusal and hands the row to the security pre-image gate, which
+          // composes per #6684/#5492 and makes the final row decision. Every
+          // other outcome — `abstain`, no security service, a service without
+          // the method, a throwing probe — leaves the refusal below untouched,
+          // byte for byte.
+          //
+          // By-id only, and deliberately: the bulk path composes a FILTER
+          // rather than a verdict and is tracked separately (#6736). Nothing
+          // here touches it.
+          const authored = await service.probeAuthoredRowWrite(
+            ctx.object,
+            String(id),
+            verb,
+            exec ?? {},
+          );
+          if (authored === 'admit') return next();
+
           // [ADR-0111 D10] A fail-closed delete denial gets a specific,
           // greppable reason so the "edit-share does not grant delete"
           // tightening is diagnosable rather than a mystery 403.
