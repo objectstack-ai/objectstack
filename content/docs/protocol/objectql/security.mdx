@@ -303,6 +303,12 @@ await data.update('attendance', { id, status: 'closed', work_duration: 480 },
 `isSystem` is the documented convention for this, and it is deliberately explicit: it
 bypasses permission checks too, so it declares "this write is platform code acting as the
 platform", not "this write came from a plugin".
+
+The read-only strip is **one of 80 behaviours** the platform keys off that flag, across 18
+packages — ownership stamping, referential-integrity checks and sharing-grant
+materialisation all change with it, and none of them is visible from the write payload.
+Before setting it, read the full census:
+[System Context (`isSystem`)](/docs/permissions/system-context).
 </Callout>
 
 **Detecting a drop programmatically.** Every strip pass reports itself to the caller
