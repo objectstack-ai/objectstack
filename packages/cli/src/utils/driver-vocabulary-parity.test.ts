@@ -61,11 +61,20 @@ const CONTRACT_ONLY_SPELLINGS = ['sqlite3', 'better-sqlite3', 'mariadb', 'inmemo
 
 type Verdict = { accepted: true; driverId: string } | { accepted: false };
 
-/** The `os start` verdict for one spelling — driving serve.ts's own two calls. */
-function cliVerdict(spelling: string, databaseUrl: string | undefined): Verdict {
+/**
+ * The `os start` verdict for one spelling — driving serve.ts's own two calls.
+ *
+ * `isDev` is a PARAMETER, and the refusal cases below run both values, because
+ * the two modes did not answer alike: in production an unrecognised selection
+ * returned `null` (refused), but in DEV it fell through to the trailing SQLite
+ * default and booted in silence. A parity test that only ran `isDev: false`
+ * would have been green with the CLI's half of fork 1 reverted — measured, in
+ * this PR's own reverse verification, which is why the parameter is here.
+ */
+function cliVerdict(spelling: string, databaseUrl: string | undefined, isDev = false): Verdict {
   try {
     const kind = resolveDriverType(spelling, databaseUrl);
-    const definition = resolveStorageDefinition(kind, { databaseUrl, isDev: false });
+    const definition = resolveStorageDefinition(kind, { databaseUrl, isDev });
     return definition ? { accepted: true, driverId: definition.driverId } : { accepted: false };
   } catch {
     return { accepted: false };
@@ -128,9 +137,14 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
   // must refuse too. Before #6345 the CLI silently booted SQLite in dev for
   // these while `os migrate` named them in a refusal.
   it.each([...CONTRACT_ONLY_SPELLINGS, 'nonsense', 'com.vendor.snowflake'])(
-    'both hosts REFUSE `%s`',
+    'both hosts REFUSE `%s`, in dev AND in prod',
     (spelling) => {
-      expect(cliVerdict(spelling, undefined).accepted, `os start accepted '${spelling}'`).toBe(false);
+      for (const isDev of [false, true]) {
+        expect(
+          cliVerdict(spelling, undefined, isDev).accepted,
+          `os start (isDev=${isDev}) accepted '${spelling}'`,
+        ).toBe(false);
+      }
       expect(standaloneVerdict(spelling, undefined).accepted, `os migrate accepted '${spelling}'`).toBe(false);
     },
   );
