@@ -37,6 +37,17 @@
  * the engine can observe but the store cannot report; collision-resync covers
  * drift the store reports but the engine could not observe.
  *
+ * ## The collision half is STORAGE-DEPENDENT, and says so
+ *
+ * It is triggered by the store REJECTING the duplicate, so it exists only where
+ * something enforces uniqueness. driver-mongodb does (a single-field unique
+ * index, when the field declares `unique`); **driver-memory never does** —
+ * `create` is a `table.push()` storing no constraints at all (#4065), so there
+ * a duplicate lands SILENTLY and this branch cannot be reached. Section (3b)
+ * pins that outcome rather than leaving "collisions are handled" to read as
+ * true on a driver where it is not (PD #10). What covers driver-memory is
+ * adoption, which waits for no rejection.
+ *
  * ## What is deliberately NOT changed
  *
  *  - **#6114 / #5979 read-failure discrimination.** A missing table still seeds
@@ -597,15 +608,94 @@ describe('ObjectQL autonumber resync (#6806)', () => {
       const { engine, driver } = makeRig(SCHEMA, rows, { uniqueOn: 'doc_no' });
       await engine.init();
       await engine.insert('doc', { title: 'first' }); // D-0004, counter warm at 4
-      rows.push({ id: 'x1', doc_no: 'D-0005' });
+      // The unobservable writer takes a whole BAND, not one number: dropping the
+      // counter and merely advancing it past the collision are otherwise
+      // indistinguishable here, and only the drop reaches the real max.
+      rows.push(...storedRows('doc_no', ['D-0005', 'D-0006', 'D-0007', 'D-0008', 'D-0009']).map((r, i) => ({ ...r, id: `x${i}` })));
 
-      await expect(engine.insert('doc', [{ title: 'a' }])).rejects.toThrow(/E11000/);
+      // What an author actually gets on a batch: the DRIVER's own error, not
+      // the single-row path's `ERR_AUTONUMBER_COLLISION` — because nothing was
+      // re-issued, so "re-issued and still refused" would be a false statement.
+      const failure = await engine.insert('doc', [{ title: 'a' }]).then(
+        () => { throw new Error('expected the batch to be refused'); },
+        (e) => e as any,
+      );
+      expect(failure.message).toMatch(/E11000/);
+      expect(failure.code).toBe(11000);
+      expect(failure.code).not.toBe('ERR_AUTONUMBER_COLLISION');
       const createsAfterBatch = (driver.create as any).mock.calls.length;
 
-      // The counter was dropped, so the next single insert re-seeds from the
-      // store (max 5) instead of colliding on D-0006... D-0005 all over again.
-      expect((await engine.insert('doc', { title: 'after' })).doc_no).toBe('D-0006');
+      // The counter was dropped, so the next single insert RE-SEEDS and lands
+      // above the whole band (max 9). Merely advancing the stale counter would
+      // hand back D-0006 — a number the unobservable writer already took. That
+      // is the guarantee a batch DOES get: the caller's retry converges.
+      expect((await engine.insert('doc', { title: 'after' })).doc_no).toBe('D-0010');
       expect((driver.create as any).mock.calls.length).toBe(createsAfterBatch + 1);
+    });
+
+    it('insertMany reports the same way — driver error, counter dropped', async () => {
+      const rows = storedRows('doc_no', ['D-0003']);
+      const { engine } = makeRig(SCHEMA, rows, { uniqueOn: 'doc_no' });
+      await engine.init();
+      await engine.insert('doc', { title: 'first' });
+      rows.push(...storedRows('doc_no', ['D-0005', 'D-0006', 'D-0007', 'D-0008', 'D-0009']).map((r, i) => ({ ...r, id: `x${i}` })));
+
+      // Partial-row mode culls rows that fail PREPARATION; a driver write that
+      // fails is still a whole-call rejection, so this is the same contract.
+      await expect(engine.insertMany('doc', [{ title: 'a' }])).rejects.toMatchObject({ code: 11000 });
+
+      expect((await engine.insert('doc', { title: 'after' })).doc_no).toBe('D-0010');
+    });
+  });
+
+  /* ====================================================================== *
+   * (3b) The collision half is STORAGE-DEPENDENT — name which driver gives
+   *      which guarantee, rather than implying one that is not delivered
+   * ==================================================================== */
+
+  describe('what a driver with no uniqueness constraint gets (driver-memory)', () => {
+    const SCHEMA = schemaWith('doc_no', 'D-{0000}');
+
+    it('a duplicate lands SILENTLY — the collision branch cannot be reached', async () => {
+      // `InMemoryDriver.create` is a `table.push()` storing no constraints of
+      // any kind (its own docstring since #4065 — it calls itself a WEAK
+      // oracle). So a duplicate raises nothing, there is no error to catch, and
+      // the re-issue this file pins elsewhere never runs. Recorded rather than
+      // papered over (PD #10): "collisions are handled" would be FALSE on one
+      // of the two drivers this fallback path serves.
+      //
+      // No `uniqueOn` — this rig is the memory driver's shape exactly.
+      const rows = storedRows('doc_no', ['D-0003']);
+      const { engine, driver } = makeRig(SCHEMA, rows);
+      await engine.init();
+      await engine.insert('doc', { title: 'first' }); // D-0004
+
+      // The writer this engine cannot observe takes D-0005.
+      rows.push({ id: 'x1', doc_no: 'D-0005' });
+
+      const written = await engine.insert('doc', { title: 'second' });
+
+      // The honest outcome: the number is issued a second time, the write
+      // SUCCEEDS, and nothing anywhere says so. Fixing this needs uniqueness in
+      // the driver — `packages/drivers/**` is under the #5499 freeze, and a
+      // pre-issue existence probe in the engine would cost a query per insert
+      // and still be racy. Reported as a follow-up, not implemented here.
+      expect(written.doc_no).toBe('D-0005');
+      expect(rows.filter((r) => r.doc_no === 'D-0005')).toHaveLength(2);
+      // One create attempt: with no rejection there is nothing to retry.
+      expect(driver.create).toHaveBeenCalledTimes(2); // 'first' + 'second'
+    });
+
+    it('...but ADOPTION still holds there — it needs no constraint at all', async () => {
+      // The half that does cover driver-memory: drift the engine can observe
+      // is fixed without waiting for anyone to reject anything.
+      const { engine } = makeRig(SCHEMA, storedRows('doc_no', ['D-0003']));
+      await engine.init();
+
+      expect((await engine.insert('doc', { title: 'first' })).doc_no).toBe('D-0004');
+      await engine.insert('doc', { title: 'replay', doc_no: 'D-0009' }, { context: { isSystem: true } } as any);
+
+      expect((await engine.insert('doc', { title: 'after' })).doc_no).toBe('D-0010');
     });
   });
 

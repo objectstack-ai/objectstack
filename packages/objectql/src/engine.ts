@@ -2613,6 +2613,37 @@ export class ObjectQL implements IObjectQLEngine {
    *     actually conflicted: the second attempt fails the same way, and the
    *     original error is what the caller finally sees.
    *
+   * # ⚠ The guarantee is STORAGE-DEPENDENT — say so, do not imply otherwise
+   *
+   * This whole branch is triggered by the storage layer REJECTING the duplicate.
+   * Of the two in-repo drivers the fallback path serves, only one can:
+   *
+   * | driver | uniqueness on the autonumber column | a collision appears as |
+   * |:---|:---|:---|
+   * | driver-mongodb, field declares `unique` | single-field unique index (`idx_<f>_unique`) | `E11000 duplicate key` → re-seed + re-issue, here |
+   * | driver-mongodb, field does not | none | **nothing** — a silent duplicate |
+   * | driver-memory | **none, ever** | **nothing** — a silent duplicate |
+   *
+   * `InMemoryDriver.create` is a `table.push()` and it stores no constraints of
+   * any kind — its own docstring says so since #4065, and calls itself a WEAK
+   * oracle for exactly this reason. So on driver-memory an out-of-process
+   * duplicate cannot raise anything for this method to catch, and the number
+   * lands twice in the rendered field with no error anywhere.
+   *
+   * That is stated rather than papered over (PD #10: never advertise a
+   * capability the runtime does not deliver). What covers driver-memory is the
+   * OTHER half of this resync — {@link adoptExplicitAutonumber} — which needs no
+   * constraint at all because it never waits for a rejection. Between them: drift
+   * the engine can observe is fixed on every driver; drift only the store can
+   * report is fixed wherever the store reports it.
+   *
+   * ⛔ The remedy for the silent-duplicate row is uniqueness enforcement in the
+   * driver, NOT a pre-issue existence probe here: a probe costs a query on every
+   * insert (the cost this resync was designed to avoid) and is still racy, so it
+   * would trade a silent duplicate for a rarer silent duplicate at double the
+   * read cost. `packages/drivers/**` is under the #5499 investment freeze, so
+   * that work is not this change's to do.
+   *
    * # And when it does not converge
    *
    * After {@link AUTONUMBER_COLLISION_ATTEMPTS} the write fails with a named
@@ -6472,6 +6503,16 @@ export class ObjectQL implements IObjectQLEngine {
             // rethrown UNCHANGED (a batch caller — bulkWrite's per-row
             // degradation — reads these errors, and this is not the place to
             // change what it reads).
+            //
+            // What an author gets, stated plainly: `insert(object, rows[])` and
+            // `insertMany` both REJECT with the driver's own duplicate-key
+            // error — never `ERR_AUTONUMBER_COLLISION`, which is the
+            // single-row path's identity for "re-issued and still refused".
+            // Whether any row was written is the driver's answer, not this
+            // method's. The one thing the engine guarantees is that the NEXT
+            // write re-seeds instead of walking into the same collision, so a
+            // retry by the caller converges. Pinned in
+            // engine-autonumber-resync.test.ts.
             try {
               if (driver.bulkCreate) {
                 result = await driver.bulkCreate(object, liveRows, driverOptions);

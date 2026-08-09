@@ -37,10 +37,24 @@ A unique-constraint failure attributable to an autonumber the engine issued now
 drops the counter, re-seeds from the store and re-issues, bounded to 3 attempts;
 past that the write fails with `code: 'ERR_AUTONUMBER_COLLISION'` carrying the
 driver's error as `cause`, rather than the raw driver error. A conflict on a
-different column, and any non-unique failure, are rethrown untouched. A **batch**
-insert drops the stale counter but is never re-issued (`bulkCreate` may be
-partially applied, so re-writing it could duplicate the rows that did land) and
-its error is unchanged.
+different column, and any non-unique failure, are rethrown untouched.
+
+**This half is storage-dependent, and the docs say which driver gives what.** It
+is triggered by the store rejecting the duplicate, so it exists only where
+something enforces uniqueness: driver-mongodb does (a single-field unique index,
+when the field declares `unique`); **driver-memory never does** — its `create` is
+a `table.push()` storing no constraints at all — so there a duplicate still lands
+silently and this branch is unreachable. That outcome is now pinned rather than
+left implied, and driver-memory is covered by the adoption half above, which
+waits for no rejection. Enforcing uniqueness in the driver is the remedy for the
+remaining case and is not attempted here.
+
+A **batch** insert drops the stale counter but is never re-issued (`bulkCreate`
+may be partially applied, so re-writing it could duplicate the rows that did
+land). `insert(object, rows[])` and `insertMany` therefore reject with the
+**driver's own** duplicate-key error — never `ERR_AUTONUMBER_COLLISION`, which is
+the single-row identity for "re-issued and still refused" — and the guarantee a
+batch does get is that the next write re-seeds, so a caller's retry converges.
 
 The unique-violation questions are asked of `@objectstack/types`'
 `isUniqueViolationError` / `uniqueViolationColumn` (#6250 / #6544), never a
