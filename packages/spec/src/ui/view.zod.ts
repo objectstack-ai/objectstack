@@ -192,6 +192,35 @@ export const VIEW_FILTER_OPERATORS = [
 export type ViewFilterOperator = (typeof VIEW_FILTER_OPERATORS)[number];
 
 /**
+ * The operators whose `value` is a LIST rather than a scalar (#6227).
+ *
+ * These are the authoring spellings that lower to `$in` / `$nin`
+ * (`AST_OPERATOR_MAP`, `data/filter.zod.ts`), which
+ * {@link https://github.com/objectstack-ai/objectstack/issues/5869 | the runtime
+ * gate} requires to be arrays. Exported so a producer can ask the question the
+ * schema asks instead of hard-coding its own list: `@object-ui`'s filter builder
+ * decides `isMultiOperator` from a local `["in", "notIn"]` literal
+ * (`components/src/custom/filter-builder.tsx`), a second dialect of exactly this
+ * fact that is already one spelling adrift — `notIn` is an alias, not the
+ * canonical member. One declared vocabulary, same reasoning as
+ * {@link VIEW_FILTER_OPERATOR_ALIASES}.
+ */
+export const VIEW_FILTER_LIST_VALUE_OPERATORS = [
+  'in', 'not_in',
+] as const satisfies readonly ViewFilterOperator[];
+
+/**
+ * The operators whose `value` is a two-element `[min, max]` array (#6227).
+ *
+ * Separate from {@link VIEW_FILTER_LIST_VALUE_OPERATORS} because the check is
+ * different in kind: membership takes ANY arity (`[]` included), a range takes
+ * exactly two bounds.
+ */
+export const VIEW_FILTER_PAIR_VALUE_OPERATORS = [
+  'between',
+] as const satisfies readonly ViewFilterOperator[];
+
+/**
  * Legacy operator spellings normalized to the canonical vocabulary above.
  *
  * These are historical shorthand (`eq`, `gt`) and camelCase (`notEquals`,
@@ -346,6 +375,158 @@ export function stripViewConsoleDecorations(body: unknown): unknown {
   return stripRowDecorations(body, false, 0);
 }
 
+/** `string` / `number` / `an array of 3` / `null` … — the word the refusal uses. */
+function describeFilterValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'no value';
+  if (Array.isArray(value)) return `an array of ${value.length}`;
+  return `a ${typeof value}`;
+}
+
+/**
+ * A short, bounded rendering of the offending value.
+ *
+ * Bounded for the reason the runtime twin's `shapePreview` is: the value can be
+ * arbitrarily large, and the message is for a human reading a refusal, not a
+ * dump.
+ */
+function previewFilterValue(value: unknown): string {
+  if (value === undefined) return '(omitted)';
+  let text: string;
+  try {
+    text = JSON.stringify(value) ?? String(value);
+  } catch {
+    text = String(value);
+  }
+  return text.length > 40 ? `${text.slice(0, 39)}…` : text;
+}
+
+/**
+ * [#6227] `value` must have the shape the rule's OPERATOR can execute.
+ *
+ * ## The two-stage failure this closes
+ *
+ * `{ field: 'stage', operator: 'not_in', value: 'won' }` — a set operator with a
+ * scalar comparand — was a spec-VALID `ViewFilterRule`: `value` declared
+ * `string | number | boolean | null | (string | number)[]` with no coupling to
+ * `operator`, so every operator accepted every shape. The view published cleanly
+ * and then failed at QUERY time, where #5869 / PR #6209 had already closed the
+ * runtime half: `assertListComparandShapes` (`@objectstack/objectql`,
+ * `filter-comparand-shape.ts`) refuses the lowered `{ stage: { $nin: 'won' } }`
+ * with a named 400 `INVALID_FILTER`. Correct refusal, wrong moment — the author
+ * is gone by then, and before #6209 the same shape was a 500. That file's own
+ * module docblock names this schema as the reachable authoring source of the
+ * defect.
+ *
+ * ## Why this mirrors the runtime gate EXACTLY, and refuses to go further
+ *
+ * The checks below are `assertListComparandShapes`' three constraints, one for
+ * one: `$in`/`$nin` must be an array, `$between` must be a 2-array. Nothing else
+ * is judged here, deliberately — #5685 already ruled on the opposite error, where
+ * `FieldOperatorsSchema` declared `$gt` as `number | Date | FieldReference` while
+ * every first-party producer put an ISO STRING there; the schema was ruled the
+ * wrong side and widened to match the runtime. A publish-time gate refusing more
+ * than the query path refuses would re-create that mismatch pointing the other
+ * way, and would reject stored metadata that executes correctly today.
+ * Specifically NOT refused, because the runtime does not refuse them:
+ *
+ * - **`in: []` / `not_in: []`.** An empty list is a legitimate declared predicate
+ *   — "matches nothing" / "matches everything" — and the runtime gate says so in
+ *   as many words. Arity is not this check's business for membership; only "is it
+ *   a list at all".
+ * - **A scalar operator carrying an array** (`equals: ['a','b']`). `equals`
+ *   lowers to a bare `{ field: value }` deep-equality comparand
+ *   (`convertComparison`), which every backend answers.
+ * - **A string operator carrying a number** (`contains: 5`). Lowers to
+ *   `$contains: 5`; no backend refuses it.
+ * - **A unary operator carrying a value** (`is_empty: ''`). The null predicates
+ *   take their direction from the operator NAME — `convertComparison` maps them
+ *   to `{ $null: true|false }` and ignores the value position entirely — and the
+ *   ObjectUI client deliberately sends a truthy PLACEHOLDER value for both
+ *   `isnull` and `isnotnull`. Refusing it would break a live first-party producer
+ *   to enforce nothing.
+ *
+ * ## Why `superRefine` and not `z.discriminatedUnion` (measured, not assumed)
+ *
+ * 1. **`z.discriminatedUnion` cannot read this discriminator — it does not
+ *    construct.** `operator` is `z.preprocess(normalizeFilterOperator, z.enum(…))`
+ *    — the alias fold that lets a stored `notIn` / `nin` / `gt` parse. Zod 4
+ *    extracts a discriminator's literal values from the option's own def, and a
+ *    preprocess wrapper hides them: building the union throws
+ *    `Invalid discriminated union option at index "0"` before any parse happens.
+ *    The alias fold is load-bearing ({@link VIEW_FILTER_OPERATOR_ALIASES} exists
+ *    for stored metadata) and is not negotiable to buy a union.
+ * 2. **A refinement adds no JSON-Schema structure.** Measured with
+ *    `z.toJSONSchema` before and after: byte-identical output. `ui/ViewFilterRule`
+ *    is a PUBLISHED def whose authorable key set is a ratchet of exactly three
+ *    entries (`authorable-surface/ui.json`). A union fans that one def into N
+ *    branches re-declaring the same three keys per branch — the phantom
+ *    liveness-worklist inflation #7042 measured and refused for
+ *    `ViewContainerWireSchema` one screen down — and ObjectUI's SchemaForm would
+ *    stop rendering the single operator dropdown it renders today.
+ * 3. **Error quality points at the defect.** A refinement emits ONE issue at path
+ *    `['value']` naming the operator, the received shape and the expected one. A
+ *    union emits every branch's failure and leads with the discriminator, i.e. it
+ *    blames `operator` for a defect that is in `value`.
+ *
+ * In Zod 4 a refinement lives INSIDE the schema rather than wrapping it in a
+ * `ZodEffects`, so `.shape` and the `ZodObject` class survive (measured) and
+ * every carrier — `z.array(ViewFilterRuleSchema)` on `ListView.filter`, a tab
+ * filter, `Page.filterBy`, a related-list filter and a lookup picker filter —
+ * keeps working untouched.
+ *
+ * ## The wording is the runtime's wording (#5240)
+ *
+ * The leading sentence is kept verbatim from `nonListComparandError` /
+ * `malformedRangeComparandError` so one condition keeps one wording across the
+ * two moments it can be reported. The TAIL deliberately differs: the runtime's
+ * closing fact is "the filter was NOT applied", which is false here — nothing
+ * ran, the metadata is being refused — so this one prescribes the fix instead.
+ */
+function checkViewFilterRuleValueShape(
+  rule: { field?: unknown; operator?: unknown; value?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  // `operator` is read POST-parse, so it is already folded to canonical by
+  // `normalizeFilterOperator`: a stored `notIn` is `not_in` here, and this check
+  // never has to know the alias table.
+  const operator = rule.operator as ViewFilterOperator;
+  const value = rule.value;
+  const field = typeof rule.field === 'string' ? rule.field : '<field>';
+
+  const isList = (VIEW_FILTER_LIST_VALUE_OPERATORS as readonly string[]).includes(operator);
+  const isPair = (VIEW_FILTER_PAIR_VALUE_OPERATORS as readonly string[]).includes(operator);
+
+  if (isList) {
+    if (Array.isArray(value)) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['value'],
+      message:
+        `Operator "${operator}" on field "${field}" requires an ARRAY of values. `
+        + `Received ${describeFilterValue(value)} (${previewFilterValue(value)}). `
+        + `"${operator}" tests membership of a list — write `
+        + `${value === undefined ? '["…"]' : previewFilterValue([value])} for a single value, `
+        + `or use ${operator === 'in' ? '"equals"' : '"not_equals"'} to compare against it. `
+        + `An empty list [] is allowed and is a real predicate. This is refused at authoring `
+        + `time because the query path refuses it too (400 INVALID_FILTER, #5869).`,
+    });
+    return;
+  }
+
+  if (!isPair) return;
+  if (Array.isArray(value) && value.length === 2) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['value'],
+    message:
+      `Operator "${operator}" on field "${field}" requires a [min, max] value array. `
+      + `Received ${describeFilterValue(value)} (${previewFilterValue(value)}). `
+      + `A range needs exactly two bounds, in order. This is refused at authoring time `
+      + `because the query path refuses it too (400 INVALID_FILTER, #5869).`,
+  });
+}
+
 /**
  * View Filter Rule Schema
  * Standardized filter condition used in list views, tabs, and page-level filters.
@@ -411,10 +592,20 @@ export const ViewFilterRuleSchema = lazySchema(() => strictObject({
    */
   operator: z.preprocess(normalizeFilterOperator, z.enum(VIEW_FILTER_OPERATORS))
     .describe('Filter operator'),
-  /** Filter value (optional for unary operators like is_empty, is_null) */
+  /**
+   * Filter value (optional for unary operators like is_empty, is_null).
+   *
+   * The accepted SHAPE is coupled to `operator` by
+   * {@link checkViewFilterRuleValueShape} (#6227).
+   */
   value: z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.union([z.string(), z.number()]))])
-    .optional().describe('Filter value'),
-}).describe('View filter rule'));
+    .optional().describe(
+      'Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an '
+      + 'array (any length, including []), `between` takes exactly [min, max], every other '
+      + 'operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / '
+      + 'is_not_null) take their direction from the operator name and ignore this key.',
+    ),
+}).superRefine(checkViewFilterRuleValueShape).describe('View filter rule'));
 
 export type ViewFilterRule = z.input<typeof ViewFilterRuleSchema>;
 /** Post-parse shape of {@link ViewFilterRule} — defaults applied, transforms run (ADR-0122). */
