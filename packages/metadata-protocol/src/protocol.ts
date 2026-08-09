@@ -8093,6 +8093,78 @@ export class ObjectStackProtocolImplementation implements
                 registry.removeOverlayEntry(singular, name);
                 if (type !== singular) registry.removeOverlayEntry(type, name);
             }
+            // [#6808] …and an `object` lives in a SECOND place, so tier 3 has a
+            // second limb. `applyObjectRegistryMutation` writes both halves on
+            // the way in — `registerItem` into the generic `metadata` map, and
+            // `registerObject` into `objectContributors` — while every verb
+            // this walk used above (`removeRuntimeShadow`, `registerItem`,
+            // `removeOverlayEntry`) addresses only the first. So the walk
+            // retired the listing copy and left the DISPATCH copy: measured
+            // over the real `SysMetadataRepository`, after the delete
+            // `metadata['object']` was empty while `registry.getObject(name)`
+            // — and `getItem('object', name)`, which special-cases back to it —
+            // still served the object, keeping the deleted row's schema
+            // readable and WRITABLE for the life of the process.
+            //
+            // Same tier as `removeOverlayEntry`, and only that tier: tiers 1
+            // and 2 both concluded that a lower layer still serves this name
+            // (a packaged artifact, or a MetadataService baseline), and an
+            // object that is still served must stay registered — retiring it
+            // there would turn "reset to artifact default" into an outage,
+            // because `assertObjectRegistered` fails CLOSED for the whole data
+            // plane. Only "no layer serves it" licenses removal, which is the
+            // verdict this branch already carries for the other half.
+            //
+            // The ADR-0029 extender guard lives in the registry verb (see
+            // {@link SchemaRegistry.unregisterObject}) and it THROWS — which
+            // this best-effort heal must not propagate: the repository delete
+            // has already committed, and the operator's row is gone either
+            // way. So the refusal is caught and stated, deliberately NOT left
+            // to the silent outer `catch`: an extended object surviving a
+            // delete is a real divergence between the store and the runtime,
+            // and it must be visible in the log rather than inferred later
+            // from a registry that disagrees with `sys_metadata`.
+            //
+            // ── AND IT NEVER RETIRES A CODE-SHIPPED OBJECT ──
+            //
+            // The same refusal `removeOverlayEntry` carries one line up, for
+            // the same reason: unregistering shipped code that the overlay
+            // delete never touched would be a worse bug than the one this
+            // closes. It is asked through the protocol's OWN existing predicate
+            // ({@link isArtifactBacked} → `SchemaRegistry.getArtifactItem`,
+            // which for `object` reads the contributor definition and applies
+            // exactly the artifact test the sibling verb applies to the plain
+            // key), so this limb inherits that judgement instead of open-coding
+            // a second one.
+            //
+            // Not theoretical, and NOT already covered by the gate at the top of
+            // `deleteMetaItem`: that two-tier authorization — which refuses an
+            // artifact-backed `object` outright with `not_overridable` — runs
+            // only when `environmentId !== undefined`. On a CONTROL-PLANE
+            // kernel it is skipped, and `revertCommit`'s soft-remove limb
+            // reaches this walk without it either, so the delete can arrive
+            // here for a name a code package still ships. Retiring it would
+            // take that object off the whole data plane until restart, because
+            // `assertObjectRegistered` fails closed.
+            //
+            // The check lives HERE rather than in the verb because it is a
+            // statement about LAYERS, which is what this walk reasons about;
+            // `unregisterObject` stays a general removal whose only refusal is
+            // ADR-0029's extender rule.
+            if (
+                singular === 'object'
+                && !this.isArtifactBacked(singular, name)
+                && typeof registry.unregisterObject === 'function'
+            ) {
+                try {
+                    registry.unregisterObject(name);
+                } catch (err: any) {
+                    console.warn(
+                        `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
+                        + `${err?.message ?? err}`,
+                    );
+                }
+            }
         } catch {
             // Best-effort registry refresh; next read fixes it anyway
         }

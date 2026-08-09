@@ -585,8 +585,16 @@ describe('[#5010] DashboardWidgetSchema — retired action trio + `aria`', () =>
     expect(message).toMatch(/Delete the key/);
     // The shared shape survives elsewhere. Without this, the message reads as
     // "AriaProps is gone", which would send an author deleting live metadata.
-    expect(message).toMatch(/app\.aria/);
+    //
+    // ⚠️ This assertion used to require `/app\.aria/` — and `App.aria` is a
+    // `retiredKey()` tombstone removed in this same 17.0.0, so the pin was
+    // holding the prescription ON a dead surface (#6756). Re-aimed at the
+    // surfaces that really do still declare `aria: AriaPropsSchema` and are
+    // graded `live` in the liveness ledger. The full both-directions
+    // enumeration pin lives in `aria-carrier-tombstones.test.ts`.
+    expect(message).toMatch(/page\.aria/);
     expect(message).toMatch(/page\.components\[\]\.aria/);
+    expect(message).not.toMatch(/app\.aria/i);
     expect(message).not.toMatch(/Unrecognized key/);
   });
 

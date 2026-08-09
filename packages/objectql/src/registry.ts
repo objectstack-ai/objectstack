@@ -1249,6 +1249,27 @@ export class SchemaRegistry {
    * 2. Legacy FQN match (e.g., 'crm__account') — backward compat.
    */
   getObject(name: string): ServiceObject | undefined {
+    const fqn = this.resolveObjectKey(name);
+    return fqn === undefined ? undefined : this.resolveObject(fqn);
+  }
+
+  /**
+   * [#6808] The name→FQN half of {@link getObject}, extracted so the READ and
+   * the name-addressed REMOVAL ({@link unregisterObject}) cannot disagree
+   * about which contributor entry a bare name addresses.
+   *
+   * That disagreement is not hypothetical — it is the shape of the bug this
+   * was extracted for: `deleteMetaItem`'s registry heal reached one of the two
+   * places an `object` lives, and the surface data CRUD dispatches on
+   * (`getObject`) kept serving a deleted object. A remover that resolved names
+   * its own way would re-open the same seam one layer down: it could remove an
+   * entry `getObject` never served, leaving the served one behind.
+   *
+   * Returns `undefined` when nothing is registered under the name, so
+   * `getObject` keeps its exact previous behaviour: `resolveObject` on an
+   * unknown FQN also answered `undefined`.
+   */
+  private resolveObjectKey(name: string): string | undefined {
     // Canonical: short name lookup
     const matches: string[] = [];
     for (const fqn of this.objectContributors.keys()) {
@@ -1264,11 +1285,11 @@ export class SchemaRegistry {
           `Returning first match. Use FQN to disambiguate.`
         );
       }
-      return this.resolveObject(matches[0]);
+      return matches[0];
     }
 
     // Fallback: explicit FQN
-    return this.resolveObject(name);
+    return this.objectContributors.has(name) ? name : undefined;
   }
 
   /**
@@ -1397,6 +1418,104 @@ export class SchemaRegistry {
       this.mergedObjectCache.delete(fqn);
       this._objectRevision += 1;
     }
+  }
+
+  /**
+   * [#6808] Unregister ONE object, addressed by NAME — the removal verb this
+   * registry was missing, and the reason a deleted object stayed servable.
+   *
+   * ## Why a second removal verb, and not a call to the first one
+   *
+   * Until this method, {@link unregisterObjectsByPackage} was the ONLY way an
+   * object left `objectContributors`, and it is addressed by PACKAGE. That is
+   * the right verb for an uninstall and the wrong one for a delete: an
+   * `object` created at runtime has no package identity of its own (the write
+   * path keys its contributor by the row's `package_id`, or the
+   * `'sys_metadata'` sentinel when the row is package-less), so routing a
+   * single delete through it would mean synthesising an identity and then
+   * tearing down every SIBLING object registered under it — a far wider blast
+   * radius than the delete the operator asked for.
+   *
+   * The gap it left was load-bearing. A runtime-authored `object` is written
+   * into TWO places (`metadata['object']` via {@link registerItem} and
+   * `objectContributors` via {@link registerObject}), and the metadata-protocol
+   * heal that runs after a `sys_metadata` delete only ever reached the first.
+   * Measured over the real repository: after `DELETE /meta/object/<name>` the
+   * row was gone and `metadata['object']` was empty, while `getObject(name)`
+   * — and therefore `getItem('object', name)`, which special-cases straight
+   * back to it — kept serving the object for the life of the process. Since
+   * `getObject` is what the data plane dispatches on
+   * (`assertObjectRegistered`), the deleted object stayed readable, syncable
+   * and WRITABLE.
+   *
+   * ## The ADR-0029 guard, and why it is the SAME judgement, not a second one
+   *
+   * ADR-0029: exactly one package owns an object; others may only `extend` it.
+   * An extender's fields are merged into the owner's definition
+   * ({@link resolveObject}), so removing an owned object out from under a live
+   * extender leaves contributions that resolve to nothing —
+   * {@link assertSingleOwnerPerObject}'s "has extenders but no owner"
+   * violation, reached at runtime instead of at bootstrap.
+   * `unregisterObjectsByPackage` already encodes the answer (refuse, name the
+   * extenders, force overrides), so this mirrors that judgement rather than
+   * inventing a second one; only the address changes, from package to name.
+   * Both facts it needs — the owner and the extenders — are already in the
+   * contributor list, so no new bookkeeping structure exists to drift.
+   *
+   * "Other" means "not the owner's package", the same relation the sibling
+   * verb expresses as "not the package being uninstalled": an extension the
+   * OWNER itself contributed goes away with the object it extends, exactly as
+   * it would on an uninstall. An object with no owner at all (only extenders —
+   * already an ADR-0029 violation) counts every extender as other, so it is
+   * refused rather than silently torn down.
+   *
+   * @param name Short name (canonical) or FQN — resolved exactly as
+   *   {@link getObject} resolves it, so this removes precisely the entry that
+   *   was being served.
+   * @param options.force Skip the extender guard. The escape hatch the
+   *   package-scoped verb has, for a caller that has already decided.
+   * @returns whether an object was removed (`false` = nothing registered
+   *   under that name; removal is idempotent).
+   * @throws Error naming the extenders when the object is still extended by
+   *   another package and `force` is not set.
+   */
+  unregisterObject(name: string, options: { force?: boolean } = {}): boolean {
+    const fqn = this.resolveObjectKey(name);
+    if (fqn === undefined) return false;
+    const contributors = this.objectContributors.get(fqn) ?? [];
+
+    const owner = contributors.find(c => c.ownership === 'own');
+    if (!options.force) {
+      const otherExtenders = contributors.filter(
+        c => c.ownership === 'extend' && c.packageId !== owner?.packageId
+      );
+      if (otherExtenders.length > 0) {
+        throw new Error(
+          `Cannot unregister object "${fqn}": it is extended by ` +
+          `${otherExtenders.map(c => c.packageId).join(', ')}. Unregister the extenders first.`
+        );
+      }
+    }
+
+    // The whole entry goes: the object no longer exists, so no contribution to
+    // it does either. Leaving the extenders behind would be the owner-less
+    // state the guard above exists to prevent.
+    this.objectContributors.delete(fqn);
+    // The same two invalidations every other contributor mutation performs —
+    // the merged-object cache would otherwise keep answering `resolveObject`
+    // for a name with no contributors, and registry-derived caches (the
+    // engine's roll-up summary index) would never learn the set moved.
+    this.mergedObjectCache.delete(fqn);
+    this._objectRevision += 1;
+    // Namespaces are deliberately NOT touched: a namespace is registered per
+    // PACKAGE and shared by every object that package ships, so dropping one
+    // object must not unregister it. `unregisterObjectsByPackage` leaves it
+    // alone too — `uninstallPackage` owns that half.
+    this.log(
+      `[Registry] Unregistered object: ${fqn} ` +
+      `(${contributors.length} contribution(s), owner ${owner?.packageId ?? '(none)'})`
+    );
+    return true;
   }
 
   // ==========================================
