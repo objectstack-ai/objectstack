@@ -5126,6 +5126,48 @@ export class RestServer {
             handler: async (req: any, res: any) => {
                 try {
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    // [#6603] Authoring capability gate — the SAME mechanism
+                    // `POST /meta/_migrate-stored` uses next door, deliberately
+                    // not a second way of demanding the same capability.
+                    //
+                    // Two independent reasons, either sufficient:
+                    //
+                    //  1. **The ADR-0106 round-trip.** D1 removes an unreadable
+                    //     field WHOLE from a served object schema, and this
+                    //     route persists the body it is handed. So a non-exempt
+                    //     caller's ordinary GET → edit a label → PUT used to
+                    //     store the schema back MINUS the fields masked out of
+                    //     their own read — silent deletion of fields they were
+                    //     never allowed to see, with nothing in the exchange
+                    //     saying so. Refusing the write is the write-side answer
+                    //     the masking needs: it makes "whoever may write a
+                    //     schema is whoever sees all of it" an enforced
+                    //     invariant instead of a coincidence, rather than
+                    //     teaching `saveMetaItem` that absent means keep (which
+                    //     would make field DELETION inexpressible for everyone).
+                    //  2. It closes a hole that predates masking entirely: any
+                    //     authenticated session could clobber any metadata item.
+                    //
+                    // Gate FIRST — before the protocol is resolved — so an
+                    // unauthorized caller cannot use the 501-vs-200 answer to
+                    // probe which kernels implement saving, and so nothing is
+                    // written before the refusal. `manage_metadata` is
+                    // ADR-0066 D1's authoring capability and saving a metadata
+                    // item is authoring; `isSystem` bypasses, matching every
+                    // other capability gate on the platform.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const held = new Set<string>(
+                        Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
+                    );
+                    if (!ctx?.isSystem && !held.has('manage_metadata')) {
+                        res.status(403).json({
+                            error: {
+                                code: 'FORBIDDEN',
+                                message: 'Saving a metadata item requires the `manage_metadata` capability.',
+                            },
+                        });
+                        return;
+                    }
                     const p = await this.resolveProtocol(environmentId, req);
                     if (!p.saveMetaItem) {
                         res.status(501).json({ error: 'Save operation not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
