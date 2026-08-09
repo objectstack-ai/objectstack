@@ -149,6 +149,18 @@ Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. 
 
     ⚠️ **And do not read draft as a barrier.** Measured on **#6732**: `draft: true` on the PR that was nevertheless merged at 14:38:56Z on 2026-08-08 — *after* exactly that disable-plus-draft reversal. Draft is a speed bump; the barrier is machine enforcement (**#6785** — `docs/adr/` in CODEOWNERS plus a required check that stays red unless the maintainer's own account has approved). Why that gate exists is this directive's own failure record: within one hour of the ruling, two **different** AI seats merged ADR PRs — #6671 at 14:23:32Z by `os-zhuang`, #6732 at 14:38:56Z by `os-project-manager`. The maintainer confirmed neither was theirs and ratified both retroactively — those two only, explicitly setting no precedent. So a seat that has read this far is not thereby licensed to judge an exception; the rule has no exception to judge.
 
+15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or triggers a release workflow, and none merges the Version Packages PR.** Maintainer ruling, 2026-08-07 (#6170), verbatim and untranslated:
+
+    > **刚才我也没提出要求,是哪个ai自己替我发了 rc.4,版本发布必须是人工的。这个要写入规范。**
+
+    Its last sentence is this directive's warrant: 「这个要写入规范」. Until #6830 it had not been — the ruling lived only in `.claude/skills/pm-dispatch/SKILL.md`, a file exactly one lane loads, while its own text binds 「任何 AI 座位(PM / dev / Routine / 队列管家)」. A rule that binds every seat has to be readable by every seat; that is why it is here and not only there.
+
+    **Release-adjacent work stays open to every seat.** The release board, `.objectui-sha` pin bumps, version reconciliation (#6149's field-level pass, #6169's merge-back), writing changesets, compiling release notes when asked, and *verifying* release state (`npm view`, `git ls-remote --tags`) are ordinary tasks — none of them is what this directive touches. What is reserved is the **release act itself**: ⛔ running `changeset publish` / `pnpm run release`, ⛔ pushing a version tag, ⛔ cutting a GitHub Release, ⛔ pushing a runtime image, ⛔ `workflow_dispatch`-ing `release.yml` or any other publish-capable workflow, and ⛔ merging — or queueing, or arming auto-merge on — the **Version Packages** PR (`chore: version packages`, today **#6208**). That PR is bot-authored and standing-open by design: it is regenerated on every push to `main`, so "green, current, and nobody has objected" is its permanent resting state, not a signal that it is due. And when you find a publish nobody ordered — a tag or an npm version that simply appeared — ⛔ do not "repair" it with a counter-publish: file it as an incident for the maintainer, which is how #6169 was handled.
+
+    **The precedent is that the mechanical channel fires with nobody deciding to use it.** On 2026-08-07 `release.yml`'s `on: push` lane shipped **17.0.0-rc.4** end to end — 69 packages to npm, 69 tags at `a10cbc77`, GitHub Releases, and the runtime image — from run `31146224227`, event `push`, actor `github-merge-queue[bot]`: **no human, no dispatch, no seat clicked anything** (#6169 measured it; #6170 diagnosed it). The same mechanism had already shipped rc.3 four days earlier (#6135). Both publishes also skipped `check:objectui-pin-fresh`, and neither version commit ever reached `main`. So the existence of a path to a release is not authorization to walk it — the same sentence #14 makes about the queue button, one rule over.
+
+    ⚠️ **And do not read "the human lane" as a barrier that holds against you.** #6172 closed the on-push hole: the publish job is now `if: github.event_name == 'workflow_dispatch'` behind `environment: release`, and the file's own comment calls `workflow_dispatch` the guarantee because "no push, no merge queue landing, no bot token and no schedule can synthesise this event". True for those four — **an authenticated seat calling the Actions API is not among them.** A `workflow_dispatch` is precisely the event an agent *can* synthesise, and whether that environment actually carries required reviewers is a repo-Settings fact this file cannot assert (the one-time setup is the maintainer's, #6170). The YAML stops the machine; this directive is the part that stops you.
+
 ---
 
 ## Multi-agent working discipline
@@ -289,11 +301,14 @@ Even inside your own worktree, operate defensively:
    workflows on that rebuilt generation, and lands it only if the required ones
    pass. That is the §10 re-verification, done by the platform, race-free.
 
-   ⛔ **One class of PR never enters this path, however green: a diff that
-   touches `docs/adr/**`.** Do not merge it, do not queue it, do not arm it —
-   read the PR's file list (`get_files`) before you arm anything, and see
-   **Prime Directive #14** for the ruling, for why "accepted and green" is not
-   an exception, and for how to get an already-queued one back out.
+   ⛔ **Two classes of PR never enter this path, however green:** (a) a diff
+   that touches `docs/adr/**` (**Prime Directive #14**); (b) the **Version
+   Packages** PR — `chore: version packages`, today #6208 — or any other PR
+   whose merge performs a release (**Prime Directive #15**). Do not merge them,
+   do not queue them, do not arm them — read the PR's file list (`get_files`)
+   **and its author** before you arm anything, and see those two directives for
+   the rulings, for why "accepted and green" is not an exception, and for how
+   to get an already-queued one back out.
 
    **What "the queue validates" means here, measured** (`origin/main`,
    2026-08-07): three of this repo's 22 workflows carry an `on: merge_group:`
