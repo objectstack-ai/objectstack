@@ -1851,7 +1851,8 @@ describe('null-guard gate (#4763)', () => {
     // flattened scope (this gate never resolves a bare identifier — only
     // `record.<f>`/`previous.<f>`, and the engine binds both roots
     // unconditionally). It is that `record-change-trigger.ts` seeds the flow's
-    // record as `{ ...inputDoc, ...after }` with no `materializeDeclaredFields`,
+    // record as `{ ...(inputData ?? {}), ...after }` (spelled `inputDoc` until
+    // #5671 dropped that alias read) with no `materializeDeclaredFields`,
     // so a declared column the write never mentioned is an ABSENT key — and on
     // an absent key the `!= null` this gate prescribes faults exactly like the
     // comparison it was meant to guard.

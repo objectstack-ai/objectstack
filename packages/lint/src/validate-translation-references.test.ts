@@ -633,6 +633,142 @@ describe('validateTranslationReferences — the canonical view-record shape', ()
     });
   });
 
+  // ── #6422 / #5164 leg 3: the NAMED entries' keys are the RUNTIME's too ────
+  //
+  // The composer constructs every `listViews.<key>` / `formViews.<key>`
+  // identity from the MAP KEY alone — the inner `name` is ignored — and
+  // renames on collision. This rule therefore reads the named entries' keys
+  // from the composer (`namedViewKeys`), exactly as it reads the default
+  // list's (`defaultListViewKey`). Same discipline as the #6038 block above:
+  // every "legal" assertion is paired with a planted bad key on the SAME
+  // fixture, so a green run is never an empty run.
+  describe('named entries are keyed by the runtime identity, single spelling', () => {
+    const bundle = (views: Record<string, unknown>) => ({
+      translations: [{ en: { objects: { crm_lead: { label: 'Lead', _views: views } } } }],
+    });
+
+    it('an inner `name` diverging from its map key is not a legal `_views` key — the runtime never resolves it', () => {
+      const stack = {
+        objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+        views: [
+          {
+            listViews: {
+              my_leads: {
+                name: 'open_leads',
+                type: 'grid',
+                data: { provider: 'object', object: 'crm_lead' },
+              },
+            },
+          },
+        ],
+      };
+      // The map key is the registry key…
+      expect(
+        validateTranslationReferences({ ...stack, ...bundle({ my_leads: { label: 'My Leads' } }) }),
+      ).toEqual([]);
+      // …and the inner `name` is a key nothing resolves. This spelling used to
+      // be accepted ("authors write either", HotCRM); #5164's ruling — canonical
+      // = the runtime identity's bare key — retires it on the named branches.
+      const findings = validateTranslationReferences({
+        ...stack,
+        ...bundle({ open_leads: { label: 'Open Leads' } }),
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.open_leads');
+    });
+
+    it('the same narrowing holds on the formViews branch', () => {
+      const stack = {
+        objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+        views: [
+          {
+            formViews: {
+              quick: {
+                name: 'quick_form',
+                type: 'simple',
+                data: { provider: 'object', object: 'crm_lead' },
+              },
+            },
+          },
+        ],
+      };
+      expect(
+        validateTranslationReferences({ ...stack, ...bundle({ quick: { label: 'Quick' } }) }),
+      ).toEqual([]);
+      const findings = validateTranslationReferences({
+        ...stack,
+        ...bundle({ quick_form: { label: 'Quick Form' } }),
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.quick_form');
+    });
+
+    it('a collision-renamed formViews entry is legal under the renamed key — the author who wrote the registry key is not an orphan', () => {
+      // The #6422 sharp case. The nameless default `list` claims
+      // `crm_lead.default` first, so `formViews.default` is renamed
+      // `crm_lead.default_2` — and the rename IS the registry key. Before this
+      // rule asked the composer, it accepted `default` for the form (a key
+      // that resolves to the LIST) and reported `default_2` — the one spelling
+      // that actually resolves the form — as an orphan.
+      //
+      // The shape is dormant in shipped configs only because the view-ref lint
+      // (`lint-view-refs.ts`) makes every view-key collision a hard error.
+      // That dormancy depends on ANOTHER rule staying strict, which is exactly
+      // why it is pinned here instead of trusted silently.
+      const collided = {
+        objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+        views: [
+          {
+            list: { type: 'grid', data: { provider: 'object', object: 'crm_lead' } },
+            formViews: {
+              default: { type: 'simple', data: { provider: 'object', object: 'crm_lead' } },
+            },
+          },
+        ],
+      };
+      // `default` resolves the list, `default_2` resolves the form: both are
+      // registry keys, so both are legal bundle spellings.
+      expect(
+        validateTranslationReferences({
+          ...collided,
+          ...bundle({ default: { label: 'All' }, default_2: { label: 'Form' } }),
+        }),
+      ).toEqual([]);
+      // Planted bad key on the SAME fixture: the green above is not an empty run.
+      const findings = validateTranslationReferences({
+        ...collided,
+        ...bundle({ default_3: { label: 'Ghost' } }),
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.default_3');
+    });
+
+    it('an inner `name` that MATCHES its map key stays legal — the narrowing removes a spelling, not a view', () => {
+      // The overwhelmingly common authored shape (every in-repo config): the
+      // author restates the map key as `name`. One key, one spelling — the
+      // map key — and it still resolves.
+      const stack = {
+        objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+        views: [
+          {
+            listViews: {
+              recent: { name: 'recent', type: 'grid', data: { provider: 'object', object: 'crm_lead' } },
+            },
+          },
+        ],
+      };
+      expect(
+        validateTranslationReferences({ ...stack, ...bundle({ recent: { label: 'Recent' } }) }),
+      ).toEqual([]);
+      const findings = validateTranslationReferences({
+        ...stack,
+        ...bundle({ recent: { label: 'Recent' }, stale: { label: 'Stale' } }),
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._views.stale');
+    });
+  });
+
   it('resolves views embedded on the object itself', () => {
     const findings = validateTranslationReferences({
       objects: [

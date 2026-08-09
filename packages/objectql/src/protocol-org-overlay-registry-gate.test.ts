@@ -447,10 +447,19 @@ describe('#6602 — the delete chain needs no re-keying under this fix', () => {
     });
 
     it('an org-scoped delete has no plain-key entry of its own to retire', async () => {
-        // The whole argument for leaving `restoreArtifactRegistryView` alone:
-        // the delete chain is `(type, name)`-addressed and org-blind, but with
-        // both entry seams refusing org rows there is nothing org-scoped in the
+        // The argument for leaving `restoreArtifactRegistryView` alone: the
+        // delete chain is `(type, name)`-addressed and org-blind, but with both
+        // entry seams refusing org rows there is nothing org-scoped in the
         // registry for it to mis-address.
+        //
+        // [#6780] TRUE OF THIS CASE, AND ONLY THIS CASE — measured later, and
+        // the correction is the next describe block. The name here is org A's
+        // alone, so the plain key really is empty and the org-blind heal has
+        // nothing to hit. Give the name an ENV-WIDE row as well and the same
+        // heal addresses that row's entry instead: `(type, name)` cannot tell
+        // the two apart, so "no entry of its own" was never "no entry". The
+        // fix keeps this file's conclusion (no org-scoped registry keys) and
+        // adds the missing half (an org-scoped delete may not heal at all).
         await protocol.saveMetaItem({
             type: 'view',
             name: 'org_grid',
@@ -462,5 +471,217 @@ describe('#6602 — the delete chain needs no re-keying under this fix', () => {
         const deleted = await protocol.deleteMetaItem({ type: 'view', name: 'org_grid', organizationId: ORG_A });
         expect(deleted.success).toBe(true);
         expect(registry.getItem('view', 'org_grid')).toBeUndefined();
+    });
+});
+
+/**
+ * #6780 — an ORG-scoped metadata DELETE must not evict the ENV-WIDE registry
+ * entry that every org and the control plane read.
+ *
+ * The block above closed the two ENTRY seams (write-through + read-side
+ * hydration) and concluded the delete chain needed no re-keying. That
+ * conclusion holds for a name only one org has touched — and fails for the
+ * name that matters, because `restoreArtifactRegistryView` is
+ * `(type, name)`-addressed and its every tier writes the PLAIN key:
+ * `removeRuntimeShadow` drops it, the layer-2 re-register rewrites it,
+ * `removeOverlayEntry` retires it. Per ADR-0005 that one plain key belongs to
+ * the ENV-WIDE row. So org A's delete could only ever hit somebody else's
+ * entry.
+ *
+ * Measured on `origin/main` (5e247fd6b) BEFORE the fix, the card's sequence:
+ *
+ *   after env save   : "Env grid"
+ *   after org save   : "Env grid"        ← #6602 holding
+ *   delete receipt   : {"success":true,"reset":true,…}
+ *   after org DELETE : undefined         ← the eviction
+ *   rows left        : [{"n":"shared_grid","org":null,"state":"active"}, …]
+ *
+ * — the env-wide ROW still in `sys_metadata`, its registry entry gone. While
+ * it is gone, direct registry readers answer as if the item does not exist
+ * (ADR-0110 D3's declaration gate, `resolveRouteActionDeclaration`,
+ * fail-closed `assertObjectRegistered` → 404), so one tenant's "reset my
+ * customization" degrades every other tenant's runtime. Pre-existing; #6602
+ * neither introduced nor covered it.
+ *
+ * ── The shape, and why (b) rather than (a) ─────────────────────────────
+ *
+ * The verdict lives INSIDE the helper as a REQUIRED `organizationId`
+ * parameter — the {@link hydrateOverlayIntoRegistry} shape #6602/PR #6779
+ * used on the register side — rather than as a gate repeated at each call
+ * site. Measured reason: there are FOUR call sites, not the two the card
+ * names — `deleteMetaItem` has three (self-heal, post-`repo.delete`, legacy
+ * raw-engine path) and `revertCommit` one. PR #6807 had already gated the
+ * revert one; a call-site fix would have had to find the other three, and
+ * the legacy raw-engine path is exactly the kind a sweep misses. A required
+ * parameter makes a fifth caller answer at compile time. #6807's call-site
+ * `if (orgId === null)` is now redundant-not-contradictory and was folded
+ * into the argument it passes; its pin ("an ORG-scoped soft-remove leaves the
+ * env-wide registry entry alone", protocol-commit-history.test.ts) is
+ * untouched and still covers the batch path.
+ *
+ * REGISTER WIDE, RETIRE NARROW: the write-through's `object` carve-out is
+ * deliberately NOT org-gated, and that does not transfer here — it rests on
+ * `assertObjectRegistered` failing CLOSED, so a surplus entry degrades to
+ * "listable but rowless" and the next reload heals it, while a wrongly
+ * retired entry 404s data CRUD for every tenant.
+ *
+ * ── Reverse verification, direction predicted BEFORE running ───────────
+ *
+ * Ordinary red, with deliberately green controls. Deleting the
+ * `organizationId` refusal from `restoreArtifactRegistryView` must turn the
+ * three org-scoped REGISTRY cases red — reproducing the card's `undefined`
+ * and, for the artifact case, the un-shadowing that precedes it — while the
+ * three env-wide cases stay green (an env-wide delete is exactly what the
+ * heal is FOR: #6687's three-tier walk must not regress) and so does the
+ * org-scoped ROW control, which asserts the delete itself and never reads the
+ * registry. Predicted 3 red / 4 green in this block; measured 3 red / 4 green:
+ *
+ *   × …the card's sequence            → expected undefined to be defined
+ *   × …the SELF-HEAL branch           → expected undefined to be 'Env grid'
+ *   × …the runtime-SHADOW tier        → expected 'Artifact grid' to be 'Env grid'
+ *   ✓ the ORG ROW is still removed · ✓ tier 1 · ✓ tier 3 · ✓ env-wide + org overlay
+ *
+ * A FOURTH red lands in a file this change did not edit, and it is the point
+ * of shape (b) rather than a surprise: PR #6807's own pin
+ * (`protocol-commit-history.test.ts` → "an ORG-scoped soft-remove leaves the
+ * env-wide registry entry alone") goes red too — `expected null to be
+ * 'EnvWide'` — because its call-site `if (orgId === null)` was folded into
+ * the argument it now passes. The gate moved; the coverage did not.
+ */
+describe('#6780 — the registry heal is org-gated: an org DELETE never evicts the env-wide entry', () => {
+    let registry: SchemaRegistry;
+    let engine: any;
+    let protocol: ObjectStackProtocolImplementation;
+
+    /** A code-shipped `view` under a composite key — the tier-1 layer. */
+    const PKG = 'com.objectstack.test-pkg';
+    const artifactView = () => ({
+        ...viewBody('shared_grid', 'Artifact grid'),
+        _packageId: PKG,
+        _packageVersion: '1.0.0',
+        _provenance: 'package',
+    });
+
+    beforeEach(() => {
+        registry = new SchemaRegistry({ multiTenant: false });
+        registry.logLevel = 'silent';
+        engine = makeEngine(registry);
+        // No environmentId — the unscoped control-plane kernel #5086 measured
+        // the flagship showcase booting with, and the one whose registry every
+        // org in the process shares.
+        protocol = new ObjectStackProtocolImplementation(engine);
+    });
+
+    it("org A deleting its OWN overlay leaves the env-wide entry standing (the card's sequence)", async () => {
+        await protocol.saveMetaItem({ type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Env grid') });
+        await protocol.saveMetaItem({
+            type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Org A grid'), organizationId: ORG_A,
+        });
+        // #6602 holding: the org write never reached the shared registry.
+        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
+
+        await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A });
+
+        // Pre-fix this read was `undefined` — the whole defect, in one line.
+        expect(registry.getItem('view', 'shared_grid')).toBeDefined();
+        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
+    });
+
+    it('the same delete still removes the ORG ROW — row-level behaviour is untouched', async () => {
+        // The control that keeps the case above from passing for the wrong
+        // reason: a "fix" that skipped the delete entirely would also leave the
+        // env-wide entry standing. The reset must still reset.
+        await protocol.saveMetaItem({ type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Env grid') });
+        await protocol.saveMetaItem({
+            type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Org A grid'), organizationId: ORG_A,
+        });
+        const beforeDelete: any = await protocol.getMetaItem({
+            type: 'view', name: 'shared_grid', organizationId: ORG_A,
+        });
+        expect(beforeDelete.item.label).toBe('Org A grid');
+
+        const deleted = await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A });
+
+        expect(deleted.success).toBe(true);
+        expect(deleted.reset).toBe(true);
+        // Org A now falls through to the env-wide body — ADR-0005's "reset to
+        // default", which is what the org author actually asked for.
+        const afterDelete: any = await protocol.getMetaItem({
+            type: 'view', name: 'shared_grid', organizationId: ORG_A,
+        });
+        expect(afterDelete.item.label).toBe('Env grid');
+    });
+
+    it('the SELF-HEAL branch respects the same scope — a no-op org DELETE is inert', async () => {
+        // The cheapest eviction door of the three, and the one a gate on the
+        // delete-ful branch alone would have left open: org A has no overlay
+        // row at all, so the delete answers `reset: false` … and pre-fix still
+        // ran the heal. Measured on `origin/main`:
+        //   delete receipt   : {"success":true,"reset":false,"…nothing to delete."}
+        //   after org DELETE : undefined
+        await protocol.saveMetaItem({ type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Env grid') });
+        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
+
+        const deleted = await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A });
+
+        expect(deleted.reset).toBe(false);
+        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
+    });
+
+    it('the runtime-SHADOW tier is org-gated too: the env-wide overlay keeps shadowing its artifact', async () => {
+        // Tier 1 of the walk, which retires nothing and is still wrong for an
+        // org-scoped delete: un-shadowing hands every reader the PACKAGED body
+        // while the env-wide overlay row is still in force.
+        registry.registerItem('view', artifactView(), 'name', PKG);
+        await protocol.saveMetaItem({
+            type: 'view', name: 'shared_grid', packageId: PKG, item: viewBody('shared_grid', 'Env grid'),
+        });
+        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
+
+        await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A });
+
+        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
+        // The artifact is still there under its composite key, unharmed.
+        expect((registry.getArtifactItem('view', 'shared_grid') as any)?.label).toBe('Artifact grid');
+    });
+
+    it('an ENV-WIDE delete still un-shadows the artifact — #6687 tier 1 not regressed', async () => {
+        // The green half. This is what the heal is FOR: the env-wide overlay
+        // goes away and the packaged default becomes visible again.
+        registry.registerItem('view', artifactView(), 'name', PKG);
+        await protocol.saveMetaItem({
+            type: 'view', name: 'shared_grid', packageId: PKG, item: viewBody('shared_grid', 'Env grid'),
+        });
+        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
+
+        await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid' });
+
+        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Artifact grid');
+    });
+
+    it('an ENV-WIDE delete of a runtime-only item still RETIRES the entry — #5079 tier 3 not regressed', async () => {
+        await protocol.saveMetaItem({ type: 'view', name: 'env_grid', item: viewBody('env_grid', 'Env grid') });
+        expect(registry.getItem('view', 'env_grid')).toBeDefined();
+
+        await protocol.deleteMetaItem({ type: 'view', name: 'env_grid' });
+
+        expect(registry.getItem('view', 'env_grid')).toBeUndefined();
+    });
+
+    it('an env-wide delete heals even while an org overlay of the same name exists', async () => {
+        // The direction the gate must NOT over-reach in: the org row is not a
+        // reason to leave the env-wide entry stale. Scope is read from the
+        // DELETE, never from what else happens to be stored.
+        await protocol.saveMetaItem({ type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Env grid') });
+        await protocol.saveMetaItem({
+            type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Org A grid'), organizationId: ORG_A,
+        });
+
+        await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid' });
+
+        expect(registry.getItem('view', 'shared_grid')).toBeUndefined();
+        // Org A's own overlay row is untouched by an env-wide delete.
+        const forOrgA: any = await protocol.getMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A });
+        expect(forOrgA.item.label).toBe('Org A grid');
     });
 });

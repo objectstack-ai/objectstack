@@ -73,7 +73,7 @@ export const SortNodeSchema = lazySchema(() => strictObject(
 const AGG_RETIRED_MIDDLE =
   ' was removed from `AggregationFunction` in @objectstack/spec 17 (#6188, ADR-0049 '
   + 'enforce-or-remove) — no SQL backend ever compiled it. `SqlDriver.mapAggregateFunc` and '
-  + '`RemoteTransport.aggregate` each lower the same five functions and refuse the rest, and '
+  + '`RemoteTransport.aggregate` each lower the same set of functions and refuse the rest, and '
   + "the v1 dataset runtime had to subtract this one by name to stop it reaching a `COUNT(*)` "
   + 'fallback that returns a row count in place of the value asked for. On the backend family '
   + 'this platform targets it was a declaration that could only fail. ';
@@ -104,17 +104,21 @@ const STRING_AGG_RETIRED =
  * - **avg**: Average numeric values (SQL: AVG(field))
  * - **min**: Minimum value (SQL: MIN(field))
  * - **max**: Maximum value (SQL: MAX(field))
- * - **count_distinct**: Count unique values (SQL: COUNT(DISTINCT field))
+ * - **count_distinct**: Count DISTINCT NON-NULL values (SQL: COUNT(DISTINCT field));
+ *   `field` is REQUIRED — there is no `COUNT(DISTINCT *)`
  *
  * `array_agg` and `string_agg` were REMOVED in 17 (#6188). They were declared
  * here from the day the enum was written and compiled by no SQL backend, while
  * `service-analytics` carried a hand-written subtraction list naming exactly
- * these two. `count_distinct` is deliberately kept on the other side of that
+ * these two. `count_distinct` was deliberately kept on the other side of that
  * split (maintainer ruling, 2026-08-07): a dashboard staple with one portable
- * lowering (`COUNT(DISTINCT x)`), it takes ADR-0049's ENFORCE leg — the SQL
- * implementation is its own card and the declaration stays ahead of it by
- * decision, not by drift. Authoring a retired value is a `tsc` error and a
- * parse error carrying the prescription above.
+ * lowering (`COUNT(DISTINCT x)`), it took ADR-0049's ENFORCE leg — and #6409
+ * closed it, lowering the function on both SQL faces (`SqlDriver` and the Turso
+ * remote transport). The declaration led its implementation by decision rather
+ * than by drift, and no longer leads it at all: every value of this enum is
+ * compiled by the SQL family, and the values are pinned across the two faces by
+ * `AGGREGATION_CASES`. Authoring a retired value is a `tsc` error and a parse
+ * error carrying the prescription above.
  *
  * Performance Considerations:
  * - COUNT(*) is typically faster than COUNT(field) as it doesn't check for nulls

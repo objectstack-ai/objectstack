@@ -225,14 +225,37 @@ export function buildActiveIndexSql(indexName: string): string {
  * has it without waiting for `os migrate plan`.
  *
  * It GROUPs by exactly the index's own key parts, so what it reports and what
- * the index rejects cannot diverge. Dialect-neutral: `COALESCE`, `GROUP BY`
- * and `HAVING` are ANSI on every engine this platform runs on.
+ * the index rejects cannot diverge — the projection and the `GROUP BY` are
+ * built from the SAME array below, so they cannot drift apart either.
+ *
+ * ⚠️ Each folded column is projected through its OWN `COALESCE` (aliased
+ * `<column>_key`), never bare. The three constructs are ANSI, but a query that
+ * projects a bare column while grouping by that column only INSIDE an
+ * expression is not: PostgreSQL requires every non-aggregated projection to
+ * appear verbatim in `GROUP BY` and rejects the bare form with
+ * `column "sys_view_definition.organization_id" must appear in the GROUP BY
+ * clause`. SQLite accepts it, which is why this shipped broken (#6772) — and
+ * PostgreSQL is one of exactly TWO dialects that can build the index this
+ * query explains, so it must be legal on both, not on the lenient one.
+ *
+ * Folding costs the operator nothing here: neither sentinel can occur in real
+ * data, so `organization_id_key = '__global__'` reads as "organization_id IS
+ * NULL" and `owner_key = ''` as "owner IS NULL" (see
+ * {@link VIEW_ACTIVE_NULL_SENTINELS}).
+ *
+ * Same shape as `overlay-index.ts`'s `buildOverlayDuplicateProbeSql()`, the
+ * sibling migration's query for the same report (#6770).
  */
 export function buildDuplicateProbeSql(): string {
+    const keyParts = viewActiveIndexKeyParts();
+    const projected = VIEW_ACTIVE_INDEX_COLUMNS.map((column, i) => {
+        const keyPart = keyParts[i]!;
+        return keyPart === column ? column : `${keyPart} AS ${column}_key`;
+    });
     return (
-        `SELECT ${VIEW_ACTIVE_INDEX_COLUMNS.join(', ')}, COUNT(*) AS duplicate_rows ` +
+        `SELECT ${projected.join(', ')}, COUNT(*) AS duplicate_rows ` +
         `FROM ${VIEW_DEFINITION_TABLE} WHERE state = 'active' ` +
-        `GROUP BY ${viewActiveIndexKeyParts().join(', ')} HAVING COUNT(*) > 1`
+        `GROUP BY ${keyParts.join(', ')} HAVING COUNT(*) > 1`
     );
 }
 

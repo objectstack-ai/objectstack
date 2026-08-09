@@ -254,6 +254,7 @@ export {
   validateRlsPredicateEnforceability,
   RLS_PREDICATE_UNENFORCEABLE,
   RLS_PREDICATE_UNPARSEABLE,
+  RLS_PREDICATE_OVER_BUDGET,
 } from './validate-rls-predicate-enforceability.js';
 export type {
   RlsPredicateFinding,
