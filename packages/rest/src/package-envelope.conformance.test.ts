@@ -341,6 +341,30 @@ describe('packages envelope (#3843) — error bodies', () => {
     expect(body.data.packages).toHaveLength(1);
   });
 
+  it('a repeated `?version=` is refused identically on both verbs (#6307)', async () => {
+    // The rule is one rule, so the two verbs must answer the SAME code, status
+    // and message — two answers for one parameter would be a new inconsistency.
+    const get = await drive(
+      mount({ get: async () => ({ id: 'com.acme.crm', manifest: MANIFEST }) }),
+      'GET',
+      `${PKGS}/:id`,
+      { params: { id: 'com.acme.crm' }, query: { version: ['1.0.0', '2.0.0'] } },
+    );
+    const del = await drive(
+      mount({ delete: async () => ({ success: true }) }),
+      'DELETE',
+      `${PKGS}/:id`,
+      { params: { id: 'com.acme.crm' }, query: { version: ['1.0.0', '2.0.0'] } },
+    );
+    expect(get.status).toBe(400);
+    expect(del.status).toBe(400);
+    expect(get.body).toEqual(del.body);
+    expect(get.body.error.code).toBe('VALIDATION_ERROR');
+    expect(get.body.error.message).toContain('"version"');
+    expect(envelopeViolations(get.body)).toEqual([]);
+    expect(BaseResponseSchema.safeParse(get.body).success).toBe(true);
+  });
+
   it('a partial uninstall keeps its per-item detail under `error.details`', async () => {
     const { body } = await drive(
       mount({}, {
