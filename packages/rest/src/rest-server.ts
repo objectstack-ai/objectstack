@@ -8,6 +8,7 @@ import {
     isMcpServerEnabled,
     looksLikeInternalErrorLeak,
     isUniqueViolationError,
+    matchMissingColumnOfRelation,
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
@@ -903,13 +904,18 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // NOTE: this is a last-resort safety net — the validation layer should
     // ideally reject these before they reach the driver (see follow-ups on
     // unknown-field rejection + provenance-aware required checks).
+    // [#6615] The Postgres limb is the shared `matchMissingColumnOfRelation`
+    // rather than a fourth open-coded copy of that phrase: its message contains
+    // a legal missing-TABLE phrase as a substring, and `service-analytics` and
+    // `metadata` each had to repair the same superstring hole. Same regex as
+    // before, same position last in the chain — only its owner moved.
     const unknownColumn =
-        /has no column named\s+["'`]?([a-z0-9_]+)/i.exec(raw) ||
-        /no such column:\s*["'`]?([a-z0-9_.]+)/i.exec(raw) ||
-        /unknown column\s+["'`]([a-z0-9_]+)["'`]/i.exec(raw) ||
-        /column\s+["'`]([a-z0-9_]+)["'`]\s+of relation\s+\S+\s+does not exist/i.exec(raw);
+        /has no column named\s+["'`]?([a-z0-9_]+)/i.exec(raw)?.[1] ??
+        /no such column:\s*["'`]?([a-z0-9_.]+)/i.exec(raw)?.[1] ??
+        /unknown column\s+["'`]([a-z0-9_]+)["'`]/i.exec(raw)?.[1] ??
+        matchMissingColumnOfRelation(raw);
     if (unknownColumn) {
-        const field = unknownColumn[1]?.split('.').pop();
+        const field = unknownColumn.split('.').pop();
         return {
             status: 400,
             body: {
@@ -7167,12 +7173,14 @@ export class RestServer {
                     //
                     // Do NOT reach for the submit handler as the backstop here.
                     // It enforces a field whitelist on WRITES, which cannot
-                    // bound a READ disclosure — and its own accepted set
-                    // degenerates identically for a section-less form
-                    // (`allowedFields.size === 0 ||` below), so narrowing this
-                    // schema to "what submit would accept" would have
-                    // republished precisely the set being removed. That
-                    // write-side twin is tracked separately in #6920.
+                    // bound a READ disclosure — and when #6601 landed, its own
+                    // accepted set still degenerated identically for a
+                    // section-less form (`allowedFields.size === 0 ||`), so
+                    // narrowing this schema to "what submit would accept" would
+                    // have republished precisely the set being removed. #6920
+                    // has since closed that write-side twin, so the two planes
+                    // now agree — but they agree by each enforcing the
+                    // declaration itself, NOT by one deferring to the other.
                     let objectSchema: any = null;
                     try {
                         const p = await this.resolveProtocol(environmentId, req);
@@ -7319,14 +7327,56 @@ export class RestServer {
                             else if (f?.field) allowedFields.add(f.field);
                         }
                     }
+                    // [#6920] A form that declares NO fields collects nothing, so
+                    // it has nothing to accept — refuse instead of inserting.
+                    //
+                    // The filter below used to read
+                    // `allowedFields.size === 0 || allowedFields.has(k)`, and that
+                    // fall-through was not "accept every field of the object": it
+                    // accepted every KEY THE CALLER SENT, minus the anchors and the
+                    // three prototype keys — measured as
+                    // `["email","internal_margin","internal_tier","not_even_a_field",
+                    // "status","subject"]` on a `sections: []` form, `not_even_a_field`
+                    // not being a field of the object at all. On an ANONYMOUS surface
+                    // that is unbounded mass assignment across the target object, and
+                    // the form created-before-its-sections-are-wired mid-state reaches
+                    // it without anything exotic.
+                    //
+                    // Symmetric with #6601 on the read side of the same pair: declare
+                    // it or it is not published / not accepted, one rule on both planes
+                    // (AGENTS.md "Explicit composition over default magic"). Post-#6601
+                    // such a form publishes `fields: {}`, so no legitimate client can
+                    // even learn what to send here.
+                    //
+                    // REFUSAL, not a silent discard: dropping the keys would leave the
+                    // `201` intact while swallowing data the caller believes it wrote —
+                    // exactly the silence AGENTS.md's warn-vs-error rule forbids. The
+                    // author's fix is to wire the sections, so the message says that;
+                    // the code is the standard ADR-0112 catalog's generic 400
+                    // (`HttpStatusErrorCodeMap[400]`), not a minted synonym, and the
+                    // message names no object, field or slug — this reply is readable
+                    // by anyone on the internet.
+                    //
+                    // NOTE the #3022 pin ('zero declared sections: business fields fall
+                    // through, anchors do NOT') asserted this fall-through as intended.
+                    // Re-judged by maintainer ruling 5229989845 (2026-08-09): the
+                    // anchor half is preserved and still pinned; the fall-through half
+                    // was the wrong invariant.
+                    if (allowedFields.size === 0) {
+                        res.status(400).json({
+                            code: 'VALIDATION_ERROR',
+                            error: 'This form declares no fields, so it cannot accept a submission. '
+                                + "Wire the fields it collects into the form's sections and publish it again.",
+                        });
+                        return;
+                    }
                     // [#3022] System-managed anchors (owner_id, organization_id,
                     // audit columns, id, …) are NEVER client-suppliable on this
-                    // anonymous surface — not via an explicit section declaration,
-                    // and not via the zero-declared-sections fallback below (which
-                    // otherwise passes the raw body through and previously let a
-                    // visitor forge record ownership). The SecurityPlugin's
-                    // publicFormGrant branch strips the same set at the data layer,
-                    // so this filter and the engine boundary cannot drift.
+                    // anonymous surface, even when a FormView explicitly declares
+                    // one in a section (the insert-forge of #3004, with no
+                    // credentials at all). The SecurityPlugin's publicFormGrant
+                    // branch strips the same set at the data layer, so this filter
+                    // and the engine boundary cannot drift.
                     const rawBody = (req.body && typeof req.body === 'object') ? req.body : {};
                     const filteredData: Record<string, unknown> = {};
                     for (const [k, v] of Object.entries(rawBody)) {
@@ -7335,7 +7385,7 @@ export class RestServer {
                         // here would REPLACE filteredData's prototype and smuggle
                         // inherited anchors past every own-property check downstream.
                         if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
-                        if (allowedFields.size === 0 || allowedFields.has(k)) filteredData[k] = v;
+                        if (allowedFields.has(k)) filteredData[k] = v;
                     }
 
                     // ADR-0056 (Option A): authorization DERIVED from the declared
