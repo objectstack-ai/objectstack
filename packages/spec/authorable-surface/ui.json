@@ -99,6 +99,7 @@
     "ui/App:_packageId",
     "ui/App:_packageVersion",
     "ui/App:_provenance",
+    "ui/App:_unpublished",
     "ui/App:active",
     "ui/App:apis [RETIRED]",
     "ui/App:areas",

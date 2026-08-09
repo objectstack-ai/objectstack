@@ -673,15 +673,17 @@ describe('SysMetadataRepository', () => {
 
     it('promoteDraft carries the draft package binding onto the promoted active row', async () => {
         // A whole-app build stages every artifact bound to the app's workspace
-        // package and the app starts `hidden`. Promotion MUST preserve that
-        // binding — otherwise the active app row lands unbound (package_id NULL)
-        // and the ADR-0045 publish visibility flip (which looks up hidden apps
-        // by package: getMetaItems({ type:'app', packageId })) never matches it,
-        // leaving the freshly-built app hidden from the app switcher forever.
+        // package and the app starts `_unpublished` (#4829 — the ADR-0045 §3
+        // gate; it rode on `hidden` until the two contracts were split).
+        // Promotion MUST preserve that binding — otherwise the active app row
+        // lands unbound (package_id NULL) and the publish visibility flip (which
+        // looks up unpublished apps by package: getMetaItems({ type:'app',
+        // packageId })) never matches it, leaving the freshly-built app
+        // externally unobservable forever.
         const ref = { org: 'org_alpha', type: 'app' as const, name: 'ticket_service_app' };
         await repo.put(
             ref,
-            { name: 'ticket_service_app', label: 'Tickets', hidden: true },
+            { name: 'ticket_service_app', label: 'Tickets', _unpublished: true },
             { parentVersion: null, actor: 'studio', state: 'draft', packageId: 'app.tickets' },
         );
         await repo.promoteDraft(ref, { actor: 'admin' });

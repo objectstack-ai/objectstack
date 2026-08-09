@@ -281,6 +281,7 @@ The same descriptor loses a key in this step, and the pairing is the point (#674
 | `page-card-body-to-children` | `page.component.page:card.body` | page:card component prop 'body' → 'children' (#5775 — one composition key across every container; the card renderer already reads both) | retired — `migrate meta` only |
 | `inline-action-api-params-to-body-extra` | `page.component.element:button.action.params` | inline type:'api' action prop 'params' (object form) → 'bodyExtra' (#5777 — the payload gets its own key; `params` stays the ActionParam[] definition array) | live — protocol 17 loader accepts the old shape |
 | `page-tabs-type-to-tab-style` | `page.component.page:tabs.type` | page:tabs component prop 'type' → 'tabStyle' (#6776 — a props key named `type` collides with the node's dispatch key and is unauthorable in flat/JSX carriers; `tabStyle` is the spelling the renderer reads in all of them) | retired — `migrate meta` only |
+| `app-hidden-to-unpublished` | `app.hidden` | stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched) | retired — `migrate meta` only |
 
 ### Semantic (delegated to you, with acceptance criteria)
 

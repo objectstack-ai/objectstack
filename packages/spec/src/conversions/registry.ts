@@ -5288,6 +5288,97 @@ const pageTabsTypeToTabStyle: MetadataConversion = {
   },
 };
 
+/**
+ * `app.hidden: true` → `app._unpublished: true` on **stored** rows (protocol 17,
+ * #4829, ADR-0045 amended 2026-08-09).
+ *
+ * ADR-0045 §3 originally hung its publish gate on `app.hidden`, citing an
+ * "ADR-0019 launcher contract" that does not exist — ADR-0019 contains no
+ * `hidden`. `hidden` already had a contract of its own, written in
+ * `ui/app.zod.ts` the day the key was born: navigation presentation, *"hidden
+ * apps stay fully routable and permission-checked"*, for personal-settings apps
+ * reached from the avatar menu. One boolean, two contracts, contradicting each
+ * other on the only question that matters — and the platform's own `account`
+ * app, authored `hidden: true` on purpose, was therefore withheld from every
+ * user without builder access. The gate now reads the machine-managed
+ * `_unpublished`; this entry carries the existing population across.
+ *
+ * **Why the rewrite is unambiguous.** Under the old regime a `hidden: true` row
+ * in `sys_metadata` could only have come from the materialization path, because
+ * that value *was* the gate: an app stored that way was invisible to every
+ * non-builder, so nobody stored it to mean "keep me out of the switcher". The
+ * one app that really does mean that is code-declared (`platform-objects`'
+ * ACCOUNT_APP), and code-declared artifacts never enter `sys_metadata`. The
+ * Studio app form has no `hidden` control either (`ui/app.form.ts`), so no
+ * authoring path could have produced a second meaning.
+ *
+ * **`retiredFromLoadPath: true` — load-bearing here, not bookkeeping.**
+ * Retirement is what confines this rewrite to *stored* rows. `hidden` is NOT
+ * retired as an authorable key — it keeps its birth contract, narrowed to
+ * navigation — so a conversion running on the load path would rewrite
+ * `defineApp({ hidden: true })`, and ACCOUNT_APP itself, into unpublished apps
+ * and reproduce #4829 through the conversion layer. Excluded from the load path,
+ * it replays only where the old meaning is the only meaning: the stored-row
+ * rehydration seams (`applyConversionsToStoredItem`, which pins
+ * `includeRetired`) and `os migrate meta`.
+ *
+ * That split is also the answer for anyone who later wants a *stored* app to be
+ * nav-hidden: declare it on the app artifact, which this entry never touches. If
+ * a stored-row spelling is ever wanted it needs its own decision — a Studio
+ * control, and a rule for how the two populations coexist — not this entry
+ * quietly ceasing to fire.
+ *
+ * A row that already carries `_unpublished` is left ALONE, both keys intact
+ * ({@link renameKey}'s house rule, #4923): the machine has already spoken about
+ * that row, and a disagreeing pair is for a human to reconcile rather than for
+ * the loader to pick a winner. It is also what makes a second pass a no-op.
+ */
+const appHiddenToUnpublished: MetadataConversion = {
+  id: 'app-hidden-to-unpublished',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'app.hidden',
+  summary:
+    "stored app publish gate 'hidden' → '_unpublished' (#4829, ADR-0045 amended — `hidden` carried BOTH the publish gate and 'keep out of the App Switcher', so the built-in Account app was withheld from every non-builder; the gate is now the machine-managed `_unpublished`, and `hidden` is navigation presentation only, never an access gate. Stored rows only — an authored `hidden: true` is left untouched)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'apps', (app, path) => {
+      if (app.hidden !== true) return app;
+      if (app._unpublished != null) return app;
+      const next = { ...app };
+      delete next.hidden;
+      next._unpublished = true;
+      emit({ from: 'hidden', to: '_unpublished', path: `${path}._unpublished` });
+      return next;
+    });
+  },
+  fixture: {
+    // DISJOINT from every other app fixture: none of these apps carries a key
+    // another entry strips, so each replays through the whole table hitting
+    // only its own.
+    before: {
+      apps: [
+        // The materialized build mid-flight — the population this exists for.
+        { name: 'production_management', label: '生产管理', hidden: true, navigation: [] },
+        // Published and listed: `hidden: false` meant exactly that under both
+        // regimes, so there is nothing to rewrite.
+        { name: 'crm', label: 'CRM', hidden: false, navigation: [] },
+        // Already carries the canonical gate. Left verbatim — the loader does
+        // not reconcile a disagreeing pair on the author's behalf (#4923), and
+        // this is what makes a second pass a no-op.
+        { name: 'team_settings', hidden: true, _unpublished: false, navigation: [] },
+      ],
+    },
+    after: {
+      apps: [
+        { name: 'production_management', label: '生产管理', _unpublished: true, navigation: [] },
+        { name: 'crm', label: 'CRM', hidden: false, navigation: [] },
+        { name: 'team_settings', hidden: true, _unpublished: false, navigation: [] },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -5347,6 +5438,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     pageCardBodyToChildren,
     inlineActionApiParamsToBodyExtra,
     pageTabsTypeToTabStyle,
+    appHiddenToUnpublished,
   ],
 };
 
