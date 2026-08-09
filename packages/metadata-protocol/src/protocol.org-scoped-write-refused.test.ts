@@ -42,14 +42,27 @@
  * ## Reverse verification, direction predicted BEFORE running
  *
  * Ordinary red with a deliberately green half. Predicted: removing the two
- * `orgScopedWriteRefusal` call sites turns all 10 enforcement cases red and
- * leaves the 4 controls + the declaration pin green. Measured: 10 red / 5
- * green, and the enforcement cases failed in the shape that names the bug —
- * `promise resolved "{ success: true, …}" instead of rejecting`, i.e. the
- * accepted-then-unreadable write, reproduced on demand. The green half is not
- * slack: a "fix" that closed this by making the whole type unwritable would
- * pass the red half and fail G2/G3, and a harness that could not save anything
- * would pass the red half for the wrong reason — which is what G1/G2 exclude.
+ * `orgScopedWriteRefusal` call sites turns every enforcement case in this file
+ * red and leaves the 4 controls + the declaration pin green.
+ *
+ * Measured: **9 red / 5 green** here (and 21 red across the package, the other
+ * 12 being the fixtures elsewhere that had pinned the reversed behaviour). The
+ * enforcement cases failed in the shape that names the bug —
+ * `AssertionError: promise resolved "{ success: true, …(4) }" instead of
+ * rejecting` — i.e. the accepted-then-unreadable write, reproduced on demand.
+ *
+ * One prediction missed, recorded rather than tidied away: the written
+ * prediction said "10 enforcement cases", counting R1 and R2 as two. They are
+ * one `it()` — the envelope and the "nothing persisted" assertion belong to a
+ * single case, because "refused AFTER writing" would satisfy either one alone
+ * and neither is the claim on its own. So the predicted count was 10 and the
+ * real one is 9; the direction and the membership were right, the arithmetic
+ * was not.
+ *
+ * The green half is not slack: a "fix" that closed this by making the whole
+ * type unwritable would pass the red half and fail G2/G3, and a harness that
+ * could not save anything would pass the red half for the wrong reason — which
+ * is what G1/G2 exclude.
  *
  * Harness: the real write path over a stub engine — the gate runs inside
  * `saveMetaItem` / `promoteDraftForPublish`, so a harness that mocks either
