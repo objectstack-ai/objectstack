@@ -397,6 +397,15 @@ Even inside your own worktree, operate defensively:
    None of this is CI-visible: CI checks out fresh and installs clean. It costs
    only *your* time, which is exactly why it is worth recognising in one step
    rather than re-diagnosing per gate.
+
+   **One row of that table now has a gate, and only one** (#5864). `pnpm dev`
+   refuses to boot on a stale `packages/spec/dist`: its build stamps a hash of
+   its own inputs into `dist/.build-input-hash`, and `check:dev-prereqs`
+   recomputes and compares. Content, never mtime — so a checkout, a `touch` or
+   a clock skew cannot false-red it, and `git worktree add` is invisible to it.
+   For every other row this prescription is still the whole remedy: the gate's
+   pass line says "existence, not freshness" about the other ~66 packages
+   precisely so its green cannot be read as vouching for them.
 10. **A clean merge is not a working merge — but scope the re-check to the
    overlap.** Git conflicts on overlapping lines; nothing warns you when two
    changes are individually fine and jointly wrong. Real examples from one
